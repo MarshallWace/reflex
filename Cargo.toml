@@ -1,7 +1,8 @@
 [package]
 name = "reflex"
 version = "0.1.0"
-authors = ["Tim Kendrick <timkendrick@gmail.com>"]
+license = "Apache-2.0"
+authors = ["Marshall Wace LLP <opensource@mwam.com>", "Tim Kendrick <t.kendrick@mwam.com>"]
 edition = "2018"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
