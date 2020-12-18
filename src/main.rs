@@ -43,26 +43,21 @@ impl AddNode {
     fn execute(&self, store: &Store) -> Result {
         let left = store.evaluate(&*self.left);
         let right = store.evaluate(&*self.right);
-        if let (Result::Value(left), Result::Value(right)) = (&left, &right) {
-            if let (Value::Int(left), Value::Int(right)) = (&left, &right) {
-                return Result::Value(Value::Int(left + right));
-            } else if let (Value::Float(left), Value::Float(right)) = (&left, &right) {
-                return Result::Value(Value::Float(left + right));
-            } else {
-                return Result::Error(String::from(
-                    "Expected (Int, Int) or (Float, Float), received (?, ?)",
-                ));
+        match (&left, &right) {
+            (Result::Error(_), _) => left,
+            (_, Result::Error(_)) => right,
+            (Result::Pending, _) | (_, Result::Pending) => Result::Pending,
+            (Result::Value(Value::Int(left)), Result::Value(Value::Int(right))) => {
+                Result::Value(Value::Int(left + right))
             }
-        } else if let Result::Error(_) = left {
-            return left;
-        } else if let Result::Error(_) = right {
-            return right;
-        } else if let Result::Pending = left {
-            return left;
-        } else if let Result::Pending = right {
-            return right;
+            (Result::Value(Value::Float(left)), Result::Value(Value::Float(right))) => {
+                Result::Value(Value::Float(left + right))
+            }
+            (Result::Value(left), Result::Value(right)) => Result::Error(format!(
+                "Expected (Int, Int) or (Float, Float), received ({:?}, {:?})",
+                left, right
+            )),
         }
-        return Result::Error(String::from("Invalid result"));
     }
 }
 
@@ -95,7 +90,6 @@ fn main() {
     let duration = start.elapsed();
     print_result(&result);
     println!("Time: {:?}", duration)
-
 }
 
 fn print_result(result: &Result) {
