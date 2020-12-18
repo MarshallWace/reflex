@@ -1,27 +1,55 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use std::time::Instant;
+use std::{rc::Rc, time::Instant};
 
 enum Expression {
-    Result(Result),
-    Node(Node),
+    Pending,
+    Error(Rc<String>),
+    Value(Value),
+    Dynamic(Node),
+}
+impl Expression {
+    fn error(message: String) -> Expression {
+        Expression::Error(Rc::from(message))
+    }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 enum Result {
     Pending,
-    Error(String),
+    Error(Rc<String>),
     Value(Value),
 }
+impl Result {
+    fn error(message: String) -> Result {
+        Result::Error(Rc::from(message))
+    }
+}
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 enum Value {
     Nil,
     Boolean(bool),
     Int(i32),
     Float(f64),
-    String(String),
+    String(Rc<String>),
+}
+impl Value {
+    fn string(value: String) -> Value {
+        Value::String(Rc::from(value))
+    }
+}
+impl Clone for Value {
+    fn clone(&self) -> Self {
+        match self {
+            Value::Nil => Value::Nil,
+            Value::Boolean(value) => Value::Boolean(*value),
+            Value::Int(value) => Value::Int(*value),
+            Value::Float(value) => Value::Float(*value),
+            Value::String(value) => Value::String(value.clone()),
+        }
+    }
 }
 
 enum Node {
@@ -32,7 +60,6 @@ struct AddNode {
     left: Box<Expression>,
     right: Box<Expression>,
 }
-
 impl AddNode {
     fn create(left: Expression, right: Expression) -> AddNode {
         AddNode {
@@ -53,7 +80,7 @@ impl AddNode {
             (Result::Value(Value::Float(left)), Result::Value(Value::Float(right))) => {
                 Result::Value(Value::Float(left + right))
             }
-            (Result::Value(left), Result::Value(right)) => Result::Error(format!(
+            (Result::Value(left), Result::Value(right)) => Result::error(format!(
                 "Expected (Int, Int) or (Float, Float), received ({:?}, {:?})",
                 left, right
             )),
@@ -68,8 +95,10 @@ impl Store {
     }
     fn evaluate(&self, value: &Expression) -> Result {
         match value {
-            Expression::Result(result) => result.clone(),
-            Expression::Node(node) => match node {
+            Expression::Pending => Result::Pending,
+            Expression::Error(message) => Result::Error(message.clone()),
+            Expression::Value(value) => Result::Value(value.clone()),
+            Expression::Dynamic(node) => match node {
                 Node::Add(node) => node.execute(self),
             },
         }
@@ -78,12 +107,12 @@ impl Store {
 
 fn main() {
     let store = Store::create();
-    let target = Expression::Node(Node::Add(AddNode::create(
-        Expression::Node(Node::Add(AddNode::create(
-            Expression::Result(Result::Value(Value::Int(3))),
-            Expression::Result(Result::Value(Value::Int(4))),
+    let target = Expression::Dynamic(Node::Add(AddNode::create(
+        Expression::Dynamic(Node::Add(AddNode::create(
+            Expression::Value(Value::Int(3)),
+            Expression::Value(Value::Int(4)),
         ))),
-        Expression::Result(Result::Value(Value::Int(5))),
+        Expression::Value(Value::Int(5)),
     )));
     let start = Instant::now();
     let result = store.evaluate(&target);
