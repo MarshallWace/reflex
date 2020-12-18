@@ -5,26 +5,16 @@ use std::{rc::Rc, time::Instant};
 
 enum Expression {
     Pending,
-    Error(Rc<String>),
+    Error(String),
     Value(Value),
     Dynamic(Node),
-}
-impl Expression {
-    fn error(message: String) -> Expression {
-        Expression::Error(Rc::from(message))
-    }
 }
 
 #[derive(Debug)]
 enum Result {
     Pending,
-    Error(Rc<String>),
+    Error(String),
     Value(Value),
-}
-impl Result {
-    fn error(message: String) -> Result {
-        Result::Error(Rc::from(message))
-    }
 }
 
 #[derive(Debug)]
@@ -80,7 +70,7 @@ impl AddNode {
             (Result::Value(Value::Float(left)), Result::Value(Value::Float(right))) => {
                 Result::Value(Value::Float(left + right))
             }
-            (Result::Value(left), Result::Value(right)) => Result::error(format!(
+            (Result::Value(left), Result::Value(right)) => Result::Error(format!(
                 "Expected (Int, Int) or (Float, Float), received ({:?}, {:?})",
                 left, right
             )),
