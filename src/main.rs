@@ -1,8 +1,9 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use std::{rc::Rc, time::Instant};
+use std::{fmt, rc::Rc, time::Instant};
 
+#[derive(Debug)]
 enum Expression {
     Pending,
     Error(String),
@@ -23,12 +24,7 @@ enum Value {
     Boolean(bool),
     Int(i32),
     Float(f64),
-    String(Rc<String>),
-}
-impl Value {
-    fn string(value: String) -> Value {
-        Value::String(Rc::from(value))
-    }
+    String(StringValue),
 }
 impl Clone for Value {
     fn clone(&self) -> Self {
@@ -42,10 +38,47 @@ impl Clone for Value {
     }
 }
 
+enum StringValue {
+    Literal(&'static str),
+    Runtime(Rc<String>),
+}
+impl StringValue {
+    fn literal(value: &'static str) -> StringValue {
+        StringValue::Literal(value)
+    }
+    fn new(value: String) -> StringValue {
+        StringValue::Runtime(Rc::new(value))
+    }
+    fn get(&self) -> &str {
+        match self {
+            StringValue::Literal(value) => value,
+            StringValue::Runtime(value) => value,
+        }
+    }
+}
+impl Clone for StringValue {
+    fn clone(&self) -> Self {
+        match self {
+            StringValue::Literal(value) => StringValue::Literal(value),
+            StringValue::Runtime(value) => StringValue::Runtime(Rc::clone(value)),
+        }
+    }
+}
+impl fmt::Debug for StringValue {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            StringValue::Literal(value) => formatter.write_str(&format!("{:?}", value)),
+            StringValue::Runtime(value) => formatter.write_str(&format!("{:?}", value)),
+        }
+    }
+}
+
+#[derive(Debug)]
 enum Node {
     Add(AddNode),
 }
 
+#[derive(Debug)]
 struct AddNode {
     left: Box<Expression>,
     right: Box<Expression>,
@@ -86,7 +119,7 @@ impl Store {
     fn evaluate(&self, value: &Expression) -> Result {
         match value {
             Expression::Pending => Result::Pending,
-            Expression::Error(message) => Result::Error(message.clone()),
+            Expression::Error(message) => Result::Error(message.to_owned()),
             Expression::Value(value) => Result::Value(value.clone()),
             Expression::Dynamic(node) => match node {
                 Node::Add(node) => node.execute(self),
@@ -120,7 +153,17 @@ fn print_result(result: &Result) {
             println!("Error: {}", message);
         }
         Result::Value(value) => {
-            println!("Result: {:?}", value);
+            println!("Result: {}", format_value(value));
         }
+    }
+}
+
+fn format_value(value: &Value) -> String {
+    match value {
+        Value::Nil => String::from("Nil"),
+        Value::Boolean(value) => format!("{:?}", value),
+        Value::Int(value) => format!("{:?}", value),
+        Value::Float(value) => format!("{:?}", value),
+        Value::String(value) => format!("{:?}", value.get()),
     }
 }
