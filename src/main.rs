@@ -91,8 +91,8 @@ impl AddNode {
         }
     }
     fn execute(&self, store: &Store) -> Result {
-        let left = store.evaluate(&*self.left);
-        let right = store.evaluate(&*self.right);
+        let left = store.evaluate(&self.left);
+        let right = store.evaluate(&self.right);
         match (&left, &right) {
             (Result::Error(_), _) => left,
             (_, Result::Error(_)) => right,
