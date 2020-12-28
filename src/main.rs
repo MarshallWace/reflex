@@ -84,7 +84,7 @@ struct AddNode {
     right: Box<Expression>,
 }
 impl AddNode {
-    fn create(left: Expression, right: Expression) -> AddNode {
+    fn new(left: Expression, right: Expression) -> AddNode {
         AddNode {
             left: Box::new(left),
             right: Box::new(right),
@@ -113,7 +113,7 @@ impl AddNode {
 
 struct Store {}
 impl Store {
-    fn create() -> Store {
+    fn new() -> Store {
         Store {}
     }
     fn evaluate(&self, value: &Expression) -> Result {
@@ -129,9 +129,9 @@ impl Store {
 }
 
 fn main() {
-    let store = Store::create();
-    let target = Expression::Dynamic(Node::Add(AddNode::create(
-        Expression::Dynamic(Node::Add(AddNode::create(
+    let store = Store::new();
+    let target = Expression::Dynamic(Node::Add(AddNode::new(
+        Expression::Dynamic(Node::Add(AddNode::new(
             Expression::Value(Value::Int(3)),
             Expression::Value(Value::Int(4)),
         ))),
