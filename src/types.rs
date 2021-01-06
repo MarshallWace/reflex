@@ -3,7 +3,7 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use std::{fmt, rc::Rc};
 
-use crate::{node::Node, store::Store};
+use crate::{node::Node, store::Store, utils::format_value};
 
 #[derive(Debug, PartialEq)]
 pub enum Expression {
@@ -19,6 +19,16 @@ impl Expression {
             Expression::Error(message) => Expression::Error(message.to_owned()),
             Expression::Value(value) => Expression::Value(value.clone()),
             Expression::Node(node) => node.evaluate(store),
+        }
+    }
+}
+impl fmt::Display for Expression {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Expression::Pending => write!(f, "{}", "<pending>"),
+            Expression::Error(message) => write!(f, "Error: {}", message),
+            Expression::Value(value) => write!(f, "{}", value),
+            Expression::Node(value) => write!(f, "{:?}", value),
         }
     }
 }
@@ -40,6 +50,11 @@ impl Clone for Value {
             Value::Float(value) => Value::Float(*value),
             Value::String(value) => Value::String(value.clone()),
         }
+    }
+}
+impl fmt::Display for Value {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", format_value(self))
     }
 }
 
