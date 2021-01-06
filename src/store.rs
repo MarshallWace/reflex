@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use crate::types::Expression;
+use crate::expression::Expression;
 
 pub struct Store {}
 impl Store {
@@ -15,7 +15,7 @@ impl Store {
 
 #[cfg(test)]
 mod tests {
-    use crate::{node::{Node, abs::AbsNode, add::AddNode}, store::Store, types::{Expression, StringValue, Value}};
+    use crate::{expression::Expression, node::{Node, abs::AbsNode, add::AddNode}, store::Store, value::{StringValue, Value}};
 
 
     #[test]
@@ -227,9 +227,10 @@ mod benchmarks {
     use test::Bencher;
 
     use crate::{
+        expression::Expression,
         node::{abs::AbsNode, add::AddNode, Node},
         store::Store,
-        types::{Expression, Value},
+        value::Value,
     };
 
     #[bench]

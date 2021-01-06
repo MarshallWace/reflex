@@ -4,8 +4,9 @@
 use std::borrow::Cow;
 
 use crate::{
+    expression::Expression,
     node::Node,
-    types::{Expression, StringValue, Value},
+    value::{StringValue, Value},
 };
 
 type ParserError = &'static str;
@@ -324,7 +325,7 @@ pub fn parse(input: &str, factory: &NodeFactory) -> ParserResult<Expression> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{node::{Node, abs::AbsNode, add::AddNode}, types::{Expression, StringValue, Value}};
+    use crate::{expression::Expression, node::{Node, abs::AbsNode, add::AddNode}, value::{StringValue, Value}};
 
     use super::{parse, NodeFactory};
 

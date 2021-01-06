@@ -1,7 +1,8 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use crate::types::{Expression, Value};
+use crate::expression::Expression;
+use crate::value::Value;
 
 pub fn format_value(value: &Value) -> String {
     match value {
@@ -24,7 +25,7 @@ pub fn format_type(expression: &Expression) -> String {
 
 #[cfg(test)]
 mod tests {
-    use crate::types::{StringValue, Value};
+    use crate::value::{StringValue, Value};
 
     use super::format_value;
 

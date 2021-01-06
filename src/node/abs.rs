@@ -2,9 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use crate::{
+    expression::Expression,
     operation::evaluate::{Evaluate, Evaluate1},
     store::Store,
-    types::{Expression, Value},
+    value::Value,
     utils::format_type,
 };
 

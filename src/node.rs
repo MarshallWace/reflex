@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use crate::{operation::evaluate::Evaluate, store::Store, types::Expression};
+use crate::{operation::evaluate::Evaluate, store::Store, expression::Expression};
 
 use self::{abs::AbsNode, add::AddNode};
 
