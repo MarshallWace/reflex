@@ -5,13 +5,13 @@ use std::borrow::Cow;
 
 use crate::{
     expression::Expression,
-    node::Node,
+    node::NodeFactoryResult,
     value::{StringValue, Value},
 };
 
 type ParserError = &'static str;
 type ParserResult<T> = Result<T, ParserError>;
-type NodeFactory = dyn Fn(&str, Vec<Expression>) -> ParserResult<Node>;
+type NodeFactory = dyn Fn(&str, Vec<Expression>) -> ParserResult<NodeFactoryResult>;
 
 struct ParserOutput<'a, T> {
     parsed: T,
@@ -234,7 +234,7 @@ fn is_string_char(char: char) -> bool {
 fn consume_s_expression<'a>(
     input: &'a str,
     factory: &NodeFactory,
-) -> ParserResult<Option<ParserOutput<'a, Node>>> {
+) -> ParserResult<Option<ParserOutput<'a, Expression>>> {
     match consume_char('(', input) {
         None => Ok(None),
         Some(input) => {
@@ -256,18 +256,62 @@ fn consume_s_expression<'a>(
                                 consume_char(')', input)
                                     .ok_or_else(|| "Unterminated expression")
                                     .and_then(|input| {
-                                        factory(identifier, args).map(|node| {
-                                            Some(ParserOutput {
-                                                parsed: node,
-                                                remaining: input,
-                                            })
-                                        })
+                                        expression_factory(identifier, args, factory).map(
+                                            |expression| {
+                                                Some(ParserOutput {
+                                                    parsed: expression,
+                                                    remaining: input,
+                                                })
+                                            },
+                                        )
                                     })
                             },
                         )
                     },
                 )
         }
+    }
+}
+
+fn expression_factory(
+    identifier: &str,
+    args: Vec<Expression>,
+    factory: &NodeFactory,
+) -> ParserResult<Expression> {
+    match factory(identifier, args)? {
+        NodeFactoryResult::Some(node) => Ok(Expression::Node(node)),
+        NodeFactoryResult::None(args) => builtin_expression_factory(identifier, args)
+            .and_then(|result| {
+                result.map_or_else(|| Err("Invalid arguments"), |result| Ok(result))
+            }),
+    }
+}
+
+fn builtin_expression_factory(
+    identifier: &str,
+    args: Vec<Expression>,
+) -> ParserResult<Option<Expression>> {
+    match identifier {
+        "throw" => {
+            if args.len() != 1 {
+                return Err("Invalid number of arguments");
+            }
+            let args = &mut args.into_iter();
+            let target = args.next().unwrap();
+            match target {
+                Expression::Value(Value::String(value)) => {
+                    Ok(Some(Expression::Error(String::from(value.get()))))
+                }
+                _ => Err("Invalid arguments"),
+            }
+        }
+        "await" => {
+            if args.len() != 0 {
+                return Err("Invalid number of arguments");
+            }
+            Ok(Some(Expression::Pending))
+        }
+        _ => Ok(None),
     }
 }
 
@@ -299,9 +343,7 @@ fn consume_expression<'a>(
     factory: &NodeFactory,
 ) -> ParserResult<Option<ParserOutput<'a, Expression>>> {
     consume_s_expression(input, factory).map(|result| {
-        result
-            .map(|result| result.map(Expression::Node))
-            .or_else(|| consume_primitive(input).map(|result| result.map(Expression::Value)))
+        result.or_else(|| consume_primitive(input).map(|result| result.map(Expression::Value)))
     })
 }
 
@@ -325,110 +367,116 @@ pub fn parse(input: &str, factory: &NodeFactory) -> ParserResult<Expression> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{expression::Expression, node::{Node, abs::AbsNode, add::AddNode}, value::{StringValue, Value}};
+    use crate::{
+        expression::Expression,
+        node::{abs::AbsNode, add::AddNode, Node},
+        value::{StringValue, Value},
+    };
 
-    use super::{parse, NodeFactory};
+    use super::parse;
 
     #[test]
     fn invalid_expression() {
-        let factory: &NodeFactory = &|_, _| Err("Not implemented");
-        assert_eq!(parse("foo", factory), Err("Invalid expression"));
-        assert_eq!(parse("1.", factory), Err("Invalid expression"));
-        assert_eq!(parse(".1", factory), Err("Invalid expression"));
-        assert_eq!(parse("-.1", factory), Err("Invalid expression"));
-        assert_eq!(parse("'foo'", factory), Err("Invalid expression"));
+        assert_eq!(parse("foo", &Node::new), Err("Invalid expression"));
+        assert_eq!(parse("1.", &Node::new), Err("Invalid expression"));
+        assert_eq!(parse(".1", &Node::new), Err("Invalid expression"));
+        assert_eq!(parse("-.1", &Node::new), Err("Invalid expression"));
+        assert_eq!(parse("'foo'", &Node::new), Err("Invalid expression"));
     }
 
     #[test]
     fn multiple_expressions() {
-        let factory: &NodeFactory = &|_, _| Err("Not implemented");
         assert_eq!(
-            parse("null null", factory),
+            parse("null null", &Node::new),
             Err("Unexpected input after expression")
         );
         assert_eq!(
-            parse("null foo", factory),
+            parse("null foo", &Node::new),
             Err("Unexpected input after expression")
         );
     }
 
     #[test]
     fn ignore_extra_whitespace() {
-        let factory: &NodeFactory = &|_, _| Err("Not implemented");
         assert_eq!(
-            parse("  \n\r\tnull\n\r\t  ", factory),
+            parse("  \n\r\tnull\n\r\t  ", &Node::new),
             Ok(Expression::Value(Value::Nil))
         );
     }
 
     #[test]
     fn primitive_values() {
-        let factory: &NodeFactory = &|_, _| Err("Not implemented");
-        assert_eq!(parse("null", factory), Ok(Expression::Value(Value::Nil)));
+        assert_eq!(parse("null", &Node::new), Ok(Expression::Value(Value::Nil)));
         assert_eq!(
-            parse("true", factory),
+            parse("true", &Node::new),
             Ok(Expression::Value(Value::Boolean(true)))
         );
         assert_eq!(
-            parse("false", factory),
+            parse("false", &Node::new),
             Ok(Expression::Value(Value::Boolean(false)))
         );
-        assert_eq!(parse("0", factory), Ok(Expression::Value(Value::Int(0))));
-        assert_eq!(parse("-0", factory), Ok(Expression::Value(Value::Int(0))));
-        assert_eq!(parse("1", factory), Ok(Expression::Value(Value::Int(1))));
-        assert_eq!(parse("-1", factory), Ok(Expression::Value(Value::Int(-1))));
+        assert_eq!(parse("0", &Node::new), Ok(Expression::Value(Value::Int(0))));
         assert_eq!(
-            parse("123", factory),
+            parse("-0", &Node::new),
+            Ok(Expression::Value(Value::Int(0)))
+        );
+        assert_eq!(parse("1", &Node::new), Ok(Expression::Value(Value::Int(1))));
+        assert_eq!(
+            parse("-1", &Node::new),
+            Ok(Expression::Value(Value::Int(-1)))
+        );
+        assert_eq!(
+            parse("123", &Node::new),
             Ok(Expression::Value(Value::Int(123)))
         );
         assert_eq!(
-            parse("-123", factory),
+            parse("-123", &Node::new),
             Ok(Expression::Value(Value::Int(-123)))
         );
         assert_eq!(
-            parse("0.0", factory),
+            parse("0.0", &Node::new),
             Ok(Expression::Value(Value::Float(0.0)))
         );
         assert_eq!(
-            parse("-0.0", factory),
+            parse("-0.0", &Node::new),
             Ok(Expression::Value(Value::Float(0.0)))
         );
         assert_eq!(
-            parse("3.142", factory),
+            parse("3.142", &Node::new),
             Ok(Expression::Value(Value::Float(3.142)))
         );
         assert_eq!(
-            parse("-3.142", factory),
+            parse("-3.142", &Node::new),
             Ok(Expression::Value(Value::Float(-3.142)))
         );
         assert_eq!(
-            parse("123.45", factory),
+            parse("123.45", &Node::new),
             Ok(Expression::Value(Value::Float(123.45)))
         );
         assert_eq!(
-            parse("-123.45", factory),
+            parse("-123.45", &Node::new),
             Ok(Expression::Value(Value::Float(-123.45)))
         );
         assert_eq!(
-            parse("\"\"", factory),
+            parse("\"\"", &Node::new),
             Ok(Expression::Value(Value::String(StringValue::new(
                 String::from("")
             ))))
         );
         assert_eq!(
-            parse("\" \"", factory),
+            parse("\" \"", &Node::new),
             Ok(Expression::Value(Value::String(StringValue::new(
                 String::from(" ")
             ))))
         );
         assert_eq!(
-            parse("\"foo\"", factory),
+            parse("\"foo\"", &Node::new),
             Ok(Expression::Value(Value::String(StringValue::new(
                 String::from("foo")
             ))))
         );
         assert_eq!(
-            parse("\"foo bar\"", factory),
+            parse("\"foo bar\"", &Node::new),
             Ok(Expression::Value(Value::String(StringValue::new(
                 String::from("foo bar")
             ))))
@@ -437,33 +485,32 @@ mod tests {
 
     #[test]
     fn escaped_string_literals() {
-        let factory: &NodeFactory = &|_, _| Err("Not implemented");
         assert_eq!(
-            parse("\"foo\\\\bar\"", factory),
+            parse("\"foo\\\\bar\"", &Node::new),
             Ok(Expression::Value(Value::String(StringValue::new(
                 String::from("foo\\bar")
             ))))
         );
         assert_eq!(
-            parse("\"foo\\nbar\"", factory),
+            parse("\"foo\\nbar\"", &Node::new),
             Ok(Expression::Value(Value::String(StringValue::new(
                 String::from("foo\nbar")
             ))))
         );
         assert_eq!(
-            parse("\"foo\\tbar\"", factory),
+            parse("\"foo\\tbar\"", &Node::new),
             Ok(Expression::Value(Value::String(StringValue::new(
                 String::from("foo\tbar")
             ))))
         );
         assert_eq!(
-            parse("\"foo\\rbar\"", factory),
+            parse("\"foo\\rbar\"", &Node::new),
             Ok(Expression::Value(Value::String(StringValue::new(
                 String::from("foo\rbar")
             ))))
         );
         assert_eq!(
-            parse("\"foo\\\"bar\\\"baz\"", factory),
+            parse("\"foo\\\"bar\\\"baz\"", &Node::new),
             Ok(Expression::Value(Value::String(StringValue::new(
                 String::from("foo\"bar\"baz")
             ))))
@@ -473,13 +520,13 @@ mod tests {
     #[test]
     fn s_expressions() {
         assert_eq!(
-            parse("(abs -123.45)", &Node::new),
+            parse("(abs -123.45)", &&Node::new),
             Ok(Expression::Node(Node::Abs(AbsNode::new(
                 Expression::Value(Value::Float(-123.45))
             ))))
         );
         assert_eq!(
-            parse("(add 3 4)", &Node::new),
+            parse("(add 3 4)", &&Node::new),
             Ok(Expression::Node(Node::Add(AddNode::new(
                 Expression::Value(Value::Int(3)),
                 Expression::Value(Value::Int(4))

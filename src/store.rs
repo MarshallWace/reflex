@@ -15,13 +15,18 @@ impl Store {
 
 #[cfg(test)]
 mod tests {
-    use crate::{expression::Expression, node::{Node, abs::AbsNode, add::AddNode}, store::Store, value::{StringValue, Value}};
-
+    use crate::{
+        expression::Expression,
+        node::Node,
+        parser,
+        store::Store,
+        value::{StringValue, Value},
+    };
 
     #[test]
     fn static_values_nil() {
         let store = Store::new();
-        let target = Expression::Value(Value::Nil);
+        let target = parser::parse("null", &Node::new).unwrap();
         let result = store.evaluate(&target);
         assert_eq!(result, Expression::Value(Value::Nil));
     }
@@ -29,10 +34,10 @@ mod tests {
     #[test]
     fn static_values_boolean() {
         let store = Store::new();
-        let target = Expression::Value(Value::Boolean(true));
+        let target = parser::parse("true", &Node::new).unwrap();
         let result = store.evaluate(&target);
         assert_eq!(result, Expression::Value(Value::Boolean(true)));
-        let target = Expression::Value(Value::Boolean(false));
+        let target = parser::parse("false", &Node::new).unwrap();
         let result = store.evaluate(&target);
         assert_eq!(result, Expression::Value(Value::Boolean(false)));
     }
@@ -40,7 +45,7 @@ mod tests {
     #[test]
     fn static_values_int() {
         let store = Store::new();
-        let target = Expression::Value(Value::Int(3));
+        let target = parser::parse("3", &Node::new).unwrap();
         let result = store.evaluate(&target);
         assert_eq!(result, Expression::Value(Value::Int(3)));
     }
@@ -48,7 +53,7 @@ mod tests {
     #[test]
     fn static_values_float() {
         let store = Store::new();
-        let target = Expression::Value(Value::Float(3.0));
+        let target = parser::parse("3.0", &Node::new).unwrap();
         let result = store.evaluate(&target);
         assert_eq!(result, Expression::Value(Value::Float(3.0)));
     }
@@ -56,25 +61,24 @@ mod tests {
     #[test]
     fn static_values_string() {
         let store = Store::new();
+        let target = parser::parse("\"foo\"", &Node::new).unwrap();
+        let result = store.evaluate(&target);
+        assert_eq!(
+            result,
+            Expression::Value(Value::String(StringValue::new(String::from("foo"))))
+        );
         let target = Expression::Value(Value::String(StringValue::literal("foo")));
         let result = store.evaluate(&target);
         assert_eq!(
             result,
             Expression::Value(Value::String(StringValue::literal("foo")))
         );
-        let store = Store::new();
-        let target = Expression::Value(Value::String(StringValue::new(String::from("foo"))));
-        let result = store.evaluate(&target);
-        assert_eq!(
-            result,
-            Expression::Value(Value::String(StringValue::new(String::from("foo"))))
-        );
     }
 
     #[test]
     fn static_errors() {
         let store = Store::new();
-        let target = Expression::Error(String::from("foo"));
+        let target = parser::parse("(throw \"foo\")", &Node::new).unwrap();
         let result = store.evaluate(&target);
         assert_eq!(result, Expression::Error(String::from("foo")));
     }
@@ -82,7 +86,7 @@ mod tests {
     #[test]
     fn static_pendings() {
         let store = Store::new();
-        let target = Expression::Pending;
+        let target = parser::parse("(await)", &Node::new).unwrap();
         let result = store.evaluate(&target);
         assert_eq!(result, Expression::Pending);
     }
@@ -90,10 +94,7 @@ mod tests {
     #[test]
     fn dynamic_expressions() {
         let store = Store::new();
-        let target = Expression::Node(Node::Add(AddNode::new(
-            Expression::Value(Value::Int(3)),
-            Expression::Value(Value::Int(4)),
-        )));
+        let target = parser::parse("(add 3 4)", &Node::new).unwrap();
         let result = store.evaluate(&target);
         assert_eq!(result, Expression::Value(Value::Int(3 + 4)));
     }
@@ -101,13 +102,7 @@ mod tests {
     #[test]
     fn nested_expressions() {
         let store = Store::new();
-        let target = Expression::Node(Node::Add(AddNode::new(
-            Expression::Node(Node::Add(AddNode::new(
-                Expression::Node(Node::Abs(AbsNode::new(Expression::Value(Value::Int(-3))))),
-                Expression::Value(Value::Int(4)),
-            ))),
-            Expression::Value(Value::Int(5)),
-        )));
+        let target = parser::parse("(add (add (abs -3) 4) 5)", &Node::new).unwrap();
         let result = store.evaluate(&target);
         assert_eq!(
             result,
@@ -118,34 +113,10 @@ mod tests {
     #[test]
     fn short_circuit_errors() {
         let store = Store::new();
-        let target = Expression::Node(Node::Add(AddNode::new(
-            Expression::Error(String::from("foo")),
-            Expression::Value(Value::Int(3)),
-        )));
+        let target = parser::parse("(add (throw \"foo\") 3)", &Node::new).unwrap();
         let result = store.evaluate(&target);
         assert_eq!(result, Expression::Error(String::from("foo")));
-        let target = Expression::Node(Node::Add(AddNode::new(
-            Expression::Value(Value::Int(3)),
-            Expression::Error(String::from("foo")),
-        )));
-        let result = store.evaluate(&target);
-        assert_eq!(result, Expression::Error(String::from("foo")));
-        let target = Expression::Node(Node::Add(AddNode::new(
-            Expression::Node(Node::Add(AddNode::new(
-                Expression::Error(String::from("foo")),
-                Expression::Value(Value::Int(3)),
-            ))),
-            Expression::Value(Value::Int(3)),
-        )));
-        let result = store.evaluate(&target);
-        assert_eq!(result, Expression::Error(String::from("foo")));
-        let target = Expression::Node(Node::Add(AddNode::new(
-            Expression::Value(Value::Int(3)),
-            Expression::Node(Node::Add(AddNode::new(
-                Expression::Error(String::from("foo")),
-                Expression::Value(Value::Int(3)),
-            ))),
-        )));
+        let target = parser::parse("(add 3 (throw \"foo\"))", &Node::new).unwrap();
         let result = store.evaluate(&target);
         assert_eq!(result, Expression::Error(String::from("foo")));
     }
@@ -153,34 +124,16 @@ mod tests {
     #[test]
     fn short_circuit_pendings() {
         let store = Store::new();
-        let target = Expression::Node(Node::Add(AddNode::new(
-            Expression::Pending,
-            Expression::Value(Value::Int(3)),
-        )));
+        let target = parser::parse("(add (await) 3)", &Node::new).unwrap();
         let result = store.evaluate(&target);
         assert_eq!(result, Expression::Pending);
-        let target = Expression::Node(Node::Add(AddNode::new(
-            Expression::Value(Value::Int(3)),
-            Expression::Pending,
-        )));
+        let target = parser::parse("(add 3 (await))", &Node::new).unwrap();
         let result = store.evaluate(&target);
         assert_eq!(result, Expression::Pending);
-        let target = Expression::Node(Node::Add(AddNode::new(
-            Expression::Node(Node::Add(AddNode::new(
-                Expression::Pending,
-                Expression::Value(Value::Int(3)),
-            ))),
-            Expression::Value(Value::Int(3)),
-        )));
+        let target = parser::parse("(add (add (await) 3) 3)", &Node::new).unwrap();
         let result = store.evaluate(&target);
         assert_eq!(result, Expression::Pending);
-        let target = Expression::Node(Node::Add(AddNode::new(
-            Expression::Value(Value::Int(3)),
-            Expression::Node(Node::Add(AddNode::new(
-                Expression::Pending,
-                Expression::Value(Value::Int(3)),
-            ))),
-        )));
+        let target = parser::parse("(add 3 (add (await) 3))", &Node::new).unwrap();
         let result = store.evaluate(&target);
         assert_eq!(result, Expression::Pending);
     }
@@ -188,34 +141,18 @@ mod tests {
     #[test]
     fn short_circuit_error_priority() {
         let store = Store::new();
-        let target = Expression::Node(Node::Add(AddNode::new(
-            Expression::Error(String::from("foo")),
-            Expression::Pending,
-        )));
+        let target = parser::parse("(add (throw \"foo\") (await))", &Node::new).unwrap();
         let result = store.evaluate(&target);
         assert_eq!(result, Expression::Error(String::from("foo")));
-        let target = Expression::Node(Node::Add(AddNode::new(
-            Expression::Pending,
-            Expression::Error(String::from("foo")),
-        )));
+        let target = parser::parse("(add (await) (throw \"foo\"))", &Node::new).unwrap();
         let result = store.evaluate(&target);
         assert_eq!(result, Expression::Error(String::from("foo")));
-        let target = Expression::Node(Node::Add(AddNode::new(
-            Expression::Node(Node::Add(AddNode::new(
-                Expression::Error(String::from("foo")),
-                Expression::Pending,
-            ))),
-            Expression::Pending,
-        )));
+        let target =
+            parser::parse("(add (add (throw \"foo\") (await)) (await))", &Node::new).unwrap();
         let result = store.evaluate(&target);
         assert_eq!(result, Expression::Error(String::from("foo")));
-        let target = Expression::Node(Node::Add(AddNode::new(
-            Expression::Pending,
-            Expression::Node(Node::Add(AddNode::new(
-                Expression::Error(String::from("foo")),
-                Expression::Pending,
-            ))),
-        )));
+        let target =
+            parser::parse("(add (await) (add (await) (throw \"foo\")))", &Node::new).unwrap();
         let result = store.evaluate(&target);
         assert_eq!(result, Expression::Error(String::from("foo")));
     }
@@ -226,23 +163,12 @@ mod benchmarks {
     extern crate test;
     use test::Bencher;
 
-    use crate::{
-        expression::Expression,
-        node::{abs::AbsNode, add::AddNode, Node},
-        store::Store,
-        value::Value,
-    };
+    use crate::{node::Node, parser, store::Store};
 
     #[bench]
     fn nested_expressions(b: &mut Bencher) {
         let store = Store::new();
-        let target = Expression::Node(Node::Add(AddNode::new(
-            Expression::Node(Node::Add(AddNode::new(
-                Expression::Node(Node::Abs(AbsNode::new(Expression::Value(Value::Int(-3))))),
-                Expression::Value(Value::Int(4)),
-            ))),
-            Expression::Value(Value::Int(5)),
-        )));
+        let target = parser::parse("(add (add (abs -3) 4) 5)", &Node::new).unwrap();
         b.iter(|| store.evaluate(&target));
     }
 }
