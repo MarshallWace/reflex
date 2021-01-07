@@ -22,7 +22,7 @@ pub fn start() -> io::Result<()> {
 
         if input == "exit\n" { break; }
 
-        match parse(&input, &Node::new) {
+        match parse(&input, &Node::factory) {
             Ok(expression) => {
                 writeln!(stdout, "{}", expression.evaluate(&env))?;
             },

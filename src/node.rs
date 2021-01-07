@@ -13,10 +13,16 @@ pub enum Node {
     Abs(self::abs::AbsNode),
     Add(self::add::AddNode),
 }
+
+const ABS: &str = AbsNode::name();
+const ADD: &str = AddNode::name();
+
 pub enum NodeFactoryResult {
     Some(Node),
-    None(Vec<Expression>)
+    None(Vec<Expression>),
+    Err(String),
 }
+
 impl Node {
     pub fn evaluate(&self, env: &Env) -> Expression {
         match self {
@@ -24,26 +30,11 @@ impl Node {
             Node::Add(node) => Evaluate::evaluate(node, env),
         }
     }
-    pub fn new(type_name: &str, args: Vec<Expression>) -> Result<NodeFactoryResult, &'static str> {
+    pub fn factory(type_name: &str, args: Vec<Expression>) -> NodeFactoryResult {
         match type_name {
-            "abs" => {
-                if args.len() != 1 {
-                    return Err("Invalid number of arguments");
-                }
-                let args = &mut args.into_iter();
-                let target = args.next().unwrap();
-                Ok(NodeFactoryResult::Some(Node::Abs(AbsNode::new(target))))
-            }
-            "add" => {
-                if args.len() != 2 {
-                    return Err("Invalid number of arguments");
-                }
-                let args = &mut args.into_iter();
-                let left = args.next().unwrap();
-                let right = args.next().unwrap();
-                Ok(NodeFactoryResult::Some(Node::Add(AddNode::new(left, right))))
-            },
-            _ => Ok(NodeFactoryResult::None(args)),
+            ABS => AbsNode::factory(args),
+            ADD => AddNode::factory(args),
+            _ => NodeFactoryResult::None(args),
         }
     }
 }

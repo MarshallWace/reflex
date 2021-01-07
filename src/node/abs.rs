@@ -3,6 +3,7 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use crate::{
     expression::Expression,
+    node::{Node, NodeFactoryResult},
     operation::evaluate::{Evaluate, Evaluate1},
     env::Env,
     value::Value,
@@ -18,6 +19,17 @@ impl AbsNode {
         AbsNode {
             target: Box::new(target),
         }
+    }
+    pub const fn name() -> &'static str {
+        "abs"
+    }
+    pub fn factory(args: Vec<Expression>) -> NodeFactoryResult {
+        if args.len() != 1 {
+            return NodeFactoryResult::Err(String::from("Invalid number of arguments"));
+        }
+        let args = &mut args.into_iter();
+        let target = args.next().unwrap();
+        NodeFactoryResult::Some(Node::Abs(AbsNode::new(target)))
     }
 }
 impl Evaluate for AbsNode {
