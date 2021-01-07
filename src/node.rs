@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use crate::{expression::Expression, operation::evaluate::Evaluate, store::Store};
+use crate::{expression::Expression, operation::evaluate::Evaluate, env::Env};
 
 use self::{abs::AbsNode, add::AddNode};
 
@@ -18,10 +18,10 @@ pub enum NodeFactoryResult {
     None(Vec<Expression>)
 }
 impl Node {
-    pub fn evaluate(&self, store: &Store) -> Expression {
+    pub fn evaluate(&self, env: &Env) -> Expression {
         match self {
-            Node::Abs(node) => Evaluate::evaluate(node, store),
-            Node::Add(node) => Evaluate::evaluate(node, store),
+            Node::Abs(node) => Evaluate::evaluate(node, env),
+            Node::Add(node) => Evaluate::evaluate(node, env),
         }
     }
     pub fn new(type_name: &str, args: Vec<Expression>) -> Result<NodeFactoryResult, &'static str> {

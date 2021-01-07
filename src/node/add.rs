@@ -4,7 +4,7 @@
 use crate::{
     expression::Expression,
     operation::evaluate::{Evaluate, Evaluate2},
-    store::Store,
+    env::Env,
     value::Value,
     utils::format_type,
 };
@@ -23,15 +23,15 @@ impl AddNode {
     }
 }
 impl Evaluate for AddNode {
-    fn evaluate(&self, store: &Store) -> Expression {
-        Evaluate2::evaluate(self, store)
+    fn evaluate(&self, env: &Env) -> Expression {
+        Evaluate2::evaluate(self, env)
     }
 }
 impl Evaluate2 for AddNode {
     fn dependencies(&self) -> (&Expression, &Expression) {
         (&self.left, &self.right)
     }
-    fn run(&self, _store: &Store, left: &Expression, right: &Expression) -> Expression {
+    fn run(&self, _env: &Env, left: &Expression, right: &Expression) -> Expression {
         match (left, right) {
             (Expression::Value(Value::Int(left)), Expression::Value(Value::Int(right))) => {
                 Expression::Value(Value::Int(left + right))

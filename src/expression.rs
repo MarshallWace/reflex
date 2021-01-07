@@ -3,7 +3,7 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use std::fmt;
 
-use crate::{node::Node, store::Store, value::Value};
+use crate::{node::Node, env::Env, value::Value};
 
 #[derive(Debug, PartialEq)]
 pub enum Expression {
@@ -13,12 +13,12 @@ pub enum Expression {
     Node(Node),
 }
 impl Expression {
-    pub fn evaluate(&self, store: &Store) -> Expression {
+    pub fn evaluate(&self, env: &Env) -> Expression {
         match self {
             Expression::Pending => Expression::Pending,
             Expression::Error(message) => Expression::Error(message.to_owned()),
             Expression::Value(value) => Expression::Value(value.clone()),
-            Expression::Node(node) => node.evaluate(store),
+            Expression::Node(node) => node.evaluate(env),
         }
     }
 }
