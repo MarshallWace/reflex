@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use std::borrow::Cow;
+use std::{borrow::Cow, rc::Rc};
 
 use crate::{
     expression::Expression,
@@ -11,7 +11,7 @@ use crate::{
 
 type ParserError = String;
 type ParserResult<T> = Result<T, ParserError>;
-type NodeFactory = dyn Fn(&str, Vec<Expression>) -> NodeFactoryResult;
+type NodeFactory = dyn Fn(&str, Vec<Rc<Expression>>) -> NodeFactoryResult;
 
 struct ParserOutput<'a, T> {
     parsed: T,
@@ -275,23 +275,27 @@ fn consume_s_expression<'a>(
 
 fn expression_factory(
     identifier: &str,
-    args: Vec<Expression>,
+    args: Vec<Rc<Expression>>,
     factory: &NodeFactory,
-) -> ParserResult<Expression> {
+) -> ParserResult<Rc<Expression>> {
     match factory(identifier, args) {
         NodeFactoryResult::Err(message) => Err(message),
-        NodeFactoryResult::Some(node) => Ok(Expression::Node(node)),
-        NodeFactoryResult::None(args) => builtin_expression_factory(identifier, args)
-            .and_then(|result| {
-                result.map_or_else(|| Err(String::from("Invalid arguments")), |result| Ok(result))
-            }),
+        NodeFactoryResult::Some(node) => Ok(Rc::new(Expression::Node(node))),
+        NodeFactoryResult::None(args) => {
+            builtin_expression_factory(identifier, args).and_then(|result| {
+                result.map_or_else(
+                    || Err(String::from("Invalid arguments")),
+                    |result| Ok(result),
+                )
+            })
+        }
     }
 }
 
 fn builtin_expression_factory(
     identifier: &str,
-    args: Vec<Expression>,
-) -> ParserResult<Option<Expression>> {
+    args: Vec<Rc<Expression>>,
+) -> ParserResult<Option<Rc<Expression>>> {
     match identifier {
         "throw" => {
             if args.len() != 1 {
@@ -299,9 +303,9 @@ fn builtin_expression_factory(
             }
             let args = &mut args.into_iter();
             let target = args.next().unwrap();
-            match target {
+            match &*target {
                 Expression::Value(Value::String(value)) => {
-                    Ok(Some(Expression::Error(String::from(value.get()))))
+                    Ok(Some(Rc::new(Expression::Error(String::from(value.get())))))
                 }
                 _ => Err(String::from("Invalid arguments")),
             }
@@ -310,7 +314,7 @@ fn builtin_expression_factory(
             if args.len() != 0 {
                 return Err(String::from("Invalid number of arguments"));
             }
-            Ok(Some(Expression::Pending))
+            Ok(Some(Rc::new(Expression::Pending)))
         }
         _ => Ok(None),
     }
@@ -319,8 +323,8 @@ fn builtin_expression_factory(
 fn consume_args<'a>(
     input: &'a str,
     factory: &NodeFactory,
-    mut args: Vec<Expression>,
-) -> ParserResult<ParserOutput<'a, Vec<Expression>>> {
+    mut args: Vec<Rc<Expression>>,
+) -> ParserResult<ParserOutput<'a, Vec<Rc<Expression>>>> {
     let result = consume_expression(input, factory)?;
     let (expression, input) = match result {
         Some(ParserOutput { parsed, remaining }) => (parsed, remaining),
@@ -342,13 +346,16 @@ fn consume_args<'a>(
 fn consume_expression<'a>(
     input: &'a str,
     factory: &NodeFactory,
-) -> ParserResult<Option<ParserOutput<'a, Expression>>> {
+) -> ParserResult<Option<ParserOutput<'a, Rc<Expression>>>> {
     consume_s_expression(input, factory).map(|result| {
-        result.or_else(|| consume_primitive(input).map(|result| result.map(Expression::Value)))
+        result.or_else(|| {
+            consume_primitive(input)
+                .map(|result| result.map(|value| Rc::new(Expression::Value(value))))
+        })
     })
 }
 
-pub fn parse(input: &str, factory: &NodeFactory) -> ParserResult<Expression> {
+pub fn parse(input: &str, factory: &NodeFactory) -> ParserResult<Rc<Expression>> {
     let input = consume_whitespace(input);
     consume_expression(input, factory)
         .and_then(|result| result.ok_or_else(|| String::from("Invalid expression")))
@@ -368,6 +375,8 @@ pub fn parse(input: &str, factory: &NodeFactory) -> ParserResult<Expression> {
 
 #[cfg(test)]
 mod tests {
+    use std::rc::Rc;
+
     use crate::{
         expression::Expression,
         node::{abs::AbsNode, add::AddNode, Node},
@@ -424,87 +433,87 @@ mod tests {
     fn primitive_values() {
         assert_eq!(
             parse("null", &Node::factory),
-            Ok(Expression::Value(Value::Nil))
+            Ok(Rc::new(Expression::Value(Value::Nil)))
         );
         assert_eq!(
             parse("true", &Node::factory),
-            Ok(Expression::Value(Value::Boolean(true)))
+            Ok(Rc::new(Expression::Value(Value::Boolean(true))))
         );
         assert_eq!(
             parse("false", &Node::factory),
-            Ok(Expression::Value(Value::Boolean(false)))
+            Ok(Rc::new(Expression::Value(Value::Boolean(false))))
         );
         assert_eq!(
             parse("0", &Node::factory),
-            Ok(Expression::Value(Value::Int(0)))
+            Ok(Rc::new(Expression::Value(Value::Int(0))))
         );
         assert_eq!(
             parse("-0", &Node::factory),
-            Ok(Expression::Value(Value::Int(0)))
+            Ok(Rc::new(Expression::Value(Value::Int(0))))
         );
         assert_eq!(
             parse("1", &Node::factory),
-            Ok(Expression::Value(Value::Int(1)))
+            Ok(Rc::new(Expression::Value(Value::Int(1))))
         );
         assert_eq!(
             parse("-1", &Node::factory),
-            Ok(Expression::Value(Value::Int(-1)))
+            Ok(Rc::new(Expression::Value(Value::Int(-1))))
         );
         assert_eq!(
             parse("123", &Node::factory),
-            Ok(Expression::Value(Value::Int(123)))
+            Ok(Rc::new(Expression::Value(Value::Int(123))))
         );
         assert_eq!(
             parse("-123", &Node::factory),
-            Ok(Expression::Value(Value::Int(-123)))
+            Ok(Rc::new(Expression::Value(Value::Int(-123))))
         );
         assert_eq!(
             parse("0.0", &Node::factory),
-            Ok(Expression::Value(Value::Float(0.0)))
+            Ok(Rc::new(Expression::Value(Value::Float(0.0))))
         );
         assert_eq!(
             parse("-0.0", &Node::factory),
-            Ok(Expression::Value(Value::Float(0.0)))
+            Ok(Rc::new(Expression::Value(Value::Float(0.0))))
         );
         assert_eq!(
             parse("3.142", &Node::factory),
-            Ok(Expression::Value(Value::Float(3.142)))
+            Ok(Rc::new(Expression::Value(Value::Float(3.142))))
         );
         assert_eq!(
             parse("-3.142", &Node::factory),
-            Ok(Expression::Value(Value::Float(-3.142)))
+            Ok(Rc::new(Expression::Value(Value::Float(-3.142))))
         );
         assert_eq!(
             parse("123.45", &Node::factory),
-            Ok(Expression::Value(Value::Float(123.45)))
+            Ok(Rc::new(Expression::Value(Value::Float(123.45))))
         );
         assert_eq!(
             parse("-123.45", &Node::factory),
-            Ok(Expression::Value(Value::Float(-123.45)))
+            Ok(Rc::new(Expression::Value(Value::Float(-123.45))))
         );
         assert_eq!(
             parse("\"\"", &Node::factory),
-            Ok(Expression::Value(Value::String(StringValue::new(
+            Ok(Rc::new(Expression::Value(Value::String(StringValue::new(
                 String::from("")
-            ))))
+            )))))
         );
         assert_eq!(
             parse("\" \"", &Node::factory),
-            Ok(Expression::Value(Value::String(StringValue::new(
+            Ok(Rc::new(Expression::Value(Value::String(StringValue::new(
                 String::from(" ")
-            ))))
+            )))))
         );
         assert_eq!(
             parse("\"foo\"", &Node::factory),
-            Ok(Expression::Value(Value::String(StringValue::new(
+            Ok(Rc::new(Expression::Value(Value::String(StringValue::new(
                 String::from("foo")
-            ))))
+            )))))
         );
         assert_eq!(
             parse("\"foo bar\"", &Node::factory),
-            Ok(Expression::Value(Value::String(StringValue::new(
+            Ok(Rc::new(Expression::Value(Value::String(StringValue::new(
                 String::from("foo bar")
-            ))))
+            )))))
         );
     }
 
@@ -512,33 +521,46 @@ mod tests {
     fn escaped_string_literals() {
         assert_eq!(
             parse("\"foo\\\\bar\"", &Node::factory),
-            Ok(Expression::Value(Value::String(StringValue::new(
+            Ok(Rc::new(Expression::Value(Value::String(StringValue::new(
                 String::from("foo\\bar")
-            ))))
+            )))))
         );
         assert_eq!(
             parse("\"foo\\nbar\"", &Node::factory),
-            Ok(Expression::Value(Value::String(StringValue::new(
+            Ok(Rc::new(Expression::Value(Value::String(StringValue::new(
                 String::from("foo\nbar")
-            ))))
+            )))))
         );
         assert_eq!(
             parse("\"foo\\tbar\"", &Node::factory),
-            Ok(Expression::Value(Value::String(StringValue::new(
+            Ok(Rc::new(Expression::Value(Value::String(StringValue::new(
                 String::from("foo\tbar")
-            ))))
+            )))))
         );
         assert_eq!(
             parse("\"foo\\rbar\"", &Node::factory),
-            Ok(Expression::Value(Value::String(StringValue::new(
+            Ok(Rc::new(Expression::Value(Value::String(StringValue::new(
                 String::from("foo\rbar")
-            ))))
+            )))))
         );
         assert_eq!(
             parse("\"foo\\\"bar\\\"baz\"", &Node::factory),
-            Ok(Expression::Value(Value::String(StringValue::new(
+            Ok(Rc::new(Expression::Value(Value::String(StringValue::new(
                 String::from("foo\"bar\"baz")
-            ))))
+            )))))
+        );
+    }
+
+
+    #[test]
+    fn builtin_procedures() {
+        assert_eq!(
+            parse("(await)", &&Node::factory),
+            Ok(Rc::new(Expression::Pending))
+        );
+        assert_eq!(
+            parse("(throw \"foo\")", &&Node::factory),
+            Ok(Rc::new(Expression::Error(String::from("foo"))))
         );
     }
 
@@ -546,16 +568,16 @@ mod tests {
     fn s_expressions() {
         assert_eq!(
             parse("(abs -123.45)", &&Node::factory),
-            Ok(Expression::Node(Node::Abs(AbsNode::new(
-                Expression::Value(Value::Float(-123.45))
-            ))))
+            Ok(Rc::new(Expression::Node(Node::Abs(AbsNode::new(Rc::new(
+                Expression::Value(Value::Float(-123.45)),
+            ))))))
         );
         assert_eq!(
             parse("(add 3 4)", &&Node::factory),
-            Ok(Expression::Node(Node::Add(AddNode::new(
-                Expression::Value(Value::Int(3)),
-                Expression::Value(Value::Int(4))
-            ))))
+            Ok(Rc::new(Expression::Node(Node::Add(AddNode::new(
+                Rc::new(Expression::Value(Value::Int(3))),
+                Rc::new(Expression::Value(Value::Int(4))),
+            )))))
         );
     }
 }

@@ -3,9 +3,7 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use std::{fmt, rc::Rc};
 
-use crate::utils::format_value;
-
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum Value {
     Nil,
     Boolean(bool),
@@ -13,23 +11,20 @@ pub enum Value {
     Float(f64),
     String(StringValue),
 }
-impl Clone for Value {
-    fn clone(&self) -> Self {
-        match self {
-            Value::Nil => Value::Nil,
-            Value::Boolean(value) => Value::Boolean(*value),
-            Value::Int(value) => Value::Int(*value),
-            Value::Float(value) => Value::Float(*value),
-            Value::String(value) => Value::String(value.clone()),
-        }
-    }
-}
 impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", format_value(self))
+        let formatted = match self {
+            Value::Nil => String::from("Nil"),
+            Value::Boolean(value) => format!("{:?}", value),
+            Value::Int(value) => format!("{:?}", value),
+            Value::Float(value) => format!("{:?}", value),
+            Value::String(value) => format!("{:?}", value.get()),
+        };
+        write!(f, "{}", formatted)
     }
 }
 
+#[derive(Clone)]
 pub enum StringValue {
     Literal(&'static str),
     Runtime(Rc<String>),
@@ -58,14 +53,6 @@ impl PartialEq for StringValue {
         }
     }
 }
-impl Clone for StringValue {
-    fn clone(&self) -> Self {
-        match self {
-            StringValue::Literal(value) => StringValue::Literal(value),
-            StringValue::Runtime(value) => StringValue::Runtime(Rc::clone(value)),
-        }
-    }
-}
 impl fmt::Debug for StringValue {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -77,7 +64,7 @@ impl fmt::Debug for StringValue {
 
 #[cfg(test)]
 mod tests {
-    use super::StringValue;
+    use super::{StringValue, Value};
 
     #[test]
     fn string_equality() {
@@ -105,5 +92,26 @@ mod tests {
         let left = StringValue::new(String::from("foo"));
         let right = StringValue::literal("bar");
         assert_ne!(left, right);
+    }
+
+    #[test]
+    fn format_values() {
+        assert_eq!(format!("{}", Value::Nil), "Nil");
+        assert_eq!(format!("{}", Value::Boolean(true)), "true");
+        assert_eq!(format!("{}", Value::Boolean(false)), "false");
+        assert_eq!(format!("{}", Value::Int(0)), "0");
+        assert_eq!(format!("{}", Value::Int(3)), "3");
+        assert_eq!(format!("{}", Value::Int(-3)), "-3");
+        assert_eq!(format!("{}", Value::Float(0.0)), "0.0");
+        assert_eq!(format!("{}", Value::Float(3.0)), "3.0");
+        assert_eq!(format!("{}", Value::Float(-3.0)), "-3.0");
+        assert_eq!(
+            format!("{}", Value::String(StringValue::literal("foo"))),
+            "\"foo\""
+        );
+        assert_eq!(
+            format!("{}", Value::String(StringValue::new(String::from("foo")))),
+            "\"foo\""
+        );
     }
 }

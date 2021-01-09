@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+use std::rc::Rc;
+
 use crate::{
     expression::Expression,
     node::{Node, NodeFactoryResult},
@@ -10,20 +12,20 @@ use crate::{
     utils::format_type,
 };
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct AbsNode {
-    target: Box<Expression>,
+    target: Rc<Expression>,
 }
 impl AbsNode {
-    pub fn new(target: Expression) -> AbsNode {
+    pub fn new(target: Rc<Expression>) -> AbsNode {
         AbsNode {
-            target: Box::new(target),
+            target,
         }
     }
     pub const fn name() -> &'static str {
         "abs"
     }
-    pub fn factory(args: Vec<Expression>) -> NodeFactoryResult {
+    pub fn factory(args: Vec<Rc<Expression>>) -> NodeFactoryResult {
         if args.len() != 1 {
             return NodeFactoryResult::Err(String::from("Invalid number of arguments"));
         }
@@ -33,24 +35,24 @@ impl AbsNode {
     }
 }
 impl Evaluate for AbsNode {
-    fn evaluate(&self, env: &Env) -> Expression {
+    fn evaluate(&self, env: &Env) -> Rc<Expression> {
         Evaluate1::evaluate(self, env)
     }
 }
 impl Evaluate1 for AbsNode {
-    fn dependencies(&self) -> &Expression {
+    fn dependencies(&self) -> &Rc<Expression> {
         &self.target
     }
-    fn run(&self, _env: &Env, target: &Expression) -> Expression {
-        match target {
-            Expression::Value(Value::Int(target)) => Expression::Value(Value::Int(target.abs())),
+    fn run(&self, _env: &Env, target: &Rc<Expression>) -> Rc<Expression> {
+        match &**target {
+            Expression::Value(Value::Int(target)) => Rc::new(Expression::Value(Value::Int(target.abs()))),
             Expression::Value(Value::Float(target)) => {
-                Expression::Value(Value::Float(target.abs()))
+                Rc::new(Expression::Value(Value::Float(target.abs())))
             }
-            target => Expression::Error(format!(
+            target => Rc::new(Expression::Error(format!(
                 "Expected Int or Float, received {}",
                 format_type(target),
-            )),
+            ))),
         }
     }
 }
