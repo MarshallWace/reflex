@@ -182,10 +182,30 @@ mod benchmarks {
     }
 
     #[bench]
-    fn function_application(b: &mut Bencher) {
+    fn function_application_nullary(b: &mut Bencher) {
         let env = Env::new();
-        let expression =
-            parser::parse("(apply (fn (foo bar) (add foo bar)) 3 4)", &Node::factory).unwrap();
+        let expression = parser::parse("(apply (fn () 3))", &Node::factory).unwrap();
+        b.iter(|| expression.evaluate(&env));
+    }
+
+    #[bench]
+    fn function_application_unary(b: &mut Bencher) {
+        let env = Env::new();
+        let expression = parser::parse("(apply (fn (foo) foo) 3)", &Node::factory).unwrap();
+        b.iter(|| expression.evaluate(&env));
+    }
+
+    #[bench]
+    fn function_application_binary(b: &mut Bencher) {
+        let env = Env::new();
+        let expression = parser::parse("(apply (fn (foo bar) foo) 3 4)", &Node::factory).unwrap();
+        b.iter(|| expression.evaluate(&env));
+    }
+
+    #[bench]
+    fn function_application_ternary(b: &mut Bencher) {
+        let env = Env::new();
+        let expression = parser::parse("(apply (fn (foo bar baz) foo) 3 4 5)", &Node::factory).unwrap();
         b.iter(|| expression.evaluate(&env));
     }
 }

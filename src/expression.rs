@@ -10,16 +10,30 @@ pub enum Expression {
     Pending,
     Error(String),
     Value(Value),
-    Reference(String),
-    Function(Vec<String>, Rc<Expression>),
+    Reference(EnvPath),
+    Function(Function),
     Node(Node),
 }
+
+type EnvPath = usize;
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct Function {
+    pub arity: usize,
+    pub body: Rc<Expression>,
+}
+impl fmt::Display for Function {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Function({} -> {})", self.arity, self.body)
+    }
+}
+
 impl Evaluate for Rc<Expression> {
     fn evaluate(&self, env: &Env) -> Rc<Expression> {
         match &**self {
-            Expression::Reference(key) => match env.get(&key) {
+            Expression::Reference(index) => match env.get(*index) {
                 Some(value) => value.evaluate(env),
-                None => Rc::new(Expression::Error(format!("Invalid reference: {}", key))),
+                None => panic!("Invalid reference target"),
             },
             Expression::Node(node) => node.evaluate(env),
             _ => Rc::clone(self),
@@ -32,10 +46,8 @@ impl fmt::Debug for Expression {
             Expression::Pending => write!(f, "{}", "Pending"),
             Expression::Error(message) => write!(f, "Error({:?})", message),
             Expression::Value(value) => write!(f, "{:?}", value),
-            Expression::Function(args, body) => {
-                write!(f, "Function({} -> {})", args.join(" "), body)
-            }
-            Expression::Reference(node) => write!(f, "Reference({:?})", node),
+            Expression::Function(value) => write!(f, "{:?}", value),
+            Expression::Reference(node) => write!(f, "Reference({})", node),
             Expression::Node(value) => write!(f, "{:?}", value),
         }
     }
@@ -46,10 +58,8 @@ impl fmt::Display for Expression {
             Expression::Pending => write!(f, "{}", "<pending>"),
             Expression::Error(message) => write!(f, "Error: {}", message),
             Expression::Value(value) => write!(f, "{}", value),
-            Expression::Function(args, body) => {
-                write!(f, "Function({} -> {:?})", args.join(" "), body)
-            }
-            Expression::Reference(value) => write!(f, "{}", value),
+            Expression::Function(value) => write!(f, "{}", value),
+            Expression::Reference(value) => write!(f, "<env:{}>", value),
             Expression::Node(value) => write!(f, "{:?}", value),
         }
     }

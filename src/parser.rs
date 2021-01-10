@@ -3,11 +3,7 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use std::{borrow::Cow, rc::Rc};
 
-use crate::{
-    expression::Expression,
-    node::Node,
-    value::{StringValue, Value},
-};
+use crate::{expression::{Expression, Function}, node::Node, value::{StringValue, Value}};
 
 type ParserError = String;
 type ParserResult<T> = Result<T, ParserError>;
@@ -262,13 +258,15 @@ fn is_string_char(char: char) -> bool {
 fn consume_macro<'a>(
     input: &'a str,
     factory: &NodeFactory,
+    scope: &LexicalScope<'a>,
 ) -> ParserResult<Option<ParserOutput<'a, Rc<Expression>>>> {
-    consume_fn_macro(input, factory)
+    consume_fn_macro(input, factory, scope)
 }
 
 fn consume_fn_macro<'a>(
     input: &'a str,
     factory: &NodeFactory,
+    scope: &LexicalScope<'a>,
 ) -> ParserResult<Option<ParserOutput<'a, Rc<Expression>>>> {
     match consume_char('(', input) {
         None => Ok(None),
@@ -291,7 +289,10 @@ fn consume_fn_macro<'a>(
                                 None => Err(String::from("Unterminated function argument list")),
                                 Some(input) => {
                                     let input = consume_whitespace(input);
-                                    match consume_expression(input, factory)? {
+                                    let arity = arg_names.len();
+                                    let child_scope = scope
+                                        .create_child(arg_names.iter().map(|name| *name).collect());
+                                    match consume_expression(input, factory, &child_scope)? {
                                         None => Err(String::from("Missing function body")),
                                         Some(ParserOutput {
                                             parsed: body,
@@ -299,9 +300,16 @@ fn consume_fn_macro<'a>(
                                         }) => {
                                             let input = consume_whitespace(input);
                                             match consume_char(')', input) {
-                                                None => Err(String::from("Unterminated function expression")),
+                                                None => Err(String::from(
+                                                    "Unterminated function expression",
+                                                )),
                                                 Some(input) => Ok(Some(ParserOutput {
-                                                    parsed: Rc::new(Expression::Function(arg_names, body)),
+                                                    parsed: Rc::new(Expression::Function(
+                                                        Function {
+                                                            arity,
+                                                            body,
+                                                        },
+                                                    )),
                                                     remaining: input,
                                                 })),
                                             }
@@ -317,11 +325,14 @@ fn consume_fn_macro<'a>(
     }
 }
 
-fn consume_fn_arg_names<'a>(input: &'a str) -> ParserResult<ParserOutput<'a, Vec<String>>> {
+fn consume_fn_arg_names<'a>(input: &'a str) -> ParserResult<ParserOutput<'a, Vec<&'a str>>> {
     consume_fn_arg_names_iter(input, Vec::new())
 }
 
-fn consume_fn_arg_names_iter<'a>(input: &'a str, mut results: Vec<String>) -> ParserResult<ParserOutput<'a, Vec<String>>> {
+fn consume_fn_arg_names_iter<'a>(
+    input: &'a str,
+    mut results: Vec<&'a str>,
+) -> ParserResult<ParserOutput<'a, Vec<&'a str>>> {
     match consume_identifier(input) {
         None => Ok(ParserOutput {
             parsed: results,
@@ -331,7 +342,7 @@ fn consume_fn_arg_names_iter<'a>(input: &'a str, mut results: Vec<String>) -> Pa
             parsed: arg_name,
             remaining: input,
         }) => {
-            results.push(String::from(arg_name));
+            results.push(arg_name);
             let input = consume_whitespace(input);
             consume_fn_arg_names_iter(input, results)
         }
@@ -341,6 +352,7 @@ fn consume_fn_arg_names_iter<'a>(input: &'a str, mut results: Vec<String>) -> Pa
 fn consume_s_expression<'a>(
     input: &'a str,
     factory: &NodeFactory,
+    scope: &LexicalScope<'a>,
 ) -> ParserResult<Option<ParserOutput<'a, Rc<Expression>>>> {
     match consume_char('(', input) {
         None => Ok(None),
@@ -356,7 +368,7 @@ fn consume_s_expression<'a>(
                     let ParserOutput {
                         parsed: args,
                         remaining: input,
-                    } = consume_list_items(input, factory)?;
+                    } = consume_list_items(input, factory, scope)?;
                     let input = consume_whitespace(input);
                     match consume_char(')', input) {
                         None => Err(String::from("Unterminated expression")),
@@ -378,16 +390,18 @@ fn consume_s_expression<'a>(
 fn consume_list_items<'a>(
     input: &'a str,
     factory: &NodeFactory,
+    scope: &LexicalScope<'a>,
 ) -> ParserResult<ParserOutput<'a, Vec<Rc<Expression>>>> {
-    consume_list_items_iter(input, factory, Vec::new())
+    consume_list_items_iter(input, factory, scope, Vec::new())
 }
 
 fn consume_list_items_iter<'a>(
     input: &'a str,
     factory: &NodeFactory,
+    scope: &LexicalScope<'a>,
     mut results: Vec<Rc<Expression>>,
 ) -> ParserResult<ParserOutput<'a, Vec<Rc<Expression>>>> {
-    match consume_expression(input, factory)? {
+    match consume_expression(input, factory, scope)? {
         None => Ok(ParserOutput {
             parsed: results,
             remaining: input,
@@ -398,7 +412,7 @@ fn consume_list_items_iter<'a>(
         }) => {
             results.push(expression);
             let input = consume_whitespace(input);
-            consume_list_items_iter(input, factory, results)
+            consume_list_items_iter(input, factory, scope, results)
         }
     }
 }
@@ -439,32 +453,80 @@ fn parse_await_expression(args: Vec<Rc<Expression>>) -> ParserResult<Rc<Expressi
     Ok(Rc::new(Expression::Pending))
 }
 
+fn consume_reference<'a>(
+    input: &'a str,
+    scope: &LexicalScope<'a>,
+) -> ParserResult<Option<ParserOutput<'a, Rc<Expression>>>> {
+    match consume_identifier(input) {
+        Some(ParserOutput {
+            parsed: identifier,
+            remaining: input,
+        }) => match scope.get(identifier) {
+            None => Err(format!("Undefined identifier: {}", identifier)),
+            Some(index) => Ok(Some(ParserOutput {
+                parsed: Rc::new(Expression::Reference(index)),
+                remaining: input,
+            })),
+        },
+        None => Ok(None),
+    }
+}
+
 fn consume_expression<'a>(
     input: &'a str,
     factory: &NodeFactory,
+    scope: &LexicalScope<'a>,
 ) -> ParserResult<Option<ParserOutput<'a, Rc<Expression>>>> {
-    match consume_macro(input, factory) {
-        Err(err) => Err(err),
-        Ok(Some(result)) => Ok(Some(result)),
-        _ => match consume_s_expression(input, factory) {
-            Err(err) => Err(err),
-            Ok(Some(result)) => Ok(Some(result)),
+    match consume_macro(input, factory, scope)? {
+        Some(result) => Ok(Some(result)),
+        _ => match consume_s_expression(input, factory, scope)? {
+            Some(result) => Ok(Some(result)),
             _ => match consume_primitive(input) {
                 Some(result) => Ok(Some(result.map(|value| Rc::new(Expression::Value(value))))),
-                None => match consume_identifier(input) {
-                    Some(result) => Ok(Some(result.map(|identifier| {
-                        Rc::new(Expression::Reference(String::from(identifier)))
-                    }))),
-                    None => Ok(None),
+                None => match consume_reference(input, scope)? {
+                    Some(result) => Ok(Some(result)),
+                    _ => Ok(None),
                 },
             },
         },
     }
 }
 
+struct LexicalScope<'a> {
+    bindings: Vec<&'a str>,
+}
+impl<'a> LexicalScope<'a> {
+    pub fn new(_: &'a str) -> LexicalScope {
+        LexicalScope {
+            bindings: Vec::new(),
+        }
+    }
+    pub fn create_child(&self, identifiers: Vec<&'a str>) -> LexicalScope<'a> {
+        LexicalScope {
+            bindings: self
+                .bindings
+                .iter()
+                .chain(identifiers.iter())
+                .map(|key| *key)
+                .collect(),
+        }
+    }
+    pub fn get(&self, identifier: &'a str) -> Option<usize> {
+        Some(
+            self.bindings
+                .iter()
+                .rev()
+                .enumerate()
+                .find(|(_, key)| **key == identifier)
+                .map(|(i, _)| i)?,
+        )
+    }
+}
+
 pub fn parse(input: &str, factory: &NodeFactory) -> ParserResult<Rc<Expression>> {
+    let mut scope = LexicalScope::new(input);
     let input = consume_whitespace(input);
-    consume_expression(input, factory)
+    consume_expression(input, factory, &mut scope)
         .and_then(|result| result.ok_or_else(|| String::from("Invalid expression")))
         .and_then(
             |ParserOutput {
@@ -485,7 +547,7 @@ mod tests {
     use std::rc::Rc;
 
     use crate::{
-        expression::Expression,
+        expression::{Expression, Function},
         node::{abs::AbsNode, add::AddNode, Node},
         value::{StringValue, Value},
     };
@@ -660,36 +722,64 @@ mod tests {
     #[test]
     fn identifiers() {
         assert_eq!(
-            parse("a", &&Node::factory),
-            Ok(Rc::new(Expression::Reference(String::from("a"))))
+            parse("foo", &Node::factory),
+            Err(String::from("Undefined identifier: foo")),
         );
         assert_eq!(
-            parse("_", &&Node::factory),
-            Ok(Rc::new(Expression::Reference(String::from("_"))))
+            parse("(fn (a) a)", &Node::factory),
+            Ok(Rc::new(Expression::Function(Function {
+                arity: 1,
+                body: Rc::new(Expression::Reference(0))
+            })))
         );
         assert_eq!(
-            parse("foo", &&Node::factory),
-            Ok(Rc::new(Expression::Reference(String::from("foo"))))
+            parse("(fn (_) _)", &Node::factory),
+            Ok(Rc::new(Expression::Function(Function {
+                arity: 1,
+                body: Rc::new(Expression::Reference(0))
+            })))
         );
         assert_eq!(
-            parse("_foo", &&Node::factory),
-            Ok(Rc::new(Expression::Reference(String::from("_foo"))))
+            parse("(fn (foo) foo)", &Node::factory),
+            Ok(Rc::new(Expression::Function(Function {
+                arity: 1,
+                body: Rc::new(Expression::Reference(0))
+            })))
         );
         assert_eq!(
-            parse("foo!", &&Node::factory),
-            Ok(Rc::new(Expression::Reference(String::from("foo!"))))
+            parse("(fn (_foo) _foo)", &Node::factory),
+            Ok(Rc::new(Expression::Function(Function {
+                arity: 1,
+                body: Rc::new(Expression::Reference(0))
+            })))
         );
         assert_eq!(
-            parse("foo?", &&Node::factory),
-            Ok(Rc::new(Expression::Reference(String::from("foo?"))))
+            parse("(fn (foo!) foo!)", &Node::factory),
+            Ok(Rc::new(Expression::Function(Function {
+                arity: 1,
+                body: Rc::new(Expression::Reference(0))
+            })))
         );
         assert_eq!(
-            parse("foo_bar", &&Node::factory),
-            Ok(Rc::new(Expression::Reference(String::from("foo_bar"))))
+            parse("(fn (foo?) foo?)", &Node::factory),
+            Ok(Rc::new(Expression::Function(Function {
+                arity: 1,
+                body: Rc::new(Expression::Reference(0))
+            })))
         );
         assert_eq!(
-            parse("foo-bar", &&Node::factory),
-            Ok(Rc::new(Expression::Reference(String::from("foo-bar"))))
+            parse("(fn (foo_bar) foo_bar)", &Node::factory),
+            Ok(Rc::new(Expression::Function(Function {
+                arity: 1,
+                body: Rc::new(Expression::Reference(0))
+            })))
+        );
+        assert_eq!(
+            parse("(fn (foo-bar) foo-bar)", &Node::factory),
+            Ok(Rc::new(Expression::Function(Function {
+                arity: 1,
+                body: Rc::new(Expression::Reference(0))
+            })))
         );
     }
 
@@ -697,40 +787,68 @@ mod tests {
     fn function_expressions() {
         assert_eq!(
             parse("(fn () (add 3 4))", &Node::factory),
-            Ok(Rc::new(Expression::Function(
-                vec![],
-                Rc::new(Expression::Node(Node::Add(AddNode::new(
+            Ok(Rc::new(Expression::Function(Function {
+                arity: 0,
+                body: Rc::new(Expression::Node(Node::Add(AddNode::new(
                     Rc::new(Expression::Value(Value::Int(3))),
                     Rc::new(Expression::Value(Value::Int(4)))
                 ))))
-            )))
+            })))
         );
         assert_eq!(
             parse("(fn (foo) (add foo 4))", &Node::factory),
-            Ok(Rc::new(Expression::Function(
-                vec![String::from("foo")],
-                Rc::new(Expression::Node(Node::Add(AddNode::new(
-                    Rc::new(Expression::Reference(String::from("foo"))),
+            Ok(Rc::new(Expression::Function(Function {
+                arity: 1,
+                body: Rc::new(Expression::Node(Node::Add(AddNode::new(
+                    Rc::new(Expression::Reference(0)),
                     Rc::new(Expression::Value(Value::Int(4)))
                 ))))
-            )))
+            })))
         );
         assert_eq!(
             parse("(fn (foo bar) (add foo bar))", &Node::factory),
-            Ok(Rc::new(Expression::Function(
-                vec![String::from("foo"), String::from("bar")],
-                Rc::new(Expression::Node(Node::Add(AddNode::new(
-                    Rc::new(Expression::Reference(String::from("foo"))),
-                    Rc::new(Expression::Reference(String::from("bar"))),
+            Ok(Rc::new(Expression::Function(Function {
+                arity: 2,
+                body: Rc::new(Expression::Node(Node::Add(AddNode::new(
+                    Rc::new(Expression::Reference(1)),
+                    Rc::new(Expression::Reference(0)),
                 ))))
-            )))
-        )
+            })))
+        );
+        assert_eq!(
+            parse("(fn (first second third) (fn (fourth fifth) (fn (sixth) (add first (add second (add third (add fourth (add fifth sixth))))))))", &Node::factory),
+            Ok(Rc::new(Expression::Function(Function {
+                arity: 3,
+                body: Rc::new(Expression::Function(Function {
+                    arity: 2,
+                body: Rc::new(Expression::Function(Function {
+                        arity: 1,
+                body: Rc::new(Expression::Node(Node::Add(AddNode::new(
+                            Rc::new(Expression::Reference(5)),
+                            Rc::new(Expression::Node(Node::Add(AddNode::new(
+                                Rc::new(Expression::Reference(4)),
+                                Rc::new(Expression::Node(Node::Add(AddNode::new(
+                                    Rc::new(Expression::Reference(3)),
+                                    Rc::new(Expression::Node(Node::Add(AddNode::new(
+                                        Rc::new(Expression::Reference(2)),
+                                        Rc::new(Expression::Node(Node::Add(AddNode::new(
+                                            Rc::new(Expression::Reference(1)),
+                                            Rc::new(Expression::Reference(0)),
+                                        )))),
+                                    )))),
+                                )))),
+                            ))))
+                        ))))
+                    })),
+                })),
+            })))
+        );
     }
 
     #[test]
     fn await_expressions() {
         assert_eq!(
-            parse("(await)", &&Node::factory),
+            parse("(await)", &Node::factory),
             Ok(Rc::new(Expression::Pending))
         );
     }
@@ -738,7 +856,7 @@ mod tests {
     #[test]
     fn throw_expressions() {
         assert_eq!(
-            parse("(throw \"foo\")", &&Node::factory),
+            parse("(throw \"foo\")", &Node::factory),
             Ok(Rc::new(Expression::Error(String::from("foo"))))
         );
     }
@@ -746,24 +864,27 @@ mod tests {
     #[test]
     fn s_expressions() {
         assert_eq!(
-            parse("(abs -123.45)", &&Node::factory),
+            parse("(abs -123.45)", &Node::factory),
             Ok(Rc::new(Expression::Node(Node::Abs(AbsNode::new(Rc::new(
                 Expression::Value(Value::Float(-123.45)),
             ))))))
         );
         assert_eq!(
-            parse("(add 3 4)", &&Node::factory),
+            parse("(add 3 4)", &Node::factory),
             Ok(Rc::new(Expression::Node(Node::Add(AddNode::new(
                 Rc::new(Expression::Value(Value::Int(3))),
                 Rc::new(Expression::Value(Value::Int(4))),
             )))))
         );
         assert_eq!(
-            parse("(add foo bar)", &&Node::factory),
-            Ok(Rc::new(Expression::Node(Node::Add(AddNode::new(
-                Rc::new(Expression::Reference(String::from("foo"))),
-                Rc::new(Expression::Reference(String::from("bar"))),
-            )))))
+            parse("(fn (foo bar) (add foo bar))", &Node::factory),
+            Ok(Rc::new(Expression::Function(Function {
+                arity: 2,
+                body: Rc::new(Expression::Node(Node::Add(AddNode::new(
+                    Rc::new(Expression::Reference(1)),
+                    Rc::new(Expression::Reference(0)),
+                ))))
+            })))
         );
     }
 }

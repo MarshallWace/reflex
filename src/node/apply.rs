@@ -5,7 +5,7 @@ use std::rc::Rc;
 
 use crate::{
     env::Env,
-    expression::Expression,
+    expression::{Expression, Function},
     operation::evaluate::{Evaluate, Evaluate1},
 };
 
@@ -44,33 +44,34 @@ impl Evaluate1 for ApplyNode {
     }
     fn run(&self, env: &Env, target: &Rc<Expression>) -> Rc<Expression> {
         match &**target {
-            Expression::Function(arg_names, body) => {
+            Expression::Function(Function { arity, body }) => {
                 let args = &self.args;
-                if args.len() != arg_names.len() {
+                if args.len() != *arity {
                     return Rc::new(Expression::Error(format!(
                         "Expected {} arguments, received {}",
-                        arg_names.len(),
+                        arity,
                         args.len()
                     )));
                 }
                 if args.len() == 0 {
                     return body.evaluate(env);
                 }
-                let bindings = arg_names
-                    .iter()
-                    .map(|arg_name| String::from(arg_name))
-                    .zip(args.iter().map(|value| Rc::clone(value)));
-                let child_env = env.set(bindings);
+                let child_env = env.set(args.iter().map(Rc::clone));
                 body.evaluate(&child_env)
             }
-            _ => Rc::new(Expression::Error(String::from("Target expression is not a function"))),
+            _ => Rc::new(Expression::Error(String::from(
+                "Target expression is not a function",
+            ))),
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::{env::Env, expression::Expression, node::Node, operation::evaluate::Evaluate, parser, value::Value};
+    use crate::{
+        env::Env, expression::Expression, node::Node, operation::evaluate::Evaluate, parser,
+        value::Value,
+    };
 
     #[test]
     fn nullary_functions() {
@@ -83,8 +84,7 @@ mod tests {
     #[test]
     fn unary_functions() {
         let env = Env::new();
-        let expression =
-            parser::parse("(apply (fn (foo) (add foo 4)) 3)", &Node::factory).unwrap();
+        let expression = parser::parse("(apply (fn (foo) (add foo 4)) 3)", &Node::factory).unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(*result, Expression::Value(Value::Int(3 + 4)));
     }
@@ -92,11 +92,8 @@ mod tests {
     #[test]
     fn binary_functions() {
         let env = Env::new();
-        let expression = parser::parse(
-            "(apply (fn (foo bar) (add foo bar)) 3 4)",
-            &Node::factory,
-        )
-        .unwrap();
+        let expression =
+            parser::parse("(apply (fn (foo bar) (add foo bar)) 3 4)", &Node::factory).unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(*result, Expression::Value(Value::Int(3 + 4)));
     }
