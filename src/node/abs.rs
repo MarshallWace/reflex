@@ -31,7 +31,7 @@ impl AbsNode {
         }
         let args = &mut args.into_iter();
         let target = args.next().unwrap();
-        NodeFactoryResult::Some(Node::Abs(AbsNode::new(target)))
+        NodeFactoryResult::Ok(Node::Abs(AbsNode::new(target)))
     }
 }
 impl Evaluate for AbsNode {

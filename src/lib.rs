@@ -15,7 +15,14 @@ pub mod value;
 mod tests {
     use std::rc::Rc;
 
-    use crate::{env::Env, expression::Expression, node::Node, operation::evaluate::Evaluate, parser, value::{StringValue, Value}};
+    use crate::{
+        env::Env,
+        expression::Expression,
+        node::Node,
+        operation::evaluate::Evaluate,
+        parser,
+        value::{StringValue, Value},
+    };
 
     #[test]
     fn static_values_nil() {
@@ -61,7 +68,9 @@ mod tests {
             *result,
             Expression::Value(Value::String(StringValue::new(String::from("foo"))))
         );
-        let expression = Rc::new(Expression::Value(Value::String(StringValue::literal("foo"))));
+        let expression = Rc::new(Expression::Value(Value::String(StringValue::literal(
+            "foo",
+        ))));
         let result = expression.evaluate(&env);
         assert_eq!(
             *result,
@@ -141,12 +150,18 @@ mod tests {
         let expression = parser::parse("(add (await) (throw \"foo\"))", &Node::factory).unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(*result, Expression::Error(String::from("foo")));
-        let expression =
-            parser::parse("(add (add (throw \"foo\") (await)) (await))", &Node::factory).unwrap();
+        let expression = parser::parse(
+            "(add (add (throw \"foo\") (await)) (await))",
+            &Node::factory,
+        )
+        .unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(*result, Expression::Error(String::from("foo")));
-        let expression =
-            parser::parse("(add (await) (add (await) (throw \"foo\")))", &Node::factory).unwrap();
+        let expression = parser::parse(
+            "(add (await) (add (await) (throw \"foo\")))",
+            &Node::factory,
+        )
+        .unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(*result, Expression::Error(String::from("foo")));
     }
@@ -163,6 +178,14 @@ mod benchmarks {
     fn nested_expressions(b: &mut Bencher) {
         let env = Env::new();
         let expression = parser::parse("(add (add (abs -3) 4) 5)", &Node::factory).unwrap();
+        b.iter(|| expression.evaluate(&env));
+    }
+
+    #[bench]
+    fn function_application(b: &mut Bencher) {
+        let env = Env::new();
+        let expression =
+            parser::parse("(apply (fn (foo bar) (add foo bar)) 3 4)", &Node::factory).unwrap();
         b.iter(|| expression.evaluate(&env));
     }
 }

@@ -5,13 +5,13 @@ use std::{borrow::Cow, rc::Rc};
 
 use crate::{
     expression::Expression,
-    node::NodeFactoryResult,
+    node::Node,
     value::{StringValue, Value},
 };
 
 type ParserError = String;
 type ParserResult<T> = Result<T, ParserError>;
-type NodeFactory = dyn Fn(&str, Vec<Rc<Expression>>) -> NodeFactoryResult;
+type NodeFactory = dyn Fn(&str, Vec<Rc<Expression>>) -> ParserResult<Option<Node>>;
 
 struct ParserOutput<'a, T> {
     parsed: T,
@@ -74,12 +74,43 @@ fn consume_keyword<'a>(keyword: &str, input: &'a str) -> Option<&'a str> {
 }
 
 fn consume_identifier(input: &str) -> Option<ParserOutput<&str>> {
-    consume_while(Box::new(is_valid_identifier_char), input)
+    let first_char = input.chars().next()?;
+    if !is_valid_identifier_leading_char(first_char) {
+        return None;
+    }
+    let identifier_length = input
+        .char_indices()
+        .skip(1)
+        .find_map(|(index, char)| {
+            if is_valid_identifier_char(char) {
+                None
+            } else {
+                Some(index)
+            }
+        })
+        .unwrap_or_else(|| input.len());
+    Some(ParserOutput {
+        parsed: &input[0..identifier_length],
+        remaining: &input[identifier_length..],
+    })
+}
+
+fn is_valid_identifier_leading_char(char: char) -> bool {
+    if char.is_ascii_alphabetic() {
+        return true;
+    }
+    match char {
+        '_' => true,
+        _ => false,
+    }
 }
 
 fn is_valid_identifier_char(char: char) -> bool {
+    if char.is_ascii_alphanumeric() {
+        return true;
+    }
     match char {
-        'a'..='z' | 'A'..='Z' | '0'..='9' | '_' | '-' | '.' | '!' | '?' | '#' => true,
+        '_' | '-' | '!' | '?' => true,
         _ => false,
     }
 }
@@ -161,22 +192,19 @@ fn is_digit_char(char: char) -> bool {
 }
 
 fn consume_string_literal(input: &str) -> Option<ParserOutput<Value>> {
-    consume_char('"', input)
-        .map(|input| consume_string_contents(input))
-        .and_then(
-            |ParserOutput {
-                 parsed,
-                 remaining: input,
-             }| {
-                consume_char('"', input).map(|remaining| ParserOutput {
-                    parsed: Value::String(match parsed {
-                        Cow::Borrowed(value) => StringValue::new(String::from(value)),
-                        Cow::Owned(value) => StringValue::new(value),
-                    }),
-                    remaining,
-                })
-            },
-        )
+    let input = consume_char('"', input)?;
+    let ParserOutput {
+        parsed,
+        remaining: input,
+    } = consume_string_contents(input);
+    let input = consume_char('"', input)?;
+    Some(ParserOutput {
+        parsed: Value::String(match parsed {
+            Cow::Borrowed(value) => StringValue::new(String::from(value)),
+            Cow::Owned(value) => StringValue::new(value),
+        }),
+        remaining: input,
+    })
 }
 
 fn consume_string_contents(input: &str) -> ParserOutput<Cow<str>> {
@@ -231,44 +259,146 @@ fn is_string_char(char: char) -> bool {
     }
 }
 
-fn consume_s_expression<'a>(
+fn consume_macro<'a>(
     input: &'a str,
     factory: &NodeFactory,
-) -> ParserResult<Option<ParserOutput<'a, Expression>>> {
+) -> ParserResult<Option<ParserOutput<'a, Rc<Expression>>>> {
+    consume_fn_macro(input, factory)
+}
+
+fn consume_fn_macro<'a>(
+    input: &'a str,
+    factory: &NodeFactory,
+) -> ParserResult<Option<ParserOutput<'a, Rc<Expression>>>> {
     match consume_char('(', input) {
         None => Ok(None),
         Some(input) => {
             let input = consume_whitespace(input);
-            consume_identifier(input)
-                .ok_or_else(|| String::from("Expected expression identifier"))
-                .and_then(
-                    |ParserOutput {
-                         parsed: identifier,
-                         remaining: input,
-                     }| {
-                        let input = consume_whitespace(input);
-                        consume_args(input, factory, Vec::new()).and_then(
-                            |ParserOutput {
-                                 parsed: args,
-                                 remaining: input,
-                             }| {
-                                let input = consume_whitespace(input);
-                                consume_char(')', input)
-                                    .ok_or_else(|| String::from("Unterminated expression"))
-                                    .and_then(|input| {
-                                        expression_factory(identifier, args, factory).map(
-                                            |expression| {
-                                                Some(ParserOutput {
-                                                    parsed: expression,
+            match consume_keyword("fn", input) {
+                None => Ok(None),
+                Some(input) => {
+                    let input = consume_whitespace(input);
+                    match consume_char('(', input) {
+                        None => Err(String::from("Invalid function argument list")),
+                        Some(input) => {
+                            let input = consume_whitespace(input);
+                            let ParserOutput {
+                                parsed: arg_names,
+                                remaining: input,
+                            } = consume_fn_arg_names(input)?;
+                            let input = consume_whitespace(input);
+                            match consume_char(')', input) {
+                                None => Err(String::from("Unterminated function argument list")),
+                                Some(input) => {
+                                    let input = consume_whitespace(input);
+                                    match consume_expression(input, factory)? {
+                                        None => Err(String::from("Missing function body")),
+                                        Some(ParserOutput {
+                                            parsed: body,
+                                            remaining: input,
+                                        }) => {
+                                            let input = consume_whitespace(input);
+                                            match consume_char(')', input) {
+                                                None => Err(String::from("Unterminated function expression")),
+                                                Some(input) => Ok(Some(ParserOutput {
+                                                    parsed: Rc::new(Expression::Function(arg_names, body)),
                                                     remaining: input,
-                                                })
-                                            },
-                                        )
-                                    })
-                            },
-                        )
-                    },
-                )
+                                                })),
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn consume_fn_arg_names<'a>(input: &'a str) -> ParserResult<ParserOutput<'a, Vec<String>>> {
+    consume_fn_arg_names_iter(input, Vec::new())
+}
+
+fn consume_fn_arg_names_iter<'a>(input: &'a str, mut results: Vec<String>) -> ParserResult<ParserOutput<'a, Vec<String>>> {
+    match consume_identifier(input) {
+        None => Ok(ParserOutput {
+            parsed: results,
+            remaining: input,
+        }),
+        Some(ParserOutput {
+            parsed: arg_name,
+            remaining: input,
+        }) => {
+            results.push(String::from(arg_name));
+            let input = consume_whitespace(input);
+            consume_fn_arg_names_iter(input, results)
+        }
+    }
+}
+
+fn consume_s_expression<'a>(
+    input: &'a str,
+    factory: &NodeFactory,
+) -> ParserResult<Option<ParserOutput<'a, Rc<Expression>>>> {
+    match consume_char('(', input) {
+        None => Ok(None),
+        Some(input) => {
+            let input = consume_whitespace(input);
+            match consume_identifier(input) {
+                None => Err(String::from("Expected expression identifier")),
+                Some(ParserOutput {
+                    parsed: identifier,
+                    remaining: input,
+                }) => {
+                    let input = consume_whitespace(input);
+                    let ParserOutput {
+                        parsed: args,
+                        remaining: input,
+                    } = consume_list_items(input, factory)?;
+                    let input = consume_whitespace(input);
+                    match consume_char(')', input) {
+                        None => Err(String::from("Unterminated expression")),
+                        Some(input) => match expression_factory(identifier, args, factory) {
+                            Err(err) => Err(err),
+                            Ok(Some(result)) => Ok(Some(ParserOutput {
+                                parsed: result,
+                                remaining: input,
+                            })),
+                            Ok(None) => Err(format!("Unknown expression type: {}", identifier)),
+                        },
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn consume_list_items<'a>(
+    input: &'a str,
+    factory: &NodeFactory,
+) -> ParserResult<ParserOutput<'a, Vec<Rc<Expression>>>> {
+    consume_list_items_iter(input, factory, Vec::new())
+}
+
+fn consume_list_items_iter<'a>(
+    input: &'a str,
+    factory: &NodeFactory,
+    mut results: Vec<Rc<Expression>>,
+) -> ParserResult<ParserOutput<'a, Vec<Rc<Expression>>>> {
+    match consume_expression(input, factory)? {
+        None => Ok(ParserOutput {
+            parsed: results,
+            remaining: input,
+        }),
+        Some(ParserOutput {
+            parsed: expression,
+            remaining: input,
+        }) => {
+            results.push(expression);
+            let input = consume_whitespace(input);
+            consume_list_items_iter(input, factory, results)
         }
     }
 }
@@ -277,82 +407,59 @@ fn expression_factory(
     identifier: &str,
     args: Vec<Rc<Expression>>,
     factory: &NodeFactory,
-) -> ParserResult<Rc<Expression>> {
-    match factory(identifier, args) {
-        NodeFactoryResult::Err(message) => Err(message),
-        NodeFactoryResult::Some(node) => Ok(Rc::new(Expression::Node(node))),
-        NodeFactoryResult::None(args) => {
-            builtin_expression_factory(identifier, args).and_then(|result| {
-                result.map_or_else(
-                    || Err(String::from("Invalid arguments")),
-                    |result| Ok(result),
-                )
-            })
-        }
-    }
-}
-
-fn builtin_expression_factory(
-    identifier: &str,
-    args: Vec<Rc<Expression>>,
 ) -> ParserResult<Option<Rc<Expression>>> {
     match identifier {
-        "throw" => {
-            if args.len() != 1 {
-                return Err(String::from("Invalid number of arguments"));
-            }
-            let args = &mut args.into_iter();
-            let target = args.next().unwrap();
-            match &*target {
-                Expression::Value(Value::String(value)) => {
-                    Ok(Some(Rc::new(Expression::Error(String::from(value.get())))))
-                }
-                _ => Err(String::from("Invalid arguments")),
-            }
-        }
-        "await" => {
-            if args.len() != 0 {
-                return Err(String::from("Invalid number of arguments"));
-            }
-            Ok(Some(Rc::new(Expression::Pending)))
-        }
-        _ => Ok(None),
+        "throw" => parse_throw_expression(args).map(Some),
+        "await" => parse_await_expression(args).map(Some),
+        _ => match factory(identifier, args)? {
+            Some(node) => Ok(Some(Rc::new(Expression::Node(node)))),
+            None => Ok(None),
+        },
     }
 }
 
-fn consume_args<'a>(
-    input: &'a str,
-    factory: &NodeFactory,
-    mut args: Vec<Rc<Expression>>,
-) -> ParserResult<ParserOutput<'a, Vec<Rc<Expression>>>> {
-    let result = consume_expression(input, factory)?;
-    let (expression, input) = match result {
-        Some(ParserOutput { parsed, remaining }) => (parsed, remaining),
-        None => {
-            return Ok(ParserOutput {
-                parsed: args,
-                remaining: input,
-            })
-        }
-    };
-    {
-        let args = &mut args;
-        args.push(expression);
+fn parse_throw_expression(args: Vec<Rc<Expression>>) -> ParserResult<Rc<Expression>> {
+    if args.len() != 1 {
+        return Err(String::from("Invalid number of arguments"));
     }
-    let input = consume_whitespace(input);
-    consume_args(input, factory, args)
+    let args = &mut args.into_iter();
+    let target = args.next().unwrap();
+    match &*target {
+        Expression::Value(Value::String(value)) => {
+            Ok(Rc::new(Expression::Error(String::from(value.get()))))
+        }
+        _ => Err(String::from("Invalid arguments")),
+    }
+}
+
+fn parse_await_expression(args: Vec<Rc<Expression>>) -> ParserResult<Rc<Expression>> {
+    if args.len() != 0 {
+        return Err(String::from("Invalid number of arguments"));
+    }
+    Ok(Rc::new(Expression::Pending))
 }
 
 fn consume_expression<'a>(
     input: &'a str,
     factory: &NodeFactory,
 ) -> ParserResult<Option<ParserOutput<'a, Rc<Expression>>>> {
-    consume_s_expression(input, factory).map(|result| {
-        result.or_else(|| {
-            consume_primitive(input)
-                .map(|result| result.map(|value| Rc::new(Expression::Value(value))))
-        })
-    })
+    match consume_macro(input, factory) {
+        Err(err) => Err(err),
+        Ok(Some(result)) => Ok(Some(result)),
+        _ => match consume_s_expression(input, factory) {
+            Err(err) => Err(err),
+            Ok(Some(result)) => Ok(Some(result)),
+            _ => match consume_primitive(input) {
+                Some(result) => Ok(Some(result.map(|value| Rc::new(Expression::Value(value))))),
+                None => match consume_identifier(input) {
+                    Some(result) => Ok(Some(result.map(|identifier| {
+                        Rc::new(Expression::Reference(String::from(identifier)))
+                    }))),
+                    None => Ok(None),
+                },
+            },
+        },
+    }
 }
 
 pub fn parse(input: &str, factory: &NodeFactory) -> ParserResult<Rc<Expression>> {
@@ -425,7 +532,7 @@ mod tests {
     fn ignore_extra_whitespace() {
         assert_eq!(
             parse("  \n\r\tnull\n\r\t  ", &Node::factory),
-            Ok(Expression::Value(Value::Nil))
+            Ok(Rc::new(Expression::Value(Value::Nil)))
         );
     }
 
@@ -550,14 +657,86 @@ mod tests {
             )))))
         );
     }
-
+    #[test]
+    fn identifiers() {
+        assert_eq!(
+            parse("a", &&Node::factory),
+            Ok(Rc::new(Expression::Reference(String::from("a"))))
+        );
+        assert_eq!(
+            parse("_", &&Node::factory),
+            Ok(Rc::new(Expression::Reference(String::from("_"))))
+        );
+        assert_eq!(
+            parse("foo", &&Node::factory),
+            Ok(Rc::new(Expression::Reference(String::from("foo"))))
+        );
+        assert_eq!(
+            parse("_foo", &&Node::factory),
+            Ok(Rc::new(Expression::Reference(String::from("_foo"))))
+        );
+        assert_eq!(
+            parse("foo!", &&Node::factory),
+            Ok(Rc::new(Expression::Reference(String::from("foo!"))))
+        );
+        assert_eq!(
+            parse("foo?", &&Node::factory),
+            Ok(Rc::new(Expression::Reference(String::from("foo?"))))
+        );
+        assert_eq!(
+            parse("foo_bar", &&Node::factory),
+            Ok(Rc::new(Expression::Reference(String::from("foo_bar"))))
+        );
+        assert_eq!(
+            parse("foo-bar", &&Node::factory),
+            Ok(Rc::new(Expression::Reference(String::from("foo-bar"))))
+        );
+    }
 
     #[test]
-    fn builtin_procedures() {
+    fn function_expressions() {
+        assert_eq!(
+            parse("(fn () (add 3 4))", &Node::factory),
+            Ok(Rc::new(Expression::Function(
+                vec![],
+                Rc::new(Expression::Node(Node::Add(AddNode::new(
+                    Rc::new(Expression::Value(Value::Int(3))),
+                    Rc::new(Expression::Value(Value::Int(4)))
+                ))))
+            )))
+        );
+        assert_eq!(
+            parse("(fn (foo) (add foo 4))", &Node::factory),
+            Ok(Rc::new(Expression::Function(
+                vec![String::from("foo")],
+                Rc::new(Expression::Node(Node::Add(AddNode::new(
+                    Rc::new(Expression::Reference(String::from("foo"))),
+                    Rc::new(Expression::Value(Value::Int(4)))
+                ))))
+            )))
+        );
+        assert_eq!(
+            parse("(fn (foo bar) (add foo bar))", &Node::factory),
+            Ok(Rc::new(Expression::Function(
+                vec![String::from("foo"), String::from("bar")],
+                Rc::new(Expression::Node(Node::Add(AddNode::new(
+                    Rc::new(Expression::Reference(String::from("foo"))),
+                    Rc::new(Expression::Reference(String::from("bar"))),
+                ))))
+            )))
+        )
+    }
+
+    #[test]
+    fn await_expressions() {
         assert_eq!(
             parse("(await)", &&Node::factory),
             Ok(Rc::new(Expression::Pending))
         );
+    }
+
+    #[test]
+    fn throw_expressions() {
         assert_eq!(
             parse("(throw \"foo\")", &&Node::factory),
             Ok(Rc::new(Expression::Error(String::from("foo"))))
@@ -577,6 +756,13 @@ mod tests {
             Ok(Rc::new(Expression::Node(Node::Add(AddNode::new(
                 Rc::new(Expression::Value(Value::Int(3))),
                 Rc::new(Expression::Value(Value::Int(4))),
+            )))))
+        );
+        assert_eq!(
+            parse("(add foo bar)", &&Node::factory),
+            Ok(Rc::new(Expression::Node(Node::Add(AddNode::new(
+                Rc::new(Expression::Reference(String::from("foo"))),
+                Rc::new(Expression::Reference(String::from("bar"))),
             )))))
         );
     }

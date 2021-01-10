@@ -34,7 +34,7 @@ impl AddNode {
         let args = &mut args.into_iter();
         let left = args.next().unwrap();
         let right = args.next().unwrap();
-        NodeFactoryResult::Some(Node::Add(AddNode::new(left, right)))
+        NodeFactoryResult::Ok(Node::Add(AddNode::new(left, right)))
     }
 }
 impl Evaluate for AddNode {

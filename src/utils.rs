@@ -8,6 +8,9 @@ pub fn format_type(expression: &Expression) -> String {
         Expression::Pending => String::from("Pending"),
         Expression::Error(message) => format!("Error({:?})", message),
         Expression::Value(value) => format!("{:?}", value),
+        Expression::Function(args, body) => {
+            format!("Function({} -> {})", args.join(" "), format_type(body))
+        }
         Expression::Reference(value) => format!("{:?}", value),
         Expression::Node(node) => format!("{:?}", node),
     }

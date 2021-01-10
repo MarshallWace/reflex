@@ -5,38 +5,39 @@ use std::rc::Rc;
 
 use crate::{env::Env, expression::Expression, operation::evaluate::Evaluate};
 
-use self::{abs::AbsNode, add::AddNode};
+use self::{abs::AbsNode, add::AddNode, apply::ApplyNode};
 
 pub mod abs;
 pub mod add;
+pub mod apply;
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Node {
     Abs(self::abs::AbsNode),
     Add(self::add::AddNode),
+    Apply(self::apply::ApplyNode),
 }
 
 const ABS: &str = AbsNode::name();
 const ADD: &str = AddNode::name();
+const APPLY: &str = ApplyNode::name();
 
-pub enum NodeFactoryResult {
-    Some(Node),
-    None(Vec<Rc<Expression>>),
-    Err(String),
-}
+pub type NodeFactoryResult = Result<Node, String>;
 
 impl Node {
-    pub fn evaluate(&self, env: &Env) -> Option<Rc<Expression>> {
+    pub fn evaluate(&self, env: &Env) -> Rc<Expression> {
         match self {
-            Node::Abs(node) => Some(Evaluate::evaluate(node, env)),
-            Node::Add(node) => Some(Evaluate::evaluate(node, env)),
+            Node::Abs(node) => Evaluate::evaluate(node, env),
+            Node::Add(node) => Evaluate::evaluate(node, env),
+            Node::Apply(node) => Evaluate::evaluate(node, env),
         }
     }
-    pub fn factory(type_name: &str, args: Vec<Rc<Expression>>) -> NodeFactoryResult {
+    pub fn factory(type_name: &str, args: Vec<Rc<Expression>>) -> Result<Option<Node>, String> {
         match type_name {
-            ABS => AbsNode::factory(args),
-            ADD => AddNode::factory(args),
-            _ => NodeFactoryResult::None(args),
+            ABS => AbsNode::factory(args).map(Some),
+            ADD => AddNode::factory(args).map(Some),
+            APPLY => ApplyNode::factory(args).map(Some),
+            _ => Ok(None),
         }
     }
 }
