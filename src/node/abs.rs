@@ -4,12 +4,12 @@
 use std::rc::Rc;
 
 use crate::{
-    expression::Expression,
-    node::{Node, NodeFactoryResult},
-    operation::evaluate::{Evaluate, Evaluate1},
     env::Env,
-    value::Value,
+    expression::Expression,
+    node::{CompoundNode, Node, NodeFactoryResult},
+    operation::evaluate::{Evaluate, Evaluate1},
     utils::format_type,
+    value::Value,
 };
 
 #[derive(Debug, PartialEq, Clone)]
@@ -18,20 +18,23 @@ pub struct AbsNode {
 }
 impl AbsNode {
     pub fn new(target: Rc<Expression>) -> AbsNode {
-        AbsNode {
-            target,
-        }
+        AbsNode { target }
     }
     pub const fn name() -> &'static str {
         "abs"
     }
-    pub fn factory(args: Vec<Rc<Expression>>) -> NodeFactoryResult {
+}
+impl CompoundNode for AbsNode {
+    fn factory(args: Vec<Rc<Expression>>) -> NodeFactoryResult {
         if args.len() != 1 {
             return NodeFactoryResult::Err(String::from("Invalid number of arguments"));
         }
         let args = &mut args.into_iter();
         let target = args.next().unwrap();
         NodeFactoryResult::Ok(Node::Abs(AbsNode::new(target)))
+    }
+    fn expressions(&self) -> Vec<&Rc<Expression>> {
+        vec![&self.target]
     }
 }
 impl Evaluate for AbsNode {
@@ -45,7 +48,9 @@ impl Evaluate1 for AbsNode {
     }
     fn run(&self, _env: &Env, target: &Rc<Expression>) -> Rc<Expression> {
         match &**target {
-            Expression::Value(Value::Int(target)) => Rc::new(Expression::Value(Value::Int(target.abs()))),
+            Expression::Value(Value::Int(target)) => {
+                Rc::new(Expression::Value(Value::Int(target.abs())))
+            }
             Expression::Value(Value::Float(target)) => {
                 Rc::new(Expression::Value(Value::Float(target.abs())))
             }

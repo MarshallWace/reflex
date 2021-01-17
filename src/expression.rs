@@ -10,16 +10,19 @@ pub enum Expression {
     Pending,
     Error(String),
     Value(Value),
-    Reference(EnvPath),
+    Reference(StackOffset),
+    Bound(Env, Rc<Expression>),
     Function(Function),
+    Closure(Closure),
     Node(Node),
 }
 
-type EnvPath = usize;
+pub type StackOffset = usize;
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct Function {
     pub arity: usize,
+    pub captures: Option<Vec<StackOffset>>,
     pub body: Rc<Expression>,
 }
 impl fmt::Display for Function {
@@ -28,14 +31,47 @@ impl fmt::Display for Function {
     }
 }
 
+#[derive(Debug, PartialEq, Clone)]
+pub struct Closure {
+    pub env: Env,
+    pub arity: usize,
+    pub body: Rc<Expression>,
+}
+impl fmt::Display for Closure {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Closure({} -> {})", self.arity, self.body)
+    }
+}
+pub trait Bind {
+    fn bind(&self, env: &Env) -> Rc<Expression>;
+}
+
+impl Bind for Rc<Expression> {
+    fn bind(&self, env: &Env) -> Rc<Expression> {
+        match &**self {
+            Expression::Reference(_) | Expression::Node(_) => {
+                Rc::new(Expression::Bound(env.clone(), Rc::clone(self)))
+            },
+            Expression::Function(Function {
+                arity,
+                captures: Some(_),
+                body,
+            }) => Rc::new(Expression::Closure(Closure {
+                env: env.clone(),
+                arity: *arity,
+                body: Rc::clone(body),
+            })),
+            _ => Rc::clone(self),
+        }
+    }
+}
 impl Evaluate for Rc<Expression> {
     fn evaluate(&self, env: &Env) -> Rc<Expression> {
         match &**self {
-            Expression::Reference(index) => match env.get(*index) {
-                Some(value) => value.evaluate(env),
-                None => panic!("Invalid reference target"),
-            },
+            Expression::Reference(index) => env.get(*index).evaluate(env),
+            Expression::Bound(env, value) => value.evaluate(env),
             Expression::Node(node) => node.evaluate(env),
+            Expression::Function(_) => self.bind(env),
             _ => Rc::clone(self),
         }
     }
@@ -46,8 +82,10 @@ impl fmt::Debug for Expression {
             Expression::Pending => write!(f, "{}", "Pending"),
             Expression::Error(message) => write!(f, "Error({:?})", message),
             Expression::Value(value) => write!(f, "{:?}", value),
-            Expression::Function(value) => write!(f, "{:?}", value),
             Expression::Reference(node) => write!(f, "Reference({})", node),
+            Expression::Bound(_, value) => write!(f, "Bound({:?})", value),
+            Expression::Function(value) => write!(f, "{:?}", value),
+            Expression::Closure(value) => write!(f, "{:?}", value),
             Expression::Node(value) => write!(f, "{:?}", value),
         }
     }
@@ -58,8 +96,10 @@ impl fmt::Display for Expression {
             Expression::Pending => write!(f, "{}", "<pending>"),
             Expression::Error(message) => write!(f, "Error: {}", message),
             Expression::Value(value) => write!(f, "{}", value),
-            Expression::Function(value) => write!(f, "{}", value),
             Expression::Reference(value) => write!(f, "<env:{}>", value),
+            Expression::Bound(_, value) => write!(f, "<bound:{}>", value),
+            Expression::Function(value) => write!(f, "{}", value),
+            Expression::Closure(value) => write!(f, "{}", value),
             Expression::Node(value) => write!(f, "{:?}", value),
         }
     }

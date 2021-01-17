@@ -3,7 +3,11 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use std::{borrow::Cow, rc::Rc};
 
-use crate::{expression::{Expression, Function}, node::Node, value::{StringValue, Value}};
+use crate::{
+    expression::{Expression, Function, StackOffset},
+    node::Node,
+    value::{StringValue, Value},
+};
 
 type ParserError = String;
 type ParserResult<T> = Result<T, ParserError>;
@@ -255,15 +259,15 @@ fn is_string_char(char: char) -> bool {
     }
 }
 
-fn consume_macro<'a>(
+fn consume_special_form<'a>(
     input: &'a str,
     factory: &NodeFactory,
     scope: &LexicalScope<'a>,
 ) -> ParserResult<Option<ParserOutput<'a, Rc<Expression>>>> {
-    consume_fn_macro(input, factory, scope)
+    consume_function_expression(input, factory, scope)
 }
 
-fn consume_fn_macro<'a>(
+fn consume_function_expression<'a>(
     input: &'a str,
     factory: &NodeFactory,
     scope: &LexicalScope<'a>,
@@ -305,10 +309,7 @@ fn consume_fn_macro<'a>(
                                                 )),
                                                 Some(input) => Ok(Some(ParserOutput {
                                                     parsed: Rc::new(Expression::Function(
-                                                        Function {
-                                                            arity,
-                                                            body,
-                                                        },
+                                                        parse_function(arity, body),
                                                     )),
                                                     remaining: input,
                                                 })),
@@ -327,6 +328,58 @@ fn consume_fn_macro<'a>(
 
 fn consume_fn_arg_names<'a>(input: &'a str) -> ParserResult<ParserOutput<'a, Vec<&'a str>>> {
     consume_fn_arg_names_iter(input, Vec::new())
+}
+
+fn parse_function(arity: usize, body: Rc<Expression>) -> Function {
+    Function {
+        arity,
+        captures: get_free_variables(&body, arity),
+        body,
+    }
+}
+fn get_free_variables(expression: &Expression, arity: usize) -> Option<Vec<StackOffset>> {
+    let mut results = get_free_variables_iter(expression, arity, Vec::new());
+    if results.len() == 0 {
+        return None;
+    }
+    results.sort_unstable();
+    results.dedup();
+    Some(results)
+}
+fn get_free_variables_iter(
+    expression: &Expression,
+    arity: usize,
+    mut results: Vec<StackOffset>,
+) -> Vec<StackOffset> {
+    match expression {
+        Expression::Reference(offset) => {
+            let offset = *offset;
+            if offset >= arity {
+                results.push(offset - arity);
+            }
+            results
+        }
+        Expression::Node(node) => match node.children() {
+            Some(expressions) => expressions.iter().fold(results, |results, expression| {
+                get_free_variables_iter(expression, arity, results)
+            }),
+            None => results,
+        },
+        Expression::Function(Function {
+            arity: _,
+            captures: Some(captures),
+            body: _,
+        }) if captures.iter().any(|offset| *offset >= arity) => {
+            results.extend(
+                captures
+                    .iter()
+                    .filter(|offset| **offset >= arity)
+                    .map(|offset| offset - arity),
+            );
+            results
+        }
+        _ => results,
+    }
 }
 
 fn consume_fn_arg_names_iter<'a>(
@@ -463,8 +516,8 @@ fn consume_reference<'a>(
             remaining: input,
         }) => match scope.get(identifier) {
             None => Err(format!("Undefined identifier: {}", identifier)),
-            Some(index) => Ok(Some(ParserOutput {
-                parsed: Rc::new(Expression::Reference(index)),
+            Some(offset) => Ok(Some(ParserOutput {
+                parsed: Rc::new(Expression::Reference(offset)),
                 remaining: input,
             })),
         },
@@ -477,7 +530,7 @@ fn consume_expression<'a>(
     factory: &NodeFactory,
     scope: &LexicalScope<'a>,
 ) -> ParserResult<Option<ParserOutput<'a, Rc<Expression>>>> {
-    match consume_macro(input, factory, scope)? {
+    match consume_special_form(input, factory, scope)? {
         Some(result) => Ok(Some(result)),
         _ => match consume_s_expression(input, factory, scope)? {
             Some(result) => Ok(Some(result)),
@@ -729,6 +782,7 @@ mod tests {
             parse("(fn (a) a)", &Node::factory),
             Ok(Rc::new(Expression::Function(Function {
                 arity: 1,
+                captures: None,
                 body: Rc::new(Expression::Reference(0))
             })))
         );
@@ -736,6 +790,7 @@ mod tests {
             parse("(fn (_) _)", &Node::factory),
             Ok(Rc::new(Expression::Function(Function {
                 arity: 1,
+                captures: None,
                 body: Rc::new(Expression::Reference(0))
             })))
         );
@@ -743,6 +798,7 @@ mod tests {
             parse("(fn (foo) foo)", &Node::factory),
             Ok(Rc::new(Expression::Function(Function {
                 arity: 1,
+                captures: None,
                 body: Rc::new(Expression::Reference(0))
             })))
         );
@@ -750,6 +806,7 @@ mod tests {
             parse("(fn (_foo) _foo)", &Node::factory),
             Ok(Rc::new(Expression::Function(Function {
                 arity: 1,
+                captures: None,
                 body: Rc::new(Expression::Reference(0))
             })))
         );
@@ -757,6 +814,7 @@ mod tests {
             parse("(fn (foo!) foo!)", &Node::factory),
             Ok(Rc::new(Expression::Function(Function {
                 arity: 1,
+                captures: None,
                 body: Rc::new(Expression::Reference(0))
             })))
         );
@@ -764,6 +822,7 @@ mod tests {
             parse("(fn (foo?) foo?)", &Node::factory),
             Ok(Rc::new(Expression::Function(Function {
                 arity: 1,
+                captures: None,
                 body: Rc::new(Expression::Reference(0))
             })))
         );
@@ -771,6 +830,7 @@ mod tests {
             parse("(fn (foo_bar) foo_bar)", &Node::factory),
             Ok(Rc::new(Expression::Function(Function {
                 arity: 1,
+                captures: None,
                 body: Rc::new(Expression::Reference(0))
             })))
         );
@@ -778,6 +838,7 @@ mod tests {
             parse("(fn (foo-bar) foo-bar)", &Node::factory),
             Ok(Rc::new(Expression::Function(Function {
                 arity: 1,
+                captures: None,
                 body: Rc::new(Expression::Reference(0))
             })))
         );
@@ -789,6 +850,7 @@ mod tests {
             parse("(fn () (add 3 4))", &Node::factory),
             Ok(Rc::new(Expression::Function(Function {
                 arity: 0,
+                captures: None,
                 body: Rc::new(Expression::Node(Node::Add(AddNode::new(
                     Rc::new(Expression::Value(Value::Int(3))),
                     Rc::new(Expression::Value(Value::Int(4)))
@@ -799,6 +861,7 @@ mod tests {
             parse("(fn (foo) (add foo 4))", &Node::factory),
             Ok(Rc::new(Expression::Function(Function {
                 arity: 1,
+                captures: None,
                 body: Rc::new(Expression::Node(Node::Add(AddNode::new(
                     Rc::new(Expression::Reference(0)),
                     Rc::new(Expression::Value(Value::Int(4)))
@@ -809,6 +872,7 @@ mod tests {
             parse("(fn (foo bar) (add foo bar))", &Node::factory),
             Ok(Rc::new(Expression::Function(Function {
                 arity: 2,
+                captures: None,
                 body: Rc::new(Expression::Node(Node::Add(AddNode::new(
                     Rc::new(Expression::Reference(1)),
                     Rc::new(Expression::Reference(0)),
@@ -819,10 +883,13 @@ mod tests {
             parse("(fn (first second third) (fn (fourth fifth) (fn (sixth) (add first (add second (add third (add fourth (add fifth sixth))))))))", &Node::factory),
             Ok(Rc::new(Expression::Function(Function {
                 arity: 3,
+                captures: None,
                 body: Rc::new(Expression::Function(Function {
                     arity: 2,
+                    captures: Some(vec![0, 1, 2]),
                 body: Rc::new(Expression::Function(Function {
                         arity: 1,
+                        captures: Some(vec![0, 1, 2, 3, 4]),
                 body: Rc::new(Expression::Node(Node::Add(AddNode::new(
                             Rc::new(Expression::Reference(5)),
                             Rc::new(Expression::Node(Node::Add(AddNode::new(
@@ -839,6 +906,77 @@ mod tests {
                                 )))),
                             ))))
                         ))))
+                    })),
+                })),
+            })))
+        );
+    }
+
+    #[test]
+    fn closures() {
+        assert_eq!(
+            parse("(fn (foo) (fn () foo))", &Node::factory),
+            Ok(Rc::new(Expression::Function(Function {
+                arity: 1,
+                captures: None,
+                body: Rc::new(Expression::Function(Function {
+                    arity: 0,
+                    captures: Some(vec![0]),
+                    body: Rc::new(Expression::Reference(0)),
+                })),
+            })))
+        );
+        assert_eq!(
+            parse("(fn (foo bar) (fn () foo))", &Node::factory),
+            Ok(Rc::new(Expression::Function(Function {
+                arity: 2,
+                captures: None,
+                body: Rc::new(Expression::Function(Function {
+                    arity: 0,
+                    captures: Some(vec![1]),
+                    body: Rc::new(Expression::Reference(1)),
+                })),
+            })))
+        );
+        assert_eq!(
+            parse("(fn (foo bar) (fn () bar))", &Node::factory),
+            Ok(Rc::new(Expression::Function(Function {
+                arity: 2,
+                captures: None,
+                body: Rc::new(Expression::Function(Function {
+                    arity: 0,
+                    captures: Some(vec![0]),
+                    body: Rc::new(Expression::Reference(0)),
+                })),
+            })))
+        );
+        assert_eq!(
+            parse("(fn (foo bar) (fn (baz) (add foo baz)))", &Node::factory),
+            Ok(Rc::new(Expression::Function(Function {
+                arity: 2,
+                captures: None,
+                body: Rc::new(Expression::Function(Function {
+                    arity: 1,
+                    captures: Some(vec![1]),
+                    body: Rc::new(Expression::Node(Node::Add(AddNode::new(
+                        Rc::new(Expression::Reference(2)),
+                        Rc::new(Expression::Reference(0)),
+                    )))),
+                })),
+            })))
+        );
+        assert_eq!(
+            parse("(fn (foo) (fn () (fn () foo)))", &Node::factory),
+            Ok(Rc::new(Expression::Function(Function {
+                arity: 1,
+                captures: None,
+                body: Rc::new(Expression::Function(Function {
+                    arity: 0,
+                    captures: Some(vec![0]),
+                    body: Rc::new(Expression::Function(Function {
+                        arity: 0,
+                        captures: Some(vec![0]),
+                        body: Rc::new(Expression::Reference(0))
                     })),
                 })),
             })))
@@ -880,6 +1018,7 @@ mod tests {
             parse("(fn (foo bar) (add foo bar))", &Node::factory),
             Ok(Rc::new(Expression::Function(Function {
                 arity: 2,
+                captures: None,
                 body: Rc::new(Expression::Node(Node::Add(AddNode::new(
                     Rc::new(Expression::Reference(1)),
                     Rc::new(Expression::Reference(0)),

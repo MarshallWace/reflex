@@ -4,12 +4,12 @@
 use std::rc::Rc;
 
 use crate::{
-    expression::Expression,
-    node::{Node,NodeFactoryResult},
-    operation::evaluate::{Evaluate, Evaluate2},
     env::Env,
-    value::Value,
+    expression::Expression,
+    node::{CompoundNode, Node, NodeFactoryResult},
+    operation::evaluate::{Evaluate, Evaluate2},
     utils::format_type,
+    value::Value,
 };
 
 #[derive(Debug, PartialEq, Clone)]
@@ -19,15 +19,14 @@ pub struct AddNode {
 }
 impl AddNode {
     pub fn new(left: Rc<Expression>, right: Rc<Expression>) -> AddNode {
-        AddNode {
-            left,
-            right,
-        }
+        AddNode { left, right }
     }
     pub const fn name() -> &'static str {
         "add"
     }
-    pub fn factory(args: Vec<Rc<Expression>>) -> NodeFactoryResult {
+}
+impl CompoundNode for AddNode {
+    fn factory(args: Vec<Rc<Expression>>) -> NodeFactoryResult {
         if args.len() != 2 {
             return NodeFactoryResult::Err(String::from("Invalid number of arguments"));
         }
@@ -35,6 +34,9 @@ impl AddNode {
         let left = args.next().unwrap();
         let right = args.next().unwrap();
         NodeFactoryResult::Ok(Node::Add(AddNode::new(left, right)))
+    }
+    fn expressions(&self) -> Vec<&Rc<Expression>> {
+        vec![&self.left, &self.right]
     }
 }
 impl Evaluate for AddNode {

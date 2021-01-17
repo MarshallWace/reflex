@@ -3,7 +3,7 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use std::rc::Rc;
 
-use crate::expression::Expression;
+use crate::expression::{Expression, StackOffset};
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct Env {
@@ -13,10 +13,10 @@ impl Env {
     pub fn new() -> Env {
         Env { values: Vec::new() }
     }
-    pub fn get(&self, index: usize) -> Option<Rc<Expression>> {
-        self.values.iter().rev().skip(index).next().map(Rc::clone)
+    pub fn get(&self, offset: StackOffset) -> Rc<Expression> {
+        Rc::clone(&self.values[self.values.len() - offset - 1])
     }
-    pub fn set(&self, values: impl IntoIterator<Item = Rc<Expression>>) -> Env {
+    pub fn extend(&self, values: impl IntoIterator<Item = Rc<Expression>>) -> Env {
         Env {
             values: self
                 .values

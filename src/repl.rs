@@ -20,15 +20,17 @@ pub fn start() -> io::Result<()> {
         input.clear();
         stdin.read_line(&mut input)?;
 
-        if input == "exit\n" { break; }
+        if input == "exit\n" {
+            break;
+        }
 
         match parse(&input, &Node::factory) {
             Ok(expression) => {
                 writeln!(stdout, "{}", expression.evaluate(&env))?;
-            },
+            }
             Err(err) => {
                 writeln!(stderr, "Syntax error: {}", err)?;
-            },
+            }
         };
     }
 

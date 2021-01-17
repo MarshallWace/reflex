@@ -1,15 +1,14 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use std::rc::Rc;
+use std::{iter, rc::Rc};
 
 use crate::{
     env::Env,
-    expression::{Expression, Function},
+    expression::{Bind, Closure, Expression, Function},
+    node::{CompoundNode, Node, NodeFactoryResult},
     operation::evaluate::{Evaluate, Evaluate1},
 };
-
-use super::{Node, NodeFactoryResult};
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct ApplyNode {
@@ -23,7 +22,9 @@ impl ApplyNode {
     pub const fn name() -> &'static str {
         "apply"
     }
-    pub fn factory(args: Vec<Rc<Expression>>) -> NodeFactoryResult {
+}
+impl CompoundNode for ApplyNode {
+    fn factory(args: Vec<Rc<Expression>>) -> NodeFactoryResult {
         if args.len() < 1 {
             return NodeFactoryResult::Err(String::from("Invalid number of arguments"));
         }
@@ -31,6 +32,9 @@ impl ApplyNode {
         let target = args.next().unwrap();
         let args = args.collect();
         NodeFactoryResult::Ok(Node::Apply(ApplyNode::new(target, args)))
+    }
+    fn expressions(&self) -> Vec<&Rc<Expression>> {
+        iter::once(&self.target).chain(self.args.iter()).collect()
     }
 }
 impl Evaluate for ApplyNode {
@@ -44,26 +48,53 @@ impl Evaluate1 for ApplyNode {
     }
     fn run(&self, env: &Env, target: &Rc<Expression>) -> Rc<Expression> {
         match &**target {
-            Expression::Function(Function { arity, body }) => {
-                let args = &self.args;
-                if args.len() != *arity {
-                    return Rc::new(Expression::Error(format!(
-                        "Expected {} arguments, received {}",
-                        arity,
-                        args.len()
-                    )));
-                }
-                if args.len() == 0 {
-                    return body.evaluate(env);
-                }
-                let child_env = env.set(args.iter().map(Rc::clone));
-                body.evaluate(&child_env)
-            }
+            Expression::Closure(Closure {
+                env: captured_env,
+                arity,
+                body,
+            }) => apply_function(
+                *arity,
+                body,
+                self.args.len(),
+                self.args.iter().map(|arg| arg.bind(env)),
+                captured_env,
+            ),
+            Expression::Function(Function {
+                arity,
+                captures: _,
+                body,
+            }) => apply_function(
+                *arity,
+                body,
+                self.args.len(),
+                self.args.iter().map(Rc::clone),
+                env,
+            ),
             _ => Rc::new(Expression::Error(String::from(
                 "Target expression is not a function",
             ))),
         }
     }
+}
+
+fn apply_function(
+    arity: usize,
+    body: &Rc<Expression>,
+    num_args: usize,
+    args: impl IntoIterator<Item = Rc<Expression>>,
+    env: &Env,
+) -> Rc<Expression> {
+    if num_args != arity {
+        return Rc::new(Expression::Error(format!(
+            "Expected {} arguments, received {}",
+            arity, num_args
+        )));
+    }
+    if num_args == 0 {
+        return body.evaluate(env);
+    }
+    let child_env = env.extend(args);
+    body.evaluate(&child_env)
 }
 
 #[cfg(test)]
@@ -108,5 +139,29 @@ mod tests {
         .unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(*result, Expression::Value(Value::Int(3 + 4 + 5)));
+    }
+
+    #[test]
+    fn immediately_invoked_closures() {
+        let env = Env::new();
+        let expression = parser::parse(
+            "(apply (apply (fn (one two) (fn (three four) (add one three))) 1 2) 3 4)",
+            &Node::factory,
+        )
+        .unwrap();
+        let result = expression.evaluate(&env);
+        assert_eq!(*result, Expression::Value(Value::Int(1 + 3)));
+    }
+
+    #[test]
+    fn deferred_closures() {
+        let env = Env::new();
+        let expression = parser::parse(
+            "(apply (fn (transform value) (apply transform (apply value))) (apply (fn (constant) (fn (value) (add value constant))) 4) (apply (fn (value) (fn () value)) 3))",
+            &Node::factory,
+        )
+        .unwrap();
+        let result = expression.evaluate(&env);
+        assert_eq!(*result, Expression::Value(Value::Int(3 + 4)));
     }
 }

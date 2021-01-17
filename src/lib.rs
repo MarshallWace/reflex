@@ -208,4 +208,11 @@ mod benchmarks {
         let expression = parser::parse("(apply (fn (foo bar baz) foo) 3 4 5)", &Node::factory).unwrap();
         b.iter(|| expression.evaluate(&env));
     }
+
+    #[bench]
+    fn function_application_closure(b: &mut Bencher) {
+        let env = Env::new();
+        let expression = parser::parse("(apply (apply (fn (foo) (fn () foo)) 3))", &Node::factory).unwrap();
+        b.iter(|| expression.evaluate(&env));
+    }
 }
