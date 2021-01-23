@@ -18,7 +18,7 @@ impl fmt::Display for Value {
             Value::Boolean(value) => format!("{:?}", value),
             Value::Int(value) => format!("{:?}", value),
             Value::Float(value) => format!("{:?}", value),
-            Value::String(value) => format!("{:?}", value.get()),
+            Value::String(value) => format!("{:?}", value),
         };
         write!(f, "{}", formatted)
     }
@@ -53,12 +53,14 @@ impl PartialEq for StringValue {
         }
     }
 }
+impl fmt::Display for StringValue {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "{:?}", self.get())
+    }
+}
 impl fmt::Debug for StringValue {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            StringValue::Literal(value) => write!(formatter, "{:?}", value),
-            StringValue::Runtime(value) => write!(formatter, "{:?}", value),
-        }
+        fmt::Display::fmt(self, formatter)
     }
 }
 
