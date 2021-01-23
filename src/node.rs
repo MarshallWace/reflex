@@ -3,7 +3,10 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use std::rc::Rc;
 
-use crate::{env::Env, expression::Expression, operation::evaluate::Evaluate};
+use crate::{
+    env::Env,
+    expression::{Evaluate, Expression},
+};
 
 use self::{abs::AbsNode, add::AddNode, apply::ApplyNode};
 

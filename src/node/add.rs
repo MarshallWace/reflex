@@ -5,9 +5,8 @@ use std::rc::Rc;
 
 use crate::{
     env::Env,
-    expression::Expression,
+    expression::{evaluate::Evaluate2, Evaluate, Expression},
     node::{CompoundNode, Node, NodeFactoryResult},
-    operation::evaluate::{Evaluate, Evaluate2},
     utils::format_type,
     value::Value,
 };

@@ -6,7 +6,6 @@
 pub mod env;
 pub mod expression;
 pub mod node;
-pub mod operation;
 pub mod parser;
 pub mod utils;
 pub mod value;
@@ -17,9 +16,8 @@ mod tests {
 
     use crate::{
         env::Env,
-        expression::Expression,
+        expression::{Evaluate, Expression},
         node::Node,
-        operation::evaluate::Evaluate,
         parser,
         value::{StringValue, Value},
     };
@@ -172,7 +170,7 @@ mod benchmarks {
     extern crate test;
     use test::Bencher;
 
-    use crate::{env::Env, node::Node, operation::evaluate::Evaluate, parser};
+    use crate::{env::Env, expression::Evaluate, node::Node, parser};
 
     #[bench]
     fn nested_expressions(b: &mut Bencher) {
@@ -205,14 +203,16 @@ mod benchmarks {
     #[bench]
     fn function_application_ternary(b: &mut Bencher) {
         let env = Env::new();
-        let expression = parser::parse("(apply (fn (foo bar baz) foo) 3 4 5)", &Node::factory).unwrap();
+        let expression =
+            parser::parse("(apply (fn (foo bar baz) foo) 3 4 5)", &Node::factory).unwrap();
         b.iter(|| expression.evaluate(&env));
     }
 
     #[bench]
     fn function_application_closure(b: &mut Bencher) {
         let env = Env::new();
-        let expression = parser::parse("(apply (apply (fn (foo) (fn () foo)) 3))", &Node::factory).unwrap();
+        let expression =
+            parser::parse("(apply (apply (fn (foo) (fn () foo)) 3))", &Node::factory).unwrap();
         b.iter(|| expression.evaluate(&env));
     }
 }

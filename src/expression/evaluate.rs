@@ -3,7 +3,7 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use std::rc::Rc;
 
-use crate::{expression::Expression, env::Env};
+use crate::{env::Env, expression::Expression};
 
 pub trait Evaluate {
     fn evaluate(&self, env: &Env) -> Rc<Expression>;

@@ -5,9 +5,11 @@ use std::{iter, rc::Rc};
 
 use crate::{
     env::Env,
-    expression::{Bind, Closure, Expression, Function},
+    expression::{
+        evaluate::{Evaluate, Evaluate1},
+        Bind, Closure, Expression, Function,
+    },
     node::{CompoundNode, Node, NodeFactoryResult},
-    operation::evaluate::{Evaluate, Evaluate1},
 };
 
 #[derive(Debug, PartialEq, Clone)]
@@ -100,7 +102,10 @@ fn apply_function(
 #[cfg(test)]
 mod tests {
     use crate::{
-        env::Env, expression::Expression, node::Node, operation::evaluate::Evaluate, parser,
+        env::Env,
+        expression::{Evaluate, Expression},
+        node::Node,
+        parser,
         value::Value,
     };
 

@@ -3,7 +3,7 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use std::io::{self, Write};
 
-use reflex::{env::Env, node::Node, operation::evaluate::Evaluate, parser::parse};
+use reflex::{env::Env, expression::Evaluate, node::Node, parser::parse};
 
 pub fn start() -> io::Result<()> {
     let stdin = io::stdin();
