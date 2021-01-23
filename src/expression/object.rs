@@ -3,7 +3,7 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use std::{collections::HashMap, fmt, iter::once, rc::Rc};
 
-use crate::{expression::Expression, value::StringValue};
+use crate::expression::{Expression, StringValue};
 
 #[derive(PartialEq, Clone)]
 pub struct Object {
@@ -68,10 +68,8 @@ mod tests {
 
     use crate::{
         env::Env,
-        expression::{Evaluate, Expression},
-        node::{add::AddNode, Node},
+        expression::{node::AddNode, Evaluate, Expression, Node, StringValue, Value},
         parser,
-        value::{StringValue, Value},
     };
 
     use super::Object;

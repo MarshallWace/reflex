@@ -8,19 +8,22 @@ use crate::{
     expression::{Evaluate, Expression},
 };
 
-use self::{abs::AbsNode, add::AddNode, apply::ApplyNode, get::GetNode};
-
 pub mod abs;
 pub mod add;
 pub mod apply;
 pub mod get;
 
+pub use abs::AbsNode;
+pub use add::AddNode;
+pub use apply::ApplyNode;
+pub use get::GetNode;
+
 #[derive(Debug, PartialEq, Clone)]
 pub enum Node {
-    Abs(self::abs::AbsNode),
-    Add(self::add::AddNode),
-    Apply(self::apply::ApplyNode),
-    Get(self::get::GetNode),
+    Abs(AbsNode),
+    Add(AddNode),
+    Apply(ApplyNode),
+    Get(GetNode),
 }
 
 const ABS: &str = AbsNode::name();

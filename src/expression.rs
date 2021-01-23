@@ -3,21 +3,25 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use std::{fmt, rc::Rc};
 
-pub mod evaluate;
-pub use self::evaluate::Evaluate;
+pub mod operations;
+pub use self::operations::bind::Bind;
+pub use self::operations::evaluate::Evaluate;
 
-mod function;
+pub mod function;
 pub use self::function::Closure;
 pub use self::function::Function;
 
-mod object;
+pub mod node;
+pub use self::node::Node;
+
+pub mod object;
 pub use self::object::Object;
 
-use crate::{
-    env::Env,
-    node::Node,
-    value::Value,
-};
+pub mod value;
+pub use self::value::StringValue;
+pub use self::value::Value;
+
+use crate::env::Env;
 
 #[derive(PartialEq, Clone)]
 pub enum Expression {
@@ -33,10 +37,6 @@ pub enum Expression {
 }
 
 pub type StackOffset = usize;
-
-pub trait Bind {
-    fn bind(&self, env: &Env) -> Rc<Expression>;
-}
 
 impl Bind for Rc<Expression> {
     fn bind(&self, env: &Env) -> Rc<Expression> {

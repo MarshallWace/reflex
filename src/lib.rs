@@ -5,10 +5,8 @@
 
 pub mod env;
 pub mod expression;
-pub mod node;
 pub mod parser;
 pub mod utils;
-pub mod value;
 
 #[cfg(test)]
 mod tests {
@@ -16,10 +14,8 @@ mod tests {
 
     use crate::{
         env::Env,
-        expression::{Evaluate, Expression},
-        node::Node,
+        expression::{Evaluate, Expression, Node, StringValue, Value},
         parser,
-        value::{StringValue, Value},
     };
 
     #[test]
@@ -170,7 +166,7 @@ mod benchmarks {
     extern crate test;
     use test::Bencher;
 
-    use crate::{env::Env, expression::Evaluate, node::Node, parser};
+    use crate::{env::Env, expression::{Evaluate, Node}, parser};
 
     #[bench]
     fn nested_expressions(b: &mut Bencher) {
@@ -219,8 +215,11 @@ mod benchmarks {
     #[bench]
     fn object_field_access(b: &mut Bencher) {
         let env = Env::new();
-        let expression =
-            parser::parse("(get { first: 1, second: 2, third: 3 } \"second\")", &Node::factory).unwrap();
+        let expression = parser::parse(
+            "(get { first: 1, second: 2, third: 3 } \"second\")",
+            &Node::factory,
+        )
+        .unwrap();
         b.iter(|| expression.evaluate(&env));
     }
 }

@@ -3,11 +3,7 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use std::{borrow::Cow, rc::Rc};
 
-use crate::{
-    expression::{Expression, Function, Object, StackOffset},
-    node::Node,
-    value::{StringValue, Value},
-};
+use crate::expression::{Expression, Function, Node, Object, StackOffset, StringValue, Value};
 
 type ParserError = String;
 type ParserResult<T> = Result<T, ParserError>;
@@ -682,10 +678,9 @@ pub fn parse(input: &str, factory: &NodeFactory) -> ParserResult<Rc<Expression>>
 mod tests {
     use std::rc::Rc;
 
-    use crate::{
-        expression::{Expression, Function, Object},
-        node::{abs::AbsNode, add::AddNode, Node},
-        value::{StringValue, Value},
+    use crate::expression::{
+        node::{AbsNode, AddNode},
+        Expression, Function, Node, Object, StringValue, Value,
     };
 
     use super::parse;

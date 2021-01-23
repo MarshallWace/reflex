@@ -5,10 +5,12 @@ use std::rc::Rc;
 
 use crate::{
     env::Env,
-    expression::{evaluate::Evaluate2, Evaluate, Expression},
-    node::{CompoundNode, Node, NodeFactoryResult},
+    expression::{
+        node::{CompoundNode, NodeFactoryResult},
+        operations::evaluate::Evaluate2,
+        Evaluate, Expression, Node, Value,
+    },
     utils::format_type,
-    value::Value,
 };
 
 #[derive(Debug, PartialEq, Clone)]

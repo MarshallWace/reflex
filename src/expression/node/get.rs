@@ -5,10 +5,12 @@ use std::rc::Rc;
 
 use crate::{
     env::Env,
-    expression::{evaluate::Evaluate2, Evaluate, Expression},
-    node::{CompoundNode, Node, NodeFactoryResult},
+    expression::{
+        node::{CompoundNode, NodeFactoryResult},
+        operations::evaluate::Evaluate2,
+        Evaluate, Expression, Node, Value,
+    },
     utils::format_type,
-    value::Value,
 };
 
 #[derive(Debug, PartialEq, Clone)]
@@ -71,10 +73,8 @@ impl Evaluate2 for GetNode {
 mod tests {
     use crate::{
         env::Env,
-        expression::{Evaluate, Expression},
-        node::Node,
+        expression::{Evaluate, Expression, Node, Value},
         parser,
-        value::Value,
     };
 
     #[test]
@@ -98,30 +98,32 @@ mod tests {
         )
         .unwrap();
         let result = expression.evaluate(&env);
-        assert_eq!(*result, Expression::Error(String::from("Field not found: fourth")));
+        assert_eq!(
+            *result,
+            Expression::Error(String::from("Field not found: fourth"))
+        );
     }
 
     #[test]
     fn get_invalid_object_field() {
         let env = Env::new();
-        let expression = parser::parse(
-            "(get { first: 1, second: 2, third: 3 } 3)",
-            &Node::factory,
-        )
-        .unwrap();
+        let expression =
+            parser::parse("(get { first: 1, second: 2, third: 3 } 3)", &Node::factory).unwrap();
         let result = expression.evaluate(&env);
-        assert_eq!(*result, Expression::Error(String::from("Unable to get field: Int(3)")));
+        assert_eq!(
+            *result,
+            Expression::Error(String::from("Unable to get field: Int(3)"))
+        );
     }
 
     #[test]
     fn get_non_object_field() {
         let env = Env::new();
-        let expression = parser::parse(
-            "(get 3 \"foo\")",
-            &Node::factory,
-        )
-        .unwrap();
+        let expression = parser::parse("(get 3 \"foo\")", &Node::factory).unwrap();
         let result = expression.evaluate(&env);
-        assert_eq!(*result, Expression::Error(String::from("Unable to get field of non-object: Int(3)")));
+        assert_eq!(
+            *result,
+            Expression::Error(String::from("Unable to get field of non-object: Int(3)"))
+        );
     }
 }
