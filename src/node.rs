@@ -8,22 +8,25 @@ use crate::{
     expression::{Evaluate, Expression},
 };
 
-use self::{abs::AbsNode, add::AddNode, apply::ApplyNode};
+use self::{abs::AbsNode, add::AddNode, apply::ApplyNode, get::GetNode};
 
 pub mod abs;
 pub mod add;
 pub mod apply;
+pub mod get;
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Node {
     Abs(self::abs::AbsNode),
     Add(self::add::AddNode),
     Apply(self::apply::ApplyNode),
+    Get(self::get::GetNode),
 }
 
 const ABS: &str = AbsNode::name();
 const ADD: &str = AddNode::name();
 const APPLY: &str = ApplyNode::name();
+const GET: &str = GetNode::name();
 
 pub type NodeFactoryResult = Result<Node, String>;
 
@@ -38,6 +41,7 @@ impl Node {
             ABS => AbsNode::factory(args).map(Some),
             ADD => AddNode::factory(args).map(Some),
             APPLY => ApplyNode::factory(args).map(Some),
+            GET => GetNode::factory(args).map(Some),
             _ => Ok(None),
         }
     }
@@ -46,6 +50,7 @@ impl Node {
             Node::Abs(node) => Some(CompoundNode::expressions(node)),
             Node::Add(node) => Some(CompoundNode::expressions(node)),
             Node::Apply(node) => Some(CompoundNode::expressions(node)),
+            Node::Get(node) => Some(CompoundNode::expressions(node)),
         }
     }
     pub fn evaluate(&self, env: &Env) -> Rc<Expression> {
@@ -53,6 +58,7 @@ impl Node {
             Node::Abs(node) => Evaluate::evaluate(node, env),
             Node::Add(node) => Evaluate::evaluate(node, env),
             Node::Apply(node) => Evaluate::evaluate(node, env),
+            Node::Get(node) => Evaluate::evaluate(node, env),
         }
     }
 }

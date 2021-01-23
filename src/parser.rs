@@ -4,7 +4,7 @@
 use std::{borrow::Cow, rc::Rc};
 
 use crate::{
-    expression::{Expression, Function, StackOffset},
+    expression::{Expression, Function, Object, StackOffset},
     node::Node,
     value::{StringValue, Value},
 };
@@ -256,6 +256,86 @@ fn is_string_char(char: char) -> bool {
     match char {
         '"' | '\\' => false,
         _ => true,
+    }
+}
+
+fn consume_object_literal<'a>(
+    input: &'a str,
+    factory: &NodeFactory,
+    scope: &LexicalScope<'a>,
+) -> ParserResult<Option<ParserOutput<'a, Rc<Expression>>>> {
+    match consume_char('{', input) {
+        None => Ok(None),
+        Some(input) => {
+            let input = consume_whitespace(input);
+            let ParserOutput {
+                parsed: entries,
+                remaining: input,
+            } = consume_object_literal_entries(input, factory, scope)?;
+            match consume_char('}', input) {
+                None => Err(String::from("Unterminated object literal")),
+                Some(input) => Ok(Some(ParserOutput {
+                    parsed: Rc::new(Expression::Object(Object::new(entries))),
+                    remaining: input,
+                })),
+            }
+        }
+    }
+}
+
+fn consume_object_literal_entries<'a>(
+    input: &'a str,
+    factory: &NodeFactory,
+    scope: &LexicalScope<'a>,
+) -> ParserResult<ParserOutput<'a, Vec<(StringValue, Rc<Expression>)>>> {
+    consume_object_literal_entries_iter(input, factory, scope, Vec::new())
+}
+
+fn consume_object_literal_entries_iter<'a>(
+    input: &'a str,
+    factory: &NodeFactory,
+    scope: &LexicalScope<'a>,
+    mut results: Vec<(StringValue, Rc<Expression>)>,
+) -> ParserResult<ParserOutput<'a, Vec<(StringValue, Rc<Expression>)>>> {
+    match consume_identifier(input) {
+        None => Ok(ParserOutput {
+            parsed: results,
+            remaining: input,
+        }),
+        Some(ParserOutput {
+            parsed: key,
+            remaining: input,
+        }) => {
+            let input = consume_whitespace(input);
+            match consume_char(':', input) {
+                None => Err(format!("Invalid object literal entry for key: {}", key)),
+                Some(input) => {
+                    let input = consume_whitespace(input);
+                    match consume_expression(input, factory, scope)? {
+                        None => Err(format!("Invalid object literal value for key: {}", key)),
+                        Some(ParserOutput {
+                            parsed: value,
+                            remaining: input,
+                        }) => {
+                            results.push((StringValue::new(String::from(key)), value));
+                            let input = consume_whitespace(input);
+                            match consume_char(',', input) {
+                                None => Ok(ParserOutput {
+                                    parsed: results,
+                                    remaining: input,
+                                }),
+                                Some(input) => {
+                                    let input = consume_whitespace(input);
+                                    consume_object_literal_entries_iter(
+                                        input, factory, scope, results,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -532,13 +612,16 @@ fn consume_expression<'a>(
 ) -> ParserResult<Option<ParserOutput<'a, Rc<Expression>>>> {
     match consume_special_form(input, factory, scope)? {
         Some(result) => Ok(Some(result)),
-        _ => match consume_s_expression(input, factory, scope)? {
-            Some(result) => Ok(Some(result)),
-            _ => match consume_primitive(input) {
-                Some(result) => Ok(Some(result.map(|value| Rc::new(Expression::Value(value))))),
-                None => match consume_reference(input, scope)? {
+        _ => match consume_primitive(input) {
+            Some(result) => Ok(Some(result.map(|value| Rc::new(Expression::Value(value))))),
+            None => match consume_reference(input, scope)? {
+                Some(result) => Ok(Some(result)),
+                _ => match consume_object_literal(input, factory, scope)? {
                     Some(result) => Ok(Some(result)),
-                    _ => Ok(None),
+                    _ => match consume_s_expression(input, factory, scope)? {
+                        Some(result) => Ok(Some(result)),
+                        _ => Ok(None),
+                    },
                 },
             },
         },
@@ -600,7 +683,7 @@ mod tests {
     use std::rc::Rc;
 
     use crate::{
-        expression::{Expression, Function},
+        expression::{Expression, Function, Object},
         node::{abs::AbsNode, add::AddNode, Node},
         value::{StringValue, Value},
     };
@@ -845,6 +928,81 @@ mod tests {
     }
 
     #[test]
+    fn object_literals() {
+        assert_eq!(
+            parse("{}", &Node::factory),
+            Ok(Rc::new(Expression::Object(Object::new(vec![])))),
+        );
+        assert_eq!(
+            parse("{   }", &Node::factory),
+            Ok(Rc::new(Expression::Object(Object::new(vec![])))),
+        );
+        assert_eq!(
+            parse("{foo:true}", &Node::factory),
+            Ok(Rc::new(Expression::Object(Object::new(vec![(
+                StringValue::new(String::from("foo")),
+                Rc::new(Expression::Value(Value::Boolean(true)))
+            )])))),
+        );
+        assert_eq!(
+            parse("{foo:true,}", &Node::factory),
+            Ok(Rc::new(Expression::Object(Object::new(vec![(
+                StringValue::new(String::from("foo")),
+                Rc::new(Expression::Value(Value::Boolean(true)))
+            )])))),
+        );
+        assert_eq!(
+            parse("{first:1, second: 2, third: 3}", &Node::factory),
+            Ok(Rc::new(Expression::Object(Object::new(vec![
+                (
+                    StringValue::new(String::from("first")),
+                    Rc::new(Expression::Value(Value::Int(1)))
+                ),
+                (
+                    StringValue::new(String::from("second")),
+                    Rc::new(Expression::Value(Value::Int(2)))
+                ),
+                (
+                    StringValue::new(String::from("third")),
+                    Rc::new(Expression::Value(Value::Int(3)))
+                )
+            ])))),
+        );
+        assert_eq!(
+            parse("{first:1, second: 2, third: 3,}", &Node::factory),
+            Ok(Rc::new(Expression::Object(Object::new(vec![
+                (
+                    StringValue::new(String::from("first")),
+                    Rc::new(Expression::Value(Value::Int(1)))
+                ),
+                (
+                    StringValue::new(String::from("second")),
+                    Rc::new(Expression::Value(Value::Int(2)))
+                ),
+                (
+                    StringValue::new(String::from("third")),
+                    Rc::new(Expression::Value(Value::Int(3)))
+                )
+            ])))),
+        );
+        assert_eq!(
+            parse("{\n\t foo\n\t :\n\t true\n\t ,\n\t }", &Node::factory),
+            Ok(Rc::new(Expression::Object(Object::new(vec![(
+                StringValue::new(String::from("foo")),
+                Rc::new(Expression::Value(Value::Boolean(true)))
+            )])))),
+        );
+        assert_eq!(
+            parse("{foo:true,,}", &Node::factory),
+            Err(String::from("Unterminated object literal")),
+        );
+        assert_eq!(
+            parse("{,}", &Node::factory),
+            Err(String::from("Unterminated object literal")),
+        );
+    }
+
+    #[test]
     fn function_expressions() {
         assert_eq!(
             parse("(fn () (add 3 4))", &Node::factory),
@@ -887,10 +1045,10 @@ mod tests {
                 body: Rc::new(Expression::Function(Function {
                     arity: 2,
                     captures: Some(vec![0, 1, 2]),
-                body: Rc::new(Expression::Function(Function {
+                    body: Rc::new(Expression::Function(Function {
                         arity: 1,
                         captures: Some(vec![0, 1, 2, 3, 4]),
-                body: Rc::new(Expression::Node(Node::Add(AddNode::new(
+                        body: Rc::new(Expression::Node(Node::Add(AddNode::new(
                             Rc::new(Expression::Reference(5)),
                             Rc::new(Expression::Node(Node::Add(AddNode::new(
                                 Rc::new(Expression::Reference(4)),

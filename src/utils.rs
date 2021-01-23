@@ -16,6 +16,7 @@ pub fn format_type(expression: &Expression) -> String {
         Expression::Closure(Closure { env: _, arity, body }) => {
             format!("Closure({} -> {})", arity, format_type(body))
         }
+        Expression::Object(value) => format!("Object({})", value),
         Expression::Node(node) => format!("{:?}", node),
     }
 }

@@ -215,4 +215,12 @@ mod benchmarks {
             parser::parse("(apply (apply (fn (foo) (fn () foo)) 3))", &Node::factory).unwrap();
         b.iter(|| expression.evaluate(&env));
     }
+
+    #[bench]
+    fn object_field_access(b: &mut Bencher) {
+        let env = Env::new();
+        let expression =
+            parser::parse("(get { first: 1, second: 2, third: 3 } \"second\")", &Node::factory).unwrap();
+        b.iter(|| expression.evaluate(&env));
+    }
 }

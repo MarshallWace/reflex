@@ -10,6 +10,9 @@ mod function;
 pub use self::function::Closure;
 pub use self::function::Function;
 
+mod object;
+pub use self::object::Object;
+
 use crate::{
     env::Env,
     node::Node,
@@ -25,6 +28,7 @@ pub enum Expression {
     Bound(Env, Rc<Expression>),
     Function(Function),
     Closure(Closure),
+    Object(Object),
     Node(Node),
 }
 
@@ -74,6 +78,7 @@ impl fmt::Debug for Expression {
             Expression::Bound(_, value) => write!(f, "Bound({:?})", value),
             Expression::Function(value) => write!(f, "{:?}", value),
             Expression::Closure(value) => write!(f, "{:?}", value),
+            Expression::Object(value) => write!(f, "{:?}", value),
             Expression::Node(value) => write!(f, "{:?}", value),
         }
     }
@@ -88,6 +93,7 @@ impl fmt::Display for Expression {
             Expression::Bound(_, value) => write!(f, "<bound:{}>", value),
             Expression::Function(value) => write!(f, "{}", value),
             Expression::Closure(value) => write!(f, "{}", value),
+            Expression::Object(value) => write!(f, "{}", value),
             Expression::Node(value) => write!(f, "{:?}", value),
         }
     }
