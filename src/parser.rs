@@ -22,6 +22,8 @@ impl<'a, T> ParserOutput<'a, T> {
     }
 }
 
+const EOF: &'static str = "end of input";
+
 fn consume_whitespace(input: &str) -> &str {
     input.trim_start()
 }
@@ -109,6 +111,10 @@ fn is_valid_identifier_char(char: char) -> bool {
         '_' | '-' | '!' | '?' => true,
         _ => false,
     }
+}
+
+fn peek_next_char(input: &str) -> Option<char> {
+    input.chars().next()
 }
 
 fn consume_primitive(input: &str) -> Option<ParserOutput<Value>> {
@@ -269,7 +275,10 @@ fn consume_object_literal<'a>(
                 remaining: input,
             } = consume_object_literal_entries(input, factory, scope)?;
             match consume_char('}', input) {
-                None => Err(String::from("Unterminated object literal")),
+                None => Err(format!(
+                    "Expected '}}', received '{}'",
+                    peek_next_char(input).map(String::from).unwrap_or(String::from(EOF))
+                )),
                 Some(input) => Ok(Some(ParserOutput {
                     parsed: Rc::new(Expression::Object(Object::new(entries))),
                     remaining: input,
@@ -366,7 +375,10 @@ fn consume_function_expression<'a>(
                             } = consume_fn_arg_names(input)?;
                             let input = consume_whitespace(input);
                             match consume_char(')', input) {
-                                None => Err(String::from("Unterminated function argument list")),
+                                None => Err(format!(
+                                    "Expected ')', received '{}'",
+                                    peek_next_char(input).map(String::from).unwrap_or(String::from(EOF))
+                                )),
                                 Some(input) => {
                                     let input = consume_whitespace(input);
                                     let arity = arg_names.len();
@@ -380,8 +392,11 @@ fn consume_function_expression<'a>(
                                         }) => {
                                             let input = consume_whitespace(input);
                                             match consume_char(')', input) {
-                                                None => Err(String::from(
-                                                    "Unterminated function expression",
+                                                None => Err(format!(
+                                                    "Expected ')', received '{}'",
+                                                    peek_next_char(input)
+                                                        .map(String::from)
+                                                        .unwrap_or(String::from(EOF))
                                                 )),
                                                 Some(input) => Ok(Some(ParserOutput {
                                                     parsed: Rc::new(Expression::Function(
@@ -500,7 +515,10 @@ fn consume_s_expression<'a>(
                     } = consume_list_items(input, factory, scope)?;
                     let input = consume_whitespace(input);
                     match consume_char(')', input) {
-                        None => Err(String::from("Unterminated expression")),
+                        None => Err(format!(
+                            "Expected ')', received '{}'",
+                            peek_next_char(input).map(String::from).unwrap_or(String::from(EOF))
+                        )),
                         Some(input) => match expression_factory(identifier, args, factory) {
                             Err(err) => Err(err),
                             Ok(Some(result)) => Ok(Some(ParserOutput {
@@ -989,11 +1007,11 @@ mod tests {
         );
         assert_eq!(
             parse("{foo:true,,}", &Node::factory),
-            Err(String::from("Unterminated object literal")),
+            Err(String::from("Expected '}', received ','")),
         );
         assert_eq!(
             parse("{,}", &Node::factory),
-            Err(String::from("Unterminated object literal")),
+            Err(String::from("Expected '}', received ','")),
         );
     }
 
