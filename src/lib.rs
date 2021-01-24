@@ -166,7 +166,11 @@ mod benchmarks {
     extern crate test;
     use test::Bencher;
 
-    use crate::{env::Env, expression::{Evaluate, Node}, parser};
+    use crate::{
+        env::Env,
+        expression::{Evaluate, Node},
+        parser,
+    };
 
     #[bench]
     fn nested_expressions(b: &mut Bencher) {
@@ -220,6 +224,13 @@ mod benchmarks {
             &Node::factory,
         )
         .unwrap();
+        b.iter(|| expression.evaluate(&env));
+    }
+
+    #[bench]
+    fn conditional_expressions(b: &mut Bencher) {
+        let env = Env::new();
+        let expression = parser::parse("(if true 3 4)", &Node::factory).unwrap();
         b.iter(|| expression.evaluate(&env));
     }
 }

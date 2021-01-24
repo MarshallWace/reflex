@@ -12,11 +12,13 @@ pub mod abs;
 pub mod add;
 pub mod apply;
 pub mod get;
+pub mod _if;
 
 pub use abs::AbsNode;
 pub use add::AddNode;
 pub use apply::ApplyNode;
 pub use get::GetNode;
+pub use _if::IfNode;
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Node {
@@ -24,12 +26,14 @@ pub enum Node {
     Add(AddNode),
     Apply(ApplyNode),
     Get(GetNode),
+    If(IfNode),
 }
 
 const ABS: &str = AbsNode::name();
 const ADD: &str = AddNode::name();
 const APPLY: &str = ApplyNode::name();
 const GET: &str = GetNode::name();
+const IF: &str = IfNode::name();
 
 pub type NodeFactoryResult = Result<Node, String>;
 
@@ -45,6 +49,7 @@ impl Node {
             ADD => AddNode::factory(args).map(Some),
             APPLY => ApplyNode::factory(args).map(Some),
             GET => GetNode::factory(args).map(Some),
+            IF => IfNode::factory(args).map(Some),
             _ => Ok(None),
         }
     }
@@ -54,6 +59,7 @@ impl Node {
             Node::Add(node) => Some(CompoundNode::expressions(node)),
             Node::Apply(node) => Some(CompoundNode::expressions(node)),
             Node::Get(node) => Some(CompoundNode::expressions(node)),
+            Node::If(node) => Some(CompoundNode::expressions(node)),
         }
     }
     pub fn evaluate(&self, env: &Env) -> Rc<Expression> {
@@ -62,6 +68,7 @@ impl Node {
             Node::Add(node) => Evaluate::evaluate(node, env),
             Node::Apply(node) => Evaluate::evaluate(node, env),
             Node::Get(node) => Evaluate::evaluate(node, env),
+            Node::If(node) => Evaluate::evaluate(node, env),
         }
     }
 }
