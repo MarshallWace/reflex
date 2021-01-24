@@ -8,6 +8,13 @@ use crate::{
     expression::{Evaluate, Expression},
 };
 
+pub type NodeFactoryResult = Result<Node, String>;
+
+pub trait CompoundNode {
+    fn factory(args: Vec<Rc<Expression>>) -> NodeFactoryResult;
+    fn expressions(&self) -> Vec<&Rc<Expression>>;
+}
+
 pub mod abs;
 pub mod add;
 pub mod and;
@@ -38,6 +45,21 @@ pub use or::OrNode;
 pub use remainder::RemainderNode;
 pub use subtract::SubtractNode;
 
+const ABS: &str = AbsNode::name();
+const ADD: &str = AddNode::name();
+const AND: &str = AndNode::name();
+const APPLY: &str = ApplyNode::name();
+const CEIL: &str = CeilNode::name();
+const DIVIDE: &str = DivideNode::name();
+const FLOOR: &str = FloorNode::name();
+const GET: &str = GetNode::name();
+const IF: &str = IfNode::name();
+const MULTIPLY: &str = MultiplyNode::name();
+const NOT: &str = NotNode::name();
+const OR: &str = OrNode::name();
+const REMAINDER: &str = RemainderNode::name();
+const SUBTRACT: &str = SubtractNode::name();
+
 #[derive(Debug, PartialEq, Clone)]
 pub enum Node {
     Abs(AbsNode),
@@ -55,29 +77,6 @@ pub enum Node {
     Remainder(RemainderNode),
     Subtract(SubtractNode),
 }
-
-const ABS: &str = AbsNode::name();
-const ADD: &str = AddNode::name();
-const AND: &str = AndNode::name();
-const APPLY: &str = ApplyNode::name();
-const CEIL: &str = CeilNode::name();
-const DIVIDE: &str = DivideNode::name();
-const FLOOR: &str = FloorNode::name();
-const GET: &str = GetNode::name();
-const IF: &str = IfNode::name();
-const MULTIPLY: &str = MultiplyNode::name();
-const NOT: &str = NotNode::name();
-const OR: &str = OrNode::name();
-const REMAINDER: &str = RemainderNode::name();
-const SUBTRACT: &str = SubtractNode::name();
-
-pub type NodeFactoryResult = Result<Node, String>;
-
-pub trait CompoundNode {
-    fn factory(args: Vec<Rc<Expression>>) -> NodeFactoryResult;
-    fn expressions(&self) -> Vec<&Rc<Expression>>;
-}
-
 impl Node {
     pub fn factory(type_name: &str, args: Vec<Rc<Expression>>) -> Result<Option<Node>, String> {
         match type_name {
@@ -98,7 +97,6 @@ impl Node {
             _ => Ok(None),
         }
     }
-
     pub fn children(&self) -> Option<Vec<&Rc<Expression>>> {
         match self {
             Node::Abs(node) => Some(CompoundNode::expressions(node)),
@@ -117,8 +115,9 @@ impl Node {
             Node::Subtract(node) => Some(CompoundNode::expressions(node)),
         }
     }
-
-    pub fn evaluate(&self, env: &Env) -> Rc<Expression> {
+}
+impl Evaluate for Node {
+    fn evaluate(&self, env: &Env) -> Rc<Expression> {
         match self {
             Node::Abs(node) => Evaluate::evaluate(node, env),
             Node::Add(node) => Evaluate::evaluate(node, env),
