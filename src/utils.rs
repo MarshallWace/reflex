@@ -10,10 +10,22 @@ pub fn format_type(expression: &Expression) -> String {
         Expression::Value(value) => format!("{:?}", value),
         Expression::Reference(value) => format!("{:?}", value),
         Expression::Bound(_, value) => format!("Bound({})", format_type(value)),
-        Expression::Function(Function { arity, captures: _, body }) => {
+        Expression::Function(Function {
+            arity,
+            captures: _,
+            body,
+        }) => {
             format!("Function({} -> {})", arity, format_type(body))
         }
-        Expression::Closure(Closure { env: _, arity, body }) => {
+        Expression::Closure(Closure {
+            env: _,
+            function:
+                Function {
+                    arity,
+                    captures: _,
+                    body,
+                },
+        }) => {
             format!("Closure({} -> {})", arity, format_type(body))
         }
         Expression::Object(value) => format!("Object({})", value),

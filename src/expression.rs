@@ -43,15 +43,18 @@ impl Bind for Rc<Expression> {
         match &**self {
             Expression::Reference(_) | Expression::Node(_) => {
                 Rc::new(Expression::Bound(env.clone(), Rc::clone(self)))
-            },
+            }
             Expression::Function(Function {
                 arity,
                 captures: Some(_),
                 body,
             }) => Rc::new(Expression::Closure(Closure {
                 env: env.clone(),
-                arity: *arity,
-                body: Rc::clone(body),
+                function: Function {
+                    arity: *arity,
+                    captures: None,
+                    body: Rc::clone(body),
+                },
             })),
             _ => Rc::clone(self),
         }

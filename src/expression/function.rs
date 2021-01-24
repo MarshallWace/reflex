@@ -20,11 +20,10 @@ impl fmt::Display for Function {
 #[derive(Debug, PartialEq, Clone)]
 pub struct Closure {
     pub env: Env,
-    pub arity: usize,
-    pub body: Rc<Expression>,
+    pub function: Function,
 }
 impl fmt::Display for Closure {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Closure({} -> {})", self.arity, self.body)
+        write!(f, "Closure({} -> {})", self.function.arity, self.function.body)
     }
 }

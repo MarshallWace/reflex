@@ -52,22 +52,15 @@ impl Evaluate1 for ApplyNode {
         match &**target {
             Expression::Closure(Closure {
                 env: captured_env,
-                arity,
-                body,
+                function,
             }) => apply_function(
-                *arity,
-                body,
+                function,
                 self.args.len(),
                 self.args.iter().map(|arg| arg.bind(env)),
                 captured_env,
             ),
-            Expression::Function(Function {
-                arity,
-                captures: _,
-                body,
-            }) => apply_function(
-                *arity,
-                body,
+            Expression::Function(function) => apply_function(
+                function,
                 self.args.len(),
                 self.args.iter().map(Rc::clone),
                 env,
@@ -80,16 +73,16 @@ impl Evaluate1 for ApplyNode {
 }
 
 fn apply_function(
-    arity: usize,
-    body: &Rc<Expression>,
+    function: &Function,
     num_args: usize,
     args: impl IntoIterator<Item = Rc<Expression>>,
     env: &Env,
 ) -> Rc<Expression> {
-    if num_args != arity {
+    let Function { arity, captures: _, body, } = function;
+    if num_args != *arity {
         return Rc::new(Expression::Error(format!(
             "Expected {} arguments, received {}",
-            arity, num_args
+            *arity, num_args
         )));
     }
     if num_args == 0 {
