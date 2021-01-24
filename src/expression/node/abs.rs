@@ -62,3 +62,69 @@ impl Evaluate1 for AbsNode {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        env::Env,
+        expression::{Evaluate, Expression, Node, Value},
+        parser,
+    };
+
+    #[test]
+    fn abs_expressions() {
+        let env = Env::new();
+        let expression = parser::parse("(abs 0)", &Node::factory).unwrap();
+        let result = expression.evaluate(&env);
+        assert_eq!(*result, Expression::Value(Value::Int(0)));
+        let expression = parser::parse("(abs -0)", &Node::factory).unwrap();
+        let result = expression.evaluate(&env);
+        assert_eq!(*result, Expression::Value(Value::Int(0)));
+        let expression = parser::parse("(abs 3)", &Node::factory).unwrap();
+        let result = expression.evaluate(&env);
+        assert_eq!(*result, Expression::Value(Value::Int(3)));
+        let expression = parser::parse("(abs -3)", &Node::factory).unwrap();
+        let result = expression.evaluate(&env);
+        assert_eq!(*result, Expression::Value(Value::Int(3)));
+
+        let expression = parser::parse("(abs 0.0)", &Node::factory).unwrap();
+        let result = expression.evaluate(&env);
+        assert_eq!(*result, Expression::Value(Value::Float(0.0)));
+        let expression = parser::parse("(abs -0.0)", &Node::factory).unwrap();
+        let result = expression.evaluate(&env);
+        assert_eq!(*result, Expression::Value(Value::Float(0.0)));
+        let expression = parser::parse("(abs 3.142)", &Node::factory).unwrap();
+        let result = expression.evaluate(&env);
+        assert_eq!(*result, Expression::Value(Value::Float(3.142)));
+        let expression = parser::parse("(abs -3.142)", &Node::factory).unwrap();
+        let result = expression.evaluate(&env);
+        assert_eq!(*result, Expression::Value(Value::Float(3.142)));
+    }
+
+    #[test]
+    fn invalid_abs_expression_operands() {
+        let env = Env::new();
+        let expression = parser::parse("(abs null)", &Node::factory).unwrap();
+        let result = expression.evaluate(&env);
+        assert_eq!(
+            *result,
+            Expression::Error(String::from("Expected Int or Float, received Nil"))
+        );
+        let expression = parser::parse("(abs false)", &Node::factory).unwrap();
+        let result = expression.evaluate(&env);
+        assert_eq!(
+            *result,
+            Expression::Error(String::from(
+                "Expected Int or Float, received Boolean(false)"
+            ))
+        );
+        let expression = parser::parse("(abs \"3\")", &Node::factory).unwrap();
+        let result = expression.evaluate(&env);
+        assert_eq!(
+            *result,
+            Expression::Error(String::from(
+                "Expected Int or Float, received String(\"3\")"
+            ))
+        );
+    }
+}
