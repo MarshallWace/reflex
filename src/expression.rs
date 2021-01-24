@@ -65,8 +65,8 @@ impl Evaluate for Rc<Expression> {
         match &**self {
             Expression::Reference(index) => env.get(*index).evaluate(env),
             Expression::Bound(env, value) => value.evaluate(env),
-            Expression::Node(node) => node.evaluate(env),
             Expression::Function(_) => self.bind(env),
+            Expression::Node(node) => node.evaluate(env),
             _ => Rc::clone(self),
         }
     }
