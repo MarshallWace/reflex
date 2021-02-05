@@ -3,28 +3,33 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use std::io::{self, Write};
 
-use reflex::{env::Env, expression::{Evaluate, Node}, parser::parse};
+use reflex::{
+    env::Env,
+    node::Node,
+};
 
 pub fn start() -> io::Result<()> {
     let stdin = io::stdin();
     let mut stdout = io::stdout();
     let mut stderr = io::stderr();
 
-    let env = Env::new();
-
-    let mut input = String::new();
     loop {
         write!(stdout, "> ")?;
         stdout.flush()?;
 
-        input.clear();
-        stdin.read_line(&mut input)?;
+        let input = {
+            let mut input = String::new();
+            stdin.read_line(&mut input)?;
+            input
+        };
 
         if input == "exit\n" {
             break;
         }
 
-        match parse(&input, &Node::factory) {
+        let env = Env::new();
+
+        match Node::parse(&input) {
             Ok(expression) => {
                 writeln!(stdout, "{}", expression.evaluate(&env))?;
             }

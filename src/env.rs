@@ -1,27 +1,34 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use std::rc::Rc;
+use crate::expression::{Expression, NodeType};
 
-use crate::expression::{Expression, StackOffset};
+pub type StackOffset = usize;
 
-#[derive(Debug, PartialEq, Clone)]
-pub struct Env {
-    values: Vec<Rc<Expression>>,
+#[derive(PartialEq, Clone)]
+pub struct Env<T: NodeType<T>> {
+    bindings: Vec<Expression<T>>,
 }
-impl Env {
-    pub fn new() -> Env {
-        Env { values: Vec::new() }
-    }
-    pub fn get(&self, offset: StackOffset) -> Rc<Expression> {
-        Rc::clone(&self.values[self.values.len() - offset - 1])
-    }
-    pub fn extend(&self, values: impl IntoIterator<Item = Rc<Expression>>) -> Env {
+impl<T: NodeType<T>> Env<T> {
+    pub fn new() -> Self {
         Env {
-            values: self
-                .values
+            bindings: Vec::new(),
+        }
+    }
+    pub fn get(&self, offset: StackOffset) -> &Expression<T> {
+        &self.bindings[self.bindings.len() - offset - 1]
+    }
+    pub fn capture(&self) -> Env<T> {
+        Env {
+            bindings: self.bindings.clone(),
+        }
+    }
+    pub fn extend(&self, values: impl IntoIterator<Item = Expression<T>>) -> Env<T> {
+        Env {
+            bindings: self
+                .bindings
                 .iter()
-                .map(|value| Rc::clone(value))
+                .map(Expression::clone)
                 .chain(values.into_iter())
                 .collect::<Vec<_>>(),
         }
