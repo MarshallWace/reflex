@@ -52,19 +52,18 @@ impl Evaluate1 for ApplyNode {
         match &**target {
             Expression::Closure(Closure {
                 env: captured_env,
-                function,
-            }) => apply_function(
-                function,
-                self.args.len(),
-                self.args.iter().map(|arg| arg.bind(env)),
-                captured_env,
-            ),
-            Expression::Function(function) => apply_function(
-                function,
-                self.args.len(),
-                self.args.iter().map(Rc::clone),
-                env,
-            ),
+                function:
+                    Function {
+                        arity,
+                        captures: _,
+                        body,
+                    },
+            }) => apply_function(*arity, body, &self.args, env, Some(captured_env)),
+            Expression::Function(Function {
+                arity,
+                captures: _,
+                body,
+            }) => apply_function(*arity, body, &self.args, env, None),
             _ => Rc::new(Expression::Error(String::from(
                 "Target expression is not a function",
             ))),
@@ -73,23 +72,30 @@ impl Evaluate1 for ApplyNode {
 }
 
 fn apply_function(
-    function: &Function,
-    num_args: usize,
-    args: impl IntoIterator<Item = Rc<Expression>>,
+    arity: usize,
+    body: &Rc<Expression>,
+    args: &Vec<Rc<Expression>>,
     env: &Env,
+    captured_env: Option<&Env>,
 ) -> Rc<Expression> {
-    let Function { arity, captures: _, body, } = function;
-    if num_args != *arity {
+    if args.len() != arity {
         return Rc::new(Expression::Error(format!(
             "Expected {} arguments, received {}",
-            *arity, num_args
+            arity,
+            args.len()
         )));
     }
-    if num_args == 0 {
-        return body.evaluate(env);
+    if arity == 0 {
+        return body.evaluate(match captured_env {
+            Some(captured_env) => captured_env,
+            None => env,
+        });
     }
-    let child_env = env.extend(args);
-    body.evaluate(&child_env)
+    let inner_env = match captured_env {
+        Some(captured_env) => captured_env.extend(args.iter().map(|arg| arg.bind(env))),
+        None => env.extend(args.iter().cloned()),
+    };
+    body.evaluate(&inner_env)
 }
 
 #[cfg(test)]

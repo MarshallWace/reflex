@@ -164,11 +164,16 @@ mod tests {
 #[cfg(test)]
 mod benchmarks {
     extern crate test;
+    use std::rc::Rc;
+
     use test::Bencher;
 
     use crate::{
         env::Env,
-        expression::{Evaluate, Node},
+        expression::{
+            node::{AddNode, ApplyNode},
+            Evaluate, Expression, Function, Node, Value,
+        },
         parser,
     };
 
@@ -206,6 +211,32 @@ mod benchmarks {
         let expression =
             parser::parse("(apply (fn (foo bar baz) foo) 3 4 5)", &Node::factory).unwrap();
         b.iter(|| expression.evaluate(&env));
+    }
+
+    #[bench]
+    fn function_application_unused_args(b: &mut Bencher) {
+        let env = Env::new();
+        let expression = parser::parse("((lambda (foo bar baz) 2) 3 4 5)", &Node::factory).unwrap();
+        b.iter(|| expression.evaluate(&env));
+    }
+
+    #[bench]
+    fn deeply_nested_function_application(b: &mut Bencher) {
+        let env = Env::new();
+        let expression = (1..=100).fold(Rc::new(Expression::Value(Value::Int(0))), |acc, i| {
+            Rc::new(Expression::Node(Node::Apply(ApplyNode::new(
+                Rc::new(Expression::Function(Function {
+                    arity: 1,
+                    captures: None,
+                    body: Rc::new(Expression::Node(Node::Add(AddNode::new(
+                        Rc::new(Expression::Reference(0)),
+                        acc,
+                    )))),
+                })),
+                vec![Rc::new(Expression::Value(Value::Int(i)))],
+            ))))
+        });
+        b.iter(|| expression.evaluate(&env))
     }
 
     #[bench]
