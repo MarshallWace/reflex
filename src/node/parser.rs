@@ -457,8 +457,8 @@ fn consume_s_expression<'a>(
                         Some(input) => match target {
                             ApplicationTarget::Primitive(identifier) => {
                                 match Node::factory(identifier, &args)? {
-                                    Some(target) => Ok(Some(ParserOutput {
-                                        parsed: Expression::new(target),
+                                    Some(expression) => Ok(Some(ParserOutput {
+                                        parsed: expression,
                                         remaining: input,
                                     })),
                                     None => Err(format!("Unknown expression type: {}", identifier)),
