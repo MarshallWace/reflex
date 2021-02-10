@@ -97,22 +97,14 @@ impl fmt::Debug for BoundFunctionNode {
 mod tests {
     use std::rc::Rc;
 
-    use crate::{
-        env::Env,
-        expression::Expression,
-        node::{
-            arithmetic::{AddNode, ArithmeticNode},
-            core::{CoreNode, FunctionNode, ReferenceNode, ValueNode},
-            Node,
-        },
-    };
+    use crate::{env::Env, expression::Expression, node::{Node, arithmetic::{AddNode, ArithmeticNode}, core::{CoreNode, FunctionNode, ReferenceNode, ValueNode}, parser}};
 
     use super::BoundFunctionNode;
 
     #[test]
     fn closures() {
         let env = Env::new();
-        let expression = Node::parse("((lambda (foo bar) (lambda () (add foo bar))) 3 4)").unwrap();
+        let expression = parser::parse("((lambda (foo bar) (lambda () (add foo bar))) 3 4)").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
@@ -131,7 +123,7 @@ mod tests {
             })))
         );
         let expression =
-            Node::parse("((lambda (foo bar) (lambda (baz) (add foo baz))) 3 4)").unwrap();
+            parser::parse("((lambda (foo bar) (lambda (baz) (add foo baz))) 3 4)").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,

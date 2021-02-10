@@ -5,7 +5,7 @@ use std::fmt;
 
 use crate::{
     env::Env,
-    expression::{Expression, NodeType},
+    expression::{AstNode, Expression, NodeFactoryResult, NodeType},
     node::{
         core::{CoreNode, ErrorNode, ValueNode},
         Evaluate2, Node,
@@ -21,14 +21,16 @@ impl AndNode {
     pub fn new(left: Expression<Node>, right: Expression<Node>) -> Self {
         AndNode { left, right }
     }
-    pub fn factory(args: &Vec<Expression<Node>>) -> Result<Self, String> {
+}
+impl AstNode<Node> for AndNode {
+    fn factory(args: &Vec<Expression<Node>>) -> NodeFactoryResult<Self> {
         if args.len() != 2 {
             return Err(String::from("Invalid number of arguments"));
         }
         let args = &mut args.iter().map(Expression::clone);
         let left = args.next().unwrap();
         let right = args.next().unwrap();
-        Ok(AndNode::new(left, right))
+        Ok(Self::new(left, right))
     }
 }
 impl NodeType<Node> for AndNode {
@@ -78,32 +80,32 @@ mod tests {
         expression::Expression,
         node::{
             core::{CoreNode, ErrorNode, ValueNode},
-            Node,
+            parser, Node,
         },
     };
 
     #[test]
     fn and_expressions() {
         let env = Env::new();
-        let expression = Node::parse("(and false false)").unwrap();
+        let expression = parser::parse("(and false false)").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
         );
-        let expression = Node::parse("(and false true)").unwrap();
+        let expression = parser::parse("(and false true)").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
         );
-        let expression = Node::parse("(and true false)").unwrap();
+        let expression = parser::parse("(and true false)").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
         );
-        let expression = Node::parse("(and true true)").unwrap();
+        let expression = parser::parse("(and true true)").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
@@ -114,7 +116,7 @@ mod tests {
     #[test]
     fn invalid_and_expression_arguments() {
         let env = Env::new();
-        let expression = Node::parse("(and true null)").unwrap();
+        let expression = parser::parse("(and true null)").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
@@ -122,7 +124,7 @@ mod tests {
                 "Expected (Boolean, Boolean), received (true, Nil)"
             ))))
         );
-        let expression = Node::parse("(and true 0)").unwrap();
+        let expression = parser::parse("(and true 0)").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
@@ -130,7 +132,7 @@ mod tests {
                 "Expected (Boolean, Boolean), received (true, 0)"
             ))))
         );
-        let expression = Node::parse("(and true 0.0)").unwrap();
+        let expression = parser::parse("(and true 0.0)").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
@@ -138,7 +140,7 @@ mod tests {
                 "Expected (Boolean, Boolean), received (true, 0.0)"
             ))))
         );
-        let expression = Node::parse("(and true \"\")").unwrap();
+        let expression = parser::parse("(and true \"\")").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
@@ -147,7 +149,7 @@ mod tests {
             ))))
         );
 
-        let expression = Node::parse("(and null true)").unwrap();
+        let expression = parser::parse("(and null true)").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
@@ -155,7 +157,7 @@ mod tests {
                 "Expected (Boolean, Boolean), received (Nil, true)"
             ))))
         );
-        let expression = Node::parse("(and 0 true)").unwrap();
+        let expression = parser::parse("(and 0 true)").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
@@ -163,7 +165,7 @@ mod tests {
                 "Expected (Boolean, Boolean), received (0, true)"
             ))))
         );
-        let expression = Node::parse("(and 0.0 true)").unwrap();
+        let expression = parser::parse("(and 0.0 true)").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
@@ -171,7 +173,7 @@ mod tests {
                 "Expected (Boolean, Boolean), received (0.0, true)"
             ))))
         );
-        let expression = Node::parse("(and \"\" true)").unwrap();
+        let expression = parser::parse("(and \"\" true)").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,

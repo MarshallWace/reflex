@@ -14,8 +14,20 @@ pub trait NodeType<T: NodeType<T>>: PartialEq + Clone + fmt::Display + fmt::Debu
     fn evaluate(&self, env: &Env<T>) -> Option<Expression<T>>;
 }
 
+pub type NodeFactory<T, V> = dyn Fn(&Vec<Expression<T>>) -> Result<V, String>;
+pub type NodeFactoryError = String;
+pub type NodeFactoryResult<T> = Result<T, NodeFactoryError>;
+
+pub trait AstNodePackage<T: NodeType<T>>: NodeType<T> {
+    fn factory(type_name: &str, args: &Vec<Expression<T>>) -> Option<NodeFactoryResult<Self>>;
+}
+
+pub trait AstNode<T: NodeType<T>>: NodeType<T> {
+    fn factory(args: &Vec<Expression<T>>) -> NodeFactoryResult<Self>;
+}
+
 #[derive(PartialEq, Clone)]
-pub struct Expression<T : NodeType<T>> {
+pub struct Expression<T: NodeType<T>> {
     value: Rc<T>,
 }
 impl<T: NodeType<T>> Expression<T> {

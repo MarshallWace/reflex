@@ -55,7 +55,7 @@ mod tests {
         node::{
             arithmetic::{AddNode, ArithmeticNode},
             core::{CoreNode, ReferenceNode},
-            Node,
+            parser, Node,
         },
     };
 
@@ -64,7 +64,7 @@ mod tests {
     #[test]
     fn functions() {
         let env = Env::new();
-        let expression = Node::parse("(lambda (foo bar) (add foo bar))").unwrap();
+        let expression = parser::parse("(lambda (foo bar) (add foo bar))").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,

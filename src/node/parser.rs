@@ -5,7 +5,7 @@ use std::borrow::Cow;
 
 use crate::{
     env::StackOffset,
-    expression::{Expression, NodeType},
+    expression::{AstNodePackage, Expression, NodeType},
     node::{
         core::{
             ApplicationNode, ClosureNode, CoreNode, FunctionNode, ReferenceNode, StringValue,
@@ -456,9 +456,9 @@ fn consume_s_expression<'a>(
                         )),
                         Some(input) => match target {
                             ApplicationTarget::Primitive(identifier) => {
-                                match Node::factory(identifier, &args)? {
-                                    Some(expression) => Ok(Some(ParserOutput {
-                                        parsed: expression,
+                                match Node::factory(identifier, &args) {
+                                    Some(result) => Ok(Some(ParserOutput {
+                                        parsed: Expression::new(result?),
                                         remaining: input,
                                     })),
                                     None => Err(format!("Unknown expression type: {}", identifier)),

@@ -5,7 +5,7 @@ use std::fmt;
 
 use crate::{
     env::Env,
-    expression::{Expression, NodeType},
+    expression::{AstNode, Expression, NodeFactoryResult, NodeType},
     node::{
         core::{CoreNode, ErrorNode},
         sequence::SequenceNode,
@@ -21,13 +21,15 @@ impl CarNode {
     pub fn new(target: Expression<Node>) -> Self {
         CarNode { target }
     }
-    pub fn factory(args: &Vec<Expression<Node>>) -> Result<Self, String> {
+}
+impl AstNode<Node> for CarNode {
+    fn factory(args: &Vec<Expression<Node>>) -> NodeFactoryResult<Self> {
         if args.len() != 1 {
             return Err(String::from("Invalid number of arguments"));
         }
         let args = &mut args.iter().map(Expression::clone);
         let target = args.next().unwrap();
-        Ok(CarNode::new(target))
+        Ok(Self::new(target))
     }
 }
 impl NodeType<Node> for CarNode {
@@ -68,33 +70,33 @@ mod tests {
         expression::Expression,
         node::{
             core::{CoreNode, ErrorNode, ValueNode},
-            Node,
+            parser, Node,
         },
     };
 
     #[test]
     fn car_expressions() {
         let env = Env::new();
-        let expression = Node::parse("(car (cons 3 4))").unwrap();
+        let expression = parser::parse("(car (cons 3 4))").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3)))),
         );
-        let expression = Node::parse("(car (cons (add 1 2) (add 3 4)))").unwrap();
+        let expression = parser::parse("(car (cons (add 1 2) (add 3 4)))").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(1 + 2)))),
         );
         let expression =
-            Node::parse("(car ((lambda (foo) foo) (cons (add 1 2) (add 3 4))))").unwrap();
+            parser::parse("(car ((lambda (foo) foo) (cons (add 1 2) (add 3 4))))").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(1 + 2)))),
         );
-        let expression = Node::parse("(car (list 3 4 5))").unwrap();
+        let expression = parser::parse("(car (list 3 4 5))").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
@@ -105,7 +107,7 @@ mod tests {
     #[test]
     fn invalid_car_expressions() {
         let env = Env::new();
-        let expression = Node::parse("(car 3)").unwrap();
+        let expression = parser::parse("(car 3)").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
@@ -113,7 +115,7 @@ mod tests {
                 "Expected pair, received 3"
             )))),
         );
-        let expression = Node::parse("(car (list))").unwrap();
+        let expression = parser::parse("(car (list))").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,

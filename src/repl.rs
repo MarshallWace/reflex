@@ -3,10 +3,7 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use std::io::{self, Write};
 
-use reflex::{
-    env::Env,
-    node::Node,
-};
+use reflex::{env::Env, node::parser};
 
 pub fn start() -> io::Result<()> {
     let stdin = io::stdin();
@@ -29,7 +26,7 @@ pub fn start() -> io::Result<()> {
 
         let env = Env::new();
 
-        match Node::parse(&input) {
+        match parser::parse(&input) {
             Ok(expression) => {
                 writeln!(stdout, "{}", expression.evaluate(&env))?;
             }

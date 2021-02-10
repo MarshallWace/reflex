@@ -5,7 +5,7 @@ use std::fmt;
 
 use crate::{
     env::Env,
-    expression::{Expression, NodeType},
+    expression::{AstNode, Expression, NodeFactoryResult, NodeType},
     node::{
         core::{CoreNode, ErrorNode, ValueNode},
         Evaluate2, Node,
@@ -21,14 +21,16 @@ impl MultiplyNode {
     pub fn new(left: Expression<Node>, right: Expression<Node>) -> Self {
         MultiplyNode { left, right }
     }
-    pub fn factory(args: &Vec<Expression<Node>>) -> Result<Self, String> {
+}
+impl AstNode<Node> for MultiplyNode {
+    fn factory(args: &Vec<Expression<Node>>) -> NodeFactoryResult<Self> {
         if args.len() != 2 {
             return Err(String::from("Invalid number of arguments"));
         }
         let args = &mut args.iter().map(Expression::clone);
         let left = args.next().unwrap();
         let right = args.next().unwrap();
-        Ok(MultiplyNode::new(left, right))
+        Ok(Self::new(left, right))
     }
 }
 impl NodeType<Node> for MultiplyNode {
@@ -80,57 +82,57 @@ mod tests {
         expression::Expression,
         node::{
             core::{CoreNode, ErrorNode, ValueNode},
-            Node,
+            parser, Node,
         },
     };
 
     #[test]
     fn multiplication_expressions() {
         let env = Env::new();
-        let expression = Node::parse("(multiply 0 0)").unwrap();
+        let expression = parser::parse("(multiply 0 0)").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(0 * 0))))
         );
-        let expression = Node::parse("(multiply 3 4)").unwrap();
+        let expression = parser::parse("(multiply 3 4)").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3 * 4))))
         );
-        let expression = Node::parse("(multiply -3 4)").unwrap();
+        let expression = parser::parse("(multiply -3 4)").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(-3 * 4))))
         );
-        let expression = Node::parse("(multiply 3 -4)").unwrap();
+        let expression = parser::parse("(multiply 3 -4)").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3 * -4))))
         );
-        let expression = Node::parse("(multiply -3 -4)").unwrap();
+        let expression = parser::parse("(multiply -3 -4)").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(-3 * -4))))
         );
 
-        let expression = Node::parse("(multiply 0.0 0.0)").unwrap();
+        let expression = parser::parse("(multiply 0.0 0.0)").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Float(0.0 * 0.0))))
         );
-        let expression = Node::parse("(multiply 2.718 3.142)").unwrap();
+        let expression = parser::parse("(multiply 2.718 3.142)").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Float(2.718 * 3.142))))
         );
-        let expression = Node::parse("(multiply -2.718 3.142)").unwrap();
+        let expression = parser::parse("(multiply -2.718 3.142)").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
@@ -138,7 +140,7 @@ mod tests {
                 -2.718 * 3.142
             ))))
         );
-        let expression = Node::parse("(multiply 2.718 -3.142)").unwrap();
+        let expression = parser::parse("(multiply 2.718 -3.142)").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
@@ -146,7 +148,7 @@ mod tests {
                 2.718 * -3.142
             ))))
         );
-        let expression = Node::parse("(multiply -2.718 -3.142)").unwrap();
+        let expression = parser::parse("(multiply -2.718 -3.142)").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
@@ -159,7 +161,7 @@ mod tests {
     #[test]
     fn invalid_multiplication_expression_operands() {
         let env = Env::new();
-        let expression = Node::parse("(multiply 3 3.142)").unwrap();
+        let expression = parser::parse("(multiply 3 3.142)").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
@@ -167,7 +169,7 @@ mod tests {
                 "Expected (Int, Int) or (Float, Float), received (3, 3.142)"
             ))))
         );
-        let expression = Node::parse("(multiply 3.142 3)").unwrap();
+        let expression = parser::parse("(multiply 3.142 3)").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
@@ -176,7 +178,7 @@ mod tests {
             ))))
         );
 
-        let expression = Node::parse("(multiply 3 null)").unwrap();
+        let expression = parser::parse("(multiply 3 null)").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
@@ -184,7 +186,7 @@ mod tests {
                 "Expected (Int, Int) or (Float, Float), received (3, Nil)"
             ))))
         );
-        let expression = Node::parse("(multiply 3 false)").unwrap();
+        let expression = parser::parse("(multiply 3 false)").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
@@ -192,7 +194,7 @@ mod tests {
                 "Expected (Int, Int) or (Float, Float), received (3, false)"
             ))))
         );
-        let expression = Node::parse("(multiply 3 \"3\")").unwrap();
+        let expression = parser::parse("(multiply 3 \"3\")").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
@@ -201,7 +203,7 @@ mod tests {
             ))))
         );
 
-        let expression = Node::parse("(multiply null 3)").unwrap();
+        let expression = parser::parse("(multiply null 3)").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
@@ -209,7 +211,7 @@ mod tests {
                 "Expected (Int, Int) or (Float, Float), received (Nil, 3)"
             ))))
         );
-        let expression = Node::parse("(multiply false 3)").unwrap();
+        let expression = parser::parse("(multiply false 3)").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
@@ -217,7 +219,7 @@ mod tests {
                 "Expected (Int, Int) or (Float, Float), received (false, 3)"
             ))))
         );
-        let expression = Node::parse("(multiply \"3\" 3)").unwrap();
+        let expression = parser::parse("(multiply \"3\" 3)").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
@@ -226,7 +228,7 @@ mod tests {
             ))))
         );
 
-        let expression = Node::parse("(multiply 3.142 null)").unwrap();
+        let expression = parser::parse("(multiply 3.142 null)").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
@@ -234,7 +236,7 @@ mod tests {
                 "Expected (Int, Int) or (Float, Float), received (3.142, Nil)"
             ))))
         );
-        let expression = Node::parse("(multiply 3.142 false)").unwrap();
+        let expression = parser::parse("(multiply 3.142 false)").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
@@ -242,7 +244,7 @@ mod tests {
                 "Expected (Int, Int) or (Float, Float), received (3.142, false)"
             ))))
         );
-        let expression = Node::parse("(multiply 3.142 \"3\")").unwrap();
+        let expression = parser::parse("(multiply 3.142 \"3\")").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
@@ -251,7 +253,7 @@ mod tests {
             ))))
         );
 
-        let expression = Node::parse("(multiply null 3.142)").unwrap();
+        let expression = parser::parse("(multiply null 3.142)").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
@@ -259,7 +261,7 @@ mod tests {
                 "Expected (Int, Int) or (Float, Float), received (Nil, 3.142)"
             ))))
         );
-        let expression = Node::parse("(multiply false 3.142)").unwrap();
+        let expression = parser::parse("(multiply false 3.142)").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
@@ -267,7 +269,7 @@ mod tests {
                 "Expected (Int, Int) or (Float, Float), received (false, 3.142)"
             ))))
         );
-        let expression = Node::parse("(multiply \"3\" 3.142)").unwrap();
+        let expression = parser::parse("(multiply \"3\" 3.142)").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,

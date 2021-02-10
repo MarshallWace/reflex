@@ -5,7 +5,7 @@ use std::fmt;
 
 use crate::{
     env::Env,
-    expression::{Expression, NodeType},
+    expression::{AstNode, Expression, NodeFactoryResult, NodeType},
     node::{
         core::{CoreNode, ErrorNode, ValueNode},
         Evaluate1, Node,
@@ -20,13 +20,15 @@ impl NotNode {
     pub fn new(target: Expression<Node>) -> Self {
         NotNode { target }
     }
-    pub fn factory(args: &Vec<Expression<Node>>) -> Result<Self, String> {
+}
+impl AstNode<Node> for NotNode {
+    fn factory(args: &Vec<Expression<Node>>) -> NodeFactoryResult<Self> {
         if args.len() != 1 {
             return Err(String::from("Invalid number of arguments"));
         }
         let args = &mut args.iter().map(Expression::clone);
         let target = args.next().unwrap();
-        Ok(NotNode::new(target))
+        Ok(Self::new(target))
     }
 }
 impl NodeType<Node> for NotNode {
@@ -66,20 +68,20 @@ mod tests {
         expression::Expression,
         node::{
             core::{CoreNode, ErrorNode, ValueNode},
-            Node,
+            parser, Node,
         },
     };
 
     #[test]
     fn not_expressions() {
         let env = Env::new();
-        let expression = Node::parse("(not true)").unwrap();
+        let expression = parser::parse("(not true)").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
         );
-        let expression = Node::parse("(not false)").unwrap();
+        let expression = parser::parse("(not false)").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
@@ -90,7 +92,7 @@ mod tests {
     #[test]
     fn invalid_or_expression_arguments() {
         let env = Env::new();
-        let expression = Node::parse("(not null)").unwrap();
+        let expression = parser::parse("(not null)").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
@@ -98,7 +100,7 @@ mod tests {
                 "Expected Boolean, received Nil"
             ))))
         );
-        let expression = Node::parse("(not 0)").unwrap();
+        let expression = parser::parse("(not 0)").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
@@ -106,7 +108,7 @@ mod tests {
                 "Expected Boolean, received 0"
             ))))
         );
-        let expression = Node::parse("(not 0.0)").unwrap();
+        let expression = parser::parse("(not 0.0)").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
@@ -114,7 +116,7 @@ mod tests {
                 "Expected Boolean, received 0.0"
             ))))
         );
-        let expression = Node::parse("(not \"\")").unwrap();
+        let expression = parser::parse("(not \"\")").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,

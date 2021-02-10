@@ -5,7 +5,7 @@ use std::fmt;
 
 use crate::{
     env::Env,
-    expression::{Expression, NodeType},
+    expression::{AstNode, Expression, NodeFactoryResult, NodeType},
     node::{
         core::{CoreNode, ErrorNode, ValueNode},
         Evaluate2, Node,
@@ -21,14 +21,16 @@ impl RemainderNode {
     pub fn new(left: Expression<Node>, right: Expression<Node>) -> Self {
         RemainderNode { left, right }
     }
-    pub fn factory(args: &Vec<Expression<Node>>) -> Result<Self, String> {
+}
+impl AstNode<Node> for RemainderNode {
+    fn factory(args: &Vec<Expression<Node>>) -> NodeFactoryResult<Self> {
         if args.len() != 2 {
             return Err(String::from("Invalid number of arguments"));
         }
         let args = &mut args.iter().map(Expression::clone);
         let left = args.next().unwrap();
         let right = args.next().unwrap();
-        Ok(RemainderNode::new(left, right))
+        Ok(Self::new(left, right))
     }
 }
 impl NodeType<Node> for RemainderNode {
@@ -98,69 +100,69 @@ mod tests {
         expression::Expression,
         node::{
             core::{CoreNode, ErrorNode, ValueNode},
-            Node,
+            parser, Node,
         },
     };
 
     #[test]
     fn remainder_expressions() {
         let env = Env::new();
-        let expression = Node::parse("(remainder 0 3)").unwrap();
+        let expression = parser::parse("(remainder 0 3)").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(0 % 3))))
         );
-        let expression = Node::parse("(remainder 5 3)").unwrap();
+        let expression = parser::parse("(remainder 5 3)").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(5 % 3))))
         );
-        let expression = Node::parse("(remainder -5 3)").unwrap();
+        let expression = parser::parse("(remainder -5 3)").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(-5 % 3))))
         );
-        let expression = Node::parse("(remainder 5 -3)").unwrap();
+        let expression = parser::parse("(remainder 5 -3)").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(5 % -3))))
         );
-        let expression = Node::parse("(remainder -5 -3)").unwrap();
+        let expression = parser::parse("(remainder -5 -3)").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(-5 % -3))))
         );
 
-        let expression = Node::parse("(remainder 0.0 2.0)").unwrap();
+        let expression = parser::parse("(remainder 0.0 2.0)").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Float(0.0 % 2.0))))
         );
-        let expression = Node::parse("(remainder 3.142 2.0)").unwrap();
+        let expression = parser::parse("(remainder 3.142 2.0)").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Float(3.142 % 2.0))))
         );
-        let expression = Node::parse("(remainder -3.142 2.0)").unwrap();
+        let expression = parser::parse("(remainder -3.142 2.0)").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Float(-3.142 % 2.0))))
         );
-        let expression = Node::parse("(remainder 3.142 -2.0)").unwrap();
+        let expression = parser::parse("(remainder 3.142 -2.0)").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Float(3.142 % -2.0))))
         );
-        let expression = Node::parse("(remainder -3.142 -2.0)").unwrap();
+        let expression = parser::parse("(remainder -3.142 -2.0)").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
@@ -171,7 +173,7 @@ mod tests {
     #[test]
     fn remainder_by_zero() {
         let env = Env::new();
-        let expression = Node::parse("(remainder 3 0)").unwrap();
+        let expression = parser::parse("(remainder 3 0)").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
@@ -179,7 +181,7 @@ mod tests {
                 "Division by zero: (3 % 0)"
             ))))
         );
-        let expression = Node::parse("(remainder 3 -0)").unwrap();
+        let expression = parser::parse("(remainder 3 -0)").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
@@ -187,7 +189,7 @@ mod tests {
                 "Division by zero: (3 % 0)"
             ))))
         );
-        let expression = Node::parse("(remainder 0 0)").unwrap();
+        let expression = parser::parse("(remainder 0 0)").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
@@ -196,7 +198,7 @@ mod tests {
             ))))
         );
 
-        let expression = Node::parse("(remainder 3.142 0.0)").unwrap();
+        let expression = parser::parse("(remainder 3.142 0.0)").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
@@ -204,7 +206,7 @@ mod tests {
                 "Division by zero: (3.142 % 0.0)"
             ))))
         );
-        let expression = Node::parse("(remainder 3.142 -0.0)").unwrap();
+        let expression = parser::parse("(remainder 3.142 -0.0)").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
@@ -212,7 +214,7 @@ mod tests {
                 "Division by zero: (3.142 % -0.0)"
             ))))
         );
-        let expression = Node::parse("(remainder 0.0 0.0)").unwrap();
+        let expression = parser::parse("(remainder 0.0 0.0)").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
@@ -225,7 +227,7 @@ mod tests {
     #[test]
     fn remainder_division_expression_operands() {
         let env = Env::new();
-        let expression = Node::parse("(remainder 3 3.142)").unwrap();
+        let expression = parser::parse("(remainder 3 3.142)").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
@@ -233,7 +235,7 @@ mod tests {
                 "Expected (Int, Int) or (Float, Float), received (3, 3.142)"
             ))))
         );
-        let expression = Node::parse("(remainder 3.142 3)").unwrap();
+        let expression = parser::parse("(remainder 3.142 3)").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
@@ -242,7 +244,7 @@ mod tests {
             ))))
         );
 
-        let expression = Node::parse("(remainder 3 null)").unwrap();
+        let expression = parser::parse("(remainder 3 null)").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
@@ -250,7 +252,7 @@ mod tests {
                 "Expected (Int, Int) or (Float, Float), received (3, Nil)"
             ))))
         );
-        let expression = Node::parse("(remainder 3 false)").unwrap();
+        let expression = parser::parse("(remainder 3 false)").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
@@ -258,7 +260,7 @@ mod tests {
                 "Expected (Int, Int) or (Float, Float), received (3, false)"
             ))))
         );
-        let expression = Node::parse("(remainder 3 \"0\")").unwrap();
+        let expression = parser::parse("(remainder 3 \"0\")").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
@@ -267,7 +269,7 @@ mod tests {
             ))))
         );
 
-        let expression = Node::parse("(remainder null 3)").unwrap();
+        let expression = parser::parse("(remainder null 3)").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
@@ -275,7 +277,7 @@ mod tests {
                 "Expected (Int, Int) or (Float, Float), received (Nil, 3)"
             ))))
         );
-        let expression = Node::parse("(remainder false 3)").unwrap();
+        let expression = parser::parse("(remainder false 3)").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
@@ -283,7 +285,7 @@ mod tests {
                 "Expected (Int, Int) or (Float, Float), received (false, 3)"
             ))))
         );
-        let expression = Node::parse("(remainder \"0\" 3)").unwrap();
+        let expression = parser::parse("(remainder \"0\" 3)").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
@@ -292,7 +294,7 @@ mod tests {
             ))))
         );
 
-        let expression = Node::parse("(remainder 3.142 null)").unwrap();
+        let expression = parser::parse("(remainder 3.142 null)").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
@@ -300,7 +302,7 @@ mod tests {
                 "Expected (Int, Int) or (Float, Float), received (3.142, Nil)"
             ))))
         );
-        let expression = Node::parse("(remainder 3.142 false)").unwrap();
+        let expression = parser::parse("(remainder 3.142 false)").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
@@ -308,7 +310,7 @@ mod tests {
                 "Expected (Int, Int) or (Float, Float), received (3.142, false)"
             ))))
         );
-        let expression = Node::parse("(remainder 3.142 \"0\")").unwrap();
+        let expression = parser::parse("(remainder 3.142 \"0\")").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
@@ -317,7 +319,7 @@ mod tests {
             ))))
         );
 
-        let expression = Node::parse("(remainder null 3.142)").unwrap();
+        let expression = parser::parse("(remainder null 3.142)").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
@@ -325,7 +327,7 @@ mod tests {
                 "Expected (Int, Int) or (Float, Float), received (Nil, 3.142)"
             ))))
         );
-        let expression = Node::parse("(remainder false 3.142)").unwrap();
+        let expression = parser::parse("(remainder false 3.142)").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
@@ -333,7 +335,7 @@ mod tests {
                 "Expected (Int, Int) or (Float, Float), received (false, 3.142)"
             ))))
         );
-        let expression = Node::parse("(remainder \"0\" 3.142)").unwrap();
+        let expression = parser::parse("(remainder \"0\" 3.142)").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,

@@ -5,7 +5,7 @@ use std::fmt;
 
 use crate::{
     env::Env,
-    expression::{Expression, NodeType},
+    expression::{AstNode, Expression, NodeFactoryResult, NodeType},
     node::core::{CoreNode, Node, ValueNode},
 };
 
@@ -19,16 +19,16 @@ impl ErrorNode {
             message: String::from(message),
         }
     }
-    pub fn factory(args: &Vec<Expression<Node>>) -> Result<Self, String> {
+}
+impl AstNode<Node> for ErrorNode {
+    fn factory(args: &Vec<Expression<Node>>) -> NodeFactoryResult<Self> {
         if args.len() != 1 {
             return Err(String::from("Invalid number of arguments"));
         }
         let args = &mut args.iter().map(Expression::clone);
         let message = args.next().unwrap();
         match message.value() {
-            Node::Core(CoreNode::Value(ValueNode::String(value))) => {
-                Ok(ErrorNode::new(value.get()))
-            }
+            Node::Core(CoreNode::Value(ValueNode::String(value))) => Ok(Self::new(value.get())),
             _ => Err(format!("Invalid argument")),
         }
     }
@@ -60,7 +60,7 @@ mod tests {
     use crate::{
         env::Env,
         expression::Expression,
-        node::{core::CoreNode, Node},
+        node::{core::CoreNode, parser, Node},
     };
 
     use super::ErrorNode;
@@ -68,7 +68,7 @@ mod tests {
     #[test]
     fn static_errors() {
         let env = Env::new();
-        let expression = Node::parse("(error \"foo\")").unwrap();
+        let expression = parser::parse("(error \"foo\")").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
@@ -79,13 +79,13 @@ mod tests {
     #[test]
     fn short_circuit_errors() {
         let env = Env::new();
-        let expression = Node::parse("(add (error \"foo\") 3)").unwrap();
+        let expression = parser::parse("(add (error \"foo\") 3)").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Error(ErrorNode::new("foo"))))
         );
-        let expression = Node::parse("(add 3 (error \"foo\"))").unwrap();
+        let expression = parser::parse("(add 3 (error \"foo\"))").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
@@ -96,25 +96,25 @@ mod tests {
     #[test]
     fn short_circuit_error_priority() {
         let env = Env::new();
-        let expression = Node::parse("(add (error \"foo\") (pending))").unwrap();
+        let expression = parser::parse("(add (error \"foo\") (pending))").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Error(ErrorNode::new("foo"))))
         );
-        let expression = Node::parse("(add (pending) (error \"foo\"))").unwrap();
+        let expression = parser::parse("(add (pending) (error \"foo\"))").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Error(ErrorNode::new("foo"))))
         );
-        let expression = Node::parse("(add (add (error \"foo\") (pending)) (pending))").unwrap();
+        let expression = parser::parse("(add (add (error \"foo\") (pending)) (pending))").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Error(ErrorNode::new("foo"))))
         );
-        let expression = Node::parse("(add (pending) (add (pending) (error \"foo\")))").unwrap();
+        let expression = parser::parse("(add (pending) (add (pending) (error \"foo\")))").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,

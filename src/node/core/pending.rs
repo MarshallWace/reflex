@@ -5,7 +5,7 @@ use std::fmt;
 
 use crate::{
     env::Env,
-    expression::{Expression, NodeType},
+    expression::{AstNode, Expression, NodeFactoryResult, NodeType},
     node::Node,
 };
 
@@ -15,11 +15,13 @@ impl PendingNode {
     pub fn new() -> Self {
         PendingNode {}
     }
-    pub fn factory(args: &Vec<Expression<Node>>) -> Result<Self, String> {
+}
+impl AstNode<Node> for PendingNode {
+    fn factory(args: &Vec<Expression<Node>>) -> NodeFactoryResult<Self> {
         if args.len() != 0 {
             return Err(String::from("Invalid number of arguments"));
         }
-        Ok(PendingNode::new())
+        Ok(Self::new())
     }
 }
 impl NodeType<Node> for PendingNode {
@@ -49,7 +51,7 @@ mod tests {
     use crate::{
         env::Env,
         expression::Expression,
-        node::{core::CoreNode, Node},
+        node::{core::CoreNode, parser, Node},
     };
 
     use super::PendingNode;
@@ -57,7 +59,7 @@ mod tests {
     #[test]
     fn static_pendings() {
         let env = Env::new();
-        let expression = Node::parse("(pending)").unwrap();
+        let expression = parser::parse("(pending)").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
@@ -68,25 +70,25 @@ mod tests {
     #[test]
     fn short_circuit_pendings() {
         let env = Env::new();
-        let expression = Node::parse("(add (pending) 3)").unwrap();
+        let expression = parser::parse("(add (pending) 3)").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Pending(PendingNode::new())))
         );
-        let expression = Node::parse("(add 3 (pending))").unwrap();
+        let expression = parser::parse("(add 3 (pending))").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Pending(PendingNode::new())))
         );
-        let expression = Node::parse("(add (add (pending) 3) 3)").unwrap();
+        let expression = parser::parse("(add (add (pending) 3) 3)").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Pending(PendingNode::new())))
         );
-        let expression = Node::parse("(add 3 (add (pending) 3))").unwrap();
+        let expression = parser::parse("(add 3 (add (pending) 3))").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,

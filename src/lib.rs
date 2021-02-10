@@ -15,56 +15,53 @@ mod benchmarks {
 
     use crate::{
         env::Env,
-        expression::{
-            Expression,
-        },
+        expression::Expression,
         node::{
             arithmetic::{AddNode, ArithmeticNode},
             core::{ApplicationNode, CoreNode, FunctionNode, ReferenceNode, ValueNode},
-            Node,
+            parser, Node,
         },
     };
 
     #[bench]
     fn nested_expressions(b: &mut Bencher) {
         let env = Env::new();
-        let expression = Node::parse("(add (add (abs -3) 4) 5)").unwrap();
+        let expression = parser::parse("(add (add (abs -3) 4) 5)").unwrap();
         b.iter(|| expression.evaluate(&env));
     }
 
     #[bench]
     fn function_application_nullary(b: &mut Bencher) {
         let env = Env::new();
-        let expression = Node::parse("((lambda () 3))").unwrap();
+        let expression = parser::parse("((lambda () 3))").unwrap();
         b.iter(|| expression.evaluate(&env));
     }
 
     #[bench]
     fn function_application_unary(b: &mut Bencher) {
         let env = Env::new();
-        let expression = Node::parse("((lambda (foo) foo) 3)").unwrap();
+        let expression = parser::parse("((lambda (foo) foo) 3)").unwrap();
         b.iter(|| expression.evaluate(&env));
     }
 
     #[bench]
     fn function_application_binary(b: &mut Bencher) {
         let env = Env::new();
-        let expression = Node::parse("((lambda (foo bar) foo) 3 4)").unwrap();
+        let expression = parser::parse("((lambda (foo bar) foo) 3 4)").unwrap();
         b.iter(|| expression.evaluate(&env));
     }
 
     #[bench]
     fn function_application_ternary(b: &mut Bencher) {
         let env = Env::new();
-        let expression =
-            Node::parse("((lambda (foo bar baz) foo) 3 4 5)").unwrap();
+        let expression = parser::parse("((lambda (foo bar baz) foo) 3 4 5)").unwrap();
         b.iter(|| expression.evaluate(&env));
     }
 
     #[bench]
     fn function_application_unused_args(b: &mut Bencher) {
         let env = Env::new();
-        let expression = Node::parse("((lambda (foo bar baz) 2) 3 4 5)").unwrap();
+        let expression = parser::parse("((lambda (foo bar baz) 2) 3 4 5)").unwrap();
         b.iter(|| expression.evaluate(&env));
     }
 
@@ -94,15 +91,14 @@ mod benchmarks {
     #[bench]
     fn function_application_closure(b: &mut Bencher) {
         let env = Env::new();
-        let expression =
-            Node::parse("(((lambda (foo) (lambda () foo)) 3))").unwrap();
+        let expression = parser::parse("(((lambda (foo) (lambda () foo)) 3))").unwrap();
         b.iter(|| expression.evaluate(&env));
     }
 
     #[bench]
     fn conditional_expressions(b: &mut Bencher) {
         let env = Env::new();
-        let expression = Node::parse("(if true 3 4)").unwrap();
+        let expression = parser::parse("(if true 3 4)").unwrap();
         b.iter(|| expression.evaluate(&env));
     }
 }

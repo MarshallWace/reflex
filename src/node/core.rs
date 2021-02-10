@@ -5,7 +5,7 @@ use std::fmt;
 
 use crate::{
     env::Env,
-    expression::{Expression, NodeType},
+    expression::{AstNode, AstNodePackage, Expression, NodeFactoryResult, NodeType},
     node::Node,
 };
 
@@ -17,13 +17,13 @@ pub mod pending;
 pub mod reference;
 pub mod value;
 
-pub use application::{ApplicationNode, BoundArgumentNode};
-pub use closure::{BoundFunctionNode, ClosureNode};
-pub use error::ErrorNode;
-pub use function::FunctionNode;
-pub use pending::PendingNode;
-pub use reference::ReferenceNode;
-pub use value::{StringValue, ValueNode};
+pub use self::application::{ApplicationNode, BoundArgumentNode};
+pub use self::closure::{BoundFunctionNode, ClosureNode};
+pub use self::error::ErrorNode;
+pub use self::function::FunctionNode;
+pub use self::pending::PendingNode;
+pub use self::reference::ReferenceNode;
+pub use self::value::{StringValue, ValueNode};
 
 #[derive(PartialEq, Clone)]
 pub enum CoreNode {
@@ -37,83 +37,83 @@ pub enum CoreNode {
     Error(ErrorNode),
     Value(ValueNode),
 }
-impl CoreNode {
-    pub fn factory(type_name: &str, args: &Vec<Expression<Node>>) -> Result<Option<Self>, String> {
+impl AstNodePackage<Node> for CoreNode {
+    fn factory(type_name: &str, args: &Vec<Expression<Node>>) -> Option<NodeFactoryResult<Self>> {
         match type_name {
-            "error" => ErrorNode::factory(args).map(|node| Some(CoreNode::Error(node))),
-            "pending" => PendingNode::factory(args).map(|node| Some(CoreNode::Pending(node))),
-            _ => Ok(None),
+            "error" => Some(ErrorNode::factory(args).map(Self::Error)),
+            "pending" => Some(PendingNode::factory(args).map(Self::Pending)),
+            _ => None,
         }
     }
 }
 impl NodeType<Node> for CoreNode {
     fn expressions(&self) -> Vec<&Expression<Node>> {
         match self {
-            CoreNode::Application(node) => node.expressions(),
-            CoreNode::BoundArgument(node) => node.expressions(),
-            CoreNode::BoundFunction(node) => node.expressions(),
-            CoreNode::Closure(node) => node.expressions(),
-            CoreNode::Error(node) => node.expressions(),
-            CoreNode::Function(node) => node.expressions(),
-            CoreNode::Pending(node) => node.expressions(),
-            CoreNode::Reference(node) => node.expressions(),
-            CoreNode::Value(node) => node.expressions(),
+            Self::Application(node) => node.expressions(),
+            Self::BoundArgument(node) => node.expressions(),
+            Self::BoundFunction(node) => node.expressions(),
+            Self::Closure(node) => node.expressions(),
+            Self::Error(node) => node.expressions(),
+            Self::Function(node) => node.expressions(),
+            Self::Pending(node) => node.expressions(),
+            Self::Reference(node) => node.expressions(),
+            Self::Value(node) => node.expressions(),
         }
     }
     fn is_static(&self) -> bool {
         match self {
-            CoreNode::Application(node) => node.is_static(),
-            CoreNode::BoundArgument(node) => node.is_static(),
-            CoreNode::BoundFunction(node) => node.is_static(),
-            CoreNode::Closure(node) => node.is_static(),
-            CoreNode::Error(node) => node.is_static(),
-            CoreNode::Function(node) => node.is_static(),
-            CoreNode::Pending(node) => node.is_static(),
-            CoreNode::Reference(node) => node.is_static(),
-            CoreNode::Value(node) => node.is_static(),
+            Self::Application(node) => node.is_static(),
+            Self::BoundArgument(node) => node.is_static(),
+            Self::BoundFunction(node) => node.is_static(),
+            Self::Closure(node) => node.is_static(),
+            Self::Error(node) => node.is_static(),
+            Self::Function(node) => node.is_static(),
+            Self::Pending(node) => node.is_static(),
+            Self::Reference(node) => node.is_static(),
+            Self::Value(node) => node.is_static(),
         }
     }
     fn evaluate(&self, env: &Env<Node>) -> Option<Expression<Node>> {
         match self {
-            CoreNode::Application(node) => node.evaluate(env),
-            CoreNode::BoundArgument(node) => node.evaluate(env),
-            CoreNode::BoundFunction(node) => node.evaluate(env),
-            CoreNode::Closure(node) => node.evaluate(env),
-            CoreNode::Error(node) => node.evaluate(env),
-            CoreNode::Function(node) => node.evaluate(env),
-            CoreNode::Pending(node) => node.evaluate(env),
-            CoreNode::Reference(node) => node.evaluate(env),
-            CoreNode::Value(node) => node.evaluate(env),
+            Self::Application(node) => node.evaluate(env),
+            Self::BoundArgument(node) => node.evaluate(env),
+            Self::BoundFunction(node) => node.evaluate(env),
+            Self::Closure(node) => node.evaluate(env),
+            Self::Error(node) => node.evaluate(env),
+            Self::Function(node) => node.evaluate(env),
+            Self::Pending(node) => node.evaluate(env),
+            Self::Reference(node) => node.evaluate(env),
+            Self::Value(node) => node.evaluate(env),
         }
     }
 }
 impl fmt::Display for CoreNode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            CoreNode::Application(node) => fmt::Display::fmt(node, f),
-            CoreNode::BoundArgument(node) => fmt::Display::fmt(node, f),
-            CoreNode::BoundFunction(node) => fmt::Display::fmt(node, f),
-            CoreNode::Closure(node) => fmt::Display::fmt(node, f),
-            CoreNode::Error(node) => fmt::Display::fmt(node, f),
-            CoreNode::Function(node) => fmt::Display::fmt(node, f),
-            CoreNode::Pending(node) => fmt::Display::fmt(node, f),
-            CoreNode::Value(node) => fmt::Display::fmt(node, f),
-            CoreNode::Reference(node) => fmt::Display::fmt(node, f),
+            Self::Application(node) => fmt::Display::fmt(node, f),
+            Self::BoundArgument(node) => fmt::Display::fmt(node, f),
+            Self::BoundFunction(node) => fmt::Display::fmt(node, f),
+            Self::Closure(node) => fmt::Display::fmt(node, f),
+            Self::Error(node) => fmt::Display::fmt(node, f),
+            Self::Function(node) => fmt::Display::fmt(node, f),
+            Self::Pending(node) => fmt::Display::fmt(node, f),
+            Self::Value(node) => fmt::Display::fmt(node, f),
+            Self::Reference(node) => fmt::Display::fmt(node, f),
         }
     }
 }
 impl fmt::Debug for CoreNode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            CoreNode::Application(node) => fmt::Debug::fmt(node, f),
-            CoreNode::BoundArgument(node) => fmt::Debug::fmt(node, f),
-            CoreNode::BoundFunction(node) => fmt::Debug::fmt(node, f),
-            CoreNode::Closure(node) => fmt::Debug::fmt(node, f),
-            CoreNode::Error(node) => fmt::Debug::fmt(node, f),
-            CoreNode::Function(node) => fmt::Debug::fmt(node, f),
-            CoreNode::Pending(node) => fmt::Debug::fmt(node, f),
-            CoreNode::Value(node) => fmt::Debug::fmt(node, f),
-            CoreNode::Reference(node) => fmt::Debug::fmt(node, f),
+            Self::Application(node) => fmt::Debug::fmt(node, f),
+            Self::BoundArgument(node) => fmt::Debug::fmt(node, f),
+            Self::BoundFunction(node) => fmt::Debug::fmt(node, f),
+            Self::Closure(node) => fmt::Debug::fmt(node, f),
+            Self::Error(node) => fmt::Debug::fmt(node, f),
+            Self::Function(node) => fmt::Debug::fmt(node, f),
+            Self::Pending(node) => fmt::Debug::fmt(node, f),
+            Self::Value(node) => fmt::Debug::fmt(node, f),
+            Self::Reference(node) => fmt::Debug::fmt(node, f),
         }
     }
 }

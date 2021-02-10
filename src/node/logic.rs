@@ -5,7 +5,7 @@ use std::fmt;
 
 use crate::{
     env::Env,
-    expression::{Expression, NodeType},
+    expression::{AstNode, AstNodePackage, Expression, NodeFactoryResult, NodeType},
     node::Node,
 };
 
@@ -14,10 +14,10 @@ pub mod conditional;
 pub mod not;
 pub mod or;
 
-pub use and::AndNode;
-pub use conditional::ConditionalNode;
-pub use not::NotNode;
-pub use or::OrNode;
+pub use self::and::AndNode;
+pub use self::conditional::ConditionalNode;
+pub use self::not::NotNode;
+pub use self::or::OrNode;
 
 #[derive(PartialEq, Clone)]
 pub enum LogicNode {
@@ -26,14 +26,14 @@ pub enum LogicNode {
     Not(NotNode),
     Or(OrNode),
 }
-impl LogicNode {
-    pub fn factory(type_name: &str, args: &Vec<Expression<Node>>) -> Result<Option<Self>, String> {
+impl AstNodePackage<Node> for LogicNode {
+    fn factory(type_name: &str, args: &Vec<Expression<Node>>) -> Option<NodeFactoryResult<Self>> {
         match type_name {
-            "and" => AndNode::factory(args).map(|node| Some(LogicNode::And(node))),
-            "if" => ConditionalNode::factory(args).map(|node| Some(LogicNode::Conditional(node))),
-            "not" => NotNode::factory(args).map(|node| Some(LogicNode::Not(node))),
-            "or" => OrNode::factory(args).map(|node| Some(LogicNode::Or(node))),
-            _ => Ok(None),
+            "and" => Some(AndNode::factory(args).map(Self::And)),
+            "if" => Some(ConditionalNode::factory(args).map(Self::Conditional)),
+            "not" => Some(NotNode::factory(args).map(Self::Not)),
+            "or" => Some(OrNode::factory(args).map(Self::Or)),
+            _ => None,
         }
     }
 }

@@ -94,7 +94,7 @@ mod tests {
     use crate::{
         env::Env,
         expression::Expression,
-        node::{core::CoreNode, Node},
+        node::{core::CoreNode, parser, Node},
     };
 
     use super::{StringValue, ValueNode};
@@ -102,7 +102,7 @@ mod tests {
     #[test]
     fn static_values_nil() {
         let env = Env::new();
-        let expression = Node::parse("null").unwrap();
+        let expression = parser::parse("null").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
@@ -113,13 +113,13 @@ mod tests {
     #[test]
     fn static_values_boolean() {
         let env = Env::new();
-        let expression = Node::parse("true").unwrap();
+        let expression = parser::parse("true").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(true))))
         );
-        let expression = Node::parse("false").unwrap();
+        let expression = parser::parse("false").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
@@ -130,7 +130,7 @@ mod tests {
     #[test]
     fn static_values_int() {
         let env = Env::new();
-        let expression = Node::parse("3").unwrap();
+        let expression = parser::parse("3").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
@@ -141,7 +141,7 @@ mod tests {
     #[test]
     fn static_values_float() {
         let env = Env::new();
-        let expression = Node::parse("3.0").unwrap();
+        let expression = parser::parse("3.0").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
@@ -152,7 +152,7 @@ mod tests {
     #[test]
     fn static_values_string() {
         let env = Env::new();
-        let expression = Node::parse("\"foo\"").unwrap();
+        let expression = parser::parse("\"foo\"").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
