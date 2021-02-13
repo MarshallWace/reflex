@@ -47,12 +47,12 @@ impl NodeType<Node> for Node {
             Self::Arithmetic(node) => node.expressions(),
         }
     }
-    fn is_static(&self) -> bool {
+    fn capture_depth(&self) -> usize {
         match self {
-            Self::Core(node) => node.is_static(),
-            Self::Logic(node) => node.is_static(),
-            Self::Sequence(node) => node.is_static(),
-            Self::Arithmetic(node) => node.is_static(),
+            Self::Core(node) => node.capture_depth(),
+            Self::Logic(node) => node.capture_depth(),
+            Self::Sequence(node) => node.capture_depth(),
+            Self::Arithmetic(node) => node.capture_depth(),
         }
     }
     fn evaluate(&self, env: &Env<Node>) -> Option<Expression<Node>> {

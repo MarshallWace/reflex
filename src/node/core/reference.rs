@@ -25,8 +25,8 @@ impl NodeType<Node> for ReferenceNode {
     fn expressions(&self) -> Vec<&Expression<Node>> {
         Vec::new()
     }
-    fn is_static(&self) -> bool {
-        false
+    fn capture_depth(&self) -> usize {
+        self.offset + 1
     }
     fn evaluate(&self, env: &Env<Node>) -> Option<Expression<Node>> {
         Some(env.get(self.offset).evaluate(env))
@@ -59,7 +59,7 @@ mod tests {
 
     #[test]
     fn references() {
-        let env = Env::new().extend(vec![
+        let env = Env::from(vec![
             Expression::new(Node::Core(CoreNode::Value(ValueNode::String(
                 StringValue::literal("first"),
             )))),

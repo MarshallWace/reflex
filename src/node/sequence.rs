@@ -59,16 +59,16 @@ impl NodeType<Node> for SequenceNode {
             Self::IsPair(node) => node.expressions(),
         }
     }
-    fn is_static(&self) -> bool {
+    fn capture_depth(&self) -> usize {
         match self {
-            Self::Apply(node) => node.is_static(),
-            Self::Car(node) => node.is_static(),
-            Self::Cdr(node) => node.is_static(),
-            Self::Cons(node) => node.is_static(),
-            Self::Collect(node) => node.is_static(),
-            Self::IsList(node) => node.is_static(),
-            Self::List(node) => node.is_static(),
-            Self::IsPair(node) => node.is_static(),
+            Self::Apply(node) => node.capture_depth(),
+            Self::Car(node) => node.capture_depth(),
+            Self::Cdr(node) => node.capture_depth(),
+            Self::Cons(node) => node.capture_depth(),
+            Self::Collect(node) => node.capture_depth(),
+            Self::IsList(node) => node.capture_depth(),
+            Self::List(node) => node.capture_depth(),
+            Self::IsPair(node) => node.capture_depth(),
         }
     }
     fn evaluate(&self, env: &Env<Node>) -> Option<Expression<Node>> {

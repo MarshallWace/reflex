@@ -71,17 +71,17 @@ impl NodeType<Node> for ArithmeticNode {
             Self::Subtract(node) => node.expressions(),
         }
     }
-    fn is_static(&self) -> bool {
+    fn capture_depth(&self) -> usize {
         match self {
-            Self::Abs(node) => node.is_static(),
-            Self::Add(node) => node.is_static(),
-            Self::Ceil(node) => node.is_static(),
-            Self::Divide(node) => node.is_static(),
-            Self::Floor(node) => node.is_static(),
-            Self::Multiply(node) => node.is_static(),
-            Self::Pow(node) => node.is_static(),
-            Self::Remainder(node) => node.is_static(),
-            Self::Subtract(node) => node.is_static(),
+            Self::Abs(node) => node.capture_depth(),
+            Self::Add(node) => node.capture_depth(),
+            Self::Ceil(node) => node.capture_depth(),
+            Self::Divide(node) => node.capture_depth(),
+            Self::Floor(node) => node.capture_depth(),
+            Self::Multiply(node) => node.capture_depth(),
+            Self::Pow(node) => node.capture_depth(),
+            Self::Remainder(node) => node.capture_depth(),
+            Self::Subtract(node) => node.capture_depth(),
         }
     }
     fn evaluate(&self, env: &Env<Node>) -> Option<Expression<Node>> {

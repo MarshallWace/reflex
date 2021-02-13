@@ -46,12 +46,12 @@ impl NodeType<Node> for LogicNode {
             LogicNode::Or(node) => node.expressions(),
         }
     }
-    fn is_static(&self) -> bool {
+    fn capture_depth(&self) -> usize {
         match self {
-            LogicNode::And(node) => node.is_static(),
-            LogicNode::Conditional(node) => node.is_static(),
-            LogicNode::Not(node) => node.is_static(),
-            LogicNode::Or(node) => node.is_static(),
+            LogicNode::And(node) => node.capture_depth(),
+            LogicNode::Conditional(node) => node.capture_depth(),
+            LogicNode::Not(node) => node.capture_depth(),
+            LogicNode::Or(node) => node.capture_depth(),
         }
     }
     fn evaluate(&self, env: &Env<Node>) -> Option<Expression<Node>> {

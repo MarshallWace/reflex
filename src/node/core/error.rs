@@ -37,9 +37,6 @@ impl NodeType<Node> for ErrorNode {
     fn expressions(&self) -> Vec<&Expression<Node>> {
         Vec::new()
     }
-    fn is_static(&self) -> bool {
-        true
-    }
     fn evaluate(&self, _env: &Env<Node>) -> Option<Expression<Node>> {
         None
     }

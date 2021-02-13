@@ -66,6 +66,16 @@ mod benchmarks {
     }
 
     #[bench]
+    fn function_application_argument_scope(b: &mut Bencher) {
+        let env = Env::new();
+        let expression = parser::parse(
+            "((lambda (first second third) ((lambda (one two) ((lambda (foo bar) (add foo bar)) one two)) first third)) 3 4 5)",
+        )
+        .unwrap();
+        b.iter(|| expression.evaluate(&env));
+    }
+
+    #[bench]
     fn deeply_nested_function_application(b: &mut Bencher) {
         let env = Env::new();
         let expression = (1..=100).fold(

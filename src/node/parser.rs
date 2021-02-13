@@ -4,13 +4,9 @@
 use std::borrow::Cow;
 
 use crate::{
-    env::StackOffset,
-    expression::{AstNodePackage, Expression, NodeType},
+    expression::{AstNodePackage, Expression},
     node::{
-        core::{
-            ApplicationNode, ClosureNode, CoreNode, FunctionNode, ReferenceNode, StringValue,
-            ValueNode,
-        },
+        core::{ApplicationNode, CoreNode, FunctionNode, ReferenceNode, StringValue, ValueNode},
         Node,
     },
 };
@@ -317,7 +313,6 @@ fn consume_lambda_expression<'a>(
                                             remaining: input,
                                         }) => {
                                             let input = consume_whitespace(input);
-                                            let captures = get_free_variables(&body, arity);
                                             match consume_char(')', input) {
                                                 None => Err(format!(
                                                     "Expected ')', received '{}'",
@@ -326,21 +321,11 @@ fn consume_lambda_expression<'a>(
                                                         .unwrap_or(String::from(EOF))
                                                 )),
                                                 Some(input) => Ok(Some(ParserOutput {
-                                                    parsed: match captures {
-                                                        Some(captures) => Expression::new(
-                                                            Node::Core(CoreNode::Closure(
-                                                                ClosureNode::new(
-                                                                    captures,
-                                                                    FunctionNode::new(arity, body),
-                                                                ),
-                                                            )),
-                                                        ),
-                                                        None => Expression::new(Node::Core(
-                                                            CoreNode::Function(FunctionNode::new(
-                                                                arity, body,
-                                                            )),
+                                                    parsed: Expression::new(Node::Core(
+                                                        CoreNode::Function(FunctionNode::new(
+                                                            arity, body,
                                                         )),
-                                                    },
+                                                    )),
                                                     remaining: input,
                                                 })),
                                             }
@@ -358,48 +343,6 @@ fn consume_lambda_expression<'a>(
 
 fn consume_fn_arg_names<'a>(input: &'a str) -> ParserResult<ParserOutput<'a, Vec<&'a str>>> {
     consume_fn_arg_names_iter(input, Vec::new())
-}
-
-fn get_free_variables(expression: &Expression<Node>, arity: usize) -> Option<Vec<StackOffset>> {
-    let mut results = get_free_variables_iter(expression, arity, Vec::new());
-    if results.len() == 0 {
-        return None;
-    }
-    results.sort_unstable();
-    results.dedup();
-    Some(results)
-}
-
-fn get_free_variables_iter(
-    expression: &Expression<Node>,
-    arity: usize,
-    mut results: Vec<StackOffset>,
-) -> Vec<StackOffset> {
-    match expression.value() {
-        Node::Core(CoreNode::Reference(node)) => {
-            let offset = node.offset();
-            if offset >= arity {
-                results.push(offset - arity);
-            }
-            results
-        }
-        Node::Core(CoreNode::Closure(node)) => {
-            results.extend(
-                node.captures()
-                    .iter()
-                    .filter(|offset| **offset >= arity)
-                    .map(|offset| offset - arity),
-            );
-            results
-        }
-        Node::Core(CoreNode::Function(_)) => results,
-        node => node
-            .expressions()
-            .iter()
-            .fold(results, |results, expression| {
-                get_free_variables_iter(expression, arity, results)
-            }),
-    }
 }
 
 fn consume_fn_arg_names_iter<'a>(
@@ -466,17 +409,7 @@ fn consume_s_expression<'a>(
                             }
                             ApplicationTarget::Expression(target) => Ok(Some(ParserOutput {
                                 parsed: Expression::new(Node::Core(CoreNode::Application(
-                                    ApplicationNode::new(
-                                        match target.value() {
-                                            Node::Core(CoreNode::Closure(node)) => {
-                                                Expression::new(Node::Core(CoreNode::Function(
-                                                    node.function().clone(),
-                                                )))
-                                            }
-                                            _ => target,
-                                        },
-                                        args,
-                                    ),
+                                    ApplicationNode::new(target, args),
                                 ))),
                                 remaining: input,
                             })),
@@ -643,8 +576,7 @@ mod tests {
         node::{
             arithmetic::{AbsNode, AddNode, ArithmeticNode},
             core::{
-                ApplicationNode, ClosureNode, CoreNode, FunctionNode, ReferenceNode, StringValue,
-                ValueNode,
+                ApplicationNode, CoreNode, FunctionNode, ReferenceNode, StringValue, ValueNode,
             },
             Node,
         },
@@ -919,8 +851,8 @@ mod tests {
                         Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3)))),
                         Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(4)))),
                     )))),
-                )
-            ))))
+                ),
+            )))),
         );
         assert_eq!(
             parse("(lambda (foo) (add foo 4))"),
@@ -931,8 +863,8 @@ mod tests {
                         Expression::new(Node::Core(CoreNode::Reference(ReferenceNode::new(0)))),
                         Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(4),)))
                     )))),
-                )
-            ))))
+                ),
+            )))),
         );
         assert_eq!(
             parse("(lambda (foo bar) (add foo bar))"),
@@ -943,8 +875,8 @@ mod tests {
                         Expression::new(Node::Core(CoreNode::Reference(ReferenceNode::new(1)))),
                         Expression::new(Node::Core(CoreNode::Reference(ReferenceNode::new(0))))
                     )))),
-                )
-            ))))
+                ),
+            )))),
         );
         assert_eq!(
             parse("(lambda (first) (lambda (second) (lambda (foo bar) (add foo bar))))",),
@@ -965,7 +897,7 @@ mod tests {
                             )))),
                         )))),
                     )))),
-                )
+                ),
             )))),
         );
     }
@@ -977,29 +909,23 @@ mod tests {
             Ok(Expression::new(Node::Core(CoreNode::Function(
                 FunctionNode::new(
                     1,
-                    Expression::new(Node::Core(CoreNode::Closure(ClosureNode::new(
-                        vec![0],
-                        FunctionNode::new(
-                            0,
-                            Expression::new(Node::Core(CoreNode::Reference(ReferenceNode::new(0))))
-                        ),
-                    )))),
-                )
-            ))))
+                    Expression::new(Node::Core(CoreNode::Function(FunctionNode::new(
+                        0,
+                        Expression::new(Node::Core(CoreNode::Reference(ReferenceNode::new(0))))
+                    ),))),
+                ),
+            )))),
         );
         assert_eq!(
             parse("(lambda (foo bar) (lambda () foo))"),
             Ok(Expression::new(Node::Core(CoreNode::Function(
                 FunctionNode::new(
                     2,
-                    Expression::new(Node::Core(CoreNode::Closure(ClosureNode::new(
-                        vec![1],
-                        FunctionNode::new(
-                            0,
-                            Expression::new(Node::Core(CoreNode::Reference(ReferenceNode::new(1))))
-                        ),
-                    )))),
-                )
+                    Expression::new(Node::Core(CoreNode::Function(FunctionNode::new(
+                        0,
+                        Expression::new(Node::Core(CoreNode::Reference(ReferenceNode::new(1))))
+                    ),))),
+                ),
             ))))
         );
         assert_eq!(
@@ -1007,14 +933,11 @@ mod tests {
             Ok(Expression::new(Node::Core(CoreNode::Function(
                 FunctionNode::new(
                     2,
-                    Expression::new(Node::Core(CoreNode::Closure(ClosureNode::new(
-                        vec![0],
-                        FunctionNode::new(
-                            0,
-                            Expression::new(Node::Core(CoreNode::Reference(ReferenceNode::new(0))))
-                        ),
-                    )))),
-                )
+                    Expression::new(Node::Core(CoreNode::Function(FunctionNode::new(
+                        0,
+                        Expression::new(Node::Core(CoreNode::Reference(ReferenceNode::new(0))))
+                    ),))),
+                ),
             )))),
         );
         assert_eq!(
@@ -1022,33 +945,24 @@ mod tests {
             Ok(Expression::new(Node::Core(CoreNode::Function(
                 FunctionNode::new(
                     2,
-                    Expression::new(Node::Core(CoreNode::Closure(ClosureNode::new(
-                        vec![1],
-                        FunctionNode::new(
-                            1,
-                            Expression::new(Node::Arithmetic(ArithmeticNode::Add(AddNode::new(
-                                Expression::new(Node::Core(CoreNode::Reference(
-                                    ReferenceNode::new(2)
-                                ))),
-                                Expression::new(Node::Core(CoreNode::Reference(
-                                    ReferenceNode::new(0)
-                                ))),
-                            ))))
-                        ),
-                    )))),
-                )
+                    Expression::new(Node::Core(CoreNode::Function(FunctionNode::new(
+                        1,
+                        Expression::new(Node::Arithmetic(ArithmeticNode::Add(AddNode::new(
+                            Expression::new(Node::Core(CoreNode::Reference(ReferenceNode::new(2)))),
+                            Expression::new(Node::Core(CoreNode::Reference(ReferenceNode::new(0)))),
+                        ))))
+                    ),))),
+                ),
             ))))
         );
         assert_eq!(
             parse("(lambda (first second third) (lambda (fourth fifth) (lambda (sixth) (add first (add second (add third (add fourth (add fifth sixth))))))))"),
             Ok(Expression::new(Node::Core(CoreNode::Function(FunctionNode::new(
                 3,
-                Expression::new(Node::Core(CoreNode::Closure(ClosureNode::new(
-                    vec![0, 1, 2],
+                Expression::new(Node::Core(CoreNode::Function(
                     FunctionNode::new(
                         2,
-                        Expression::new(Node::Core(CoreNode::Closure(ClosureNode::new(
-                            vec![0, 1, 2, 3, 4],
+                        Expression::new(Node::Core(CoreNode::Function(
                             FunctionNode::new(
                                 1,
                                 Expression::new(Node::Arithmetic(ArithmeticNode::Add(AddNode::new(
@@ -1068,9 +982,9 @@ mod tests {
                                     )))),
                                 )))),
                             ),
-                        )))),
+                        ))),
                     ),
-                )))),
+                ))),
             ))))),
         );
         assert_eq!(
@@ -1078,22 +992,14 @@ mod tests {
             Ok(Expression::new(Node::Core(CoreNode::Function(
                 FunctionNode::new(
                     1,
-                    Expression::new(Node::Core(CoreNode::Closure(ClosureNode::new(
-                        vec![0],
-                        FunctionNode::new(
+                    Expression::new(Node::Core(CoreNode::Function(FunctionNode::new(
+                        0,
+                        Expression::new(Node::Core(CoreNode::Function(FunctionNode::new(
                             0,
-                            Expression::new(Node::Core(CoreNode::Closure(ClosureNode::new(
-                                vec![0],
-                                FunctionNode::new(
-                                    0,
-                                    Expression::new(Node::Core(CoreNode::Reference(
-                                        ReferenceNode::new(0)
-                                    ))),
-                                ),
-                            )))),
-                        ),
+                            Expression::new(Node::Core(CoreNode::Reference(ReferenceNode::new(0)))),
+                        ),))),
                     )))),
-                )
+                ),
             )))),
         );
     }
@@ -1159,35 +1065,6 @@ mod tests {
                     )))],
                 )
             )))),
-        );
-    }
-
-    #[test]
-    fn immediately_invoked_closures() {
-        assert_eq!(
-            parse("(lambda (foo bar) ((lambda (one two) (add one foo)) 1 2))",),
-            Ok(Expression::new(Node::Core(CoreNode::Function(
-                FunctionNode::new(
-                    2,
-                    Expression::new(Node::Core(CoreNode::Application(ApplicationNode::new(
-                        Expression::new(Node::Core(CoreNode::Function(FunctionNode::new(
-                            2,
-                            Expression::new(Node::Arithmetic(ArithmeticNode::Add(AddNode::new(
-                                Expression::new(Node::Core(CoreNode::Reference(
-                                    ReferenceNode::new(1)
-                                ))),
-                                Expression::new(Node::Core(CoreNode::Reference(
-                                    ReferenceNode::new(3)
-                                ))),
-                            ))))
-                        )))),
-                        vec![
-                            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(1)))),
-                            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(2)))),
-                        ]
-                    )))),
-                )
-            ))))
         );
     }
 

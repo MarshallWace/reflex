@@ -10,7 +10,6 @@ use crate::{
 };
 
 pub mod application;
-pub mod closure;
 pub mod error;
 pub mod function;
 pub mod pending;
@@ -18,9 +17,8 @@ pub mod reference;
 pub mod value;
 
 pub use self::application::{ApplicationNode, BoundArgumentNode};
-pub use self::closure::{BoundFunctionNode, ClosureNode};
 pub use self::error::ErrorNode;
-pub use self::function::FunctionNode;
+pub use self::function::{BoundFunctionNode, FunctionNode};
 pub use self::pending::PendingNode;
 pub use self::reference::ReferenceNode;
 pub use self::value::{StringValue, ValueNode};
@@ -30,7 +28,6 @@ pub enum CoreNode {
     Application(ApplicationNode),
     BoundArgument(BoundArgumentNode),
     BoundFunction(BoundFunctionNode),
-    Closure(ClosureNode),
     Function(FunctionNode),
     Pending(PendingNode),
     Reference(ReferenceNode),
@@ -52,7 +49,6 @@ impl NodeType<Node> for CoreNode {
             Self::Application(node) => node.expressions(),
             Self::BoundArgument(node) => node.expressions(),
             Self::BoundFunction(node) => node.expressions(),
-            Self::Closure(node) => node.expressions(),
             Self::Error(node) => node.expressions(),
             Self::Function(node) => node.expressions(),
             Self::Pending(node) => node.expressions(),
@@ -60,17 +56,16 @@ impl NodeType<Node> for CoreNode {
             Self::Value(node) => node.expressions(),
         }
     }
-    fn is_static(&self) -> bool {
+    fn capture_depth(&self) -> usize {
         match self {
-            Self::Application(node) => node.is_static(),
-            Self::BoundArgument(node) => node.is_static(),
-            Self::BoundFunction(node) => node.is_static(),
-            Self::Closure(node) => node.is_static(),
-            Self::Error(node) => node.is_static(),
-            Self::Function(node) => node.is_static(),
-            Self::Pending(node) => node.is_static(),
-            Self::Reference(node) => node.is_static(),
-            Self::Value(node) => node.is_static(),
+            Self::Application(node) => node.capture_depth(),
+            Self::BoundArgument(node) => node.capture_depth(),
+            Self::BoundFunction(node) => node.capture_depth(),
+            Self::Error(node) => node.capture_depth(),
+            Self::Function(node) => node.capture_depth(),
+            Self::Pending(node) => node.capture_depth(),
+            Self::Reference(node) => node.capture_depth(),
+            Self::Value(node) => node.capture_depth(),
         }
     }
     fn evaluate(&self, env: &Env<Node>) -> Option<Expression<Node>> {
@@ -78,7 +73,6 @@ impl NodeType<Node> for CoreNode {
             Self::Application(node) => node.evaluate(env),
             Self::BoundArgument(node) => node.evaluate(env),
             Self::BoundFunction(node) => node.evaluate(env),
-            Self::Closure(node) => node.evaluate(env),
             Self::Error(node) => node.evaluate(env),
             Self::Function(node) => node.evaluate(env),
             Self::Pending(node) => node.evaluate(env),
@@ -93,7 +87,6 @@ impl fmt::Display for CoreNode {
             Self::Application(node) => fmt::Display::fmt(node, f),
             Self::BoundArgument(node) => fmt::Display::fmt(node, f),
             Self::BoundFunction(node) => fmt::Display::fmt(node, f),
-            Self::Closure(node) => fmt::Display::fmt(node, f),
             Self::Error(node) => fmt::Display::fmt(node, f),
             Self::Function(node) => fmt::Display::fmt(node, f),
             Self::Pending(node) => fmt::Display::fmt(node, f),
@@ -108,7 +101,6 @@ impl fmt::Debug for CoreNode {
             Self::Application(node) => fmt::Debug::fmt(node, f),
             Self::BoundArgument(node) => fmt::Debug::fmt(node, f),
             Self::BoundFunction(node) => fmt::Debug::fmt(node, f),
-            Self::Closure(node) => fmt::Debug::fmt(node, f),
             Self::Error(node) => fmt::Debug::fmt(node, f),
             Self::Function(node) => fmt::Debug::fmt(node, f),
             Self::Pending(node) => fmt::Debug::fmt(node, f),

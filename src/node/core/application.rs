@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use std::{fmt, iter::once, rc::Rc};
+use std::{fmt, iter::once};
 
 use crate::{
     env::Env,
@@ -42,9 +42,8 @@ impl Evaluate1 for ApplicationNode {
                 apply_function(arity, body, &self.args, env, None)
             }
             Node::Core(CoreNode::BoundFunction(node)) => {
-                let function = node.function();
-                let arity = function.arity();
-                let body = function.body();
+                let arity = node.arity();
+                let body = node.body();
                 let captured_env = node.env();
                 apply_function(arity, body, &self.args, env, Some(captured_env))
             }
@@ -79,7 +78,7 @@ fn apply_function(
     arity: usize,
     body: &Expression<Node>,
     args: &Vec<Expression<Node>>,
-    env: &Env<Node>,
+    arg_env: &Env<Node>,
     captured_env: Option<&Env<Node>>,
 ) -> Expression<Node> {
     if args.len() != arity {
@@ -90,22 +89,24 @@ fn apply_function(
         )))));
     }
     if arity == 0 {
-        return body.evaluate(match captured_env {
-            Some(captured_env) => captured_env,
-            None => env,
-        });
+        return match captured_env {
+            Some(captured_env) => body.evaluate(captured_env),
+            None => body.evaluate(&Env::new()),
+        };
     }
+    let args = args.iter().map(|arg| match arg.capture_depth() {
+        0 => Expression::clone(arg),
+        depth => match arg.value() {
+            Node::Core(CoreNode::Reference(node)) => Expression::clone(arg_env.get(node.offset())),
+            _ => Expression::new(Node::Core(CoreNode::BoundArgument(BoundArgumentNode {
+                target: Expression::clone(arg),
+                env: arg_env.capture(depth),
+            }))),
+        },
+    });
     let inner_env = match captured_env {
-        Some(captured_env) => {
-            let arg_env = Rc::new(env.capture());
-            captured_env.extend(args.iter().map(|arg| {
-                Expression::new(Node::Core(CoreNode::BoundArgument(BoundArgumentNode {
-                    target: Expression::clone(arg),
-                    env: Rc::clone(&arg_env),
-                })))
-            }))
-        }
-        None => env.extend(args.iter().map(Expression::clone)),
+        Some(captured_env) => captured_env.extend(args),
+        None => Env::from(args),
     };
     body.evaluate(&inner_env)
 }
@@ -113,14 +114,17 @@ fn apply_function(
 #[derive(PartialEq, Clone)]
 pub struct BoundArgumentNode {
     target: Expression<Node>,
-    env: Rc<Env<Node>>,
+    env: Env<Node>,
 }
 impl NodeType<Node> for BoundArgumentNode {
     fn expressions(&self) -> Vec<&Expression<Node>> {
-        self.target.value().expressions()
+        vec![&self.target]
     }
     fn evaluate(&self, _env: &Env<Node>) -> Option<Expression<Node>> {
         Some(self.target.evaluate(&self.env))
+    }
+    fn capture_depth(&self) -> usize {
+        0
     }
 }
 impl fmt::Display for BoundArgumentNode {
@@ -190,6 +194,29 @@ mod tests {
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3 + 4 + 5))))
+        );
+    }
+
+    #[test]
+    fn argument_scope() {
+        let env = Env::new();
+        let expression = parser::parse(
+            "((lambda (first second third) ((lambda (foo bar) (add foo bar)) second third)) 3 4 5)",
+        )
+        .unwrap();
+        let result = expression.evaluate(&env);
+        assert_eq!(
+            result,
+            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(4 + 5)))),
+        );
+        let env = Env::new();
+        let expression = parser::parse(
+            "((lambda (first second third) ((lambda (one two) ((lambda (foo bar) (add foo bar)) one two)) first third)) 3 4 5)",
+        ).unwrap();
+        let result = expression.evaluate(&env);
+        assert_eq!(
+            result,
+            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3 + 5)))),
         );
     }
 
