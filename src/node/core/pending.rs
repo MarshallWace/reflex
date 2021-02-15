@@ -17,7 +17,7 @@ impl PendingNode {
     }
 }
 impl AstNode<Node> for PendingNode {
-    fn factory(args: &Vec<Expression<Node>>) -> NodeFactoryResult<Self> {
+    fn factory(args: &[Expression<Node>]) -> NodeFactoryResult<Self> {
         if args.len() != 0 {
             return Err(String::from("Invalid number of arguments"));
         }

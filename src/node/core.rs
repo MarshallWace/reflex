@@ -35,7 +35,7 @@ pub enum CoreNode {
     Value(ValueNode),
 }
 impl AstNodePackage<Node> for CoreNode {
-    fn factory(type_name: &str, args: &Vec<Expression<Node>>) -> Option<NodeFactoryResult<Self>> {
+    fn factory(type_name: &str, args: &[Expression<Node>]) -> Option<NodeFactoryResult<Self>> {
         match type_name {
             "error" => Some(ErrorNode::factory(args).map(Self::Error)),
             "pending" => Some(PendingNode::factory(args).map(Self::Pending)),

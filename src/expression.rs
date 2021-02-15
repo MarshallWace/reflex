@@ -15,16 +15,16 @@ pub trait NodeType<T: NodeType<T>>: PartialEq + Clone + fmt::Display + fmt::Debu
     fn evaluate(&self, env: &Env<T>) -> Option<Expression<T>>;
 }
 
-pub type NodeFactory<T, V> = dyn Fn(&Vec<Expression<T>>) -> Result<V, String>;
+pub type NodeFactory<T, V> = dyn Fn(&[Expression<T>]) -> Result<V, String>;
 pub type NodeFactoryError = String;
 pub type NodeFactoryResult<T> = Result<T, NodeFactoryError>;
 
 pub trait AstNodePackage<T: NodeType<T>>: NodeType<T> {
-    fn factory(type_name: &str, args: &Vec<Expression<T>>) -> Option<NodeFactoryResult<Self>>;
+    fn factory(type_name: &str, args: &[Expression<T>]) -> Option<NodeFactoryResult<Self>>;
 }
 
 pub trait AstNode<T: NodeType<T>>: NodeType<T> {
-    fn factory(args: &Vec<Expression<T>>) -> NodeFactoryResult<Self>;
+    fn factory(args: &[Expression<T>]) -> NodeFactoryResult<Self>;
 }
 
 #[derive(PartialEq, Clone)]

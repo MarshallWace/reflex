@@ -30,7 +30,7 @@ impl ConsNode {
     }
 }
 impl AstNode<Node> for ConsNode {
-    fn factory(args: &Vec<Expression<Node>>) -> NodeFactoryResult<Self> {
+    fn factory(args: &[Expression<Node>]) -> NodeFactoryResult<Self> {
         if args.len() != 2 {
             return Err(String::from("Invalid number of arguments"));
         }
@@ -62,7 +62,7 @@ impl IsPairNode {
     pub fn new(target: Expression<Node>) -> Self {
         IsPairNode { target }
     }
-    pub fn factory(args: &Vec<Expression<Node>>) -> NodeFactoryResult<Self> {
+    pub fn factory(args: &[Expression<Node>]) -> NodeFactoryResult<Self> {
         if args.len() != 1 {
             return Err(String::from("Invalid number of arguments"));
         }

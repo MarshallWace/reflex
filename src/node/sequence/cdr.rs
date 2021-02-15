@@ -23,7 +23,7 @@ impl CdrNode {
     }
 }
 impl AstNode<Node> for CdrNode {
-    fn factory(args: &Vec<Expression<Node>>) -> NodeFactoryResult<Self> {
+    fn factory(args: &[Expression<Node>]) -> NodeFactoryResult<Self> {
         if args.len() != 1 {
             return Err(String::from("Invalid number of arguments"));
         }

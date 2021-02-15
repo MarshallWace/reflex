@@ -31,7 +31,7 @@ pub enum Node {
     Arithmetic(ArithmeticNode),
 }
 impl AstNodePackage<Node> for Node {
-    fn factory(type_name: &str, args: &Vec<Expression<Node>>) -> Option<NodeFactoryResult<Self>> {
+    fn factory(type_name: &str, args: &[Expression<Node>]) -> Option<NodeFactoryResult<Self>> {
         None.or_else(|| wrap(CoreNode::factory, Self::Core)(type_name, args))
             .or_else(|| wrap(LogicNode::factory, Self::Logic)(type_name, args))
             .or_else(|| wrap(SequenceNode::factory, Self::Sequence)(type_name, args))
@@ -88,12 +88,12 @@ impl fmt::Debug for Node {
 fn wrap<
     T: NodeType<T>,
     V: NodeType<T>,
-    F: Fn(&str, &Vec<Expression<T>>) -> Option<NodeFactoryResult<V>>,
+    F: Fn(&str, &[Expression<T>]) -> Option<NodeFactoryResult<V>>,
     W: Fn(V) -> T,
 >(
     factory: F,
     wrapper: W,
-) -> impl Fn(&str, &Vec<Expression<T>>) -> Option<NodeFactoryResult<T>> {
+) -> impl Fn(&str, &[Expression<T>]) -> Option<NodeFactoryResult<T>> {
     move |type_name, args| match factory(type_name, args) {
         Some(Ok(result)) => Some(Ok(wrapper(result))),
         Some(Err(err)) => Some(Err(err)),

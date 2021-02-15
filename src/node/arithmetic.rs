@@ -42,7 +42,7 @@ pub enum ArithmeticNode {
     Subtract(SubtractNode),
 }
 impl AstNodePackage<Node> for ArithmeticNode {
-    fn factory(type_name: &str, args: &Vec<Expression<Node>>) -> Option<NodeFactoryResult<Self>> {
+    fn factory(type_name: &str, args: &[Expression<Node>]) -> Option<NodeFactoryResult<Self>> {
         match type_name {
             "abs" => Some(AbsNode::factory(args).map(Self::Abs)),
             "add" => Some(AddNode::factory(args).map(Self::Add)),

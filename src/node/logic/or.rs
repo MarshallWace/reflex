@@ -23,7 +23,7 @@ impl OrNode {
     }
 }
 impl AstNode<Node> for OrNode {
-    fn factory(args: &Vec<Expression<Node>>) -> NodeFactoryResult<Self> {
+    fn factory(args: &[Expression<Node>]) -> NodeFactoryResult<Self> {
         if args.len() != 2 {
             return Err(String::from("Invalid number of arguments"));
         }

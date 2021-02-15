@@ -36,7 +36,7 @@ impl ListNode {
     }
 }
 impl AstNode<Node> for ListNode {
-    fn factory(args: &Vec<Expression<Node>>) -> NodeFactoryResult<Self> {
+    fn factory(args: &[Expression<Node>]) -> NodeFactoryResult<Self> {
         let args = &mut args.iter().map(Expression::clone);
         let items = args.collect::<Vec<_>>();
         Ok(Self::new(items))
@@ -68,7 +68,7 @@ impl IsListNode {
     pub fn new(target: Expression<Node>) -> Self {
         IsListNode { target }
     }
-    pub fn factory(args: &Vec<Expression<Node>>) -> NodeFactoryResult<Self> {
+    pub fn factory(args: &[Expression<Node>]) -> NodeFactoryResult<Self> {
         let args = &mut args.iter().map(Expression::clone);
         if args.len() != 1 {
             return Err(String::from("Invalid number of arguments"));

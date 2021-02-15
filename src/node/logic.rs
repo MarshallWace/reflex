@@ -27,7 +27,7 @@ pub enum LogicNode {
     Or(OrNode),
 }
 impl AstNodePackage<Node> for LogicNode {
-    fn factory(type_name: &str, args: &Vec<Expression<Node>>) -> Option<NodeFactoryResult<Self>> {
+    fn factory(type_name: &str, args: &[Expression<Node>]) -> Option<NodeFactoryResult<Self>> {
         match type_name {
             "and" => Some(AndNode::factory(args).map(Self::And)),
             "if" => Some(ConditionalNode::factory(args).map(Self::Conditional)),

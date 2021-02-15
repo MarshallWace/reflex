@@ -33,7 +33,7 @@ pub enum SequenceNode {
     List(ListNode),
 }
 impl AstNodePackage<Node> for SequenceNode {
-    fn factory(type_name: &str, args: &Vec<Expression<Node>>) -> Option<NodeFactoryResult<Self>> {
+    fn factory(type_name: &str, args: &[Expression<Node>]) -> Option<NodeFactoryResult<Self>> {
         match type_name {
             "apply" => Some(ApplyNode::factory(args).map(Self::Apply)),
             "car" => Some(CarNode::factory(args).map(Self::Car)),
