@@ -5,7 +5,7 @@ use std::fmt;
 
 use crate::{
     env::Env,
-    expression::{AstNode, Expression, NodeFactoryResult, NodeType},
+    expression::{AstNode, EvaluationResult, Expression, NodeFactoryResult, NodeType},
     node::{
         core::{CoreNode, ErrorNode},
         sequence::SequenceNode,
@@ -36,7 +36,7 @@ impl NodeType<Node> for CdrNode {
     fn expressions(&self) -> Vec<&Expression<Node>> {
         vec![&self.target]
     }
-    fn evaluate(&self, env: &Env<Node>) -> Option<Expression<Node>> {
+    fn evaluate(&self, env: &Env<Node>) -> Option<EvaluationResult<Node>> {
         Evaluate1::evaluate(self, env)
     }
 }
@@ -75,20 +75,20 @@ mod tests {
     fn cdr_expressions() {
         let env = Env::new();
         let expression = parser::parse("(cdr (cons 3 4))").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(4)))),
         );
         let expression = parser::parse("(cdr (cons (add 1 2) (add 3 4)))").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3 + 4)))),
         );
         let expression =
             parser::parse("(cdr ((lambda (foo) foo) (cons (add 1 2) (add 3 4))))").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3 + 4)))),
@@ -99,7 +99,7 @@ mod tests {
     fn invalid_cdr_expressions() {
         let env = Env::new();
         let expression = parser::parse("(cdr 3)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(

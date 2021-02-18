@@ -5,7 +5,7 @@ use std::fmt;
 
 use crate::{
     env::Env,
-    expression::{AstNode, Expression, NodeFactoryResult, NodeType},
+    expression::{AstNode, EvaluationResult, Expression, NodeFactoryResult, NodeType},
     node::{
         core::{CoreNode, ErrorNode, ValueNode},
         Evaluate2, Node,
@@ -37,7 +37,7 @@ impl NodeType<Node> for SubtractNode {
     fn expressions(&self) -> Vec<&Expression<Node>> {
         vec![&self.left, &self.right]
     }
-    fn evaluate(&self, env: &Env<Node>) -> Option<Expression<Node>> {
+    fn evaluate(&self, env: &Env<Node>) -> Option<EvaluationResult<Node>> {
         Evaluate2::evaluate(self, env)
     }
 }
@@ -90,50 +90,50 @@ mod tests {
     fn subtraction_expressions() {
         let env = Env::new();
         let expression = parser::parse("(subtract 0 0)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(0 - 0))))
         );
         let expression = parser::parse("(subtract 3 4)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3 - 4))))
         );
         let expression = parser::parse("(subtract -3 4)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(-3 - 4))))
         );
         let expression = parser::parse("(subtract 3 -4)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3 - -4))))
         );
         let expression = parser::parse("(subtract -3 -4)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(-3 - -4))))
         );
 
         let expression = parser::parse("(subtract 0.0 0.0)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Float(0.0 - 0.0))))
         );
         let expression = parser::parse("(subtract 2.718 3.142)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Float(2.718 - 3.142))))
         );
         let expression = parser::parse("(subtract -2.718 3.142)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Float(
@@ -141,7 +141,7 @@ mod tests {
             ))))
         );
         let expression = parser::parse("(subtract 2.718 -3.142)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Float(
@@ -149,7 +149,7 @@ mod tests {
             ))))
         );
         let expression = parser::parse("(subtract -2.718 -3.142)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Float(
@@ -162,7 +162,7 @@ mod tests {
     fn invalid_subtraction_expression_operands() {
         let env = Env::new();
         let expression = parser::parse("(subtract 3 3.142)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
@@ -170,7 +170,7 @@ mod tests {
             ))))
         );
         let expression = parser::parse("(subtract 3.142 3)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env).expression;
 
         assert_eq!(
             result,
@@ -179,7 +179,7 @@ mod tests {
             ))))
         );
         let expression = parser::parse("(subtract 3 null)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
@@ -187,7 +187,7 @@ mod tests {
             ))))
         );
         let expression = parser::parse("(subtract 3 false)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
@@ -195,7 +195,7 @@ mod tests {
             ))))
         );
         let expression = parser::parse("(subtract 3 \"3\")").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
@@ -204,7 +204,7 @@ mod tests {
         );
 
         let expression = parser::parse("(subtract null 3)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
@@ -212,7 +212,7 @@ mod tests {
             ))))
         );
         let expression = parser::parse("(subtract false 3)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
@@ -220,7 +220,7 @@ mod tests {
             ))))
         );
         let expression = parser::parse("(subtract \"3\" 3)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
@@ -229,7 +229,7 @@ mod tests {
         );
 
         let expression = parser::parse("(subtract 3.142 null)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
@@ -237,7 +237,7 @@ mod tests {
             ))))
         );
         let expression = parser::parse("(subtract 3.142 false)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
@@ -245,7 +245,7 @@ mod tests {
             ))))
         );
         let expression = parser::parse("(subtract 3.142 \"3\")").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
@@ -254,7 +254,7 @@ mod tests {
         );
 
         let expression = parser::parse("(subtract null 3.142)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
@@ -262,7 +262,7 @@ mod tests {
             ))))
         );
         let expression = parser::parse("(subtract false 3.142)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
@@ -270,7 +270,7 @@ mod tests {
             ))))
         );
         let expression = parser::parse("(subtract \"3\" 3.142)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(

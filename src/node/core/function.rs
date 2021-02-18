@@ -5,7 +5,7 @@ use std::fmt;
 
 use crate::{
     env::Env,
-    expression::{AstNode, Expression, NodeFactoryResult, NodeType},
+    expression::{AstNode, EvaluationResult, Expression, NodeFactoryResult, NodeType},
     node::{
         core::{CoreNode, ValueNode},
         Evaluate1, Node,
@@ -41,16 +41,17 @@ impl NodeType<Node> for FunctionNode {
             depth - arity
         }
     }
-    fn evaluate(&self, env: &Env<Node>) -> Option<Expression<Node>> {
+    fn evaluate(&self, env: &Env<Node>) -> Option<EvaluationResult<Node>> {
         match self.capture_depth() {
             0 => None,
-            depth => Some(Expression::new(Node::Core(CoreNode::BoundFunction(
-                BoundFunctionNode {
+            depth => Some(EvaluationResult::new(
+                Expression::new(Node::Core(CoreNode::BoundFunction(BoundFunctionNode {
                     arity: self.arity,
                     body: Expression::clone(&self.body),
                     env: env.capture(depth),
-                },
-            )))),
+                }))),
+                None,
+            )),
         }
     }
 }
@@ -89,7 +90,7 @@ impl NodeType<Node> for BoundFunctionNode {
     fn capture_depth(&self) -> usize {
         0
     }
-    fn evaluate(&self, _env: &Env<Node>) -> Option<Expression<Node>> {
+    fn evaluate(&self, _env: &Env<Node>) -> Option<EvaluationResult<Node>> {
         None
     }
 }
@@ -127,7 +128,7 @@ impl NodeType<Node> for IsFunctionNode {
     fn expressions(&self) -> Vec<&Expression<Node>> {
         vec![&self.target]
     }
-    fn evaluate(&self, env: &Env<Node>) -> Option<Expression<Node>> {
+    fn evaluate(&self, env: &Env<Node>) -> Option<EvaluationResult<Node>> {
         Evaluate1::evaluate(self, env)
     }
 }
@@ -168,7 +169,7 @@ mod tests {
     fn functions() {
         let env = Env::new();
         let expression = parser::parse("(lambda (foo bar) (add foo bar))").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Function(FunctionNode::new(
@@ -187,7 +188,7 @@ mod tests {
         let expression =
             parser::parse("((lambda (first second third) (lambda () (add second third))) 3 4 5)")
                 .unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::BoundFunction(BoundFunctionNode {
@@ -204,7 +205,7 @@ mod tests {
         );
         let expression =
             parser::parse("((lambda (foo bar) (lambda (baz) (add foo baz))) 3 4)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::BoundFunction(BoundFunctionNode {
@@ -225,92 +226,92 @@ mod tests {
     fn is_function_expressions() {
         let env = Env::new();
         let expression = parser::parse("(function? (lambda () 3))").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(true))))
         );
         let expression = parser::parse("(function? ((lambda (foo) (lambda () foo)) 3))").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(true))))
         );
 
         let expression = parser::parse("(function? null)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
         );
         let expression = parser::parse("(function? true)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
         );
         let expression = parser::parse("(function? false)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
         );
         let expression = parser::parse("(function? 0)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
         );
         let expression = parser::parse("(function? -0)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
         );
         let expression = parser::parse("(function? 3)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
         );
         let expression = parser::parse("(function? -3)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
         );
         let expression = parser::parse("(function? 0.0)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
         );
         let expression = parser::parse("(function? -0.0)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
         );
         let expression = parser::parse("(function? 3.142)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
         );
         let expression = parser::parse("(function? -3.142)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
         );
         let expression = parser::parse("(function? \"\")").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
         );
         let expression = parser::parse("(function? \"foo\")").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))

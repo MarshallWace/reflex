@@ -5,7 +5,7 @@ use std::fmt;
 
 use crate::{
     env::Env,
-    expression::{AstNodePackage, Expression, NodeFactoryResult, NodeType},
+    expression::{AstNodePackage, EvaluationResult, Expression, NodeFactoryResult, NodeType},
 };
 
 mod evaluate;
@@ -55,7 +55,7 @@ impl NodeType<Node> for Node {
             Self::Arithmetic(node) => node.capture_depth(),
         }
     }
-    fn evaluate(&self, env: &Env<Node>) -> Option<Expression<Node>> {
+    fn evaluate(&self, env: &Env<Node>) -> Option<EvaluationResult<Node>> {
         match self {
             Self::Core(node) => node.evaluate(env),
             Self::Logic(node) => node.evaluate(env),

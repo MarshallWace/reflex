@@ -5,7 +5,7 @@ use std::fmt;
 
 use crate::{
     env::Env,
-    expression::{AstNode, Expression, NodeFactoryResult, NodeType},
+    expression::{AstNode, EvaluationResult, Expression, NodeFactoryResult, NodeType},
     node::{
         core::{CoreNode, ErrorNode},
         sequence::SequenceNode,
@@ -36,7 +36,7 @@ impl NodeType<Node> for CarNode {
     fn expressions(&self) -> Vec<&Expression<Node>> {
         vec![&self.target]
     }
-    fn evaluate(&self, env: &Env<Node>) -> Option<Expression<Node>> {
+    fn evaluate(&self, env: &Env<Node>) -> Option<EvaluationResult<Node>> {
         Evaluate1::evaluate(self, env)
     }
 }
@@ -78,26 +78,26 @@ mod tests {
     fn car_expressions() {
         let env = Env::new();
         let expression = parser::parse("(car (cons 3 4))").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3)))),
         );
         let expression = parser::parse("(car (cons (add 1 2) (add 3 4)))").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(1 + 2)))),
         );
         let expression =
             parser::parse("(car ((lambda (foo) foo) (cons (add 1 2) (add 3 4))))").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(1 + 2)))),
         );
         let expression = parser::parse("(car (list 3 4 5))").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3)))),
@@ -108,7 +108,7 @@ mod tests {
     fn invalid_car_expressions() {
         let env = Env::new();
         let expression = parser::parse("(car 3)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
@@ -116,7 +116,7 @@ mod tests {
             )))),
         );
         let expression = parser::parse("(car (list))").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(

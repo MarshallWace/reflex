@@ -5,7 +5,9 @@ use std::fmt;
 
 use crate::{
     env::Env,
-    expression::{AstNode, AstNodePackage, Expression, NodeFactoryResult, NodeType},
+    expression::{
+        AstNode, AstNodePackage, EvaluationResult, Expression, NodeFactoryResult, NodeType,
+    },
     node::Node,
 };
 
@@ -71,7 +73,7 @@ impl NodeType<Node> for SequenceNode {
             Self::IsPair(node) => node.capture_depth(),
         }
     }
-    fn evaluate(&self, env: &Env<Node>) -> Option<Expression<Node>> {
+    fn evaluate(&self, env: &Env<Node>) -> Option<EvaluationResult<Node>> {
         match self {
             Self::Apply(node) => node.evaluate(env),
             Self::Car(node) => node.evaluate(env),

@@ -5,7 +5,7 @@ use std::fmt;
 
 use crate::{
     env::Env,
-    expression::{AstNode, Expression, NodeFactoryResult, NodeType},
+    expression::{AstNode, EvaluationResult, Expression, NodeFactoryResult, NodeType},
     node::{
         core::{CoreNode, ErrorNode, ValueNode},
         Evaluate2, Node,
@@ -37,7 +37,7 @@ impl NodeType<Node> for DivideNode {
     fn expressions(&self) -> Vec<&Expression<Node>> {
         vec![&self.left, &self.right]
     }
-    fn evaluate(&self, env: &Env<Node>) -> Option<Expression<Node>> {
+    fn evaluate(&self, env: &Env<Node>) -> Option<EvaluationResult<Node>> {
         Evaluate2::evaluate(self, env)
     }
 }
@@ -108,50 +108,50 @@ mod tests {
     fn division_expressions() {
         let env = Env::new();
         let expression = parser::parse("(divide 0 3)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(0 / 3))))
         );
         let expression = parser::parse("(divide 12 3)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(12 / 3))))
         );
         let expression = parser::parse("(divide -12 3)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(-12 / 3))))
         );
         let expression = parser::parse("(divide 12 -3)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(12 / -3))))
         );
         let expression = parser::parse("(divide -12 -3)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(-12 / -3))))
         );
 
         let expression = parser::parse("(divide 0.0 3.142)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Float(0.0 / 3.142))))
         );
         let expression = parser::parse("(divide 2.718 3.142)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Float(2.718 / 3.142))))
         );
         let expression = parser::parse("(divide -2.718 3.142)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Float(
@@ -159,7 +159,7 @@ mod tests {
             ))))
         );
         let expression = parser::parse("(divide 2.718 -3.142)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Float(
@@ -167,7 +167,7 @@ mod tests {
             ))))
         );
         let expression = parser::parse("(divide -2.718 -3.142)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Float(
@@ -180,7 +180,7 @@ mod tests {
     fn integer_division_rounding() {
         let env = Env::new();
         let expression = parser::parse("(divide 5 3)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(1))))
@@ -191,7 +191,7 @@ mod tests {
     fn division_by_zero() {
         let env = Env::new();
         let expression = parser::parse("(divide 3 0)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
@@ -199,7 +199,7 @@ mod tests {
             ))))
         );
         let expression = parser::parse("(divide 3 -0)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
@@ -207,7 +207,7 @@ mod tests {
             ))))
         );
         let expression = parser::parse("(divide 0 0)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
@@ -216,7 +216,7 @@ mod tests {
         );
 
         let expression = parser::parse("(divide 3.142 0.0)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
@@ -224,7 +224,7 @@ mod tests {
             ))))
         );
         let expression = parser::parse("(divide 3.142 -0.0)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
@@ -232,7 +232,7 @@ mod tests {
             ))))
         );
         let expression = parser::parse("(divide 0.0 0.0)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
@@ -245,7 +245,7 @@ mod tests {
     fn invalid_division_expression_operands() {
         let env = Env::new();
         let expression = parser::parse("(divide 3 3.142)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
@@ -253,7 +253,7 @@ mod tests {
             ))))
         );
         let expression = parser::parse("(divide 3.142 3)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
@@ -262,7 +262,7 @@ mod tests {
         );
 
         let expression = parser::parse("(divide 3 null)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
@@ -270,7 +270,7 @@ mod tests {
             ))))
         );
         let expression = parser::parse("(divide 3 false)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
@@ -278,7 +278,7 @@ mod tests {
             ))))
         );
         let expression = parser::parse("(divide 3 \"0\")").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
@@ -287,7 +287,7 @@ mod tests {
         );
 
         let expression = parser::parse("(divide null 3)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
@@ -295,7 +295,7 @@ mod tests {
             ))))
         );
         let expression = parser::parse("(divide false 3)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
@@ -303,7 +303,7 @@ mod tests {
             ))))
         );
         let expression = parser::parse("(divide \"0\" 3)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
@@ -312,7 +312,7 @@ mod tests {
         );
 
         let expression = parser::parse("(divide 3.142 null)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
@@ -320,7 +320,7 @@ mod tests {
             ))))
         );
         let expression = parser::parse("(divide 3.142 false)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
@@ -328,7 +328,7 @@ mod tests {
             ))))
         );
         let expression = parser::parse("(divide 3.142 \"0\")").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
@@ -337,7 +337,7 @@ mod tests {
         );
 
         let expression = parser::parse("(divide null 3.142)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
@@ -345,7 +345,7 @@ mod tests {
             ))))
         );
         let expression = parser::parse("(divide false 3.142)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
@@ -353,7 +353,7 @@ mod tests {
             ))))
         );
         let expression = parser::parse("(divide \"0\" 3.142)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(

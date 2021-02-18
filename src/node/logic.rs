@@ -3,11 +3,7 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use std::fmt;
 
-use crate::{
-    env::Env,
-    expression::{AstNode, AstNodePackage, Expression, NodeFactoryResult, NodeType},
-    node::Node,
-};
+use crate::{env::Env, expression::{AstNode, AstNodePackage, EvaluationResult, Expression, NodeFactoryResult, NodeType}, node::Node};
 
 pub mod and;
 pub mod conditional;
@@ -54,7 +50,7 @@ impl NodeType<Node> for LogicNode {
             LogicNode::Or(node) => node.capture_depth(),
         }
     }
-    fn evaluate(&self, env: &Env<Node>) -> Option<Expression<Node>> {
+    fn evaluate(&self, env: &Env<Node>) -> Option<EvaluationResult<Node>> {
         match self {
             LogicNode::And(node) => node.evaluate(env),
             LogicNode::Conditional(node) => node.evaluate(env),

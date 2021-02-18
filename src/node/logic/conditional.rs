@@ -5,7 +5,7 @@ use std::fmt;
 
 use crate::{
     env::Env,
-    expression::{AstNode, Expression, NodeFactoryResult, NodeType},
+    expression::{AstNode, EvaluationResult, Expression, NodeFactoryResult, NodeType},
     node::{
         core::{CoreNode, ErrorNode, ValueNode},
         Evaluate1, Node,
@@ -47,7 +47,7 @@ impl NodeType<Node> for ConditionalNode {
     fn expressions(&self) -> Vec<&Expression<Node>> {
         vec![&self.condition, &self.consequent, &self.alternate]
     }
-    fn evaluate(&self, env: &Env<Node>) -> Option<Expression<Node>> {
+    fn evaluate(&self, env: &Env<Node>) -> Option<EvaluationResult<Node>> {
         Evaluate1::evaluate(self, env)
     }
 }
@@ -92,13 +92,13 @@ mod tests {
     fn conditional_expressions() {
         let env = Env::new();
         let expression = parser::parse("(if true 3 4)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3))))
         );
         let expression = parser::parse("(if false 3 4)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(4))))
@@ -109,13 +109,13 @@ mod tests {
     fn conditional_expression_short_circuiting() {
         let env = Env::new();
         let expression = parser::parse("(if true (add 3 4) (error \"foo\"))").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3 + 4))))
         );
         let expression = parser::parse("(if false (error \"foo\") (add 3 4))").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3 + 4))))
@@ -126,7 +126,7 @@ mod tests {
     fn invalid_conditional_expression_conditions() {
         let env = Env::new();
         let expression = parser::parse("(if null true false)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
@@ -134,7 +134,7 @@ mod tests {
             ))))
         );
         let expression = parser::parse("(if 0 true false)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
@@ -142,7 +142,7 @@ mod tests {
             ))))
         );
         let expression = parser::parse("(if 0.0 true false)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
@@ -150,7 +150,7 @@ mod tests {
             ))))
         );
         let expression = parser::parse("(if \"\" true false)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(

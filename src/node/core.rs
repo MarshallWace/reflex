@@ -5,7 +5,9 @@ use std::fmt;
 
 use crate::{
     env::Env,
-    expression::{AstNode, AstNodePackage, Expression, NodeFactoryResult, NodeType},
+    expression::{
+        AstNode, AstNodePackage, EvaluationResult, Expression, NodeFactoryResult, NodeType,
+    },
     node::Node,
 };
 
@@ -18,10 +20,12 @@ pub mod value;
 
 pub use self::application::{ApplicationNode, BoundArgumentNode};
 pub use self::error::{ErrorNode, IsErrorNode};
-pub use self::function::{BoundFunctionNode, IsFunctionNode, FunctionNode};
+pub use self::function::{BoundFunctionNode, FunctionNode, IsFunctionNode};
 pub use self::pending::{IsPendingNode, PendingNode};
 pub use self::reference::ReferenceNode;
-pub use self::value::{IsNullNode, IsBooleanNode, IsIntegerNode, IsFloatNode, IsStringNode, StringValue, ValueNode};
+pub use self::value::{
+    IsBooleanNode, IsFloatNode, IsIntegerNode, IsNullNode, IsStringNode, StringValue, ValueNode,
+};
 
 #[derive(PartialEq, Clone)]
 pub enum CoreNode {
@@ -100,7 +104,7 @@ impl NodeType<Node> for CoreNode {
             Self::IsPending(node) => node.capture_depth(),
         }
     }
-    fn evaluate(&self, env: &Env<Node>) -> Option<Expression<Node>> {
+    fn evaluate(&self, env: &Env<Node>) -> Option<EvaluationResult<Node>> {
         match self {
             Self::Application(node) => node.evaluate(env),
             Self::BoundArgument(node) => node.evaluate(env),

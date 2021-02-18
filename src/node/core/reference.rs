@@ -3,11 +3,7 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use std::fmt;
 
-use crate::{
-    env::{Env, StackOffset},
-    expression::{Expression, NodeType},
-    node::Node,
-};
+use crate::{env::{Env, StackOffset}, expression::{EvaluationResult, Expression, NodeType}, node::Node};
 
 #[derive(PartialEq, Clone)]
 pub struct ReferenceNode {
@@ -28,7 +24,7 @@ impl NodeType<Node> for ReferenceNode {
     fn capture_depth(&self) -> usize {
         self.offset + 1
     }
-    fn evaluate(&self, env: &Env<Node>) -> Option<Expression<Node>> {
+    fn evaluate(&self, env: &Env<Node>) -> Option<EvaluationResult<Node>> {
         Some(env.get(self.offset).evaluate(env))
     }
 }
@@ -71,7 +67,7 @@ mod tests {
             )))),
         ]);
         let expression = Expression::new(Node::Core(CoreNode::Reference(ReferenceNode::new(2))));
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::String(
@@ -79,7 +75,7 @@ mod tests {
             ))))
         );
         let expression = Expression::new(Node::Core(CoreNode::Reference(ReferenceNode::new(1))));
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::String(
@@ -87,7 +83,7 @@ mod tests {
             ))))
         );
         let expression = Expression::new(Node::Core(CoreNode::Reference(ReferenceNode::new(0))));
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::String(
