@@ -5,8 +5,11 @@ use std::fmt;
 
 use crate::{
     env::Env,
-    expression::{Expression, NodeType},
-    node::{CoreNode, Node},
+    expression::{AstNode, Expression, NodeFactoryResult, NodeType},
+    node::{
+        core::{CoreNode, ValueNode},
+        Evaluate1, Node,
+    },
 };
 
 #[derive(PartialEq, Clone)]
@@ -101,6 +104,52 @@ impl fmt::Debug for BoundFunctionNode {
     }
 }
 
+#[derive(Debug, PartialEq, Clone)]
+pub struct IsFunctionNode {
+    target: Expression<Node>,
+}
+impl IsFunctionNode {
+    pub fn new(target: Expression<Node>) -> Self {
+        IsFunctionNode { target }
+    }
+}
+impl AstNode<Node> for IsFunctionNode {
+    fn factory(args: &[Expression<Node>]) -> NodeFactoryResult<Self> {
+        if args.len() != 1 {
+            return Err(String::from("Invalid number of arguments"));
+        }
+        let args = &mut args.iter().map(Expression::clone);
+        let target = args.next().unwrap();
+        Ok(Self::new(target))
+    }
+}
+impl NodeType<Node> for IsFunctionNode {
+    fn expressions(&self) -> Vec<&Expression<Node>> {
+        vec![&self.target]
+    }
+    fn evaluate(&self, env: &Env<Node>) -> Option<Expression<Node>> {
+        Evaluate1::evaluate(self, env)
+    }
+}
+impl Evaluate1 for IsFunctionNode {
+    fn dependencies(&self) -> &Expression<Node> {
+        &self.target
+    }
+    fn run(&self, _env: &Env<Node>, target: &Expression<Node>) -> Expression<Node> {
+        match target.value() {
+            Node::Core(CoreNode::Function(_)) | Node::Core(CoreNode::BoundFunction(_)) => {
+                Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(true))))
+            }
+            _ => Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false)))),
+        }
+    }
+}
+impl fmt::Display for IsFunctionNode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt(self, f)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::{
@@ -169,6 +218,102 @@ mod tests {
                     Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(4)))),
                 ]),
             })))
+        );
+    }
+
+    #[test]
+    fn is_function_expressions() {
+        let env = Env::new();
+        let expression = parser::parse("(function? (lambda () 3))").unwrap();
+        let result = expression.evaluate(&env);
+        assert_eq!(
+            result,
+            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(true))))
+        );
+        let expression = parser::parse("(function? ((lambda (foo) (lambda () foo)) 3))").unwrap();
+        let result = expression.evaluate(&env);
+        assert_eq!(
+            result,
+            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(true))))
+        );
+
+        let expression = parser::parse("(function? null)").unwrap();
+        let result = expression.evaluate(&env);
+        assert_eq!(
+            result,
+            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
+        );
+        let expression = parser::parse("(function? true)").unwrap();
+        let result = expression.evaluate(&env);
+        assert_eq!(
+            result,
+            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
+        );
+        let expression = parser::parse("(function? false)").unwrap();
+        let result = expression.evaluate(&env);
+        assert_eq!(
+            result,
+            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
+        );
+        let expression = parser::parse("(function? 0)").unwrap();
+        let result = expression.evaluate(&env);
+        assert_eq!(
+            result,
+            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
+        );
+        let expression = parser::parse("(function? -0)").unwrap();
+        let result = expression.evaluate(&env);
+        assert_eq!(
+            result,
+            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
+        );
+        let expression = parser::parse("(function? 3)").unwrap();
+        let result = expression.evaluate(&env);
+        assert_eq!(
+            result,
+            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
+        );
+        let expression = parser::parse("(function? -3)").unwrap();
+        let result = expression.evaluate(&env);
+        assert_eq!(
+            result,
+            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
+        );
+        let expression = parser::parse("(function? 0.0)").unwrap();
+        let result = expression.evaluate(&env);
+        assert_eq!(
+            result,
+            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
+        );
+        let expression = parser::parse("(function? -0.0)").unwrap();
+        let result = expression.evaluate(&env);
+        assert_eq!(
+            result,
+            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
+        );
+        let expression = parser::parse("(function? 3.142)").unwrap();
+        let result = expression.evaluate(&env);
+        assert_eq!(
+            result,
+            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
+        );
+        let expression = parser::parse("(function? -3.142)").unwrap();
+        let result = expression.evaluate(&env);
+        assert_eq!(
+            result,
+            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
+        );
+        let expression = parser::parse("(function? \"\")").unwrap();
+        let result = expression.evaluate(&env);
+        assert_eq!(
+            result,
+            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
+        );
+        let expression = parser::parse("(function? \"foo\")").unwrap();
+        let result = expression.evaluate(&env);
+        assert_eq!(
+            result,
+            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
         );
     }
 }

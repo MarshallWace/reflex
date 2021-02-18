@@ -13,15 +13,15 @@ use crate::{
 };
 
 #[derive(Debug, PartialEq, Clone)]
-pub struct CeilNode {
+pub struct RoundNode {
     target: Expression<Node>,
 }
-impl CeilNode {
+impl RoundNode {
     pub fn new(target: Expression<Node>) -> Self {
-        CeilNode { target }
+        RoundNode { target }
     }
 }
-impl AstNode<Node> for CeilNode {
+impl AstNode<Node> for RoundNode {
     fn factory(args: &[Expression<Node>]) -> NodeFactoryResult<Self> {
         if args.len() != 1 {
             return Err(String::from("Invalid number of arguments"));
@@ -31,7 +31,7 @@ impl AstNode<Node> for CeilNode {
         Ok(Self::new(target))
     }
 }
-impl NodeType<Node> for CeilNode {
+impl NodeType<Node> for RoundNode {
     fn expressions(&self) -> Vec<&Expression<Node>> {
         vec![&self.target]
     }
@@ -39,15 +39,15 @@ impl NodeType<Node> for CeilNode {
         Evaluate1::evaluate(self, env)
     }
 }
-impl Evaluate1 for CeilNode {
+impl Evaluate1 for RoundNode {
     fn dependencies(&self) -> &Expression<Node> {
         &self.target
     }
     fn run(&self, _env: &Env<Node>, target: &Expression<Node>) -> Expression<Node> {
         match target.value() {
-            Node::Core(CoreNode::Value(ValueNode::Float(target))) => {
-                Expression::new(Node::Core(CoreNode::Value(ValueNode::Float(target.ceil()))))
-            }
+            Node::Core(CoreNode::Value(ValueNode::Float(target))) => Expression::new(Node::Core(
+                CoreNode::Value(ValueNode::Float(target.round())),
+            )),
             target => Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(&format!(
                 "Expected Float, received {}",
                 target,
@@ -55,7 +55,7 @@ impl Evaluate1 for CeilNode {
         }
     }
 }
-impl fmt::Display for CeilNode {
+impl fmt::Display for RoundNode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Debug::fmt(self, f)
     }
@@ -73,51 +73,51 @@ mod tests {
     };
 
     #[test]
-    fn ceil_expressions() {
+    fn round_expressions() {
         let env = Env::new();
-        let expression = parser::parse("(ceil 0.0)").unwrap();
+        let expression = parser::parse("(round 0.0)").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Float(0.0))))
         );
-        let expression = parser::parse("(ceil 2.718)").unwrap();
+        let expression = parser::parse("(round 2.718)").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Float(3.0))))
         );
-        let expression = parser::parse("(ceil 3.0)").unwrap();
+        let expression = parser::parse("(round 3.000)").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Float(3.0))))
         );
-        let expression = parser::parse("(ceil 3.142)").unwrap();
+        let expression = parser::parse("(round 3.142)").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Float(4.0))))
+            Expression::new(Node::Core(CoreNode::Value(ValueNode::Float(3.0))))
         );
-        let expression = parser::parse("(ceil -0.0)").unwrap();
+        let expression = parser::parse("(round -0.0)").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Float(0.0))))
         );
-        let expression = parser::parse("(ceil -2.718)").unwrap();
-        let result = expression.evaluate(&env);
-        assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Float(-2.0))))
-        );
-        let expression = parser::parse("(ceil -3.0)").unwrap();
+        let expression = parser::parse("(round -2.718)").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Float(-3.0))))
         );
-        let expression = parser::parse("(ceil -3.142)").unwrap();
+        let expression = parser::parse("(round -3.0)").unwrap();
+        let result = expression.evaluate(&env);
+        assert_eq!(
+            result,
+            Expression::new(Node::Core(CoreNode::Value(ValueNode::Float(-3.0))))
+        );
+        let expression = parser::parse("(round -3.142)").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
@@ -126,9 +126,9 @@ mod tests {
     }
 
     #[test]
-    fn invalid_ceil_expression_operands() {
+    fn invalid_round_expression_operands() {
         let env = Env::new();
-        let expression = parser::parse("(ceil 3)").unwrap();
+        let expression = parser::parse("(round 3)").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
@@ -136,7 +136,7 @@ mod tests {
                 "Expected Float, received 3"
             ))))
         );
-        let expression = parser::parse("(ceil null)").unwrap();
+        let expression = parser::parse("(round null)").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
@@ -144,7 +144,7 @@ mod tests {
                 "Expected Float, received Nil"
             ))))
         );
-        let expression = parser::parse("(ceil false)").unwrap();
+        let expression = parser::parse("(round false)").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
@@ -152,7 +152,7 @@ mod tests {
                 "Expected Float, received false"
             ))))
         );
-        let expression = parser::parse("(ceil \"3\")").unwrap();
+        let expression = parser::parse("(round \"3\")").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,

@@ -6,7 +6,10 @@ use std::fmt;
 use crate::{
     env::Env,
     expression::{AstNode, Expression, NodeFactoryResult, NodeType},
-    node::Node,
+    node::{
+        core::{CoreNode, ValueNode},
+        Node,
+    },
 };
 
 #[derive(PartialEq, Clone)]
@@ -43,12 +46,57 @@ impl fmt::Debug for PendingNode {
     }
 }
 
+#[derive(Debug, PartialEq, Clone)]
+pub struct IsPendingNode {
+    target: Expression<Node>,
+}
+impl IsPendingNode {
+    pub fn new(target: Expression<Node>) -> Self {
+        IsPendingNode { target }
+    }
+}
+impl AstNode<Node> for IsPendingNode {
+    fn factory(args: &[Expression<Node>]) -> NodeFactoryResult<Self> {
+        if args.len() != 1 {
+            return Err(String::from("Invalid number of arguments"));
+        }
+        let args = &mut args.iter().map(Expression::clone);
+        let target = args.next().unwrap();
+        Ok(Self::new(target))
+    }
+}
+impl NodeType<Node> for IsPendingNode {
+    fn expressions(&self) -> Vec<&Expression<Node>> {
+        vec![&self.target]
+    }
+    fn evaluate(&self, env: &Env<Node>) -> Option<Expression<Node>> {
+        let target = self.target.evaluate(env);
+        match target.value() {
+            Node::Core(CoreNode::Pending(_)) => Some(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Boolean(true),
+            )))),
+            Node::Core(CoreNode::Error(_)) => Some(target),
+            _ => Some(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Boolean(false),
+            )))),
+        }
+    }
+}
+impl fmt::Display for IsPendingNode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt(self, f)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::{
         env::Env,
         expression::Expression,
-        node::{core::CoreNode, parser, Node},
+        node::{
+            core::{CoreNode, ErrorNode, ValueNode},
+            parser, Node,
+        },
     };
 
     use super::PendingNode;
@@ -90,6 +138,109 @@ mod tests {
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Pending(PendingNode::new())))
+        );
+    }
+
+    #[test]
+    fn is_pending_expression() {
+        let env = Env::new();
+        let expression = parser::parse("(pending? (pending))").unwrap();
+        let result = expression.evaluate(&env);
+        assert_eq!(
+            result,
+            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(true)))),
+        );
+        let expression = parser::parse("(pending? (add 3 (pending)))").unwrap();
+        let result = expression.evaluate(&env);
+        assert_eq!(
+            result,
+            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(true)))),
+        );
+
+        let expression = parser::parse("(pending? (error \"foo\"))").unwrap();
+        let result = expression.evaluate(&env);
+        assert_eq!(
+            result,
+            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new("foo")))),
+        );
+
+        let expression = parser::parse("(pending? null)").unwrap();
+        let result = expression.evaluate(&env);
+        assert_eq!(
+            result,
+            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false)))),
+        );
+        let expression = parser::parse("(pending? true)").unwrap();
+        let result = expression.evaluate(&env);
+        assert_eq!(
+            result,
+            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
+        );
+        let expression = parser::parse("(pending? false)").unwrap();
+        let result = expression.evaluate(&env);
+        assert_eq!(
+            result,
+            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
+        );
+        let expression = parser::parse("(pending? 0)").unwrap();
+        let result = expression.evaluate(&env);
+        assert_eq!(
+            result,
+            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
+        );
+        let expression = parser::parse("(pending? -0)").unwrap();
+        let result = expression.evaluate(&env);
+        assert_eq!(
+            result,
+            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
+        );
+        let expression = parser::parse("(pending? 3)").unwrap();
+        let result = expression.evaluate(&env);
+        assert_eq!(
+            result,
+            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
+        );
+        let expression = parser::parse("(pending? -3)").unwrap();
+        let result = expression.evaluate(&env);
+        assert_eq!(
+            result,
+            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
+        );
+        let expression = parser::parse("(pending? 0.0)").unwrap();
+        let result = expression.evaluate(&env);
+        assert_eq!(
+            result,
+            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
+        );
+        let expression = parser::parse("(pending? -0.0)").unwrap();
+        let result = expression.evaluate(&env);
+        assert_eq!(
+            result,
+            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
+        );
+        let expression = parser::parse("(pending? 3.142)").unwrap();
+        let result = expression.evaluate(&env);
+        assert_eq!(
+            result,
+            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
+        );
+        let expression = parser::parse("(pending? -3.142)").unwrap();
+        let result = expression.evaluate(&env);
+        assert_eq!(
+            result,
+            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
+        );
+        let expression = parser::parse("(pending? \"\")").unwrap();
+        let result = expression.evaluate(&env);
+        assert_eq!(
+            result,
+            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
+        );
+        let expression = parser::parse("(pending? \"foo\")").unwrap();
+        let result = expression.evaluate(&env);
+        assert_eq!(
+            result,
+            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
         );
     }
 }

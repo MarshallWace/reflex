@@ -81,19 +81,13 @@ mod tests {
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Float(0.0))))
         );
-        let expression = parser::parse("(floor -0.0)").unwrap();
-        let result = expression.evaluate(&env);
-        assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Float(0.0))))
-        );
         let expression = parser::parse("(floor 2.718)").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Float(2.0))))
         );
-        let expression = parser::parse("(floor 3.000)").unwrap();
+        let expression = parser::parse("(floor 3.0)").unwrap();
         let result = expression.evaluate(&env);
         assert_eq!(
             result,
@@ -104,6 +98,30 @@ mod tests {
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Float(3.0))))
+        );
+        let expression = parser::parse("(floor -0.0)").unwrap();
+        let result = expression.evaluate(&env);
+        assert_eq!(
+            result,
+            Expression::new(Node::Core(CoreNode::Value(ValueNode::Float(0.0))))
+        );
+        let expression = parser::parse("(floor -2.718)").unwrap();
+        let result = expression.evaluate(&env);
+        assert_eq!(
+            result,
+            Expression::new(Node::Core(CoreNode::Value(ValueNode::Float(-3.0))))
+        );
+        let expression = parser::parse("(floor -3.0)").unwrap();
+        let result = expression.evaluate(&env);
+        assert_eq!(
+            result,
+            Expression::new(Node::Core(CoreNode::Value(ValueNode::Float(-3.0))))
+        );
+        let expression = parser::parse("(floor -3.142)").unwrap();
+        let result = expression.evaluate(&env);
+        assert_eq!(
+            result,
+            Expression::new(Node::Core(CoreNode::Value(ValueNode::Float(-4.0))))
         );
     }
 
