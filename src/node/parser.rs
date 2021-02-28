@@ -6,7 +6,10 @@ use std::borrow::Cow;
 use crate::{
     expression::{AstNodePackage, Expression},
     node::{
-        core::{CoreNode, FunctionNode, FunctionApplicationNode, ReferenceNode, StringValue, ValueNode},
+        core::{
+            CoreNode, FunctionApplicationNode, FunctionNode, LetNode, ReferenceNode, StringValue,
+            ValueNode,
+        },
         Node,
     },
 };
@@ -270,7 +273,13 @@ fn consume_special_form<'a>(
     input: &'a str,
     scope: &LexicalScope<'a>,
 ) -> ParserResult<Option<ParserOutput<'a, Expression<Node>>>> {
-    consume_lambda_expression(input, scope)
+    match consume_lambda_expression(input, scope)? {
+        Some(result) => Ok(Some(result)),
+        _ => match consume_let_expression(input, scope)? {
+            Some(result) => Ok(Some(result)),
+            _ => Ok(None),
+        },
+    }
 }
 
 fn consume_lambda_expression<'a>(
@@ -361,6 +370,142 @@ fn consume_fn_arg_names_iter<'a>(
             results.push(arg_name);
             let input = consume_whitespace(input);
             consume_fn_arg_names_iter(input, results)
+        }
+    }
+}
+
+fn consume_let_expression<'a>(
+    input: &'a str,
+    scope: &LexicalScope<'a>,
+) -> ParserResult<Option<ParserOutput<'a, Expression<Node>>>> {
+    match consume_char('(', input) {
+        None => Ok(None),
+        Some(input) => {
+            let input = consume_whitespace(input);
+            match consume_keyword("let", input) {
+                None => Ok(None),
+                Some(input) => {
+                    let input = consume_whitespace(input);
+                    match consume_char('(', input) {
+                        None => Err(String::from("Invalid let binding list")),
+                        Some(input) => {
+                            let input = consume_whitespace(input);
+                            let ParserOutput {
+                                parsed: bindings,
+                                remaining: input,
+                            } = consume_let_bindings(input, scope)?;
+                            let input = consume_whitespace(input);
+                            match consume_char(')', input) {
+                                None => Err(format!(
+                                    "Expected ')', received '{}'",
+                                    peek_next_char(input)
+                                        .map(String::from)
+                                        .unwrap_or(String::from(EOF))
+                                )),
+                                Some(input) => {
+                                    let input = consume_whitespace(input);
+                                    let child_scope = scope.create_child(
+                                        bindings.iter().map(|(name, _)| *name).collect(),
+                                    );
+                                    match consume_expression(input, &child_scope)? {
+                                        None => Err(String::from("Missing let binding body")),
+                                        Some(ParserOutput {
+                                            parsed: body,
+                                            remaining: input,
+                                        }) => {
+                                            let input = consume_whitespace(input);
+                                            match consume_char(')', input) {
+                                                None => Err(format!(
+                                                    "Expected ')', received '{}'",
+                                                    peek_next_char(input)
+                                                        .map(String::from)
+                                                        .unwrap_or(String::from(EOF))
+                                                )),
+                                                Some(input) => Ok(Some(ParserOutput {
+                                                    parsed: Expression::new(Node::Core(
+                                                        CoreNode::Let(LetNode::new(
+                                                            bindings
+                                                                .into_iter()
+                                                                .map(|(_, initializer)| initializer)
+                                                                .collect(),
+                                                            body,
+                                                        )),
+                                                    )),
+                                                    remaining: input,
+                                                })),
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn consume_let_bindings<'a>(
+    input: &'a str,
+    scope: &LexicalScope<'a>,
+) -> ParserResult<ParserOutput<'a, Vec<(&'a str, Expression<Node>)>>> {
+    consume_let_bindings_iter(input, scope, Vec::new())
+}
+
+fn consume_let_bindings_iter<'a>(
+    input: &'a str,
+    scope: &LexicalScope<'a>,
+    mut results: Vec<(&'a str, Expression<Node>)>,
+) -> ParserResult<ParserOutput<'a, Vec<(&'a str, Expression<Node>)>>> {
+    match consume_char('(', input) {
+        None => Ok(ParserOutput {
+            parsed: results,
+            remaining: input,
+        }),
+        Some(input) => {
+            let input = consume_whitespace(input);
+            match consume_identifier(input) {
+                None => Err(format!(
+                    "Expected identifier, received '{}'",
+                    peek_next_char(input)
+                        .map(String::from)
+                        .unwrap_or(String::from(EOF))
+                )),
+                Some(ParserOutput {
+                    parsed: binding_name,
+                    remaining: input,
+                }) => {
+                    let input = consume_whitespace(input);
+                    match consume_expression(input, scope)? {
+                        None => Err(format!(
+                            "Expected initializer expression, received '{}'",
+                            peek_next_char(input)
+                                .map(String::from)
+                                .unwrap_or(String::from(EOF))
+                        )),
+                        Some(ParserOutput {
+                            parsed: initializer,
+                            remaining: input,
+                        }) => {
+                            let input = consume_whitespace(input);
+                            match consume_char(')', input) {
+                                None => Err(format!(
+                                    "Expected ')', received '{}'",
+                                    peek_next_char(input)
+                                        .map(String::from)
+                                        .unwrap_or(String::from(EOF))
+                                )),
+                                Some(input) => {
+                                    results.push((binding_name, initializer));
+                                    let input = consume_whitespace(input);
+                                    consume_let_bindings_iter(input, scope, results)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -576,7 +721,8 @@ mod tests {
         node::{
             arithmetic::{AbsNode, AddNode, ArithmeticNode},
             core::{
-                FunctionApplicationNode, CoreNode, FunctionNode, ReferenceNode, StringValue, ValueNode,
+                CoreNode, FunctionApplicationNode, FunctionNode, LetNode, ReferenceNode,
+                StringValue, ValueNode,
             },
             Node,
         },
@@ -841,6 +987,46 @@ mod tests {
     }
 
     #[test]
+    fn let_bindings() {
+        assert_eq!(
+            parse("(let () 3)"),
+            Ok(Expression::new(Node::Core(CoreNode::Let(LetNode::new(
+                vec![],
+                Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3)))),
+            ),)))),
+        );
+        assert_eq!(
+            parse("(let ((foo 3)) foo)"),
+            Ok(Expression::new(Node::Core(CoreNode::Let(LetNode::new(
+                vec![Expression::new(Node::Core(CoreNode::Value(
+                    ValueNode::Int(3)
+                )))],
+                Expression::new(Node::Core(CoreNode::Reference(ReferenceNode::new(0)))),
+            ),)))),
+        );
+        assert_eq!(
+            parse("(let ((foo 3) (bar 4)) foo)"),
+            Ok(Expression::new(Node::Core(CoreNode::Let(LetNode::new(
+                vec![
+                    Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3)))),
+                    Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(4)))),
+                ],
+                Expression::new(Node::Core(CoreNode::Reference(ReferenceNode::new(1)))),
+            ),)))),
+        );
+        assert_eq!(
+            parse("(let ((foo 3) (bar 4)) bar)"),
+            Ok(Expression::new(Node::Core(CoreNode::Let(LetNode::new(
+                vec![
+                    Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3)))),
+                    Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(4)))),
+                ],
+                Expression::new(Node::Core(CoreNode::Reference(ReferenceNode::new(0)))),
+            ),)))),
+        );
+    }
+
+    #[test]
     fn function_expressions() {
         assert_eq!(
             parse("(lambda () (add 3 4))"),
@@ -1042,13 +1228,17 @@ mod tests {
                 FunctionApplicationNode::new(
                     Expression::new(Node::Core(CoreNode::Function(FunctionNode::new(
                         1,
-                        Expression::new(Node::Core(CoreNode::FunctionApplication(FunctionApplicationNode::new(
-                            Expression::new(Node::Core(CoreNode::Reference(ReferenceNode::new(0)))),
-                            vec![
-                                Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3)))),
-                                Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(4)))),
-                            ],
-                        )))),
+                        Expression::new(Node::Core(CoreNode::FunctionApplication(
+                            FunctionApplicationNode::new(
+                                Expression::new(Node::Core(CoreNode::Reference(
+                                    ReferenceNode::new(0)
+                                ))),
+                                vec![
+                                    Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3)))),
+                                    Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(4)))),
+                                ],
+                            )
+                        ))),
                     )))),
                     vec![Expression::new(Node::Core(CoreNode::Function(
                         FunctionNode::new(

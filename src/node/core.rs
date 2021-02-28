@@ -11,18 +11,18 @@ use crate::{
     node::Node,
 };
 
-pub mod bound;
+pub mod bindings;
 pub mod error;
 pub mod function;
 pub mod pending;
-pub mod reference;
 pub mod value;
 
-pub use self::bound::BoundNode;
+pub use self::bindings::{BoundNode, LetNode, ReferenceNode};
 pub use self::error::{ErrorNode, IsErrorNode};
-pub use self::function::{FunctionApplicationNode, BoundFunctionNode, FunctionNode, IsFunctionNode};
+pub use self::function::{
+    BoundFunctionNode, FunctionApplicationNode, FunctionNode, IsFunctionNode,
+};
 pub use self::pending::{IsPendingNode, PendingNode};
-pub use self::reference::ReferenceNode;
 pub use self::value::{
     IsBooleanNode, IsFloatNode, IsIntegerNode, IsNullNode, IsStringNode, StringValue, ValueNode,
 };
@@ -31,11 +31,12 @@ pub use self::value::{
 pub enum CoreNode {
     Bound(BoundNode),
     BoundFunction(BoundFunctionNode),
+    Error(ErrorNode),
     Function(FunctionNode),
     FunctionApplication(FunctionApplicationNode),
+    Let(LetNode),
     Pending(PendingNode),
     Reference(ReferenceNode),
-    Error(ErrorNode),
     Value(ValueNode),
     IsNull(IsNullNode),
     IsBoolean(IsBooleanNode),
@@ -51,6 +52,7 @@ impl AstNodePackage<Node> for CoreNode {
         match type_name {
             "error" => Some(ErrorNode::factory(args).map(Self::Error)),
             "pending" => Some(PendingNode::factory(args).map(Self::Pending)),
+            "let" => Some(LetNode::factory(args).map(Self::Let)),
             "null?" => Some(IsNullNode::factory(args).map(Self::IsNull)),
             "boolean?" => Some(IsBooleanNode::factory(args).map(Self::IsBoolean)),
             "integer?" => Some(IsIntegerNode::factory(args).map(Self::IsInteger)),
@@ -66,11 +68,12 @@ impl AstNodePackage<Node> for CoreNode {
 impl NodeType<Node> for CoreNode {
     fn expressions(&self) -> Vec<&Expression<Node>> {
         match self {
-            Self::FunctionApplication(node) => node.expressions(),
             Self::Bound(node) => node.expressions(),
             Self::BoundFunction(node) => node.expressions(),
             Self::Error(node) => node.expressions(),
             Self::Function(node) => node.expressions(),
+            Self::FunctionApplication(node) => node.expressions(),
+            Self::Let(node) => node.expressions(),
             Self::Pending(node) => node.expressions(),
             Self::Reference(node) => node.expressions(),
             Self::Value(node) => node.expressions(),
@@ -86,11 +89,12 @@ impl NodeType<Node> for CoreNode {
     }
     fn capture_depth(&self) -> usize {
         match self {
-            Self::FunctionApplication(node) => node.capture_depth(),
             Self::Bound(node) => node.capture_depth(),
             Self::BoundFunction(node) => node.capture_depth(),
             Self::Error(node) => node.capture_depth(),
             Self::Function(node) => node.capture_depth(),
+            Self::FunctionApplication(node) => node.capture_depth(),
+            Self::Let(node) => node.capture_depth(),
             Self::Pending(node) => node.capture_depth(),
             Self::Reference(node) => node.capture_depth(),
             Self::Value(node) => node.capture_depth(),
@@ -106,11 +110,12 @@ impl NodeType<Node> for CoreNode {
     }
     fn evaluate(&self, env: &Env<Node>) -> Option<EvaluationResult<Node>> {
         match self {
-            Self::FunctionApplication(node) => node.evaluate(env),
             Self::Bound(node) => node.evaluate(env),
             Self::BoundFunction(node) => node.evaluate(env),
             Self::Error(node) => node.evaluate(env),
             Self::Function(node) => node.evaluate(env),
+            Self::FunctionApplication(node) => node.evaluate(env),
+            Self::Let(node) => node.evaluate(env),
             Self::Pending(node) => node.evaluate(env),
             Self::Reference(node) => node.evaluate(env),
             Self::Value(node) => node.evaluate(env),
@@ -128,11 +133,12 @@ impl NodeType<Node> for CoreNode {
 impl fmt::Display for CoreNode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::FunctionApplication(node) => fmt::Display::fmt(node, f),
             Self::Bound(node) => fmt::Display::fmt(node, f),
             Self::BoundFunction(node) => fmt::Display::fmt(node, f),
             Self::Error(node) => fmt::Display::fmt(node, f),
             Self::Function(node) => fmt::Display::fmt(node, f),
+            Self::FunctionApplication(node) => fmt::Display::fmt(node, f),
+            Self::Let(node) => fmt::Display::fmt(node, f),
             Self::Pending(node) => fmt::Display::fmt(node, f),
             Self::Reference(node) => fmt::Display::fmt(node, f),
             Self::Value(node) => fmt::Display::fmt(node, f),
@@ -150,11 +156,12 @@ impl fmt::Display for CoreNode {
 impl fmt::Debug for CoreNode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::FunctionApplication(node) => fmt::Debug::fmt(node, f),
             Self::Bound(node) => fmt::Debug::fmt(node, f),
             Self::BoundFunction(node) => fmt::Debug::fmt(node, f),
             Self::Error(node) => fmt::Debug::fmt(node, f),
             Self::Function(node) => fmt::Debug::fmt(node, f),
+            Self::FunctionApplication(node) => fmt::Debug::fmt(node, f),
+            Self::Let(node) => fmt::Debug::fmt(node, f),
             Self::Pending(node) => fmt::Debug::fmt(node, f),
             Self::Reference(node) => fmt::Debug::fmt(node, f),
             Self::Value(node) => fmt::Debug::fmt(node, f),
