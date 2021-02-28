@@ -7,7 +7,7 @@ use crate::{
     env::Env,
     expression::{AstNode, EvaluationResult, Expression, NodeFactoryResult, NodeType},
     node::{
-        core::{ApplicationNode, CoreNode, ErrorNode, ValueNode},
+        core::{CoreNode, ErrorNode, FunctionApplicationNode, ValueNode},
         sequence::{ListNode, SequenceNode},
         Evaluate1, Node,
     },
@@ -52,13 +52,13 @@ impl Evaluate1 for ApplyNode {
     fn run(&self, _env: &Env<Node>, args: &Expression<Node>) -> Expression<Node> {
         match args.value() {
             Node::Core(CoreNode::Value(ValueNode::Nil)) => {
-                Expression::new(Node::Core(CoreNode::Application(ApplicationNode::new(
+                Expression::new(Node::Core(CoreNode::FunctionApplication(FunctionApplicationNode::new(
                     Expression::clone(&self.target),
                     Vec::new(),
                 ))))
             }
             Node::Sequence(SequenceNode::List(args)) => {
-                Expression::new(Node::Core(CoreNode::Application(ApplicationNode::new(
+                Expression::new(Node::Core(CoreNode::FunctionApplication(FunctionApplicationNode::new(
                     Expression::clone(&self.target),
                     args.items().iter().map(Expression::clone).collect(),
                 ))))

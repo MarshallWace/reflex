@@ -6,7 +6,7 @@ use std::borrow::Cow;
 use crate::{
     expression::{AstNodePackage, Expression},
     node::{
-        core::{ApplicationNode, CoreNode, FunctionNode, ReferenceNode, StringValue, ValueNode},
+        core::{CoreNode, FunctionNode, FunctionApplicationNode, ReferenceNode, StringValue, ValueNode},
         Node,
     },
 };
@@ -408,8 +408,8 @@ fn consume_s_expression<'a>(
                                 }
                             }
                             ApplicationTarget::Expression(target) => Ok(Some(ParserOutput {
-                                parsed: Expression::new(Node::Core(CoreNode::Application(
-                                    ApplicationNode::new(target, args),
+                                parsed: Expression::new(Node::Core(CoreNode::FunctionApplication(
+                                    FunctionApplicationNode::new(target, args),
                                 ))),
                                 remaining: input,
                             })),
@@ -576,7 +576,7 @@ mod tests {
         node::{
             arithmetic::{AbsNode, AddNode, ArithmeticNode},
             core::{
-                ApplicationNode, CoreNode, FunctionNode, ReferenceNode, StringValue, ValueNode,
+                FunctionApplicationNode, CoreNode, FunctionNode, ReferenceNode, StringValue, ValueNode,
             },
             Node,
         },
@@ -1008,8 +1008,8 @@ mod tests {
     fn function_applications() {
         assert_eq!(
             parse("((lambda (foo) foo) 3)"),
-            Ok(Expression::new(Node::Core(CoreNode::Application(
-                ApplicationNode::new(
+            Ok(Expression::new(Node::Core(CoreNode::FunctionApplication(
+                FunctionApplicationNode::new(
                     Expression::new(Node::Core(CoreNode::Function(FunctionNode::new(
                         1,
                         Expression::new(Node::Core(CoreNode::Reference(ReferenceNode::new(0))))
@@ -1022,8 +1022,8 @@ mod tests {
         );
         assert_eq!(
             parse("((lambda (foo bar baz) foo) 3 4 5)"),
-            Ok(Expression::new(Node::Core(CoreNode::Application(
-                ApplicationNode::new(
+            Ok(Expression::new(Node::Core(CoreNode::FunctionApplication(
+                FunctionApplicationNode::new(
                     Expression::new(Node::Core(CoreNode::Function(FunctionNode::new(
                         3,
                         Expression::new(Node::Core(CoreNode::Reference(ReferenceNode::new(2))))
@@ -1038,11 +1038,11 @@ mod tests {
         );
         assert_eq!(
             parse("((lambda (add) (add 3 4)) (lambda (first second) (add first second)))",),
-            Ok(Expression::new(Node::Core(CoreNode::Application(
-                ApplicationNode::new(
+            Ok(Expression::new(Node::Core(CoreNode::FunctionApplication(
+                FunctionApplicationNode::new(
                     Expression::new(Node::Core(CoreNode::Function(FunctionNode::new(
                         1,
-                        Expression::new(Node::Core(CoreNode::Application(ApplicationNode::new(
+                        Expression::new(Node::Core(CoreNode::FunctionApplication(FunctionApplicationNode::new(
                             Expression::new(Node::Core(CoreNode::Reference(ReferenceNode::new(0)))),
                             vec![
                                 Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3)))),

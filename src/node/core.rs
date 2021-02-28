@@ -11,16 +11,16 @@ use crate::{
     node::Node,
 };
 
-pub mod application;
+pub mod bound;
 pub mod error;
 pub mod function;
 pub mod pending;
 pub mod reference;
 pub mod value;
 
-pub use self::application::{ApplicationNode, BoundArgumentNode};
+pub use self::bound::BoundNode;
 pub use self::error::{ErrorNode, IsErrorNode};
-pub use self::function::{BoundFunctionNode, FunctionNode, IsFunctionNode};
+pub use self::function::{FunctionApplicationNode, BoundFunctionNode, FunctionNode, IsFunctionNode};
 pub use self::pending::{IsPendingNode, PendingNode};
 pub use self::reference::ReferenceNode;
 pub use self::value::{
@@ -29,10 +29,10 @@ pub use self::value::{
 
 #[derive(PartialEq, Clone)]
 pub enum CoreNode {
-    Application(ApplicationNode),
-    BoundArgument(BoundArgumentNode),
+    Bound(BoundNode),
     BoundFunction(BoundFunctionNode),
     Function(FunctionNode),
+    FunctionApplication(FunctionApplicationNode),
     Pending(PendingNode),
     Reference(ReferenceNode),
     Error(ErrorNode),
@@ -66,8 +66,8 @@ impl AstNodePackage<Node> for CoreNode {
 impl NodeType<Node> for CoreNode {
     fn expressions(&self) -> Vec<&Expression<Node>> {
         match self {
-            Self::Application(node) => node.expressions(),
-            Self::BoundArgument(node) => node.expressions(),
+            Self::FunctionApplication(node) => node.expressions(),
+            Self::Bound(node) => node.expressions(),
             Self::BoundFunction(node) => node.expressions(),
             Self::Error(node) => node.expressions(),
             Self::Function(node) => node.expressions(),
@@ -86,8 +86,8 @@ impl NodeType<Node> for CoreNode {
     }
     fn capture_depth(&self) -> usize {
         match self {
-            Self::Application(node) => node.capture_depth(),
-            Self::BoundArgument(node) => node.capture_depth(),
+            Self::FunctionApplication(node) => node.capture_depth(),
+            Self::Bound(node) => node.capture_depth(),
             Self::BoundFunction(node) => node.capture_depth(),
             Self::Error(node) => node.capture_depth(),
             Self::Function(node) => node.capture_depth(),
@@ -106,8 +106,8 @@ impl NodeType<Node> for CoreNode {
     }
     fn evaluate(&self, env: &Env<Node>) -> Option<EvaluationResult<Node>> {
         match self {
-            Self::Application(node) => node.evaluate(env),
-            Self::BoundArgument(node) => node.evaluate(env),
+            Self::FunctionApplication(node) => node.evaluate(env),
+            Self::Bound(node) => node.evaluate(env),
             Self::BoundFunction(node) => node.evaluate(env),
             Self::Error(node) => node.evaluate(env),
             Self::Function(node) => node.evaluate(env),
@@ -128,8 +128,8 @@ impl NodeType<Node> for CoreNode {
 impl fmt::Display for CoreNode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Application(node) => fmt::Display::fmt(node, f),
-            Self::BoundArgument(node) => fmt::Display::fmt(node, f),
+            Self::FunctionApplication(node) => fmt::Display::fmt(node, f),
+            Self::Bound(node) => fmt::Display::fmt(node, f),
             Self::BoundFunction(node) => fmt::Display::fmt(node, f),
             Self::Error(node) => fmt::Display::fmt(node, f),
             Self::Function(node) => fmt::Display::fmt(node, f),
@@ -150,8 +150,8 @@ impl fmt::Display for CoreNode {
 impl fmt::Debug for CoreNode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Application(node) => fmt::Debug::fmt(node, f),
-            Self::BoundArgument(node) => fmt::Debug::fmt(node, f),
+            Self::FunctionApplication(node) => fmt::Debug::fmt(node, f),
+            Self::Bound(node) => fmt::Debug::fmt(node, f),
             Self::BoundFunction(node) => fmt::Debug::fmt(node, f),
             Self::Error(node) => fmt::Debug::fmt(node, f),
             Self::Function(node) => fmt::Debug::fmt(node, f),

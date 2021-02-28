@@ -18,7 +18,7 @@ mod benchmarks {
         expression::Expression,
         node::{
             arithmetic::{AddNode, ArithmeticNode},
-            core::{ApplicationNode, CoreNode, FunctionNode, ReferenceNode, ValueNode},
+            core::{CoreNode, FunctionNode, FunctionApplicationNode, ReferenceNode, ValueNode},
             parser, Node,
         },
     };
@@ -81,7 +81,7 @@ mod benchmarks {
         let expression = (1..=100).fold(
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(0)))),
             |acc, i| {
-                Expression::new(Node::Core(CoreNode::Application(ApplicationNode::new(
+                Expression::new(Node::Core(CoreNode::FunctionApplication(FunctionApplicationNode::new(
                     Expression::new(Node::Core(CoreNode::Function(FunctionNode::new(
                         1,
                         Expression::new(Node::Arithmetic(ArithmeticNode::Add(AddNode::new(
