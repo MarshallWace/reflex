@@ -117,7 +117,7 @@ impl Evaluate1 for IsNullNode {
     fn dependencies(&self) -> &Expression<Node> {
         &self.target
     }
-    fn run(&self, _env: &Env<Node>, target: &Expression<Node>) -> Expression<Node> {
+    fn run(&self, target: &Expression<Node>) -> Expression<Node> {
         match target.value() {
             Node::Core(CoreNode::Value(ValueNode::Nil)) => {
                 Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(true))))
@@ -163,7 +163,7 @@ impl Evaluate1 for IsBooleanNode {
     fn dependencies(&self) -> &Expression<Node> {
         &self.target
     }
-    fn run(&self, _env: &Env<Node>, target: &Expression<Node>) -> Expression<Node> {
+    fn run(&self, target: &Expression<Node>) -> Expression<Node> {
         match target.value() {
             Node::Core(CoreNode::Value(ValueNode::Boolean(_))) => {
                 Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(true))))
@@ -209,7 +209,7 @@ impl Evaluate1 for IsIntegerNode {
     fn dependencies(&self) -> &Expression<Node> {
         &self.target
     }
-    fn run(&self, _env: &Env<Node>, target: &Expression<Node>) -> Expression<Node> {
+    fn run(&self, target: &Expression<Node>) -> Expression<Node> {
         match target.value() {
             Node::Core(CoreNode::Value(ValueNode::Int(_))) => {
                 Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(true))))
@@ -255,7 +255,7 @@ impl Evaluate1 for IsFloatNode {
     fn dependencies(&self) -> &Expression<Node> {
         &self.target
     }
-    fn run(&self, _env: &Env<Node>, target: &Expression<Node>) -> Expression<Node> {
+    fn run(&self, target: &Expression<Node>) -> Expression<Node> {
         match target.value() {
             Node::Core(CoreNode::Value(ValueNode::Float(_))) => {
                 Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(true))))
@@ -301,7 +301,7 @@ impl Evaluate1 for IsStringNode {
     fn dependencies(&self) -> &Expression<Node> {
         &self.target
     }
-    fn run(&self, _env: &Env<Node>, target: &Expression<Node>) -> Expression<Node> {
+    fn run(&self, target: &Expression<Node>) -> Expression<Node> {
         match target.value() {
             Node::Core(CoreNode::Value(ValueNode::String(_))) => {
                 Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(true))))

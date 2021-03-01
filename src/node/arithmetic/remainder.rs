@@ -47,7 +47,6 @@ impl Evaluate2 for RemainderNode {
     }
     fn run(
         &self,
-        _env: &Env<Node>,
         left: &Expression<Node>,
         right: &Expression<Node>,
     ) -> Expression<Node> {

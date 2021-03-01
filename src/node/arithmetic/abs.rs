@@ -43,7 +43,7 @@ impl Evaluate1 for AbsNode {
     fn dependencies(&self) -> &Expression<Node> {
         &self.target
     }
-    fn run(&self, _env: &Env<Node>, target: &Expression<Node>) -> Expression<Node> {
+    fn run(&self, target: &Expression<Node>) -> Expression<Node> {
         match target.value() {
             Node::Core(CoreNode::Value(ValueNode::Int(target))) => {
                 Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(target.abs()))))

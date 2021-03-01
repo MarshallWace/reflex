@@ -130,7 +130,7 @@ impl Evaluate1 for IsPairNode {
     fn dependencies(&self) -> &Expression<Node> {
         &self.target
     }
-    fn run(&self, _env: &Env<Node>, target: &Expression<Node>) -> Expression<Node> {
+    fn run(&self, target: &Expression<Node>) -> Expression<Node> {
         Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(
             match target.value() {
                 Node::Sequence(SequenceNode::Cons(_)) => true,

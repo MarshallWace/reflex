@@ -242,7 +242,7 @@ impl Evaluate1 for IsFunctionNode {
     fn dependencies(&self) -> &Expression<Node> {
         &self.target
     }
-    fn run(&self, _env: &Env<Node>, target: &Expression<Node>) -> Expression<Node> {
+    fn run(&self, target: &Expression<Node>) -> Expression<Node> {
         match target.value() {
             Node::Core(CoreNode::Function(_)) | Node::Core(CoreNode::BoundFunction(_)) => {
                 Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(true))))

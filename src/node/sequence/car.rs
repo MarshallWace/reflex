@@ -44,7 +44,7 @@ impl Evaluate1 for CarNode {
     fn dependencies(&self) -> &Expression<Node> {
         &self.target
     }
-    fn run(&self, _env: &Env<Node>, target: &Expression<Node>) -> Expression<Node> {
+    fn run(&self, target: &Expression<Node>) -> Expression<Node> {
         match target.value() {
             Node::Sequence(SequenceNode::Cons(node)) => Expression::clone(node.head()),
             _ => Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(&format!(

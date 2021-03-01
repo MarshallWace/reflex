@@ -8,15 +8,15 @@ use crate::{
 };
 
 pub trait Evaluate0 {
-    fn run(&self, env: &Env<Node>) -> Expression<Node>;
+    fn run(&self) -> Expression<Node>;
     fn evaluate(&self, env: &Env<Node>) -> Option<EvaluationResult<Node>> {
-        Some(self.run(env).evaluate(env))
+        Some(self.run().evaluate(env))
     }
 }
 
 pub trait Evaluate1 {
     fn dependencies(&self) -> &Expression<Node>;
-    fn run(&self, env: &Env<Node>, dep1: &Expression<Node>) -> Expression<Node>;
+    fn run(&self, dep1: &Expression<Node>) -> Expression<Node>;
     fn evaluate(&self, env: &Env<Node>) -> Option<EvaluationResult<Node>> {
         let dep1 = self.dependencies();
         let dep1 = dep1.evaluate(env);
@@ -27,7 +27,7 @@ pub trait Evaluate1 {
                     expression: expression1,
                     dependencies: dependencies1,
                 } = dep1;
-                with_dependencies(dependencies1, self.run(env, &expression1).evaluate(env))
+                with_dependencies(dependencies1, self.run(&expression1).evaluate(env))
             }
         })
     }
@@ -35,12 +35,7 @@ pub trait Evaluate1 {
 
 pub trait Evaluate2 {
     fn dependencies(&self) -> (&Expression<Node>, &Expression<Node>);
-    fn run(
-        &self,
-        env: &Env<Node>,
-        dep1: &Expression<Node>,
-        dep2: &Expression<Node>,
-    ) -> Expression<Node>;
+    fn run(&self, dep1: &Expression<Node>, dep2: &Expression<Node>) -> Expression<Node>;
     fn evaluate(&self, env: &Env<Node>) -> Option<EvaluationResult<Node>> {
         let (dep1, dep2) = self.dependencies();
         let dep1 = dep1.evaluate(env);
@@ -61,7 +56,7 @@ pub trait Evaluate2 {
                 } = dep2;
                 with_dependencies(
                     combine_dependency_lists(dependencies1, dependencies2),
-                    self.run(env, &expression1, &expression2).evaluate(env),
+                    self.run(&expression1, &expression2).evaluate(env),
                 )
             }
         })

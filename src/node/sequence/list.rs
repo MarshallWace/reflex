@@ -44,7 +44,7 @@ impl NodeType<Node> for ListNode {
     }
 }
 impl Evaluate0 for ListNode {
-    fn run(&self, _env: &Env<Node>) -> Expression<Node> {
+    fn run(&self) -> Expression<Node> {
         if self.items.is_empty() {
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Nil)))
         } else {
@@ -95,7 +95,7 @@ impl Evaluate1 for IsListNode {
     fn dependencies(&self) -> &Expression<Node> {
         &self.target
     }
-    fn run(&self, _env: &Env, target: &Expression<Node>) -> Expression<Node> {
+    fn run(&self, target: &Expression<Node>) -> Expression<Node> {
         match target.value() {
             Node::Core(CoreNode::Value(ValueNode::Nil)) => {
                 Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(true))))

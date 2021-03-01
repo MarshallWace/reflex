@@ -55,7 +55,7 @@ impl Evaluate1 for ConditionalNode {
     fn dependencies(&self) -> &Expression<Node> {
         &self.condition
     }
-    fn run(&self, _env: &Env<Node>, condition: &Expression<Node>) -> Expression<Node> {
+    fn run(&self, condition: &Expression<Node>) -> Expression<Node> {
         match condition.value() {
             Node::Core(CoreNode::Value(ValueNode::Boolean(condition))) => {
                 if *condition {
