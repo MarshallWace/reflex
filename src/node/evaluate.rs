@@ -3,11 +3,16 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use crate::{
     env::Env,
-    expression::{
-        combine_dependency_lists, with_dependencies, EvaluationResult, Expression,
-    },
+    expression::{combine_dependency_lists, with_dependencies, EvaluationResult, Expression},
     node::{core::CoreNode, Node},
 };
+
+pub trait Evaluate0 {
+    fn run(&self, env: &Env<Node>) -> Expression<Node>;
+    fn evaluate(&self, env: &Env<Node>) -> Option<EvaluationResult<Node>> {
+        Some(self.run(env).evaluate(env))
+    }
+}
 
 pub trait Evaluate1 {
     fn dependencies(&self) -> &Expression<Node>;
@@ -56,8 +61,7 @@ pub trait Evaluate2 {
                 } = dep2;
                 with_dependencies(
                     combine_dependency_lists(dependencies1, dependencies2),
-                    self.run(env, &expression1, &expression2)
-                        .evaluate(env),
+                    self.run(env, &expression1, &expression2).evaluate(env),
                 )
             }
         })

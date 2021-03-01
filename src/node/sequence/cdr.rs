@@ -67,7 +67,9 @@ mod tests {
         expression::Expression,
         node::{
             core::{CoreNode, ErrorNode, ValueNode},
-            parser, Node,
+            parser,
+            sequence::{ConsNode, SequenceNode},
+            Node,
         },
     };
 
@@ -85,6 +87,18 @@ mod tests {
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3 + 4)))),
+        );
+        let expression = parser::parse("(cdr (list 3 4 5))").unwrap();
+        let result = expression.evaluate(&env).expression;
+        assert_eq!(
+            result,
+            Expression::new(Node::Sequence(SequenceNode::Cons(ConsNode::new(
+                Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(4)))),
+                Expression::new(Node::Sequence(SequenceNode::Cons(ConsNode::new(
+                    Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(5)))),
+                    Expression::new(Node::Core(CoreNode::Value(ValueNode::Nil))),
+                )))),
+            )))),
         );
         let expression =
             parser::parse("(cdr ((lambda (foo) foo) (cons (add 1 2) (add 3 4))))").unwrap();

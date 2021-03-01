@@ -5,11 +5,14 @@ use std::fmt;
 
 use crate::{
     env::Env,
-    expression::{AstNode, EvaluationResult, Expression, NodeFactoryResult, NodeType},
+    expression::{
+        with_dependencies, AstNode, EvaluationResult, Expression, NodeFactoryResult, NodeType,
+    },
     node::{
         core::{CoreNode, ErrorNode, ValueNode},
-        sequence::SequenceNode,
-        Node,
+        evaluate::Evaluate0,
+        sequence::{ConsNode, SequenceNode},
+        Evaluate1, Node,
     },
 };
 
@@ -24,16 +27,6 @@ impl ListNode {
     pub fn items(&self) -> &Vec<Expression<Node>> {
         &self.items
     }
-    pub fn collect(target: Expression<Node>) -> Expression<Node> {
-        match target.value() {
-            Node::Sequence(SequenceNode::List(_)) | Node::Core(CoreNode::Value(ValueNode::Nil)) => {
-                target
-            }
-            _ => Expression::new(Node::Sequence(SequenceNode::Collect(CollectNode::new(
-                target,
-            )))),
-        }
-    }
 }
 impl AstNode<Node> for ListNode {
     fn factory(args: &[Expression<Node>]) -> NodeFactoryResult<Self> {
@@ -46,14 +39,24 @@ impl NodeType<Node> for ListNode {
     fn expressions(&self) -> Vec<&Expression<Node>> {
         self.items.iter().collect()
     }
-    fn evaluate(&self, _env: &Env<Node>) -> Option<EvaluationResult<Node>> {
-        if self.items().is_empty() {
-            Some(EvaluationResult::new(
-                Expression::new(Node::Core(CoreNode::Value(ValueNode::Nil))),
-                None,
-            ))
+    fn evaluate(&self, env: &Env<Node>) -> Option<EvaluationResult<Node>> {
+        Evaluate0::evaluate(self, env)
+    }
+}
+impl Evaluate0 for ListNode {
+    fn run(&self, _env: &Env<Node>) -> Expression<Node> {
+        if self.items.is_empty() {
+            Expression::new(Node::Core(CoreNode::Value(ValueNode::Nil)))
         } else {
-            None
+            self.items.iter().rev().fold(
+                Expression::new(Node::Core(CoreNode::Value(ValueNode::Nil))),
+                |tail, head| {
+                    Expression::new(Node::Sequence(SequenceNode::Cons(ConsNode::new(
+                        Expression::clone(head),
+                        tail,
+                    ))))
+                },
+            )
         }
     }
 }
@@ -85,7 +88,28 @@ impl NodeType<Node> for IsListNode {
         vec![&self.target]
     }
     fn evaluate(&self, env: &Env<Node>) -> Option<EvaluationResult<Node>> {
-        Some(is_list(&self.target, env))
+        Evaluate1::evaluate(self, env)
+    }
+}
+impl Evaluate1 for IsListNode {
+    fn dependencies(&self) -> &Expression<Node> {
+        &self.target
+    }
+    fn run(&self, _env: &Env, target: &Expression<Node>) -> Expression<Node> {
+        match target.value() {
+            Node::Core(CoreNode::Value(ValueNode::Nil)) => {
+                Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(true))))
+            }
+            Node::Sequence(SequenceNode::Cons(node)) if node.is_list().unwrap_or(false) => {
+                Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(true))))
+            }
+            Node::Sequence(SequenceNode::Cons(node)) if node.is_list().is_none() => {
+                Expression::new(Node::Sequence(SequenceNode::IsList(IsListNode::new(
+                    Expression::clone(node.tail()),
+                ))))
+            }
+            _ => Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false)))),
+        }
     }
 }
 impl fmt::Display for IsListNode {
@@ -94,67 +118,36 @@ impl fmt::Display for IsListNode {
     }
 }
 
-#[derive(Debug, PartialEq, Clone)]
-pub struct CollectNode {
-    target: Expression<Node>,
-}
-impl CollectNode {
-    fn new(target: Expression<Node>) -> Self {
-        CollectNode { target }
-    }
-}
-impl NodeType<Node> for CollectNode {
-    fn expressions(&self) -> Vec<&Expression<Node>> {
-        vec![&self.target]
-    }
-    fn evaluate(&self, env: &Env<Node>) -> Option<EvaluationResult<Node>> {
-        Some(collect_list_items(&self.target, env, Vec::new()))
-    }
-}
-impl fmt::Display for CollectNode {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt::Debug::fmt(self, f)
-    }
-}
-
-fn is_list(target: &Expression<Node>, env: &Env<Node>) -> EvaluationResult<Node> {
-    let target = target.evaluate(env);
-    match target.expression.value() {
-        Node::Core(CoreNode::Pending(_)) | Node::Core(CoreNode::Error(_)) => target,
-        Node::Core(CoreNode::Value(ValueNode::Nil)) | Node::Sequence(SequenceNode::List(_)) => {
-            EvaluationResult::new(
-                Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(true)))),
-                target.dependencies,
-            )
-        }
-        Node::Sequence(SequenceNode::Cons(node)) => is_list(node.tail(), env),
-        _ => EvaluationResult::new(
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false)))),
-            target.dependencies,
-        ),
-    }
-}
-
-fn collect_list_items(
+pub fn collect_list_items(
     target: &Expression<Node>,
     env: &Env<Node>,
+    combine: impl Fn(Vec<Expression<Node>>) -> Expression<Node>,
+) -> EvaluationResult<Node> {
+    collect_list_items_iter(target, env, combine, Vec::new())
+}
+
+fn collect_list_items_iter(
+    target: &Expression<Node>,
+    env: &Env<Node>,
+    combine: impl Fn(Vec<Expression<Node>>) -> Expression<Node>,
     mut results: Vec<Expression<Node>>,
 ) -> EvaluationResult<Node> {
     let target = target.evaluate(env);
     match target.expression.value() {
         Node::Core(CoreNode::Error(_)) | Node::Core(CoreNode::Pending(_)) => target,
-        Node::Sequence(SequenceNode::List(_)) => target,
-        Node::Core(CoreNode::Value(ValueNode::Nil)) => EvaluationResult::new(
-            Expression::new(if results.is_empty() {
-                Node::Core(CoreNode::Value(ValueNode::Nil))
-            } else {
-                Node::Sequence(SequenceNode::List(ListNode::new(results)))
-            }),
-            target.dependencies,
-        ),
-        Node::Sequence(SequenceNode::Cons(node)) => {
+        Node::Core(CoreNode::Value(ValueNode::Nil)) => {
+            EvaluationResult::new(combine(results), target.dependencies)
+        }
+        Node::Sequence(SequenceNode::Cons(node)) if node.is_list().unwrap_or(false) => {
+            results.extend(node.iter());
+            EvaluationResult::new(combine(results), target.dependencies)
+        }
+        Node::Sequence(SequenceNode::Cons(node)) if node.is_list().is_none() => {
             results.push(Expression::clone(node.head()));
-            collect_list_items(node.tail(), env, results)
+            with_dependencies(
+                target.dependencies,
+                collect_list_items_iter(node.tail(), env, combine, results),
+            )
         }
         _ => EvaluationResult::new(
             Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(&format!(
@@ -175,12 +168,12 @@ mod tests {
             arithmetic::{AddNode, ArithmeticNode},
             core::{CoreNode, ValueNode},
             parser,
-            sequence::SequenceNode,
+            sequence::{ConsNode, SequenceNode},
             Node,
         },
     };
 
-    use super::ListNode;
+    use super::collect_list_items;
 
     #[test]
     fn list_expressions() {
@@ -189,30 +182,40 @@ mod tests {
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
-            Expression::new(Node::Sequence(SequenceNode::List(ListNode::new(vec![
+            Expression::new(Node::Sequence(SequenceNode::Cons(ConsNode::new(
                 Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3)))),
-                Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(4)))),
-                Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(5)))),
-            ])))),
+                Expression::new(Node::Sequence(SequenceNode::Cons(ConsNode::new(
+                    Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(4)))),
+                    Expression::new(Node::Sequence(SequenceNode::Cons(ConsNode::new(
+                        Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(5)))),
+                        Expression::new(Node::Core(CoreNode::Value(ValueNode::Nil))),
+                    )))),
+                )))),
+            )))),
         );
         let expression = parser::parse("(list (add 1 2) (add 3 4) (add 5 6))").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
-            Expression::new(Node::Sequence(SequenceNode::List(ListNode::new(vec![
+            Expression::new(Node::Sequence(SequenceNode::Cons(ConsNode::new(
                 Expression::new(Node::Arithmetic(ArithmeticNode::Add(AddNode::new(
                     Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(1)))),
                     Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(2)))),
                 )))),
-                Expression::new(Node::Arithmetic(ArithmeticNode::Add(AddNode::new(
-                    Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3)))),
-                    Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(4)))),
+                Expression::new(Node::Sequence(SequenceNode::Cons(ConsNode::new(
+                    Expression::new(Node::Arithmetic(ArithmeticNode::Add(AddNode::new(
+                        Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3)))),
+                        Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(4)))),
+                    )))),
+                    Expression::new(Node::Sequence(SequenceNode::Cons(ConsNode::new(
+                        Expression::new(Node::Arithmetic(ArithmeticNode::Add(AddNode::new(
+                            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(5)))),
+                            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(6)))),
+                        )))),
+                        Expression::new(Node::Core(CoreNode::Value(ValueNode::Nil))),
+                    )))),
                 )))),
-                Expression::new(Node::Arithmetic(ArithmeticNode::Add(AddNode::new(
-                    Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(5)))),
-                    Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(6)))),
-                )))),
-            ])))),
+            )))),
         );
     }
 
@@ -228,7 +231,7 @@ mod tests {
     }
 
     #[test]
-    fn is_list() {
+    fn is_list_expressions() {
         let env = Env::new();
         let expression = parser::parse("(list? (list))").unwrap();
         let result = expression.evaluate(&env).expression;
@@ -345,75 +348,117 @@ mod tests {
     #[test]
     fn collect_static_lists() {
         let env = Env::new();
-        let expression = ListNode::collect(parser::parse("null").unwrap());
+        let sum = |items: Vec<Expression<Node>>| {
+            items.into_iter().fold(
+                Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(0)))),
+                |acc, item| {
+                    Expression::new(Node::Arithmetic(ArithmeticNode::Add(AddNode::new(
+                        acc, item,
+                    ))))
+                },
+            )
+        };
+        let result = collect_list_items(&parser::parse("null").unwrap(), &env, sum);
         assert_eq!(
-            expression,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Nil)))
+            result.expression,
+            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(0))))
         );
-        let expression = ListNode::collect(parser::parse("(list)").unwrap());
+        let result = collect_list_items(&parser::parse("(list)").unwrap(), &env, sum);
         assert_eq!(
-            expression,
-            Expression::new(Node::Sequence(SequenceNode::List(
-                ListNode::new(Vec::new())
-            )))
+            result.expression,
+            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(0))))
         );
-        let expression = ListNode::collect(parser::parse("(list 3 4 5)").unwrap());
+        let result = collect_list_items(&parser::parse("(list 3 4 5)").unwrap(), &env, sum);
         assert_eq!(
-            expression,
-            Expression::new(Node::Sequence(SequenceNode::List(ListNode::new(vec![
-                Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3)))),
-                Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(4)))),
-                Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(5)))),
-            ])))),
-        );
-        let expression =
-            ListNode::collect(parser::parse("(list (add 1 2) (add 3 4) (add 5 6))").unwrap());
-        let result = expression.evaluate(&env).expression;
-        assert_eq!(
-            result,
-            Expression::new(Node::Sequence(SequenceNode::List(ListNode::new(vec![
+            result.expression,
+            Expression::new(Node::Arithmetic(ArithmeticNode::Add(AddNode::new(
                 Expression::new(Node::Arithmetic(ArithmeticNode::Add(AddNode::new(
-                    Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(1)))),
-                    Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(2)))),
-                )))),
-                Expression::new(Node::Arithmetic(ArithmeticNode::Add(AddNode::new(
-                    Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3)))),
+                    Expression::new(Node::Arithmetic(ArithmeticNode::Add(AddNode::new(
+                        Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(0)))),
+                        Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3)))),
+                    )))),
                     Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(4)))),
+                )))),
+                Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(5)))),
+            ))))
+        );
+        let result = collect_list_items(
+            &parser::parse("(list (add 1 2) (add 3 4) (add 5 6))").unwrap(),
+            &env,
+            sum,
+        );
+        assert_eq!(
+            result.expression,
+            Expression::new(Node::Arithmetic(ArithmeticNode::Add(AddNode::new(
+                Expression::new(Node::Arithmetic(ArithmeticNode::Add(AddNode::new(
+                    Expression::new(Node::Arithmetic(ArithmeticNode::Add(AddNode::new(
+                        Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(0)))),
+                        Expression::new(Node::Arithmetic(ArithmeticNode::Add(AddNode::new(
+                            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(1)))),
+                            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(2)))),
+                        )))),
+                    )))),
+                    Expression::new(Node::Arithmetic(ArithmeticNode::Add(AddNode::new(
+                        Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3)))),
+                        Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(4)))),
+                    )))),
                 )))),
                 Expression::new(Node::Arithmetic(ArithmeticNode::Add(AddNode::new(
                     Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(5)))),
                     Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(6)))),
                 )))),
-            ])))),
+            ))))
         );
     }
 
     #[test]
-    fn collect_dynamic_cons_lists() {
+    fn collect_dynamic_lists() {
         let env = Env::new();
-        let expression = ListNode::collect(
-            parser::parse(
-                "(cons (add 1 2) (cons (add 3 4) (cons (add 5 6) ((lambda (foo) foo) null))))",
+        let sum = |items: Vec<Expression<Node>>| {
+            items.into_iter().fold(
+                Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(0)))),
+                |acc, item| {
+                    Expression::new(Node::Arithmetic(ArithmeticNode::Add(AddNode::new(
+                        acc, item,
+                    ))))
+                },
+            )
+        };
+        let result = collect_list_items(
+            &parser::parse(
+                "(cons (add 1 2) (cons (add 3 4) (cons (add 5 6) ((lambda (foo) foo) (cons (add 7 8) null)))))",
             )
             .unwrap(),
+            &env,
+            sum,
         );
-        let result = expression.evaluate(&env).expression;
         assert_eq!(
-            result,
-            Expression::new(Node::Sequence(SequenceNode::List(ListNode::new(vec![
+            result.expression,
+            Expression::new(Node::Arithmetic(ArithmeticNode::Add(AddNode::new(
                 Expression::new(Node::Arithmetic(ArithmeticNode::Add(AddNode::new(
-                    Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(1)))),
-                    Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(2)))),
+                    Expression::new(Node::Arithmetic(ArithmeticNode::Add(AddNode::new(
+                        Expression::new(Node::Arithmetic(ArithmeticNode::Add(AddNode::new(
+                            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(0)))),
+                            Expression::new(Node::Arithmetic(ArithmeticNode::Add(AddNode::new(
+                                Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(1)))),
+                                Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(2)))),
+                            )))),
+                        )))),
+                        Expression::new(Node::Arithmetic(ArithmeticNode::Add(AddNode::new(
+                            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3)))),
+                            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(4)))),
+                        )))),
+                    )))),
+                    Expression::new(Node::Arithmetic(ArithmeticNode::Add(AddNode::new(
+                        Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(5)))),
+                        Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(6)))),
+                    )))),
                 )))),
                 Expression::new(Node::Arithmetic(ArithmeticNode::Add(AddNode::new(
-                    Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3)))),
-                    Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(4)))),
+                    Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(7)))),
+                    Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(8)))),
                 )))),
-                Expression::new(Node::Arithmetic(ArithmeticNode::Add(AddNode::new(
-                    Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(5)))),
-                    Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(6)))),
-                )))),
-            ])))),
+            )))),
         );
     }
 }

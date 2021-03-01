@@ -43,12 +43,6 @@ impl<T: NodeType<T>> EvaluationResult<T> {
 
 pub type StateToken = usize;
 
-#[derive(Debug, PartialEq, Clone)]
-pub struct WithDependencies<T: NodeType<T>> {
-    expression: Expression<T>,
-    dependencies: Vec<StateToken>,
-}
-
 #[derive(PartialEq, Clone)]
 pub struct Expression<T: NodeType<T>> {
     value: Rc<T>,

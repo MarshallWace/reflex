@@ -47,9 +47,6 @@ impl Evaluate1 for CarNode {
     fn run(&self, _env: &Env<Node>, target: &Expression<Node>) -> Expression<Node> {
         match target.value() {
             Node::Sequence(SequenceNode::Cons(node)) => Expression::clone(node.head()),
-            Node::Sequence(SequenceNode::List(node)) if !node.items().is_empty() => {
-                Expression::clone(&node.items()[0])
-            }
             _ => Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(&format!(
                 "Expected pair, received {}",
                 target

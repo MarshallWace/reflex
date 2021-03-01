@@ -17,16 +17,34 @@ use crate::{
 pub struct ConsNode {
     head: Expression<Node>,
     tail: Expression<Node>,
+    is_list: Option<bool>,
 }
 impl ConsNode {
     pub fn new(head: Expression<Node>, tail: Expression<Node>) -> Self {
-        ConsNode { head, tail }
+        let is_list = match tail.value() {
+            Node::Core(CoreNode::Value(ValueNode::Nil)) => Some(true),
+            Node::Sequence(SequenceNode::Cons(tail)) => tail.is_list,
+            _ => None,
+        };
+        ConsNode {
+            head,
+            tail,
+            is_list,
+        }
     }
     pub fn head(&self) -> &Expression<Node> {
         &self.head
     }
     pub fn tail(&self) -> &Expression<Node> {
         &self.tail
+    }
+    pub fn is_list(&self) -> Option<bool> {
+        self.is_list
+    }
+    pub fn iter(&self) -> ConsIterator {
+        ConsIterator {
+            current: ConsIteratorItem::Pair(self),
+        }
     }
 }
 impl AstNode<Node> for ConsNode {
@@ -51,6 +69,35 @@ impl NodeType<Node> for ConsNode {
 impl fmt::Display for ConsNode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Debug::fmt(self, f)
+    }
+}
+
+pub struct ConsIterator<'a> {
+    current: ConsIteratorItem<'a>,
+}
+enum ConsIteratorItem<'a> {
+    Pair(&'a ConsNode),
+    Tail(&'a Expression<Node>),
+    Nil,
+}
+impl<'a> Iterator for ConsIterator<'a> {
+    type Item = Expression<Node>;
+    fn next(&mut self) -> Option<Expression<Node>> {
+        match self.current {
+            ConsIteratorItem::Pair(ConsNode { head, tail, .. }) => {
+                self.current = match tail.value() {
+                    Node::Core(CoreNode::Value(ValueNode::Nil)) => ConsIteratorItem::Nil,
+                    Node::Sequence(SequenceNode::Cons(next)) => ConsIteratorItem::Pair(next),
+                    _ => ConsIteratorItem::Tail(tail),
+                };
+                Some(Expression::clone(head))
+            }
+            ConsIteratorItem::Tail(expression) => {
+                self.current = ConsIteratorItem::Nil;
+                Some(Expression::clone(expression))
+            }
+            ConsIteratorItem::Nil => None,
+        }
     }
 }
 
@@ -87,7 +134,6 @@ impl Evaluate1 for IsPairNode {
         Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(
             match target.value() {
                 Node::Sequence(SequenceNode::Cons(_)) => true,
-                Node::Sequence(SequenceNode::List(_)) => true,
                 _ => false,
             },
         ))))
@@ -276,5 +322,101 @@ mod tests {
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
         );
+    }
+
+    #[test]
+    fn cons_iterator() {
+        let expression = ConsNode::new(
+            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3)))),
+            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(4)))),
+        );
+        let mut iterator = expression.iter();
+        assert_eq!(
+            iterator.next(),
+            Some(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Int(3)
+            ))))
+        );
+        assert_eq!(
+            iterator.next(),
+            Some(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Int(4)
+            ))))
+        );
+        assert_eq!(iterator.next(), None);
+    }
+
+    #[test]
+    fn cons_list_iterator() {
+        let expression = ConsNode::new(
+            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3)))),
+            Expression::new(Node::Sequence(SequenceNode::Cons(ConsNode::new(
+                Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(4)))),
+                Expression::new(Node::Sequence(SequenceNode::Cons(ConsNode::new(
+                    Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(5)))),
+                    Expression::new(Node::Core(CoreNode::Value(ValueNode::Nil))),
+                )))),
+            )))),
+        );
+        let mut iterator = expression.iter();
+        assert_eq!(
+            iterator.next(),
+            Some(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Int(3)
+            ))))
+        );
+        assert_eq!(
+            iterator.next(),
+            Some(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Int(4)
+            ))))
+        );
+        assert_eq!(
+            iterator.next(),
+            Some(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Int(5)
+            ))))
+        );
+        assert_eq!(iterator.next(), None);
+    }
+
+    #[test]
+    fn cons_dotted_list_iterator() {
+        let expression = ConsNode::new(
+            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3)))),
+            Expression::new(Node::Sequence(SequenceNode::Cons(ConsNode::new(
+                Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(4)))),
+                Expression::new(Node::Sequence(SequenceNode::Cons(ConsNode::new(
+                    Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(5)))),
+                    Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(6)))),
+                )))),
+            )))),
+        );
+        let mut iterator = expression.iter();
+        assert_eq!(
+            iterator.next(),
+            Some(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Int(3)
+            ))))
+        );
+        assert_eq!(
+            iterator.next(),
+            Some(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Int(4)
+            ))))
+        );
+        assert_eq!(
+            iterator.next(),
+            Some(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Int(5)
+            ))))
+        );
+        assert_eq!(
+            iterator.next(),
+            Some(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Int(6)
+            ))))
+        );
+        assert_eq!(iterator.next(), None);
     }
 }

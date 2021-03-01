@@ -21,18 +21,17 @@ pub use self::apply::ApplyNode;
 pub use self::car::CarNode;
 pub use self::cdr::CdrNode;
 pub use self::cons::{ConsNode, IsPairNode};
-pub use self::list::{CollectNode, IsListNode, ListNode};
+pub use self::list::{IsListNode, ListNode};
 
 #[derive(PartialEq, Clone)]
 pub enum SequenceNode {
     Apply(ApplyNode),
     Car(CarNode),
     Cdr(CdrNode),
-    Collect(CollectNode),
     Cons(ConsNode),
+    List(ListNode),
     IsList(IsListNode),
     IsPair(IsPairNode),
-    List(ListNode),
 }
 impl AstNodePackage<Node> for SequenceNode {
     fn factory(type_name: &str, args: &[Expression<Node>]) -> Option<NodeFactoryResult<Self>> {
@@ -55,9 +54,8 @@ impl NodeType<Node> for SequenceNode {
             Self::Car(node) => node.expressions(),
             Self::Cdr(node) => node.expressions(),
             Self::Cons(node) => node.expressions(),
-            Self::Collect(node) => node.expressions(),
-            Self::IsList(node) => node.expressions(),
             Self::List(node) => node.expressions(),
+            Self::IsList(node) => node.expressions(),
             Self::IsPair(node) => node.expressions(),
         }
     }
@@ -67,9 +65,8 @@ impl NodeType<Node> for SequenceNode {
             Self::Car(node) => node.capture_depth(),
             Self::Cdr(node) => node.capture_depth(),
             Self::Cons(node) => node.capture_depth(),
-            Self::Collect(node) => node.capture_depth(),
-            Self::IsList(node) => node.capture_depth(),
             Self::List(node) => node.capture_depth(),
+            Self::IsList(node) => node.capture_depth(),
             Self::IsPair(node) => node.capture_depth(),
         }
     }
@@ -79,9 +76,8 @@ impl NodeType<Node> for SequenceNode {
             Self::Car(node) => node.evaluate(env),
             Self::Cdr(node) => node.evaluate(env),
             Self::Cons(node) => node.evaluate(env),
-            Self::Collect(node) => node.evaluate(env),
-            Self::IsList(node) => node.evaluate(env),
             Self::List(node) => node.evaluate(env),
+            Self::IsList(node) => node.evaluate(env),
             Self::IsPair(node) => node.evaluate(env),
         }
     }
@@ -93,9 +89,8 @@ impl fmt::Display for SequenceNode {
             Self::Car(node) => fmt::Display::fmt(node, f),
             Self::Cdr(node) => fmt::Display::fmt(node, f),
             Self::Cons(node) => fmt::Display::fmt(node, f),
-            Self::Collect(node) => fmt::Display::fmt(node, f),
-            Self::IsList(node) => fmt::Display::fmt(node, f),
             Self::List(node) => fmt::Display::fmt(node, f),
+            Self::IsList(node) => fmt::Display::fmt(node, f),
             Self::IsPair(node) => fmt::Display::fmt(node, f),
         }
     }
@@ -107,9 +102,8 @@ impl fmt::Debug for SequenceNode {
             Self::Car(node) => fmt::Debug::fmt(node, f),
             Self::Cdr(node) => fmt::Debug::fmt(node, f),
             Self::Cons(node) => fmt::Debug::fmt(node, f),
-            Self::Collect(node) => fmt::Debug::fmt(node, f),
-            Self::IsList(node) => fmt::Debug::fmt(node, f),
             Self::List(node) => fmt::Debug::fmt(node, f),
+            Self::IsList(node) => fmt::Debug::fmt(node, f),
             Self::IsPair(node) => fmt::Debug::fmt(node, f),
         }
     }

@@ -5,11 +5,13 @@ use std::fmt;
 
 use crate::{
     env::Env,
-    expression::{AstNode, EvaluationResult, Expression, NodeFactoryResult, NodeType},
+    expression::{
+        with_dependencies, AstNode, EvaluationResult, Expression, NodeFactoryResult, NodeType,
+    },
     node::{
-        core::{CoreNode, ErrorNode, FunctionApplicationNode, ValueNode},
-        sequence::{ListNode, SequenceNode},
-        Evaluate1, Node,
+        core::{CoreNode, FunctionApplicationNode},
+        sequence::list::collect_list_items,
+        Node,
     },
 };
 
@@ -20,10 +22,7 @@ pub struct ApplyNode {
 }
 impl ApplyNode {
     pub fn new(target: Expression<Node>, args: Expression<Node>) -> Self {
-        ApplyNode {
-            target,
-            args: ListNode::collect(args),
-        }
+        ApplyNode { target, args }
     }
 }
 impl AstNode<Node> for ApplyNode {
@@ -42,32 +41,15 @@ impl NodeType<Node> for ApplyNode {
         vec![&self.target, &self.args]
     }
     fn evaluate(&self, env: &Env<Node>) -> Option<EvaluationResult<Node>> {
-        Evaluate1::evaluate(self, env)
-    }
-}
-impl Evaluate1 for ApplyNode {
-    fn dependencies(&self) -> &Expression<Node> {
-        &self.args
-    }
-    fn run(&self, _env: &Env<Node>, args: &Expression<Node>) -> Expression<Node> {
-        match args.value() {
-            Node::Core(CoreNode::Value(ValueNode::Nil)) => {
-                Expression::new(Node::Core(CoreNode::FunctionApplication(FunctionApplicationNode::new(
-                    Expression::clone(&self.target),
-                    Vec::new(),
-                ))))
-            }
-            Node::Sequence(SequenceNode::List(args)) => {
-                Expression::new(Node::Core(CoreNode::FunctionApplication(FunctionApplicationNode::new(
-                    Expression::clone(&self.target),
-                    args.items().iter().map(Expression::clone).collect(),
-                ))))
-            }
-            _ => Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(&format!(
-                "Expected list, received {}",
-                args,
-            ))))),
-        }
+        let result = collect_list_items(&self.args, env, |args| {
+            Expression::new(Node::Core(CoreNode::FunctionApplication(
+                FunctionApplicationNode::new(Expression::clone(&self.target), args),
+            )))
+        });
+        Some(with_dependencies(
+            result.dependencies,
+            result.expression.evaluate(env),
+        ))
     }
 }
 impl fmt::Display for ApplyNode {
