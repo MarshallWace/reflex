@@ -6,7 +6,10 @@ use std::{fmt, iter::once};
 use crate::{
     env::{Env, StackOffset},
     expression::{AstNode, EvaluationResult, Expression, NodeFactoryResult, NodeType},
-    node::{core::function::apply_function, Node},
+    node::{
+        core::{function::apply_function, CoreNode},
+        Node,
+    },
 };
 
 #[derive(PartialEq, Clone)]
@@ -49,8 +52,26 @@ pub struct BoundNode {
     env: Env<Node>,
 }
 impl BoundNode {
-    pub fn new(target: Expression<Node>, env: Env<Node>) -> Self {
-        BoundNode { target, env }
+    pub fn bind(target: &Expression<Node>, env: &Env<Node>) -> Expression<Node> {
+        let capture_depth = target.capture_depth();
+        if capture_depth == 0 {
+            return Expression::clone(target);
+        }
+        match target.value() {
+            Node::Core(CoreNode::Reference(ReferenceNode { offset })) => {
+                Expression::clone(env.get(*offset))
+            }
+            _ => Expression::new(Node::Core(CoreNode::Bound(BoundNode {
+                target: Expression::clone(target),
+                env: env.capture(capture_depth),
+            }))),
+        }
+    }
+    pub fn target(&self) -> &Expression<Node> {
+        &self.target
+    }
+    pub fn env(&self) -> &Env<Node> {
+        &self.env
     }
 }
 impl NodeType<Node> for BoundNode {
@@ -175,16 +196,16 @@ mod tests {
     #[test]
     fn bound_expressions() {
         let env = Env::new();
-        let expression = Expression::new(Node::Core(CoreNode::Bound(BoundNode::new(
-            Expression::new(Node::Arithmetic(ArithmeticNode::Add(AddNode::new(
+        let expression = Expression::new(Node::Core(CoreNode::Bound(BoundNode {
+            target: Expression::new(Node::Arithmetic(ArithmeticNode::Add(AddNode::new(
                 Expression::new(Node::Core(CoreNode::Reference(ReferenceNode::new(1)))),
                 Expression::new(Node::Core(CoreNode::Reference(ReferenceNode::new(0)))),
             )))),
-            env.extend(vec![
+            env: env.extend(vec![
                 Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3)))),
                 Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(4)))),
             ]),
-        ))));
+        })));
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,

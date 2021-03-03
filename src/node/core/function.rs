@@ -194,16 +194,7 @@ pub fn apply_function(
             None => body.evaluate(&Env::new()),
         };
     }
-    let args = args.iter().map(|arg| match arg.capture_depth() {
-        0 => Expression::clone(arg),
-        depth => match arg.value() {
-            Node::Core(CoreNode::Reference(node)) => Expression::clone(arg_env.get(node.offset())),
-            _ => Expression::new(Node::Core(CoreNode::Bound(BoundNode::new(
-                Expression::clone(arg),
-                arg_env.capture(depth),
-            )))),
-        },
-    });
+    let args = args.iter().map(|arg| BoundNode::bind(arg, arg_env));
     let inner_env = match captured_env {
         Some(captured_env) => captured_env.extend(args),
         None => Env::from(args),
