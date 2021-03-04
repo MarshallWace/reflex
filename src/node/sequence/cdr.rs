@@ -121,4 +121,16 @@ mod tests {
             )))),
         );
     }
+
+    #[test]
+    fn lazy_evaluation() {
+        let env = Env::new();
+        let expression = parser::parse("(cdr (cons (error \"foo\") (add 3 4)))").unwrap();
+        let result = expression.evaluate(&env).expression;
+        assert_eq!(
+            result,
+            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3 + 4)))),
+        );
+    }
+
 }

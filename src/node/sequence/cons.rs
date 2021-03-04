@@ -231,7 +231,7 @@ mod tests {
         expression::Expression,
         node::{
             arithmetic::{AddNode, ArithmeticNode},
-            core::{CoreNode, ValueNode},
+            core::{CoreNode, ErrorNode, ValueNode},
             parser,
             sequence::SequenceNode,
             Node,
@@ -317,6 +317,20 @@ mod tests {
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(5)))),
         );
+    }
+
+    #[test]
+    fn lazy_evaluation() {
+        let env = Env::new();
+        let expression = parser::parse("(cons (error \"foo\") (error \"bar\"))").unwrap();
+        let result = expression.evaluate(&env).expression;
+        assert_eq!(
+            result,
+            Expression::new(Node::Sequence(SequenceNode::Cons(ConsNode::new(
+                Expression::new(Node::Core(CoreNode::Error(ErrorNode::new("foo")))),
+                Expression::new(Node::Core(CoreNode::Error(ErrorNode::new("bar")))),
+            ))))
+        )
     }
 
     #[test]

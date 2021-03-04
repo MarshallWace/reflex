@@ -102,6 +102,17 @@ mod tests {
     }
 
     #[test]
+    fn lazy_evaluation() {
+        let env = Env::new();
+        let expression = parser::parse("(car (cons (add 3 4) (error \"foo\")))").unwrap();
+        let result = expression.evaluate(&env).expression;
+        assert_eq!(
+            result,
+            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3 + 4)))),
+        );
+    }
+
+    #[test]
     fn invalid_car_expressions() {
         let env = Env::new();
         let expression = parser::parse("(car 3)").unwrap();
