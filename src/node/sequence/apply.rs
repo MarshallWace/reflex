@@ -10,7 +10,7 @@ use crate::{
     },
     node::{
         core::{CoreNode, FunctionApplicationNode},
-        sequence::list::collect_list_items,
+        sequence::cons::collect_list_items,
         Node,
     },
 };
@@ -92,6 +92,29 @@ mod tests {
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(
                 (-3 as i32).abs() + (4 + 5)
             )))),
+        );
+    }
+
+    #[test]
+    fn dynamic_argument_lists() {
+        let env = Env::new();
+        let expression = parser::parse(
+            "(apply (lambda (foo bar) (add foo bar)) (cons 3 ((lambda () (cons 4 null)))))",
+        )
+        .unwrap();
+        let result = expression.evaluate(&env).expression;
+        assert_eq!(
+            result,
+            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3 + 4)))),
+        );
+        let expression = parser::parse(
+            "(apply (lambda (foo bar) (add foo bar)) (cons 3 ((lambda (foo) (cons 4 foo)) null)))",
+        )
+        .unwrap();
+        let result = expression.evaluate(&env).expression;
+        assert_eq!(
+            result,
+            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3 + 4)))),
         );
     }
 
