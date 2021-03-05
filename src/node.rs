@@ -11,6 +11,7 @@ use crate::{
 mod evaluate;
 pub use evaluate::{Evaluate1, Evaluate2};
 
+mod lexer;
 pub mod parser;
 
 pub mod arithmetic;

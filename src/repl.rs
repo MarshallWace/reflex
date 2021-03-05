@@ -31,7 +31,7 @@ pub fn start() -> io::Result<()> {
                 writeln!(stdout, "{}", expression.evaluate(&env).expression)?;
             }
             Err(err) => {
-                writeln!(stderr, "Syntax error: {}", err)?;
+                writeln!(stderr, "Syntax error: {}", err.message())?;
             }
         };
     }

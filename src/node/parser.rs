@@ -1,8 +1,6 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use std::borrow::Cow;
-
 use crate::{
     expression::{AstNodePackage, Expression},
     node::{
@@ -10,659 +8,10 @@ use crate::{
             CoreNode, FunctionApplicationNode, FunctionNode, LetNode, ReferenceNode, StringValue,
             ValueNode,
         },
+        lexer::{parse_syntax, SyntaxDatum},
         Node,
     },
 };
-
-type ParserError = String;
-type ParserResult<T> = Result<T, ParserError>;
-
-struct ParserOutput<'a, T> {
-    parsed: T,
-    remaining: &'a str,
-}
-impl<'a, T> ParserOutput<'a, T> {
-    fn map<U, F: FnOnce(T) -> U>(self, f: F) -> ParserOutput<'a, U> {
-        ParserOutput {
-            parsed: f(self.parsed),
-            remaining: self.remaining,
-        }
-    }
-}
-
-const EOF: &'static str = "end of input";
-
-fn consume_whitespace(input: &str) -> &str {
-    input.trim_start()
-}
-
-fn consume_char(char: char, input: &str) -> Option<&str> {
-    input
-        .chars()
-        .next()
-        .filter(|value| *value == char)
-        .map(|_| &input[1..])
-}
-
-fn consume_while(predicate: Box<dyn Fn(char) -> bool>, input: &str) -> Option<ParserOutput<&str>> {
-    let length = input
-        .char_indices()
-        .find_map(
-            |(index, char)| {
-                if predicate(char) {
-                    None
-                } else {
-                    Some(index)
-                }
-            },
-        )
-        .unwrap_or_else(|| input.len());
-    if length > 0 {
-        Some(ParserOutput {
-            parsed: &input[0..length],
-            remaining: &input[length..],
-        })
-    } else {
-        None
-    }
-}
-
-fn consume_keyword<'a>(keyword: &str, input: &'a str) -> Option<&'a str> {
-    if keyword
-        .chars()
-        .zip(input.chars())
-        .all(|(left, right)| left == right)
-    {
-        Some(&input[keyword.len()..])
-    } else {
-        None
-    }
-}
-
-fn consume_identifier(input: &str) -> Option<ParserOutput<&str>> {
-    let first_char = input.chars().next()?;
-    if !is_valid_identifier_leading_char(first_char) {
-        return None;
-    }
-    let identifier_length = input
-        .char_indices()
-        .skip(1)
-        .find_map(|(index, char)| {
-            if is_valid_identifier_char(char) {
-                None
-            } else {
-                Some(index)
-            }
-        })
-        .unwrap_or_else(|| input.len());
-    Some(ParserOutput {
-        parsed: &input[0..identifier_length],
-        remaining: &input[identifier_length..],
-    })
-}
-
-fn is_valid_identifier_leading_char(char: char) -> bool {
-    if char.is_ascii_alphabetic() {
-        return true;
-    }
-    match char {
-        '_' => true,
-        _ => false,
-    }
-}
-
-fn is_valid_identifier_char(char: char) -> bool {
-    if char.is_ascii_alphanumeric() {
-        return true;
-    }
-    match char {
-        '_' | '-' | '!' | '?' => true,
-        _ => false,
-    }
-}
-
-fn peek_next_char(input: &str) -> Option<char> {
-    input.chars().next()
-}
-
-fn consume_primitive(input: &str) -> Option<ParserOutput<ValueNode>> {
-    None.or_else(|| consume_nil_literal(input))
-        .or_else(|| consume_boolean_literal(input))
-        .or_else(|| consume_number_literal(input))
-        .or_else(|| consume_string_literal(input))
-}
-
-fn consume_nil_literal(input: &str) -> Option<ParserOutput<ValueNode>> {
-    consume_keyword("null", input).map(|remaining| ParserOutput {
-        parsed: ValueNode::Nil,
-        remaining,
-    })
-}
-
-fn consume_boolean_literal(input: &str) -> Option<ParserOutput<ValueNode>> {
-    None.or_else(|| consume_true_literal(input))
-        .or_else(|| consume_false_literal(input))
-}
-
-fn consume_true_literal(input: &str) -> Option<ParserOutput<ValueNode>> {
-    consume_keyword("true", input).map(|remaining| ParserOutput {
-        parsed: ValueNode::Boolean(true),
-        remaining,
-    })
-}
-
-fn consume_false_literal(input: &str) -> Option<ParserOutput<ValueNode>> {
-    consume_keyword("false", input).map(|remaining| ParserOutput {
-        parsed: ValueNode::Boolean(false),
-        remaining,
-    })
-}
-
-fn consume_number_literal(input: &str) -> Option<ParserOutput<ValueNode>> {
-    let (is_negative, input) =
-        consume_char('-', input).map_or_else(|| (false, input), |remaining| (true, remaining));
-    let result = consume_while(Box::new(is_digit_char), input);
-    if let None = result {
-        return None;
-    }
-    let (int_chars, input) = result
-        .map(|ParserOutput { parsed, remaining }| (parsed, remaining))
-        .unwrap();
-    let (is_float, input) =
-        consume_char('.', input).map_or_else(|| (false, input), |remaining| (true, remaining));
-    if !is_float {
-        let int_value = int_chars.parse::<i32>();
-        return match int_value {
-            Ok(value) => Some(ParserOutput {
-                parsed: ValueNode::Int(if is_negative { -value } else { value }),
-                remaining: input,
-            }),
-            Err(_) => None,
-        };
-    }
-    let result = consume_while(Box::new(is_digit_char), input);
-    if let None = result {
-        return None;
-    }
-    let (decimal_chars, input) = result
-        .map(|ParserOutput { parsed, remaining }| (parsed, remaining))
-        .unwrap();
-    let float_value = format!("{}.{}", int_chars, decimal_chars).parse::<f64>();
-    match float_value {
-        Ok(value) => Some(ParserOutput {
-            parsed: ValueNode::Float(if is_negative { -value } else { value }),
-            remaining: input,
-        }),
-        Err(_) => None,
-    }
-}
-
-fn is_digit_char(char: char) -> bool {
-    char.is_ascii_digit()
-}
-
-fn consume_string_literal(input: &str) -> Option<ParserOutput<ValueNode>> {
-    let input = consume_char('"', input)?;
-    let ParserOutput {
-        parsed,
-        remaining: input,
-    } = consume_string_contents(input);
-    let input = consume_char('"', input)?;
-    Some(ParserOutput {
-        parsed: ValueNode::String(match parsed {
-            Cow::Borrowed(value) => StringValue::new(String::from(value)),
-            Cow::Owned(value) => StringValue::new(value),
-        }),
-        remaining: input,
-    })
-}
-
-fn consume_string_contents(input: &str) -> ParserOutput<Cow<str>> {
-    let result = consume_while(Box::new(is_string_char), input).map_or_else(
-        || ParserOutput {
-            parsed: Cow::Borrowed(""),
-            remaining: input,
-        },
-        |result| result.map(Cow::Borrowed),
-    );
-    let mut lookahead_iter = result.remaining.chars();
-    match lookahead_iter.next() {
-        Some('\\') => {
-            let escaped_char = lookahead_iter.next();
-            match escaped_char {
-                Some(char) => {
-                    let next = consume_string_contents(&result.remaining[2..]);
-                    ParserOutput {
-                        parsed: Cow::Owned(format!(
-                            "{}{}{}",
-                            result.parsed,
-                            parse_escape_code(char)
-                                .map(String::from)
-                                .unwrap_or(char.to_string()),
-                            next.parsed
-                        )),
-                        remaining: next.remaining,
-                    }
-                }
-                None => result,
-            }
-        }
-        _ => result,
-    }
-}
-
-fn parse_escape_code(char: char) -> Option<&'static str> {
-    match char {
-        '\\' => Some("\\"),
-        '"' => Some("\""),
-        'n' => Some("\n"),
-        't' => Some("\t"),
-        'r' => Some("\r"),
-        _ => None,
-    }
-}
-
-fn is_string_char(char: char) -> bool {
-    match char {
-        '"' | '\\' => false,
-        _ => true,
-    }
-}
-
-fn consume_special_form<'a>(
-    input: &'a str,
-    scope: &LexicalScope<'a>,
-) -> ParserResult<Option<ParserOutput<'a, Expression<Node>>>> {
-    match consume_lambda_expression(input, scope)? {
-        Some(result) => Ok(Some(result)),
-        _ => match consume_let_expression(input, scope)? {
-            Some(result) => Ok(Some(result)),
-            _ => Ok(None),
-        },
-    }
-}
-
-fn consume_lambda_expression<'a>(
-    input: &'a str,
-    scope: &LexicalScope<'a>,
-) -> ParserResult<Option<ParserOutput<'a, Expression<Node>>>> {
-    match consume_char('(', input) {
-        None => Ok(None),
-        Some(input) => {
-            let input = consume_whitespace(input);
-            match consume_keyword("lambda", input) {
-                None => Ok(None),
-                Some(input) => {
-                    let input = consume_whitespace(input);
-                    match consume_char('(', input) {
-                        None => Err(String::from("Invalid function argument list")),
-                        Some(input) => {
-                            let input = consume_whitespace(input);
-                            let ParserOutput {
-                                parsed: arg_names,
-                                remaining: input,
-                            } = consume_fn_arg_names(input)?;
-                            let input = consume_whitespace(input);
-                            match consume_char(')', input) {
-                                None => Err(format!(
-                                    "Expected ')', received '{}'",
-                                    peek_next_char(input)
-                                        .map(String::from)
-                                        .unwrap_or(String::from(EOF))
-                                )),
-                                Some(input) => {
-                                    let input = consume_whitespace(input);
-                                    let arity = arg_names.len();
-                                    let child_scope = scope
-                                        .create_child(arg_names.iter().map(|name| *name).collect());
-                                    match consume_expression(input, &child_scope)? {
-                                        None => Err(String::from("Missing function body")),
-                                        Some(ParserOutput {
-                                            parsed: body,
-                                            remaining: input,
-                                        }) => {
-                                            let input = consume_whitespace(input);
-                                            match consume_char(')', input) {
-                                                None => Err(format!(
-                                                    "Expected ')', received '{}'",
-                                                    peek_next_char(input)
-                                                        .map(String::from)
-                                                        .unwrap_or(String::from(EOF))
-                                                )),
-                                                Some(input) => Ok(Some(ParserOutput {
-                                                    parsed: Expression::new(Node::Core(
-                                                        CoreNode::Function(FunctionNode::new(
-                                                            arity, body,
-                                                        )),
-                                                    )),
-                                                    remaining: input,
-                                                })),
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-fn consume_fn_arg_names<'a>(input: &'a str) -> ParserResult<ParserOutput<'a, Vec<&'a str>>> {
-    consume_fn_arg_names_iter(input, Vec::new())
-}
-
-fn consume_fn_arg_names_iter<'a>(
-    input: &'a str,
-    mut results: Vec<&'a str>,
-) -> ParserResult<ParserOutput<'a, Vec<&'a str>>> {
-    match consume_identifier(input) {
-        None => Ok(ParserOutput {
-            parsed: results,
-            remaining: input,
-        }),
-        Some(ParserOutput {
-            parsed: arg_name,
-            remaining: input,
-        }) => {
-            results.push(arg_name);
-            let input = consume_whitespace(input);
-            consume_fn_arg_names_iter(input, results)
-        }
-    }
-}
-
-fn consume_let_expression<'a>(
-    input: &'a str,
-    scope: &LexicalScope<'a>,
-) -> ParserResult<Option<ParserOutput<'a, Expression<Node>>>> {
-    match consume_char('(', input) {
-        None => Ok(None),
-        Some(input) => {
-            let input = consume_whitespace(input);
-            match consume_keyword("let", input) {
-                None => Ok(None),
-                Some(input) => {
-                    let input = consume_whitespace(input);
-                    match consume_char('(', input) {
-                        None => Err(String::from("Invalid let binding list")),
-                        Some(input) => {
-                            let input = consume_whitespace(input);
-                            let ParserOutput {
-                                parsed: bindings,
-                                remaining: input,
-                            } = consume_let_bindings(input, scope)?;
-                            let input = consume_whitespace(input);
-                            match consume_char(')', input) {
-                                None => Err(format!(
-                                    "Expected ')', received '{}'",
-                                    peek_next_char(input)
-                                        .map(String::from)
-                                        .unwrap_or(String::from(EOF))
-                                )),
-                                Some(input) => {
-                                    let input = consume_whitespace(input);
-                                    let child_scope = scope.create_child(
-                                        bindings.iter().map(|(name, _)| *name).collect(),
-                                    );
-                                    match consume_expression(input, &child_scope)? {
-                                        None => Err(String::from("Missing let binding body")),
-                                        Some(ParserOutput {
-                                            parsed: body,
-                                            remaining: input,
-                                        }) => {
-                                            let input = consume_whitespace(input);
-                                            match consume_char(')', input) {
-                                                None => Err(format!(
-                                                    "Expected ')', received '{}'",
-                                                    peek_next_char(input)
-                                                        .map(String::from)
-                                                        .unwrap_or(String::from(EOF))
-                                                )),
-                                                Some(input) => Ok(Some(ParserOutput {
-                                                    parsed: Expression::new(Node::Core(
-                                                        CoreNode::Let(LetNode::new(
-                                                            bindings
-                                                                .into_iter()
-                                                                .map(|(_, initializer)| initializer)
-                                                                .collect(),
-                                                            body,
-                                                        )),
-                                                    )),
-                                                    remaining: input,
-                                                })),
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-fn consume_let_bindings<'a>(
-    input: &'a str,
-    scope: &LexicalScope<'a>,
-) -> ParserResult<ParserOutput<'a, Vec<(&'a str, Expression<Node>)>>> {
-    consume_let_bindings_iter(input, scope, Vec::new())
-}
-
-fn consume_let_bindings_iter<'a>(
-    input: &'a str,
-    scope: &LexicalScope<'a>,
-    mut results: Vec<(&'a str, Expression<Node>)>,
-) -> ParserResult<ParserOutput<'a, Vec<(&'a str, Expression<Node>)>>> {
-    match consume_char('(', input) {
-        None => Ok(ParserOutput {
-            parsed: results,
-            remaining: input,
-        }),
-        Some(input) => {
-            let input = consume_whitespace(input);
-            match consume_identifier(input) {
-                None => Err(format!(
-                    "Expected identifier, received '{}'",
-                    peek_next_char(input)
-                        .map(String::from)
-                        .unwrap_or(String::from(EOF))
-                )),
-                Some(ParserOutput {
-                    parsed: binding_name,
-                    remaining: input,
-                }) => {
-                    let input = consume_whitespace(input);
-                    match consume_expression(input, scope)? {
-                        None => Err(format!(
-                            "Expected initializer expression, received '{}'",
-                            peek_next_char(input)
-                                .map(String::from)
-                                .unwrap_or(String::from(EOF))
-                        )),
-                        Some(ParserOutput {
-                            parsed: initializer,
-                            remaining: input,
-                        }) => {
-                            let input = consume_whitespace(input);
-                            match consume_char(')', input) {
-                                None => Err(format!(
-                                    "Expected ')', received '{}'",
-                                    peek_next_char(input)
-                                        .map(String::from)
-                                        .unwrap_or(String::from(EOF))
-                                )),
-                                Some(input) => {
-                                    results.push((binding_name, initializer));
-                                    let input = consume_whitespace(input);
-                                    consume_let_bindings_iter(input, scope, results)
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-fn consume_s_expression<'a>(
-    input: &'a str,
-    scope: &LexicalScope<'a>,
-) -> ParserResult<Option<ParserOutput<'a, Expression<Node>>>> {
-    match consume_char('(', input) {
-        None => Ok(None),
-        Some(input) => {
-            let input = consume_whitespace(input);
-            match consume_application_target(input, scope)? {
-                None => Err(format!(
-                    "Expected identifier or expression, received {}",
-                    peek_next_char(input)
-                        .map(String::from)
-                        .unwrap_or(String::from(EOF))
-                )),
-                Some(ParserOutput {
-                    parsed: target,
-                    remaining: input,
-                }) => {
-                    let input = consume_whitespace(input);
-                    let ParserOutput {
-                        parsed: args,
-                        remaining: input,
-                    } = consume_list_items(input, scope)?;
-                    let input = consume_whitespace(input);
-                    match consume_char(')', input) {
-                        None => Err(format!(
-                            "Expected ')', received '{}'",
-                            peek_next_char(input)
-                                .map(String::from)
-                                .unwrap_or(String::from(EOF))
-                        )),
-                        Some(input) => match target {
-                            ApplicationTarget::Primitive(identifier) => {
-                                match Node::factory(identifier, &args) {
-                                    Some(result) => Ok(Some(ParserOutput {
-                                        parsed: Expression::new(result?),
-                                        remaining: input,
-                                    })),
-                                    None => Err(format!("Unknown expression type: {}", identifier)),
-                                }
-                            }
-                            ApplicationTarget::Expression(target) => Ok(Some(ParserOutput {
-                                parsed: Expression::new(Node::Core(CoreNode::FunctionApplication(
-                                    FunctionApplicationNode::new(target, args),
-                                ))),
-                                remaining: input,
-                            })),
-                        },
-                    }
-                }
-            }
-        }
-    }
-}
-
-enum ApplicationTarget<'a> {
-    Primitive(&'a str),
-    Expression(Expression<Node>),
-}
-fn consume_application_target<'a>(
-    input: &'a str,
-    scope: &LexicalScope<'a>,
-) -> ParserResult<Option<ParserOutput<'a, ApplicationTarget<'a>>>> {
-    let identifier = consume_identifier(input);
-    match identifier.filter(|output| scope.get(output.parsed).is_none()) {
-        Some(output) => {
-            Ok(Some(output.map(|identifier| {
-                ApplicationTarget::Primitive(identifier)
-            })))
-        }
-        _ => match consume_expression(input, scope)? {
-            Some(output) => {
-                Ok(Some(output.map(|expression| {
-                    ApplicationTarget::Expression(expression)
-                })))
-            }
-            _ => Ok(None),
-        },
-    }
-}
-
-fn consume_list_items<'a>(
-    input: &'a str,
-    scope: &LexicalScope<'a>,
-) -> ParserResult<ParserOutput<'a, Vec<Expression<Node>>>> {
-    consume_list_items_iter(input, scope, Vec::new())
-}
-
-fn consume_list_items_iter<'a>(
-    input: &'a str,
-    scope: &LexicalScope<'a>,
-    mut results: Vec<Expression<Node>>,
-) -> ParserResult<ParserOutput<'a, Vec<Expression<Node>>>> {
-    match consume_expression(input, scope)? {
-        None => Ok(ParserOutput {
-            parsed: results,
-            remaining: input,
-        }),
-        Some(ParserOutput {
-            parsed: expression,
-            remaining: input,
-        }) => {
-            results.push(expression);
-            let input = consume_whitespace(input);
-            consume_list_items_iter(input, scope, results)
-        }
-    }
-}
-
-fn consume_reference<'a>(
-    input: &'a str,
-    scope: &LexicalScope<'a>,
-) -> ParserResult<Option<ParserOutput<'a, Expression<Node>>>> {
-    match consume_identifier(input) {
-        None => Ok(None),
-        Some(ParserOutput {
-            parsed: identifier,
-            remaining: input,
-        }) => match scope.get(identifier) {
-            None => Err(format!("Undefined identifier: {}", identifier)),
-            Some(offset) => Ok(Some(ParserOutput {
-                parsed: Expression::new(Node::Core(CoreNode::Reference(ReferenceNode::new(
-                    offset,
-                )))),
-                remaining: input,
-            })),
-        },
-    }
-}
-
-fn consume_expression<'a>(
-    input: &'a str,
-    scope: &LexicalScope<'a>,
-) -> ParserResult<Option<ParserOutput<'a, Expression<Node>>>> {
-    match consume_special_form(input, scope)? {
-        Some(result) => Ok(Some(result)),
-        _ => match consume_primitive(input) {
-            Some(result) => {
-                Ok(Some(result.map(|value| {
-                    Expression::new(Node::Core(CoreNode::Value(value)))
-                })))
-            }
-            _ => match consume_reference(input, scope)? {
-                Some(result) => Ok(Some(result)),
-                _ => match consume_s_expression(input, scope)? {
-                    Some(result) => Ok(Some(result)),
-                    _ => Ok(None),
-                },
-            },
-        },
-    }
-}
 
 struct LexicalScope<'a> {
     bindings: Vec<&'a str>,
@@ -695,23 +44,279 @@ impl<'a> LexicalScope<'a> {
     }
 }
 
-pub fn parse(input: &str) -> ParserResult<Expression<Node>> {
+type ParserResult<'a, T> = Result<T, ParserError<'a>>;
+
+#[derive(Debug, PartialEq)]
+pub struct ParserError<'a> {
+    message: String,
+    source: Option<SyntaxDatum<'a>>,
+}
+impl<'a> ParserError<'a> {
+    fn new(message: String, source: &SyntaxDatum<'a>) -> Self {
+        ParserError {
+            message,
+            source: Some(source.clone()),
+        }
+    }
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+}
+
+pub fn parse<'a>(input: &'a str) -> ParserResult<'a, Expression<Node>> {
+    let syntax = match parse_syntax(input) {
+        Ok(syntax) => Ok(syntax),
+        Err(message) => Err(ParserError {
+            message,
+            source: None,
+        }),
+    }?;
     let mut scope = LexicalScope::new(input);
-    let input = consume_whitespace(input);
-    consume_expression(input, &mut scope)
-        .and_then(|result| result.ok_or_else(|| String::from("Invalid expression")))
-        .and_then(
-            |ParserOutput {
-                 parsed: expression,
-                 remaining: input,
-             }| {
-                let input = consume_whitespace(input);
-                if !input.is_empty() {
-                    return Err(String::from("Unexpected input after expression"));
-                }
-                Ok(expression)
+    parse_expression(&syntax, &mut scope)
+}
+
+fn parse_expression<'a>(
+    input: &SyntaxDatum<'a>,
+    scope: &LexicalScope<'a>,
+) -> ParserResult<'a, Expression<Node>> {
+    match input {
+        SyntaxDatum::IntegerLiteral(value) => Ok(parse_integer_literal(input, *value)),
+        SyntaxDatum::FloatLiteral(value) => Ok(parse_float_literal(input, *value)),
+        SyntaxDatum::StringLiteral(value) => Ok(parse_string_literal(input, &value)),
+        SyntaxDatum::Symbol(identifier) => parse_reference(input, identifier, scope),
+        SyntaxDatum::List(items) => match items.split_first() {
+            None => Err(ParserError::new(String::from("Expected expression"), input)),
+            Some((target, args)) => match parse_special_form(input, target, args, scope)? {
+                Some(result) => Ok(result),
+                _ => parse_function_application(input, target, args, scope),
             },
-        )
+        },
+    }
+}
+
+fn parse_nil_literal(_input: &SyntaxDatum) -> Expression<Node> {
+    Expression::new(Node::Core(CoreNode::Value(ValueNode::Nil)))
+}
+
+fn parse_boolean_literal(_input: &SyntaxDatum, value: bool) -> Expression<Node> {
+    Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(value))))
+}
+
+fn parse_integer_literal(_input: &SyntaxDatum, value: i32) -> Expression<Node> {
+    Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(value))))
+}
+
+fn parse_float_literal(_input: &SyntaxDatum, value: f64) -> Expression<Node> {
+    Expression::new(Node::Core(CoreNode::Value(ValueNode::Float(value))))
+}
+
+fn parse_string_literal(_input: &SyntaxDatum, value: &str) -> Expression<Node> {
+    Expression::new(Node::Core(CoreNode::Value(ValueNode::String(
+        StringValue::new(String::from(value)),
+    ))))
+}
+
+fn parse_reference<'a>(
+    input: &SyntaxDatum<'a>,
+    identifier: &'a str,
+    scope: &LexicalScope<'a>,
+) -> ParserResult<'a, Expression<Node>> {
+    match scope.get(identifier) {
+        None => match parse_global(input, identifier) {
+            Some(result) => Ok(result),
+            None => Err(ParserError::new(
+                format!("Undefined identifier: {}", identifier),
+                input,
+            )),
+        },
+        Some(offset) => Ok(Expression::new(Node::Core(CoreNode::Reference(
+            ReferenceNode::new(offset),
+        )))),
+    }
+}
+
+fn parse_global<'a>(input: &SyntaxDatum<'a>, identifier: &'a str) -> Option<Expression<Node>> {
+    match identifier {
+        "null" => Some(parse_nil_literal(input)),
+        "true" => Some(parse_boolean_literal(input, true)),
+        "false" => Some(parse_boolean_literal(input, false)),
+        _ => None,
+    }
+}
+
+fn parse_special_form<'a>(
+    input: &SyntaxDatum<'a>,
+    target: &SyntaxDatum<'a>,
+    args: &[SyntaxDatum<'a>],
+    scope: &LexicalScope<'a>,
+) -> ParserResult<'a, Option<Expression<Node>>> {
+    match target {
+        SyntaxDatum::Symbol(identifier) => match *identifier {
+            "lambda" => parse_lambda_expression(input, args, scope).map(Some),
+            "let" => parse_let_expression(input, args, scope).map(Some),
+            _ => Ok(None),
+        },
+        _ => Ok(None),
+    }
+}
+
+fn parse_function_application<'a>(
+    input: &SyntaxDatum<'a>,
+    target: &SyntaxDatum<'a>,
+    args: &[SyntaxDatum<'a>],
+    scope: &LexicalScope<'a>,
+) -> ParserResult<'a, Expression<Node>> {
+    match target {
+        SyntaxDatum::Symbol(identifier) if scope.get(identifier).is_none() => {
+            match Node::factory(identifier, &parse_function_arguments(args, scope)?) {
+                Some(result) => match result {
+                    Ok(result) => Ok(Expression::new(result)),
+                    Err(message) => Err(ParserError::new(message, input)),
+                },
+                None => Err(ParserError::new(
+                    format!("Unknown expression type: {}", identifier),
+                    input,
+                )),
+            }
+        }
+        _ => Ok(Expression::new(Node::Core(CoreNode::FunctionApplication(
+            FunctionApplicationNode::new(
+                parse_expression(target, scope)?,
+                parse_function_arguments(args, scope)?,
+            ),
+        )))),
+    }
+}
+
+fn parse_function_arguments<'a>(
+    items: &[SyntaxDatum<'a>],
+    scope: &LexicalScope<'a>,
+) -> ParserResult<'a, Vec<Expression<Node>>> {
+    items
+        .iter()
+        .map(|item| parse_expression(item, scope))
+        .collect()
+}
+
+fn parse_lambda_expression<'a>(
+    input: &SyntaxDatum<'a>,
+    args: &[SyntaxDatum<'a>],
+    scope: &LexicalScope<'a>,
+) -> ParserResult<'a, Expression<Node>> {
+    let mut args = args.iter();
+    let arg_list = match args.next() {
+        Some(arg_list) => Ok(arg_list),
+        _ => Err(ParserError::new(
+            String::from("Missing lambda expression arguments"),
+            input,
+        )),
+    }?;
+    let arg_names = match arg_list {
+        SyntaxDatum::List(items) => parse_lambda_argument_names(items),
+        _ => Err(ParserError::new(
+            String::from("Invalid lambda expression argument definition"),
+            input,
+        )),
+    }?;
+    let body = match args.next() {
+        Some(body) => Ok(body),
+        _ => Err(ParserError::new(
+            String::from("Missing lambda expression body"),
+            input,
+        )),
+    }?;
+    let arity = arg_names.len();
+    let child_scope = scope.create_child(arg_names);
+    let body = parse_expression(body, &child_scope)?;
+    match args.next() {
+        Some(arg) => Err(ParserError::new(String::from("Unexpected expression"), arg)),
+        None => Ok(Expression::new(Node::Core(CoreNode::Function(
+            FunctionNode::new(arity, body),
+        )))),
+    }
+}
+
+fn parse_lambda_argument_names<'a>(items: &[SyntaxDatum<'a>]) -> ParserResult<'a, Vec<&'a str>> {
+    items
+        .iter()
+        .map(|arg| match arg {
+            SyntaxDatum::Symbol(arg_name) => Ok(*arg_name),
+            _ => Err(ParserError::new(String::from("Invalid argument name"), arg)),
+        })
+        .collect()
+}
+
+fn parse_let_expression<'a>(
+    input: &SyntaxDatum<'a>,
+    args: &[SyntaxDatum<'a>],
+    scope: &LexicalScope<'a>,
+) -> ParserResult<'a, Expression<Node>> {
+    let mut args = args.iter();
+    let binding_initializers = match args.next() {
+        Some(binding_initializers) => Ok(binding_initializers),
+        _ => Err(ParserError::new(
+            String::from("Missing let expression bindings"),
+            input,
+        )),
+    }?;
+    let binding_initializers = match binding_initializers {
+        SyntaxDatum::List(items) => parse_let_expression_binding_initializers(items, scope),
+        _ => Err(ParserError::new(
+            String::from("Invalid let expression bindings"),
+            input,
+        )),
+    }?;
+    let body = match args.next() {
+        Some(body) => Ok(body),
+        _ => Err(ParserError::new(
+            String::from("Missing let expression body"),
+            input,
+        )),
+    }?;
+    let identifiers = binding_initializers
+        .iter()
+        .map(|(identifier, _)| *identifier)
+        .collect();
+    let initializers = binding_initializers
+        .into_iter()
+        .map(|(_, initializer)| initializer)
+        .collect();
+    let child_scope = scope.create_child(identifiers);
+    let body = parse_expression(body, &child_scope)?;
+    match args.next() {
+        Some(arg) => Err(ParserError::new(String::from("Unexpected expression"), arg)),
+        None => Ok(Expression::new(Node::Core(CoreNode::Let(LetNode::new(
+            initializers,
+            body,
+        ))))),
+    }
+}
+
+fn parse_let_expression_binding_initializers<'a>(
+    items: &[SyntaxDatum<'a>],
+    scope: &LexicalScope<'a>,
+) -> ParserResult<'a, Vec<(&'a str, Expression<Node>)>> {
+    items
+        .iter()
+        .map(|binding| match binding {
+            SyntaxDatum::List(binding) if binding.len() == 2 => {
+                let mut items = binding.iter();
+                let identifier = match items.next().unwrap() {
+                    SyntaxDatum::Symbol(identifier) => Ok(*identifier),
+                    identifier => Err(ParserError::new(
+                        String::from("Invalid binding identifier"),
+                        identifier,
+                    )),
+                }?;
+                let initializer = parse_expression(items.next().unwrap(), scope)?;
+                return Ok((identifier, initializer));
+            }
+            _ => Err(ParserError::new(
+                String::from("Invalid binding definition"),
+                binding,
+            )),
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -724,30 +329,67 @@ mod tests {
                 CoreNode, FunctionApplicationNode, FunctionNode, LetNode, ReferenceNode,
                 StringValue, ValueNode,
             },
+            lexer::SyntaxDatum,
             Node,
         },
     };
 
-    use super::parse;
+    use super::{parse, ParserError};
 
     #[test]
     fn invalid_expression() {
-        assert_eq!(parse("#"), Err(String::from("Invalid expression")));
-        assert_eq!(parse("1."), Err(String::from("Invalid expression")));
-        assert_eq!(parse(".1"), Err(String::from("Invalid expression")));
-        assert_eq!(parse("-.1"), Err(String::from("Invalid expression")));
-        assert_eq!(parse("'foo'"), Err(String::from("Invalid expression")));
+        assert_eq!(
+            parse("#"),
+            Err(ParserError {
+                message: String::from("Expected expression, received '#'"),
+                source: None
+            })
+        );
+        assert_eq!(
+            parse("1."),
+            Err(ParserError {
+                message: String::from("Expected expression, received '1'"),
+                source: None
+            })
+        );
+        assert_eq!(
+            parse(".1"),
+            Err(ParserError {
+                message: String::from("Expected expression, received '.'"),
+                source: None
+            })
+        );
+        assert_eq!(
+            parse("-.1"),
+            Err(ParserError {
+                message: String::from("Expected expression, received '-'"),
+                source: None
+            })
+        );
+        assert_eq!(
+            parse("'foo'"),
+            Err(ParserError {
+                message: String::from("Expected expression, received '''"),
+                source: None
+            })
+        );
     }
 
     #[test]
     fn multiple_expressions() {
         assert_eq!(
             parse("null null"),
-            Err(String::from("Unexpected input after expression"))
+            Err(ParserError {
+                message: String::from("Unexpected end of input"),
+                source: None,
+            })
         );
         assert_eq!(
             parse("null foo"),
-            Err(String::from("Unexpected input after expression"))
+            Err(ParserError {
+                message: String::from("Unexpected end of input"),
+                source: None,
+            })
         );
     }
 
@@ -911,7 +553,13 @@ mod tests {
 
     #[test]
     fn identifiers() {
-        assert_eq!(parse("foo"), Err(String::from("Undefined identifier: foo")),);
+        assert_eq!(
+            parse("foo"),
+            Err(ParserError::new(
+                String::from("Undefined identifier: foo"),
+                &SyntaxDatum::Symbol("foo")
+            )),
+        );
         assert_eq!(
             parse("(lambda (a) a)"),
             Ok(Expression::new(Node::Core(CoreNode::Function(
