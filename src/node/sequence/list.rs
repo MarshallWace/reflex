@@ -226,6 +226,14 @@ mod tests {
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(true))))
         );
+        let expression = parser::parse(
+    "(list? ((lambda (first) ((lambda (second) ((lambda (third) (cons first (cons second (cons third null)))) 5)) 4)) 3))"
+        ).unwrap();
+        let result = expression.evaluate(&env).expression;
+        assert_eq!(
+            result,
+            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(true))))
+        );
         let expression =
             parser::parse("(list? (cons 3 (cons 4 (cons 5 ((lambda (foo) foo) 6)))))").unwrap();
         let result = expression.evaluate(&env).expression;

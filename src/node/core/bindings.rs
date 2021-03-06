@@ -4,12 +4,9 @@
 use std::{fmt, iter::once};
 
 use crate::{
-    env::{Env, StackOffset},
+    env::{Env, MutableEnv, StackOffset},
     expression::{AstNode, EvaluationResult, Expression, NodeFactoryResult, NodeType},
-    node::{
-        core::{function::apply_function, CoreNode},
-        Node,
-    },
+    node::{core::CoreNode, Node},
 };
 
 #[derive(PartialEq, Clone)]
@@ -59,7 +56,7 @@ impl BoundNode {
         }
         match target.value() {
             Node::Core(CoreNode::Reference(ReferenceNode { offset })) => {
-                Expression::clone(env.get(*offset))
+                BoundNode::bind(env.get(*offset), env)
             }
             _ => Expression::new(Node::Core(CoreNode::Bound(BoundNode {
                 target: Expression::clone(target),
@@ -122,16 +119,134 @@ impl NodeType<Node> for LetNode {
         self.initializers.iter().chain(once(&self.body)).collect()
     }
     fn evaluate(&self, env: &Env<Node>) -> Option<EvaluationResult<Node>> {
-        Some(apply_function(
-            self.initializers.len(),
-            &self.body,
-            &self.initializers,
-            env,
-            Some(env),
-        ))
+        let inner_env = env.extend(
+            self.initializers
+                .iter()
+                .map(|initializer| BoundNode::bind(initializer, env)),
+        );
+        Some(self.body.evaluate(&inner_env))
     }
 }
 impl fmt::Display for LetNode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt(self, f)
+    }
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct LetRecNode {
+    initializers: Vec<Expression<Node>>,
+    body: Expression<Node>,
+}
+impl LetRecNode {
+    pub fn new(initializers: Vec<Expression<Node>>, body: Expression<Node>) -> Self {
+        LetRecNode { initializers, body }
+    }
+}
+impl AstNode<Node> for LetRecNode {
+    fn factory(args: &[Expression<Node>]) -> NodeFactoryResult<Self> {
+        if args.len() < 1 {
+            return Err(String::from("Invalid number of arguments"));
+        }
+        let (body, initializers) = args.split_last().unwrap();
+        let initializers = initializers.iter().map(Expression::clone).collect();
+        let body = Expression::clone(body);
+        Ok(Self::new(initializers, body))
+    }
+}
+impl NodeType<Node> for LetRecNode {
+    fn expressions(&self) -> Vec<&Expression<Node>> {
+        self.initializers.iter().chain(once(&self.body)).collect()
+    }
+    fn evaluate(&self, env: &Env<Node>) -> Option<EvaluationResult<Node>> {
+        let shared_env = env.extend_recursive(|env| {
+            self.initializers
+                .iter()
+                .map(|initializer| {
+                    if initializer.capture_depth() == 0 {
+                        Expression::clone(initializer)
+                    } else {
+                        Expression::new(Node::Core(CoreNode::LetRecBinding(LetRecBindingNode {
+                            target: Expression::clone(initializer),
+                            env: MutableEnv::clone(env),
+                        })))
+                    }
+                })
+                .collect()
+        });
+        let inner_env = shared_env.get();
+        Some(self.body.evaluate(&inner_env))
+    }
+}
+impl fmt::Display for LetRecNode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt(self, f)
+    }
+}
+
+#[derive(PartialEq, Clone)]
+pub struct LetRecBindingNode {
+    target: Expression<Node>,
+    env: MutableEnv<Node>,
+}
+impl NodeType<Node> for LetRecBindingNode {
+    fn expressions(&self) -> Vec<&Expression<Node>> {
+        vec![&self.target]
+    }
+    fn evaluate(&self, _env: &Env<Node>) -> Option<EvaluationResult<Node>> {
+        Some(self.target.evaluate(&self.env.get()))
+    }
+    fn capture_depth(&self) -> usize {
+        0
+    }
+}
+impl fmt::Display for LetRecBindingNode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "<bound:{}>", self.target)
+    }
+}
+impl fmt::Debug for LetRecBindingNode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Display::fmt(&self, f)
+    }
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct LetStarNode {
+    initializers: Vec<Expression<Node>>,
+    body: Expression<Node>,
+}
+impl LetStarNode {
+    pub fn new(initializers: Vec<Expression<Node>>, body: Expression<Node>) -> Self {
+        LetStarNode { initializers, body }
+    }
+}
+impl AstNode<Node> for LetStarNode {
+    fn factory(args: &[Expression<Node>]) -> NodeFactoryResult<Self> {
+        if args.len() < 1 {
+            return Err(String::from("Invalid number of arguments"));
+        }
+        let (body, initializers) = args.split_last().unwrap();
+        let initializers = initializers.iter().map(Expression::clone).collect();
+        let body = Expression::clone(body);
+        Ok(Self::new(initializers, body))
+    }
+}
+impl NodeType<Node> for LetStarNode {
+    fn expressions(&self) -> Vec<&Expression<Node>> {
+        self.initializers.iter().chain(once(&self.body)).collect()
+    }
+    fn evaluate(&self, env: &Env<Node>) -> Option<EvaluationResult<Node>> {
+        let mut initializer_env: Option<Env<Node>> = None;
+        for initializer in self.initializers.iter() {
+            let current_env = initializer_env.as_ref().unwrap_or(env);
+            initializer_env =
+                Some(current_env.extend(once(BoundNode::bind(initializer, current_env))))
+        }
+        Some(self.body.evaluate(initializer_env.as_ref().unwrap_or(env)))
+    }
+}
+impl fmt::Display for LetStarNode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Debug::fmt(self, f)
     }
@@ -239,6 +354,120 @@ mod tests {
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3 + 4))))
+        );
+    }
+
+    #[test]
+    fn letrec_expressions() {
+        let env = Env::new();
+        let expression = parser::parse("(letrec () 3)").unwrap();
+        let result = expression.evaluate(&env).expression;
+        assert_eq!(
+            result,
+            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3))))
+        );
+        let expression = parser::parse("(letrec ((foo 3)) foo)").unwrap();
+        let result = expression.evaluate(&env).expression;
+        assert_eq!(
+            result,
+            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3))))
+        );
+        let expression = parser::parse("(letrec ((foo 3) (bar 4)) (+ foo bar))").unwrap();
+        let result = expression.evaluate(&env).expression;
+        assert_eq!(
+            result,
+            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3 + 4))))
+        );
+        let expression = parser::parse("(letrec ((first 3)) (letrec ((second 4)) (letrec ((third first) (fourth second)) (+ third fourth))))").unwrap();
+        let result = expression.evaluate(&env).expression;
+        assert_eq!(
+            result,
+            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3 + 4))))
+        );
+        let expression = parser::parse("(letrec ((foo 3) (bar foo)) (+ foo bar))").unwrap();
+        let result = expression.evaluate(&env).expression;
+        assert_eq!(
+            result,
+            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3 + 3))))
+        );
+        let expression = parser::parse("(letrec ((foo bar) (bar 3)) (+ foo bar))").unwrap();
+        let result = expression.evaluate(&env).expression;
+        assert_eq!(
+            result,
+            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3 + 3))))
+        );
+        let expression = parser::parse("(letrec ((foo 3) (bar (+ foo 1))) bar)").unwrap();
+        let result = expression.evaluate(&env).expression;
+        assert_eq!(
+            result,
+            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3 + 1))))
+        );
+        let expression = parser::parse("(letrec ((foo (+ bar 1)) (bar 3)) foo)").unwrap();
+        let result = expression.evaluate(&env).expression;
+        assert_eq!(
+            result,
+            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3 + 1))))
+        );
+        let expression = parser::parse("(letrec ((fac (lambda (n) (if (= n 1) n (* n (fac (- n 1))))))) (fac 5))").unwrap();
+        let result = expression.evaluate(&env).expression;
+        assert_eq!(
+            result,
+            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(
+                5 * 4 * 3 * 2 * 1
+            ))))
+        );
+        let expression = parser::parse("(letrec ((is-even? (lambda (x) (if (= x 0) true (is-odd? (- x 1))))) (is-odd? (lambda (x) (if (= x 0) false (is-even? (- x 1)))))) (is-even? 3))").unwrap();
+        let result = expression.evaluate(&env).expression;
+        assert_eq!(
+            result,
+            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
+        );
+        let expression = parser::parse("(letrec ((is-even? (lambda (x) (if (= x 0) true (is-odd? (- x 1))))) (is-odd? (lambda (x) (if (= x 0) false (is-even? (- x 1)))))) (is-odd? 3))").unwrap();
+        let result = expression.evaluate(&env).expression;
+        assert_eq!(
+            result,
+            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(true))))
+        );
+    }
+
+    #[test]
+    fn letstar_expressions() {
+        let env = Env::new();
+        let expression = parser::parse("(let* () 3)").unwrap();
+        let result = expression.evaluate(&env).expression;
+        assert_eq!(
+            result,
+            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3))))
+        );
+        let expression = parser::parse("(let* ((foo 3)) foo)").unwrap();
+        let result = expression.evaluate(&env).expression;
+        assert_eq!(
+            result,
+            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3))))
+        );
+        let expression = parser::parse("(let* ((foo 3) (bar 4)) (+ foo bar))").unwrap();
+        let result = expression.evaluate(&env).expression;
+        assert_eq!(
+            result,
+            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3 + 4))))
+        );
+        let expression = parser::parse("(let* ((first 3)) (let* ((second 4)) (let* ((third first) (fourth second)) (+ third fourth))))").unwrap();
+        let result = expression.evaluate(&env).expression;
+        assert_eq!(
+            result,
+            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3 + 4))))
+        );
+        let expression = parser::parse("(let* ((foo 3) (bar foo)) (+ foo bar))").unwrap();
+        let result = expression.evaluate(&env).expression;
+        assert_eq!(
+            result,
+            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3 + 3))))
+        );
+        let expression = parser::parse("(let* ((foo 3) (bar (+ foo 1))) bar)").unwrap();
+        let result = expression.evaluate(&env).expression;
+        assert_eq!(
+            result,
+            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3 + 1))))
         );
     }
 }

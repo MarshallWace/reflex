@@ -5,14 +5,15 @@ use crate::{
     expression::{AstNodePackage, Expression},
     node::{
         core::{
-            CoreNode, FunctionApplicationNode, FunctionNode, LetNode, ReferenceNode, StringValue,
-            ValueNode,
+            CoreNode, FunctionApplicationNode, FunctionNode, LetNode, LetRecNode, LetStarNode,
+            ReferenceNode, StringValue, ValueNode,
         },
         lexer::{parse_syntax, SyntaxDatum},
         Node,
     },
 };
 
+#[derive(Clone)]
 struct LexicalScope<'a> {
     bindings: Vec<&'a str>,
 }
@@ -22,7 +23,7 @@ impl<'a> LexicalScope<'a> {
             bindings: Vec::new(),
         }
     }
-    pub fn create_child(&self, identifiers: Vec<&'a str>) -> LexicalScope<'a> {
+    pub fn create_child(&self, identifiers: &[&'a str]) -> LexicalScope<'a> {
         LexicalScope {
             bindings: self
                 .bindings
@@ -154,6 +155,8 @@ fn parse_special_form<'a>(
         SyntaxDatum::Symbol(identifier) => match *identifier {
             "lambda" => parse_lambda_expression(input, args, scope).map(Some),
             "let" => parse_let_expression(input, args, scope).map(Some),
+            "letrec" => parse_letrec_expression(input, args, scope).map(Some),
+            "let*" => parse_letstar_expression(input, args, scope).map(Some),
             _ => Ok(None),
         },
         _ => Ok(None),
@@ -226,7 +229,7 @@ fn parse_lambda_expression<'a>(
         )),
     }?;
     let arity = arg_names.len();
-    let child_scope = scope.create_child(arg_names);
+    let child_scope = scope.create_child(&arg_names);
     let body = parse_expression(body, &child_scope)?;
     match args.next() {
         Some(arg) => Err(ParserError::new(String::from("Unexpected expression"), arg)),
@@ -251,51 +254,133 @@ fn parse_let_expression<'a>(
     args: &[SyntaxDatum<'a>],
     scope: &LexicalScope<'a>,
 ) -> ParserResult<'a, Expression<Node>> {
+    parse_binding_expression(&BindingExpressionType::Let, input, args, scope)
+}
+
+fn parse_letrec_expression<'a>(
+    input: &SyntaxDatum<'a>,
+    args: &[SyntaxDatum<'a>],
+    scope: &LexicalScope<'a>,
+) -> ParserResult<'a, Expression<Node>> {
+    parse_binding_expression(&BindingExpressionType::LetRec, input, args, scope)
+}
+
+fn parse_letstar_expression<'a>(
+    input: &SyntaxDatum<'a>,
+    args: &[SyntaxDatum<'a>],
+    scope: &LexicalScope<'a>,
+) -> ParserResult<'a, Expression<Node>> {
+    parse_binding_expression(&BindingExpressionType::LetStar, input, args, scope)
+}
+
+enum BindingExpressionType {
+    Let,
+    LetRec,
+    LetStar,
+}
+
+fn get_binding_type_name(binding_type: &BindingExpressionType) -> &'static str {
+    match binding_type {
+        BindingExpressionType::Let => "let",
+        BindingExpressionType::LetRec => "letrec",
+        BindingExpressionType::LetStar => "let*",
+    }
+}
+
+fn parse_binding_expression<'a>(
+    binding_type: &BindingExpressionType,
+    input: &SyntaxDatum<'a>,
+    args: &[SyntaxDatum<'a>],
+    scope: &LexicalScope<'a>,
+) -> ParserResult<'a, Expression<Node>> {
     let mut args = args.iter();
-    let binding_initializers = match args.next() {
-        Some(binding_initializers) => Ok(binding_initializers),
+    let binding_definitions = match args.next() {
+        Some(binding_definitions) => Ok(binding_definitions),
         _ => Err(ParserError::new(
-            String::from("Missing let expression bindings"),
+            format!(
+                "Missing {} expression bindings",
+                get_binding_type_name(binding_type)
+            ),
             input,
         )),
     }?;
-    let binding_initializers = match binding_initializers {
-        SyntaxDatum::List(items) => parse_let_expression_binding_initializers(items, scope),
+    let binding_definitions = match binding_definitions {
+        SyntaxDatum::List(items) => parse_binding_definitions(items),
         _ => Err(ParserError::new(
-            String::from("Invalid let expression bindings"),
+            format!(
+                "Invalid {} expression bindings",
+                get_binding_type_name(binding_type)
+            ),
             input,
         )),
     }?;
     let body = match args.next() {
         Some(body) => Ok(body),
         _ => Err(ParserError::new(
-            String::from("Missing let expression body"),
+            format!(
+                "Missing {} expression body",
+                get_binding_type_name(binding_type)
+            ),
             input,
         )),
     }?;
-    let identifiers = binding_initializers
-        .iter()
-        .map(|(identifier, _)| *identifier)
-        .collect();
-    let initializers = binding_initializers
-        .into_iter()
-        .map(|(_, initializer)| initializer)
-        .collect();
-    let child_scope = scope.create_child(identifiers);
+    let initializers = parse_binding_initializers(binding_type, &binding_definitions, scope)?;
+    let child_scope = scope.create_child(
+        &binding_definitions
+            .iter()
+            .map(|(identifier, _)| *identifier)
+            .collect::<Vec<_>>(),
+    );
     let body = parse_expression(body, &child_scope)?;
     match args.next() {
         Some(arg) => Err(ParserError::new(String::from("Unexpected expression"), arg)),
-        None => Ok(Expression::new(Node::Core(CoreNode::Let(LetNode::new(
-            initializers,
-            body,
-        ))))),
+        None => Ok(Expression::new(Node::Core(match binding_type {
+            BindingExpressionType::Let => CoreNode::Let(LetNode::new(initializers, body)),
+            BindingExpressionType::LetRec => CoreNode::LetRec(LetRecNode::new(initializers, body)),
+            BindingExpressionType::LetStar => {
+                CoreNode::LetStar(LetStarNode::new(initializers, body))
+            }
+        }))),
     }
 }
 
-fn parse_let_expression_binding_initializers<'a>(
-    items: &[SyntaxDatum<'a>],
+fn parse_binding_initializers<'a>(
+    binding_type: &BindingExpressionType,
+    binding_definitions: &[(&'a str, &SyntaxDatum<'a>)],
     scope: &LexicalScope<'a>,
-) -> ParserResult<'a, Vec<(&'a str, Expression<Node>)>> {
+) -> ParserResult<'a, Vec<Expression<Node>>> {
+    match binding_type {
+        BindingExpressionType::Let => binding_definitions
+            .iter()
+            .map(|(_, initializer)| parse_expression(initializer, scope))
+            .collect(),
+        BindingExpressionType::LetRec => {
+            let child_scope = scope.create_child(
+                &binding_definitions
+                    .iter()
+                    .map(|(identifier, _)| *identifier)
+                    .collect::<Vec<_>>(),
+            );
+            binding_definitions
+                .iter()
+                .map(|(_, initializer)| parse_expression(initializer, &child_scope))
+                .collect()
+        }
+        BindingExpressionType::LetStar => {
+            let mut initializers = Vec::with_capacity(binding_definitions.len());
+            let mut scope = scope.clone();
+            for (identifier, initializer) in binding_definitions {
+                initializers.push(parse_expression(initializer, &scope)?);
+                scope = scope.create_child(&[identifier]);
+            }
+            Ok(initializers)
+        }
+    }
+}
+
+fn parse_binding_definitions<'a, 'b>(
+    items: &'b [SyntaxDatum<'a>],
+) -> ParserResult<'a, Vec<(&'a str, &'b SyntaxDatum<'a>)>> {
     items
         .iter()
         .map(|binding| match binding {
@@ -308,7 +393,7 @@ fn parse_let_expression_binding_initializers<'a>(
                         identifier,
                     )),
                 }?;
-                let initializer = parse_expression(items.next().unwrap(), scope)?;
+                let initializer = items.next().unwrap();
                 return Ok((identifier, initializer));
             }
             _ => Err(ParserError::new(
@@ -324,12 +409,13 @@ mod tests {
     use crate::{
         expression::Expression,
         node::{
-            arithmetic::{AbsNode, AddNode, ArithmeticNode},
+            arithmetic::{AbsNode, AddNode, ArithmeticNode, EqualNode, MultiplyNode, SubtractNode},
             core::{
-                CoreNode, FunctionApplicationNode, FunctionNode, LetNode, ReferenceNode,
-                StringValue, ValueNode,
+                CoreNode, FunctionApplicationNode, FunctionNode, LetNode, LetRecNode, LetStarNode,
+                ReferenceNode, StringValue, ValueNode,
             },
             lexer::SyntaxDatum,
+            logic::{ConditionalNode, LogicNode},
             Node,
         },
     };
@@ -671,6 +757,296 @@ mod tests {
                 ],
                 Expression::new(Node::Core(CoreNode::Reference(ReferenceNode::new(0)))),
             ),)))),
+        );
+        assert_eq!(
+            parse("(let ((foo (lambda (bar baz) (+ bar baz)))) (foo 3 4))"),
+            Ok(Expression::new(Node::Core(CoreNode::Let(LetNode::new(
+                vec![Expression::new(Node::Core(CoreNode::Function(
+                    FunctionNode::new(
+                        2,
+                        Expression::new(Node::Arithmetic(ArithmeticNode::Add(AddNode::new(
+                            Expression::new(Node::Core(CoreNode::Reference(ReferenceNode::new(1)))),
+                            Expression::new(Node::Core(CoreNode::Reference(ReferenceNode::new(0)))),
+                        )))),
+                    ),
+                )))],
+                Expression::new(Node::Core(CoreNode::FunctionApplication(
+                    FunctionApplicationNode::new(
+                        Expression::new(Node::Core(CoreNode::Reference(ReferenceNode::new(0)))),
+                        vec![
+                            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3)))),
+                            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(4)))),
+                        ],
+                    ),
+                ))),
+            ))))),
+        );
+    }
+
+    #[test]
+    fn letrec_bindings() {
+        assert_eq!(
+            parse("(letrec () 3)"),
+            Ok(Expression::new(Node::Core(CoreNode::LetRec(
+                LetRecNode::new(
+                    vec![],
+                    Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3)))),
+                ),
+            )))),
+        );
+        assert_eq!(
+            parse("(letrec ((foo 3)) foo)"),
+            Ok(Expression::new(Node::Core(CoreNode::LetRec(
+                LetRecNode::new(
+                    vec![Expression::new(Node::Core(CoreNode::Value(
+                        ValueNode::Int(3)
+                    )))],
+                    Expression::new(Node::Core(CoreNode::Reference(ReferenceNode::new(0)))),
+                ),
+            )))),
+        );
+        assert_eq!(
+            parse("(letrec ((foo 3) (bar 4)) foo)"),
+            Ok(Expression::new(Node::Core(CoreNode::LetRec(
+                LetRecNode::new(
+                    vec![
+                        Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3)))),
+                        Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(4)))),
+                    ],
+                    Expression::new(Node::Core(CoreNode::Reference(ReferenceNode::new(1)))),
+                ),
+            )))),
+        );
+        assert_eq!(
+            parse("(letrec ((foo 3) (bar 4)) bar)"),
+            Ok(Expression::new(Node::Core(CoreNode::LetRec(
+                LetRecNode::new(
+                    vec![
+                        Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3)))),
+                        Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(4)))),
+                    ],
+                    Expression::new(Node::Core(CoreNode::Reference(ReferenceNode::new(0)))),
+                ),
+            )))),
+        );
+        assert_eq!(
+            parse("(letrec ((foo 3) (bar foo)) foo)"),
+            Ok(Expression::new(Node::Core(CoreNode::LetRec(
+                LetRecNode::new(
+                    vec![
+                        Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3)))),
+                        Expression::new(Node::Core(CoreNode::Reference(ReferenceNode::new(1)))),
+                    ],
+                    Expression::new(Node::Core(CoreNode::Reference(ReferenceNode::new(1)))),
+                ),
+            )))),
+        );
+        assert_eq!(
+            parse("(letrec ((foo 3) (bar foo)) bar)"),
+            Ok(Expression::new(Node::Core(CoreNode::LetRec(
+                LetRecNode::new(
+                    vec![
+                        Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3)))),
+                        Expression::new(Node::Core(CoreNode::Reference(ReferenceNode::new(1)))),
+                    ],
+                    Expression::new(Node::Core(CoreNode::Reference(ReferenceNode::new(0)))),
+                ),
+            )))),
+        );
+        assert_eq!(
+            parse("(letrec ((foo bar) (bar 3)) foo)"),
+            Ok(Expression::new(Node::Core(CoreNode::LetRec(
+                LetRecNode::new(
+                    vec![
+                        Expression::new(Node::Core(CoreNode::Reference(ReferenceNode::new(0)))),
+                        Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3)))),
+                    ],
+                    Expression::new(Node::Core(CoreNode::Reference(ReferenceNode::new(1)))),
+                ),
+            )))),
+        );
+        assert_eq!(
+            parse("(letrec ((foo bar) (bar 3)) bar)"),
+            Ok(Expression::new(Node::Core(CoreNode::LetRec(
+                LetRecNode::new(
+                    vec![
+                        Expression::new(Node::Core(CoreNode::Reference(ReferenceNode::new(0)))),
+                        Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3)))),
+                    ],
+                    Expression::new(Node::Core(CoreNode::Reference(ReferenceNode::new(0)))),
+                ),
+            )))),
+        );
+        assert_eq!(
+            parse("(letrec ((first second) (second third) (third first)) third)"),
+            Ok(Expression::new(Node::Core(CoreNode::LetRec(
+                LetRecNode::new(
+                    vec![
+                        Expression::new(Node::Core(CoreNode::Reference(ReferenceNode::new(1)))),
+                        Expression::new(Node::Core(CoreNode::Reference(ReferenceNode::new(0)))),
+                        Expression::new(Node::Core(CoreNode::Reference(ReferenceNode::new(2)))),
+                    ],
+                    Expression::new(Node::Core(CoreNode::Reference(ReferenceNode::new(0)))),
+                ),
+            )))),
+        );
+        assert_eq!(
+            parse("(letrec ((foo (lambda (bar baz) (+ (+ first bar) (+ second baz)))) (first 3) (second 4)) (foo 5 6))"),
+            Ok(Expression::new(Node::Core(CoreNode::LetRec(LetRecNode::new(
+                vec![
+                    Expression::new(Node::Core(CoreNode::Function(
+                        FunctionNode::new(
+                            2,
+                            Expression::new(Node::Arithmetic(ArithmeticNode::Add(AddNode::new(
+                                Expression::new(Node::Arithmetic(ArithmeticNode::Add(AddNode::new(
+                                    Expression::new(Node::Core(CoreNode::Reference(ReferenceNode::new(3)))),
+                                    Expression::new(Node::Core(CoreNode::Reference(ReferenceNode::new(1)))),
+                                )))),
+                                Expression::new(Node::Arithmetic(ArithmeticNode::Add(AddNode::new(
+                                    Expression::new(Node::Core(CoreNode::Reference(ReferenceNode::new(2)))),
+                                    Expression::new(Node::Core(CoreNode::Reference(ReferenceNode::new(0)))),
+                                )))),
+                            )))),
+                        ),
+                    ))),
+                    Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3)))),
+                    Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(4)))),
+                ],
+                Expression::new(Node::Core(CoreNode::FunctionApplication(
+                    FunctionApplicationNode::new(
+                        Expression::new(Node::Core(CoreNode::Reference(ReferenceNode::new(2)))),
+                        vec![
+                            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(5)))),
+                            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(6)))),
+                        ],
+                    ),
+                ))),
+            ))))),
+        );
+        assert_eq!(
+            parse("(letrec ((fac (lambda (n) (if (= n 1) n (* n (fac (- n 1))))))) (fac 5))"),
+            Ok(Expression::new(Node::Core(CoreNode::LetRec(LetRecNode::new(
+                vec![
+                    Expression::new(Node::Core(CoreNode::Function(
+                        FunctionNode::new(
+                            1,
+                            Expression::new(Node::Logic(LogicNode::Conditional(ConditionalNode::new(
+                                Expression::new(Node::Arithmetic(ArithmeticNode::Equal(EqualNode::new(
+                                    Expression::new(Node::Core(CoreNode::Reference(ReferenceNode::new(0)))),
+                                    Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(1)))),
+                                )))),
+                                Expression::new(Node::Core(CoreNode::Reference(ReferenceNode::new(0)))),
+                                Expression::new(Node::Arithmetic(ArithmeticNode::Multiply(MultiplyNode::new(
+                                    Expression::new(Node::Core(CoreNode::Reference(ReferenceNode::new(0)))),
+                                    Expression::new(Node::Core(CoreNode::FunctionApplication(FunctionApplicationNode::new(
+                                        Expression::new(Node::Core(CoreNode::Reference(ReferenceNode::new(1)))),
+                                        vec![
+                                            Expression::new(Node::Arithmetic(ArithmeticNode::Subtract(SubtractNode::new(
+                                                Expression::new(Node::Core(CoreNode::Reference(ReferenceNode::new(0)))),
+                                                Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(1)))),
+                                            )))),
+                                        ],
+                                    )))),
+                                )))),
+                            )))),
+                        ),
+                    ))),
+                ],
+                Expression::new(Node::Core(CoreNode::FunctionApplication(
+                    FunctionApplicationNode::new(
+                        Expression::new(Node::Core(CoreNode::Reference(ReferenceNode::new(0)))),
+                        vec![
+                            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(5)))),
+                        ],
+                    ),
+                ))),
+            ))))),
+        );
+    }
+
+    #[test]
+    fn letstar_bindings() {
+        assert_eq!(
+            parse("(let* () 3)"),
+            Ok(Expression::new(Node::Core(CoreNode::LetStar(
+                LetStarNode::new(
+                    vec![],
+                    Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3)))),
+                ),
+            )))),
+        );
+        assert_eq!(
+            parse("(let* ((foo 3)) foo)"),
+            Ok(Expression::new(Node::Core(CoreNode::LetStar(
+                LetStarNode::new(
+                    vec![Expression::new(Node::Core(CoreNode::Value(
+                        ValueNode::Int(3)
+                    )))],
+                    Expression::new(Node::Core(CoreNode::Reference(ReferenceNode::new(0)))),
+                ),
+            )))),
+        );
+        assert_eq!(
+            parse("(let* ((foo 3) (bar 4)) foo)"),
+            Ok(Expression::new(Node::Core(CoreNode::LetStar(
+                LetStarNode::new(
+                    vec![
+                        Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3)))),
+                        Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(4)))),
+                    ],
+                    Expression::new(Node::Core(CoreNode::Reference(ReferenceNode::new(1)))),
+                ),
+            )))),
+        );
+        assert_eq!(
+            parse("(let* ((foo 3) (bar 4)) bar)"),
+            Ok(Expression::new(Node::Core(CoreNode::LetStar(
+                LetStarNode::new(
+                    vec![
+                        Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3)))),
+                        Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(4)))),
+                    ],
+                    Expression::new(Node::Core(CoreNode::Reference(ReferenceNode::new(0)))),
+                ),
+            )))),
+        );
+        assert_eq!(
+            parse("(let* ((foo 3) (bar foo)) foo)"),
+            Ok(Expression::new(Node::Core(CoreNode::LetStar(
+                LetStarNode::new(
+                    vec![
+                        Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3)))),
+                        Expression::new(Node::Core(CoreNode::Reference(ReferenceNode::new(0)))),
+                    ],
+                    Expression::new(Node::Core(CoreNode::Reference(ReferenceNode::new(1)))),
+                ),
+            )))),
+        );
+        assert_eq!(
+            parse("(let* ((foo 3) (bar foo)) bar)"),
+            Ok(Expression::new(Node::Core(CoreNode::LetStar(
+                LetStarNode::new(
+                    vec![
+                        Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3)))),
+                        Expression::new(Node::Core(CoreNode::Reference(ReferenceNode::new(0)))),
+                    ],
+                    Expression::new(Node::Core(CoreNode::Reference(ReferenceNode::new(0)))),
+                ),
+            )))),
+        );
+        assert_eq!(
+            parse("(let* ((first 3) (second first) (third second) (fourth first)) fourth)"),
+            Ok(Expression::new(Node::Core(CoreNode::LetStar(
+                LetStarNode::new(
+                    vec![
+                        Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3)))),
+                        Expression::new(Node::Core(CoreNode::Reference(ReferenceNode::new(0)))),
+                        Expression::new(Node::Core(CoreNode::Reference(ReferenceNode::new(0)))),
+                        Expression::new(Node::Core(CoreNode::Reference(ReferenceNode::new(2)))),
+                    ],
+                    Expression::new(Node::Core(CoreNode::Reference(ReferenceNode::new(0)))),
+                ),
+            )))),
         );
     }
 

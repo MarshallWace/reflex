@@ -17,7 +17,7 @@ pub mod function;
 pub mod pending;
 pub mod value;
 
-pub use self::bindings::{BoundNode, LetNode, ReferenceNode};
+pub use self::bindings::{BoundNode, LetNode, LetRecNode, LetStarNode, LetRecBindingNode, ReferenceNode};
 pub use self::error::{ErrorNode, IsErrorNode};
 pub use self::function::{
     BoundFunctionNode, FunctionApplicationNode, FunctionNode, IsFunctionNode,
@@ -35,6 +35,9 @@ pub enum CoreNode {
     Function(FunctionNode),
     FunctionApplication(FunctionApplicationNode),
     Let(LetNode),
+    LetRec(LetRecNode),
+    LetRecBinding(LetRecBindingNode),
+    LetStar(LetStarNode),
     Pending(PendingNode),
     Reference(ReferenceNode),
     Value(ValueNode),
@@ -53,6 +56,8 @@ impl AstNodePackage<Node> for CoreNode {
             "error" => Some(ErrorNode::factory(args).map(Self::Error)),
             "pending" => Some(PendingNode::factory(args).map(Self::Pending)),
             "let" => Some(LetNode::factory(args).map(Self::Let)),
+            "letrec" => Some(LetRecNode::factory(args).map(Self::LetRec)),
+            "let*" => Some(LetStarNode::factory(args).map(Self::LetStar)),
             "null?" => Some(IsNullNode::factory(args).map(Self::IsNull)),
             "boolean?" => Some(IsBooleanNode::factory(args).map(Self::IsBoolean)),
             "integer?" => Some(IsIntegerNode::factory(args).map(Self::IsInteger)),
@@ -74,6 +79,9 @@ impl NodeType<Node> for CoreNode {
             Self::Function(node) => node.expressions(),
             Self::FunctionApplication(node) => node.expressions(),
             Self::Let(node) => node.expressions(),
+            Self::LetRec(node) => node.expressions(),
+            Self::LetRecBinding(node) => node.expressions(),
+            Self::LetStar(node) => node.expressions(),
             Self::Pending(node) => node.expressions(),
             Self::Reference(node) => node.expressions(),
             Self::Value(node) => node.expressions(),
@@ -95,6 +103,9 @@ impl NodeType<Node> for CoreNode {
             Self::Function(node) => node.capture_depth(),
             Self::FunctionApplication(node) => node.capture_depth(),
             Self::Let(node) => node.capture_depth(),
+            Self::LetRec(node) => node.capture_depth(),
+            Self::LetRecBinding(node) => node.capture_depth(),
+            Self::LetStar(node) => node.capture_depth(),
             Self::Pending(node) => node.capture_depth(),
             Self::Reference(node) => node.capture_depth(),
             Self::Value(node) => node.capture_depth(),
@@ -116,6 +127,9 @@ impl NodeType<Node> for CoreNode {
             Self::Function(node) => node.evaluate(env),
             Self::FunctionApplication(node) => node.evaluate(env),
             Self::Let(node) => node.evaluate(env),
+            Self::LetRec(node) => node.evaluate(env),
+            Self::LetRecBinding(node) => node.evaluate(env),
+            Self::LetStar(node) => node.evaluate(env),
             Self::Pending(node) => node.evaluate(env),
             Self::Reference(node) => node.evaluate(env),
             Self::Value(node) => node.evaluate(env),
@@ -139,6 +153,9 @@ impl fmt::Display for CoreNode {
             Self::Function(node) => fmt::Display::fmt(node, f),
             Self::FunctionApplication(node) => fmt::Display::fmt(node, f),
             Self::Let(node) => fmt::Display::fmt(node, f),
+            Self::LetRec(node) => fmt::Display::fmt(node, f),
+            Self::LetRecBinding(node) => fmt::Display::fmt(node, f),
+            Self::LetStar(node) => fmt::Display::fmt(node, f),
             Self::Pending(node) => fmt::Display::fmt(node, f),
             Self::Reference(node) => fmt::Display::fmt(node, f),
             Self::Value(node) => fmt::Display::fmt(node, f),
@@ -162,6 +179,9 @@ impl fmt::Debug for CoreNode {
             Self::Function(node) => fmt::Debug::fmt(node, f),
             Self::FunctionApplication(node) => fmt::Debug::fmt(node, f),
             Self::Let(node) => fmt::Debug::fmt(node, f),
+            Self::LetRec(node) => fmt::Debug::fmt(node, f),
+            Self::LetRecBinding(node) => fmt::Debug::fmt(node, f),
+            Self::LetStar(node) => fmt::Debug::fmt(node, f),
             Self::Pending(node) => fmt::Debug::fmt(node, f),
             Self::Reference(node) => fmt::Debug::fmt(node, f),
             Self::Value(node) => fmt::Debug::fmt(node, f),

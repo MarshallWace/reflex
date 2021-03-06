@@ -171,7 +171,7 @@ impl fmt::Debug for FunctionApplicationNode {
     }
 }
 
-pub fn apply_function(
+fn apply_function(
     arity: usize,
     body: &Expression<Node>,
     args: &Vec<Expression<Node>>,

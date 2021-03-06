@@ -116,6 +116,23 @@ mod tests {
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3 + 4)))),
         );
+        let expression = parser::parse(
+            "(apply (lambda (foo bar) (+ foo bar)) ((lambda (foo) foo) (cons ((lambda (first) first) 3) ((lambda (third) (cons ((lambda (second) second) 4) third)) null))))",
+        )
+        .unwrap();
+        let result = expression.evaluate(&env).expression;
+        assert_eq!(
+            result,
+            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3 + 4)))),
+        );
+        let expression = parser::parse(
+    "(apply (lambda (first second third) (+ first (+ second third))) ((lambda (first) ((lambda (second) ((lambda (third) (cons first (cons second (cons third null)))) 5)) 4)) 3))"
+        ).unwrap();
+        let result = expression.evaluate(&env).expression;
+        assert_eq!(
+            result,
+            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3 + 4 + 5)))),
+        )
     }
 
     #[test]

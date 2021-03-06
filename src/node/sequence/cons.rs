@@ -19,14 +19,14 @@ use crate::{
 pub struct ConsNode {
     head: Expression<Node>,
     tail: Expression<Node>,
-    list_length: Option<NonZeroUsize>,
+    static_list_length: Option<NonZeroUsize>,
 }
 impl ConsNode {
     pub fn new(head: Expression<Node>, tail: Expression<Node>) -> Self {
-        let list_length = match tail.value() {
+        let static_list_length = match tail.value() {
             Node::Core(CoreNode::Value(ValueNode::Nil)) => NonZeroUsize::new(1),
             Node::Sequence(SequenceNode::Cons(ConsNode {
-                list_length: Some(tail_length),
+                static_list_length: Some(tail_length),
                 ..
             })) => NonZeroUsize::new(tail_length.get() + 1),
             _ => None,
@@ -34,7 +34,7 @@ impl ConsNode {
         ConsNode {
             head,
             tail,
-            list_length,
+            static_list_length,
         }
     }
     pub fn head(&self) -> &Expression<Node> {
@@ -44,13 +44,13 @@ impl ConsNode {
         &self.tail
     }
     pub fn is_static_list(&self) -> bool {
-        self.list_length.is_some()
+        self.static_list_length.is_some()
     }
-    pub fn list_length(&self) -> Option<usize> {
-        self.list_length.map(|value| value.get())
+    pub fn static_list_length(&self) -> Option<usize> {
+        self.static_list_length.map(|value| value.get())
     }
     fn iter(&self) -> ConsIterator {
-        match self.list_length {
+        match self.static_list_length {
             Some(length) => ConsIterator {
                 current: ConsIteratorItem::Some(self, None),
                 length: length.get(),
@@ -82,7 +82,7 @@ impl NodeType<Node> for ConsNode {
             Expression::new(Node::Sequence(SequenceNode::Cons(ConsNode {
                 head: BoundNode::bind(&self.head, env),
                 tail: BoundNode::bind(&self.tail, env),
-                list_length: self.list_length,
+                static_list_length: self.static_list_length,
             }))),
             None,
         ))
