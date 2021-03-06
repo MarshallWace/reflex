@@ -51,7 +51,13 @@ pub fn parse_syntax<'a>(input: &'a str) -> ParserResult<SyntaxDatum<'a>> {
     }?;
     let input = consume_whitespace(input);
     if input.len() > 0 {
-        return Err(format!("Unexpected {}", EOF));
+        return Err(format!(
+            "Expected {}, received '{}'",
+            EOF,
+            peek_next_char(input)
+                .map(String::from)
+                .unwrap_or(String::from(EOF))
+        ));
     }
     return Ok(parsed);
 }
@@ -110,12 +116,11 @@ fn peek_next_char(input: &str) -> Option<char> {
 
 fn consume_symbol(input: &str) -> Option<ParserOutput<SyntaxDatum>> {
     let first_char = input.chars().next()?;
-    if !is_valid_symbol_leading_char(first_char) {
+    if !is_valid_symbol_char(first_char) {
         return None;
     }
     let identifier_length = input
         .char_indices()
-        .skip(1)
         .find_map(|(index, char)| {
             if is_valid_symbol_char(char) {
                 None
@@ -130,22 +135,12 @@ fn consume_symbol(input: &str) -> Option<ParserOutput<SyntaxDatum>> {
     })
 }
 
-fn is_valid_symbol_leading_char(char: char) -> bool {
-    if char.is_ascii_alphabetic() {
-        return true;
-    }
-    match char {
-        '_' => true,
-        _ => false,
-    }
-}
-
 fn is_valid_symbol_char(char: char) -> bool {
     if char.is_ascii_alphanumeric() {
         return true;
     }
     match char {
-        '_' | '-' | '!' | '?' => true,
+        '_' | '!' | '?' | '+' | '-' | '*' | '/' | '=' | '<' | '>' => true,
         _ => false,
     }
 }

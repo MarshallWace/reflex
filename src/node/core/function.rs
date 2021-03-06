@@ -265,7 +265,7 @@ mod tests {
     #[test]
     fn function_definitions() {
         let env = Env::new();
-        let expression = parser::parse("(lambda (foo bar) (add foo bar))").unwrap();
+        let expression = parser::parse("(lambda (foo bar) (+ foo bar))").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
@@ -283,7 +283,7 @@ mod tests {
     fn closure_definitions() {
         let env = Env::new();
         let expression =
-            parser::parse("((lambda (first second third) (lambda () (add second third))) 3 4 5)")
+            parser::parse("((lambda (first second third) (lambda () (+ second third))) 3 4 5)")
                 .unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
@@ -301,7 +301,7 @@ mod tests {
             })))
         );
         let expression =
-            parser::parse("((lambda (foo bar) (lambda (baz) (add foo baz))) 3 4)").unwrap();
+            parser::parse("((lambda (foo bar) (lambda (baz) (+ foo baz))) 3 4)").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
@@ -322,7 +322,7 @@ mod tests {
     #[test]
     fn nullary_function_application() {
         let env = Env::new();
-        let expression = parser::parse("((lambda () (add 3 4)))").unwrap();
+        let expression = parser::parse("((lambda () (+ 3 4)))").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
@@ -333,7 +333,7 @@ mod tests {
     #[test]
     fn unary_function_application() {
         let env = Env::new();
-        let expression = parser::parse("((lambda (foo) (add foo 4)) 3)").unwrap();
+        let expression = parser::parse("((lambda (foo) (+ foo 4)) 3)").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
@@ -344,7 +344,7 @@ mod tests {
     #[test]
     fn binary_function_application() {
         let env = Env::new();
-        let expression = parser::parse("((lambda (foo bar) (add foo bar)) 3 4)").unwrap();
+        let expression = parser::parse("((lambda (foo bar) (+ foo bar)) 3 4)").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
@@ -356,7 +356,7 @@ mod tests {
     fn ternary_function_application() {
         let env = Env::new();
         let expression =
-            parser::parse("((lambda (foo bar baz) (add foo (add bar baz))) 3 4 5)").unwrap();
+            parser::parse("((lambda (foo bar baz) (+ foo (+ bar baz))) 3 4 5)").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
@@ -390,7 +390,7 @@ mod tests {
     fn nested_argument_scope() {
         let env = Env::new();
         let expression = parser::parse(
-            "((lambda (first second third) ((lambda (foo bar) (add foo bar)) second third)) 3 4 5)",
+            "((lambda (first second third) ((lambda (foo bar) (+ foo bar)) second third)) 3 4 5)",
         )
         .unwrap();
         let result = expression.evaluate(&env).expression;
@@ -400,7 +400,7 @@ mod tests {
         );
         let env = Env::new();
         let expression = parser::parse(
-            "((lambda (first second third) ((lambda (one two) ((lambda (foo bar) (add foo bar)) one two)) first third)) 3 4 5)",
+            "((lambda (first second third) ((lambda (one two) ((lambda (foo bar) (+ foo bar)) one two)) first third)) 3 4 5)",
         ).unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
@@ -413,7 +413,7 @@ mod tests {
     fn immediately_invoked_closures() {
         let env = Env::new();
         let expression =
-            parser::parse("((lambda (three four) ((lambda (one two) (add one three)) 1 2)) 3 4)")
+            parser::parse("((lambda (three four) ((lambda (one two) (+ one three)) 1 2)) 3 4)")
                 .unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
@@ -421,7 +421,7 @@ mod tests {
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(1 + 3))))
         );
         let expression =
-            parser::parse("(((lambda (one two) (lambda (three four) (add one three))) 1 2) 3 4)")
+            parser::parse("(((lambda (one two) (lambda (three four) (+ one three))) 1 2) 3 4)")
                 .unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
@@ -434,7 +434,7 @@ mod tests {
     fn deferred_closures() {
         let env = Env::new();
         let expression = parser::parse(
-            "((lambda (transform value) (transform (value))) ((lambda (constant) (lambda (value) (add value constant))) 4) ((lambda (value) (lambda () value)) 3))",
+            "((lambda (transform value) (transform (value))) ((lambda (constant) (lambda (value) (+ value constant))) 4) ((lambda (value) (lambda () value)) 3))",
         )
         .unwrap();
         let result = expression.evaluate(&env).expression;

@@ -348,7 +348,7 @@ mod tests {
         assert_eq!(
             parse("1."),
             Err(ParserError {
-                message: String::from("Expected expression, received '1'"),
+                message: String::from("Expected end of input, received '.'"),
                 source: None
             })
         );
@@ -362,7 +362,7 @@ mod tests {
         assert_eq!(
             parse("-.1"),
             Err(ParserError {
-                message: String::from("Expected expression, received '-'"),
+                message: String::from("Expected end of input, received '.'"),
                 source: None
             })
         );
@@ -380,14 +380,14 @@ mod tests {
         assert_eq!(
             parse("null null"),
             Err(ParserError {
-                message: String::from("Unexpected end of input"),
+                message: String::from("Expected end of input, received 'n'"),
                 source: None,
             })
         );
         assert_eq!(
             parse("null foo"),
             Err(ParserError {
-                message: String::from("Unexpected end of input"),
+                message: String::from("Expected end of input, received 'f'"),
                 source: None,
             })
         );
@@ -677,7 +677,7 @@ mod tests {
     #[test]
     fn function_expressions() {
         assert_eq!(
-            parse("(lambda () (add 3 4))"),
+            parse("(lambda () (+ 3 4))"),
             Ok(Expression::new(Node::Core(CoreNode::Function(
                 FunctionNode::new(
                     0,
@@ -689,7 +689,7 @@ mod tests {
             )))),
         );
         assert_eq!(
-            parse("(lambda (foo) (add foo 4))"),
+            parse("(lambda (foo) (+ foo 4))"),
             Ok(Expression::new(Node::Core(CoreNode::Function(
                 FunctionNode::new(
                     1,
@@ -701,7 +701,7 @@ mod tests {
             )))),
         );
         assert_eq!(
-            parse("(lambda (foo bar) (add foo bar))"),
+            parse("(lambda (foo bar) (+ foo bar))"),
             Ok(Expression::new(Node::Core(CoreNode::Function(
                 FunctionNode::new(
                     2,
@@ -713,7 +713,7 @@ mod tests {
             )))),
         );
         assert_eq!(
-            parse("(lambda (first) (lambda (second) (lambda (foo bar) (add foo bar))))",),
+            parse("(lambda (first) (lambda (second) (lambda (foo bar) (+ foo bar))))",),
             Ok(Expression::new(Node::Core(CoreNode::Function(
                 FunctionNode::new(
                     1,
@@ -775,7 +775,7 @@ mod tests {
             )))),
         );
         assert_eq!(
-            parse("(lambda (foo bar) (lambda (baz) (add foo baz)))",),
+            parse("(lambda (foo bar) (lambda (baz) (+ foo baz)))",),
             Ok(Expression::new(Node::Core(CoreNode::Function(
                 FunctionNode::new(
                     2,
@@ -790,7 +790,7 @@ mod tests {
             ))))
         );
         assert_eq!(
-            parse("(lambda (first second third) (lambda (fourth fifth) (lambda (sixth) (add first (add second (add third (add fourth (add fifth sixth))))))))"),
+            parse("(lambda (first second third) (lambda (fourth fifth) (lambda (sixth) (+ first (+ second (+ third (+ fourth (+ fifth sixth))))))))"),
             Ok(Expression::new(Node::Core(CoreNode::Function(FunctionNode::new(
                 3,
                 Expression::new(Node::Core(CoreNode::Function(
@@ -871,7 +871,7 @@ mod tests {
             )),))
         );
         assert_eq!(
-            parse("((lambda (add) (add 3 4)) (lambda (first second) (add first second)))",),
+            parse("((lambda (+) (+ 3 4)) (lambda (first second) (+ first second)))",),
             Ok(Expression::new(Node::Core(CoreNode::FunctionApplication(
                 FunctionApplicationNode::new(
                     Expression::new(Node::Core(CoreNode::Function(FunctionNode::new(
@@ -917,7 +917,7 @@ mod tests {
             )))),
         );
         assert_eq!(
-            parse("(add 3 4)"),
+            parse("(+ 3 4)"),
             Ok(Expression::new(Node::Arithmetic(ArithmeticNode::Add(
                 AddNode::new(
                     Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3)))),

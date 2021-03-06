@@ -26,7 +26,7 @@ mod benchmarks {
     #[bench]
     fn nested_expressions(b: &mut Bencher) {
         let env = Env::new();
-        let expression = parser::parse("(add (add (abs -3) 4) 5)").unwrap();
+        let expression = parser::parse("(+ (+ (abs -3) 4) 5)").unwrap();
         b.iter(|| expression.evaluate(&env));
     }
 
@@ -69,7 +69,7 @@ mod benchmarks {
     fn function_application_argument_scope(b: &mut Bencher) {
         let env = Env::new();
         let expression = parser::parse(
-            "((lambda (first second third) ((lambda (one two) ((lambda (foo bar) (add foo bar)) one two)) first third)) 3 4 5)",
+            "((lambda (first second third) ((lambda (one two) ((lambda (foo bar) (+ foo bar)) one two)) first third)) 3 4 5)",
         )
         .unwrap();
         b.iter(|| expression.evaluate(&env));

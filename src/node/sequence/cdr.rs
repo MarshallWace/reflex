@@ -82,7 +82,7 @@ mod tests {
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(4)))),
         );
-        let expression = parser::parse("(cdr (cons (add 1 2) (add 3 4)))").unwrap();
+        let expression = parser::parse("(cdr (cons (+ 1 2) (+ 3 4)))").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
@@ -101,7 +101,7 @@ mod tests {
             )))),
         );
         let expression =
-            parser::parse("(cdr ((lambda (foo) foo) (cons (add 1 2) (add 3 4))))").unwrap();
+            parser::parse("(cdr ((lambda (foo) foo) (cons (+ 1 2) (+ 3 4))))").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
@@ -125,7 +125,7 @@ mod tests {
     #[test]
     fn lazy_evaluation() {
         let env = Env::new();
-        let expression = parser::parse("(cdr (cons (error \"foo\") (add 3 4)))").unwrap();
+        let expression = parser::parse("(cdr (cons (error \"foo\") (+ 3 4)))").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,

@@ -108,13 +108,13 @@ mod tests {
     #[test]
     fn conditional_expression_short_circuiting() {
         let env = Env::new();
-        let expression = parser::parse("(if true (add 3 4) (error \"foo\"))").unwrap();
+        let expression = parser::parse("(if true (+ 3 4) (error \"foo\"))").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3 + 4))))
         );
-        let expression = parser::parse("(if false (error \"foo\") (add 3 4))").unwrap();
+        let expression = parser::parse("(if false (error \"foo\") (+ 3 4))").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,

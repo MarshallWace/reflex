@@ -88,50 +88,50 @@ mod tests {
     #[test]
     fn subtraction_expressions() {
         let env = Env::new();
-        let expression = parser::parse("(subtract 0 0)").unwrap();
+        let expression = parser::parse("(- 0 0)").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(0 - 0))))
         );
-        let expression = parser::parse("(subtract 3 4)").unwrap();
+        let expression = parser::parse("(- 3 4)").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3 - 4))))
         );
-        let expression = parser::parse("(subtract -3 4)").unwrap();
+        let expression = parser::parse("(- -3 4)").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(-3 - 4))))
         );
-        let expression = parser::parse("(subtract 3 -4)").unwrap();
+        let expression = parser::parse("(- 3 -4)").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3 - -4))))
         );
-        let expression = parser::parse("(subtract -3 -4)").unwrap();
+        let expression = parser::parse("(- -3 -4)").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(-3 - -4))))
         );
 
-        let expression = parser::parse("(subtract 0.0 0.0)").unwrap();
+        let expression = parser::parse("(- 0.0 0.0)").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Float(0.0 - 0.0))))
         );
-        let expression = parser::parse("(subtract 2.718 3.142)").unwrap();
+        let expression = parser::parse("(- 2.718 3.142)").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Float(2.718 - 3.142))))
         );
-        let expression = parser::parse("(subtract -2.718 3.142)").unwrap();
+        let expression = parser::parse("(- -2.718 3.142)").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
@@ -139,7 +139,7 @@ mod tests {
                 -2.718 - 3.142
             ))))
         );
-        let expression = parser::parse("(subtract 2.718 -3.142)").unwrap();
+        let expression = parser::parse("(- 2.718 -3.142)").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
@@ -147,7 +147,7 @@ mod tests {
                 2.718 - -3.142
             ))))
         );
-        let expression = parser::parse("(subtract -2.718 -3.142)").unwrap();
+        let expression = parser::parse("(- -2.718 -3.142)").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
@@ -160,7 +160,7 @@ mod tests {
     #[test]
     fn invalid_subtraction_expression_operands() {
         let env = Env::new();
-        let expression = parser::parse("(subtract 3 3.142)").unwrap();
+        let expression = parser::parse("(- 3 3.142)").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
@@ -168,7 +168,7 @@ mod tests {
                 "Expected (Int, Int) or (Float, Float), received (3, 3.142)"
             ))))
         );
-        let expression = parser::parse("(subtract 3.142 3)").unwrap();
+        let expression = parser::parse("(- 3.142 3)").unwrap();
         let result = expression.evaluate(&env).expression;
 
         assert_eq!(
@@ -177,7 +177,7 @@ mod tests {
                 "Expected (Int, Int) or (Float, Float), received (3.142, 3)"
             ))))
         );
-        let expression = parser::parse("(subtract 3 null)").unwrap();
+        let expression = parser::parse("(- 3 null)").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
@@ -185,7 +185,7 @@ mod tests {
                 "Expected (Int, Int) or (Float, Float), received (3, Nil)"
             ))))
         );
-        let expression = parser::parse("(subtract 3 false)").unwrap();
+        let expression = parser::parse("(- 3 false)").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
@@ -193,7 +193,7 @@ mod tests {
                 "Expected (Int, Int) or (Float, Float), received (3, false)"
             ))))
         );
-        let expression = parser::parse("(subtract 3 \"3\")").unwrap();
+        let expression = parser::parse("(- 3 \"3\")").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
@@ -202,7 +202,7 @@ mod tests {
             ))))
         );
 
-        let expression = parser::parse("(subtract null 3)").unwrap();
+        let expression = parser::parse("(- null 3)").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
@@ -210,7 +210,7 @@ mod tests {
                 "Expected (Int, Int) or (Float, Float), received (Nil, 3)"
             ))))
         );
-        let expression = parser::parse("(subtract false 3)").unwrap();
+        let expression = parser::parse("(- false 3)").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
@@ -218,7 +218,7 @@ mod tests {
                 "Expected (Int, Int) or (Float, Float), received (false, 3)"
             ))))
         );
-        let expression = parser::parse("(subtract \"3\" 3)").unwrap();
+        let expression = parser::parse("(- \"3\" 3)").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
@@ -227,7 +227,7 @@ mod tests {
             ))))
         );
 
-        let expression = parser::parse("(subtract 3.142 null)").unwrap();
+        let expression = parser::parse("(- 3.142 null)").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
@@ -235,7 +235,7 @@ mod tests {
                 "Expected (Int, Int) or (Float, Float), received (3.142, Nil)"
             ))))
         );
-        let expression = parser::parse("(subtract 3.142 false)").unwrap();
+        let expression = parser::parse("(- 3.142 false)").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
@@ -243,7 +243,7 @@ mod tests {
                 "Expected (Int, Int) or (Float, Float), received (3.142, false)"
             ))))
         );
-        let expression = parser::parse("(subtract 3.142 \"3\")").unwrap();
+        let expression = parser::parse("(- 3.142 \"3\")").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
@@ -252,7 +252,7 @@ mod tests {
             ))))
         );
 
-        let expression = parser::parse("(subtract null 3.142)").unwrap();
+        let expression = parser::parse("(- null 3.142)").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
@@ -260,7 +260,7 @@ mod tests {
                 "Expected (Int, Int) or (Float, Float), received (Nil, 3.142)"
             ))))
         );
-        let expression = parser::parse("(subtract false 3.142)").unwrap();
+        let expression = parser::parse("(- false 3.142)").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
@@ -268,7 +268,7 @@ mod tests {
                 "Expected (Int, Int) or (Float, Float), received (false, 3.142)"
             ))))
         );
-        let expression = parser::parse("(subtract \"3\" 3.142)").unwrap();
+        let expression = parser::parse("(- \"3\" 3.142)").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,

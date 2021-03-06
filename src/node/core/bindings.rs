@@ -228,13 +228,13 @@ mod tests {
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3))))
         );
-        let expression = parser::parse("(let ((foo 3) (bar 4)) (add foo bar))").unwrap();
+        let expression = parser::parse("(let ((foo 3) (bar 4)) (+ foo bar))").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3 + 4))))
         );
-        let expression = parser::parse("(let ((first 3)) (let ((second 4)) (let ((third first) (fourth second)) (add third fourth))))").unwrap();
+        let expression = parser::parse("(let ((first 3)) (let ((second 4)) (let ((third first) (fourth second)) (+ third fourth))))").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,

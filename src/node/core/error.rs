@@ -126,13 +126,13 @@ mod tests {
     #[test]
     fn short_circuit_errors() {
         let env = Env::new();
-        let expression = parser::parse("(add (error \"foo\") 3)").unwrap();
+        let expression = parser::parse("(+ (error \"foo\") 3)").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Error(ErrorNode::new("foo"))))
         );
-        let expression = parser::parse("(add 3 (error \"foo\"))").unwrap();
+        let expression = parser::parse("(+ 3 (error \"foo\"))").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
@@ -143,25 +143,25 @@ mod tests {
     #[test]
     fn short_circuit_error_priority() {
         let env = Env::new();
-        let expression = parser::parse("(add (error \"foo\") (pending))").unwrap();
+        let expression = parser::parse("(+ (error \"foo\") (pending))").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Error(ErrorNode::new("foo"))))
         );
-        let expression = parser::parse("(add (pending) (error \"foo\"))").unwrap();
+        let expression = parser::parse("(+ (pending) (error \"foo\"))").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Error(ErrorNode::new("foo"))))
         );
-        let expression = parser::parse("(add (add (error \"foo\") (pending)) (pending))").unwrap();
+        let expression = parser::parse("(+ (+ (error \"foo\") (pending)) (pending))").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Error(ErrorNode::new("foo"))))
         );
-        let expression = parser::parse("(add (pending) (add (pending) (error \"foo\")))").unwrap();
+        let expression = parser::parse("(+ (pending) (+ (pending) (error \"foo\")))").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
@@ -178,7 +178,7 @@ mod tests {
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(true)))),
         );
-        let expression = parser::parse("(error? (divide 3 0))").unwrap();
+        let expression = parser::parse("(error? (/ 3 0))").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,

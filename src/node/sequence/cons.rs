@@ -252,7 +252,7 @@ mod tests {
                 Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(4)))),
             )))),
         );
-        let expression = parser::parse("(cons (add 1 2) (add 3 4))").unwrap();
+        let expression = parser::parse("(cons (+ 1 2) (+ 3 4))").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,

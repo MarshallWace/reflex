@@ -119,25 +119,25 @@ mod tests {
     #[test]
     fn short_circuit_pendings() {
         let env = Env::new();
-        let expression = parser::parse("(add (pending) 3)").unwrap();
+        let expression = parser::parse("(+ (pending) 3)").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Pending(PendingNode::new())))
         );
-        let expression = parser::parse("(add 3 (pending))").unwrap();
+        let expression = parser::parse("(+ 3 (pending))").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Pending(PendingNode::new())))
         );
-        let expression = parser::parse("(add (add (pending) 3) 3)").unwrap();
+        let expression = parser::parse("(+ (+ (pending) 3) 3)").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Pending(PendingNode::new())))
         );
-        let expression = parser::parse("(add 3 (add (pending) 3))").unwrap();
+        let expression = parser::parse("(+ 3 (+ (pending) 3))").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
@@ -154,7 +154,7 @@ mod tests {
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(true)))),
         );
-        let expression = parser::parse("(pending? (add 3 (pending)))").unwrap();
+        let expression = parser::parse("(pending? (+ 3 (pending)))").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,

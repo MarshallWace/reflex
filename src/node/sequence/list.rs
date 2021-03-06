@@ -149,7 +149,7 @@ mod tests {
                 )))),
             )))),
         );
-        let expression = parser::parse("(list (add 1 2) (add 3 4) (add 5 6))").unwrap();
+        let expression = parser::parse("(list (+ 1 2) (+ 3 4) (+ 5 6))").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,

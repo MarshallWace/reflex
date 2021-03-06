@@ -15,7 +15,12 @@ pub mod abs;
 pub mod add;
 pub mod ceil;
 pub mod divide;
+pub mod equal;
 pub mod floor;
+pub mod gt;
+pub mod gte;
+pub mod lt;
+pub mod lte;
 pub mod max;
 pub mod min;
 pub mod multiply;
@@ -28,7 +33,12 @@ pub use self::abs::AbsNode;
 pub use self::add::AddNode;
 pub use self::ceil::CeilNode;
 pub use self::divide::DivideNode;
+pub use self::equal::EqualNode;
 pub use self::floor::FloorNode;
+pub use self::gt::GtNode;
+pub use self::gte::GteNode;
+pub use self::lt::LtNode;
+pub use self::lte::LteNode;
 pub use self::max::MaxNode;
 pub use self::min::MinNode;
 pub use self::multiply::MultiplyNode;
@@ -43,9 +53,14 @@ pub enum ArithmeticNode {
     Subtract(SubtractNode),
     Multiply(MultiplyNode),
     Divide(DivideNode),
+    Equal(EqualNode),
     Remainder(RemainderNode),
     Abs(AbsNode),
     Floor(FloorNode),
+    Gt(GtNode),
+    Gte(GteNode),
+    Lt(LtNode),
+    Lte(LteNode),
     Ceil(CeilNode),
     Round(RoundNode),
     Max(MaxNode),
@@ -55,10 +70,15 @@ pub enum ArithmeticNode {
 impl AstNodePackage<Node> for ArithmeticNode {
     fn factory(type_name: &str, args: &[Expression<Node>]) -> Option<NodeFactoryResult<Self>> {
         match type_name {
-            "add" => Some(AddNode::factory(args).map(Self::Add)),
-            "subtract" => Some(SubtractNode::factory(args).map(Self::Subtract)),
-            "multiply" => Some(MultiplyNode::factory(args).map(Self::Multiply)),
-            "divide" => Some(DivideNode::factory(args).map(Self::Divide)),
+            "+" => Some(AddNode::factory(args).map(Self::Add)),
+            "-" => Some(SubtractNode::factory(args).map(Self::Subtract)),
+            "*" => Some(MultiplyNode::factory(args).map(Self::Multiply)),
+            "/" => Some(DivideNode::factory(args).map(Self::Divide)),
+            "=" => Some(EqualNode::factory(args).map(Self::Equal)),
+            ">" => Some(GtNode::factory(args).map(Self::Gt)),
+            ">=" => Some(GteNode::factory(args).map(Self::Gte)),
+            "<" => Some(LtNode::factory(args).map(Self::Lt)),
+            "<=" => Some(LteNode::factory(args).map(Self::Lte)),
             "remainder" => Some(RemainderNode::factory(args).map(Self::Remainder)),
             "abs" => Some(AbsNode::factory(args).map(Self::Abs)),
             "floor" => Some(FloorNode::factory(args).map(Self::Floor)),
@@ -78,9 +98,14 @@ impl NodeType<Node> for ArithmeticNode {
             Self::Subtract(node) => node.expressions(),
             Self::Multiply(node) => node.expressions(),
             Self::Divide(node) => node.expressions(),
+            Self::Equal(node) => node.expressions(),
             Self::Remainder(node) => node.expressions(),
             Self::Abs(node) => node.expressions(),
             Self::Floor(node) => node.expressions(),
+            Self::Gt(node) => node.expressions(),
+            Self::Gte(node) => node.expressions(),
+            Self::Lt(node) => node.expressions(),
+            Self::Lte(node) => node.expressions(),
             Self::Ceil(node) => node.expressions(),
             Self::Round(node) => node.expressions(),
             Self::Max(node) => node.expressions(),
@@ -94,9 +119,14 @@ impl NodeType<Node> for ArithmeticNode {
             Self::Subtract(node) => node.capture_depth(),
             Self::Multiply(node) => node.capture_depth(),
             Self::Divide(node) => node.capture_depth(),
+            Self::Equal(node) => node.capture_depth(),
             Self::Remainder(node) => node.capture_depth(),
             Self::Abs(node) => node.capture_depth(),
             Self::Floor(node) => node.capture_depth(),
+            Self::Gt(node) => node.capture_depth(),
+            Self::Gte(node) => node.capture_depth(),
+            Self::Lt(node) => node.capture_depth(),
+            Self::Lte(node) => node.capture_depth(),
             Self::Ceil(node) => node.capture_depth(),
             Self::Round(node) => node.capture_depth(),
             Self::Max(node) => node.capture_depth(),
@@ -110,9 +140,14 @@ impl NodeType<Node> for ArithmeticNode {
             Self::Subtract(node) => node.evaluate(env),
             Self::Multiply(node) => node.evaluate(env),
             Self::Divide(node) => node.evaluate(env),
+            Self::Equal(node) => node.evaluate(env),
             Self::Remainder(node) => node.evaluate(env),
             Self::Abs(node) => node.evaluate(env),
             Self::Floor(node) => node.evaluate(env),
+            Self::Gt(node) => node.evaluate(env),
+            Self::Gte(node) => node.evaluate(env),
+            Self::Lt(node) => node.evaluate(env),
+            Self::Lte(node) => node.evaluate(env),
             Self::Ceil(node) => node.evaluate(env),
             Self::Round(node) => node.evaluate(env),
             Self::Max(node) => node.evaluate(env),
@@ -128,9 +163,14 @@ impl fmt::Display for ArithmeticNode {
             Self::Subtract(node) => fmt::Display::fmt(node, f),
             Self::Multiply(node) => fmt::Display::fmt(node, f),
             Self::Divide(node) => fmt::Display::fmt(node, f),
+            Self::Equal(node) => fmt::Display::fmt(node, f),
             Self::Remainder(node) => fmt::Display::fmt(node, f),
             Self::Abs(node) => fmt::Display::fmt(node, f),
             Self::Floor(node) => fmt::Display::fmt(node, f),
+            Self::Gt(node) => fmt::Display::fmt(node, f),
+            Self::Gte(node) => fmt::Display::fmt(node, f),
+            Self::Lt(node) => fmt::Display::fmt(node, f),
+            Self::Lte(node) => fmt::Display::fmt(node, f),
             Self::Ceil(node) => fmt::Display::fmt(node, f),
             Self::Round(node) => fmt::Display::fmt(node, f),
             Self::Max(node) => fmt::Display::fmt(node, f),
@@ -146,9 +186,14 @@ impl fmt::Debug for ArithmeticNode {
             Self::Subtract(node) => fmt::Display::fmt(node, f),
             Self::Multiply(node) => fmt::Display::fmt(node, f),
             Self::Divide(node) => fmt::Display::fmt(node, f),
+            Self::Equal(node) => fmt::Display::fmt(node, f),
             Self::Remainder(node) => fmt::Display::fmt(node, f),
             Self::Abs(node) => fmt::Display::fmt(node, f),
             Self::Floor(node) => fmt::Display::fmt(node, f),
+            Self::Gt(node) => fmt::Display::fmt(node, f),
+            Self::Gte(node) => fmt::Display::fmt(node, f),
+            Self::Lt(node) => fmt::Display::fmt(node, f),
+            Self::Lte(node) => fmt::Display::fmt(node, f),
             Self::Ceil(node) => fmt::Display::fmt(node, f),
             Self::Round(node) => fmt::Display::fmt(node, f),
             Self::Max(node) => fmt::Display::fmt(node, f),
