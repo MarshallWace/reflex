@@ -3,7 +3,14 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use std::fmt;
 
-use crate::{env::Env, expression::{AstNode, AstNodePackage, EvaluationResult, Expression, NodeFactoryResult, NodeType}, node::Node};
+use crate::{
+    env::Env,
+    expression::{
+        AstNode, AstNodePackage, EvaluationResult, Expression, NodeFactoryResult, NodeType,
+    },
+    hash::prefix_hash,
+    node::Node,
+};
 
 pub mod and;
 pub mod conditional;
@@ -34,6 +41,14 @@ impl AstNodePackage<Node> for LogicNode {
     }
 }
 impl NodeType<Node> for LogicNode {
+    fn hash(&self) -> u32 {
+        match self {
+            LogicNode::And(node) => prefix_hash(0, node.hash()),
+            LogicNode::Conditional(node) => prefix_hash(1, node.hash()),
+            LogicNode::Not(node) => prefix_hash(2, node.hash()),
+            LogicNode::Or(node) => prefix_hash(3, node.hash()),
+        }
+    }
     fn expressions(&self) -> Vec<&Expression<Node>> {
         match self {
             LogicNode::And(node) => node.expressions(),

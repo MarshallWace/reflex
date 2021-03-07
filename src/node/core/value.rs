@@ -6,6 +6,7 @@ use std::{fmt, rc::Rc};
 use crate::{
     env::Env,
     expression::{AstNode, EvaluationResult, Expression, NodeFactoryResult, NodeType},
+    hash::{hash_bytes, hash_string, prefix_hash},
     node::{core::CoreNode, Evaluate1, Node},
 };
 
@@ -18,6 +19,28 @@ pub enum ValueNode {
     String(StringValue),
 }
 impl NodeType<Node> for ValueNode {
+    fn hash(&self) -> u32 {
+        match self {
+            ValueNode::Nil => prefix_hash(0, 0),
+            ValueNode::Boolean(value) => prefix_hash(1, {
+                if !*value {
+                    1
+                } else {
+                    2
+                }
+            }),
+            ValueNode::Int(value) => prefix_hash(2, hash_bytes(&value.to_be_bytes())),
+            ValueNode::Float(value) => prefix_hash(
+                3,
+                if *value == 0.0 {
+                    0
+                } else {
+                    hash_bytes(&value.to_be_bytes())
+                },
+            ),
+            ValueNode::String(value) => prefix_hash(4, hash_string(value.get())),
+        }
+    }
     fn expressions(&self) -> Vec<&Expression<Node>> {
         Vec::new()
     }

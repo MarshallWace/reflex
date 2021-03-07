@@ -8,6 +8,7 @@ use crate::{
     expression::{
         AstNode, AstNodePackage, EvaluationResult, Expression, NodeFactoryResult, NodeType,
     },
+    hash::prefix_hash,
     node::Node,
 };
 
@@ -48,6 +49,17 @@ impl AstNodePackage<Node> for SequenceNode {
     }
 }
 impl NodeType<Node> for SequenceNode {
+    fn hash(&self) -> u32 {
+        match self {
+            Self::Apply(node) => prefix_hash(0, node.hash()),
+            Self::Car(node) => prefix_hash(1, node.hash()),
+            Self::Cdr(node) => prefix_hash(2, node.hash()),
+            Self::Cons(node) => prefix_hash(3, node.hash()),
+            Self::List(node) => prefix_hash(4, node.hash()),
+            Self::IsList(node) => prefix_hash(5, node.hash()),
+            Self::IsPair(node) => prefix_hash(6, node.hash()),
+        }
+    }
     fn expressions(&self) -> Vec<&Expression<Node>> {
         match self {
             Self::Apply(node) => node.expressions(),

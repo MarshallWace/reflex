@@ -8,6 +8,7 @@ use crate::{
     expression::{
         AstNode, AstNodePackage, EvaluationResult, Expression, NodeFactoryResult, NodeType,
     },
+    hash::prefix_hash,
     node::Node,
 };
 
@@ -92,6 +93,27 @@ impl AstNodePackage<Node> for ArithmeticNode {
     }
 }
 impl NodeType<Node> for ArithmeticNode {
+    fn hash(&self) -> u32 {
+        match self {
+            Self::Add(node) => prefix_hash(0, node.hash()),
+            Self::Subtract(node) => prefix_hash(1, node.hash()),
+            Self::Multiply(node) => prefix_hash(2, node.hash()),
+            Self::Divide(node) => prefix_hash(3, node.hash()),
+            Self::Equal(node) => prefix_hash(4, node.hash()),
+            Self::Remainder(node) => prefix_hash(5, node.hash()),
+            Self::Abs(node) => prefix_hash(6, node.hash()),
+            Self::Floor(node) => prefix_hash(7, node.hash()),
+            Self::Gt(node) => prefix_hash(8, node.hash()),
+            Self::Gte(node) => prefix_hash(9, node.hash()),
+            Self::Lt(node) => prefix_hash(10, node.hash()),
+            Self::Lte(node) => prefix_hash(11, node.hash()),
+            Self::Ceil(node) => prefix_hash(12, node.hash()),
+            Self::Round(node) => prefix_hash(13, node.hash()),
+            Self::Max(node) => prefix_hash(14, node.hash()),
+            Self::Min(node) => prefix_hash(15, node.hash()),
+            Self::Pow(node) => prefix_hash(16, node.hash()),
+        }
+    }
     fn expressions(&self) -> Vec<&Expression<Node>> {
         match self {
             Self::Add(node) => node.expressions(),

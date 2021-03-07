@@ -5,6 +5,7 @@
 
 pub mod env;
 pub mod expression;
+pub mod hash;
 pub mod node;
 
 #[cfg(test)]

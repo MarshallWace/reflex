@@ -30,6 +30,9 @@ impl AstNode<Node> for PendingNode {
     }
 }
 impl NodeType<Node> for PendingNode {
+    fn hash(&self) -> u32 {
+        0
+    }
     fn expressions(&self) -> Vec<&Expression<Node>> {
         Vec::new()
     }

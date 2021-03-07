@@ -6,6 +6,7 @@ use std::fmt;
 use crate::{
     env::Env,
     expression::{AstNode, EvaluationResult, Expression, NodeFactoryResult, NodeType},
+    hash::hash_string,
     node::{
         core::{CoreNode, ValueNode},
         Node,
@@ -37,6 +38,9 @@ impl AstNode<Node> for ErrorNode {
     }
 }
 impl NodeType<Node> for ErrorNode {
+    fn hash(&self) -> u32 {
+        hash_string(&self.message)
+    }
     fn expressions(&self) -> Vec<&Expression<Node>> {
         Vec::new()
     }

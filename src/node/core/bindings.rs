@@ -6,6 +6,7 @@ use std::{fmt, iter::once};
 use crate::{
     env::{Env, MutableEnv, StackOffset},
     expression::{AstNode, EvaluationResult, Expression, NodeFactoryResult, NodeType},
+    hash::{combine_hashes, hash_bytes},
     node::{core::CoreNode, Node},
 };
 
@@ -22,6 +23,9 @@ impl ReferenceNode {
     }
 }
 impl NodeType<Node> for ReferenceNode {
+    fn hash(&self) -> u32 {
+        hash_bytes(&self.offset.to_be_bytes())
+    }
     fn expressions(&self) -> Vec<&Expression<Node>> {
         Vec::new()
     }
@@ -72,6 +76,9 @@ impl BoundNode {
     }
 }
 impl NodeType<Node> for BoundNode {
+    fn hash(&self) -> u32 {
+        combine_hashes(&vec![self.target.hash(), self.env.hash()])
+    }
     fn expressions(&self) -> Vec<&Expression<Node>> {
         vec![&self.target]
     }
@@ -190,6 +197,9 @@ pub struct LetRecBindingNode {
     env: MutableEnv<Node>,
 }
 impl NodeType<Node> for LetRecBindingNode {
+    fn hash(&self) -> u32 {
+        combine_hashes(&vec![self.target.hash(), self.env.hash()])
+    }
     fn expressions(&self) -> Vec<&Expression<Node>> {
         vec![&self.target]
     }
@@ -408,7 +418,10 @@ mod tests {
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3 + 1))))
         );
-        let expression = parser::parse("(letrec ((fac (lambda (n) (if (= n 1) n (* n (fac (- n 1))))))) (fac 5))").unwrap();
+        let expression = parser::parse(
+            "(letrec ((fac (lambda (n) (if (= n 1) n (* n (fac (- n 1))))))) (fac 5))",
+        )
+        .unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,

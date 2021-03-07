@@ -94,6 +94,18 @@ mod tests {
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(true))))
         );
+        let expression = parser::parse("(= 0 -0)").unwrap();
+        let result = expression.evaluate(&env).expression;
+        assert_eq!(
+            result,
+            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(true))))
+        );
+        let expression = parser::parse("(= -0 0)").unwrap();
+        let result = expression.evaluate(&env).expression;
+        assert_eq!(
+            result,
+            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(true))))
+        );
         let expression = parser::parse("(= 3 3)").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
@@ -144,6 +156,18 @@ mod tests {
         );
 
         let expression = parser::parse("(= 0.0 0.0)").unwrap();
+        let result = expression.evaluate(&env).expression;
+        assert_eq!(
+            result,
+            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(true))))
+        );
+        let expression = parser::parse("(= 0.0 -0.0)").unwrap();
+        let result = expression.evaluate(&env).expression;
+        assert_eq!(
+            result,
+            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(true))))
+        );
+        let expression = parser::parse("(= -0.0 0.0)").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,

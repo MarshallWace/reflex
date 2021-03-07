@@ -3,9 +3,18 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use std::{fmt, rc::Rc};
 
-use crate::env::Env;
+use crate::{env::Env, hash::combine_hashes};
 
 pub trait NodeType<T: NodeType<T>>: PartialEq + Clone + fmt::Display + fmt::Debug {
+    fn hash(&self) -> u32 {
+        combine_hashes(
+            &self
+                .expressions()
+                .iter()
+                .map(|expression| expression.hash())
+                .collect::<Vec<_>>(),
+        )
+    }
     fn expressions(&self) -> Vec<&Expression<T>>;
     fn capture_depth(&self) -> usize {
         self.expressions()
@@ -46,15 +55,21 @@ pub type StateToken = usize;
 #[derive(PartialEq, Clone)]
 pub struct Expression<T: NodeType<T>> {
     value: Rc<T>,
+    hash: u32,
     capture_depth: usize,
 }
 impl<T: NodeType<T>> Expression<T> {
     pub fn new(value: T) -> Self {
+        let hash = value.hash();
         let capture_depth = value.capture_depth();
         Expression {
             value: Rc::new(value),
+            hash,
             capture_depth,
         }
+    }
+    pub fn hash(&self) -> u32 {
+        self.hash
     }
     pub fn value(&self) -> &T {
         &self.value
@@ -62,6 +77,7 @@ impl<T: NodeType<T>> Expression<T> {
     pub fn clone(&self) -> Self {
         Expression {
             value: Rc::clone(&self.value),
+            hash: self.hash,
             capture_depth: self.capture_depth,
         }
     }

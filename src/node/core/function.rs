@@ -8,6 +8,7 @@ use crate::{
     expression::{
         with_dependencies, AstNode, EvaluationResult, Expression, NodeFactoryResult, NodeType,
     },
+    hash::{combine_hashes, prefix_hash},
     node::{
         core::{BoundNode, CoreNode, ErrorNode, ValueNode},
         Evaluate1, Node,
@@ -31,6 +32,9 @@ impl FunctionNode {
     }
 }
 impl NodeType<Node> for FunctionNode {
+    fn hash(&self) -> u32 {
+        prefix_hash(self.arity as u8, self.body.hash())
+    }
     fn expressions(&self) -> Vec<&Expression<Node>> {
         vec![&self.body]
     }
@@ -86,6 +90,12 @@ impl BoundFunctionNode {
     }
 }
 impl NodeType<Node> for BoundFunctionNode {
+    fn hash(&self) -> u32 {
+        prefix_hash(
+            self.arity as u8,
+            combine_hashes(&vec![self.body.hash(), self.env.hash()]),
+        )
+    }
     fn expressions(&self) -> Vec<&Expression<Node>> {
         vec![&self.body]
     }

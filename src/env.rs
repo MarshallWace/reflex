@@ -7,37 +7,45 @@ use std::{
     rc::Rc,
 };
 
-use crate::expression::{Expression, NodeType};
+use crate::{
+    expression::{Expression, NodeType},
+    hash::combine_hashes,
+};
 
 pub type StackOffset = usize;
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct Env<T: NodeType<T>> {
+    hash: u32,
     bindings: Vec<Expression<T>>,
 }
 impl<T: NodeType<T>> Env<T> {
     pub fn new() -> Self {
         Env {
+            hash: 0,
             bindings: Vec::new(),
         }
     }
     pub fn from(values: impl IntoIterator<Item = Expression<T>>) -> Env<T> {
-        Env {
-            bindings: values.into_iter().collect(),
-        }
+        let bindings = values.into_iter().collect::<Vec<_>>();
+        let hash = hash_expressions(&bindings);
+        Env { hash, bindings }
+    }
+    pub fn hash(&self) -> u32 {
+        self.hash
     }
     pub fn get(&self, offset: StackOffset) -> &Expression<T> {
         &self.bindings[self.bindings.len() - offset - 1]
     }
     pub fn capture(&self, offset: StackOffset) -> Env<T> {
-        Env {
-            bindings: self
-                .bindings
-                .iter()
-                .skip(self.bindings.len() - offset)
-                .cloned()
-                .collect(),
-        }
+        let bindings = self
+            .bindings
+            .iter()
+            .skip(self.bindings.len() - offset)
+            .cloned()
+            .collect::<Vec<_>>();
+        let hash = hash_expressions(&bindings);
+        Env { hash, bindings }
     }
     pub fn extend(&self, values: impl IntoIterator<Item = Expression<T>>) -> Env<T> {
         Env::from(self.bindings.iter().cloned().chain(values.into_iter()))
@@ -47,12 +55,11 @@ impl<T: NodeType<T>> Env<T> {
         values: impl FnOnce(&MutableEnv<T>) -> Vec<Expression<T>>,
     ) -> MutableEnv<T> {
         let child_env = MutableEnv::from(self);
-        (*child_env.state)
-            .borrow_mut()
-            .as_mut()
-            .unwrap()
-            .bindings
-            .extend(values(&child_env));
+        {
+            let mut state = (*child_env.state).borrow_mut();
+            let env = state.as_mut().unwrap();
+            env.bindings.extend(values(&child_env));
+        }
         child_env
     }
 }
@@ -60,14 +67,17 @@ impl<T: NodeType<T>> Env<T> {
 #[derive(Debug, PartialEq, Clone)]
 pub struct MutableEnv<T: NodeType<T>> {
     state: Rc<RefCell<Option<Env<T>>>>,
+    hash: u32,
 }
 impl<T: NodeType<T>> MutableEnv<T> {
     fn from(env: &Env<T>) -> Self {
         MutableEnv {
-            state: Rc::new(RefCell::new(Some(Env {
-                bindings: env.bindings.iter().cloned().collect(),
-            }))),
+            hash: env.hash,
+            state: Rc::new(RefCell::new(Some(env.clone()))),
         }
+    }
+    pub fn hash(&self) -> u32 {
+        self.hash
     }
     pub fn get(&self) -> Ref<'_, Env<T>> {
         let state = (*self.state).borrow();
@@ -85,4 +95,13 @@ impl<T: NodeType<T>> Drop for MutableEnv<T> {
             env.bindings.clear();
         }
     }
+}
+
+fn hash_expressions<T: NodeType<T>>(expressions: &Vec<Expression<T>>) -> u32 {
+    combine_hashes(
+        &expressions
+            .iter()
+            .map(|expression| expression.hash())
+            .collect::<Vec<_>>(),
+    )
 }

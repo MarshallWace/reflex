@@ -8,6 +8,7 @@ use crate::{
     expression::{
         AstNode, AstNodePackage, EvaluationResult, Expression, NodeFactoryResult, NodeType,
     },
+    hash::prefix_hash,
     node::Node,
 };
 
@@ -17,7 +18,9 @@ pub mod function;
 pub mod pending;
 pub mod value;
 
-pub use self::bindings::{BoundNode, LetNode, LetRecNode, LetStarNode, LetRecBindingNode, ReferenceNode};
+pub use self::bindings::{
+    BoundNode, LetNode, LetRecBindingNode, LetRecNode, LetStarNode, ReferenceNode,
+};
 pub use self::error::{ErrorNode, IsErrorNode};
 pub use self::function::{
     BoundFunctionNode, FunctionApplicationNode, FunctionNode, IsFunctionNode,
@@ -71,6 +74,30 @@ impl AstNodePackage<Node> for CoreNode {
     }
 }
 impl NodeType<Node> for CoreNode {
+    fn hash(&self) -> u32 {
+        match self {
+            Self::Bound(node) => prefix_hash(0, node.hash()),
+            Self::BoundFunction(node) => prefix_hash(1, node.hash()),
+            Self::Error(node) => prefix_hash(2, node.hash()),
+            Self::Function(node) => prefix_hash(3, node.hash()),
+            Self::FunctionApplication(node) => prefix_hash(4, node.hash()),
+            Self::Let(node) => prefix_hash(5, node.hash()),
+            Self::LetRec(node) => prefix_hash(6, node.hash()),
+            Self::LetRecBinding(node) => prefix_hash(7, node.hash()),
+            Self::LetStar(node) => prefix_hash(8, node.hash()),
+            Self::Pending(node) => prefix_hash(9, node.hash()),
+            Self::Reference(node) => prefix_hash(10, node.hash()),
+            Self::Value(node) => prefix_hash(11, node.hash()),
+            Self::IsNull(node) => prefix_hash(12, node.hash()),
+            Self::IsBoolean(node) => prefix_hash(13, node.hash()),
+            Self::IsInteger(node) => prefix_hash(14, node.hash()),
+            Self::IsFloat(node) => prefix_hash(15, node.hash()),
+            Self::IsString(node) => prefix_hash(16, node.hash()),
+            Self::IsFunction(node) => prefix_hash(17, node.hash()),
+            Self::IsError(node) => prefix_hash(18, node.hash()),
+            Self::IsPending(node) => prefix_hash(19, node.hash()),
+        }
+    }
     fn expressions(&self) -> Vec<&Expression<Node>> {
         match self {
             Self::Bound(node) => node.expressions(),

@@ -6,6 +6,7 @@ use std::fmt;
 use crate::{
     env::Env,
     expression::{AstNodePackage, EvaluationResult, Expression, NodeFactoryResult, NodeType},
+    hash::prefix_hash,
 };
 
 mod evaluate;
@@ -40,6 +41,14 @@ impl AstNodePackage<Node> for Node {
     }
 }
 impl NodeType<Node> for Node {
+    fn hash(&self) -> u32 {
+        match self {
+            Self::Core(node) => prefix_hash(0, node.hash()),
+            Self::Logic(node) => prefix_hash(0, node.hash()),
+            Self::Sequence(node) => prefix_hash(0, node.hash()),
+            Self::Arithmetic(node) => prefix_hash(0, node.hash()),
+        }
+    }
     fn expressions(&self) -> Vec<&Expression<Node>> {
         match self {
             Self::Core(node) => node.expressions(),
