@@ -198,13 +198,13 @@ mod tests {
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false)))),
         );
-        let expression = parser::parse("(error? true)").unwrap();
+        let expression = parser::parse("(error? #t)").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
         );
-        let expression = parser::parse("(error? false)").unwrap();
+        let expression = parser::parse("(error? #f)").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,

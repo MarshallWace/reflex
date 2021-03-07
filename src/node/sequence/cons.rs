@@ -390,13 +390,13 @@ mod tests {
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
         );
-        let expression = parser::parse("(pair? true)").unwrap();
+        let expression = parser::parse("(pair? #t)").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
         );
-        let expression = parser::parse("(pair? false)").unwrap();
+        let expression = parser::parse("(pair? #f)").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,

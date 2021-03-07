@@ -137,15 +137,15 @@ mod tests {
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
-                "Expected Int or Float, received Nil"
+                "Expected Int or Float, received null"
             ))))
         );
-        let expression = parser::parse("(abs false)").unwrap();
+        let expression = parser::parse("(abs #f)").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
-                "Expected Int or Float, received false"
+                "Expected Int or Float, received #f"
             ))))
         );
         let expression = parser::parse("(abs \"3\")").unwrap();

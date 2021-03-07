@@ -139,8 +139,8 @@ fn parse_reference<'a>(
 fn parse_global<'a>(input: &SyntaxDatum<'a>, identifier: &'a str) -> Option<Expression<Node>> {
     match identifier {
         "null" => Some(parse_nil_literal(input)),
-        "true" => Some(parse_boolean_literal(input, true)),
-        "false" => Some(parse_boolean_literal(input, false)),
+        "#t" => Some(parse_boolean_literal(input, true)),
+        "#f" => Some(parse_boolean_literal(input, false)),
         _ => None,
     }
 }
@@ -494,13 +494,13 @@ mod tests {
             Ok(Expression::new(Node::Core(CoreNode::Value(ValueNode::Nil))))
         );
         assert_eq!(
-            parse("true"),
+            parse("#t"),
             Ok(Expression::new(Node::Core(CoreNode::Value(
                 ValueNode::Boolean(true)
             ))))
         );
         assert_eq!(
-            parse("false"),
+            parse("#f"),
             Ok(Expression::new(Node::Core(CoreNode::Value(
                 ValueNode::Boolean(false)
             ))))
@@ -518,15 +518,15 @@ mod tests {
             ))))
         );
         assert_eq!(
-            parse("1"),
+            parse("3"),
             Ok(Expression::new(Node::Core(CoreNode::Value(
-                ValueNode::Int(1)
+                ValueNode::Int(3)
             ))))
         );
         assert_eq!(
-            parse("-1"),
+            parse("-3"),
             Ok(Expression::new(Node::Core(CoreNode::Value(
-                ValueNode::Int(-1)
+                ValueNode::Int(-3)
             ))))
         );
         assert_eq!(

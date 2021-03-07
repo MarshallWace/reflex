@@ -174,13 +174,13 @@ mod tests {
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false)))),
         );
-        let expression = parser::parse("(pending? true)").unwrap();
+        let expression = parser::parse("(pending? #t)").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
         );
-        let expression = parser::parse("(pending? false)").unwrap();
+        let expression = parser::parse("(pending? #f)").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,

@@ -91,13 +91,13 @@ mod tests {
     #[test]
     fn conditional_expressions() {
         let env = Env::new();
-        let expression = parser::parse("(if true 3 4)").unwrap();
+        let expression = parser::parse("(if #t 3 4)").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3))))
         );
-        let expression = parser::parse("(if false 3 4)").unwrap();
+        let expression = parser::parse("(if #f 3 4)").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
@@ -108,13 +108,13 @@ mod tests {
     #[test]
     fn conditional_expression_short_circuiting() {
         let env = Env::new();
-        let expression = parser::parse("(if true (+ 3 4) (error \"foo\"))").unwrap();
+        let expression = parser::parse("(if #t (+ 3 4) (error \"foo\"))").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3 + 4))))
         );
-        let expression = parser::parse("(if false (error \"foo\") (+ 3 4))").unwrap();
+        let expression = parser::parse("(if #f (error \"foo\") (+ 3 4))").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
@@ -125,15 +125,15 @@ mod tests {
     #[test]
     fn invalid_conditional_expression_conditions() {
         let env = Env::new();
-        let expression = parser::parse("(if null true false)").unwrap();
+        let expression = parser::parse("(if null #t #f)").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
-                "Expected Boolean, received Nil"
+                "Expected Boolean, received null"
             ))))
         );
-        let expression = parser::parse("(if 0 true false)").unwrap();
+        let expression = parser::parse("(if 0 #t #f)").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
@@ -141,7 +141,7 @@ mod tests {
                 "Expected Boolean, received 0"
             ))))
         );
-        let expression = parser::parse("(if 0.0 true false)").unwrap();
+        let expression = parser::parse("(if 0.0 #t #f)").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
@@ -149,7 +149,7 @@ mod tests {
                 "Expected Boolean, received 0.0"
             ))))
         );
-        let expression = parser::parse("(if \"\" true false)").unwrap();
+        let expression = parser::parse("(if \"\" #t #f)").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,

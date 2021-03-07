@@ -108,7 +108,7 @@ mod benchmarks {
     #[bench]
     fn conditional_expressions(b: &mut Bencher) {
         let env = Env::new();
-        let expression = parser::parse("(if true 3 4)").unwrap();
+        let expression = parser::parse("(if #t 3 4)").unwrap();
         b.iter(|| expression.evaluate(&env));
     }
 }

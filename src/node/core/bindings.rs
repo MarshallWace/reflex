@@ -416,13 +416,13 @@ mod tests {
                 5 * 4 * 3 * 2 * 1
             ))))
         );
-        let expression = parser::parse("(letrec ((is-even? (lambda (x) (if (= x 0) true (is-odd? (- x 1))))) (is-odd? (lambda (x) (if (= x 0) false (is-even? (- x 1)))))) (is-even? 3))").unwrap();
+        let expression = parser::parse("(letrec ((is-even? (lambda (x) (if (= x 0) #t (is-odd? (- x 1))))) (is-odd? (lambda (x) (if (= x 0) #f (is-even? (- x 1)))))) (is-even? 3))").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
         );
-        let expression = parser::parse("(letrec ((is-even? (lambda (x) (if (= x 0) true (is-odd? (- x 1))))) (is-odd? (lambda (x) (if (= x 0) false (is-even? (- x 1)))))) (is-odd? 3))").unwrap();
+        let expression = parser::parse("(letrec ((is-even? (lambda (x) (if (= x 0) #t (is-odd? (- x 1))))) (is-odd? (lambda (x) (if (= x 0) #f (is-even? (- x 1)))))) (is-odd? 3))").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,

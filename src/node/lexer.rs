@@ -115,20 +115,37 @@ fn peek_next_char(input: &str) -> Option<char> {
 }
 
 fn consume_symbol(input: &str) -> Option<ParserOutput<SyntaxDatum>> {
-    let first_char = input.chars().next()?;
-    if !is_valid_symbol_char(first_char) {
-        return None;
-    }
-    let identifier_length = input
-        .char_indices()
-        .find_map(|(index, char)| {
-            if is_valid_symbol_char(char) {
-                None
-            } else {
-                Some(index)
-            }
-        })
-        .unwrap_or_else(|| input.len());
+    let mut chars = input.chars();
+    let first_char = chars.next()?;
+    let identifier_length = if first_char == '#' {
+        let constant_name = chars.next()?;
+        let is_valid_constant = match constant_name {
+            't' | 'f' => true,
+            _ => false,
+        };
+        if !is_valid_constant {
+            return None;
+        }
+        let name_length = 1;
+        let identifier_length = 1 + name_length;
+        Some(identifier_length)
+    } else if is_valid_symbol_char(first_char) {
+        Some(
+            input
+                .char_indices()
+                .skip(1)
+                .find_map(|(index, char)| {
+                    if is_valid_symbol_char(char) {
+                        None
+                    } else {
+                        Some(index)
+                    }
+                })
+                .unwrap_or_else(|| input.len()),
+        )
+    } else {
+        None
+    }?;
     Some(ParserOutput {
         parsed: SyntaxDatum::Symbol(&input[0..identifier_length]),
         remaining: &input[identifier_length..],

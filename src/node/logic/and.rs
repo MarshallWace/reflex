@@ -86,25 +86,25 @@ mod tests {
     #[test]
     fn and_expressions() {
         let env = Env::new();
-        let expression = parser::parse("(and false false)").unwrap();
+        let expression = parser::parse("(and #f #f)").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
         );
-        let expression = parser::parse("(and false true)").unwrap();
+        let expression = parser::parse("(and #f #t)").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
         );
-        let expression = parser::parse("(and true false)").unwrap();
+        let expression = parser::parse("(and #t #f)").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
         );
-        let expression = parser::parse("(and true true)").unwrap();
+        let expression = parser::parse("(and #t #t)").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
@@ -115,69 +115,69 @@ mod tests {
     #[test]
     fn invalid_and_expression_arguments() {
         let env = Env::new();
-        let expression = parser::parse("(and true null)").unwrap();
+        let expression = parser::parse("(and #t null)").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
-                "Expected (Boolean, Boolean), received (true, Nil)"
+                "Expected (Boolean, Boolean), received (#t, null)"
             ))))
         );
-        let expression = parser::parse("(and true 0)").unwrap();
+        let expression = parser::parse("(and #t 0)").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
-                "Expected (Boolean, Boolean), received (true, 0)"
+                "Expected (Boolean, Boolean), received (#t, 0)"
             ))))
         );
-        let expression = parser::parse("(and true 0.0)").unwrap();
+        let expression = parser::parse("(and #t 0.0)").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
-                "Expected (Boolean, Boolean), received (true, 0.0)"
+                "Expected (Boolean, Boolean), received (#t, 0.0)"
             ))))
         );
-        let expression = parser::parse("(and true \"\")").unwrap();
+        let expression = parser::parse("(and #t \"\")").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
-                "Expected (Boolean, Boolean), received (true, \"\")"
+                "Expected (Boolean, Boolean), received (#t, \"\")"
             ))))
         );
 
-        let expression = parser::parse("(and null true)").unwrap();
+        let expression = parser::parse("(and null #t)").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
-                "Expected (Boolean, Boolean), received (Nil, true)"
+                "Expected (Boolean, Boolean), received (null, #t)"
             ))))
         );
-        let expression = parser::parse("(and 0 true)").unwrap();
+        let expression = parser::parse("(and 0 #t)").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
-                "Expected (Boolean, Boolean), received (0, true)"
+                "Expected (Boolean, Boolean), received (0, #t)"
             ))))
         );
-        let expression = parser::parse("(and 0.0 true)").unwrap();
+        let expression = parser::parse("(and 0.0 #t)").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
-                "Expected (Boolean, Boolean), received (0.0, true)"
+                "Expected (Boolean, Boolean), received (0.0, #t)"
             ))))
         );
-        let expression = parser::parse("(and \"\" true)").unwrap();
+        let expression = parser::parse("(and \"\" #t)").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
-                "Expected (Boolean, Boolean), received (\"\", true)"
+                "Expected (Boolean, Boolean), received (\"\", #t)"
             ))))
         );
     }

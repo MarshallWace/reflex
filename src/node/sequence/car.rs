@@ -128,7 +128,7 @@ mod tests {
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
-                "Expected pair, received Nil"
+                "Expected pair, received null"
             )))),
         );
     }

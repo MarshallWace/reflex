@@ -28,8 +28,8 @@ impl NodeType<Node> for ValueNode {
 impl fmt::Display for ValueNode {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let formatted = match self {
-            ValueNode::Nil => String::from("Nil"),
-            ValueNode::Boolean(value) => format!("{:?}", value),
+            ValueNode::Nil => String::from("null"),
+            ValueNode::Boolean(value) => String::from(if *value { "#t" } else { "#f" }),
             ValueNode::Int(value) => format!("{:?}", value),
             ValueNode::Float(value) => format!("{:?}", value),
             ValueNode::String(value) => format!("{}", value),
@@ -340,13 +340,13 @@ mod tests {
     #[test]
     fn static_values_boolean() {
         let env = Env::new();
-        let expression = parser::parse("true").unwrap();
+        let expression = parser::parse("#t").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(true))))
         );
-        let expression = parser::parse("false").unwrap();
+        let expression = parser::parse("#f").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
@@ -471,9 +471,9 @@ mod tests {
 
     #[test]
     fn format_values() {
-        assert_eq!(format!("{}", ValueNode::Nil), "Nil");
-        assert_eq!(format!("{}", ValueNode::Boolean(true)), "true");
-        assert_eq!(format!("{}", ValueNode::Boolean(false)), "false");
+        assert_eq!(format!("{}", ValueNode::Nil), "null");
+        assert_eq!(format!("{}", ValueNode::Boolean(true)), "#t");
+        assert_eq!(format!("{}", ValueNode::Boolean(false)), "#f");
         assert_eq!(format!("{}", ValueNode::Int(0)), "0");
         assert_eq!(format!("{}", ValueNode::Int(3)), "3");
         assert_eq!(format!("{}", ValueNode::Int(-3)), "-3");
@@ -510,13 +510,13 @@ mod tests {
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(true))))
         );
 
-        let expression = parser::parse("(null? true)").unwrap();
+        let expression = parser::parse("(null? #t)").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
         );
-        let expression = parser::parse("(null? false)").unwrap();
+        let expression = parser::parse("(null? #f)").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
@@ -587,13 +587,13 @@ mod tests {
     #[test]
     fn is_boolean_expressions() {
         let env = Env::new();
-        let expression = parser::parse("(boolean? true)").unwrap();
+        let expression = parser::parse("(boolean? #t)").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(true))))
         );
-        let expression = parser::parse("(boolean? false)").unwrap();
+        let expression = parser::parse("(boolean? #f)").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
@@ -702,13 +702,13 @@ mod tests {
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
         );
-        let expression = parser::parse("(integer? true)").unwrap();
+        let expression = parser::parse("(integer? #t)").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
         );
-        let expression = parser::parse("(integer? false)").unwrap();
+        let expression = parser::parse("(integer? #f)").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
@@ -786,13 +786,13 @@ mod tests {
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
         );
-        let expression = parser::parse("(float? true)").unwrap();
+        let expression = parser::parse("(float? #t)").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
         );
-        let expression = parser::parse("(float? false)").unwrap();
+        let expression = parser::parse("(float? #f)").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
@@ -858,13 +858,13 @@ mod tests {
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
         );
-        let expression = parser::parse("(string? true)").unwrap();
+        let expression = parser::parse("(string? #t)").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
         );
-        let expression = parser::parse("(string? false)").unwrap();
+        let expression = parser::parse("(string? #f)").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,

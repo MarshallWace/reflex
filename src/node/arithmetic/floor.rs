@@ -141,15 +141,15 @@ mod tests {
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
-                "Expected Float, received Nil"
+                "Expected Float, received null"
             ))))
         );
-        let expression = parser::parse("(floor false)").unwrap();
+        let expression = parser::parse("(floor #f)").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
-                "Expected Float, received false"
+                "Expected Float, received #f"
             ))))
         );
         let expression = parser::parse("(floor \"3\")").unwrap();

@@ -75,13 +75,13 @@ mod tests {
     #[test]
     fn not_expressions() {
         let env = Env::new();
-        let expression = parser::parse("(not true)").unwrap();
+        let expression = parser::parse("(not #t)").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
         );
-        let expression = parser::parse("(not false)").unwrap();
+        let expression = parser::parse("(not #f)").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
@@ -97,7 +97,7 @@ mod tests {
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
-                "Expected Boolean, received Nil"
+                "Expected Boolean, received null"
             ))))
         );
         let expression = parser::parse("(not 0)").unwrap();

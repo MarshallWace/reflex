@@ -247,13 +247,13 @@ mod tests {
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
         );
-        let expression = parser::parse("(list? false)").unwrap();
+        let expression = parser::parse("(list? #f)").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
         );
-        let expression = parser::parse("(list? true)").unwrap();
+        let expression = parser::parse("(list? #t)").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,

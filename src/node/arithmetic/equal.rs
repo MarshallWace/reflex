@@ -224,15 +224,15 @@ mod tests {
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
-                "Expected (Int, Int) or (Float, Float), received (3, Nil)"
+                "Expected (Int, Int) or (Float, Float), received (3, null)"
             ))))
         );
-        let expression = parser::parse("(= 3 false)").unwrap();
+        let expression = parser::parse("(= 3 #f)").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
-                "Expected (Int, Int) or (Float, Float), received (3, false)"
+                "Expected (Int, Int) or (Float, Float), received (3, #f)"
             ))))
         );
         let expression = parser::parse("(= 3 \"3\")").unwrap();
@@ -249,15 +249,15 @@ mod tests {
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
-                "Expected (Int, Int) or (Float, Float), received (Nil, 3)"
+                "Expected (Int, Int) or (Float, Float), received (null, 3)"
             ))))
         );
-        let expression = parser::parse("(= false 3)").unwrap();
+        let expression = parser::parse("(= #f 3)").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
-                "Expected (Int, Int) or (Float, Float), received (false, 3)"
+                "Expected (Int, Int) or (Float, Float), received (#f, 3)"
             ))))
         );
         let expression = parser::parse("(= \"3\" 3)").unwrap();
@@ -274,15 +274,15 @@ mod tests {
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
-                "Expected (Int, Int) or (Float, Float), received (3.142, Nil)"
+                "Expected (Int, Int) or (Float, Float), received (3.142, null)"
             ))))
         );
-        let expression = parser::parse("(= 3.142 false)").unwrap();
+        let expression = parser::parse("(= 3.142 #f)").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
-                "Expected (Int, Int) or (Float, Float), received (3.142, false)"
+                "Expected (Int, Int) or (Float, Float), received (3.142, #f)"
             ))))
         );
         let expression = parser::parse("(= 3.142 \"3\")").unwrap();
@@ -299,15 +299,15 @@ mod tests {
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
-                "Expected (Int, Int) or (Float, Float), received (Nil, 3.142)"
+                "Expected (Int, Int) or (Float, Float), received (null, 3.142)"
             ))))
         );
-        let expression = parser::parse("(= false 3.142)").unwrap();
+        let expression = parser::parse("(= #f 3.142)").unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
-                "Expected (Int, Int) or (Float, Float), received (false, 3.142)"
+                "Expected (Int, Int) or (Float, Float), received (#f, 3.142)"
             ))))
         );
         let expression = parser::parse("(= \"3\" 3.142)").unwrap();
