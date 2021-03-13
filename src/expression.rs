@@ -3,25 +3,24 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use std::{fmt, rc::Rc};
 
-use crate::{env::Env, hash::combine_hashes};
+use crate::{env::Env, hash::hash_sequence, node::Node};
 
 pub trait NodeType<T: NodeType<T>>: PartialEq + Clone + fmt::Display + fmt::Debug {
-    fn hash(&self) -> u32 {
-        combine_hashes(
-            &self
-                .expressions()
-                .iter()
-                .map(|expression| expression.hash())
-                .collect::<Vec<_>>(),
-        )
+    fn hash(&self) -> u32;
+    fn capture_depth(&self) -> usize;
+    fn evaluate(&self, env: &Env<T>) -> Option<EvaluationResult<T>>;
+}
+
+pub trait CompoundNode<'a> {
+    type Expressions: Iterator<Item = &'a Expression<Node>>;
+    fn expressions(&'a self) -> Self::Expressions;
+    fn hash(&'a self) -> u32 {
+        hash_sequence(self.expressions().map(|expression| expression.hash()))
     }
-    fn expressions(&self) -> Vec<&Expression<T>>;
-    fn capture_depth(&self) -> usize {
+    fn capture_depth(&'a self) -> usize {
         self.expressions()
-            .iter()
             .fold(0, |acc, child| acc.max(child.capture_depth()))
     }
-    fn evaluate(&self, env: &Env<T>) -> Option<EvaluationResult<T>>;
 }
 
 pub type NodeFactory<T, V> = dyn Fn(&[Expression<T>]) -> Result<V, String>;
@@ -73,13 +72,6 @@ impl<T: NodeType<T>> Expression<T> {
     }
     pub fn value(&self) -> &T {
         &self.value
-    }
-    pub fn clone(&self) -> Self {
-        Expression {
-            value: Rc::clone(&self.value),
-            hash: self.hash,
-            capture_depth: self.capture_depth,
-        }
     }
     pub fn evaluate(&self, env: &Env<T>) -> EvaluationResult<T> {
         self.value()

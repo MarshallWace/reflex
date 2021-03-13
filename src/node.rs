@@ -49,14 +49,6 @@ impl NodeType<Node> for Node {
             Self::Arithmetic(node) => prefix_hash(0, node.hash()),
         }
     }
-    fn expressions(&self) -> Vec<&Expression<Node>> {
-        match self {
-            Self::Core(node) => node.expressions(),
-            Self::Logic(node) => node.expressions(),
-            Self::Sequence(node) => node.expressions(),
-            Self::Arithmetic(node) => node.expressions(),
-        }
-    }
     fn capture_depth(&self) -> usize {
         match self {
             Self::Core(node) => node.capture_depth(),

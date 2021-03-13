@@ -1,12 +1,13 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use std::fmt;
+use std::{fmt, iter::once};
 
 use crate::{
     env::Env,
     expression::{
-        with_dependencies, AstNode, EvaluationResult, Expression, NodeFactoryResult, NodeType,
+        with_dependencies, AstNode, CompoundNode, EvaluationResult, Expression, NodeFactoryResult,
+        NodeType,
     },
     node::{
         core::{CoreNode, FunctionApplicationNode},
@@ -36,9 +37,21 @@ impl AstNode<Node> for ApplyNode {
         Ok(Self::new(target, args))
     }
 }
+impl<'a> CompoundNode<'a> for ApplyNode {
+    type Expressions = std::iter::Chain<
+        std::iter::Once<&'a Expression<Node>>,
+        std::iter::Once<&'a Expression<Node>>,
+    >;
+    fn expressions(&'a self) -> Self::Expressions {
+        once(&self.target).chain(once(&self.args))
+    }
+}
 impl NodeType<Node> for ApplyNode {
-    fn expressions(&self) -> Vec<&Expression<Node>> {
-        vec![&self.target, &self.args]
+    fn hash(&self) -> u32 {
+        CompoundNode::hash(self)
+    }
+    fn capture_depth(&self) -> usize {
+        CompoundNode::capture_depth(self)
     }
     fn evaluate(&self, env: &Env<Node>) -> Option<EvaluationResult<Node>> {
         let result = collect_list_items(&self.args, env, |args| {
@@ -85,7 +98,10 @@ mod tests {
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3 + 4)))),
         );
-        let expression = parser::parse("(apply (lambda (first second third) (+ (abs first) (+ second third))) (list -3 4 5))").unwrap();
+        let expression = parser::parse(
+            "(apply (lambda (first second third) (+ (abs first) (+ second third))) (list -3 4 5))",
+        )
+        .unwrap();
         let result = expression.evaluate(&env).expression;
         assert_eq!(
             result,

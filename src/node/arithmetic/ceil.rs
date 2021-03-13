@@ -1,11 +1,13 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use std::fmt;
+use std::{fmt, iter::once};
 
 use crate::{
     env::Env,
-    expression::{AstNode, EvaluationResult, Expression, NodeFactoryResult, NodeType},
+    expression::{
+        AstNode, CompoundNode, EvaluationResult, Expression, NodeFactoryResult, NodeType,
+    },
     node::{
         core::{CoreNode, ErrorNode, ValueNode},
         Evaluate1, Node,
@@ -31,9 +33,18 @@ impl AstNode<Node> for CeilNode {
         Ok(Self::new(target))
     }
 }
+impl<'a> CompoundNode<'a> for CeilNode {
+    type Expressions = std::iter::Once<&'a Expression<Node>>;
+    fn expressions(&'a self) -> Self::Expressions {
+        once(&self.target)
+    }
+}
 impl NodeType<Node> for CeilNode {
-    fn expressions(&self) -> Vec<&Expression<Node>> {
-        vec![&self.target]
+    fn hash(&self) -> u32 {
+        CompoundNode::hash(self)
+    }
+    fn capture_depth(&self) -> usize {
+        CompoundNode::capture_depth(self)
     }
     fn evaluate(&self, env: &Env<Node>) -> Option<EvaluationResult<Node>> {
         Evaluate1::evaluate(self, env)

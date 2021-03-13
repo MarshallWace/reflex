@@ -9,7 +9,7 @@ use std::{
 
 use crate::{
     expression::{Expression, NodeType},
-    hash::combine_hashes,
+    hash::{combine_hashes, hash_seed, hash_sequence},
 };
 
 pub type StackOffset = usize;
@@ -22,13 +22,13 @@ pub struct Env<T: NodeType<T>> {
 impl<T: NodeType<T>> Env<T> {
     pub fn new() -> Self {
         Env {
-            hash: 0,
+            hash: hash_seed(),
             bindings: Vec::new(),
         }
     }
     pub fn from(values: impl IntoIterator<Item = Expression<T>>) -> Env<T> {
         let bindings = values.into_iter().collect::<Vec<_>>();
-        let hash = hash_expressions(&bindings);
+        let hash = hash_sequence(bindings.iter().map(|expression| expression.hash()));
         Env { hash, bindings }
     }
     pub fn hash(&self) -> u32 {
@@ -37,18 +37,21 @@ impl<T: NodeType<T>> Env<T> {
     pub fn get(&self, offset: StackOffset) -> &Expression<T> {
         &self.bindings[self.bindings.len() - offset - 1]
     }
-    pub fn capture(&self, offset: StackOffset) -> Env<T> {
-        let bindings = self
-            .bindings
-            .iter()
-            .skip(self.bindings.len() - offset)
-            .cloned()
-            .collect::<Vec<_>>();
-        let hash = hash_expressions(&bindings);
-        Env { hash, bindings }
+    pub fn capture(&self) -> Env<T> {
+        self.clone()
     }
-    pub fn extend(&self, values: impl IntoIterator<Item = Expression<T>>) -> Env<T> {
-        Env::from(self.bindings.iter().cloned().chain(values.into_iter()))
+    pub fn extend(
+        &self,
+        values: impl IntoIterator<Item = Expression<T>> + ExactSizeIterator,
+    ) -> Env<T> {
+        let mut bindings = self.bindings.clone();
+        let mut hash = self.hash;
+        bindings.reserve(values.len());
+        for value in values.into_iter() {
+            hash = combine_hashes(hash, value.hash());
+            bindings.push(value);
+        }
+        Env { hash, bindings }
     }
     pub fn extend_recursive(
         &self,
@@ -67,17 +70,12 @@ impl<T: NodeType<T>> Env<T> {
 #[derive(Debug, PartialEq, Clone)]
 pub struct MutableEnv<T: NodeType<T>> {
     state: Rc<RefCell<Option<Env<T>>>>,
-    hash: u32,
 }
 impl<T: NodeType<T>> MutableEnv<T> {
     fn from(env: &Env<T>) -> Self {
         MutableEnv {
-            hash: env.hash,
             state: Rc::new(RefCell::new(Some(env.clone()))),
         }
-    }
-    pub fn hash(&self) -> u32 {
-        self.hash
     }
     pub fn get(&self) -> Ref<'_, Env<T>> {
         let state = (*self.state).borrow();
@@ -95,13 +93,4 @@ impl<T: NodeType<T>> Drop for MutableEnv<T> {
             env.bindings.clear();
         }
     }
-}
-
-fn hash_expressions<T: NodeType<T>>(expressions: &Vec<Expression<T>>) -> u32 {
-    combine_hashes(
-        &expressions
-            .iter()
-            .map(|expression| expression.hash())
-            .collect::<Vec<_>>(),
-    )
 }

@@ -5,8 +5,10 @@ use std::{fmt, iter::once};
 
 use crate::{
     env::{Env, MutableEnv, StackOffset},
-    expression::{AstNode, EvaluationResult, Expression, NodeFactoryResult, NodeType},
-    hash::{combine_hashes, hash_bytes},
+    expression::{
+        AstNode, CompoundNode, EvaluationResult, Expression, NodeFactoryResult, NodeType,
+    },
+    hash::{combine_hashes, hash_bytes, hash_sequence},
     node::{core::CoreNode, Node},
 };
 
@@ -25,9 +27,6 @@ impl ReferenceNode {
 impl NodeType<Node> for ReferenceNode {
     fn hash(&self) -> u32 {
         hash_bytes(&self.offset.to_be_bytes())
-    }
-    fn expressions(&self) -> Vec<&Expression<Node>> {
-        Vec::new()
     }
     fn capture_depth(&self) -> usize {
         self.offset + 1
@@ -54,18 +53,17 @@ pub struct BoundNode {
 }
 impl BoundNode {
     pub fn bind(target: &Expression<Node>, env: &Env<Node>) -> Expression<Node> {
-        let capture_depth = target.capture_depth();
-        if capture_depth == 0 {
-            return Expression::clone(target);
-        }
-        match target.value() {
-            Node::Core(CoreNode::Reference(ReferenceNode { offset })) => {
-                BoundNode::bind(env.get(*offset), env)
-            }
-            _ => Expression::new(Node::Core(CoreNode::Bound(BoundNode {
-                target: Expression::clone(target),
-                env: env.capture(capture_depth),
-            }))),
+        match target.capture_depth() {
+            0 => Expression::clone(target),
+            _ => match target.value() {
+                Node::Core(CoreNode::Reference(ReferenceNode { offset })) => {
+                    BoundNode::bind(env.get(*offset), env)
+                }
+                _ => Expression::new(Node::Core(CoreNode::Bound(BoundNode {
+                    target: Expression::clone(target),
+                    env: env.capture(),
+                }))),
+            },
         }
     }
     pub fn target(&self) -> &Expression<Node> {
@@ -77,16 +75,13 @@ impl BoundNode {
 }
 impl NodeType<Node> for BoundNode {
     fn hash(&self) -> u32 {
-        combine_hashes(&vec![self.target.hash(), self.env.hash()])
-    }
-    fn expressions(&self) -> Vec<&Expression<Node>> {
-        vec![&self.target]
-    }
-    fn evaluate(&self, _env: &Env<Node>) -> Option<EvaluationResult<Node>> {
-        Some(self.target.evaluate(&self.env))
+        combine_hashes(self.target.hash(), self.env.hash())
     }
     fn capture_depth(&self) -> usize {
         0
+    }
+    fn evaluate(&self, _env: &Env<Node>) -> Option<EvaluationResult<Node>> {
+        Some(self.target.evaluate(&self.env))
     }
 }
 impl fmt::Display for BoundNode {
@@ -121,9 +116,27 @@ impl AstNode<Node> for LetNode {
         Ok(Self::new(initializers, body))
     }
 }
+impl<'a> CompoundNode<'a> for LetNode {
+    type Expressions = std::iter::Chain<
+        std::slice::Iter<'a, Expression<Node>>,
+        std::iter::Once<&'a Expression<Node>>,
+    >;
+    fn expressions(&'a self) -> Self::Expressions {
+        self.initializers.iter().chain(once(&self.body))
+    }
+}
 impl NodeType<Node> for LetNode {
-    fn expressions(&self) -> Vec<&Expression<Node>> {
-        self.initializers.iter().chain(once(&self.body)).collect()
+    fn hash(&self) -> u32 {
+        CompoundNode::hash(self)
+    }
+    fn capture_depth(&self) -> usize {
+        let num_bindings = self.initializers.len();
+        self.initializers
+            .iter()
+            .fold(0, |result, initializer| {
+                result.max(initializer.capture_depth())
+            })
+            .max(self.body.capture_depth().saturating_sub(num_bindings))
     }
     fn evaluate(&self, env: &Env<Node>) -> Option<EvaluationResult<Node>> {
         let inner_env = env.extend(
@@ -161,11 +174,32 @@ impl AstNode<Node> for LetRecNode {
         Ok(Self::new(initializers, body))
     }
 }
+impl<'a> CompoundNode<'a> for LetRecNode {
+    type Expressions = std::iter::Chain<
+        std::slice::Iter<'a, Expression<Node>>,
+        std::iter::Once<&'a Expression<Node>>,
+    >;
+    fn expressions(&'a self) -> Self::Expressions {
+        self.initializers.iter().chain(once(&self.body))
+    }
+}
 impl NodeType<Node> for LetRecNode {
-    fn expressions(&self) -> Vec<&Expression<Node>> {
-        self.initializers.iter().chain(once(&self.body)).collect()
+    fn hash(&self) -> u32 {
+        CompoundNode::hash(self)
+    }
+    fn capture_depth(&self) -> usize {
+        let num_bindings = self.initializers.len();
+        self.initializers
+            .iter()
+            .fold(0, |result, initializer| {
+                result.max(initializer.capture_depth().saturating_sub(num_bindings))
+            })
+            .max(self.body.capture_depth().saturating_sub(num_bindings))
     }
     fn evaluate(&self, env: &Env<Node>) -> Option<EvaluationResult<Node>> {
+        let env_hash = hash_sequence(
+            once(env.hash()).chain(self.initializers.iter().map(|expression| expression.hash())),
+        );
         let shared_env = env.extend_recursive(|env| {
             self.initializers
                 .iter()
@@ -176,6 +210,7 @@ impl NodeType<Node> for LetRecNode {
                         Expression::new(Node::Core(CoreNode::LetRecBinding(LetRecBindingNode {
                             target: Expression::clone(initializer),
                             env: MutableEnv::clone(env),
+                            env_hash,
                         })))
                     }
                 })
@@ -195,19 +230,17 @@ impl fmt::Display for LetRecNode {
 pub struct LetRecBindingNode {
     target: Expression<Node>,
     env: MutableEnv<Node>,
+    env_hash: u32,
 }
 impl NodeType<Node> for LetRecBindingNode {
     fn hash(&self) -> u32 {
-        combine_hashes(&vec![self.target.hash(), self.env.hash()])
-    }
-    fn expressions(&self) -> Vec<&Expression<Node>> {
-        vec![&self.target]
-    }
-    fn evaluate(&self, _env: &Env<Node>) -> Option<EvaluationResult<Node>> {
-        Some(self.target.evaluate(&self.env.get()))
+        combine_hashes(self.env_hash, self.target.hash())
     }
     fn capture_depth(&self) -> usize {
         0
+    }
+    fn evaluate(&self, _env: &Env<Node>) -> Option<EvaluationResult<Node>> {
+        Some(self.target.evaluate(&self.env.get()))
     }
 }
 impl fmt::Display for LetRecBindingNode {
@@ -242,9 +275,28 @@ impl AstNode<Node> for LetStarNode {
         Ok(Self::new(initializers, body))
     }
 }
+impl<'a> CompoundNode<'a> for LetStarNode {
+    type Expressions = std::iter::Chain<
+        std::slice::Iter<'a, Expression<Node>>,
+        std::iter::Once<&'a Expression<Node>>,
+    >;
+    fn expressions(&'a self) -> Self::Expressions {
+        self.initializers.iter().chain(once(&self.body))
+    }
+}
 impl NodeType<Node> for LetStarNode {
-    fn expressions(&self) -> Vec<&Expression<Node>> {
-        self.initializers.iter().chain(once(&self.body)).collect()
+    fn hash(&self) -> u32 {
+        CompoundNode::hash(self)
+    }
+    fn capture_depth(&self) -> usize {
+        let num_bindings = self.initializers.len();
+        self.initializers
+            .iter()
+            .enumerate()
+            .fold(0, |result, (binding_index, initializer)| {
+                result.max(initializer.capture_depth().saturating_sub(binding_index))
+            })
+            .max(self.body.capture_depth().saturating_sub(num_bindings))
     }
     fn evaluate(&self, env: &Env<Node>) -> Option<EvaluationResult<Node>> {
         let mut initializer_env: Option<Env<Node>> = None;
@@ -326,10 +378,14 @@ mod tests {
                 Expression::new(Node::Core(CoreNode::Reference(ReferenceNode::new(1)))),
                 Expression::new(Node::Core(CoreNode::Reference(ReferenceNode::new(0)))),
             )))),
-            env: env.extend(vec![
-                Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3)))),
-                Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(4)))),
-            ]),
+            env: env.extend(
+                vec![
+                    Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3)))),
+                    Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(4)))),
+                ]
+                .iter()
+                .cloned(),
+            ),
         })));
         let result = expression.evaluate(&env).expression;
         assert_eq!(
@@ -440,6 +496,22 @@ mod tests {
         assert_eq!(
             result,
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(true))))
+        );
+        let expression =
+            parser::parse("(letrec ((foo (cons 3 foo))) (car (cdr (cdr (cdr foo)))))").unwrap();
+        let result = expression.evaluate(&env).expression;
+        assert_eq!(
+            result,
+            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3))))
+        );
+        let expression = parser::parse(
+            "(letrec ((foo (cons 1 bar)) (bar (cons 2 foo))) (car (cdr (cdr (cdr foo)))))",
+        )
+        .unwrap();
+        let result = expression.evaluate(&env).expression;
+        assert_eq!(
+            result,
+            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(2))))
         );
     }
 

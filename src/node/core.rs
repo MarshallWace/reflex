@@ -98,30 +98,6 @@ impl NodeType<Node> for CoreNode {
             Self::IsPending(node) => prefix_hash(19, node.hash()),
         }
     }
-    fn expressions(&self) -> Vec<&Expression<Node>> {
-        match self {
-            Self::Bound(node) => node.expressions(),
-            Self::BoundFunction(node) => node.expressions(),
-            Self::Error(node) => node.expressions(),
-            Self::Function(node) => node.expressions(),
-            Self::FunctionApplication(node) => node.expressions(),
-            Self::Let(node) => node.expressions(),
-            Self::LetRec(node) => node.expressions(),
-            Self::LetRecBinding(node) => node.expressions(),
-            Self::LetStar(node) => node.expressions(),
-            Self::Pending(node) => node.expressions(),
-            Self::Reference(node) => node.expressions(),
-            Self::Value(node) => node.expressions(),
-            Self::IsNull(node) => node.expressions(),
-            Self::IsBoolean(node) => node.expressions(),
-            Self::IsInteger(node) => node.expressions(),
-            Self::IsFloat(node) => node.expressions(),
-            Self::IsString(node) => node.expressions(),
-            Self::IsFunction(node) => node.expressions(),
-            Self::IsError(node) => node.expressions(),
-            Self::IsPending(node) => node.expressions(),
-        }
-    }
     fn capture_depth(&self) -> usize {
         match self {
             Self::Bound(node) => node.capture_depth(),

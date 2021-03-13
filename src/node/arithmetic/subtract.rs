@@ -1,11 +1,13 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use std::fmt;
+use std::{fmt, iter::once};
 
 use crate::{
     env::Env,
-    expression::{AstNode, EvaluationResult, Expression, NodeFactoryResult, NodeType},
+    expression::{
+        AstNode, CompoundNode, EvaluationResult, Expression, NodeFactoryResult, NodeType,
+    },
     node::{
         core::{CoreNode, ErrorNode, ValueNode},
         Evaluate2, Node,
@@ -33,9 +35,21 @@ impl AstNode<Node> for SubtractNode {
         Ok(Self::new(left, right))
     }
 }
+impl<'a> CompoundNode<'a> for SubtractNode {
+    type Expressions = std::iter::Chain<
+        std::iter::Once<&'a Expression<Node>>,
+        std::iter::Once<&'a Expression<Node>>,
+    >;
+    fn expressions(&'a self) -> Self::Expressions {
+        once(&self.left).chain(once(&self.right))
+    }
+}
 impl NodeType<Node> for SubtractNode {
-    fn expressions(&self) -> Vec<&Expression<Node>> {
-        vec![&self.left, &self.right]
+    fn hash(&self) -> u32 {
+        CompoundNode::hash(self)
+    }
+    fn capture_depth(&self) -> usize {
+        CompoundNode::capture_depth(self)
     }
     fn evaluate(&self, env: &Env<Node>) -> Option<EvaluationResult<Node>> {
         Evaluate2::evaluate(self, env)
@@ -45,11 +59,7 @@ impl Evaluate2 for SubtractNode {
     fn dependencies(&self) -> (&Expression<Node>, &Expression<Node>) {
         (&self.left, &self.right)
     }
-    fn run(
-        &self,
-        left: &Expression<Node>,
-        right: &Expression<Node>,
-    ) -> Expression<Node> {
+    fn run(&self, left: &Expression<Node>, right: &Expression<Node>) -> Expression<Node> {
         match (left.value(), right.value()) {
             (
                 Node::Core(CoreNode::Value(ValueNode::Int(left))),

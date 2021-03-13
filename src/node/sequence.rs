@@ -60,17 +60,6 @@ impl NodeType<Node> for SequenceNode {
             Self::IsPair(node) => prefix_hash(6, node.hash()),
         }
     }
-    fn expressions(&self) -> Vec<&Expression<Node>> {
-        match self {
-            Self::Apply(node) => node.expressions(),
-            Self::Car(node) => node.expressions(),
-            Self::Cdr(node) => node.expressions(),
-            Self::Cons(node) => node.expressions(),
-            Self::List(node) => node.expressions(),
-            Self::IsList(node) => node.expressions(),
-            Self::IsPair(node) => node.expressions(),
-        }
-    }
     fn capture_depth(&self) -> usize {
         match self {
             Self::Apply(node) => node.capture_depth(),

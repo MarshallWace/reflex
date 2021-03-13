@@ -1,11 +1,13 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use std::{fmt, rc::Rc};
+use std::{fmt, iter::once, rc::Rc};
 
 use crate::{
     env::Env,
-    expression::{AstNode, EvaluationResult, Expression, NodeFactoryResult, NodeType},
+    expression::{
+        AstNode, CompoundNode, EvaluationResult, Expression, NodeFactoryResult, NodeType,
+    },
     hash::{hash_bytes, hash_string, prefix_hash},
     node::{core::CoreNode, Evaluate1, Node},
 };
@@ -41,8 +43,8 @@ impl NodeType<Node> for ValueNode {
             ValueNode::String(value) => prefix_hash(4, hash_string(value.get())),
         }
     }
-    fn expressions(&self) -> Vec<&Expression<Node>> {
-        Vec::new()
+    fn capture_depth(&self) -> usize {
+        0
     }
     fn evaluate(&self, _env: &Env<Node>) -> Option<EvaluationResult<Node>> {
         None
@@ -128,9 +130,18 @@ impl AstNode<Node> for IsNullNode {
         Ok(Self::new(target))
     }
 }
+impl<'a> CompoundNode<'a> for IsNullNode {
+    type Expressions = std::iter::Once<&'a Expression<Node>>;
+    fn expressions(&'a self) -> Self::Expressions {
+        once(&self.target)
+    }
+}
 impl NodeType<Node> for IsNullNode {
-    fn expressions(&self) -> Vec<&Expression<Node>> {
-        vec![&self.target]
+    fn hash(&self) -> u32 {
+        CompoundNode::hash(self)
+    }
+    fn capture_depth(&self) -> usize {
+        CompoundNode::capture_depth(self)
     }
     fn evaluate(&self, env: &Env<Node>) -> Option<EvaluationResult<Node>> {
         Evaluate1::evaluate(self, env)
@@ -174,9 +185,18 @@ impl AstNode<Node> for IsBooleanNode {
         Ok(Self::new(target))
     }
 }
+impl<'a> CompoundNode<'a> for IsBooleanNode {
+    type Expressions = std::iter::Once<&'a Expression<Node>>;
+    fn expressions(&'a self) -> Self::Expressions {
+        once(&self.target)
+    }
+}
 impl NodeType<Node> for IsBooleanNode {
-    fn expressions(&self) -> Vec<&Expression<Node>> {
-        vec![&self.target]
+    fn hash(&self) -> u32 {
+        CompoundNode::hash(self)
+    }
+    fn capture_depth(&self) -> usize {
+        CompoundNode::capture_depth(self)
     }
     fn evaluate(&self, env: &Env<Node>) -> Option<EvaluationResult<Node>> {
         Evaluate1::evaluate(self, env)
@@ -220,9 +240,18 @@ impl AstNode<Node> for IsIntegerNode {
         Ok(Self::new(target))
     }
 }
+impl<'a> CompoundNode<'a> for IsIntegerNode {
+    type Expressions = std::iter::Once<&'a Expression<Node>>;
+    fn expressions(&'a self) -> Self::Expressions {
+        once(&self.target)
+    }
+}
 impl NodeType<Node> for IsIntegerNode {
-    fn expressions(&self) -> Vec<&Expression<Node>> {
-        vec![&self.target]
+    fn hash(&self) -> u32 {
+        CompoundNode::hash(self)
+    }
+    fn capture_depth(&self) -> usize {
+        CompoundNode::capture_depth(self)
     }
     fn evaluate(&self, env: &Env<Node>) -> Option<EvaluationResult<Node>> {
         Evaluate1::evaluate(self, env)
@@ -266,9 +295,18 @@ impl AstNode<Node> for IsFloatNode {
         Ok(Self::new(target))
     }
 }
+impl<'a> CompoundNode<'a> for IsFloatNode {
+    type Expressions = std::iter::Once<&'a Expression<Node>>;
+    fn expressions(&'a self) -> Self::Expressions {
+        once(&self.target)
+    }
+}
 impl NodeType<Node> for IsFloatNode {
-    fn expressions(&self) -> Vec<&Expression<Node>> {
-        vec![&self.target]
+    fn hash(&self) -> u32 {
+        CompoundNode::hash(self)
+    }
+    fn capture_depth(&self) -> usize {
+        CompoundNode::capture_depth(self)
     }
     fn evaluate(&self, env: &Env<Node>) -> Option<EvaluationResult<Node>> {
         Evaluate1::evaluate(self, env)
@@ -312,9 +350,18 @@ impl AstNode<Node> for IsStringNode {
         Ok(Self::new(target))
     }
 }
+impl<'a> CompoundNode<'a> for IsStringNode {
+    type Expressions = std::iter::Once<&'a Expression<Node>>;
+    fn expressions(&'a self) -> Self::Expressions {
+        once(&self.target)
+    }
+}
 impl NodeType<Node> for IsStringNode {
-    fn expressions(&self) -> Vec<&Expression<Node>> {
-        vec![&self.target]
+    fn hash(&self) -> u32 {
+        CompoundNode::hash(self)
+    }
+    fn capture_depth(&self) -> usize {
+        CompoundNode::capture_depth(self)
     }
     fn evaluate(&self, env: &Env<Node>) -> Option<EvaluationResult<Node>> {
         Evaluate1::evaluate(self, env)

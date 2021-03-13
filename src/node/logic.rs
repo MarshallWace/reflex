@@ -49,14 +49,6 @@ impl NodeType<Node> for LogicNode {
             LogicNode::Or(node) => prefix_hash(3, node.hash()),
         }
     }
-    fn expressions(&self) -> Vec<&Expression<Node>> {
-        match self {
-            LogicNode::And(node) => node.expressions(),
-            LogicNode::Conditional(node) => node.expressions(),
-            LogicNode::Not(node) => node.expressions(),
-            LogicNode::Or(node) => node.expressions(),
-        }
-    }
     fn capture_depth(&self) -> usize {
         match self {
             LogicNode::And(node) => node.capture_depth(),

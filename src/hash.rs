@@ -9,24 +9,37 @@ pub fn hash_string(value: &str) -> u32 {
     hash_bytes(value.as_bytes())
 }
 
+pub fn combine_hashes(hash1: u32, hash2: u32) -> u32 {
+    hash2
+        .to_be_bytes()
+        .iter()
+        .copied()
+        .fold(hash1, apply_hash_iteration)
+}
+
 pub fn hash_bytes(chars: &[u8]) -> u32 {
-    // djb2 hash function: http://www.cse.yorku.ca/~oz/hash.html
-    return chars.into_iter().copied().fold(5381, apply_hash_iteration);
+    return hash_byte_sequence(chars.iter().copied());
 }
 
-pub fn combine_hashes(hashes: &[u32]) -> u32 {
-    hash_bytes(u32_slice_as_u8_slice(hashes))
+pub fn hash_byte_sequence(chars: impl IntoIterator<Item = u8>) -> u32 {
+    chars.into_iter().fold(hash_seed(), apply_hash_iteration)
 }
 
-fn u32_slice_as_u8_slice(values: &[u32]) -> &[u8] {
-    unsafe {
-        std::slice::from_raw_parts(
-            values.as_ptr() as *const u8,
-            values.len() * (std::mem::size_of::<u32>() / std::mem::size_of::<u8>()),
-        )
-    }
+pub fn hash_sequence(hashes: impl IntoIterator<Item = u32>) -> u32 {
+    hashes.into_iter().fold(hash_seed(), |hash, item| {
+        item.to_be_bytes()
+            .iter()
+            .copied()
+            .fold(hash, apply_hash_iteration)
+    })
 }
 
+// djb2 hash function: http://www.cse.yorku.ca/~oz/hash.html
+pub fn hash_seed() -> u32 {
+    5381
+}
 fn apply_hash_iteration(hash: u32, byte: u8) -> u32 {
-    hash.rotate_left(5).wrapping_add(hash).wrapping_add(byte as u32)
+    hash.rotate_left(5)
+        .wrapping_add(hash)
+        .wrapping_add(byte as u32)
 }

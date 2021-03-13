@@ -114,27 +114,6 @@ impl NodeType<Node> for ArithmeticNode {
             Self::Pow(node) => prefix_hash(16, node.hash()),
         }
     }
-    fn expressions(&self) -> Vec<&Expression<Node>> {
-        match self {
-            Self::Add(node) => node.expressions(),
-            Self::Subtract(node) => node.expressions(),
-            Self::Multiply(node) => node.expressions(),
-            Self::Divide(node) => node.expressions(),
-            Self::Equal(node) => node.expressions(),
-            Self::Remainder(node) => node.expressions(),
-            Self::Abs(node) => node.expressions(),
-            Self::Floor(node) => node.expressions(),
-            Self::Gt(node) => node.expressions(),
-            Self::Gte(node) => node.expressions(),
-            Self::Lt(node) => node.expressions(),
-            Self::Lte(node) => node.expressions(),
-            Self::Ceil(node) => node.expressions(),
-            Self::Round(node) => node.expressions(),
-            Self::Max(node) => node.expressions(),
-            Self::Min(node) => node.expressions(),
-            Self::Pow(node) => node.expressions(),
-        }
-    }
     fn capture_depth(&self) -> usize {
         match self {
             Self::Add(node) => node.capture_depth(),

@@ -6,7 +6,8 @@ use std::{fmt, iter::once};
 use crate::{
     env::Env,
     expression::{
-        with_dependencies, AstNode, EvaluationResult, Expression, NodeFactoryResult, NodeType,
+        with_dependencies, AstNode, CompoundNode, EvaluationResult, Expression, NodeFactoryResult,
+        NodeType,
     },
     hash::{combine_hashes, prefix_hash},
     node::{
@@ -35,26 +36,17 @@ impl NodeType<Node> for FunctionNode {
     fn hash(&self) -> u32 {
         prefix_hash(self.arity as u8, self.body.hash())
     }
-    fn expressions(&self) -> Vec<&Expression<Node>> {
-        vec![&self.body]
-    }
     fn capture_depth(&self) -> usize {
-        let depth = self.body.capture_depth();
-        let arity = self.arity;
-        if depth <= arity {
-            0
-        } else {
-            depth - arity
-        }
+        self.body.capture_depth().saturating_sub(self.arity)
     }
     fn evaluate(&self, env: &Env<Node>) -> Option<EvaluationResult<Node>> {
         match self.capture_depth() {
             0 => None,
-            depth => Some(EvaluationResult::new(
+            _ => Some(EvaluationResult::new(
                 Expression::new(Node::Core(CoreNode::BoundFunction(BoundFunctionNode {
                     arity: self.arity,
                     body: Expression::clone(&self.body),
-                    env: env.capture(depth),
+                    env: env.capture(),
                 }))),
                 None,
             )),
@@ -93,11 +85,8 @@ impl NodeType<Node> for BoundFunctionNode {
     fn hash(&self) -> u32 {
         prefix_hash(
             self.arity as u8,
-            combine_hashes(&vec![self.body.hash(), self.env.hash()]),
+            combine_hashes(self.body.hash(), self.env.hash()),
         )
-    }
-    fn expressions(&self) -> Vec<&Expression<Node>> {
-        vec![&self.body]
     }
     fn capture_depth(&self) -> usize {
         0
@@ -126,9 +115,21 @@ impl FunctionApplicationNode {
         FunctionApplicationNode { target, args }
     }
 }
+impl<'a> CompoundNode<'a> for FunctionApplicationNode {
+    type Expressions = std::iter::Chain<
+        std::iter::Once<&'a Expression<Node>>,
+        std::slice::Iter<'a, Expression<Node>>,
+    >;
+    fn expressions(&'a self) -> Self::Expressions {
+        once(&self.target).chain(self.args.iter())
+    }
+}
 impl NodeType<Node> for FunctionApplicationNode {
-    fn expressions(&self) -> Vec<&Expression<Node>> {
-        once(&self.target).chain(self.args.iter()).collect()
+    fn hash(&self) -> u32 {
+        CompoundNode::hash(self)
+    }
+    fn capture_depth(&self) -> usize {
+        CompoundNode::capture_depth(self)
     }
     fn evaluate(&self, env: &Env<Node>) -> Option<EvaluationResult<Node>> {
         let target = self.target.evaluate(env);
@@ -231,9 +232,18 @@ impl AstNode<Node> for IsFunctionNode {
         Ok(Self::new(target))
     }
 }
+impl<'a> CompoundNode<'a> for IsFunctionNode {
+    type Expressions = std::iter::Once<&'a Expression<Node>>;
+    fn expressions(&'a self) -> Self::Expressions {
+        once(&self.target)
+    }
+}
 impl NodeType<Node> for IsFunctionNode {
-    fn expressions(&self) -> Vec<&Expression<Node>> {
-        vec![&self.target]
+    fn hash(&self) -> u32 {
+        CompoundNode::hash(self)
+    }
+    fn capture_depth(&self) -> usize {
+        CompoundNode::capture_depth(self)
     }
     fn evaluate(&self, env: &Env<Node>) -> Option<EvaluationResult<Node>> {
         Evaluate1::evaluate(self, env)
@@ -304,10 +314,14 @@ mod tests {
                     Expression::new(Node::Core(CoreNode::Reference(ReferenceNode::new(1)))),
                     Expression::new(Node::Core(CoreNode::Reference(ReferenceNode::new(0)))),
                 )))),
-                env: Env::from(vec![
-                    Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(4)))),
-                    Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(5)))),
-                ]),
+                env: env.extend(
+                    vec![
+                        Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3)))),
+                        Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(4)))),
+                        Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(5)))),
+                    ]
+                    .into_iter()
+                ),
             })))
         );
         let expression =

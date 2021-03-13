@@ -16,10 +16,13 @@ mod benchmarks {
 
     use crate::{
         env::Env,
-        expression::Expression,
+        expression::{Expression, NodeType},
         node::{
             arithmetic::{AddNode, ArithmeticNode},
-            core::{CoreNode, FunctionNode, FunctionApplicationNode, ReferenceNode, ValueNode},
+            core::{
+                CoreNode, FunctionApplicationNode, FunctionNode, ReferenceNode, StringValue,
+                ValueNode,
+            },
             parser, Node,
         },
     };
@@ -82,18 +85,22 @@ mod benchmarks {
         let expression = (1..=100).fold(
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(0)))),
             |acc, i| {
-                Expression::new(Node::Core(CoreNode::FunctionApplication(FunctionApplicationNode::new(
-                    Expression::new(Node::Core(CoreNode::Function(FunctionNode::new(
-                        1,
-                        Expression::new(Node::Arithmetic(ArithmeticNode::Add(AddNode::new(
-                            Expression::new(Node::Core(CoreNode::Reference(ReferenceNode::new(0)))),
-                            acc,
+                Expression::new(Node::Core(CoreNode::FunctionApplication(
+                    FunctionApplicationNode::new(
+                        Expression::new(Node::Core(CoreNode::Function(FunctionNode::new(
+                            1,
+                            Expression::new(Node::Arithmetic(ArithmeticNode::Add(AddNode::new(
+                                Expression::new(Node::Core(CoreNode::Reference(
+                                    ReferenceNode::new(0),
+                                ))),
+                                acc,
+                            )))),
                         )))),
-                    )))),
-                    vec![Expression::new(Node::Core(CoreNode::Value(
-                        ValueNode::Int(i),
-                    )))],
-                ))))
+                        vec![Expression::new(Node::Core(CoreNode::Value(
+                            ValueNode::Int(i),
+                        )))],
+                    ),
+                )))
             },
         );
         b.iter(|| expression.evaluate(&env))
@@ -111,5 +118,13 @@ mod benchmarks {
         let env = Env::new();
         let expression = parser::parse("(if #t 3 4)").unwrap();
         b.iter(|| expression.evaluate(&env));
+    }
+
+    #[bench]
+    fn hash_string_value(b: &mut Bencher) {
+        let node = Node::Core(CoreNode::Value(ValueNode::String(StringValue::Literal(
+            "foo",
+        ))));
+        b.iter(|| node.hash());
     }
 }

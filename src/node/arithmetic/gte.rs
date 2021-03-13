@@ -1,11 +1,13 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use std::fmt;
+use std::{fmt, iter::once};
 
 use crate::{
     env::Env,
-    expression::{AstNode, EvaluationResult, Expression, NodeFactoryResult, NodeType},
+    expression::{
+        AstNode, CompoundNode, EvaluationResult, Expression, NodeFactoryResult, NodeType,
+    },
     node::{
         core::{CoreNode, ErrorNode, ValueNode},
         Evaluate2, Node,
@@ -33,9 +35,21 @@ impl AstNode<Node> for GteNode {
         Ok(Self::new(left, right))
     }
 }
+impl<'a> CompoundNode<'a> for GteNode {
+    type Expressions = std::iter::Chain<
+        std::iter::Once<&'a Expression<Node>>,
+        std::iter::Once<&'a Expression<Node>>,
+    >;
+    fn expressions(&'a self) -> Self::Expressions {
+        once(&self.left).chain(once(&self.right))
+    }
+}
 impl NodeType<Node> for GteNode {
-    fn expressions(&self) -> Vec<&Expression<Node>> {
-        vec![&self.left, &self.right]
+    fn hash(&self) -> u32 {
+        CompoundNode::hash(self)
+    }
+    fn capture_depth(&self) -> usize {
+        CompoundNode::capture_depth(self)
     }
     fn evaluate(&self, env: &Env<Node>) -> Option<EvaluationResult<Node>> {
         Evaluate2::evaluate(self, env)
@@ -45,20 +59,20 @@ impl Evaluate2 for GteNode {
     fn dependencies(&self) -> (&Expression<Node>, &Expression<Node>) {
         (&self.left, &self.right)
     }
-    fn run(
-        &self,
-        left: &Expression<Node>,
-        right: &Expression<Node>,
-    ) -> Expression<Node> {
+    fn run(&self, left: &Expression<Node>, right: &Expression<Node>) -> Expression<Node> {
         match (left.value(), right.value()) {
             (
                 Node::Core(CoreNode::Value(ValueNode::Int(left))),
                 Node::Core(CoreNode::Value(ValueNode::Int(right))),
-            ) => Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(left >= right)))),
+            ) => Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(
+                left >= right,
+            )))),
             (
                 Node::Core(CoreNode::Value(ValueNode::Float(left))),
                 Node::Core(CoreNode::Value(ValueNode::Float(right))),
-            ) => Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(left >= right)))),
+            ) => Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(
+                left >= right,
+            )))),
             (left, right) => {
                 Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(&format!(
                     "Expected (Int, Int) or (Float, Float), received ({}, {})",
