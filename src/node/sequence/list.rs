@@ -155,10 +155,10 @@ mod tests {
     fn list_expressions() {
         let env = Env::new();
         let expression = parser::parse("(list 3 4 5)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Sequence(SequenceNode::Cons(ConsNode::new(
+            *result.value(),
+            Node::Sequence(SequenceNode::Cons(ConsNode::new(
                 Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3)))),
                 Expression::new(Node::Sequence(SequenceNode::Cons(ConsNode::new(
                     Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(4)))),
@@ -167,13 +167,13 @@ mod tests {
                         Expression::new(Node::Core(CoreNode::Value(ValueNode::Nil))),
                     )))),
                 )))),
-            )))),
+            ))),
         );
         let expression = parser::parse("(list (+ 1 2) (+ 3 4) (+ 5 6))").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Sequence(SequenceNode::Cons(ConsNode::new(
+            *result.value(),
+            Node::Sequence(SequenceNode::Cons(ConsNode::new(
                 Expression::new(Node::Arithmetic(ArithmeticNode::Add(AddNode::new(
                     Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(1)))),
                     Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(2)))),
@@ -191,7 +191,7 @@ mod tests {
                         Expression::new(Node::Core(CoreNode::Value(ValueNode::Nil))),
                     )))),
                 )))),
-            )))),
+            ))),
         );
     }
 
@@ -199,10 +199,10 @@ mod tests {
     fn empty_list_expressions() {
         let env = Env::new();
         let expression = parser::parse("(list)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Nil)))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Nil))
         );
     }
 
@@ -210,122 +210,122 @@ mod tests {
     fn is_list_expressions() {
         let env = Env::new();
         let expression = parser::parse("(list? (list))").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(true))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Boolean(true)))
         );
         let expression = parser::parse("(list? (list 3 4 5))").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(true))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Boolean(true)))
         );
         let expression = parser::parse("(list? null)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(true))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Boolean(true)))
         );
         let expression = parser::parse("(list? (cons 3 null))").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(true))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Boolean(true)))
         );
         let expression = parser::parse("(list? (cons 3 (cons 4 (cons 5 null))))").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(true))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Boolean(true)))
         );
         let expression =
             parser::parse("(list? (cons 3 (cons 4 (cons 5 ((lambda (foo) foo) null)))))").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(true))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Boolean(true)))
         );
         let expression = parser::parse(
     "(list? ((lambda (first) ((lambda (second) ((lambda (third) (cons first (cons second (cons third null)))) 5)) 4)) 3))"
         ).unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(true))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Boolean(true)))
         );
         let expression =
             parser::parse("(list? (cons 3 (cons 4 (cons 5 ((lambda (foo) foo) 6)))))").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
         );
         let expression = parser::parse("(list? (cons 1 2))").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
         );
         let expression = parser::parse("(list? #f)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
         );
         let expression = parser::parse("(list? #t)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
         );
         let expression = parser::parse("(list? \"\")").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
         );
         let expression = parser::parse("(list? \"foo\")").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
         );
         let expression = parser::parse("(list? 0)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
         );
         let expression = parser::parse("(list? 3)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
         );
         let expression = parser::parse("(list? -3)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
         );
         let expression = parser::parse("(list? 0.0)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
         );
         let expression = parser::parse("(list? 3.142)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
         );
         let expression = parser::parse("(list? -3.142)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
         );
     }
 }

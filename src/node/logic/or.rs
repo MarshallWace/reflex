@@ -86,7 +86,6 @@ impl fmt::Display for OrNode {
 mod tests {
     use crate::{
         env::Env,
-        expression::Expression,
         node::{
             core::{CoreNode, ErrorNode, ValueNode},
             parser, Node,
@@ -97,28 +96,28 @@ mod tests {
     fn or_expressions() {
         let env = Env::new();
         let expression = parser::parse("(or #f #f)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
         );
         let expression = parser::parse("(or #f #t)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
         );
         let expression = parser::parse("(or #t #f)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
         );
         let expression = parser::parse("(or #t #t)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(true))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Boolean(true)))
         );
     }
 
@@ -126,69 +125,69 @@ mod tests {
     fn invalid_or_expression_arguments() {
         let env = Env::new();
         let expression = parser::parse("(or #t null)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new(
                 "Expected (Boolean, Boolean), received (#t, null)"
-            ))))
+            )))
         );
         let expression = parser::parse("(or #t 0)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new(
                 "Expected (Boolean, Boolean), received (#t, 0)"
-            ))))
+            )))
         );
         let expression = parser::parse("(or #t 0.0)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new(
                 "Expected (Boolean, Boolean), received (#t, 0.0)"
-            ))))
+            )))
         );
         let expression = parser::parse("(or #t \"\")").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new(
                 "Expected (Boolean, Boolean), received (#t, \"\")"
-            ))))
+            )))
         );
 
         let expression = parser::parse("(or null #t)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new(
                 "Expected (Boolean, Boolean), received (null, #t)"
-            ))))
+            )))
         );
         let expression = parser::parse("(or 0 #t)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new(
                 "Expected (Boolean, Boolean), received (0, #t)"
-            ))))
+            )))
         );
         let expression = parser::parse("(or 0.0 #t)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new(
                 "Expected (Boolean, Boolean), received (0.0, #t)"
-            ))))
+            )))
         );
         let expression = parser::parse("(or \"\" #t)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new(
                 "Expected (Boolean, Boolean), received (\"\", #t)"
-            ))))
+            )))
         );
     }
 }

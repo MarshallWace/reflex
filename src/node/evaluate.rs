@@ -3,7 +3,7 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use crate::{
     env::Env,
-    expression::{combine_dependency_lists, with_dependencies, EvaluationResult, Expression},
+    expression::{EvaluationResult, Expression},
     node::{core::CoreNode, Node},
 };
 
@@ -20,15 +20,12 @@ pub trait Evaluate1 {
     fn evaluate(&self, env: &Env<Node>) -> Option<EvaluationResult<Node>> {
         let dep1 = self.dependencies();
         let dep1 = dep1.evaluate(env);
-        Some(match dep1.expression.value() {
+        Some(match dep1.value() {
             Node::Core(CoreNode::Error(_)) | Node::Core(CoreNode::Pending(_)) => dep1,
-            _ => {
-                let EvaluationResult {
-                    expression: expression1,
-                    dependencies: dependencies1,
-                } = dep1;
-                with_dependencies(dependencies1, self.run(&expression1).evaluate(env))
-            }
+            _ => self
+                .run(&dep1.expression())
+                .evaluate(env)
+                .with_dependencies_from(dep1),
         })
     }
 }
@@ -40,25 +37,16 @@ pub trait Evaluate2 {
         let (dep1, dep2) = self.dependencies();
         let dep1 = dep1.evaluate(env);
         let dep2 = dep2.evaluate(env);
-        Some(match (dep1.expression.value(), dep2.expression.value()) {
+        Some(match (dep1.value(), dep2.value()) {
             (Node::Core(CoreNode::Error(_)), _) => dep1,
             (_, Node::Core(CoreNode::Error(_))) => dep2,
             (Node::Core(CoreNode::Pending(_)), _) => dep1,
             (_, Node::Core(CoreNode::Pending(_))) => dep2,
-            (_, _) => {
-                let EvaluationResult {
-                    expression: expression1,
-                    dependencies: dependencies1,
-                } = dep1;
-                let EvaluationResult {
-                    expression: expression2,
-                    dependencies: dependencies2,
-                } = dep2;
-                with_dependencies(
-                    combine_dependency_lists(dependencies1, dependencies2),
-                    self.run(&expression1, &expression2).evaluate(env),
-                )
-            }
+            (_, _) => self
+                .run(&dep1.expression(), &dep2.expression())
+                .evaluate(env)
+                .with_dependencies_from(dep1)
+                .with_dependencies_from(dep2),
         })
     }
 }

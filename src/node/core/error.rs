@@ -95,17 +95,18 @@ impl NodeType<Node> for IsErrorNode {
     }
     fn evaluate(&self, env: &Env<Node>) -> Option<EvaluationResult<Node>> {
         let target = self.target.evaluate(env);
-        match target.expression.value() {
-            Node::Core(CoreNode::Pending(_)) => Some(target),
-            Node::Core(CoreNode::Error(_)) => Some(EvaluationResult::new(
-                Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(true)))),
-                target.dependencies,
-            )),
-            _ => Some(EvaluationResult::new(
-                Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false)))),
-                target.dependencies,
-            )),
-        }
+        let result = match target.value() {
+            Node::Core(CoreNode::Pending(_)) => {
+                return Some(target);
+            }
+            Node::Core(CoreNode::Error(_)) => EvaluationResult::new(Expression::new(Node::Core(
+                CoreNode::Value(ValueNode::Boolean(true)),
+            ))),
+            _ => EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Boolean(false),
+            )))),
+        };
+        Some(result.with_dependencies_from(target))
     }
 }
 impl fmt::Display for IsErrorNode {
@@ -118,7 +119,6 @@ impl fmt::Display for IsErrorNode {
 mod tests {
     use crate::{
         env::Env,
-        expression::Expression,
         node::{
             core::{CoreNode, PendingNode, ValueNode},
             parser, Node,
@@ -131,10 +131,10 @@ mod tests {
     fn static_errors() {
         let env = Env::new();
         let expression = parser::parse("(error \"foo\")").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new("foo"))))
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new("foo")))
         );
     }
 
@@ -142,16 +142,16 @@ mod tests {
     fn short_circuit_errors() {
         let env = Env::new();
         let expression = parser::parse("(+ (error \"foo\") 3)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new("foo"))))
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new("foo")))
         );
         let expression = parser::parse("(+ 3 (error \"foo\"))").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new("foo"))))
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new("foo")))
         );
     }
 
@@ -159,28 +159,28 @@ mod tests {
     fn short_circuit_error_priority() {
         let env = Env::new();
         let expression = parser::parse("(+ (error \"foo\") (pending))").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new("foo"))))
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new("foo")))
         );
         let expression = parser::parse("(+ (pending) (error \"foo\"))").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new("foo"))))
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new("foo")))
         );
         let expression = parser::parse("(+ (+ (error \"foo\") (pending)) (pending))").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new("foo"))))
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new("foo")))
         );
         let expression = parser::parse("(+ (pending) (+ (pending) (error \"foo\")))").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new("foo"))))
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new("foo")))
         );
     }
 
@@ -188,102 +188,102 @@ mod tests {
     fn is_error_expression() {
         let env = Env::new();
         let expression = parser::parse("(error? (error \"foo\"))").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(true)))),
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Boolean(true))),
         );
         let expression = parser::parse("(error? (/ 3 0))").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(true)))),
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Boolean(true))),
         );
 
         let expression = parser::parse("(error? (pending))").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Pending(PendingNode::new()))),
+            *result.value(),
+            Node::Core(CoreNode::Pending(PendingNode::new())),
         );
 
         let expression = parser::parse("(error? null)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false)))),
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Boolean(false))),
         );
         let expression = parser::parse("(error? #t)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
         );
         let expression = parser::parse("(error? #f)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
         );
         let expression = parser::parse("(error? 0)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
         );
         let expression = parser::parse("(error? -0)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
         );
         let expression = parser::parse("(error? 3)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
         );
         let expression = parser::parse("(error? -3)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
         );
         let expression = parser::parse("(error? 0.0)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
         );
         let expression = parser::parse("(error? -0.0)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
         );
         let expression = parser::parse("(error? 3.142)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
         );
         let expression = parser::parse("(error? -3.142)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
         );
         let expression = parser::parse("(error? \"\")").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
         );
         let expression = parser::parse("(error? \"foo\")").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
         );
     }
 }

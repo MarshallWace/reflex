@@ -106,7 +106,6 @@ impl fmt::Display for RemainderNode {
 mod tests {
     use crate::{
         env::Env,
-        expression::Expression,
         node::{
             core::{CoreNode, ErrorNode, ValueNode},
             parser, Node,
@@ -117,65 +116,65 @@ mod tests {
     fn remainder_expressions() {
         let env = Env::new();
         let expression = parser::parse("(remainder 0 3)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(0 % 3))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Int(0 % 3)))
         );
         let expression = parser::parse("(remainder 5 3)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(5 % 3))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Int(5 % 3)))
         );
         let expression = parser::parse("(remainder -5 3)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(-5 % 3))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Int(-5 % 3)))
         );
         let expression = parser::parse("(remainder 5 -3)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(5 % -3))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Int(5 % -3)))
         );
         let expression = parser::parse("(remainder -5 -3)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(-5 % -3))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Int(-5 % -3)))
         );
 
         let expression = parser::parse("(remainder 0.0 2.0)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Float(0.0 % 2.0))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Float(0.0 % 2.0)))
         );
         let expression = parser::parse("(remainder 3.142 2.0)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Float(3.142 % 2.0))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Float(3.142 % 2.0)))
         );
         let expression = parser::parse("(remainder -3.142 2.0)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Float(-3.142 % 2.0))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Float(-3.142 % 2.0)))
         );
         let expression = parser::parse("(remainder 3.142 -2.0)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Float(3.142 % -2.0))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Float(3.142 % -2.0)))
         );
         let expression = parser::parse("(remainder -3.142 -2.0)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Float(-3.142 % -2.0))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Float(-3.142 % -2.0)))
         );
     }
 
@@ -183,53 +182,47 @@ mod tests {
     fn remainder_by_zero() {
         let env = Env::new();
         let expression = parser::parse("(remainder 3 0)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
-                "Division by zero: (3 % 0)"
-            ))))
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new("Division by zero: (3 % 0)")))
         );
         let expression = parser::parse("(remainder 3 -0)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
-                "Division by zero: (3 % 0)"
-            ))))
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new("Division by zero: (3 % 0)")))
         );
         let expression = parser::parse("(remainder 0 0)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
-                "Division by zero: (0 % 0)"
-            ))))
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new("Division by zero: (0 % 0)")))
         );
 
         let expression = parser::parse("(remainder 3.142 0.0)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new(
                 "Division by zero: (3.142 % 0.0)"
-            ))))
+            )))
         );
         let expression = parser::parse("(remainder 3.142 -0.0)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new(
                 "Division by zero: (3.142 % -0.0)"
-            ))))
+            )))
         );
         let expression = parser::parse("(remainder 0.0 0.0)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new(
                 "Division by zero: (0.0 % 0.0)"
-            ))))
+            )))
         );
     }
 
@@ -237,120 +230,120 @@ mod tests {
     fn remainder_division_expression_operands() {
         let env = Env::new();
         let expression = parser::parse("(remainder 3 3.142)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new(
                 "Expected (Int, Int) or (Float, Float), received (3, 3.142)"
-            ))))
+            )))
         );
         let expression = parser::parse("(remainder 3.142 3)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new(
                 "Expected (Int, Int) or (Float, Float), received (3.142, 3)"
-            ))))
+            )))
         );
 
         let expression = parser::parse("(remainder 3 null)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new(
                 "Expected (Int, Int) or (Float, Float), received (3, null)"
-            ))))
+            )))
         );
         let expression = parser::parse("(remainder 3 #f)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new(
                 "Expected (Int, Int) or (Float, Float), received (3, #f)"
-            ))))
+            )))
         );
         let expression = parser::parse("(remainder 3 \"0\")").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new(
                 "Expected (Int, Int) or (Float, Float), received (3, \"0\")"
-            ))))
+            )))
         );
 
         let expression = parser::parse("(remainder null 3)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new(
                 "Expected (Int, Int) or (Float, Float), received (null, 3)"
-            ))))
+            )))
         );
         let expression = parser::parse("(remainder #f 3)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new(
                 "Expected (Int, Int) or (Float, Float), received (#f, 3)"
-            ))))
+            )))
         );
         let expression = parser::parse("(remainder \"0\" 3)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new(
                 "Expected (Int, Int) or (Float, Float), received (\"0\", 3)"
-            ))))
+            )))
         );
 
         let expression = parser::parse("(remainder 3.142 null)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new(
                 "Expected (Int, Int) or (Float, Float), received (3.142, null)"
-            ))))
+            )))
         );
         let expression = parser::parse("(remainder 3.142 #f)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new(
                 "Expected (Int, Int) or (Float, Float), received (3.142, #f)"
-            ))))
+            )))
         );
         let expression = parser::parse("(remainder 3.142 \"0\")").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new(
                 "Expected (Int, Int) or (Float, Float), received (3.142, \"0\")"
-            ))))
+            )))
         );
 
         let expression = parser::parse("(remainder null 3.142)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new(
                 "Expected (Int, Int) or (Float, Float), received (null, 3.142)"
-            ))))
+            )))
         );
         let expression = parser::parse("(remainder #f 3.142)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new(
                 "Expected (Int, Int) or (Float, Float), received (#f, 3.142)"
-            ))))
+            )))
         );
         let expression = parser::parse("(remainder \"0\" 3.142)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new(
                 "Expected (Int, Int) or (Float, Float), received (\"0\", 3.142)"
-            ))))
+            )))
         );
     }
 }

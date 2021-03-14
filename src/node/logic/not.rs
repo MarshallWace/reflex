@@ -76,7 +76,6 @@ impl fmt::Display for NotNode {
 mod tests {
     use crate::{
         env::Env,
-        expression::Expression,
         node::{
             core::{CoreNode, ErrorNode, ValueNode},
             parser, Node,
@@ -87,16 +86,16 @@ mod tests {
     fn not_expressions() {
         let env = Env::new();
         let expression = parser::parse("(not #t)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
         );
         let expression = parser::parse("(not #f)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(true))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Boolean(true)))
         );
     }
 
@@ -104,36 +103,36 @@ mod tests {
     fn invalid_or_expression_arguments() {
         let env = Env::new();
         let expression = parser::parse("(not null)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new(
                 "Expected Boolean, received null"
-            ))))
+            )))
         );
         let expression = parser::parse("(not 0)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new(
                 "Expected Boolean, received 0"
-            ))))
+            )))
         );
         let expression = parser::parse("(not 0.0)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new(
                 "Expected Boolean, received 0.0"
-            ))))
+            )))
         );
         let expression = parser::parse("(not \"\")").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new(
                 "Expected Boolean, received \"\""
-            ))))
+            )))
         );
     }
 }

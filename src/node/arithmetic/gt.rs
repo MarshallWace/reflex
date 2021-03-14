@@ -92,7 +92,6 @@ impl fmt::Display for GtNode {
 mod tests {
     use crate::{
         env::Env,
-        expression::Expression,
         node::{
             core::{CoreNode, ErrorNode, ValueNode},
             parser, Node,
@@ -103,137 +102,137 @@ mod tests {
     fn gt_expressions() {
         let env = Env::new();
         let expression = parser::parse("(> 0 0)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
         );
         let expression = parser::parse("(> 3 3)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
         );
         let expression = parser::parse("(> -3 -3)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
         );
         let expression = parser::parse("(> 3 -3)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(true))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Boolean(true)))
         );
         let expression = parser::parse("(> -3 3)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
         );
         let expression = parser::parse("(> 3 4)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
         );
         let expression = parser::parse("(> -3 4)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
         );
         let expression = parser::parse("(> 3 -4)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(true))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Boolean(true)))
         );
         let expression = parser::parse("(> -3 -4)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(true))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Boolean(true)))
         );
 
         let expression = parser::parse("(> 0.0 0.0)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
         );
         let expression = parser::parse("(> 3.142 3.142)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
         );
         let expression = parser::parse("(> -3.142 -3.142)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
         );
         let expression = parser::parse("(> 3.142 -3.142)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(true))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Boolean(true)))
         );
         let expression = parser::parse("(> -3.142 3.142)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
         );
         let expression = parser::parse("(> 3.142 2.718)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(true))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Boolean(true)))
         );
         let expression = parser::parse("(> 3.142 -2.718)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(true))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Boolean(true)))
         );
         let expression = parser::parse("(> -3.142 2.718)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
         );
         let expression = parser::parse("(> -3.142 -2.718)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
         );
         let expression = parser::parse("(> 2.718 3.142)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
         );
         let expression = parser::parse("(> -2.718 3.142)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
         );
         let expression = parser::parse("(> 2.718 -3.142)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(true))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Boolean(true)))
         );
         let expression = parser::parse("(> -2.718 -3.142)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(true))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Boolean(true)))
         );
     }
 
@@ -241,120 +240,120 @@ mod tests {
     fn invalid_gt_expression_operands() {
         let env = Env::new();
         let expression = parser::parse("(> 3 3.142)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new(
                 "Expected (Int, Int) or (Float, Float), received (3, 3.142)"
-            ))))
+            )))
         );
         let expression = parser::parse("(> 3.142 3)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new(
                 "Expected (Int, Int) or (Float, Float), received (3.142, 3)"
-            ))))
+            )))
         );
 
         let expression = parser::parse("(> 3 null)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new(
                 "Expected (Int, Int) or (Float, Float), received (3, null)"
-            ))))
+            )))
         );
         let expression = parser::parse("(> 3 #f)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new(
                 "Expected (Int, Int) or (Float, Float), received (3, #f)"
-            ))))
+            )))
         );
         let expression = parser::parse("(> 3 \"3\")").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new(
                 "Expected (Int, Int) or (Float, Float), received (3, \"3\")"
-            ))))
+            )))
         );
 
         let expression = parser::parse("(> null 3)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new(
                 "Expected (Int, Int) or (Float, Float), received (null, 3)"
-            ))))
+            )))
         );
         let expression = parser::parse("(> #f 3)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new(
                 "Expected (Int, Int) or (Float, Float), received (#f, 3)"
-            ))))
+            )))
         );
         let expression = parser::parse("(> \"3\" 3)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new(
                 "Expected (Int, Int) or (Float, Float), received (\"3\", 3)"
-            ))))
+            )))
         );
 
         let expression = parser::parse("(> 3.142 null)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new(
                 "Expected (Int, Int) or (Float, Float), received (3.142, null)"
-            ))))
+            )))
         );
         let expression = parser::parse("(> 3.142 #f)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new(
                 "Expected (Int, Int) or (Float, Float), received (3.142, #f)"
-            ))))
+            )))
         );
         let expression = parser::parse("(> 3.142 \"3\")").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new(
                 "Expected (Int, Int) or (Float, Float), received (3.142, \"3\")"
-            ))))
+            )))
         );
 
         let expression = parser::parse("(> null 3.142)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new(
                 "Expected (Int, Int) or (Float, Float), received (null, 3.142)"
-            ))))
+            )))
         );
         let expression = parser::parse("(> #f 3.142)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new(
                 "Expected (Int, Int) or (Float, Float), received (#f, 3.142)"
-            ))))
+            )))
         );
         let expression = parser::parse("(> \"3\" 3.142)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new(
                 "Expected (Int, Int) or (Float, Float), received (\"3\", 3.142)"
-            ))))
+            )))
         );
     }
 }

@@ -6,8 +6,7 @@ use std::{fmt, iter::once};
 use crate::{
     env::Env,
     expression::{
-        with_dependencies, AstNode, CompoundNode, EvaluationResult, Expression, NodeFactoryResult,
-        NodeType,
+        AstNode, CompoundNode, EvaluationResult, Expression, NodeFactoryResult, NodeType,
     },
     node::{
         core::{CoreNode, FunctionApplicationNode},
@@ -54,15 +53,17 @@ impl NodeType<Node> for ApplyNode {
         CompoundNode::capture_depth(self)
     }
     fn evaluate(&self, env: &Env<Node>) -> Option<EvaluationResult<Node>> {
-        let result = collect_list_items(&self.args, env, |args| {
+        let target = collect_list_items(&self.args, env, |args| {
             Expression::new(Node::Core(CoreNode::FunctionApplication(
                 FunctionApplicationNode::new(Expression::clone(&self.target), args),
             )))
         });
-        Some(with_dependencies(
-            result.dependencies,
-            result.expression.evaluate(env),
-        ))
+        Some(
+            target
+                .expression()
+                .evaluate(env)
+                .with_dependencies_from(target),
+        )
     }
 }
 impl fmt::Display for ApplyNode {
@@ -75,7 +76,6 @@ impl fmt::Display for ApplyNode {
 mod tests {
     use crate::{
         env::Env,
-        expression::Expression,
         node::{
             core::{CoreNode, ErrorNode, ValueNode},
             parser, Node,
@@ -86,28 +86,26 @@ mod tests {
     fn apply_expressions() {
         let env = Env::new();
         let expression = parser::parse("(apply (lambda () 3) (list))").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3)))),
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Int(3))),
         );
         let expression =
             parser::parse("(apply (lambda (foo bar) (+ foo bar)) (list 3 4))").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3 + 4)))),
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Int(3 + 4))),
         );
         let expression = parser::parse(
             "(apply (lambda (first second third) (+ (abs first) (+ second third))) (list -3 4 5))",
         )
         .unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(
-                (-3 as i32).abs() + (4 + 5)
-            )))),
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Int((-3 as i32).abs() + (4 + 5)))),
         );
     }
 
@@ -118,36 +116,36 @@ mod tests {
             "(apply (lambda (foo bar) (+ foo bar)) (cons 3 ((lambda () (cons 4 null)))))",
         )
         .unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3 + 4)))),
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Int(3 + 4))),
         );
         let expression = parser::parse(
             "(apply (lambda (foo bar) (+ foo bar)) (cons 3 ((lambda (foo) (cons 4 foo)) null)))",
         )
         .unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3 + 4)))),
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Int(3 + 4))),
         );
         let expression = parser::parse(
             "(apply (lambda (foo bar) (+ foo bar)) ((lambda (foo) foo) (cons ((lambda (first) first) 3) ((lambda (third) (cons ((lambda (second) second) 4) third)) null))))",
         )
         .unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3 + 4)))),
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Int(3 + 4))),
         );
         let expression = parser::parse(
     "(apply (lambda (first second third) (+ first (+ second third))) ((lambda (first) ((lambda (second) ((lambda (third) (cons first (cons second (cons third null)))) 5)) 4)) 3))"
         ).unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3 + 4 + 5)))),
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Int(3 + 4 + 5))),
         )
     }
 
@@ -155,36 +153,34 @@ mod tests {
     fn invalid_apply_expressions() {
         let env = Env::new();
         let expression = parser::parse("(apply 3 (list))").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new(
                 "Target expression is not a function: 3"
-            ))))
+            )))
         );
         let expression = parser::parse("(apply (lambda (foo) foo) 3)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
-                "Expected list, received 3"
-            ))))
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new("Expected list, received 3")))
         );
         let expression = parser::parse("(apply (lambda (foo) foo) (list))").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new(
                 "Expected 1 arguments, received 0"
-            ))))
+            )))
         );
         let expression = parser::parse("(apply (lambda (foo) foo) (list 3 4))").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new(
                 "Expected 1 arguments, received 2"
-            ))))
+            )))
         );
     }
 }

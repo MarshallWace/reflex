@@ -92,7 +92,6 @@ impl fmt::Display for MinNode {
 mod tests {
     use crate::{
         env::Env,
-        expression::Expression,
         node::{
             core::{CoreNode, ErrorNode, ValueNode},
             parser, Node,
@@ -103,149 +102,149 @@ mod tests {
     fn min_expressions() {
         let env = Env::new();
         let expression = parser::parse("(min 0 0)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(0))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Int(0)))
         );
         let expression = parser::parse("(min -0 0)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(0))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Int(0)))
         );
         let expression = parser::parse("(min 0 -0)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(0))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Int(0)))
         );
         let expression = parser::parse("(min -0 -0)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(0))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Int(0)))
         );
         let expression = parser::parse("(min 3 4)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Int(3)))
         );
         let expression = parser::parse("(min 4 3)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Int(3)))
         );
         let expression = parser::parse("(min -3 4)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(-3))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Int(-3)))
         );
         let expression = parser::parse("(min 4 -3)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(-3))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Int(-3)))
         );
         let expression = parser::parse("(min 3 -4)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(-4))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Int(-4)))
         );
         let expression = parser::parse("(min -4 3)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(-4))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Int(-4)))
         );
         let expression = parser::parse("(min -3 -4)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(-4))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Int(-4)))
         );
         let expression = parser::parse("(min -4 -3)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(-4))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Int(-4)))
         );
 
         let expression = parser::parse("(min 0.0 0.0)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Float(0.0))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Float(0.0)))
         );
         let expression = parser::parse("(min -0.0 0.0)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Float(0.0))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Float(0.0)))
         );
         let expression = parser::parse("(min 0.0 -0.0)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Float(0.0))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Float(0.0)))
         );
         let expression = parser::parse("(min -0.0 -0.0)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Float(0.0))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Float(0.0)))
         );
         let expression = parser::parse("(min 2.718 3.142)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Float(2.718))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Float(2.718)))
         );
         let expression = parser::parse("(min 3.142 2.718)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Float(2.718))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Float(2.718)))
         );
         let expression = parser::parse("(min -2.718 3.142)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Float(-2.718))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Float(-2.718)))
         );
         let expression = parser::parse("(min 3.142 -2.718)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Float(-2.718))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Float(-2.718)))
         );
         let expression = parser::parse("(min 2.718 -3.142)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Float(-3.142))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Float(-3.142)))
         );
         let expression = parser::parse("(min -3.142 2.718)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Float(-3.142))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Float(-3.142)))
         );
         let expression = parser::parse("(min -2.718 -3.142)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Float(-3.142))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Float(-3.142)))
         );
         let expression = parser::parse("(min -3.142 -2.718)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Float(-3.142))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Float(-3.142)))
         );
     }
 
@@ -253,120 +252,120 @@ mod tests {
     fn invalid_min_expression_operands() {
         let env = Env::new();
         let expression = parser::parse("(min 3 3.142)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new(
                 "Expected (Int, Int) or (Float, Float), received (3, 3.142)"
-            ))))
+            )))
         );
         let expression = parser::parse("(min 3.142 3)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new(
                 "Expected (Int, Int) or (Float, Float), received (3.142, 3)"
-            ))))
+            )))
         );
 
         let expression = parser::parse("(min 3 null)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new(
                 "Expected (Int, Int) or (Float, Float), received (3, null)"
-            ))))
+            )))
         );
         let expression = parser::parse("(min 3 #f)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new(
                 "Expected (Int, Int) or (Float, Float), received (3, #f)"
-            ))))
+            )))
         );
         let expression = parser::parse("(min 3 \"3\")").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new(
                 "Expected (Int, Int) or (Float, Float), received (3, \"3\")"
-            ))))
+            )))
         );
 
         let expression = parser::parse("(min null 3)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new(
                 "Expected (Int, Int) or (Float, Float), received (null, 3)"
-            ))))
+            )))
         );
         let expression = parser::parse("(min #f 3)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new(
                 "Expected (Int, Int) or (Float, Float), received (#f, 3)"
-            ))))
+            )))
         );
         let expression = parser::parse("(min \"3\" 3)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new(
                 "Expected (Int, Int) or (Float, Float), received (\"3\", 3)"
-            ))))
+            )))
         );
 
         let expression = parser::parse("(min 3.142 null)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new(
                 "Expected (Int, Int) or (Float, Float), received (3.142, null)"
-            ))))
+            )))
         );
         let expression = parser::parse("(min 3.142 #f)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new(
                 "Expected (Int, Int) or (Float, Float), received (3.142, #f)"
-            ))))
+            )))
         );
         let expression = parser::parse("(min 3.142 \"3\")").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new(
                 "Expected (Int, Int) or (Float, Float), received (3.142, \"3\")"
-            ))))
+            )))
         );
 
         let expression = parser::parse("(min null 3.142)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new(
                 "Expected (Int, Int) or (Float, Float), received (null, 3.142)"
-            ))))
+            )))
         );
         let expression = parser::parse("(min #f 3.142)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new(
                 "Expected (Int, Int) or (Float, Float), received (#f, 3.142)"
-            ))))
+            )))
         );
         let expression = parser::parse("(min \"3\" 3.142)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new(
                 "Expected (Int, Int) or (Float, Float), received (\"3\", 3.142)"
-            ))))
+            )))
         );
     }
 }

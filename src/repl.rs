@@ -29,7 +29,7 @@ pub fn start() -> io::Result<()> {
         match parser::parse(&input) {
             Ok(expression) => {
                 let result = expression.evaluate(&env);
-                writeln!(stdout, "{}", result.expression)?;
+                writeln!(stdout, "{}", result.value())?;
             }
             Err(err) => {
                 writeln!(stderr, "Syntax error: {}", err.message())?;

@@ -76,7 +76,6 @@ impl fmt::Display for CeilNode {
 mod tests {
     use crate::{
         env::Env,
-        expression::Expression,
         node::{
             core::{CoreNode, ErrorNode, ValueNode},
             parser, Node,
@@ -87,52 +86,52 @@ mod tests {
     fn ceil_expressions() {
         let env = Env::new();
         let expression = parser::parse("(ceil 0.0)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Float(0.0))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Float(0.0)))
         );
         let expression = parser::parse("(ceil 2.718)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Float(3.0))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Float(3.0)))
         );
         let expression = parser::parse("(ceil 3.0)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Float(3.0))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Float(3.0)))
         );
         let expression = parser::parse("(ceil 3.142)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Float(4.0))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Float(4.0)))
         );
         let expression = parser::parse("(ceil -0.0)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Float(0.0))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Float(0.0)))
         );
         let expression = parser::parse("(ceil -2.718)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Float(-2.0))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Float(-2.0)))
         );
         let expression = parser::parse("(ceil -3.0)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Float(-3.0))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Float(-3.0)))
         );
         let expression = parser::parse("(ceil -3.142)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Float(-3.0))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Float(-3.0)))
         );
     }
 
@@ -140,36 +139,36 @@ mod tests {
     fn invalid_ceil_expression_operands() {
         let env = Env::new();
         let expression = parser::parse("(ceil 3)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new(
                 "Expected Float, received 3"
-            ))))
+            )))
         );
         let expression = parser::parse("(ceil null)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new(
                 "Expected Float, received null"
-            ))))
+            )))
         );
         let expression = parser::parse("(ceil #f)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new(
                 "Expected Float, received #f"
-            ))))
+            )))
         );
         let expression = parser::parse("(ceil \"3\")").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new(
                 "Expected Float, received \"3\""
-            ))))
+            )))
         );
     }
 }

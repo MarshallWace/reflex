@@ -88,35 +88,35 @@ mod tests {
     fn cdr_expressions() {
         let env = Env::new();
         let expression = parser::parse("(cdr (cons 3 4))").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(4)))),
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Int(4))),
         );
         let expression = parser::parse("(cdr (cons (+ 1 2) (+ 3 4)))").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3 + 4)))),
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Int(3 + 4))),
         );
         let expression = parser::parse("(cdr (list 3 4 5))").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Sequence(SequenceNode::Cons(ConsNode::new(
+            *result.value(),
+            Node::Sequence(SequenceNode::Cons(ConsNode::new(
                 Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(4)))),
                 Expression::new(Node::Sequence(SequenceNode::Cons(ConsNode::new(
                     Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(5)))),
                     Expression::new(Node::Core(CoreNode::Value(ValueNode::Nil))),
                 )))),
-            )))),
+            ))),
         );
         let expression =
             parser::parse("(cdr ((lambda (foo) foo) (cons (+ 1 2) (+ 3 4))))").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3 + 4)))),
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Int(3 + 4))),
         );
     }
 
@@ -124,12 +124,10 @@ mod tests {
     fn invalid_cdr_expressions() {
         let env = Env::new();
         let expression = parser::parse("(cdr 3)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
-                "Expected pair, received 3"
-            )))),
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new("Expected pair, received 3"))),
         );
     }
 
@@ -137,10 +135,10 @@ mod tests {
     fn lazy_evaluation() {
         let env = Env::new();
         let expression = parser::parse("(cdr (cons (error \"foo\") (+ 3 4)))").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3 + 4)))),
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Int(3 + 4))),
         );
     }
 }

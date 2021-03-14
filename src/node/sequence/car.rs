@@ -75,7 +75,6 @@ impl fmt::Display for CarNode {
 mod tests {
     use crate::{
         env::Env,
-        expression::Expression,
         node::{
             core::{CoreNode, ErrorNode, ValueNode},
             parser, Node,
@@ -86,29 +85,29 @@ mod tests {
     fn car_expressions() {
         let env = Env::new();
         let expression = parser::parse("(car (cons 3 4))").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3)))),
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Int(3))),
         );
         let expression = parser::parse("(car (cons (+ 1 2) (+ 3 4)))").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(1 + 2)))),
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Int(1 + 2))),
         );
         let expression =
             parser::parse("(car ((lambda (foo) foo) (cons (+ 1 2) (+ 3 4))))").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(1 + 2)))),
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Int(1 + 2))),
         );
         let expression = parser::parse("(car (list 3 4 5))").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3)))),
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Int(3))),
         );
     }
 
@@ -116,10 +115,10 @@ mod tests {
     fn lazy_evaluation() {
         let env = Env::new();
         let expression = parser::parse("(car (cons (+ 3 4) (error \"foo\")))").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3 + 4)))),
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Int(3 + 4))),
         );
     }
 
@@ -127,20 +126,18 @@ mod tests {
     fn invalid_car_expressions() {
         let env = Env::new();
         let expression = parser::parse("(car 3)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
-                "Expected pair, received 3"
-            )))),
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new("Expected pair, received 3"))),
         );
         let expression = parser::parse("(car (list))").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new(
                 "Expected pair, received null"
-            )))),
+            ))),
         );
     }
 }

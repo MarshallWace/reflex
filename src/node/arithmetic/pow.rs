@@ -112,7 +112,6 @@ fn is_integer(value: f64) -> bool {
 mod tests {
     use crate::{
         env::Env,
-        expression::Expression,
         node::{
             core::{CoreNode, ErrorNode, ValueNode},
             parser, Node,
@@ -120,275 +119,251 @@ mod tests {
     };
 
     #[test]
-    fn exponentiation_expressions() {
+    fn pow_expressions() {
         let env = Env::new();
         let expression = parser::parse("(pow 0 0)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(
-                (0 as i32).pow(0)
-            ))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Int((0 as i32).pow(0))))
         );
         let expression = parser::parse("(pow 3 4)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(
-                (3 as i32).pow(4)
-            ))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Int((3 as i32).pow(4))))
         );
         let expression = parser::parse("(pow -3 4)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(
-                (-3 as i32).pow(4)
-            ))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Int((-3 as i32).pow(4))))
         );
         let expression = parser::parse("(pow 3 -4)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Float(
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Float(
                 (3 as f64).powf(-4 as f64)
-            ))))
+            )))
         );
         let expression = parser::parse("(pow -3 -4)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Float(
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Float(
                 (-3 as f64).powf(-4 as f64)
-            ))))
+            )))
         );
 
         let expression = parser::parse("(pow 0.0 0.0)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Float(
-                (0.0 as f64).powf(0.0)
-            ))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Float((0.0 as f64).powf(0.0))))
         );
         let expression = parser::parse("(pow 2.718 3.142)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Float(
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Float(
                 (2.718 as f64).powf(3.142)
-            ))))
+            )))
         );
         let expression = parser::parse("(pow -2.718 3.142)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new(
                 "Invalid exponentiation operands: (-2.718, 3.142)"
-            ))))
+            )))
         );
         let expression = parser::parse("(pow 2.718 -3.142)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Float(
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Float(
                 (2.718 as f64).powf(-3.142)
-            ))))
+            )))
         );
         let expression = parser::parse("(pow -2.718 -3.142)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new(
                 "Invalid exponentiation operands: (-2.718, -3.142)"
-            ))))
+            )))
         );
 
         let expression = parser::parse("(pow 0 0.0)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Float(
-                (0 as f64).powf(0.0)
-            ))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Float((0 as f64).powf(0.0))))
         );
         let expression = parser::parse("(pow 3 3.142)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Float(
-                (3 as f64).powf(3.142)
-            ))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Float((3 as f64).powf(3.142))))
         );
         let expression = parser::parse("(pow 3 -3.142)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Float(
-                (3 as f64).powf(-3.142)
-            ))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Float((3 as f64).powf(-3.142))))
         );
         let expression = parser::parse("(pow -3 3.142)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new(
                 "Invalid exponentiation operands: (-3, 3.142)"
-            ))))
+            )))
         );
         let expression = parser::parse("(pow -3 -3.142)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new(
                 "Invalid exponentiation operands: (-3, -3.142)"
-            ))))
+            )))
         );
 
         let expression = parser::parse("(pow 0.0 0)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Float(
-                (0.0 as f64).powi(0)
-            ))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Float((0.0 as f64).powi(0))))
         );
         let expression = parser::parse("(pow 3.142 3)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Float(
-                (3.142 as f64).powi(3)
-            ))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Float((3.142 as f64).powi(3))))
         );
         let expression = parser::parse("(pow -3.142 3)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Float(
-                (-3.142 as f64).powi(3)
-            ))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Float((-3.142 as f64).powi(3))))
         );
         let expression = parser::parse("(pow 3.142 -3)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Float(
-                (3.142 as f64).powi(-3)
-            ))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Float((3.142 as f64).powi(-3))))
         );
         let expression = parser::parse("(pow -3.142 -3)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Float(
-                (-3.142 as f64).powi(-3)
-            ))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Float((-3.142 as f64).powi(-3))))
         );
     }
 
     #[test]
-    fn invalid_exponentiation_expression_operands() {
+    fn invalid_pow_expression_operands() {
         let env = Env::new();
 
         let expression = parser::parse("(pow 3 null)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new(
                 "Expected (Int, Int) or (Float, Int) or (Int, Float) or (Float, Float), received (3, null)"
-            ))))
+            )))
         );
         let expression = parser::parse("(pow 3 #f)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new(
                 "Expected (Int, Int) or (Float, Int) or (Int, Float) or (Float, Float), received (3, #f)"
-            ))))
+            )))
         );
         let expression = parser::parse("(pow 3 \"3\")").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new(
                 "Expected (Int, Int) or (Float, Int) or (Int, Float) or (Float, Float), received (3, \"3\")"
-            ))))
+            )))
         );
 
         let expression = parser::parse("(pow null 3)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new(
                 "Expected (Int, Int) or (Float, Int) or (Int, Float) or (Float, Float), received (null, 3)"
-            ))))
+            )))
         );
         let expression = parser::parse("(pow #f 3)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new(
                 "Expected (Int, Int) or (Float, Int) or (Int, Float) or (Float, Float), received (#f, 3)"
-            ))))
+            )))
         );
         let expression = parser::parse("(pow \"3\" 3)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new(
                 "Expected (Int, Int) or (Float, Int) or (Int, Float) or (Float, Float), received (\"3\", 3)"
-            ))))
+            )))
         );
 
         let expression = parser::parse("(pow 3.142 null)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new(
                 "Expected (Int, Int) or (Float, Int) or (Int, Float) or (Float, Float), received (3.142, null)"
-            ))))
+            )))
         );
         let expression = parser::parse("(pow 3.142 #f)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new(
                 "Expected (Int, Int) or (Float, Int) or (Int, Float) or (Float, Float), received (3.142, #f)"
-            ))))
+            )))
         );
         let expression = parser::parse("(pow 3.142 \"3\")").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new(
                 "Expected (Int, Int) or (Float, Int) or (Int, Float) or (Float, Float), received (3.142, \"3\")"
-            ))))
+            )))
         );
 
         let expression = parser::parse("(pow null 3.142)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new(
                 "Expected (Int, Int) or (Float, Int) or (Int, Float) or (Float, Float), received (null, 3.142)"
-            ))))
+            )))
         );
         let expression = parser::parse("(pow #f 3.142)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new(
                 "Expected (Int, Int) or (Float, Int) or (Int, Float) or (Float, Float), received (#f, 3.142)"
-            ))))
+            )))
         );
         let expression = parser::parse("(pow \"3\" 3.142)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new(
                 "Expected (Int, Int) or (Float, Int) or (Int, Float) or (Float, Float), received (\"3\", 3.142)"
-            ))))
+            )))
         );
     }
 }

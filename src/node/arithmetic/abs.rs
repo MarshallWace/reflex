@@ -79,7 +79,6 @@ impl fmt::Display for AbsNode {
 mod tests {
     use crate::{
         env::Env,
-        expression::Expression,
         node::{
             core::{CoreNode, ErrorNode, ValueNode},
             parser, Node,
@@ -90,53 +89,53 @@ mod tests {
     fn abs_expressions() {
         let env = Env::new();
         let expression = parser::parse("(abs 0)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(0))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Int(0)))
         );
         let expression = parser::parse("(abs -0)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(0))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Int(0)))
         );
         let expression = parser::parse("(abs 3)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Int(3)))
         );
         let expression = parser::parse("(abs -3)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Int(3)))
         );
 
         let expression = parser::parse("(abs 0.0)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Float(0.0))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Float(0.0)))
         );
         let expression = parser::parse("(abs -0.0)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Float(0.0))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Float(0.0)))
         );
         let expression = parser::parse("(abs 3.142)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Float(3.142))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Float(3.142)))
         );
         let expression = parser::parse("(abs -3.142)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Float(3.142))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Float(3.142)))
         );
     }
 
@@ -144,28 +143,28 @@ mod tests {
     fn invalid_abs_expression_operands() {
         let env = Env::new();
         let expression = parser::parse("(abs null)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new(
                 "Expected Int or Float, received null"
-            ))))
+            )))
         );
         let expression = parser::parse("(abs #f)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new(
                 "Expected Int or Float, received #f"
-            ))))
+            )))
         );
         let expression = parser::parse("(abs \"3\")").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new(
                 "Expected Int or Float, received \"3\""
-            ))))
+            )))
         );
     }
 }

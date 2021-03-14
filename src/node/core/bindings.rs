@@ -345,27 +345,27 @@ mod tests {
             )))),
         ]);
         let expression = Expression::new(Node::Core(CoreNode::Reference(ReferenceNode::new(2))));
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::String(
-                StringValue::Literal("first")
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::String(StringValue::Literal(
+                "first"
             ))))
         );
         let expression = Expression::new(Node::Core(CoreNode::Reference(ReferenceNode::new(1))));
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::String(
-                StringValue::Literal("second")
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::String(StringValue::Literal(
+                "second"
             ))))
         );
         let expression = Expression::new(Node::Core(CoreNode::Reference(ReferenceNode::new(0))));
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::String(
-                StringValue::Literal("third")
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::String(StringValue::Literal(
+                "third"
             ))))
         );
     }
@@ -387,10 +387,10 @@ mod tests {
                 .cloned(),
             ),
         })));
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3 + 4))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Int(3 + 4)))
         );
     }
 
@@ -398,28 +398,28 @@ mod tests {
     fn let_expressions() {
         let env = Env::new();
         let expression = parser::parse("(let () 3)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Int(3)))
         );
         let expression = parser::parse("(let ((foo 3)) foo)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Int(3)))
         );
         let expression = parser::parse("(let ((foo 3) (bar 4)) (+ foo bar))").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3 + 4))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Int(3 + 4)))
         );
         let expression = parser::parse("(let ((first 3)) (let ((second 4)) (let ((third first) (fourth second)) (+ third fourth))))").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3 + 4))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Int(3 + 4)))
         );
     }
 
@@ -427,91 +427,89 @@ mod tests {
     fn letrec_expressions() {
         let env = Env::new();
         let expression = parser::parse("(letrec () 3)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Int(3)))
         );
         let expression = parser::parse("(letrec ((foo 3)) foo)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Int(3)))
         );
         let expression = parser::parse("(letrec ((foo 3) (bar 4)) (+ foo bar))").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3 + 4))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Int(3 + 4)))
         );
         let expression = parser::parse("(letrec ((first 3)) (letrec ((second 4)) (letrec ((third first) (fourth second)) (+ third fourth))))").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3 + 4))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Int(3 + 4)))
         );
         let expression = parser::parse("(letrec ((foo 3) (bar foo)) (+ foo bar))").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3 + 3))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Int(3 + 3)))
         );
         let expression = parser::parse("(letrec ((foo bar) (bar 3)) (+ foo bar))").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3 + 3))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Int(3 + 3)))
         );
         let expression = parser::parse("(letrec ((foo 3) (bar (+ foo 1))) bar)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3 + 1))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Int(3 + 1)))
         );
         let expression = parser::parse("(letrec ((foo (+ bar 1)) (bar 3)) foo)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3 + 1))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Int(3 + 1)))
         );
         let expression = parser::parse(
             "(letrec ((fac (lambda (n) (if (= n 1) n (* n (fac (- n 1))))))) (fac 5))",
         )
         .unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(
-                5 * 4 * 3 * 2 * 1
-            ))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Int(5 * 4 * 3 * 2 * 1)))
         );
         let expression = parser::parse("(letrec ((is-even? (lambda (x) (if (= x 0) #t (is-odd? (- x 1))))) (is-odd? (lambda (x) (if (= x 0) #f (is-even? (- x 1)))))) (is-even? 3))").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
         );
         let expression = parser::parse("(letrec ((is-even? (lambda (x) (if (= x 0) #t (is-odd? (- x 1))))) (is-odd? (lambda (x) (if (= x 0) #f (is-even? (- x 1)))))) (is-odd? 3))").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(true))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Boolean(true)))
         );
         let expression =
             parser::parse("(letrec ((foo (cons 3 foo))) (car (cdr (cdr (cdr foo)))))").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Int(3)))
         );
         let expression = parser::parse(
             "(letrec ((foo (cons 1 bar)) (bar (cons 2 foo))) (car (cdr (cdr (cdr foo)))))",
         )
         .unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(2))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Int(2)))
         );
     }
 
@@ -519,40 +517,40 @@ mod tests {
     fn letstar_expressions() {
         let env = Env::new();
         let expression = parser::parse("(let* () 3)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Int(3)))
         );
         let expression = parser::parse("(let* ((foo 3)) foo)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Int(3)))
         );
         let expression = parser::parse("(let* ((foo 3) (bar 4)) (+ foo bar))").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3 + 4))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Int(3 + 4)))
         );
         let expression = parser::parse("(let* ((first 3)) (let* ((second 4)) (let* ((third first) (fourth second)) (+ third fourth))))").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3 + 4))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Int(3 + 4)))
         );
         let expression = parser::parse("(let* ((foo 3) (bar foo)) (+ foo bar))").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3 + 3))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Int(3 + 3)))
         );
         let expression = parser::parse("(let* ((foo 3) (bar (+ foo 1))) bar)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3 + 1))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Int(3 + 1)))
         );
     }
 }

@@ -100,7 +100,6 @@ impl fmt::Display for ConditionalNode {
 mod tests {
     use crate::{
         env::Env,
-        expression::Expression,
         node::{
             core::{CoreNode, ErrorNode, ValueNode},
             parser, Node,
@@ -111,16 +110,16 @@ mod tests {
     fn conditional_expressions() {
         let env = Env::new();
         let expression = parser::parse("(if #t 3 4)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Int(3)))
         );
         let expression = parser::parse("(if #f 3 4)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(4))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Int(4)))
         );
     }
 
@@ -128,16 +127,16 @@ mod tests {
     fn conditional_expression_short_circuiting() {
         let env = Env::new();
         let expression = parser::parse("(if #t (+ 3 4) (error \"foo\"))").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3 + 4))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Int(3 + 4)))
         );
         let expression = parser::parse("(if #f (error \"foo\") (+ 3 4))").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(3 + 4))))
+            *result.value(),
+            Node::Core(CoreNode::Value(ValueNode::Int(3 + 4)))
         );
     }
 
@@ -145,36 +144,36 @@ mod tests {
     fn invalid_conditional_expression_conditions() {
         let env = Env::new();
         let expression = parser::parse("(if null #t #f)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new(
                 "Expected Boolean, received null"
-            ))))
+            )))
         );
         let expression = parser::parse("(if 0 #t #f)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new(
                 "Expected Boolean, received 0"
-            ))))
+            )))
         );
         let expression = parser::parse("(if 0.0 #t #f)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new(
                 "Expected Boolean, received 0.0"
-            ))))
+            )))
         );
         let expression = parser::parse("(if \"\" #t #f)").unwrap();
-        let result = expression.evaluate(&env).expression;
+        let result = expression.evaluate(&env);
         assert_eq!(
-            result,
-            Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(
+            *result.value(),
+            Node::Core(CoreNode::Error(ErrorNode::new(
                 "Expected Boolean, received \"\""
-            ))))
+            )))
         );
     }
 }

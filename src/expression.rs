@@ -35,22 +35,6 @@ pub trait AstNode<T: NodeType<T>>: NodeType<T> {
     fn factory(args: &[Expression<T>]) -> NodeFactoryResult<Self>;
 }
 
-#[derive(Debug, PartialEq, Clone)]
-pub struct EvaluationResult<T: NodeType<T>> {
-    pub expression: Expression<T>,
-    pub dependencies: Option<Vec<StateToken>>,
-}
-impl<T: NodeType<T>> EvaluationResult<T> {
-    pub fn new(expression: Expression<T>, dependencies: Option<Vec<StateToken>>) -> Self {
-        EvaluationResult {
-            expression,
-            dependencies,
-        }
-    }
-}
-
-pub type StateToken = usize;
-
 #[derive(PartialEq, Clone)]
 pub struct Expression<T: NodeType<T>> {
     value: Rc<T>,
@@ -76,7 +60,7 @@ impl<T: NodeType<T>> Expression<T> {
     pub fn evaluate(&self, env: &Env<T>) -> EvaluationResult<T> {
         self.value()
             .evaluate(env)
-            .unwrap_or_else(|| EvaluationResult::new(Expression::clone(self), None))
+            .unwrap_or_else(|| EvaluationResult::new(Expression::clone(self)))
     }
     pub fn capture_depth(&self) -> usize {
         self.capture_depth
@@ -93,31 +77,53 @@ impl<T: NodeType<T>> fmt::Display for Expression<T> {
     }
 }
 
-pub fn with_dependencies<T: NodeType<T>>(
-    base_dependencies: Option<Vec<usize>>,
-    result: EvaluationResult<T>,
-) -> EvaluationResult<T> {
-    match base_dependencies {
-        None => result,
-        Some(_) => EvaluationResult::new(
-            result.expression,
-            combine_dependency_lists(base_dependencies, result.dependencies),
-        ),
+pub type StateToken = u32;
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct EvaluationResult<T: NodeType<T>> {
+    expression: Expression<T>,
+    dependencies: DependencyList,
+}
+impl<T: NodeType<T>> EvaluationResult<T> {
+    pub fn new(expression: Expression<T>) -> Self {
+        EvaluationResult {
+            expression,
+            dependencies: DependencyList::new(),
+        }
+    }
+    pub fn with_dependencies_from(self, other: EvaluationResult<T>) -> Self {
+        EvaluationResult {
+            expression: self.expression,
+            dependencies: self.dependencies.extend(other.dependencies),
+        }
+    }
+    pub fn expression(&self) -> &Expression<T> {
+        &self.expression
+    }
+    pub fn dependencies(&self) -> &DependencyList {
+        &self.dependencies
+    }
+    pub fn value(&self) -> &T {
+        self.expression.value()
     }
 }
 
-pub fn combine_dependency_lists(
-    base_dependencies: Option<Vec<usize>>,
-    extra_dependencies: Option<Vec<usize>>,
-) -> Option<Vec<usize>> {
-    match base_dependencies {
-        None => extra_dependencies,
-        Some(mut base_dependencies) => match extra_dependencies {
-            None => Some(base_dependencies),
-            Some(extra_dependencies_items) => {
-                base_dependencies.extend(extra_dependencies_items);
-                Some(base_dependencies)
-            }
-        },
+#[derive(Debug, PartialEq, Clone)]
+pub struct DependencyList(Option<Vec<StateToken>>);
+impl DependencyList {
+    pub fn new() -> Self {
+        DependencyList(None)
+    }
+    pub fn extend(self, target: DependencyList) -> Self {
+        match self.0 {
+            None => target,
+            Some(mut base_dependencies) => match target.0 {
+                None => DependencyList(Some(base_dependencies)),
+                Some(target_dependencies) => {
+                    base_dependencies.extend(target_dependencies);
+                    DependencyList(Some(base_dependencies))
+                }
+            },
+        }
     }
 }
