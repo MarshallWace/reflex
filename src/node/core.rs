@@ -15,6 +15,7 @@ use crate::{
 
 pub mod bindings;
 pub mod effect;
+pub mod eq;
 pub mod function;
 pub mod signals;
 pub mod state;
@@ -24,6 +25,7 @@ pub use self::bindings::{
     BoundNode, LetNode, LetRecBindingNode, LetRecNode, LetStarNode, ReferenceNode,
 };
 pub use self::effect::EffectNode;
+pub use self::eq::EqNode;
 pub use self::function::{
     BoundFunctionNode, FunctionApplicationNode, FunctionNode, IsFunctionNode,
 };
@@ -41,6 +43,7 @@ pub enum CoreNode {
     BoundFunction(BoundFunctionNode),
     Catch(CatchNode),
     Effect(EffectNode),
+    Eq(EqNode),
     Error(ErrorNode),
     Function(FunctionNode),
     FunctionApplication(FunctionApplicationNode),
@@ -66,6 +69,7 @@ impl AstNodePackage<Node> for CoreNode {
     fn factory(type_name: &str, args: &[Expression<Node>]) -> Option<NodeFactoryResult<Self>> {
         match type_name {
             "catch" => Some(CatchNode::factory(args).map(Self::Catch)),
+            "eq" => Some(EqNode::factory(args).map(Self::Eq)),
             "error" => Some(ErrorNode::factory(args).map(Self::Error)),
             "pending" => Some(PendingNode::factory(args).map(Self::Pending)),
             "let" => Some(LetNode::factory(args).map(Self::Let)),
@@ -90,26 +94,27 @@ impl NodeType<Node> for CoreNode {
             Self::BoundFunction(node) => prefix_hash(1, node.hash()),
             Self::Catch(node) => prefix_hash(2, node.hash()),
             Self::Effect(node) => prefix_hash(3, node.hash()),
-            Self::Error(node) => prefix_hash(4, node.hash()),
-            Self::Function(node) => prefix_hash(5, node.hash()),
-            Self::FunctionApplication(node) => prefix_hash(6, node.hash()),
-            Self::Let(node) => prefix_hash(7, node.hash()),
-            Self::LetRec(node) => prefix_hash(8, node.hash()),
-            Self::LetRecBinding(node) => prefix_hash(9, node.hash()),
-            Self::LetStar(node) => prefix_hash(10, node.hash()),
-            Self::Pending(node) => prefix_hash(11, node.hash()),
-            Self::Reference(node) => prefix_hash(12, node.hash()),
-            Self::SignalHandler(node) => prefix_hash(13, node.hash()),
-            Self::State(node) => prefix_hash(14, node.hash()),
-            Self::Value(node) => prefix_hash(15, node.hash()),
-            Self::IsNull(node) => prefix_hash(16, node.hash()),
-            Self::IsBoolean(node) => prefix_hash(17, node.hash()),
-            Self::IsInteger(node) => prefix_hash(18, node.hash()),
-            Self::IsFloat(node) => prefix_hash(19, node.hash()),
-            Self::IsString(node) => prefix_hash(20, node.hash()),
-            Self::IsFunction(node) => prefix_hash(21, node.hash()),
-            Self::IsError(node) => prefix_hash(22, node.hash()),
-            Self::IsPending(node) => prefix_hash(23, node.hash()),
+            Self::Eq(node) => prefix_hash(4, node.hash()),
+            Self::Error(node) => prefix_hash(5, node.hash()),
+            Self::Function(node) => prefix_hash(6, node.hash()),
+            Self::FunctionApplication(node) => prefix_hash(7, node.hash()),
+            Self::Let(node) => prefix_hash(8, node.hash()),
+            Self::LetRec(node) => prefix_hash(9, node.hash()),
+            Self::LetRecBinding(node) => prefix_hash(10, node.hash()),
+            Self::LetStar(node) => prefix_hash(11, node.hash()),
+            Self::Pending(node) => prefix_hash(12, node.hash()),
+            Self::Reference(node) => prefix_hash(13, node.hash()),
+            Self::SignalHandler(node) => prefix_hash(14, node.hash()),
+            Self::State(node) => prefix_hash(15, node.hash()),
+            Self::Value(node) => prefix_hash(16, node.hash()),
+            Self::IsNull(node) => prefix_hash(17, node.hash()),
+            Self::IsBoolean(node) => prefix_hash(18, node.hash()),
+            Self::IsInteger(node) => prefix_hash(19, node.hash()),
+            Self::IsFloat(node) => prefix_hash(20, node.hash()),
+            Self::IsString(node) => prefix_hash(21, node.hash()),
+            Self::IsFunction(node) => prefix_hash(22, node.hash()),
+            Self::IsError(node) => prefix_hash(23, node.hash()),
+            Self::IsPending(node) => prefix_hash(24, node.hash()),
         }
     }
     fn capture_depth(&self) -> usize {
@@ -118,6 +123,7 @@ impl NodeType<Node> for CoreNode {
             Self::BoundFunction(node) => node.capture_depth(),
             Self::Catch(node) => node.capture_depth(),
             Self::Effect(node) => node.capture_depth(),
+            Self::Eq(node) => node.capture_depth(),
             Self::Error(node) => node.capture_depth(),
             Self::Function(node) => node.capture_depth(),
             Self::FunctionApplication(node) => node.capture_depth(),
@@ -150,6 +156,7 @@ impl NodeType<Node> for CoreNode {
             Self::BoundFunction(node) => node.evaluate(env, state),
             Self::Catch(node) => node.evaluate(env, state),
             Self::Effect(node) => node.evaluate(env, state),
+            Self::Eq(node) => node.evaluate(env, state),
             Self::Error(node) => node.evaluate(env, state),
             Self::Function(node) => node.evaluate(env, state),
             Self::FunctionApplication(node) => node.evaluate(env, state),
@@ -180,6 +187,7 @@ impl fmt::Display for CoreNode {
             Self::BoundFunction(node) => fmt::Display::fmt(node, f),
             Self::Catch(node) => fmt::Display::fmt(node, f),
             Self::Effect(node) => fmt::Display::fmt(node, f),
+            Self::Eq(node) => fmt::Display::fmt(node, f),
             Self::Error(node) => fmt::Display::fmt(node, f),
             Self::Function(node) => fmt::Display::fmt(node, f),
             Self::FunctionApplication(node) => fmt::Display::fmt(node, f),
@@ -210,6 +218,7 @@ impl fmt::Debug for CoreNode {
             Self::BoundFunction(node) => fmt::Debug::fmt(node, f),
             Self::Catch(node) => fmt::Debug::fmt(node, f),
             Self::Effect(node) => fmt::Debug::fmt(node, f),
+            Self::Eq(node) => fmt::Debug::fmt(node, f),
             Self::Error(node) => fmt::Debug::fmt(node, f),
             Self::Function(node) => fmt::Debug::fmt(node, f),
             Self::FunctionApplication(node) => fmt::Debug::fmt(node, f),
