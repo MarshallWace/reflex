@@ -7,6 +7,7 @@ use crate::{
     env::Env,
     expression::{
         AstNode, AstNodePackage, EvaluationResult, Expression, NodeFactoryResult, NodeType,
+        RuntimeState,
     },
     hash::prefix_hash,
     node::Node,
@@ -71,15 +72,19 @@ impl NodeType<Node> for SequenceNode {
             Self::IsPair(node) => node.capture_depth(),
         }
     }
-    fn evaluate(&self, env: &Env<Node>) -> Option<EvaluationResult<Node>> {
+    fn evaluate(
+        &self,
+        env: &Env<Node>,
+        state: &RuntimeState<Node>,
+    ) -> Option<EvaluationResult<Node>> {
         match self {
-            Self::Apply(node) => node.evaluate(env),
-            Self::Car(node) => node.evaluate(env),
-            Self::Cdr(node) => node.evaluate(env),
-            Self::Cons(node) => node.evaluate(env),
-            Self::List(node) => node.evaluate(env),
-            Self::IsList(node) => node.evaluate(env),
-            Self::IsPair(node) => node.evaluate(env),
+            Self::Apply(node) => node.evaluate(env, state),
+            Self::Car(node) => node.evaluate(env, state),
+            Self::Cdr(node) => node.evaluate(env, state),
+            Self::Cons(node) => node.evaluate(env, state),
+            Self::List(node) => node.evaluate(env, state),
+            Self::IsList(node) => node.evaluate(env, state),
+            Self::IsPair(node) => node.evaluate(env, state),
         }
     }
 }

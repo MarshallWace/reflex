@@ -5,7 +5,9 @@ use std::fmt;
 
 use crate::{
     env::Env,
-    expression::{AstNodePackage, EvaluationResult, Expression, NodeFactoryResult, NodeType},
+    expression::{
+        AstNodePackage, RuntimeState, EvaluationResult, Expression, NodeFactoryResult, NodeType,
+    },
     hash::prefix_hash,
 };
 
@@ -57,12 +59,16 @@ impl NodeType<Node> for Node {
             Self::Arithmetic(node) => node.capture_depth(),
         }
     }
-    fn evaluate(&self, env: &Env<Node>) -> Option<EvaluationResult<Node>> {
+    fn evaluate(
+        &self,
+        env: &Env<Node>,
+        state: &RuntimeState<Node>,
+    ) -> Option<EvaluationResult<Node>> {
         match self {
-            Self::Core(node) => node.evaluate(env),
-            Self::Logic(node) => node.evaluate(env),
-            Self::Sequence(node) => node.evaluate(env),
-            Self::Arithmetic(node) => node.evaluate(env),
+            Self::Core(node) => node.evaluate(env, state),
+            Self::Logic(node) => node.evaluate(env, state),
+            Self::Sequence(node) => node.evaluate(env, state),
+            Self::Arithmetic(node) => node.evaluate(env, state),
         }
     }
 }

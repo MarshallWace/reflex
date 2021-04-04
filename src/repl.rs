@@ -3,7 +3,15 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use std::io::{self, Write};
 
-use reflex::{env::Env, node::parser};
+use reflex::{
+    env::Env,
+    expression::{Expression, RuntimeState},
+    node::{
+        core::{signals::with_error_handler, CoreNode, ValueNode},
+        parser, Node,
+    },
+    signal::EffectHandler,
+};
 
 pub fn start() -> io::Result<()> {
     let stdin = io::stdin();
@@ -25,11 +33,14 @@ pub fn start() -> io::Result<()> {
         }
 
         let env = Env::new();
+        let state = RuntimeState::new();
+
+        let error_handler = EffectHandler::new(1, handle_errors);
 
         match parser::parse(&input) {
             Ok(expression) => {
-                let result = expression.evaluate(&env);
-                writeln!(stdout, "{}", result.value())?;
+                let result = with_error_handler(error_handler, expression).evaluate(&env, &state);
+                writeln!(stdout, "{}", result)?;
             }
             Err(err) => {
                 writeln!(stderr, "Syntax error: {}", err.message())?;
@@ -38,4 +49,13 @@ pub fn start() -> io::Result<()> {
     }
 
     Ok(())
+}
+
+fn handle_errors(errors: &[&[Expression<Node>]]) -> Expression<Node> {
+    let mut stdout = io::stdout();
+    for args in errors {
+        let message = &args[0];
+        writeln!(stdout, "Error: {}", message).unwrap();
+    }
+    Expression::new(Node::Core(CoreNode::Value(ValueNode::Nil)))
 }

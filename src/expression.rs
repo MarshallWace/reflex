@@ -1,26 +1,19 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use std::{fmt, rc::Rc};
+use std::{collections::HashMap, fmt, rc::Rc};
 
-use crate::{env::Env, hash::hash_sequence, node::Node};
+use crate::{
+    env::Env,
+    hash::hash_sequence,
+    node::Node,
+    signal::{Signal, SignalResult},
+};
 
 pub trait NodeType<T: NodeType<T>>: PartialEq + Clone + fmt::Display + fmt::Debug {
     fn hash(&self) -> u32;
     fn capture_depth(&self) -> usize;
-    fn evaluate(&self, env: &Env<T>) -> Option<EvaluationResult<T>>;
-}
-
-pub trait CompoundNode<'a> {
-    type Expressions: Iterator<Item = &'a Expression<Node>>;
-    fn expressions(&'a self) -> Self::Expressions;
-    fn hash(&'a self) -> u32 {
-        hash_sequence(self.expressions().map(|expression| expression.hash()))
-    }
-    fn capture_depth(&'a self) -> usize {
-        self.expressions()
-            .fold(0, |acc, child| acc.max(child.capture_depth()))
-    }
+    fn evaluate(&self, env: &Env<T>, state: &RuntimeState<T>) -> Option<EvaluationResult<T>>;
 }
 
 pub type NodeFactory<T, V> = dyn Fn(&[Expression<T>]) -> Result<V, String>;
@@ -33,6 +26,18 @@ pub trait AstNodePackage<T: NodeType<T>>: NodeType<T> {
 
 pub trait AstNode<T: NodeType<T>>: NodeType<T> {
     fn factory(args: &[Expression<T>]) -> NodeFactoryResult<Self>;
+}
+
+pub trait CompoundNode<'a, T: NodeType<T> + 'a> {
+    type Expressions: Iterator<Item = &'a Expression<Node>>;
+    fn expressions(&'a self) -> Self::Expressions;
+    fn hash(&'a self) -> u32 {
+        hash_sequence(self.expressions().map(|expression| expression.hash()))
+    }
+    fn capture_depth(&'a self) -> usize {
+        self.expressions()
+            .fold(0, |acc, child| acc.max(child.capture_depth()))
+    }
 }
 
 #[derive(PartialEq, Clone)]
@@ -57,9 +62,9 @@ impl<T: NodeType<T>> Expression<T> {
     pub fn value(&self) -> &T {
         &self.value
     }
-    pub fn evaluate(&self, env: &Env<T>) -> EvaluationResult<T> {
+    pub fn evaluate(&self, env: &Env<T>, state: &RuntimeState<T>) -> EvaluationResult<T> {
         self.value()
-            .evaluate(env)
+            .evaluate(env, state)
             .unwrap_or_else(|| EvaluationResult::new(Expression::clone(self)))
     }
     pub fn capture_depth(&self) -> usize {
@@ -68,43 +73,90 @@ impl<T: NodeType<T>> Expression<T> {
 }
 impl<T: NodeType<T>> fmt::Debug for Expression<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}", self.value)
+        fmt::Debug::fmt(&self.value, f)
     }
 }
 impl<T: NodeType<T>> fmt::Display for Expression<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{:}", self.value)
+        fmt::Display::fmt(&self.value, f)
     }
 }
-
-pub type StateToken = u32;
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct EvaluationResult<T: NodeType<T>> {
-    expression: Expression<T>,
+    result: EvaluationResultType<T>,
     dependencies: DependencyList,
 }
 impl<T: NodeType<T>> EvaluationResult<T> {
+    pub fn from(result: EvaluationResultType<T>, dependencies: DependencyList) -> Self {
+        EvaluationResult {
+            result,
+            dependencies,
+        }
+    }
     pub fn new(expression: Expression<T>) -> Self {
         EvaluationResult {
-            expression,
+            result: EvaluationResultType::Expression(expression),
             dependencies: DependencyList::new(),
         }
     }
-    pub fn with_dependencies_from(self, other: EvaluationResult<T>) -> Self {
+    pub fn with_dependencies(expression: Expression<T>, dependencies: DependencyList) -> Self {
         EvaluationResult {
-            expression: self.expression,
-            dependencies: self.dependencies.extend(other.dependencies),
+            result: EvaluationResultType::Expression(expression),
+            dependencies,
         }
     }
-    pub fn expression(&self) -> &Expression<T> {
-        &self.expression
+    pub fn with_dependency(expression: Expression<T>, key: StateToken) -> Self {
+        EvaluationResult {
+            result: EvaluationResultType::Expression(expression),
+            dependencies: DependencyList::of(key),
+        }
     }
-    pub fn dependencies(&self) -> &DependencyList {
-        &self.dependencies
+    pub fn signal_with_dependencies(signal: SignalResult<T>, dependencies: DependencyList) -> Self {
+        EvaluationResult {
+            result: EvaluationResultType::Signal(signal),
+            dependencies,
+        }
     }
-    pub fn value(&self) -> &T {
-        self.expression.value()
+    pub fn signal(signal: Signal<T>) -> Self {
+        EvaluationResult::signal_with_dependencies(
+            SignalResult::Single(signal),
+            DependencyList::new(),
+        )
+    }
+    pub fn add_dependency(self, key: StateToken) -> Self {
+        EvaluationResult {
+            result: self.result,
+            dependencies: self.dependencies.append(key),
+        }
+    }
+    pub fn add_dependencies(self, dependencies: DependencyList) -> Self {
+        EvaluationResult {
+            result: self.result,
+            dependencies: self.dependencies.extend(dependencies),
+        }
+    }
+    pub fn unwrap(self) -> (EvaluationResultType<T>, DependencyList) {
+        (self.result, self.dependencies)
+    }
+}
+impl<T: NodeType<T>> fmt::Display for EvaluationResult<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Display::fmt(&self.result, f)
+    }
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub enum EvaluationResultType<T: NodeType<T>> {
+    Signal(SignalResult<T>),
+    Expression(Expression<T>),
+}
+impl<T: NodeType<T>> fmt::Display for EvaluationResultType<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            EvaluationResultType::Expression(expression) => fmt::Display::fmt(expression, f),
+            EvaluationResultType::Signal(signal) => fmt::Display::fmt(signal, f),
+        }
     }
 }
 
@@ -114,7 +166,19 @@ impl DependencyList {
     pub fn new() -> Self {
         DependencyList(None)
     }
-    pub fn extend(self, target: DependencyList) -> Self {
+    pub fn of(key: StateToken) -> Self {
+        DependencyList(Some(vec![key]))
+    }
+    pub fn append(self, key: StateToken) -> Self {
+        match self.0 {
+            None => DependencyList::of(key),
+            Some(mut dependencies) => {
+                dependencies.push(key);
+                DependencyList(Some(dependencies))
+            }
+        }
+    }
+    pub fn extend(self, target: Self) -> Self {
         match self.0 {
             None => target,
             Some(mut base_dependencies) => match target.0 {
@@ -125,5 +189,70 @@ impl DependencyList {
                 }
             },
         }
+    }
+}
+
+pub type StateToken = u32;
+
+pub struct RuntimeState<T: NodeType<T>> {
+    state: HashMap<StateToken, Expression<T>>,
+}
+impl<T: NodeType<T>> RuntimeState<T> {
+    pub fn new() -> Self {
+        RuntimeState {
+            state: HashMap::new(),
+        }
+    }
+    pub fn get(&self, key: StateToken) -> Option<Expression<T>> {
+        let value = self.state.get(&key)?;
+        Some(Expression::clone(value))
+    }
+    pub fn set(&mut self, key: StateToken, value: Expression<T>) {
+        self.state.insert(key, value);
+    }
+}
+
+pub trait EvaluateDependencies<'a, T: NodeType<T> + 'a> {
+    type Dependencies: Iterator<Item = &'a Expression<T>>;
+    fn dependencies(&'a self) -> Self::Dependencies;
+    fn run(
+        &self,
+        deps: &[Expression<T>],
+        env: &Env<T>,
+        state: &RuntimeState<T>,
+    ) -> EvaluationResult<T>;
+    fn evaluate(&'a self, env: &Env<T>, state: &RuntimeState<T>) -> Option<EvaluationResult<T>> {
+        let deps = self.dependencies();
+        let (results, dependencies) = deps.into_iter().fold(
+            (Ok(Vec::new()), DependencyList::new()),
+            |(combined_results, combined_dependencies): (
+                Result<Vec<Expression<T>>, SignalResult<T>>,
+                DependencyList,
+            ),
+             dep| {
+                let (result, dependencies) = dep.evaluate(env, state).unwrap();
+                let combined_results = match combined_results {
+                    Err(combined_signal) => Err(match result {
+                        EvaluationResultType::Signal(signal) => combined_signal.combine(signal),
+                        _ => combined_signal,
+                    }),
+                    Ok(mut results) => match result {
+                        EvaluationResultType::Signal(signal) => Err(signal),
+                        EvaluationResultType::Expression(expression) => {
+                            results.push(expression);
+                            Ok(results)
+                        }
+                    },
+                };
+                let combined_dependencies = combined_dependencies.extend(dependencies);
+                (combined_results, combined_dependencies)
+            },
+        );
+        Some(match results {
+            Err(signal) => EvaluationResult::signal_with_dependencies(signal, dependencies),
+            Ok(values) => self
+                .run(&values[..], env, state)
+                .add_dependencies(dependencies),
+        })
     }
 }

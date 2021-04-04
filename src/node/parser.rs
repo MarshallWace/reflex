@@ -925,42 +925,74 @@ mod tests {
         );
         assert_eq!(
             parse("(letrec ((fac (lambda (n) (if (= n 1) n (* n (fac (- n 1))))))) (fac 5))"),
-            Ok(Expression::new(Node::Core(CoreNode::LetRec(LetRecNode::new(
-                vec![
-                    Expression::new(Node::Core(CoreNode::Function(
+            Ok(Expression::new(Node::Core(CoreNode::LetRec(
+                LetRecNode::new(
+                    vec![Expression::new(Node::Core(CoreNode::Function(
                         FunctionNode::new(
                             1,
-                            Expression::new(Node::Logic(LogicNode::Conditional(ConditionalNode::new(
-                                Expression::new(Node::Arithmetic(ArithmeticNode::Equal(EqualNode::new(
-                                    Expression::new(Node::Core(CoreNode::Reference(ReferenceNode::new(0)))),
-                                    Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(1)))),
-                                )))),
-                                Expression::new(Node::Core(CoreNode::Reference(ReferenceNode::new(0)))),
-                                Expression::new(Node::Arithmetic(ArithmeticNode::Multiply(MultiplyNode::new(
-                                    Expression::new(Node::Core(CoreNode::Reference(ReferenceNode::new(0)))),
-                                    Expression::new(Node::Core(CoreNode::FunctionApplication(FunctionApplicationNode::new(
-                                        Expression::new(Node::Core(CoreNode::Reference(ReferenceNode::new(1)))),
-                                        vec![
-                                            Expression::new(Node::Arithmetic(ArithmeticNode::Subtract(SubtractNode::new(
-                                                Expression::new(Node::Core(CoreNode::Reference(ReferenceNode::new(0)))),
-                                                Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(1)))),
-                                            )))),
-                                        ],
-                                    )))),
-                                )))),
-                            )))),
+                            Expression::new(Node::Logic(LogicNode::Conditional(
+                                ConditionalNode::new(
+                                    Expression::new(Node::Arithmetic(ArithmeticNode::Equal(
+                                        EqualNode::new(
+                                            Expression::new(Node::Core(CoreNode::Reference(
+                                                ReferenceNode::new(0)
+                                            ))),
+                                            Expression::new(Node::Core(CoreNode::Value(
+                                                ValueNode::Int(1)
+                                            ))),
+                                        )
+                                    ))),
+                                    Expression::new(Node::Core(CoreNode::Reference(
+                                        ReferenceNode::new(0)
+                                    ))),
+                                    Expression::new(Node::Arithmetic(ArithmeticNode::Multiply(
+                                        MultiplyNode::new(
+                                            Expression::new(Node::Core(CoreNode::Reference(
+                                                ReferenceNode::new(0)
+                                            ))),
+                                            Expression::new(Node::Core(
+                                                CoreNode::FunctionApplication(
+                                                    FunctionApplicationNode::new(
+                                                        Expression::new(Node::Core(
+                                                            CoreNode::Reference(
+                                                                ReferenceNode::new(1)
+                                                            )
+                                                        )),
+                                                        vec![Expression::new(Node::Arithmetic(
+                                                            ArithmeticNode::Subtract(
+                                                                SubtractNode::new(
+                                                                    Expression::new(Node::Core(
+                                                                        CoreNode::Reference(
+                                                                            ReferenceNode::new(0)
+                                                                        )
+                                                                    )),
+                                                                    Expression::new(Node::Core(
+                                                                        CoreNode::Value(
+                                                                            ValueNode::Int(1)
+                                                                        )
+                                                                    )),
+                                                                )
+                                                            )
+                                                        )),],
+                                                    )
+                                                )
+                                            )),
+                                        )
+                                    ))),
+                                )
+                            ))),
+                        ),
+                    ))),],
+                    Expression::new(Node::Core(CoreNode::FunctionApplication(
+                        FunctionApplicationNode::new(
+                            Expression::new(Node::Core(CoreNode::Reference(ReferenceNode::new(0)))),
+                            vec![Expression::new(Node::Core(CoreNode::Value(
+                                ValueNode::Int(5)
+                            ))),],
                         ),
                     ))),
-                ],
-                Expression::new(Node::Core(CoreNode::FunctionApplication(
-                    FunctionApplicationNode::new(
-                        Expression::new(Node::Core(CoreNode::Reference(ReferenceNode::new(0)))),
-                        vec![
-                            Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(5)))),
-                        ],
-                    ),
-                ))),
-            ))))),
+                )
+            )))),
         );
     }
 
@@ -1289,7 +1321,7 @@ mod tests {
             Ok(Expression::new(Node::Arithmetic(ArithmeticNode::Abs(
                 AbsNode::new(Expression::new(Node::Core(CoreNode::Value(
                     ValueNode::Float(-123.45)
-                )),))
+                ))))
             )))),
         );
         assert_eq!(

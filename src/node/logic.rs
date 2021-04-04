@@ -7,6 +7,7 @@ use crate::{
     env::Env,
     expression::{
         AstNode, AstNodePackage, EvaluationResult, Expression, NodeFactoryResult, NodeType,
+        RuntimeState,
     },
     hash::prefix_hash,
     node::Node,
@@ -57,12 +58,16 @@ impl NodeType<Node> for LogicNode {
             LogicNode::Or(node) => node.capture_depth(),
         }
     }
-    fn evaluate(&self, env: &Env<Node>) -> Option<EvaluationResult<Node>> {
+    fn evaluate(
+        &self,
+        env: &Env<Node>,
+        state: &RuntimeState<Node>,
+    ) -> Option<EvaluationResult<Node>> {
         match self {
-            LogicNode::And(node) => node.evaluate(env),
-            LogicNode::Conditional(node) => node.evaluate(env),
-            LogicNode::Not(node) => node.evaluate(env),
-            LogicNode::Or(node) => node.evaluate(env),
+            LogicNode::And(node) => node.evaluate(env, state),
+            LogicNode::Conditional(node) => node.evaluate(env, state),
+            LogicNode::Not(node) => node.evaluate(env, state),
+            LogicNode::Or(node) => node.evaluate(env, state),
         }
     }
 }

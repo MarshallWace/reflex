@@ -7,6 +7,7 @@ pub mod env;
 pub mod expression;
 pub mod hash;
 pub mod node;
+pub mod signal;
 
 #[cfg(test)]
 mod benchmarks {
@@ -16,7 +17,7 @@ mod benchmarks {
 
     use crate::{
         env::Env,
-        expression::{Expression, NodeType},
+        expression::{RuntimeState, Expression, NodeType},
         node::{
             arithmetic::{AddNode, ArithmeticNode},
             core::{
@@ -30,58 +31,66 @@ mod benchmarks {
     #[bench]
     fn nested_expressions(b: &mut Bencher) {
         let env = Env::new();
+        let state = RuntimeState::new();
         let expression = parser::parse("(+ (+ (abs -3) 4) 5)").unwrap();
-        b.iter(|| expression.evaluate(&env));
+        b.iter(|| expression.evaluate(&env, &state));
     }
 
     #[bench]
     fn function_application_nullary(b: &mut Bencher) {
         let env = Env::new();
+        let state = RuntimeState::new();
         let expression = parser::parse("((lambda () 3))").unwrap();
-        b.iter(|| expression.evaluate(&env));
+        b.iter(|| expression.evaluate(&env, &state));
     }
 
     #[bench]
     fn function_application_unary(b: &mut Bencher) {
         let env = Env::new();
+        let state = RuntimeState::new();
         let expression = parser::parse("((lambda (foo) foo) 3)").unwrap();
-        b.iter(|| expression.evaluate(&env));
+        b.iter(|| expression.evaluate(&env, &state));
     }
 
     #[bench]
     fn function_application_binary(b: &mut Bencher) {
         let env = Env::new();
+        let state = RuntimeState::new();
         let expression = parser::parse("((lambda (foo bar) foo) 3 4)").unwrap();
-        b.iter(|| expression.evaluate(&env));
+        b.iter(|| expression.evaluate(&env, &state));
     }
 
     #[bench]
     fn function_application_ternary(b: &mut Bencher) {
         let env = Env::new();
+        let state = RuntimeState::new();
         let expression = parser::parse("((lambda (foo bar baz) foo) 3 4 5)").unwrap();
-        b.iter(|| expression.evaluate(&env));
+        b.iter(|| expression.evaluate(&env, &state));
     }
 
     #[bench]
     fn function_application_unused_args(b: &mut Bencher) {
         let env = Env::new();
+        let state = RuntimeState::new();
         let expression = parser::parse("((lambda (foo bar baz) 2) 3 4 5)").unwrap();
-        b.iter(|| expression.evaluate(&env));
+        b.iter(|| expression.evaluate(&env, &state));
     }
 
     #[bench]
     fn function_application_argument_scope(b: &mut Bencher) {
         let env = Env::new();
+        let state = RuntimeState::new();
         let expression = parser::parse(
             "((lambda (first second third) ((lambda (one two) ((lambda (foo bar) (+ foo bar)) one two)) first third)) 3 4 5)",
         )
         .unwrap();
-        b.iter(|| expression.evaluate(&env));
+        b.iter(|| expression.evaluate(&env, &state));
     }
 
     #[bench]
     fn deeply_nested_function_application(b: &mut Bencher) {
         let env = Env::new();
+        let state = RuntimeState::new();
         let expression = (1..=100).fold(
             Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(0)))),
             |acc, i| {
@@ -103,21 +112,23 @@ mod benchmarks {
                 )))
             },
         );
-        b.iter(|| expression.evaluate(&env))
+        b.iter(|| expression.evaluate(&env, &state))
     }
 
     #[bench]
     fn function_application_closure(b: &mut Bencher) {
         let env = Env::new();
+        let state = RuntimeState::new();
         let expression = parser::parse("(((lambda (foo) (lambda () foo)) 3))").unwrap();
-        b.iter(|| expression.evaluate(&env));
+        b.iter(|| expression.evaluate(&env, &state));
     }
 
     #[bench]
     fn conditional_expressions(b: &mut Bencher) {
         let env = Env::new();
+        let state = RuntimeState::new();
         let expression = parser::parse("(if #t 3 4)").unwrap();
-        b.iter(|| expression.evaluate(&env));
+        b.iter(|| expression.evaluate(&env, &state));
     }
 
     #[bench]

@@ -7,9 +7,11 @@ use crate::{
     env::Env,
     expression::{
         AstNode, CompoundNode, EvaluationResult, Expression, NodeFactoryResult, NodeType,
+        RuntimeState,
     },
     node::{
-        core::{CoreNode, ErrorNode, ValueNode},
+        core::{CoreNode, ValueNode},
+        evaluate::EvaluateResult,
         Evaluate1, Node,
     },
 };
@@ -45,7 +47,7 @@ impl AstNode<Node> for ConditionalNode {
         Ok(Self::new(condition, consequent, alternate))
     }
 }
-impl<'a> CompoundNode<'a> for ConditionalNode {
+impl<'a> CompoundNode<'a, Node> for ConditionalNode {
     type Expressions = std::iter::Chain<
         std::iter::Chain<
             std::iter::Once<&'a Expression<Node>>,
@@ -66,27 +68,28 @@ impl NodeType<Node> for ConditionalNode {
     fn capture_depth(&self) -> usize {
         CompoundNode::capture_depth(self)
     }
-    fn evaluate(&self, env: &Env<Node>) -> Option<EvaluationResult<Node>> {
-        Evaluate1::evaluate(self, env)
+    fn evaluate(
+        &self,
+        env: &Env<Node>,
+        state: &RuntimeState<Node>,
+    ) -> Option<EvaluationResult<Node>> {
+        Evaluate1::evaluate(self, env, state)
     }
 }
 impl Evaluate1 for ConditionalNode {
     fn dependencies(&self) -> &Expression<Node> {
         &self.condition
     }
-    fn run(&self, condition: &Expression<Node>) -> Expression<Node> {
+    fn run(&self, condition: &Expression<Node>) -> EvaluateResult {
         match condition.value() {
             Node::Core(CoreNode::Value(ValueNode::Boolean(condition))) => {
-                if *condition {
-                    Expression::clone(&self.consequent)
+                Ok(Expression::clone(if *condition {
+                    &self.consequent
                 } else {
-                    Expression::clone(&self.alternate)
-                }
+                    &self.alternate
+                }))
             }
-            _ => Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(&format!(
-                "Expected Boolean, received {}",
-                condition
-            ))))),
+            _ => Err(format!("Expected Boolean, received {}", condition)),
         }
     }
 }
@@ -100,78 +103,89 @@ impl fmt::Display for ConditionalNode {
 mod tests {
     use crate::{
         env::Env,
+        expression::{EvaluationResult, Expression, RuntimeState},
         node::{
-            core::{CoreNode, ErrorNode, ValueNode},
+            core::{CoreNode, ValueNode},
             parser, Node,
         },
+        signal::Signal,
     };
 
     #[test]
     fn conditional_expressions() {
         let env = Env::new();
+        let state = RuntimeState::new();
         let expression = parser::parse("(if #t 3 4)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Value(ValueNode::Int(3)))
+            result,
+            EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Int(3)
+            ))))
         );
         let expression = parser::parse("(if #f 3 4)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Value(ValueNode::Int(4)))
+            result,
+            EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Int(4)
+            ))))
         );
     }
 
     #[test]
     fn conditional_expression_short_circuiting() {
         let env = Env::new();
+        let state = RuntimeState::new();
         let expression = parser::parse("(if #t (+ 3 4) (error \"foo\"))").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Value(ValueNode::Int(3 + 4)))
+            result,
+            EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Int(3 + 4)
+            ))))
         );
         let expression = parser::parse("(if #f (error \"foo\") (+ 3 4))").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Value(ValueNode::Int(3 + 4)))
+            result,
+            EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Int(3 + 4)
+            ))))
         );
     }
 
     #[test]
     fn invalid_conditional_expression_conditions() {
         let env = Env::new();
+        let state = RuntimeState::new();
         let expression = parser::parse("(if null #t #f)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Error(ErrorNode::new(
+            result,
+            EvaluationResult::signal(Signal::error(String::from(
                 "Expected Boolean, received null"
             )))
         );
         let expression = parser::parse("(if 0 #t #f)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Error(ErrorNode::new(
-                "Expected Boolean, received 0"
-            )))
+            result,
+            EvaluationResult::signal(Signal::error(String::from("Expected Boolean, received 0")))
         );
         let expression = parser::parse("(if 0.0 #t #f)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Error(ErrorNode::new(
+            result,
+            EvaluationResult::signal(Signal::error(String::from(
                 "Expected Boolean, received 0.0"
             )))
         );
         let expression = parser::parse("(if \"\" #t #f)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Error(ErrorNode::new(
+            result,
+            EvaluationResult::signal(Signal::error(String::from(
                 "Expected Boolean, received \"\""
             )))
         );

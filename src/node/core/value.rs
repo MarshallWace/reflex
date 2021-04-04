@@ -7,9 +7,10 @@ use crate::{
     env::Env,
     expression::{
         AstNode, CompoundNode, EvaluationResult, Expression, NodeFactoryResult, NodeType,
+        RuntimeState,
     },
     hash::{hash_bytes, hash_string, prefix_hash},
-    node::{core::CoreNode, Evaluate1, Node},
+    node::{core::CoreNode, evaluate::EvaluateResult, Evaluate1, Node},
 };
 
 #[derive(Debug, PartialEq, Clone)]
@@ -46,7 +47,11 @@ impl NodeType<Node> for ValueNode {
     fn capture_depth(&self) -> usize {
         0
     }
-    fn evaluate(&self, _env: &Env<Node>) -> Option<EvaluationResult<Node>> {
+    fn evaluate(
+        &self,
+        _env: &Env<Node>,
+        _state: &RuntimeState<Node>,
+    ) -> Option<EvaluationResult<Node>> {
         None
     }
 }
@@ -130,7 +135,7 @@ impl AstNode<Node> for IsNullNode {
         Ok(Self::new(target))
     }
 }
-impl<'a> CompoundNode<'a> for IsNullNode {
+impl<'a> CompoundNode<'a, Node> for IsNullNode {
     type Expressions = std::iter::Once<&'a Expression<Node>>;
     fn expressions(&'a self) -> Self::Expressions {
         once(&self.target)
@@ -143,21 +148,25 @@ impl NodeType<Node> for IsNullNode {
     fn capture_depth(&self) -> usize {
         CompoundNode::capture_depth(self)
     }
-    fn evaluate(&self, env: &Env<Node>) -> Option<EvaluationResult<Node>> {
-        Evaluate1::evaluate(self, env)
+    fn evaluate(
+        &self,
+        env: &Env<Node>,
+        state: &RuntimeState<Node>,
+    ) -> Option<EvaluationResult<Node>> {
+        Evaluate1::evaluate(self, env, state)
     }
 }
 impl Evaluate1 for IsNullNode {
     fn dependencies(&self) -> &Expression<Node> {
         &self.target
     }
-    fn run(&self, target: &Expression<Node>) -> Expression<Node> {
-        match target.value() {
+    fn run(&self, target: &Expression<Node>) -> EvaluateResult {
+        Ok(match target.value() {
             Node::Core(CoreNode::Value(ValueNode::Nil)) => {
                 Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(true))))
             }
             _ => Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false)))),
-        }
+        })
     }
 }
 impl fmt::Display for IsNullNode {
@@ -185,7 +194,7 @@ impl AstNode<Node> for IsBooleanNode {
         Ok(Self::new(target))
     }
 }
-impl<'a> CompoundNode<'a> for IsBooleanNode {
+impl<'a> CompoundNode<'a, Node> for IsBooleanNode {
     type Expressions = std::iter::Once<&'a Expression<Node>>;
     fn expressions(&'a self) -> Self::Expressions {
         once(&self.target)
@@ -198,21 +207,25 @@ impl NodeType<Node> for IsBooleanNode {
     fn capture_depth(&self) -> usize {
         CompoundNode::capture_depth(self)
     }
-    fn evaluate(&self, env: &Env<Node>) -> Option<EvaluationResult<Node>> {
-        Evaluate1::evaluate(self, env)
+    fn evaluate(
+        &self,
+        env: &Env<Node>,
+        state: &RuntimeState<Node>,
+    ) -> Option<EvaluationResult<Node>> {
+        Evaluate1::evaluate(self, env, state)
     }
 }
 impl Evaluate1 for IsBooleanNode {
     fn dependencies(&self) -> &Expression<Node> {
         &self.target
     }
-    fn run(&self, target: &Expression<Node>) -> Expression<Node> {
-        match target.value() {
+    fn run(&self, target: &Expression<Node>) -> EvaluateResult {
+        Ok(match target.value() {
             Node::Core(CoreNode::Value(ValueNode::Boolean(_))) => {
                 Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(true))))
             }
             _ => Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false)))),
-        }
+        })
     }
 }
 impl fmt::Display for IsBooleanNode {
@@ -240,7 +253,7 @@ impl AstNode<Node> for IsIntegerNode {
         Ok(Self::new(target))
     }
 }
-impl<'a> CompoundNode<'a> for IsIntegerNode {
+impl<'a> CompoundNode<'a, Node> for IsIntegerNode {
     type Expressions = std::iter::Once<&'a Expression<Node>>;
     fn expressions(&'a self) -> Self::Expressions {
         once(&self.target)
@@ -253,21 +266,25 @@ impl NodeType<Node> for IsIntegerNode {
     fn capture_depth(&self) -> usize {
         CompoundNode::capture_depth(self)
     }
-    fn evaluate(&self, env: &Env<Node>) -> Option<EvaluationResult<Node>> {
-        Evaluate1::evaluate(self, env)
+    fn evaluate(
+        &self,
+        env: &Env<Node>,
+        state: &RuntimeState<Node>,
+    ) -> Option<EvaluationResult<Node>> {
+        Evaluate1::evaluate(self, env, state)
     }
 }
 impl Evaluate1 for IsIntegerNode {
     fn dependencies(&self) -> &Expression<Node> {
         &self.target
     }
-    fn run(&self, target: &Expression<Node>) -> Expression<Node> {
-        match target.value() {
+    fn run(&self, target: &Expression<Node>) -> EvaluateResult {
+        Ok(match target.value() {
             Node::Core(CoreNode::Value(ValueNode::Int(_))) => {
                 Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(true))))
             }
             _ => Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false)))),
-        }
+        })
     }
 }
 impl fmt::Display for IsIntegerNode {
@@ -295,7 +312,7 @@ impl AstNode<Node> for IsFloatNode {
         Ok(Self::new(target))
     }
 }
-impl<'a> CompoundNode<'a> for IsFloatNode {
+impl<'a> CompoundNode<'a, Node> for IsFloatNode {
     type Expressions = std::iter::Once<&'a Expression<Node>>;
     fn expressions(&'a self) -> Self::Expressions {
         once(&self.target)
@@ -308,21 +325,25 @@ impl NodeType<Node> for IsFloatNode {
     fn capture_depth(&self) -> usize {
         CompoundNode::capture_depth(self)
     }
-    fn evaluate(&self, env: &Env<Node>) -> Option<EvaluationResult<Node>> {
-        Evaluate1::evaluate(self, env)
+    fn evaluate(
+        &self,
+        env: &Env<Node>,
+        state: &RuntimeState<Node>,
+    ) -> Option<EvaluationResult<Node>> {
+        Evaluate1::evaluate(self, env, state)
     }
 }
 impl Evaluate1 for IsFloatNode {
     fn dependencies(&self) -> &Expression<Node> {
         &self.target
     }
-    fn run(&self, target: &Expression<Node>) -> Expression<Node> {
-        match target.value() {
+    fn run(&self, target: &Expression<Node>) -> EvaluateResult {
+        Ok(match target.value() {
             Node::Core(CoreNode::Value(ValueNode::Float(_))) => {
                 Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(true))))
             }
             _ => Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false)))),
-        }
+        })
     }
 }
 impl fmt::Display for IsFloatNode {
@@ -350,7 +371,7 @@ impl AstNode<Node> for IsStringNode {
         Ok(Self::new(target))
     }
 }
-impl<'a> CompoundNode<'a> for IsStringNode {
+impl<'a> CompoundNode<'a, Node> for IsStringNode {
     type Expressions = std::iter::Once<&'a Expression<Node>>;
     fn expressions(&'a self) -> Self::Expressions {
         once(&self.target)
@@ -363,21 +384,25 @@ impl NodeType<Node> for IsStringNode {
     fn capture_depth(&self) -> usize {
         CompoundNode::capture_depth(self)
     }
-    fn evaluate(&self, env: &Env<Node>) -> Option<EvaluationResult<Node>> {
-        Evaluate1::evaluate(self, env)
+    fn evaluate(
+        &self,
+        env: &Env<Node>,
+        state: &RuntimeState<Node>,
+    ) -> Option<EvaluationResult<Node>> {
+        Evaluate1::evaluate(self, env, state)
     }
 }
 impl Evaluate1 for IsStringNode {
     fn dependencies(&self) -> &Expression<Node> {
         &self.target
     }
-    fn run(&self, target: &Expression<Node>) -> Expression<Node> {
-        match target.value() {
+    fn run(&self, target: &Expression<Node>) -> EvaluateResult {
+        Ok(match target.value() {
             Node::Core(CoreNode::Value(ValueNode::String(_))) => {
                 Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(true))))
             }
             _ => Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(false)))),
-        }
+        })
     }
 }
 impl fmt::Display for IsStringNode {
@@ -390,7 +415,7 @@ impl fmt::Display for IsStringNode {
 mod tests {
     use crate::{
         env::Env,
-        expression::Expression,
+        expression::{EvaluationResult, Expression, RuntimeState},
         node::{core::CoreNode, parser, Node},
     };
 
@@ -399,112 +424,135 @@ mod tests {
     #[test]
     fn static_values_nil() {
         let env = Env::new();
+        let state = RuntimeState::new();
         let expression = parser::parse("null").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Value(ValueNode::Nil))
+            result,
+            EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(ValueNode::Nil))))
         );
     }
 
     #[test]
     fn static_values_boolean() {
         let env = Env::new();
+        let state = RuntimeState::new();
         let expression = parser::parse("#t").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Value(ValueNode::Boolean(true)))
+            result,
+            EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Boolean(true)
+            ))))
         );
         let expression = parser::parse("#f").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
+            result,
+            EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Boolean(false)
+            ))))
         );
     }
 
     #[test]
     fn static_values_int() {
         let env = Env::new();
+        let state = RuntimeState::new();
         let expression = parser::parse("0").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Value(ValueNode::Int(0)))
+            result,
+            EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Int(0)
+            ))))
         );
         let expression = parser::parse("3").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Value(ValueNode::Int(3)))
+            result,
+            EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Int(3)
+            ))))
         );
         let expression = parser::parse("-3").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Value(ValueNode::Int(-3)))
+            result,
+            EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Int(-3)
+            ))))
         );
     }
 
     #[test]
     fn static_values_float() {
         let env = Env::new();
+        let state = RuntimeState::new();
         let expression = parser::parse("0.0").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Value(ValueNode::Float(0.0)))
+            result,
+            EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Float(0.0)
+            ))))
         );
         let expression = parser::parse("3.142").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Value(ValueNode::Float(3.142)))
+            result,
+            EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Float(3.142)
+            ))))
         );
         let expression = parser::parse("-3.142").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Value(ValueNode::Float(-3.142)))
+            result,
+            EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Float(-3.142)
+            ))))
         );
     }
 
     #[test]
     fn static_values_string() {
         let env = Env::new();
+        let state = RuntimeState::new();
         let expression = parser::parse("\"\"").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Value(ValueNode::String(StringValue::new(
-                String::from("")
+            result,
+            EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::String(StringValue::new(String::from("")))
             ))))
         );
         let expression = parser::parse("\"foo\"").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Value(ValueNode::String(StringValue::new(
-                String::from("foo")
+            result,
+            EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::String(StringValue::new(String::from("foo")))
             ))))
         );
         let expression = Expression::new(Node::Core(CoreNode::Value(ValueNode::String(
             StringValue::literal(""),
         ))));
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Value(ValueNode::String(StringValue::literal(""))))
+            result,
+            EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::String(StringValue::literal(""))
+            ))))
         );
         let expression = Expression::new(Node::Core(CoreNode::Value(ValueNode::String(
             StringValue::literal("foo"),
         ))));
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Value(ValueNode::String(StringValue::literal(
-                "foo"
+            result,
+            EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::String(StringValue::literal("foo"))
             ))))
         );
     }
@@ -571,420 +619,555 @@ mod tests {
     #[test]
     fn is_null_expressions() {
         let env = Env::new();
+        let state = RuntimeState::new();
         let expression = parser::parse("(null? null)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Value(ValueNode::Boolean(true)))
+            result,
+            EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Boolean(true)
+            ))))
         );
 
         let expression = parser::parse("(null? #t)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
+            result,
+            EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Boolean(false)
+            ))))
         );
         let expression = parser::parse("(null? #f)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
+            result,
+            EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Boolean(false)
+            ))))
         );
         let expression = parser::parse("(null? 0)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
+            result,
+            EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Boolean(false)
+            ))))
         );
         let expression = parser::parse("(null? -0)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
+            result,
+            EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Boolean(false)
+            ))))
         );
         let expression = parser::parse("(null? 3)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
+            result,
+            EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Boolean(false)
+            ))))
         );
         let expression = parser::parse("(null? -3)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
+            result,
+            EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Boolean(false)
+            ))))
         );
         let expression = parser::parse("(null? 0.0)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
+            result,
+            EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Boolean(false)
+            ))))
         );
         let expression = parser::parse("(null? -0.0)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
+            result,
+            EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Boolean(false)
+            ))))
         );
         let expression = parser::parse("(null? 3.142)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
+            result,
+            EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Boolean(false)
+            ))))
         );
         let expression = parser::parse("(null? -3.142)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
+            result,
+            EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Boolean(false)
+            ))))
         );
         let expression = parser::parse("(null? \"\")").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
+            result,
+            EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Boolean(false)
+            ))))
         );
         let expression = parser::parse("(null? \"foo\")").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
+            result,
+            EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Boolean(false)
+            ))))
         );
     }
 
     #[test]
     fn is_boolean_expressions() {
         let env = Env::new();
+        let state = RuntimeState::new();
         let expression = parser::parse("(boolean? #t)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Value(ValueNode::Boolean(true)))
+            result,
+            EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Boolean(true)
+            ))))
         );
         let expression = parser::parse("(boolean? #f)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Value(ValueNode::Boolean(true)))
+            result,
+            EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Boolean(true)
+            ))))
         );
 
         let expression = parser::parse("(boolean? null)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
+            result,
+            EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Boolean(false)
+            ))))
         );
         let expression = parser::parse("(boolean? 0)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
+            result,
+            EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Boolean(false)
+            ))))
         );
         let expression = parser::parse("(boolean? -0)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
+            result,
+            EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Boolean(false)
+            ))))
         );
         let expression = parser::parse("(boolean? 3)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
+            result,
+            EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Boolean(false)
+            ))))
         );
         let expression = parser::parse("(boolean? -3)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
+            result,
+            EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Boolean(false)
+            ))))
         );
         let expression = parser::parse("(boolean? 0.0)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
+            result,
+            EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Boolean(false)
+            ))))
         );
         let expression = parser::parse("(boolean? -0.0)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
+            result,
+            EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Boolean(false)
+            ))))
         );
         let expression = parser::parse("(boolean? 3.142)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
+            result,
+            EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Boolean(false)
+            ))))
         );
         let expression = parser::parse("(boolean? -3.142)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
+            result,
+            EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Boolean(false)
+            ))))
         );
         let expression = parser::parse("(boolean? \"\")").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
+            result,
+            EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Boolean(false)
+            ))))
         );
         let expression = parser::parse("(boolean? \"foo\")").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
+            result,
+            EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Boolean(false)
+            ))))
         );
     }
 
     #[test]
     fn is_integer_expressions() {
         let env = Env::new();
+        let state = RuntimeState::new();
         let expression = parser::parse("(integer? 0)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Value(ValueNode::Boolean(true)))
+            result,
+            EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Boolean(true)
+            ))))
         );
         let expression = parser::parse("(integer? -0)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Value(ValueNode::Boolean(true)))
+            result,
+            EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Boolean(true)
+            ))))
         );
         let expression = parser::parse("(integer? 3)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Value(ValueNode::Boolean(true)))
+            result,
+            EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Boolean(true)
+            ))))
         );
         let expression = parser::parse("(integer? -3)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Value(ValueNode::Boolean(true)))
+            result,
+            EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Boolean(true)
+            ))))
         );
 
         let expression = parser::parse("(integer? null)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
+            result,
+            EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Boolean(false)
+            ))))
         );
         let expression = parser::parse("(integer? #t)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
+            result,
+            EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Boolean(false)
+            ))))
         );
         let expression = parser::parse("(integer? #f)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
+            result,
+            EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Boolean(false)
+            ))))
         );
         let expression = parser::parse("(integer? 0.0)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
+            result,
+            EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Boolean(false)
+            ))))
         );
         let expression = parser::parse("(integer? -0.0)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
+            result,
+            EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Boolean(false)
+            ))))
         );
         let expression = parser::parse("(integer? 3.142)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
+            result,
+            EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Boolean(false)
+            ))))
         );
         let expression = parser::parse("(integer? -3.142)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
+            result,
+            EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Boolean(false)
+            ))))
         );
         let expression = parser::parse("(integer? \"\")").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
+            result,
+            EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Boolean(false)
+            ))))
         );
         let expression = parser::parse("(integer? \"foo\")").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
+            result,
+            EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Boolean(false)
+            ))))
         );
     }
 
     #[test]
     fn is_float_expressions() {
         let env = Env::new();
+        let state = RuntimeState::new();
         let expression = parser::parse("(float? 0.0)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Value(ValueNode::Boolean(true)))
+            result,
+            EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Boolean(true)
+            ))))
         );
         let expression = parser::parse("(float? -0.0)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Value(ValueNode::Boolean(true)))
+            result,
+            EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Boolean(true)
+            ))))
         );
         let expression = parser::parse("(float? 3.142)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Value(ValueNode::Boolean(true)))
+            result,
+            EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Boolean(true)
+            ))))
         );
         let expression = parser::parse("(float? -3.142)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Value(ValueNode::Boolean(true)))
+            result,
+            EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Boolean(true)
+            ))))
         );
 
         let expression = parser::parse("(float? null)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
+            result,
+            EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Boolean(false)
+            ))))
         );
         let expression = parser::parse("(float? #t)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
+            result,
+            EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Boolean(false)
+            ))))
         );
         let expression = parser::parse("(float? #f)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
+            result,
+            EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Boolean(false)
+            ))))
         );
         let expression = parser::parse("(float? 0)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
+            result,
+            EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Boolean(false)
+            ))))
         );
         let expression = parser::parse("(float? -0)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
+            result,
+            EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Boolean(false)
+            ))))
         );
         let expression = parser::parse("(float? 3)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
+            result,
+            EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Boolean(false)
+            ))))
         );
         let expression = parser::parse("(float? -3)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
+            result,
+            EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Boolean(false)
+            ))))
         );
         let expression = parser::parse("(float? \"\")").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
+            result,
+            EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Boolean(false)
+            ))))
         );
         let expression = parser::parse("(float? \"foo\")").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
+            result,
+            EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Boolean(false)
+            ))))
         );
     }
 
     #[test]
     fn is_string_expressions() {
         let env = Env::new();
+        let state = RuntimeState::new();
         let expression = parser::parse("(string? \"\")").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Value(ValueNode::Boolean(true)))
+            result,
+            EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Boolean(true)
+            ))))
         );
         let expression = parser::parse("(string? \"foo\")").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Value(ValueNode::Boolean(true)))
+            result,
+            EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Boolean(true)
+            ))))
         );
 
         let expression = parser::parse("(string? null)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
+            result,
+            EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Boolean(false)
+            ))))
         );
         let expression = parser::parse("(string? #t)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
+            result,
+            EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Boolean(false)
+            ))))
         );
         let expression = parser::parse("(string? #f)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
+            result,
+            EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Boolean(false)
+            ))))
         );
         let expression = parser::parse("(string? 0)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
+            result,
+            EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Boolean(false)
+            ))))
         );
         let expression = parser::parse("(string? -0)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
+            result,
+            EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Boolean(false)
+            ))))
         );
         let expression = parser::parse("(string? 3)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
+            result,
+            EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Boolean(false)
+            ))))
         );
         let expression = parser::parse("(string? -3)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
+            result,
+            EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Boolean(false)
+            ))))
         );
         let expression = parser::parse("(string? 0.0)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
+            result,
+            EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Boolean(false)
+            ))))
         );
         let expression = parser::parse("(string? -0.0)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
+            result,
+            EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Boolean(false)
+            ))))
         );
         let expression = parser::parse("(string? 3.142)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
+            result,
+            EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Boolean(false)
+            ))))
         );
         let expression = parser::parse("(string? -3.142)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
+            result,
+            EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Boolean(false)
+            ))))
         );
     }
 }

@@ -7,6 +7,7 @@ use crate::{
     env::Env,
     expression::{
         AstNode, AstNodePackage, EvaluationResult, Expression, NodeFactoryResult, NodeType,
+        RuntimeState,
     },
     hash::prefix_hash,
     node::Node,
@@ -135,25 +136,29 @@ impl NodeType<Node> for ArithmeticNode {
             Self::Pow(node) => node.capture_depth(),
         }
     }
-    fn evaluate(&self, env: &Env<Node>) -> Option<EvaluationResult<Node>> {
+    fn evaluate(
+        &self,
+        env: &Env<Node>,
+        state: &RuntimeState<Node>,
+    ) -> Option<EvaluationResult<Node>> {
         match self {
-            Self::Add(node) => node.evaluate(env),
-            Self::Subtract(node) => node.evaluate(env),
-            Self::Multiply(node) => node.evaluate(env),
-            Self::Divide(node) => node.evaluate(env),
-            Self::Equal(node) => node.evaluate(env),
-            Self::Remainder(node) => node.evaluate(env),
-            Self::Abs(node) => node.evaluate(env),
-            Self::Floor(node) => node.evaluate(env),
-            Self::Gt(node) => node.evaluate(env),
-            Self::Gte(node) => node.evaluate(env),
-            Self::Lt(node) => node.evaluate(env),
-            Self::Lte(node) => node.evaluate(env),
-            Self::Ceil(node) => node.evaluate(env),
-            Self::Round(node) => node.evaluate(env),
-            Self::Max(node) => node.evaluate(env),
-            Self::Min(node) => node.evaluate(env),
-            Self::Pow(node) => node.evaluate(env),
+            Self::Add(node) => node.evaluate(env, state),
+            Self::Subtract(node) => node.evaluate(env, state),
+            Self::Multiply(node) => node.evaluate(env, state),
+            Self::Divide(node) => node.evaluate(env, state),
+            Self::Equal(node) => node.evaluate(env, state),
+            Self::Remainder(node) => node.evaluate(env, state),
+            Self::Abs(node) => node.evaluate(env, state),
+            Self::Floor(node) => node.evaluate(env, state),
+            Self::Gt(node) => node.evaluate(env, state),
+            Self::Gte(node) => node.evaluate(env, state),
+            Self::Lt(node) => node.evaluate(env, state),
+            Self::Lte(node) => node.evaluate(env, state),
+            Self::Ceil(node) => node.evaluate(env, state),
+            Self::Round(node) => node.evaluate(env, state),
+            Self::Max(node) => node.evaluate(env, state),
+            Self::Min(node) => node.evaluate(env, state),
+            Self::Pow(node) => node.evaluate(env, state),
         }
     }
 }

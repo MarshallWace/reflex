@@ -7,9 +7,11 @@ use crate::{
     env::Env,
     expression::{
         AstNode, CompoundNode, EvaluationResult, Expression, NodeFactoryResult, NodeType,
+        RuntimeState,
     },
     node::{
-        core::{CoreNode, ErrorNode, ValueNode},
+        core::{CoreNode, ValueNode},
+        evaluate::EvaluateResult,
         Evaluate2, Node,
     },
 };
@@ -35,7 +37,7 @@ impl AstNode<Node> for DivideNode {
         Ok(Self::new(left, right))
     }
 }
-impl<'a> CompoundNode<'a> for DivideNode {
+impl<'a> CompoundNode<'a, Node> for DivideNode {
     type Expressions = std::iter::Chain<
         std::iter::Once<&'a Expression<Node>>,
         std::iter::Once<&'a Expression<Node>>,
@@ -51,27 +53,30 @@ impl NodeType<Node> for DivideNode {
     fn capture_depth(&self) -> usize {
         CompoundNode::capture_depth(self)
     }
-    fn evaluate(&self, env: &Env<Node>) -> Option<EvaluationResult<Node>> {
-        Evaluate2::evaluate(self, env)
+    fn evaluate(
+        &self,
+        env: &Env<Node>,
+        state: &RuntimeState<Node>,
+    ) -> Option<EvaluationResult<Node>> {
+        Evaluate2::evaluate(self, env, state)
     }
 }
 impl Evaluate2 for DivideNode {
     fn dependencies(&self) -> (&Expression<Node>, &Expression<Node>) {
         (&self.left, &self.right)
     }
-    fn run(&self, left: &Expression<Node>, right: &Expression<Node>) -> Expression<Node> {
+    fn run(&self, left: &Expression<Node>, right: &Expression<Node>) -> EvaluateResult {
         match (left.value(), right.value()) {
             (
                 Node::Core(CoreNode::Value(ValueNode::Int(left))),
                 Node::Core(CoreNode::Value(ValueNode::Int(right))),
             ) => {
                 if *right == 0 {
-                    Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(&format!(
-                        "Division by zero: ({:?} / {:?})",
-                        left, right
-                    )))))
+                    Err(format!("Division by zero: ({:?} / {:?})", left, right))
                 } else {
-                    Expression::new(Node::Core(CoreNode::Value(ValueNode::Int(left / right))))
+                    Ok(Expression::new(Node::Core(CoreNode::Value(
+                        ValueNode::Int(left / right),
+                    ))))
                 }
             }
             (
@@ -79,20 +84,17 @@ impl Evaluate2 for DivideNode {
                 Node::Core(CoreNode::Value(ValueNode::Float(right))),
             ) => {
                 if *right == 0.0 {
-                    Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(&format!(
-                        "Division by zero: ({:?} / {:?})",
-                        left, right
-                    )))))
+                    Err(format!("Division by zero: ({:?} / {:?})", left, right))
                 } else {
-                    Expression::new(Node::Core(CoreNode::Value(ValueNode::Float(left / right))))
+                    Ok(Expression::new(Node::Core(CoreNode::Value(
+                        ValueNode::Float(left / right),
+                    ))))
                 }
             }
-            (left, right) => {
-                Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(&format!(
-                    "Expected (Int, Int) or (Float, Float), received ({}, {})",
-                    left, right,
-                )))))
-            }
+            (left, right) => Err(format!(
+                "Expected (Int, Int) or (Float, Float), received ({}, {})",
+                left, right,
+            )),
         }
     }
 }
@@ -106,253 +108,279 @@ impl fmt::Display for DivideNode {
 mod tests {
     use crate::{
         env::Env,
+        expression::{EvaluationResult, Expression, RuntimeState},
         node::{
-            core::{CoreNode, ErrorNode, ValueNode},
+            core::{CoreNode, ValueNode},
             parser, Node,
         },
+        signal::Signal,
     };
 
     #[test]
     fn divide_expressions() {
         let env = Env::new();
+        let state = RuntimeState::new();
         let expression = parser::parse("(/ 0 3)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Value(ValueNode::Int(0 / 3)))
+            result,
+            EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Int(0 / 3)
+            ))))
         );
         let expression = parser::parse("(/ 12 3)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Value(ValueNode::Int(12 / 3)))
+            result,
+            EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Int(12 / 3)
+            ))))
         );
         let expression = parser::parse("(/ -12 3)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Value(ValueNode::Int(-12 / 3)))
+            result,
+            EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Int(-12 / 3)
+            ))))
         );
         let expression = parser::parse("(/ 12 -3)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Value(ValueNode::Int(12 / -3)))
+            result,
+            EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Int(12 / -3)
+            ))))
         );
         let expression = parser::parse("(/ -12 -3)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Value(ValueNode::Int(-12 / -3)))
+            result,
+            EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Int(-12 / -3)
+            ))))
         );
 
         let expression = parser::parse("(/ 0.0 3.142)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Value(ValueNode::Float(0.0 / 3.142)))
+            result,
+            EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Float(0.0 / 3.142)
+            ))))
         );
         let expression = parser::parse("(/ 2.718 3.142)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Value(ValueNode::Float(2.718 / 3.142)))
+            result,
+            EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Float(2.718 / 3.142)
+            ))))
         );
         let expression = parser::parse("(/ -2.718 3.142)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Value(ValueNode::Float(-2.718 / 3.142)))
+            result,
+            EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Float(-2.718 / 3.142)
+            ))))
         );
         let expression = parser::parse("(/ 2.718 -3.142)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Value(ValueNode::Float(2.718 / -3.142)))
+            result,
+            EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Float(2.718 / -3.142)
+            ))))
         );
         let expression = parser::parse("(/ -2.718 -3.142)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Value(ValueNode::Float(-2.718 / -3.142)))
+            result,
+            EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Float(-2.718 / -3.142)
+            ))))
         );
     }
 
     #[test]
     fn integer_divide_rounding() {
         let env = Env::new();
+        let state = RuntimeState::new();
         let expression = parser::parse("(/ 5 3)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Value(ValueNode::Int(1)))
+            result,
+            EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Int(1)
+            ))))
         );
     }
 
     #[test]
     fn divide_by_zero() {
         let env = Env::new();
+        let state = RuntimeState::new();
         let expression = parser::parse("(/ 3 0)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Error(ErrorNode::new("Division by zero: (3 / 0)")))
+            result,
+            EvaluationResult::signal(Signal::error(String::from("Division by zero: (3 / 0)")))
         );
         let expression = parser::parse("(/ 3 -0)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Error(ErrorNode::new("Division by zero: (3 / 0)")))
+            result,
+            EvaluationResult::signal(Signal::error(String::from("Division by zero: (3 / 0)")))
         );
         let expression = parser::parse("(/ 0 0)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Error(ErrorNode::new("Division by zero: (0 / 0)")))
+            result,
+            EvaluationResult::signal(Signal::error(String::from("Division by zero: (0 / 0)")))
         );
 
         let expression = parser::parse("(/ 3.142 0.0)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Error(ErrorNode::new(
+            result,
+            EvaluationResult::signal(Signal::error(String::from(
                 "Division by zero: (3.142 / 0.0)"
             )))
         );
         let expression = parser::parse("(/ 3.142 -0.0)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Error(ErrorNode::new(
+            result,
+            EvaluationResult::signal(Signal::error(String::from(
                 "Division by zero: (3.142 / -0.0)"
             )))
         );
         let expression = parser::parse("(/ 0.0 0.0)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Error(ErrorNode::new(
-                "Division by zero: (0.0 / 0.0)"
-            )))
+            result,
+            EvaluationResult::signal(Signal::error(String::from("Division by zero: (0.0 / 0.0)")))
         );
     }
 
     #[test]
     fn invalid_divide_expression_operands() {
         let env = Env::new();
+        let state = RuntimeState::new();
         let expression = parser::parse("(/ 3 3.142)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Error(ErrorNode::new(
+            result,
+            EvaluationResult::signal(Signal::error(String::from(
                 "Expected (Int, Int) or (Float, Float), received (3, 3.142)"
             )))
         );
         let expression = parser::parse("(/ 3.142 3)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Error(ErrorNode::new(
+            result,
+            EvaluationResult::signal(Signal::error(String::from(
                 "Expected (Int, Int) or (Float, Float), received (3.142, 3)"
             )))
         );
 
         let expression = parser::parse("(/ 3 null)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Error(ErrorNode::new(
+            result,
+            EvaluationResult::signal(Signal::error(String::from(
                 "Expected (Int, Int) or (Float, Float), received (3, null)"
             )))
         );
         let expression = parser::parse("(/ 3 #f)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Error(ErrorNode::new(
+            result,
+            EvaluationResult::signal(Signal::error(String::from(
                 "Expected (Int, Int) or (Float, Float), received (3, #f)"
             )))
         );
         let expression = parser::parse("(/ 3 \"0\")").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Error(ErrorNode::new(
+            result,
+            EvaluationResult::signal(Signal::error(String::from(
                 "Expected (Int, Int) or (Float, Float), received (3, \"0\")"
             )))
         );
 
         let expression = parser::parse("(/ null 3)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Error(ErrorNode::new(
+            result,
+            EvaluationResult::signal(Signal::error(String::from(
                 "Expected (Int, Int) or (Float, Float), received (null, 3)"
             )))
         );
         let expression = parser::parse("(/ #f 3)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Error(ErrorNode::new(
+            result,
+            EvaluationResult::signal(Signal::error(String::from(
                 "Expected (Int, Int) or (Float, Float), received (#f, 3)"
             )))
         );
         let expression = parser::parse("(/ \"0\" 3)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Error(ErrorNode::new(
+            result,
+            EvaluationResult::signal(Signal::error(String::from(
                 "Expected (Int, Int) or (Float, Float), received (\"0\", 3)"
             )))
         );
 
         let expression = parser::parse("(/ 3.142 null)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Error(ErrorNode::new(
+            result,
+            EvaluationResult::signal(Signal::error(String::from(
                 "Expected (Int, Int) or (Float, Float), received (3.142, null)"
             )))
         );
         let expression = parser::parse("(/ 3.142 #f)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Error(ErrorNode::new(
+            result,
+            EvaluationResult::signal(Signal::error(String::from(
                 "Expected (Int, Int) or (Float, Float), received (3.142, #f)"
             )))
         );
         let expression = parser::parse("(/ 3.142 \"0\")").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Error(ErrorNode::new(
+            result,
+            EvaluationResult::signal(Signal::error(String::from(
                 "Expected (Int, Int) or (Float, Float), received (3.142, \"0\")"
             )))
         );
 
         let expression = parser::parse("(/ null 3.142)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Error(ErrorNode::new(
+            result,
+            EvaluationResult::signal(Signal::error(String::from(
                 "Expected (Int, Int) or (Float, Float), received (null, 3.142)"
             )))
         );
         let expression = parser::parse("(/ #f 3.142)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Error(ErrorNode::new(
+            result,
+            EvaluationResult::signal(Signal::error(String::from(
                 "Expected (Int, Int) or (Float, Float), received (#f, 3.142)"
             )))
         );
         let expression = parser::parse("(/ \"0\" 3.142)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Error(ErrorNode::new(
+            result,
+            EvaluationResult::signal(Signal::error(String::from(
                 "Expected (Int, Int) or (Float, Float), received (\"0\", 3.142)"
             )))
         );

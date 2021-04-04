@@ -7,9 +7,11 @@ use crate::{
     env::Env,
     expression::{
         AstNode, CompoundNode, EvaluationResult, Expression, NodeFactoryResult, NodeType,
+        RuntimeState,
     },
     node::{
-        core::{CoreNode, ErrorNode, ValueNode},
+        core::{CoreNode, ValueNode},
+        evaluate::EvaluateResult,
         Evaluate1, Node,
     },
 };
@@ -33,7 +35,7 @@ impl AstNode<Node> for NotNode {
         Ok(Self::new(target))
     }
 }
-impl<'a> CompoundNode<'a> for NotNode {
+impl<'a> CompoundNode<'a, Node> for NotNode {
     type Expressions = std::iter::Once<&'a Expression<Node>>;
     fn expressions(&'a self) -> Self::Expressions {
         once(&self.target)
@@ -46,23 +48,24 @@ impl NodeType<Node> for NotNode {
     fn capture_depth(&self) -> usize {
         CompoundNode::capture_depth(self)
     }
-    fn evaluate(&self, env: &Env<Node>) -> Option<EvaluationResult<Node>> {
-        Evaluate1::evaluate(self, env)
+    fn evaluate(
+        &self,
+        env: &Env<Node>,
+        state: &RuntimeState<Node>,
+    ) -> Option<EvaluationResult<Node>> {
+        Evaluate1::evaluate(self, env, state)
     }
 }
 impl Evaluate1 for NotNode {
     fn dependencies(&self) -> &Expression<Node> {
         &self.target
     }
-    fn run(&self, target: &Expression<Node>) -> Expression<Node> {
+    fn run(&self, target: &Expression<Node>) -> EvaluateResult {
         match target.value() {
-            Node::Core(CoreNode::Value(ValueNode::Boolean(target))) => {
-                Expression::new(Node::Core(CoreNode::Value(ValueNode::Boolean(!*target))))
-            }
-            target => Expression::new(Node::Core(CoreNode::Error(ErrorNode::new(&format!(
-                "Expected Boolean, received {}",
-                target,
-            ))))),
+            Node::Core(CoreNode::Value(ValueNode::Boolean(target))) => Ok(Expression::new(
+                Node::Core(CoreNode::Value(ValueNode::Boolean(!*target))),
+            )),
+            target => Err(format!("Expected Boolean, received {}", target,)),
         }
     }
 }
@@ -76,61 +79,67 @@ impl fmt::Display for NotNode {
 mod tests {
     use crate::{
         env::Env,
+        expression::{EvaluationResult, Expression, RuntimeState},
         node::{
-            core::{CoreNode, ErrorNode, ValueNode},
+            core::{CoreNode, ValueNode},
             parser, Node,
         },
+        signal::Signal,
     };
 
     #[test]
     fn not_expressions() {
         let env = Env::new();
+        let state = RuntimeState::new();
         let expression = parser::parse("(not #t)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Value(ValueNode::Boolean(false)))
+            result,
+            EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Boolean(false)
+            ))))
         );
         let expression = parser::parse("(not #f)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Value(ValueNode::Boolean(true)))
+            result,
+            EvaluationResult::new(Expression::new(Node::Core(CoreNode::Value(
+                ValueNode::Boolean(true)
+            ))))
         );
     }
 
     #[test]
     fn invalid_or_expression_arguments() {
         let env = Env::new();
+        let state = RuntimeState::new();
         let expression = parser::parse("(not null)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Error(ErrorNode::new(
+            result,
+            EvaluationResult::signal(Signal::error(String::from(
                 "Expected Boolean, received null"
             )))
         );
         let expression = parser::parse("(not 0)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Error(ErrorNode::new(
-                "Expected Boolean, received 0"
-            )))
+            result,
+            EvaluationResult::signal(Signal::error(String::from("Expected Boolean, received 0")))
         );
         let expression = parser::parse("(not 0.0)").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Error(ErrorNode::new(
+            result,
+            EvaluationResult::signal(Signal::error(String::from(
                 "Expected Boolean, received 0.0"
             )))
         );
         let expression = parser::parse("(not \"\")").unwrap();
-        let result = expression.evaluate(&env);
+        let result = expression.evaluate(&env, &state);
         assert_eq!(
-            *result.value(),
-            Node::Core(CoreNode::Error(ErrorNode::new(
+            result,
+            EvaluationResult::signal(Signal::error(String::from(
                 "Expected Boolean, received \"\""
             )))
         );
