@@ -1,10 +1,6 @@
-[package]
-name = "reflex"
-version = "0.1.0"
-license = "Apache-2.0"
-authors = ["Marshall Wace LLP <opensource@mwam.com>", "Tim Kendrick <t.kendrick@mwam.com>"]
-edition = "2018"
+[workspace]
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
-[dependencies]
+members = [
+  "reflex",
+  "reflex-cli",
+]

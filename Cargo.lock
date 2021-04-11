@@ -3,3 +3,10 @@
 [[package]]
 name = "reflex"
 version = "0.1.0"
+
+[[package]]
+name = "reflex-cli"
+version = "0.1.0"
+dependencies = [
+ "reflex",
+]
