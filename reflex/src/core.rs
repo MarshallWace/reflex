@@ -10,18 +10,13 @@ use std::{
 
 use crate::{
     hash::{
-        combine_hashes, hash_bytes, hash_sequence, hash_u32, hash_unordered_sequence, prefix_hash,
-        HashId, Hashable,
+        combine_hashes, hash_bytes, hash_option, hash_sequence, hash_u32, hash_u8,
+        hash_unordered_sequence, prefix_hash, HashId, Hashable,
     },
     stdlib::{
         builtin::BuiltinTerm, collection::CollectionTerm, signal::SignalType, value::ValueTerm,
     },
 };
-
-pub trait NativeFunction {
-    fn arity() -> Arity;
-    fn apply(args: impl IntoIterator<Item = Expression> + ExactSizeIterator) -> Expression;
-}
 
 #[derive(PartialEq, Clone, Copy, Debug)]
 pub enum VarArgs {
@@ -212,6 +207,9 @@ impl Expression {
     pub fn value(&self) -> &Term {
         &self.value
     }
+    pub fn has_free_variables(&self) -> bool {
+        self.capture_depth > 0
+    }
     pub fn compile(&self) -> Expression {
         self.optimize().unwrap_or_else(|| Expression::clone(self))
     }
@@ -369,7 +367,7 @@ impl DependencyList {
     pub fn is_empty(&self) -> bool {
         self.dependencies.is_none()
     }
-    fn extend(self, other: Self) -> Self {
+    pub fn extend(self, other: Self) -> Self {
         match self.dependencies {
             None => self,
             Some(dependencies) => match other.dependencies {
@@ -390,8 +388,11 @@ pub enum Term {
     Application(ApplicationTerm),
     Recursive(RecursiveTerm),
     Builtin(BuiltinTerm),
-    DataStructure(DataStructureTerm),
-    Matcher(MatcherTerm),
+    Native(NativeFunction),
+    Struct(StructTerm),
+    Enum(EnumTerm),
+    StructConstructor(StructPrototype),
+    EnumConstructor(EnumVariantPrototype),
     Collection(CollectionTerm),
     Signal(SignalTerm),
 }
@@ -404,10 +405,13 @@ impl Hashable for Term {
             Self::Application(term) => prefix_hash(3, term.hash()),
             Self::Recursive(term) => prefix_hash(4, term.hash()),
             Self::Builtin(term) => prefix_hash(5, term.hash()),
-            Self::DataStructure(term) => prefix_hash(6, term.hash()),
-            Self::Matcher(term) => prefix_hash(7, term.hash()),
-            Self::Collection(term) => prefix_hash(8, term.hash()),
-            Self::Signal(term) => prefix_hash(9, term.hash()),
+            Self::Native(term) => prefix_hash(6, term.hash()),
+            Self::Struct(term) => prefix_hash(7, term.hash()),
+            Self::Enum(term) => prefix_hash(8, term.hash()),
+            Self::StructConstructor(term) => prefix_hash(9, term.hash()),
+            Self::EnumConstructor(term) => prefix_hash(10, term.hash()),
+            Self::Collection(term) => prefix_hash(11, term.hash()),
+            Self::Signal(term) => prefix_hash(12, term.hash()),
         }
     }
 }
@@ -418,8 +422,8 @@ impl Rewritable for Term {
             Self::Lambda(term) => term.capture_depth(),
             Self::Application(term) => term.capture_depth(),
             Self::Recursive(term) => term.capture_depth(),
-            Self::DataStructure(term) => term.capture_depth(),
-            Self::Matcher(term) => term.capture_depth(),
+            Self::Struct(term) => term.capture_depth(),
+            Self::Enum(term) => term.capture_depth(),
             Self::Collection(term) => term.capture_depth(),
             _ => 0,
         }
@@ -430,8 +434,8 @@ impl Rewritable for Term {
             Self::Lambda(term) => term.dynamic_dependencies(),
             Self::Application(term) => term.dynamic_dependencies(),
             Self::Recursive(term) => term.dynamic_dependencies(),
-            Self::DataStructure(term) => term.dynamic_dependencies(),
-            Self::Matcher(term) => term.dynamic_dependencies(),
+            Self::Struct(term) => term.dynamic_dependencies(),
+            Self::Enum(term) => term.dynamic_dependencies(),
             Self::Collection(term) => term.dynamic_dependencies(),
             _ => DependencyList::empty(),
         }
@@ -442,8 +446,8 @@ impl Rewritable for Term {
             Self::Lambda(term) => term.substitute(substitutions),
             Self::Application(term) => term.substitute(substitutions),
             Self::Recursive(term) => term.substitute(substitutions),
-            Self::DataStructure(term) => term.substitute(substitutions),
-            Self::Matcher(term) => term.substitute(substitutions),
+            Self::Struct(term) => term.substitute(substitutions),
+            Self::Enum(term) => term.substitute(substitutions),
             Self::Collection(term) => term.substitute(substitutions),
             _ => None,
         }
@@ -454,8 +458,8 @@ impl Rewritable for Term {
             Self::Lambda(term) => term.optimize(),
             Self::Application(term) => term.optimize(),
             Self::Recursive(term) => term.optimize(),
-            Self::DataStructure(term) => term.optimize(),
-            Self::Matcher(term) => term.optimize(),
+            Self::Struct(term) => term.optimize(),
+            Self::Enum(term) => term.optimize(),
             Self::Collection(term) => term.optimize(),
             _ => None,
         }
@@ -488,8 +492,11 @@ impl fmt::Display for Term {
             Self::Application(term) => fmt::Display::fmt(term, f),
             Self::Recursive(term) => fmt::Display::fmt(term, f),
             Self::Builtin(term) => fmt::Display::fmt(term, f),
-            Self::DataStructure(term) => fmt::Display::fmt(term, f),
-            Self::Matcher(term) => fmt::Display::fmt(term, f),
+            Self::Native(term) => fmt::Display::fmt(term, f),
+            Self::Struct(term) => fmt::Display::fmt(term, f),
+            Self::Enum(term) => fmt::Display::fmt(term, f),
+            Self::StructConstructor(term) => fmt::Display::fmt(term, f),
+            Self::EnumConstructor(term) => fmt::Display::fmt(term, f),
             Self::Collection(term) => fmt::Display::fmt(term, f),
             Self::Signal(term) => fmt::Display::fmt(term, f),
         }
@@ -859,6 +866,9 @@ impl Rewritable for ApplicationTerm {
         let arity = match self.target.value() {
             Term::Lambda(target) => Some(target.arity),
             Term::Builtin(target) => Some(target.arity()),
+            Term::Native(target) => Some(target.arity),
+            Term::StructConstructor(target) => Some(target.arity()),
+            Term::EnumConstructor(target) => Some(Arity::from(0, target.arity, None)),
             _ => None,
         };
         let eager_arity = arity.map(|arity| arity.eager()).unwrap_or(0);
@@ -896,10 +906,11 @@ impl Rewritable for ApplicationTerm {
         Some(Expression::new(Term::Application(Self::new(target, args))))
     }
     fn optimize(&self) -> Option<Expression> {
+        let optimized_target = self.target.optimize();
         let optimized_args = optimize_multiple(&self.args);
         let optimized_expression = optimized_args.map(|args| {
             Expression::new(Term::Application(Self::new(
-                Expression::clone(&self.target),
+                optimized_target.unwrap_or_else(|| Expression::clone(&self.target)),
                 args,
             )))
         });
@@ -917,10 +928,25 @@ impl Reducible for ApplicationTerm {
             .map_or_else(|| self.target.value(), |target| target.value());
         let result = match target {
             Term::Lambda(target) => Ok(reduce_lambda_application(target, self.args.iter())),
-            Term::Builtin(target) => match reduce_builtin_application(target, self.args.iter()) {
-                Ok(result) => Ok(result),
-                Err(args) => Err(Some(args)),
-            },
+            Term::Builtin(target) => {
+                match reduce_native_application(NativeApplicable::Builtin(target), self.args.iter())
+                {
+                    Ok(result) => Ok(result),
+                    Err(args) => Err(Some(args)),
+                }
+            }
+            Term::Native(target) => {
+                match reduce_native_application(NativeApplicable::Custom(target), self.args.iter())
+                {
+                    Ok(result) => Ok(result),
+                    Err(args) => Err(Some(args)),
+                }
+            }
+            Term::StructConstructor(target) => Ok(reduce_struct_constructor_application(
+                target,
+                self.args.iter(),
+            )),
+            Term::EnumConstructor(target) => Ok(target.apply(self.args.iter().cloned())),
             _ => Err(None),
         };
         match result {
@@ -945,21 +971,65 @@ fn reduce_lambda_application<'a>(
     args: impl IntoIterator<Item = &'a Expression> + ExactSizeIterator,
 ) -> Expression {
     let arity = target.arity;
-    if args.len() < arity.required() {
-        panic!(
-            "Expected {} arguments, received {}",
-            arity.required(),
-            args.len()
-        )
-    }
+    assert_arity(arity, args.len());
     match reduce_eager_args(&arity, args) {
         Err(signal) => signal,
         Ok(args) => target.apply(args.into_iter()),
     }
 }
 
-fn reduce_builtin_application<'a>(
-    target: &BuiltinTerm,
+fn reduce_struct_constructor_application<'a>(
+    target: &StructPrototype,
+    args: impl IntoIterator<Item = &'a Expression> + ExactSizeIterator,
+) -> Expression {
+    let num_keys = target.keys.len() as u8;
+    let arity = Arity::from(num_keys, num_keys, None);
+    assert_arity(arity, args.len());
+    match reduce_eager_args(&arity, args) {
+        Err(signal) => signal,
+        Ok(args) => {
+            let (keys, values) = args.split_at(arity.eager());
+            target.apply(
+                keys.iter()
+                    .map(|key| key.hash())
+                    .zip(values.iter().map(Expression::clone))
+                    .map(|(key, value)| (key, value)),
+            )
+        }
+    }
+}
+
+fn assert_arity(arity: Arity, num_args: usize) {
+    if num_args < arity.required() {
+        panic!(
+            "Expected {} arguments, received {}",
+            arity.required(),
+            num_args
+        )
+    }
+}
+
+enum NativeApplicable<'a> {
+    Builtin(&'a BuiltinTerm),
+    Custom(&'a NativeFunction),
+}
+impl<'a> NativeApplicable<'a> {
+    fn arity(&self) -> Arity {
+        match self {
+            NativeApplicable::Builtin(target) => target.arity(),
+            NativeApplicable::Custom(target) => target.arity,
+        }
+    }
+    fn apply(&self, args: impl IntoIterator<Item = Expression> + ExactSizeIterator) -> Expression {
+        match self {
+            Self::Builtin(target) => target.apply(args),
+            Self::Custom(target) => target.apply(args),
+        }
+    }
+}
+
+fn reduce_native_application<'a>(
+    target: NativeApplicable<'a>,
     args: impl IntoIterator<Item = &'a Expression> + ExactSizeIterator,
 ) -> Result<Expression, Vec<Expression>> {
     let arity = target.arity();
@@ -1082,51 +1152,178 @@ fn reduce_eager_args<'a>(
     }
 }
 
-#[derive(PartialEq, Clone, Debug)]
-pub enum DataStructureTerm {
-    Enum(EnumTerm),
-    Struct(StructTerm),
+#[derive(Clone)]
+pub struct NativeFunction {
+    hash: HashId,
+    arity: Arity,
+    body: Rc<dyn Fn(Vec<Expression>) -> Expression>,
 }
-impl Hashable for DataStructureTerm {
-    fn hash(&self) -> HashId {
-        match self {
-            DataStructureTerm::Enum(term) => prefix_hash(0, term.hash()),
-            DataStructureTerm::Struct(term) => prefix_hash(1, term.hash()),
+impl NativeFunction {
+    pub fn new(
+        hash: HashId,
+        arity: Arity,
+        body: impl Fn(Vec<Expression>) -> Expression + 'static,
+    ) -> Self {
+        Self {
+            hash,
+            arity,
+            body: Rc::new(body),
         }
     }
+    fn apply(&self, args: impl IntoIterator<Item = Expression> + ExactSizeIterator) -> Expression {
+        (self.body)(args.into_iter().collect())
+    }
 }
-impl Rewritable for DataStructureTerm {
+impl Hashable for NativeFunction {
+    fn hash(&self) -> HashId {
+        self.hash
+    }
+}
+impl PartialEq for NativeFunction {
+    fn eq(&self, other: &Self) -> bool {
+        self.hash == other.hash
+    }
+}
+impl fmt::Display for NativeFunction {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "<native:{}:{}>", self.arity.required(), self.hash)
+    }
+}
+impl fmt::Debug for NativeFunction {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Display::fmt(self, f)
+    }
+}
+
+pub type StructFieldOffset = u32;
+pub fn hash_struct_field_offset(value: StructFieldOffset) -> HashId {
+    hash_u32(value)
+}
+
+#[derive(PartialEq, Clone, Debug)]
+pub struct StructTerm {
+    prototype: Option<StructPrototype>,
+    fields: Vec<Expression>,
+}
+impl Hashable for StructTerm {
+    fn hash(&self) -> HashId {
+        combine_hashes(
+            hash_option(
+                self.prototype
+                    .as_ref()
+                    .map(|constructor| constructor.hash()),
+            ),
+            hash_sequence(self.fields.iter().map(|field| field.hash())),
+        )
+    }
+}
+impl StructTerm {
+    pub fn new(prototype: Option<StructPrototype>, fields: Vec<Expression>) -> Self {
+        Self { prototype, fields }
+    }
+    pub fn get(&self, field_offset: StructFieldOffset) -> Option<&Expression> {
+        self.fields.get(field_offset as usize)
+    }
+    pub fn prototype(&self) -> Option<&StructPrototype> {
+        self.prototype.as_ref()
+    }
+    pub fn fields(&self) -> &[Expression] {
+        &self.fields
+    }
+}
+impl Rewritable for StructTerm {
     fn capture_depth(&self) -> StackOffset {
-        match self {
-            DataStructureTerm::Enum(term) => term.capture_depth(),
-            DataStructureTerm::Struct(term) => term.capture_depth(),
-        }
+        capture_depth_multiple(&self.fields)
     }
     fn dynamic_dependencies(&self) -> DependencyList {
-        match self {
-            DataStructureTerm::Enum(term) => term.dynamic_dependencies(),
-            DataStructureTerm::Struct(term) => term.dynamic_dependencies(),
-        }
+        dynamic_dependencies_multiple(&self.fields)
     }
     fn substitute(&self, substitutions: &Substitutions) -> Option<Expression> {
-        match self {
-            DataStructureTerm::Enum(term) => term.substitute(substitutions),
-            DataStructureTerm::Struct(term) => term.substitute(substitutions),
-        }
+        substitute_multiple(&self.fields, substitutions)
+            .map(|fields| Expression::new(Term::Struct(Self::new(self.prototype.clone(), fields))))
     }
     fn optimize(&self) -> Option<Expression> {
-        match self {
-            DataStructureTerm::Enum(term) => term.optimize(),
-            DataStructureTerm::Struct(term) => term.optimize(),
-        }
+        optimize_multiple(&self.fields)
+            .map(|fields| Expression::new(Term::Struct(Self::new(self.prototype.clone(), fields))))
     }
 }
-impl fmt::Display for DataStructureTerm {
+impl fmt::Display for StructTerm {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            DataStructureTerm::Enum(term) => fmt::Display::fmt(term, f),
-            DataStructureTerm::Struct(term) => fmt::Display::fmt(term, f),
-        }
+        write!(
+            f,
+            "<struct:{}>",
+            self.prototype.as_ref().map_or_else(
+                || format!("{}", self.fields.len()),
+                |prototype| format!("{}", prototype)
+            ),
+        )
+    }
+}
+
+#[derive(PartialEq, Clone, Debug)]
+pub struct StructPrototype {
+    keys: Vec<HashId>,
+}
+impl Hashable for StructPrototype {
+    fn hash(&self) -> HashId {
+        hash_sequence(self.keys.iter().copied())
+    }
+}
+impl StructPrototype {
+    pub fn new(keys: Vec<HashId>) -> Self {
+        Self { keys }
+    }
+    pub fn field(&self, key: HashId) -> Option<StructFieldOffset> {
+        self.keys
+            .iter()
+            .copied()
+            .enumerate()
+            .find(|(_, existing)| *existing == key)
+            .map(|(index, _)| index as StructFieldOffset)
+    }
+    pub fn keys(&self) -> &[HashId] {
+        &self.keys
+    }
+    pub fn arity(&self) -> Arity {
+        let num_keys = self.keys.len() as u8;
+        Arity::from(num_keys, num_keys, None)
+    }
+    pub fn apply(
+        &self,
+        fields: impl IntoIterator<Item = (HashId, Expression)> + ExactSizeIterator,
+    ) -> Expression {
+        let fields = fields.into_iter().collect::<Vec<_>>();
+        let has_correctly_ordered_keys = fields.len() >= self.keys.len()
+            && fields
+                .iter()
+                .zip(self.keys.iter())
+                .all(|((id, _), key)| id == key);
+        let fields = if has_correctly_ordered_keys {
+            fields
+                .into_iter()
+                .take(self.keys.len())
+                .map(|(_, value)| value)
+                .collect()
+        } else {
+            let mut remaining_fields = fields;
+            self.keys
+                .iter()
+                .map(|key| {
+                    let index = remaining_fields
+                        .iter()
+                        .position(|(id, _)| id == key)
+                        .expect("Invalid constructor call");
+                    let (_, value) = remaining_fields.remove(index);
+                    value
+                })
+                .collect()
+        };
+        Expression::new(Term::Struct(StructTerm::new(Some(self.clone()), fields)))
+    }
+}
+impl fmt::Display for StructPrototype {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "<constructor:struct:{}>", self.keys.len())
     }
 }
 
@@ -1162,18 +1359,12 @@ impl Rewritable for EnumTerm {
         dynamic_dependencies_multiple(&self.args)
     }
     fn substitute(&self, substitutions: &Substitutions) -> Option<Expression> {
-        substitute_multiple(&self.args, substitutions).map(|args| {
-            Expression::new(Term::DataStructure(DataStructureTerm::Enum(Self::new(
-                self.index, args,
-            ))))
-        })
+        substitute_multiple(&self.args, substitutions)
+            .map(|args| Expression::new(Term::Enum(Self::new(self.index, args))))
     }
     fn optimize(&self) -> Option<Expression> {
-        optimize_multiple(&self.args).map(|args| {
-            Expression::new(Term::DataStructure(DataStructureTerm::Enum(Self::new(
-                self.index, args,
-            ))))
-        })
+        optimize_multiple(&self.args)
+            .map(|args| Expression::new(Term::Enum(Self::new(self.index, args))))
     }
 }
 impl fmt::Display for EnumTerm {
@@ -1191,103 +1382,41 @@ impl fmt::Display for EnumTerm {
     }
 }
 
-pub type StructFieldOffset = u32;
-pub fn hash_struct_field_offset(value: StructFieldOffset) -> HashId {
-    hash_u32(value)
+pub type EnumConstructorArity = u8;
+fn hash_enum_constructor_arity(value: EnumConstructorArity) -> HashId {
+    hash_u8(value)
 }
 
 #[derive(PartialEq, Clone, Debug)]
-pub struct StructTerm {
-    fields: Vec<Expression>,
+pub struct EnumVariantPrototype {
+    index: EnumIndex,
+    arity: EnumConstructorArity,
 }
-impl Hashable for StructTerm {
+impl Hashable for EnumVariantPrototype {
     fn hash(&self) -> HashId {
-        hash_sequence(self.fields.iter().map(|field| field.hash()))
+        prefix_hash(self.index, hash_enum_constructor_arity(self.arity))
     }
 }
-impl StructTerm {
-    pub fn new(fields: Vec<Expression>) -> Self {
-        Self { fields }
+impl EnumVariantPrototype {
+    pub fn new(index: EnumIndex, arity: EnumConstructorArity) -> Self {
+        Self { index, arity }
     }
-    pub fn get(&self, field_offset: StructFieldOffset) -> Option<Expression> {
-        self.fields
-            .get(field_offset as usize)
-            .map(Expression::clone)
+    fn apply(&self, args: impl IntoIterator<Item = Expression> + ExactSizeIterator) -> Expression {
+        Expression::new(Term::Enum(EnumTerm::new(
+            self.index,
+            args.into_iter().collect(),
+        )))
     }
-}
-impl Rewritable for StructTerm {
-    fn capture_depth(&self) -> StackOffset {
-        capture_depth_multiple(&self.fields)
+    pub fn index(&self) -> EnumIndex {
+        self.index
     }
-    fn dynamic_dependencies(&self) -> DependencyList {
-        dynamic_dependencies_multiple(&self.fields)
-    }
-    fn substitute(&self, substitutions: &Substitutions) -> Option<Expression> {
-        substitute_multiple(&self.fields, substitutions).map(|fields| {
-            Expression::new(Term::DataStructure(DataStructureTerm::Struct(Self::new(
-                fields,
-            ))))
-        })
-    }
-    fn optimize(&self) -> Option<Expression> {
-        optimize_multiple(&self.fields).map(|fields| {
-            Expression::new(Term::DataStructure(DataStructureTerm::Struct(Self::new(
-                fields,
-            ))))
-        })
+    pub fn arity(&self) -> EnumConstructorArity {
+        self.arity
     }
 }
-impl fmt::Display for StructTerm {
+impl fmt::Display for EnumVariantPrototype {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "<struct:{{{}}}>",
-            self.fields
-                .iter()
-                .enumerate()
-                .map(|(index, field)| format!("{}:{}", index, field))
-                .collect::<Vec<_>>()
-                .join(",")
-        )
-    }
-}
-
-#[derive(PartialEq, Clone, Debug)]
-pub struct MatcherTerm {
-    handlers: Vec<Expression>,
-}
-impl Hashable for MatcherTerm {
-    fn hash(&self) -> HashId {
-        hash_sequence(self.handlers.iter().map(|case| case.hash()))
-    }
-}
-impl MatcherTerm {
-    pub fn new(handlers: Vec<Expression>) -> Self {
-        Self { handlers }
-    }
-    pub fn handlers(&self) -> &[Expression] {
-        &self.handlers
-    }
-}
-impl Rewritable for MatcherTerm {
-    fn capture_depth(&self) -> StackOffset {
-        capture_depth_multiple(&self.handlers)
-    }
-    fn dynamic_dependencies(&self) -> DependencyList {
-        dynamic_dependencies_multiple(&self.handlers)
-    }
-    fn substitute(&self, substitutions: &Substitutions) -> Option<Expression> {
-        substitute_multiple(&self.handlers, substitutions)
-            .map(|cases| Expression::new(Term::Matcher(Self::new(cases))))
-    }
-    fn optimize(&self) -> Option<Expression> {
-        optimize_multiple(&self.handlers)
-            .map(|cases| Expression::new(Term::Matcher(Self::new(cases))))
-    }
-}
-impl fmt::Display for MatcherTerm {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "<matcher:{}>", self.handlers.len())
+        write!(f, "<constructor:enum:{}:{}>", self.index, self.arity)
     }
 }
 
@@ -1331,7 +1460,7 @@ impl SignalTerm {
     }
     fn flatten(&self) -> Vec<Signal> {
         match self {
-            Self::Single(signal) => vec![signal.clone()],
+            Self::Single(signal) => vec![Signal::clone(signal)],
             Self::Combined(_) => vec![],
         }
     }
@@ -1502,7 +1631,7 @@ pub(crate) fn substitute_multiple(
 }
 
 pub(crate) fn optimize_multiple<'a>(expressions: &[Expression]) -> Option<Vec<Expression>> {
-    transform_expressions(expressions, |arg| arg.reduce())
+    transform_expressions(expressions, |expression| expression.optimize())
 }
 
 fn transform_expressions<'a>(
@@ -1548,7 +1677,10 @@ fn transform_expressions<'a>(
 mod tests {
     use crate::{parser::sexpr::parse, stdlib::builtin::BuiltinTerm, stdlib::value::ValueTerm};
 
-    use super::{DependencyList, DynamicState, EvaluationResult, Expression, Rewritable, Term};
+    use super::{
+        ApplicationTerm, Arity, DependencyList, DynamicState, EvaluationResult, Expression,
+        NativeFunction, Rewritable, Term,
+    };
 
     #[test]
     fn value_expressions() {
@@ -1830,6 +1962,59 @@ mod tests {
             result,
             EvaluationResult::new(
                 Ok(Expression::new(Term::Value(ValueTerm::Int(2)))),
+                DependencyList::empty(),
+            ),
+        );
+    }
+
+    #[test]
+    fn custom_builtins() {
+        fn constant(_args: Vec<Expression>) -> Expression {
+            Expression::new(Term::Value(ValueTerm::Int(3)))
+        }
+        fn add3(args: Vec<Expression>) -> Expression {
+            let mut args = args.into_iter();
+            let first = args.next().unwrap();
+            let second = args.next().unwrap();
+            let third = args.next().unwrap();
+            match (first.value(), second.value(), third.value()) {
+                (
+                    Term::Value(ValueTerm::Int(first)),
+                    Term::Value(ValueTerm::Int(second)),
+                    Term::Value(ValueTerm::Int(third)),
+                ) => Expression::new(Term::Value(ValueTerm::Int(first + second + third))),
+                _ => panic!("Invalid arguments"),
+            }
+        }
+        let constant = NativeFunction::new(0, Arity::from(0, 0, None), constant);
+        let add3 = NativeFunction::new(1, Arity::from(3, 0, None), add3);
+
+        let state = DynamicState::new();
+        let expression = Expression::new(Term::Application(ApplicationTerm::new(
+            Expression::new(Term::Native(constant)),
+            vec![],
+        )));
+        let result = expression.evaluate(&state);
+        assert_eq!(
+            result,
+            EvaluationResult::new(
+                Ok(Expression::new(Term::Value(ValueTerm::Int(3)))),
+                DependencyList::empty(),
+            ),
+        );
+        let expression = Expression::new(Term::Application(ApplicationTerm::new(
+            Expression::new(Term::Native(add3)),
+            vec![
+                Expression::new(Term::Value(ValueTerm::Int(3))),
+                Expression::new(Term::Value(ValueTerm::Int(4))),
+                Expression::new(Term::Value(ValueTerm::Int(5))),
+            ],
+        )));
+        let result = expression.evaluate(&state);
+        assert_eq!(
+            result,
+            EvaluationResult::new(
+                Ok(Expression::new(Term::Value(ValueTerm::Int(3 + 4 + 5)))),
                 DependencyList::empty(),
             ),
         );

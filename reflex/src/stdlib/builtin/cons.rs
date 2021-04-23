@@ -2,14 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use crate::{
-    core::{
-        Arity, DataStructureTerm, EnumTerm, Expression, NativeFunction, Signal, SignalTerm, Term,
-    },
-    stdlib::{signal::SignalType, value::ValueTerm},
+    core::{Arity, EnumTerm, Expression, Signal, SignalTerm, Term},
+    stdlib::{builtin::BuiltinFunction, signal::SignalType, value::ValueTerm},
 };
 
 pub struct Cons {}
-impl NativeFunction for Cons {
+impl BuiltinFunction for Cons {
     fn arity() -> Arity {
         Arity::from(0, 2, None)
     }
@@ -26,9 +24,6 @@ impl NativeFunction for Cons {
         let mut args = args.into_iter();
         let head = args.next().unwrap();
         let tail = args.next().unwrap();
-        Expression::new(Term::DataStructure(DataStructureTerm::Enum(EnumTerm::new(
-            1,
-            vec![head, tail],
-        ))))
+        Expression::new(Term::Enum(EnumTerm::new(1, vec![head, tail])))
     }
 }

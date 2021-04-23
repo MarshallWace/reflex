@@ -6,8 +6,8 @@ use crate::{
     stdlib::{builtin::BuiltinFunction, signal::SignalType, value::ValueTerm},
 };
 
-pub struct Car {}
-impl BuiltinFunction for Car {
+pub struct Not {}
+impl BuiltinFunction for Not {
     fn arity() -> Arity {
         Arity::from(1, 0, None)
     }
@@ -16,24 +16,19 @@ impl BuiltinFunction for Car {
             return Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                 SignalType::Error,
                 vec![ValueTerm::String(format!(
-                    "Expected 1 arguments, received {}",
+                    "Expected 1 argument, received {}",
                     args.len(),
                 ))],
             ))));
         }
         let mut args = args.into_iter();
-        let target = args.next().unwrap();
-        match target.value() {
-            Term::Enum(target) if target.index() == 1 && target.args().len() == 2 => {
-                Expression::clone(target.args().get(0).unwrap())
+        let operand = args.next().unwrap();
+        match operand.value() {
+            Term::Value(ValueTerm::Boolean(operand)) => {
+                Expression::new(Term::Value(ValueTerm::Boolean(!operand)))
             }
-            _ => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
-                SignalType::Error,
-                vec![ValueTerm::String(format!(
-                    "Expected list, received {}",
-                    target,
-                ))],
-            )))),
+            Term::Value(ValueTerm::Null) => Expression::new(Term::Value(ValueTerm::Boolean(true))),
+            _ => Expression::new(Term::Value(ValueTerm::Boolean(false))),
         }
     }
 }

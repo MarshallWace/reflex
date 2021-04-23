@@ -2,12 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use crate::{
-    core::{Arity, Expression, NativeFunction, Signal, SignalTerm, Term},
-    stdlib::{signal::SignalType, value::ValueTerm},
+    core::{Arity, Expression, Signal, SignalTerm, Term},
+    stdlib::{builtin::BuiltinFunction, signal::SignalType, value::ValueTerm},
 };
 
 pub struct Abs {}
-impl NativeFunction for Abs {
+impl BuiltinFunction for Abs {
     fn arity() -> Arity {
         Arity::from(1, 0, None)
     }

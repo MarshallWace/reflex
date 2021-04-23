@@ -3,11 +3,12 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use crate::{
     core::{Arity, Expression, Signal, SignalTerm, Term},
+    hash::Hashable,
     stdlib::{builtin::BuiltinFunction, signal::SignalType, value::ValueTerm},
 };
 
-pub struct Subtract {}
-impl BuiltinFunction for Subtract {
+pub struct Eq {}
+impl BuiltinFunction for Eq {
     fn arity() -> Arity {
         Arity::from(2, 0, None)
     }
@@ -24,20 +25,6 @@ impl BuiltinFunction for Subtract {
         let mut args = args.into_iter();
         let left = args.next().unwrap();
         let right = args.next().unwrap();
-        match (left.value(), right.value()) {
-            (Term::Value(ValueTerm::Int(left)), Term::Value(ValueTerm::Int(right))) => {
-                Expression::new(Term::Value(ValueTerm::Int(left - right)))
-            }
-            (Term::Value(ValueTerm::Float(left)), Term::Value(ValueTerm::Float(right))) => {
-                Expression::new(Term::Value(ValueTerm::Float(left - right)))
-            }
-            _ => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
-                SignalType::Error,
-                vec![ValueTerm::String(format!(
-                    "Expected (Int, Int) or (Float, Float), received ({}, {})",
-                    left, right,
-                ))],
-            )))),
-        }
+        Expression::new(Term::Value(ValueTerm::Boolean(left.hash() == right.hash())))
     }
 }

@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use std::fmt;
+use std::{fmt, iter::once};
 
 use crate::{
     core::{
@@ -24,8 +24,21 @@ impl Hashable for VectorTerm {
     }
 }
 impl VectorTerm {
-    pub fn new(items: Vec<Expression>) -> Self {
-        Self { items }
+    pub fn new(items: impl IntoIterator<Item = Expression>) -> Self {
+        Self {
+            items: items.into_iter().collect(),
+        }
+    }
+    pub fn get(&self, index: usize) -> Option<&Expression> {
+        self.items.get(index)
+    }
+    pub fn len(&self) -> usize {
+        self.items.len()
+    }
+    pub fn push(&self, value: Expression) -> Expression {
+        Expression::new(Term::Collection(CollectionTerm::Vector(Self::new(
+            self.items.iter().map(Expression::clone).chain(once(value)),
+        ))))
     }
     pub fn iterate(&self) -> impl IntoIterator<Item = Expression> + ExactSizeIterator + '_ {
         self.items.iter().map(|item| Expression::clone(item))

@@ -3,39 +3,40 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use crate::{
     core::{Arity, Expression, Signal, SignalTerm, Term},
-    stdlib::{builtin::BuiltinFunction, signal::SignalType, value::ValueTerm},
+    stdlib::{
+        builtin::BuiltinFunction, collection::CollectionTerm, signal::SignalType, value::ValueTerm,
+    },
 };
 
-pub struct Subtract {}
-impl BuiltinFunction for Subtract {
+pub struct Insert {}
+impl BuiltinFunction for Insert {
     fn arity() -> Arity {
-        Arity::from(2, 0, None)
+        Arity::from(2, 1, None)
     }
     fn apply(args: impl IntoIterator<Item = Expression> + ExactSizeIterator) -> Expression {
-        if args.len() != 2 {
+        if args.len() != 3 {
             return Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                 SignalType::Error,
                 vec![ValueTerm::String(format!(
-                    "Expected 2 arguments, received {}",
+                    "Expected 3 arguments, received {}",
                     args.len(),
                 ))],
             ))));
         }
         let mut args = args.into_iter();
-        let left = args.next().unwrap();
-        let right = args.next().unwrap();
-        match (left.value(), right.value()) {
-            (Term::Value(ValueTerm::Int(left)), Term::Value(ValueTerm::Int(right))) => {
-                Expression::new(Term::Value(ValueTerm::Int(left - right)))
-            }
-            (Term::Value(ValueTerm::Float(left)), Term::Value(ValueTerm::Float(right))) => {
-                Expression::new(Term::Value(ValueTerm::Float(left - right)))
-            }
+        let target = args.next().unwrap();
+        let key = args.next().unwrap();
+        let value = args.next().unwrap();
+        match target.value() {
+            Term::Collection(CollectionTerm::HashMap(existing)) => match existing.set(key, value) {
+                Some(updated) => updated,
+                None => target,
+            },
             _ => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                 SignalType::Error,
                 vec![ValueTerm::String(format!(
-                    "Expected (Int, Int) or (Float, Float), received ({}, {})",
-                    left, right,
+                    "Invalid field update: Expected (HashMap, <any>, <any>), received ({}, {})",
+                    target, key,
                 ))],
             )))),
         }

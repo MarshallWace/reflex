@@ -2,12 +2,15 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use crate::{
-    core::{Arity, Expression, NativeFunction, Signal, SignalTerm, Term},
-    stdlib::{builtin::Array, collection::CollectionTerm, signal::SignalType, value::ValueTerm},
+    core::{Arity, Expression, Signal, SignalTerm, Term},
+    stdlib::{
+        builtin::Array, builtin::BuiltinFunction, collection::CollectionTerm, signal::SignalType,
+        value::ValueTerm,
+    },
 };
 
 pub struct Collect {}
-impl NativeFunction for Collect {
+impl BuiltinFunction for Collect {
     fn arity() -> Arity {
         Arity::from(1, 0, None)
     }
@@ -24,9 +27,11 @@ impl NativeFunction for Collect {
         let mut args = args.into_iter();
         let target = args.next().unwrap();
         match target.value() {
-            Term::Collection(collection) => Array::apply(match collection {
-                CollectionTerm::Vector(target) => target.iterate(),
-            }),
+            Term::Collection(collection) => match collection {
+                CollectionTerm::Vector(target) => Array::apply(target.iterate()),
+                CollectionTerm::HashMap(target) => Array::apply(target.iterate()),
+                CollectionTerm::HashSet(target) => Array::apply(target.iterate()),
+            },
             _ => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                 SignalType::Error,
                 vec![ValueTerm::String(format!(

@@ -2,12 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use crate::{
-    core::{Arity, Expression, NativeFunction, Signal, SignalTerm, Term},
-    stdlib::{signal::SignalType, value::ValueTerm},
+    core::{Arity, Expression, Signal, SignalTerm, Term},
+    stdlib::{builtin::BuiltinFunction, signal::SignalType, value::ValueTerm},
 };
 
 pub struct If {}
-impl NativeFunction for If {
+impl BuiltinFunction for If {
     fn arity() -> Arity {
         Arity::from(1, 2, None)
     }
@@ -33,6 +33,7 @@ impl NativeFunction for If {
                     alternate
                 }
             }
+            Term::Value(ValueTerm::Null) => alternate,
             _ => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                 SignalType::Error,
                 vec![ValueTerm::String(format!(

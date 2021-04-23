@@ -1,6 +1,11 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+use std::{
+    collections::hash_map::DefaultHasher,
+    hash::{Hash, Hasher},
+};
+
 pub type HashId = u32;
 
 pub trait Hashable {
@@ -74,6 +79,13 @@ pub fn hash_unordered_sequence(hashes: impl IntoIterator<Item = HashId>) -> Hash
             (hash1.wrapping_add(item), hash2.wrapping_mul(item))
         });
     combine_hashes(hash1, hash2)
+}
+
+pub fn hash_object<T: Hash>(value: T) -> HashId {
+    let mut hasher = DefaultHasher::new();
+    value.hash(&mut hasher);
+    let value = hasher.finish();
+    hash_bytes(&value.to_be_bytes())
 }
 
 // djb2 hash function: http://www.cse.yorku.ca/~oz/hash.html

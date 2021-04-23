@@ -2,15 +2,15 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use crate::{
-    core::{ApplicationTerm, Arity, Expression, NativeFunction, Signal, SignalTerm, Term},
+    core::{ApplicationTerm, Arity, Expression, Signal, SignalTerm, Term},
     stdlib::{
-        collection::vector::VectorTerm, collection::CollectionTerm, signal::SignalType,
-        value::ValueTerm,
+        builtin::BuiltinFunction, collection::vector::VectorTerm, collection::CollectionTerm,
+        signal::SignalType, value::ValueTerm,
     },
 };
 
 pub struct Map {}
-impl NativeFunction for Map {
+impl BuiltinFunction for Map {
     fn arity() -> Arity {
         Arity::from(2, 0, None)
     }
@@ -40,11 +40,33 @@ impl NativeFunction for Map {
                         VectorTerm::collect(transformed_values),
                     )))
                 }
+                CollectionTerm::HashMap(target) => {
+                    let transformed_values = target.iterate().into_iter().map(|item| {
+                        Expression::new(Term::Application(ApplicationTerm::new(
+                            Expression::clone(&transform),
+                            vec![item],
+                        )))
+                    });
+                    Expression::new(Term::Collection(CollectionTerm::Vector(
+                        VectorTerm::collect(transformed_values),
+                    )))
+                }
+                CollectionTerm::HashSet(target) => {
+                    let transformed_values = target.iterate().into_iter().map(|item| {
+                        Expression::new(Term::Application(ApplicationTerm::new(
+                            Expression::clone(&transform),
+                            vec![item],
+                        )))
+                    });
+                    Expression::new(Term::Collection(CollectionTerm::Vector(
+                        VectorTerm::collect(transformed_values),
+                    )))
+                }
             },
             _ => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                 SignalType::Error,
                 vec![ValueTerm::String(format!(
-                    "Expected (<collection>, <function:1>), received ({}, {})",
+                    "Expected (<iterable>, <function:1>), received ({}, {})",
                     target, transform,
                 ))],
             )))),

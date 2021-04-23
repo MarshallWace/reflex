@@ -2,15 +2,16 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use crate::{
-    core::{Arity, Expression, NativeFunction, Reducible, Signal, SignalTerm, Term, VarArgs},
+    core::{Arity, Expression, Reducible, Signal, SignalTerm, Term, VarArgs},
     stdlib::{
+        builtin::BuiltinFunction,
         signal::SignalType,
         value::{ArrayValue, ValueTerm},
     },
 };
 
 pub struct Array {}
-impl NativeFunction for Array {
+impl BuiltinFunction for Array {
     fn arity() -> Arity {
         Arity::from(0, 0, Some(VarArgs::Eager))
     }

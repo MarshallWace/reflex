@@ -3,4 +3,5 @@
 members = [
   "reflex",
   "reflex-cli",
+  "reflex-js",
 ]

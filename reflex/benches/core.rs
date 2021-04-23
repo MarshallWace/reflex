@@ -112,17 +112,15 @@ fn conditional_expressions(b: &mut Bencher) {
 fn list_transforms(b: &mut Bencher) {
     let state = DynamicState::new();
     let collection = Expression::new(Term::Collection(CollectionTerm::Vector(VectorTerm::new(
-        (0..1000)
-            .map(|index| {
-                Expression::new(Term::Application(ApplicationTerm::new(
-                    Expression::new(Term::Builtin(BuiltinTerm::Add)),
-                    vec![
-                        Expression::new(Term::Value(ValueTerm::Int(index))),
-                        Expression::new(Term::Value(ValueTerm::Int(1))),
-                    ],
-                )))
-            })
-            .collect(),
+        (0..1000).map(|index| {
+            Expression::new(Term::Application(ApplicationTerm::new(
+                Expression::new(Term::Builtin(BuiltinTerm::Add)),
+                vec![
+                    Expression::new(Term::Value(ValueTerm::Int(index))),
+                    Expression::new(Term::Value(ValueTerm::Int(1))),
+                ],
+            )))
+        }),
     ))));
     let transform = parse("(lambda (value) (+ value 2))").unwrap();
     let expression = Expression::new(Term::Application(ApplicationTerm::new(

@@ -2,12 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use crate::{
-    core::{Arity, DataStructureTerm, Expression, NativeFunction, Signal, SignalTerm, Term},
-    stdlib::{signal::SignalType, value::ValueTerm},
+    core::{Arity, Expression, Signal, SignalTerm, Term},
+    stdlib::{builtin::BuiltinFunction, signal::SignalType, value::ValueTerm},
 };
 
 pub struct Cdr {}
-impl NativeFunction for Cdr {
+impl BuiltinFunction for Cdr {
     fn arity() -> Arity {
         Arity::from(1, 0, None)
     }
@@ -24,9 +24,7 @@ impl NativeFunction for Cdr {
         let mut args = args.into_iter();
         let target = args.next().unwrap();
         match target.value() {
-            Term::DataStructure(DataStructureTerm::Enum(target))
-                if target.index() == 1 && target.args().len() == 2 =>
-            {
+            Term::Enum(target) if target.index() == 1 && target.args().len() == 2 => {
                 Expression::clone(target.args().get(1).unwrap())
             }
             _ => Expression::new(Term::Signal(SignalTerm::new(Signal::new(

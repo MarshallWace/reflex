@@ -6,36 +6,32 @@ use crate::{
     stdlib::{builtin::BuiltinFunction, signal::SignalType, value::ValueTerm},
 };
 
-pub struct Subtract {}
-impl BuiltinFunction for Subtract {
+pub struct Ceil {}
+impl BuiltinFunction for Ceil {
     fn arity() -> Arity {
-        Arity::from(2, 0, None)
+        Arity::from(1, 0, None)
     }
     fn apply(args: impl IntoIterator<Item = Expression> + ExactSizeIterator) -> Expression {
-        if args.len() != 2 {
+        if args.len() != 1 {
             return Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                 SignalType::Error,
                 vec![ValueTerm::String(format!(
-                    "Expected 2 arguments, received {}",
+                    "Expected 1 argument, received {}",
                     args.len(),
                 ))],
             ))));
         }
         let mut args = args.into_iter();
-        let left = args.next().unwrap();
-        let right = args.next().unwrap();
-        match (left.value(), right.value()) {
-            (Term::Value(ValueTerm::Int(left)), Term::Value(ValueTerm::Int(right))) => {
-                Expression::new(Term::Value(ValueTerm::Int(left - right)))
-            }
-            (Term::Value(ValueTerm::Float(left)), Term::Value(ValueTerm::Float(right))) => {
-                Expression::new(Term::Value(ValueTerm::Float(left - right)))
+        let operand = args.next().unwrap();
+        match operand.value() {
+            Term::Value(ValueTerm::Float(operand)) => {
+                Expression::new(Term::Value(ValueTerm::Float(operand.ceil())))
             }
             _ => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                 SignalType::Error,
                 vec![ValueTerm::String(format!(
-                    "Expected (Int, Int) or (Float, Float), received ({}, {})",
-                    left, right,
+                    "Expected Float, received {}",
+                    operand,
                 ))],
             )))),
         }

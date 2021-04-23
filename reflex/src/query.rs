@@ -5,188 +5,15 @@ use std::fmt;
 
 use crate::{
     core::{
-        hash_struct_field_offset, ApplicationTerm, Arity, Expression, LambdaTerm, MatcherTerm,
-        NativeFunction, Signal, SignalTerm, StackOffset, StaticVariableTerm, StructFieldOffset,
-        Term, VariableTerm,
+        hash_struct_field_offset, ApplicationTerm, Arity, Expression, LambdaTerm, StackOffset,
+        StaticVariableTerm, StructFieldOffset, StructTerm, Term, VariableTerm,
     },
     hash::{combine_hashes, hash_seed, hash_sequence, prefix_hash, HashId, Hashable},
     stdlib::{
-        signal::SignalType,
+        builtin::BuiltinTerm,
         value::{IntValue, ValueTerm},
     },
 };
-
-use super::BuiltinTerm;
-
-pub struct Query {}
-impl NativeFunction for Query {
-    fn arity() -> Arity {
-        Arity::from(1, 1, None)
-    }
-    fn apply(args: impl IntoIterator<Item = Expression> + ExactSizeIterator) -> Expression {
-        if args.len() != 2 {
-            return Expression::new(Term::Signal(SignalTerm::new(Signal::new(
-                SignalType::Error,
-                vec![ValueTerm::String(format!(
-                    "Expected 2 arguments, received {}",
-                    args.len(),
-                ))],
-            ))));
-        }
-        let mut args = args.into_iter();
-        let shape = args.next().unwrap();
-        let target = args.next().unwrap();
-        match shape.value() {
-            Term::Value(ValueTerm::QueryShape(shape)) => evaluate_query(target, shape),
-            _ => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
-                SignalType::Error,
-                vec![ValueTerm::String(format!(
-                    "Invalid query access: Expected (<shape>, <any>), received ({}, {})",
-                    shape, target,
-                ))],
-            )))),
-        }
-    }
-}
-
-fn evaluate_query(target: Expression, shape: &QueryShape) -> Expression {
-    match shape {
-        QueryShape::Leaf => target,
-        QueryShape::Branch(selectors) => evaluate_branch_query(target, selectors),
-        QueryShape::List(shape) => evaluate_list_query(target, shape),
-    }
-}
-
-fn evaluate_branch_query(target: Expression, selectors: &[FieldSelector]) -> Expression {
-    Expression::new(Term::Application(ApplicationTerm::new(
-        Expression::new(Term::Builtin(BuiltinTerm::Array)),
-        selectors
-            .iter()
-            .map(|selector| evaluate_field(Expression::clone(&target), selector))
-            .collect(),
-    )))
-}
-
-fn evaluate_field(target: Expression, selector: &FieldSelector) -> Expression {
-    match selector {
-        FieldSelector::EnumField(variants) => evaluate_enum_field(target, variants),
-        FieldSelector::StructField(field_offset, shape) => {
-            evaluate_struct_field(target, *field_offset, shape)
-        }
-        FieldSelector::FunctionField(args, shape) => evaluate_function_field(target, args, shape),
-    }
-}
-
-fn evaluate_struct_field(
-    target: Expression,
-    field_offset: StructFieldOffset,
-    shape: &QueryShape,
-) -> Expression {
-    evaluate_query(
-        Expression::new(Term::Application(ApplicationTerm::new(
-            Expression::new(Term::Builtin(BuiltinTerm::Get)),
-            vec![
-                target,
-                Expression::new(Term::Value(ValueTerm::Int(field_offset as IntValue))),
-            ],
-        ))),
-        shape,
-    )
-}
-
-fn evaluate_enum_field(target: Expression, variants: &[EnumFieldSelector]) -> Expression {
-    Expression::new(Term::Application(ApplicationTerm::new(
-        Expression::new(Term::Builtin(BuiltinTerm::Match)),
-        vec![
-            Expression::clone(&target),
-            Expression::new(Term::Matcher(MatcherTerm::new(
-                variants
-                    .iter()
-                    .enumerate()
-                    .map(|(index, variant)| {
-                        let enum_index = Expression::new(Term::Value(ValueTerm::Int(index as i32)));
-                        let num_args = match variant {
-                            EnumFieldSelector::Nullary(_) => 0,
-                            EnumFieldSelector::Unary(_) => 1,
-                            EnumFieldSelector::Multiple(num_args, _, _) => *num_args,
-                        };
-                        let result = match variant {
-                            EnumFieldSelector::Nullary(value) => Expression::clone(value),
-                            EnumFieldSelector::Unary(shape) => evaluate_query(
-                                Expression::new(Term::Variable(VariableTerm::Static(
-                                    StaticVariableTerm::new(0),
-                                ))),
-                                shape,
-                            ),
-                            EnumFieldSelector::Multiple(num_args, transform, shape) => {
-                                let num_args = *num_args;
-                                evaluate_query(
-                                    Expression::new(Term::Application(ApplicationTerm::new(
-                                        Expression::clone(transform),
-                                        (0..num_args)
-                                            .into_iter()
-                                            .map(|index| {
-                                                let offset = (num_args - index - 1) as StackOffset;
-                                                Expression::new(Term::Variable(
-                                                    VariableTerm::Static(StaticVariableTerm::new(
-                                                        offset,
-                                                    )),
-                                                ))
-                                            })
-                                            .collect(),
-                                    ))),
-                                    shape,
-                                )
-                            }
-                        };
-                        Expression::new(Term::Lambda(LambdaTerm::new(
-                            Arity::from(num_args, 0, None),
-                            Expression::new(Term::Application(ApplicationTerm::new(
-                                Expression::new(Term::Builtin(BuiltinTerm::Array)),
-                                vec![enum_index, result],
-                            ))),
-                        )))
-                    })
-                    .collect(),
-            ))),
-        ],
-    )))
-}
-
-fn evaluate_function_field(
-    target: Expression,
-    args: &[Expression],
-    shape: &QueryShape,
-) -> Expression {
-    evaluate_query(
-        Expression::new(Term::Application(ApplicationTerm::new(
-            target,
-            args.iter().map(|arg| Expression::clone(arg)).collect(),
-        ))),
-        shape,
-    )
-}
-
-fn evaluate_list_query(target: Expression, shape: &QueryShape) -> Expression {
-    Expression::new(Term::Application(ApplicationTerm::new(
-        Expression::new(Term::Builtin(BuiltinTerm::Collect)),
-        vec![Expression::new(Term::Application(ApplicationTerm::new(
-            Expression::new(Term::Builtin(BuiltinTerm::Map)),
-            vec![
-                target,
-                Expression::new(Term::Lambda(LambdaTerm::new(
-                    Arity::from(0, 1, None),
-                    evaluate_query(
-                        Expression::new(Term::Variable(VariableTerm::Static(
-                            StaticVariableTerm::new(0),
-                        ))),
-                        shape,
-                    ),
-                ))),
-            ],
-        )))],
-    )))
-}
 
 #[derive(PartialEq, Clone, Debug)]
 pub enum QueryShape {
@@ -230,6 +57,142 @@ impl fmt::Display for QueryShape {
             QueryShape::List(shape) => write!(f, "<list:{}>", shape),
         }
     }
+}
+
+pub fn query(target: Expression, shape: &QueryShape) -> Expression {
+    match shape {
+        QueryShape::Leaf => target,
+        QueryShape::Branch(selectors) => query_branch(target, selectors),
+        QueryShape::List(shape) => query_list(target, shape),
+    }
+}
+
+fn query_branch(target: Expression, selectors: &[FieldSelector]) -> Expression {
+    Expression::new(Term::Application(ApplicationTerm::new(
+        Expression::new(Term::Builtin(BuiltinTerm::Array)),
+        selectors
+            .iter()
+            .map(|selector| query_field(Expression::clone(&target), selector))
+            .collect(),
+    )))
+}
+
+fn query_field(target: Expression, selector: &FieldSelector) -> Expression {
+    match selector {
+        FieldSelector::EnumField(variants) => query_enum_field(target, variants),
+        FieldSelector::StructField(field_offset, shape) => {
+            query_struct_field(target, *field_offset, shape)
+        }
+        FieldSelector::FunctionField(args, shape) => query_function_field(target, args, shape),
+    }
+}
+
+fn query_struct_field(
+    target: Expression,
+    field_offset: StructFieldOffset,
+    shape: &QueryShape,
+) -> Expression {
+    query(
+        Expression::new(Term::Application(ApplicationTerm::new(
+            Expression::new(Term::Builtin(BuiltinTerm::Get)),
+            vec![
+                target,
+                Expression::new(Term::Value(ValueTerm::Int(field_offset as IntValue))),
+            ],
+        ))),
+        shape,
+    )
+}
+
+fn query_enum_field(target: Expression, variants: &[EnumFieldSelector]) -> Expression {
+    Expression::new(Term::Application(ApplicationTerm::new(
+        Expression::new(Term::Builtin(BuiltinTerm::Match)),
+        vec![
+            Expression::clone(&target),
+            Expression::new(Term::Struct(StructTerm::new(
+                None,
+                variants
+                    .iter()
+                    .enumerate()
+                    .map(|(index, variant)| {
+                        let enum_index = Expression::new(Term::Value(ValueTerm::Int(index as i32)));
+                        let num_args = match variant {
+                            EnumFieldSelector::Nullary(_) => 0,
+                            EnumFieldSelector::Unary(_) => 1,
+                            EnumFieldSelector::Multiple(num_args, _, _) => *num_args,
+                        };
+                        let result = match variant {
+                            EnumFieldSelector::Nullary(value) => Expression::clone(value),
+                            EnumFieldSelector::Unary(shape) => query(
+                                Expression::new(Term::Variable(VariableTerm::Static(
+                                    StaticVariableTerm::new(0),
+                                ))),
+                                shape,
+                            ),
+                            EnumFieldSelector::Multiple(num_args, transform, shape) => {
+                                let num_args = *num_args;
+                                query(
+                                    Expression::new(Term::Application(ApplicationTerm::new(
+                                        Expression::clone(transform),
+                                        (0..num_args)
+                                            .into_iter()
+                                            .map(|index| {
+                                                let offset = (num_args - index - 1) as StackOffset;
+                                                Expression::new(Term::Variable(
+                                                    VariableTerm::Static(StaticVariableTerm::new(
+                                                        offset,
+                                                    )),
+                                                ))
+                                            })
+                                            .collect(),
+                                    ))),
+                                    shape,
+                                )
+                            }
+                        };
+                        Expression::new(Term::Lambda(LambdaTerm::new(
+                            Arity::from(num_args, 0, None),
+                            Expression::new(Term::Application(ApplicationTerm::new(
+                                Expression::new(Term::Builtin(BuiltinTerm::Array)),
+                                vec![enum_index, result],
+                            ))),
+                        )))
+                    })
+                    .collect(),
+            ))),
+        ],
+    )))
+}
+
+fn query_function_field(target: Expression, args: &[Expression], shape: &QueryShape) -> Expression {
+    query(
+        Expression::new(Term::Application(ApplicationTerm::new(
+            target,
+            args.iter().map(|arg| Expression::clone(arg)).collect(),
+        ))),
+        shape,
+    )
+}
+
+fn query_list(target: Expression, shape: &QueryShape) -> Expression {
+    Expression::new(Term::Application(ApplicationTerm::new(
+        Expression::new(Term::Builtin(BuiltinTerm::Collect)),
+        vec![Expression::new(Term::Application(ApplicationTerm::new(
+            Expression::new(Term::Builtin(BuiltinTerm::Map)),
+            vec![
+                target,
+                Expression::new(Term::Lambda(LambdaTerm::new(
+                    Arity::from(0, 1, None),
+                    query(
+                        Expression::new(Term::Variable(VariableTerm::Static(
+                            StaticVariableTerm::new(0),
+                        ))),
+                        shape,
+                    ),
+                ))),
+            ],
+        )))],
+    )))
 }
 
 #[derive(PartialEq, Clone, Debug)]
@@ -310,8 +273,8 @@ mod tests {
     use super::{EnumFieldSelector, FieldSelector, QueryShape};
     use crate::{
         core::{
-            ApplicationTerm, DataStructureTerm, DependencyList, DynamicState, EnumTerm,
-            EvaluationResult, Expression, Signal, SignalTerm, StructTerm, Term,
+            DependencyList, DynamicState, EnumTerm, EvaluationResult, Expression, Signal,
+            SignalTerm, StructTerm, Term,
         },
         parser::sexpr::parse,
         stdlib::{
@@ -322,18 +285,14 @@ mod tests {
         },
     };
 
+    use super::query;
+
     #[test]
     fn leaf_queries() {
         let state = DynamicState::new();
         let root = parse("(+ 3 4)").unwrap();
         let shape = QueryShape::Leaf;
-        let expression = Expression::new(Term::Application(ApplicationTerm::new(
-            Expression::new(Term::Builtin(BuiltinTerm::Query)),
-            vec![
-                Expression::new(Term::Value(ValueTerm::QueryShape(shape))),
-                root,
-            ],
-        )));
+        let expression = query(root, &shape);
         let result = expression.evaluate(&state);
         assert_eq!(
             result,
@@ -347,8 +306,9 @@ mod tests {
     #[test]
     fn struct_fields() {
         let state = DynamicState::new();
-        let root = Expression::new(Term::DataStructure(DataStructureTerm::Struct(
-            StructTerm::new(vec![
+        let root = Expression::new(Term::Struct(StructTerm::new(
+            None,
+            vec![
                 parse("(+ 0 1)").unwrap(),
                 parse("(+ 1 1)").unwrap(),
                 parse("(+ 2 1)").unwrap(),
@@ -356,20 +316,14 @@ mod tests {
                 parse("(+ 4 1)").unwrap(),
                 parse("(+ 5 1)").unwrap(),
                 parse("(+ 6 1)").unwrap(),
-            ]),
+            ],
         )));
         let shape = QueryShape::branch(vec![
             FieldSelector::StructField(3, QueryShape::Leaf),
             FieldSelector::StructField(4, QueryShape::Leaf),
             FieldSelector::StructField(5, QueryShape::Leaf),
         ]);
-        let expression = Expression::new(Term::Application(ApplicationTerm::new(
-            Expression::new(Term::Builtin(BuiltinTerm::Query)),
-            vec![
-                Expression::new(Term::Value(ValueTerm::QueryShape(shape))),
-                root,
-            ],
-        )));
+        let expression = query(root, &shape);
         let result = expression.evaluate(&state);
         assert_eq!(
             result,
@@ -389,10 +343,7 @@ mod tests {
     #[test]
     fn enum_fields_nullary() {
         let state = DynamicState::new();
-        let root = Expression::new(Term::DataStructure(DataStructureTerm::Enum(EnumTerm::new(
-            2,
-            vec![],
-        ))));
+        let root = Expression::new(Term::Enum(EnumTerm::new(2, vec![])));
         let error = Expression::new(Term::Signal(SignalTerm::Single(Signal::new(
             SignalType::Error,
             vec![ValueTerm::String(StringValue::from("foo"))],
@@ -405,13 +356,7 @@ mod tests {
             EnumFieldSelector::Nullary(Expression::clone(&error)),
             EnumFieldSelector::Nullary(Expression::clone(&error)),
         ])]);
-        let expression = Expression::new(Term::Application(ApplicationTerm::new(
-            Expression::new(Term::Builtin(BuiltinTerm::Query)),
-            vec![
-                Expression::new(Term::Value(ValueTerm::QueryShape(shape))),
-                root,
-            ],
-        )));
+        let expression = query(root, &shape);
         let result = expression.evaluate(&state);
         assert_eq!(
             result,
@@ -430,10 +375,10 @@ mod tests {
     #[test]
     fn enum_fields_unary() {
         let state = DynamicState::new();
-        let root = Expression::new(Term::DataStructure(DataStructureTerm::Enum(EnumTerm::new(
+        let root = Expression::new(Term::Enum(EnumTerm::new(
             2,
             vec![Expression::new(Term::Value(ValueTerm::Int(3)))],
-        ))));
+        )));
         let error = Expression::new(Term::Signal(SignalTerm::Single(Signal::new(
             SignalType::Error,
             vec![ValueTerm::String(StringValue::from("foo"))],
@@ -446,13 +391,7 @@ mod tests {
             EnumFieldSelector::Nullary(Expression::clone(&error)),
             EnumFieldSelector::Nullary(Expression::clone(&error)),
         ])]);
-        let expression = Expression::new(Term::Application(ApplicationTerm::new(
-            Expression::new(Term::Builtin(BuiltinTerm::Query)),
-            vec![
-                Expression::new(Term::Value(ValueTerm::QueryShape(shape))),
-                root,
-            ],
-        )));
+        let expression = query(root, &shape);
         let result = expression.evaluate(&state);
         assert_eq!(
             result,
@@ -471,13 +410,13 @@ mod tests {
     #[test]
     fn enum_fields_multiple() {
         let state = DynamicState::new();
-        let root = Expression::new(Term::DataStructure(DataStructureTerm::Enum(EnumTerm::new(
+        let root = Expression::new(Term::Enum(EnumTerm::new(
             2,
             vec![
                 Expression::new(Term::Value(ValueTerm::Int(3))),
                 Expression::new(Term::Value(ValueTerm::Int(4))),
             ],
-        ))));
+        )));
         let transform = Expression::new(Term::Builtin(BuiltinTerm::Add));
         let error = Expression::new(Term::Signal(SignalTerm::Single(Signal::new(
             SignalType::Error,
@@ -491,13 +430,7 @@ mod tests {
             EnumFieldSelector::Nullary(Expression::clone(&error)),
             EnumFieldSelector::Nullary(Expression::clone(&error)),
         ])]);
-        let expression = Expression::new(Term::Application(ApplicationTerm::new(
-            Expression::new(Term::Builtin(BuiltinTerm::Query)),
-            vec![
-                Expression::new(Term::Value(ValueTerm::QueryShape(shape))),
-                root,
-            ],
-        )));
+        let expression = query(root, &shape);
         let result = expression.evaluate(&state);
         assert_eq!(
             result,
@@ -540,13 +473,7 @@ mod tests {
                 QueryShape::Leaf,
             ),
         ]);
-        let expression = Expression::new(Term::Application(ApplicationTerm::new(
-            Expression::new(Term::Builtin(BuiltinTerm::Query)),
-            vec![
-                Expression::new(Term::Value(ValueTerm::QueryShape(shape))),
-                root,
-            ],
-        )));
+        let expression = query(root, &shape);
         let result = expression.evaluate(&state);
         assert_eq!(
             result,
@@ -566,12 +493,15 @@ mod tests {
     #[test]
     fn deeply_nested_fields() {
         let state = DynamicState::new();
-        let root = Expression::new(Term::DataStructure(DataStructureTerm::Struct(
-            StructTerm::new(vec![
-                Expression::new(Term::DataStructure(DataStructureTerm::Struct(
-                    StructTerm::new(vec![
-                        Expression::new(Term::DataStructure(DataStructureTerm::Struct(
-                            StructTerm::new(vec![
+        let root = Expression::new(Term::Struct(StructTerm::new(
+            None,
+            vec![
+                Expression::new(Term::Struct(StructTerm::new(
+                    None,
+                    vec![
+                        Expression::new(Term::Struct(StructTerm::new(
+                            None,
+                            vec![
                                 Expression::new(Term::Value(ValueTerm::String(StringValue::from(
                                     "0:0:0",
                                 )))),
@@ -581,10 +511,11 @@ mod tests {
                                 Expression::new(Term::Value(ValueTerm::String(StringValue::from(
                                     "0:0:2",
                                 )))),
-                            ]),
+                            ],
                         ))),
-                        Expression::new(Term::DataStructure(DataStructureTerm::Struct(
-                            StructTerm::new(vec![
+                        Expression::new(Term::Struct(StructTerm::new(
+                            None,
+                            vec![
                                 Expression::new(Term::Value(ValueTerm::String(StringValue::from(
                                     "0:1:0",
                                 )))),
@@ -594,10 +525,11 @@ mod tests {
                                 Expression::new(Term::Value(ValueTerm::String(StringValue::from(
                                     "0:1:2",
                                 )))),
-                            ]),
+                            ],
                         ))),
-                        Expression::new(Term::DataStructure(DataStructureTerm::Struct(
-                            StructTerm::new(vec![
+                        Expression::new(Term::Struct(StructTerm::new(
+                            None,
+                            vec![
                                 Expression::new(Term::Value(ValueTerm::String(StringValue::from(
                                     "0:2:0",
                                 )))),
@@ -607,14 +539,16 @@ mod tests {
                                 Expression::new(Term::Value(ValueTerm::String(StringValue::from(
                                     "0:2:2",
                                 )))),
-                            ]),
+                            ],
                         ))),
-                    ]),
+                    ],
                 ))),
-                Expression::new(Term::DataStructure(DataStructureTerm::Struct(
-                    StructTerm::new(vec![
-                        Expression::new(Term::DataStructure(DataStructureTerm::Struct(
-                            StructTerm::new(vec![
+                Expression::new(Term::Struct(StructTerm::new(
+                    None,
+                    vec![
+                        Expression::new(Term::Struct(StructTerm::new(
+                            None,
+                            vec![
                                 Expression::new(Term::Value(ValueTerm::String(StringValue::from(
                                     "1:0:0",
                                 )))),
@@ -624,10 +558,11 @@ mod tests {
                                 Expression::new(Term::Value(ValueTerm::String(StringValue::from(
                                     "1:0:2",
                                 )))),
-                            ]),
+                            ],
                         ))),
-                        Expression::new(Term::DataStructure(DataStructureTerm::Struct(
-                            StructTerm::new(vec![
+                        Expression::new(Term::Struct(StructTerm::new(
+                            None,
+                            vec![
                                 Expression::new(Term::Value(ValueTerm::String(StringValue::from(
                                     "1:1:0",
                                 )))),
@@ -637,10 +572,11 @@ mod tests {
                                 Expression::new(Term::Value(ValueTerm::String(StringValue::from(
                                     "1:1:2",
                                 )))),
-                            ]),
+                            ],
                         ))),
-                        Expression::new(Term::DataStructure(DataStructureTerm::Struct(
-                            StructTerm::new(vec![
+                        Expression::new(Term::Struct(StructTerm::new(
+                            None,
+                            vec![
                                 Expression::new(Term::Value(ValueTerm::String(StringValue::from(
                                     "1:2:0",
                                 )))),
@@ -650,14 +586,16 @@ mod tests {
                                 Expression::new(Term::Value(ValueTerm::String(StringValue::from(
                                     "1:2:2",
                                 )))),
-                            ]),
+                            ],
                         ))),
-                    ]),
+                    ],
                 ))),
-                Expression::new(Term::DataStructure(DataStructureTerm::Struct(
-                    StructTerm::new(vec![
-                        Expression::new(Term::DataStructure(DataStructureTerm::Struct(
-                            StructTerm::new(vec![
+                Expression::new(Term::Struct(StructTerm::new(
+                    None,
+                    vec![
+                        Expression::new(Term::Struct(StructTerm::new(
+                            None,
+                            vec![
                                 Expression::new(Term::Value(ValueTerm::String(StringValue::from(
                                     "2:0:0",
                                 )))),
@@ -667,10 +605,11 @@ mod tests {
                                 Expression::new(Term::Value(ValueTerm::String(StringValue::from(
                                     "2:0:2",
                                 )))),
-                            ]),
+                            ],
                         ))),
-                        Expression::new(Term::DataStructure(DataStructureTerm::Struct(
-                            StructTerm::new(vec![
+                        Expression::new(Term::Struct(StructTerm::new(
+                            None,
+                            vec![
                                 Expression::new(Term::Value(ValueTerm::String(StringValue::from(
                                     "2:1:0",
                                 )))),
@@ -680,10 +619,11 @@ mod tests {
                                 Expression::new(Term::Value(ValueTerm::String(StringValue::from(
                                     "2:1:2",
                                 )))),
-                            ]),
+                            ],
                         ))),
-                        Expression::new(Term::DataStructure(DataStructureTerm::Struct(
-                            StructTerm::new(vec![
+                        Expression::new(Term::Struct(StructTerm::new(
+                            None,
+                            vec![
                                 Expression::new(Term::Value(ValueTerm::String(StringValue::from(
                                     "2:2:0",
                                 )))),
@@ -693,11 +633,11 @@ mod tests {
                                 Expression::new(Term::Value(ValueTerm::String(StringValue::from(
                                     "2:2:2",
                                 )))),
-                            ]),
+                            ],
                         ))),
-                    ]),
+                    ],
                 ))),
-            ]),
+            ],
         )));
         let shape = QueryShape::branch(vec![
             FieldSelector::StructField(
@@ -733,13 +673,7 @@ mod tests {
                 ]),
             ),
         ]);
-        let expression = Expression::new(Term::Application(ApplicationTerm::new(
-            Expression::new(Term::Builtin(BuiltinTerm::Query)),
-            vec![
-                Expression::new(Term::Value(ValueTerm::QueryShape(shape))),
-                root,
-            ],
-        )));
+        let expression = query(root, &shape);
         let result = expression.evaluate(&state);
         assert_eq!(
             result,
@@ -781,15 +715,8 @@ mod tests {
                 parse("(+ 5 1)").unwrap(),
             ],
         ))));
-        let expression = Expression::new(Term::Application(ApplicationTerm::new(
-            Expression::new(Term::Builtin(BuiltinTerm::Query)),
-            vec![
-                Expression::new(Term::Value(ValueTerm::QueryShape(QueryShape::list(
-                    QueryShape::Leaf,
-                )))),
-                root,
-            ],
-        )));
+        let shape = QueryShape::list(QueryShape::Leaf);
+        let expression = query(root, &shape);
         let result = expression.evaluate(&state);
         assert_eq!(
             result,
@@ -830,15 +757,8 @@ mod tests {
                 )))),
             ],
         ))));
-        let expression = Expression::new(Term::Application(ApplicationTerm::new(
-            Expression::new(Term::Builtin(BuiltinTerm::Query)),
-            vec![
-                Expression::new(Term::Value(ValueTerm::QueryShape(QueryShape::list(
-                    QueryShape::list(QueryShape::Leaf),
-                )))),
-                root,
-            ],
-        )));
+        let shape = QueryShape::list(QueryShape::list(QueryShape::Leaf));
+        let expression = query(root, &shape);
         let result = expression.evaluate(&state);
         assert_eq!(
             result,

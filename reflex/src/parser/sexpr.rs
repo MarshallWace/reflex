@@ -5,9 +5,9 @@ use std::collections::HashMap;
 
 use crate::{
     core::{
-        ApplicationTerm, Arity, DataStructureTerm, EnumTerm, Expression, LambdaTerm, RecursiveTerm,
-        Rewritable, StackOffset, StaticSubstitutions, StaticVariableTerm, StructTerm,
-        Substitutions, Term, VariableTerm,
+        ApplicationTerm, Arity, EnumTerm, Expression, LambdaTerm, RecursiveTerm, Rewritable,
+        StackOffset, StaticSubstitutions, StaticVariableTerm, StructTerm, Substitutions, Term,
+        VariableTerm,
     },
     stdlib::{
         builtin::BuiltinTerm,
@@ -42,12 +42,12 @@ struct LexicalScope<'a> {
     bindings: Vec<&'a str>,
 }
 impl<'a> LexicalScope<'a> {
-    pub fn new(_: &'a str) -> Self {
+    fn new() -> Self {
         LexicalScope {
             bindings: Vec::new(),
         }
     }
-    pub fn create_child(&self, identifiers: &[&'a str]) -> LexicalScope<'a> {
+    fn create_child(&self, identifiers: &[&'a str]) -> LexicalScope<'a> {
         LexicalScope {
             bindings: self
                 .bindings
@@ -57,7 +57,7 @@ impl<'a> LexicalScope<'a> {
                 .collect(),
         }
     }
-    pub fn get(&self, identifier: &'a str) -> Option<usize> {
+    fn get(&self, identifier: &'a str) -> Option<usize> {
         Some(
             self.bindings
                 .iter()
@@ -89,6 +89,7 @@ impl<'a> SymbolCache<'a> {
             })
     }
 }
+
 pub fn parse<'a>(input: &'a str) -> ParserResult<'a, Expression> {
     let syntax = match parse_syntax(input) {
         Ok(syntax) => Ok(syntax),
@@ -97,7 +98,7 @@ pub fn parse<'a>(input: &'a str) -> ParserResult<'a, Expression> {
             source: None,
         }),
     }?;
-    let scope = LexicalScope::new(input);
+    let scope = LexicalScope::new();
     let mut symbol_cache = SymbolCache::new();
     parse_expression(&syntax, &scope, &mut symbol_cache)
 }
@@ -181,12 +182,24 @@ fn parse_builtin_procedure(name: &str) -> Option<BuiltinTerm> {
         "+" => Some(BuiltinTerm::Add),
         "-" => Some(BuiltinTerm::Subtract),
         "*" => Some(BuiltinTerm::Multiply),
+        "/" => Some(BuiltinTerm::Divide),
         "=" => Some(BuiltinTerm::Equal),
         "abs" => Some(BuiltinTerm::Abs),
+        "and" => Some(BuiltinTerm::And),
         "car" => Some(BuiltinTerm::Car),
         "cdr" => Some(BuiltinTerm::Cdr),
+        "concat" => Some(BuiltinTerm::Concat),
         "cons" => Some(BuiltinTerm::Cons),
+        "eq" => Some(BuiltinTerm::Eq),
+        "gt" => Some(BuiltinTerm::Gt),
+        "gte" => Some(BuiltinTerm::Gte),
         "if" => Some(BuiltinTerm::If),
+        "lt" => Some(BuiltinTerm::Lt),
+        "lte" => Some(BuiltinTerm::Lte),
+        "not" => Some(BuiltinTerm::Not),
+        "or" => Some(BuiltinTerm::Or),
+        "pow" => Some(BuiltinTerm::Pow),
+        "remainder" => Some(BuiltinTerm::Remainder),
         _ => None,
     }
 }
@@ -268,19 +281,16 @@ fn parse_quoted_list<'a>(
     symbol_cache: &mut SymbolCache<'a>,
 ) -> Expression {
     match values.len() {
-        0 => Expression::new(Term::DataStructure(DataStructureTerm::Enum(EnumTerm::new(
-            0,
-            Vec::new(),
-        )))),
+        0 => Expression::new(Term::Enum(EnumTerm::new(0, Vec::new()))),
         _ => {
             let value = values.iter().next().unwrap();
-            Expression::new(Term::DataStructure(DataStructureTerm::Enum(EnumTerm::new(
+            Expression::new(Term::Enum(EnumTerm::new(
                 1,
                 vec![
                     parse_quoted_value(value, symbol_cache),
                     parse_quoted_list(&values[1..], symbol_cache),
                 ],
-            ))))
+            )))
         }
     }
 }
@@ -476,19 +486,16 @@ fn parse_binding_expression<'a>(
                         let bindings = Expression::new(Term::Recursive(RecursiveTerm::new(
                             Expression::new(Term::Lambda(LambdaTerm::new(
                                 Arity::from(0, 1, None),
-                                Expression::new(Term::DataStructure(DataStructureTerm::Struct(
-                                    StructTerm::new(
-                                        initializers
-                                            .iter()
-                                            .map(|initializer| {
-                                                initializer
-                                                    .substitute(&initializer_substitutions)
-                                                    .unwrap_or_else(|| {
-                                                        Expression::clone(initializer)
-                                                    })
-                                            })
-                                            .collect(),
-                                    ),
+                                Expression::new(Term::Struct(StructTerm::new(
+                                    None,
+                                    initializers
+                                        .iter()
+                                        .map(|initializer| {
+                                            initializer
+                                                .substitute(&initializer_substitutions)
+                                                .unwrap_or_else(|| Expression::clone(initializer))
+                                        })
+                                        .collect(),
                                 ))),
                             ))),
                         )));
@@ -574,8 +581,8 @@ fn parse_binding_definitions<'a, 'b>(
 mod tests {
     use crate::{
         core::{
-            ApplicationTerm, Arity, DataStructureTerm, EnumTerm, Expression, LambdaTerm,
-            RecursiveTerm, StaticVariableTerm, StructTerm, Term, VariableTerm,
+            ApplicationTerm, Arity, EnumTerm, Expression, LambdaTerm, RecursiveTerm,
+            StaticVariableTerm, StructTerm, Term, VariableTerm,
         },
         stdlib::{
             builtin::BuiltinTerm,
@@ -902,42 +909,29 @@ mod tests {
         );
         assert_eq!(
             parse("'()"),
-            Ok(Expression::new(Term::DataStructure(
-                DataStructureTerm::Enum(EnumTerm::new(0, Vec::new()))
-            ))),
+            Ok(Expression::new(Term::Enum(EnumTerm::new(0, Vec::new())))),
         );
         assert_eq!(
             parse("'(3 4 5)"),
-            Ok(Expression::new(Term::DataStructure(
-                DataStructureTerm::Enum(EnumTerm::new(
-                    1,
-                    vec![
-                        Expression::new(Term::Value(ValueTerm::Int(3))),
-                        Expression::new(Term::DataStructure(DataStructureTerm::Enum(
-                            EnumTerm::new(
+            Ok(Expression::new(Term::Enum(EnumTerm::new(
+                1,
+                vec![
+                    Expression::new(Term::Value(ValueTerm::Int(3))),
+                    Expression::new(Term::Enum(EnumTerm::new(
+                        1,
+                        vec![
+                            Expression::new(Term::Value(ValueTerm::Int(4))),
+                            Expression::new(Term::Enum(EnumTerm::new(
                                 1,
                                 vec![
-                                    Expression::new(Term::Value(ValueTerm::Int(4))),
-                                    Expression::new(Term::DataStructure(DataStructureTerm::Enum(
-                                        EnumTerm::new(
-                                            1,
-                                            vec![
-                                                Expression::new(Term::Value(ValueTerm::Int(5))),
-                                                Expression::new(Term::DataStructure(
-                                                    DataStructureTerm::Enum(EnumTerm::new(
-                                                        0,
-                                                        Vec::new()
-                                                    ))
-                                                )),
-                                            ],
-                                        ),
-                                    ))),
+                                    Expression::new(Term::Value(ValueTerm::Int(5))),
+                                    Expression::new(Term::Enum(EnumTerm::new(0, Vec::new()))),
                                 ],
-                            ),
-                        ))),
-                    ],
-                )),
-            ))),
+                            ),)),
+                        ],
+                    ),)),
+                ],
+            )),)),
         );
     }
 
@@ -1079,12 +1073,13 @@ mod tests {
                             Expression::new(Term::Recursive(RecursiveTerm::new(Expression::new(
                                 Term::Lambda(LambdaTerm::new(
                                     Arity::from(0, 1, None),
-                                    Expression::new(Term::DataStructure(
-                                        DataStructureTerm::Struct(StructTerm::new(vec![
+                                    Expression::new(Term::Struct(StructTerm::new(
+                                        None,
+                                        vec![
                                             Expression::new(Term::Value(ValueTerm::Int(3))),
                                             Expression::new(Term::Value(ValueTerm::Int(4))),
-                                        ]),)
-                                    )),
+                                        ]
+                                    )),),
                                 ))
                             ),))),
                             Expression::new(Term::Value(ValueTerm::Int(0))),
@@ -1096,12 +1091,13 @@ mod tests {
                             Expression::new(Term::Recursive(RecursiveTerm::new(Expression::new(
                                 Term::Lambda(LambdaTerm::new(
                                     Arity::from(0, 1, None),
-                                    Expression::new(Term::DataStructure(
-                                        DataStructureTerm::Struct(StructTerm::new(vec![
+                                    Expression::new(Term::Struct(StructTerm::new(
+                                        None,
+                                        vec![
                                             Expression::new(Term::Value(ValueTerm::Int(3))),
                                             Expression::new(Term::Value(ValueTerm::Int(4))),
-                                        ]),)
-                                    )),
+                                        ]
+                                    )),),
                                 ))
                             ),))),
                             Expression::new(Term::Value(ValueTerm::Int(1))),
@@ -1126,14 +1122,15 @@ mod tests {
                             Expression::new(Term::Recursive(RecursiveTerm::new(Expression::new(
                                 Term::Lambda(LambdaTerm::new(
                                     Arity::from(0, 1, None),
-                                    Expression::new(Term::DataStructure(
-                                        DataStructureTerm::Struct(StructTerm::new(vec![
+                                    Expression::new(Term::Struct(StructTerm::new(
+                                        None,
+                                        vec![
                                             Expression::new(Term::Value(ValueTerm::Int(3))),
                                             Expression::new(Term::Value(ValueTerm::Int(4))),
-                                        ]),)
-                                    )),
-                                ))
-                            ),))),
+                                        ]
+                                    )),),
+                                )),
+                            )))),
                             Expression::new(Term::Value(ValueTerm::Int(0))),
                         ],
                     ))),
@@ -1143,14 +1140,15 @@ mod tests {
                             Expression::new(Term::Recursive(RecursiveTerm::new(Expression::new(
                                 Term::Lambda(LambdaTerm::new(
                                     Arity::from(0, 1, None),
-                                    Expression::new(Term::DataStructure(
-                                        DataStructureTerm::Struct(StructTerm::new(vec![
+                                    Expression::new(Term::Struct(StructTerm::new(
+                                        None,
+                                        vec![
                                             Expression::new(Term::Value(ValueTerm::Int(3))),
                                             Expression::new(Term::Value(ValueTerm::Int(4))),
-                                        ]),)
-                                    )),
-                                ))
-                            ),))),
+                                        ]
+                                    )),),
+                                )),
+                            )))),
                             Expression::new(Term::Value(ValueTerm::Int(1))),
                         ],
                     ))),
@@ -1195,12 +1193,13 @@ mod tests {
                                 Expression::new(Term::Recursive(RecursiveTerm::new(
                                     Expression::new(Term::Lambda(LambdaTerm::new(
                                         Arity::from(0, 1, None),
-                                        Expression::new(Term::DataStructure(
-                                            DataStructureTerm::Struct(StructTerm::new(vec![
+                                        Expression::new(Term::Struct(StructTerm::new(
+                                            None,
+                                            vec![
                                                 Expression::new(Term::Value(ValueTerm::Int(3))),
                                                 Expression::new(Term::Value(ValueTerm::Int(4))),
-                                            ]),)
-                                        )),
+                                            ]
+                                        )),),
                                     ))),
                                 ))),
                                 Expression::new(Term::Value(ValueTerm::Int(0))),
@@ -1212,12 +1211,13 @@ mod tests {
                                 Expression::new(Term::Recursive(RecursiveTerm::new(
                                     Expression::new(Term::Lambda(LambdaTerm::new(
                                         Arity::from(0, 1, None),
-                                        Expression::new(Term::DataStructure(
-                                            DataStructureTerm::Struct(StructTerm::new(vec![
+                                        Expression::new(Term::Struct(StructTerm::new(
+                                            None,
+                                            vec![
                                                 Expression::new(Term::Value(ValueTerm::Int(3))),
                                                 Expression::new(Term::Value(ValueTerm::Int(4))),
-                                            ])),
-                                        )),
+                                            ]
+                                        )),),
                                     ))),
                                 ))),
                                 Expression::new(Term::Value(ValueTerm::Int(1))),
@@ -1243,8 +1243,9 @@ mod tests {
                             Expression::new(Term::Recursive(RecursiveTerm::new(Expression::new(
                                 Term::Lambda(LambdaTerm::new(
                                     Arity::from(0, 1, None),
-                                    Expression::new(Term::DataStructure(
-                                        DataStructureTerm::Struct(StructTerm::new(vec![
+                                    Expression::new(Term::Struct(StructTerm::new(
+                                        None,
+                                        vec![
                                             Expression::new(Term::Value(ValueTerm::Int(3))),
                                             Expression::new(Term::Application(
                                                 ApplicationTerm::new(
@@ -1263,8 +1264,8 @@ mod tests {
                                                     ],
                                                 ),
                                             )),
-                                        ])),
-                                    )),
+                                        ]
+                                    )),),
                                 )),
                             )))),
                             Expression::new(Term::Value(ValueTerm::Int(0))),
@@ -1276,8 +1277,9 @@ mod tests {
                             Expression::new(Term::Recursive(RecursiveTerm::new(Expression::new(
                                 Term::Lambda(LambdaTerm::new(
                                     Arity::from(0, 1, None),
-                                    Expression::new(Term::DataStructure(
-                                        DataStructureTerm::Struct(StructTerm::new(vec![
+                                    Expression::new(Term::Struct(StructTerm::new(
+                                        None,
+                                        vec![
                                             Expression::new(Term::Value(ValueTerm::Int(3))),
                                             Expression::new(Term::Application(
                                                 ApplicationTerm::new(
@@ -1296,8 +1298,8 @@ mod tests {
                                                     ],
                                                 ),
                                             )),
-                                        ])),
-                                    )),
+                                        ]
+                                    )),),
                                 )),
                             )))),
                             Expression::new(Term::Value(ValueTerm::Int(1))),
@@ -1322,8 +1324,9 @@ mod tests {
                             Expression::new(Term::Recursive(RecursiveTerm::new(Expression::new(
                                 Term::Lambda(LambdaTerm::new(
                                     Arity::from(0, 1, None),
-                                    Expression::new(Term::DataStructure(
-                                        DataStructureTerm::Struct(StructTerm::new(vec![
+                                    Expression::new(Term::Struct(StructTerm::new(
+                                        None,
+                                        vec![
                                             Expression::new(Term::Value(ValueTerm::Int(3))),
                                             Expression::new(Term::Application(
                                                 ApplicationTerm::new(
@@ -1342,8 +1345,8 @@ mod tests {
                                                     ],
                                                 ),
                                             )),
-                                        ])),
-                                    )),
+                                        ]
+                                    )),),
                                 )),
                             )))),
                             Expression::new(Term::Value(ValueTerm::Int(0))),
@@ -1355,8 +1358,9 @@ mod tests {
                             Expression::new(Term::Recursive(RecursiveTerm::new(Expression::new(
                                 Term::Lambda(LambdaTerm::new(
                                     Arity::from(0, 1, None),
-                                    Expression::new(Term::DataStructure(
-                                        DataStructureTerm::Struct(StructTerm::new(vec![
+                                    Expression::new(Term::Struct(StructTerm::new(
+                                        None,
+                                        vec![
                                             Expression::new(Term::Value(ValueTerm::Int(3))),
                                             Expression::new(Term::Application(
                                                 ApplicationTerm::new(
@@ -1375,8 +1379,8 @@ mod tests {
                                                     ],
                                                 ),
                                             )),
-                                        ])),
-                                    )),
+                                        ]
+                                    )),),
                                 )),
                             )))),
                             Expression::new(Term::Value(ValueTerm::Int(1))),
@@ -1401,8 +1405,9 @@ mod tests {
                             Expression::new(Term::Recursive(RecursiveTerm::new(Expression::new(
                                 Term::Lambda(LambdaTerm::new(
                                     Arity::from(0, 1, None),
-                                    Expression::new(Term::DataStructure(
-                                        DataStructureTerm::Struct(StructTerm::new(vec![
+                                    Expression::new(Term::Struct(StructTerm::new(
+                                        None,
+                                        vec![
                                             Expression::new(Term::Application(
                                                 ApplicationTerm::new(
                                                     Expression::new(Term::Builtin(
@@ -1421,8 +1426,8 @@ mod tests {
                                                 ),
                                             )),
                                             Expression::new(Term::Value(ValueTerm::Int(3))),
-                                        ])),
-                                    )),
+                                        ]
+                                    )),),
                                 )),
                             )))),
                             Expression::new(Term::Value(ValueTerm::Int(0))),
@@ -1434,8 +1439,9 @@ mod tests {
                             Expression::new(Term::Recursive(RecursiveTerm::new(Expression::new(
                                 Term::Lambda(LambdaTerm::new(
                                     Arity::from(0, 1, None),
-                                    Expression::new(Term::DataStructure(
-                                        DataStructureTerm::Struct(StructTerm::new(vec![
+                                    Expression::new(Term::Struct(StructTerm::new(
+                                        None,
+                                        vec![
                                             Expression::new(Term::Application(
                                                 ApplicationTerm::new(
                                                     Expression::new(Term::Builtin(
@@ -1454,8 +1460,8 @@ mod tests {
                                                 ),
                                             )),
                                             Expression::new(Term::Value(ValueTerm::Int(3))),
-                                        ])),
-                                    )),
+                                        ]
+                                    )),),
                                 )),
                             )))),
                             Expression::new(Term::Value(ValueTerm::Int(1))),
@@ -1480,8 +1486,9 @@ mod tests {
                             Expression::new(Term::Recursive(RecursiveTerm::new(Expression::new(
                                 Term::Lambda(LambdaTerm::new(
                                     Arity::from(0, 1, None),
-                                    Expression::new(Term::DataStructure(
-                                        DataStructureTerm::Struct(StructTerm::new(vec![
+                                    Expression::new(Term::Struct(StructTerm::new(
+                                        None,
+                                        vec![
                                             Expression::new(Term::Application(
                                                 ApplicationTerm::new(
                                                     Expression::new(Term::Builtin(
@@ -1500,8 +1507,8 @@ mod tests {
                                                 ),
                                             )),
                                             Expression::new(Term::Value(ValueTerm::Int(3))),
-                                        ])),
-                                    )),
+                                        ]
+                                    )),),
                                 )),
                             )))),
                             Expression::new(Term::Value(ValueTerm::Int(0))),
@@ -1513,8 +1520,9 @@ mod tests {
                             Expression::new(Term::Recursive(RecursiveTerm::new(Expression::new(
                                 Term::Lambda(LambdaTerm::new(
                                     Arity::from(0, 1, None),
-                                    Expression::new(Term::DataStructure(
-                                        DataStructureTerm::Struct(StructTerm::new(vec![
+                                    Expression::new(Term::Struct(StructTerm::new(
+                                        None,
+                                        vec![
                                             Expression::new(Term::Application(
                                                 ApplicationTerm::new(
                                                     Expression::new(Term::Builtin(
@@ -1533,8 +1541,8 @@ mod tests {
                                                 ),
                                             )),
                                             Expression::new(Term::Value(ValueTerm::Int(3))),
-                                        ])),
-                                    )),
+                                        ]
+                                    )),),
                                 )),
                             )))),
                             Expression::new(Term::Value(ValueTerm::Int(1))),
@@ -1565,8 +1573,7 @@ mod tests {
                             Expression::new(Term::Recursive(RecursiveTerm::new(Expression::new(
                                 Term::Lambda(LambdaTerm::new(
                                     Arity::from(0, 1, None),
-                                    Expression::new(Term::DataStructure(
-                                        DataStructureTerm::Struct(StructTerm::new(vec![
+                                    Expression::new(Term::Struct(StructTerm::new(None,vec![
                                             Expression::new(Term::Lambda(LambdaTerm::new(
                                                 Arity::from(0, 2, None),
                                                 Expression::new(Term::Application(ApplicationTerm::new(
@@ -1604,7 +1611,7 @@ mod tests {
                                             Expression::new(Term::Value(ValueTerm::Int(3))),
                                             Expression::new(Term::Value(ValueTerm::Int(4))),
                                         ])),
-                                    )),
+                                    ),
                                 )),
                             )))),
                             Expression::new(Term::Value(ValueTerm::Int(0))),
@@ -1616,8 +1623,7 @@ mod tests {
                             Expression::new(Term::Recursive(RecursiveTerm::new(Expression::new(
                                 Term::Lambda(LambdaTerm::new(
                                     Arity::from(0, 1, None),
-                                    Expression::new(Term::DataStructure(
-                                        DataStructureTerm::Struct(StructTerm::new(vec![
+                                    Expression::new(Term::Struct(StructTerm::new(None,vec![
                                             Expression::new(Term::Lambda(LambdaTerm::new(
                                                 Arity::from(0, 2, None),
                                                 Expression::new(Term::Application(ApplicationTerm::new(
@@ -1655,7 +1661,7 @@ mod tests {
                                             Expression::new(Term::Value(ValueTerm::Int(3))),
                                             Expression::new(Term::Value(ValueTerm::Int(4))),
                                         ])),
-                                    )),
+                                    ),
                                 )),
                             )))),
                             Expression::new(Term::Value(ValueTerm::Int(1))),
@@ -1667,8 +1673,9 @@ mod tests {
                             Expression::new(Term::Recursive(RecursiveTerm::new(Expression::new(
                                 Term::Lambda(LambdaTerm::new(
                                     Arity::from(0, 1, None),
-                                    Expression::new(Term::DataStructure(
-                                        DataStructureTerm::Struct(StructTerm::new(vec![
+                                    Expression::new(Term::Struct(StructTerm::new(
+                                        None,
+                                        vec![
                                             Expression::new(Term::Lambda(LambdaTerm::new(
                                                 Arity::from(0, 2, None),
                                                 Expression::new(Term::Application(ApplicationTerm::new(
@@ -1706,7 +1713,7 @@ mod tests {
                                             Expression::new(Term::Value(ValueTerm::Int(3))),
                                             Expression::new(Term::Value(ValueTerm::Int(4))),
                                         ])),
-                                    )),
+                                    ),
                                 )),
                             )))),
                             Expression::new(Term::Value(ValueTerm::Int(2))),

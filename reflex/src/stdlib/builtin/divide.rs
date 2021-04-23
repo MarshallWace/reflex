@@ -6,8 +6,8 @@ use crate::{
     stdlib::{builtin::BuiltinFunction, signal::SignalType, value::ValueTerm},
 };
 
-pub struct Subtract {}
-impl BuiltinFunction for Subtract {
+pub struct Divide {}
+impl BuiltinFunction for Divide {
     fn arity() -> Arity {
         Arity::from(2, 0, None)
     }
@@ -26,10 +26,30 @@ impl BuiltinFunction for Subtract {
         let right = args.next().unwrap();
         match (left.value(), right.value()) {
             (Term::Value(ValueTerm::Int(left)), Term::Value(ValueTerm::Int(right))) => {
-                Expression::new(Term::Value(ValueTerm::Int(left - right)))
+                if *right == 0 {
+                    Expression::new(Term::Signal(SignalTerm::new(Signal::new(
+                        SignalType::Error,
+                        vec![ValueTerm::String(format!(
+                            "Division by zero: {} / {}",
+                            left, right,
+                        ))],
+                    ))))
+                } else {
+                    Expression::new(Term::Value(ValueTerm::Int(left / right)))
+                }
             }
             (Term::Value(ValueTerm::Float(left)), Term::Value(ValueTerm::Float(right))) => {
-                Expression::new(Term::Value(ValueTerm::Float(left - right)))
+                if *right == 0.0 {
+                    Expression::new(Term::Signal(SignalTerm::new(Signal::new(
+                        SignalType::Error,
+                        vec![ValueTerm::String(format!(
+                            "Division by zero: {} / {}",
+                            left, right,
+                        ))],
+                    ))))
+                } else {
+                    Expression::new(Term::Value(ValueTerm::Float(left / right)))
+                }
             }
             _ => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                 SignalType::Error,

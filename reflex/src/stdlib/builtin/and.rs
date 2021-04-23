@@ -6,8 +6,8 @@ use crate::{
     stdlib::{builtin::BuiltinFunction, signal::SignalType, value::ValueTerm},
 };
 
-pub struct Subtract {}
-impl BuiltinFunction for Subtract {
+pub struct And {}
+impl BuiltinFunction for And {
     fn arity() -> Arity {
         Arity::from(2, 0, None)
     }
@@ -24,20 +24,18 @@ impl BuiltinFunction for Subtract {
         let mut args = args.into_iter();
         let left = args.next().unwrap();
         let right = args.next().unwrap();
-        match (left.value(), right.value()) {
-            (Term::Value(ValueTerm::Int(left)), Term::Value(ValueTerm::Int(right))) => {
-                Expression::new(Term::Value(ValueTerm::Int(left - right)))
-            }
-            (Term::Value(ValueTerm::Float(left)), Term::Value(ValueTerm::Float(right))) => {
-                Expression::new(Term::Value(ValueTerm::Float(left - right)))
-            }
-            _ => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
-                SignalType::Error,
-                vec![ValueTerm::String(format!(
-                    "Expected (Int, Int) or (Float, Float), received ({}, {})",
-                    left, right,
-                ))],
-            )))),
+        let left_value = match left.value() {
+            Term::Value(ValueTerm::Boolean(false)) | Term::Value(ValueTerm::Null) => false,
+            _ => true,
+        };
+        let right_value = match right.value() {
+            Term::Value(ValueTerm::Boolean(false)) | Term::Value(ValueTerm::Null) => false,
+            _ => true,
+        };
+        if left_value && right_value {
+            right
+        } else {
+            left
         }
     }
 }
