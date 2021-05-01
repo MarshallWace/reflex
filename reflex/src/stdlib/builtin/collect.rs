@@ -2,9 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use crate::{
-    core::{Arity, Expression, Signal, SignalTerm, Term},
+    core::{ApplicationTerm, Arity, Expression, Signal, SignalTerm, Term, VarArgs},
     stdlib::{
-        builtin::Array, builtin::BuiltinFunction, collection::CollectionTerm, signal::SignalType,
+        builtin::{BuiltinFunction, BuiltinTerm},
+        collection::{vector::VectorTerm, CollectionTerm},
+        signal::SignalType,
         value::ValueTerm,
     },
 };
@@ -27,11 +29,24 @@ impl BuiltinFunction for Collect {
         let mut args = args.into_iter();
         let target = args.next().unwrap();
         match target.value() {
-            Term::Collection(collection) => match collection {
-                CollectionTerm::Vector(target) => Array::apply(target.iterate()),
-                CollectionTerm::HashMap(target) => Array::apply(target.iterate()),
-                CollectionTerm::HashSet(target) => Array::apply(target.iterate()),
-            },
+            Term::Collection(collection) => {
+                let items: Vec<Expression> = match collection {
+                    CollectionTerm::Vector(target) => target.iterate().into_iter().collect(),
+                    CollectionTerm::HashMap(target) => target.iterate().into_iter().collect(),
+                    CollectionTerm::HashSet(target) => target.iterate().into_iter().collect(),
+                };
+                let has_dynamic_items = items.iter().any(|item| match item.value() {
+                    Term::Value(_) => false,
+                    _ => true,
+                });
+                match has_dynamic_items {
+                    false => Expression::clone(&target),
+                    true => Expression::new(Term::Application(ApplicationTerm::new(
+                        Expression::new(Term::Builtin(BuiltinTerm::CollectArgs)),
+                        items,
+                    ))),
+                }
+            }
             _ => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                 SignalType::Error,
                 vec![ValueTerm::String(format!(
@@ -43,20 +58,34 @@ impl BuiltinFunction for Collect {
     }
 }
 
+pub struct CollectArgs {}
+impl BuiltinFunction for CollectArgs {
+    fn arity() -> Arity {
+        Arity::from(0, 0, Some(VarArgs::Eager))
+    }
+    fn apply(args: impl IntoIterator<Item = Expression> + ExactSizeIterator) -> Expression {
+        Expression::new(Term::Collection(CollectionTerm::Vector(VectorTerm::new(
+            args.into_iter(),
+        ))))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::{
+        cache::EvaluationCache,
         core::{ApplicationTerm, DependencyList, DynamicState, EvaluationResult, Expression, Term},
         parser::sexpr::parse,
         stdlib::{
             builtin::BuiltinTerm,
             collection::{vector::VectorTerm, CollectionTerm},
-            value::{ArrayValue, ValueTerm},
+            value::ValueTerm,
         },
     };
 
     #[test]
     fn collect_expressions() {
+        let mut cache = EvaluationCache::new();
         let state = DynamicState::new();
         let collection = Expression::new(Term::Collection(CollectionTerm::Vector(
             VectorTerm::new(vec![
@@ -69,15 +98,15 @@ mod tests {
             Expression::new(Term::Builtin(BuiltinTerm::Collect)),
             vec![collection],
         )));
-        let result = expression.evaluate(&state);
+        let result = expression.evaluate(&state, &mut cache);
         assert_eq!(
             result,
             EvaluationResult::new(
-                Ok(Expression::new(Term::Value(ValueTerm::Array(
-                    ArrayValue::new(vec![
-                        ValueTerm::Int(3 + 1),
-                        ValueTerm::Int(4 + 1),
-                        ValueTerm::Int(5 + 1),
+                Ok(Expression::new(Term::Collection(CollectionTerm::Vector(
+                    VectorTerm::new(vec![
+                        Expression::new(Term::Value(ValueTerm::Int(3 + 1))),
+                        Expression::new(Term::Value(ValueTerm::Int(4 + 1))),
+                        Expression::new(Term::Value(ValueTerm::Int(5 + 1))),
                     ]),
                 )))),
                 DependencyList::empty(),

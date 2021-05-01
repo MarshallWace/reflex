@@ -55,6 +55,7 @@ impl BuiltinFunction for Match {
 #[cfg(test)]
 mod tests {
     use crate::{
+        cache::EvaluationCache,
         core::{
             ApplicationTerm, Arity, DependencyList, DynamicState, EnumTerm, EvaluationResult,
             Expression, LambdaTerm, Signal, SignalTerm, StaticVariableTerm, StructTerm, Term,
@@ -67,6 +68,7 @@ mod tests {
 
     #[test]
     fn match_expressions() {
+        let mut cache = EvaluationCache::new();
         let state = DynamicState::new();
         let expression = Expression::new(Term::Application(ApplicationTerm::new(
             Expression::new(Term::Builtin(BuiltinTerm::Match)),
@@ -122,7 +124,7 @@ mod tests {
                 ))),
             ],
         )));
-        let result = expression.evaluate(&state);
+        let result = expression.evaluate(&state, &mut cache);
         assert_eq!(
             result,
             EvaluationResult::new(

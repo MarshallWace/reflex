@@ -4,6 +4,7 @@
 use std::io::{self, Write};
 
 use reflex::{
+    cache::EvaluationCache,
     core::{DynamicState, Signal},
     parser::sexpr::parse,
     stdlib::{signal::SignalType, value::ValueTerm},
@@ -28,11 +29,12 @@ pub fn run() -> io::Result<()> {
             break;
         }
 
+        let mut cache = EvaluationCache::new();
         let state = DynamicState::new();
 
         match parse(&input) {
             Ok(expression) => {
-                let result = expression.evaluate(&state).unwrap();
+                let result = expression.evaluate(&state, &mut cache).unwrap();
                 match result {
                     Ok(result) => writeln!(stdout, "{}", result)?,
                     Err(signals) => {

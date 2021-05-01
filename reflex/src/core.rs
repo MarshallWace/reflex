@@ -9,6 +9,7 @@ use std::{
 };
 
 use crate::{
+    cache::EvaluationCache,
     hash::{
         combine_hashes, hash_bytes, hash_option, hash_sequence, hash_u32, hash_u8,
         hash_unordered_sequence, prefix_hash, HashId, Hashable,
@@ -69,22 +70,83 @@ impl fmt::Display for Arity {
 pub(crate) trait Rewritable {
     fn capture_depth(&self) -> StackOffset;
     fn dynamic_dependencies(&self) -> DependencyList;
-    fn substitute(&self, substitutions: &Substitutions) -> Option<Expression>;
-    fn optimize(&self) -> Option<Expression>;
+    fn substitute(
+        &self,
+        substitutions: &Substitutions,
+        cache: &mut EvaluationCache,
+    ) -> Option<Expression>;
+    fn optimize(&self, cache: &mut EvaluationCache) -> Option<Expression>;
 }
 
 pub(crate) trait Reducible {
-    fn reduce(&self) -> Option<Expression>;
+    fn reduce(&self, cache: &mut EvaluationCache) -> Option<Expression>;
 }
 
-pub(crate) enum Substitutions<'a> {
+pub struct Substitutions<'a> {
+    hash: HashId,
+    substitutions: SubstitutionType<'a>,
+}
+impl<'a> Hashable for Substitutions<'a> {
+    fn hash(&self) -> HashId {
+        self.hash
+    }
+}
+impl<'a> Substitutions<'a> {
+    pub fn from(substitutions: SubstitutionType<'a>) -> Self {
+        Self {
+            hash: substitutions.hash(),
+            substitutions,
+        }
+    }
+    pub fn new(substitutions: &'a [(StackOffset, Expression)]) -> Self {
+        let substitutions = SubstitutionType::Static(StaticSubstitutions::new(substitutions));
+        Self {
+            hash: substitutions.hash(),
+            substitutions,
+        }
+    }
+    pub fn wildcard(offset: StackOffset) -> Self {
+        let substitutions = SubstitutionType::Static(StaticSubstitutions::all(offset));
+        Self {
+            hash: substitutions.hash(),
+            substitutions,
+        }
+    }
+    pub fn dynamic(state: &'a DynamicState) -> Self {
+        let substitutions = SubstitutionType::Dynamic(state);
+        Self {
+            hash: substitutions.hash(),
+            substitutions: substitutions,
+        }
+    }
+    pub fn kind(&self) -> &SubstitutionType<'a> {
+        &self.substitutions
+    }
+}
+
+pub enum SubstitutionType<'a> {
     Static(StaticSubstitutions<'a>),
     Dynamic(&'a DynamicState),
 }
-
-pub(crate) enum StaticSubstitutions<'a> {
+impl<'a> Hashable for SubstitutionType<'a> {
+    fn hash(&self) -> HashId {
+        match self {
+            Self::Static(substitutions) => prefix_hash(0, substitutions.hash()),
+            Self::Dynamic(substitutions) => prefix_hash(1, substitutions.hash()),
+        }
+    }
+}
+pub enum StaticSubstitutions<'a> {
     Some(TargetedStaticSubstitutions<'a>),
     All(WildcardStaticSubstitutions),
+}
+impl<'a> Hashable for StaticSubstitutions<'a> {
+    fn hash(&self) -> HashId {
+        match self {
+            Self::Some(substitutions) => prefix_hash(0, substitutions.hash()),
+            Self::All(substitutions) => prefix_hash(1, substitutions.hash()),
+        }
+    }
 }
 impl<'a> StaticSubstitutions<'a> {
     pub fn new(substitutions: &'a [(StackOffset, Expression)]) -> Self {
@@ -105,18 +167,30 @@ impl<'a> StaticSubstitutions<'a> {
             Self::All(substitutions) => substitutions.can_skip(expression),
         }
     }
-    fn get(&self, offset: StackOffset) -> Option<Expression> {
+    fn get(&self, offset: StackOffset, cache: &mut EvaluationCache) -> Option<Expression> {
         match self {
-            Self::Some(substitutions) => substitutions.get(offset),
+            Self::Some(substitutions) => substitutions.get(offset, cache),
             Self::All(substitutions) => substitutions.get(offset),
         }
     }
 }
 
-pub(crate) struct TargetedStaticSubstitutions<'a> {
+pub struct TargetedStaticSubstitutions<'a> {
     substitutions: &'a [(StackOffset, Expression)],
     min_depth: StackOffset,
     offset: StackOffset,
+}
+impl<'a> Hashable for TargetedStaticSubstitutions<'a> {
+    fn hash(&self) -> HashId {
+        combine_hashes(
+            hash_stack_offset(self.offset),
+            hash_sequence(
+                self.substitutions
+                    .iter()
+                    .map(|(key, value)| combine_hashes(hash_stack_offset(*key), value.hash())),
+            ),
+        )
+    }
 }
 impl<'a> TargetedStaticSubstitutions<'a> {
     pub fn new(substitutions: &'a [(StackOffset, Expression)]) -> Self {
@@ -139,7 +213,7 @@ impl<'a> TargetedStaticSubstitutions<'a> {
         let capture_depth = expression.capture_depth();
         capture_depth == 0 || (capture_depth - 1 < self.min_depth + self.offset)
     }
-    fn get(&self, offset: StackOffset) -> Option<Expression> {
+    fn get(&self, offset: StackOffset, cache: &mut EvaluationCache) -> Option<Expression> {
         if offset < self.offset {
             return None;
         }
@@ -150,9 +224,7 @@ impl<'a> TargetedStaticSubstitutions<'a> {
             .map(|(_, expression)| {
                 if expression.capture_depth() > 0 {
                     expression
-                        .substitute(&Substitutions::Static(StaticSubstitutions::all(
-                            self.offset,
-                        )))
+                        .substitute(&Substitutions::wildcard(self.offset), cache)
                         .unwrap_or_else(|| Expression::clone(expression))
                 } else {
                     Expression::clone(expression)
@@ -161,8 +233,13 @@ impl<'a> TargetedStaticSubstitutions<'a> {
     }
 }
 
-pub(crate) struct WildcardStaticSubstitutions {
+pub struct WildcardStaticSubstitutions {
     offset: StackOffset,
+}
+impl Hashable for WildcardStaticSubstitutions {
+    fn hash(&self) -> HashId {
+        hash_stack_offset(self.offset)
+    }
 }
 impl WildcardStaticSubstitutions {
     pub fn new(offset: StackOffset) -> Self {
@@ -210,14 +287,16 @@ impl Expression {
     pub fn has_free_variables(&self) -> bool {
         self.capture_depth > 0
     }
-    pub fn compile(&self) -> Expression {
-        self.optimize().unwrap_or_else(|| Expression::clone(self))
+    pub fn compile(&self, cache: &mut EvaluationCache) -> Expression {
+        self.optimize(cache)
+            .unwrap_or_else(|| Expression::clone(self))
     }
-    pub fn evaluate(&self, state: &DynamicState) -> EvaluationResult {
-        let substitutions = Substitutions::Dynamic(state);
+    pub fn evaluate(&self, state: &DynamicState, cache: &mut EvaluationCache) -> EvaluationResult {
+        let substitutions = Substitutions::dynamic(state);
         let (result, dependencies) = evaluate_recursive(
             Expression::clone(self),
             &substitutions,
+            cache,
             DependencyList::empty(),
         );
         let result = match result.value() {
@@ -267,34 +346,55 @@ impl Rewritable for Expression {
     fn dynamic_dependencies(&self) -> DependencyList {
         DependencyList::clone(&self.dynamic_dependencies)
     }
-    fn substitute(&self, substitutions: &Substitutions) -> Option<Expression> {
-        let can_skip = match substitutions {
-            Substitutions::Static(substitutions) => substitutions.can_skip(self),
-            Substitutions::Dynamic(_) => self.dynamic_dependencies.is_empty(),
+    fn substitute(
+        &self,
+        substitutions: &Substitutions,
+        cache: &mut EvaluationCache,
+    ) -> Option<Expression> {
+        let can_skip = match substitutions.kind() {
+            SubstitutionType::Static(substitutions) => substitutions.can_skip(self),
+            SubstitutionType::Dynamic(_) => self.dynamic_dependencies.is_empty(),
         };
         if can_skip {
-            None
-        } else {
-            self.value.substitute(substitutions)
+            return None;
+        }
+        match cache.retrieve_substitution(self, substitutions) {
+            Some(result) => result,
+            None => {
+                let result = self.value.substitute(substitutions, cache);
+                cache.store_substitution(self, substitutions, result.as_ref());
+                result
+            }
         }
     }
-    fn optimize(&self) -> Option<Expression> {
+    fn optimize(&self, cache: &mut EvaluationCache) -> Option<Expression> {
         if self.is_optimized {
             return None;
         }
         Some(
             self.value
-                .optimize()
+                .optimize(cache)
                 .unwrap_or_else(|| Self::optimized(self)),
         )
     }
 }
 impl Reducible for Expression {
-    fn reduce(&self) -> Option<Expression> {
+    fn reduce(&self, cache: &mut EvaluationCache) -> Option<Expression> {
         if self.is_reduced {
             return None;
         }
-        Some(self.value.reduce().unwrap_or_else(|| Self::reduced(self)))
+        match cache.retrieve_reduction(self) {
+            Some(result) => result,
+            None => {
+                let result = Some(
+                    self.value
+                        .reduce(cache)
+                        .unwrap_or_else(|| Self::reduced(self)),
+                );
+                cache.store_reduction(self, result.as_ref());
+                result
+            }
+        }
     }
 }
 impl fmt::Debug for Expression {
@@ -310,13 +410,14 @@ impl fmt::Display for Expression {
 fn evaluate_recursive(
     expression: Expression,
     state: &Substitutions,
+    cache: &mut EvaluationCache,
     dependencies: DependencyList,
 ) -> (Expression, DependencyList) {
     let dependencies = dependencies.extend(expression.dynamic_dependencies());
-    match expression.substitute(state) {
-        Some(expression) => evaluate_recursive(expression, state, dependencies),
-        None => match expression.reduce() {
-            Some(expression) => evaluate_recursive(expression, state, dependencies),
+    match expression.substitute(state, cache) {
+        Some(expression) => evaluate_recursive(expression, state, cache, dependencies),
+        None => match expression.reduce(cache) {
+            Some(expression) => evaluate_recursive(expression, state, cache, dependencies),
             None => (expression, dependencies),
         },
     }
@@ -440,27 +541,31 @@ impl Rewritable for Term {
             _ => DependencyList::empty(),
         }
     }
-    fn substitute(&self, substitutions: &Substitutions) -> Option<Expression> {
+    fn substitute(
+        &self,
+        substitutions: &Substitutions,
+        cache: &mut EvaluationCache,
+    ) -> Option<Expression> {
         match self {
-            Self::Variable(term) => term.substitute(substitutions),
-            Self::Lambda(term) => term.substitute(substitutions),
-            Self::Application(term) => term.substitute(substitutions),
-            Self::Recursive(term) => term.substitute(substitutions),
-            Self::Struct(term) => term.substitute(substitutions),
-            Self::Enum(term) => term.substitute(substitutions),
-            Self::Collection(term) => term.substitute(substitutions),
+            Self::Variable(term) => term.substitute(substitutions, cache),
+            Self::Lambda(term) => term.substitute(substitutions, cache),
+            Self::Application(term) => term.substitute(substitutions, cache),
+            Self::Recursive(term) => term.substitute(substitutions, cache),
+            Self::Struct(term) => term.substitute(substitutions, cache),
+            Self::Enum(term) => term.substitute(substitutions, cache),
+            Self::Collection(term) => term.substitute(substitutions, cache),
             _ => None,
         }
     }
-    fn optimize(&self) -> Option<Expression> {
+    fn optimize(&self, cache: &mut EvaluationCache) -> Option<Expression> {
         match self {
-            Self::Variable(term) => term.optimize(),
-            Self::Lambda(term) => term.optimize(),
-            Self::Application(term) => term.optimize(),
-            Self::Recursive(term) => term.optimize(),
-            Self::Struct(term) => term.optimize(),
-            Self::Enum(term) => term.optimize(),
-            Self::Collection(term) => term.optimize(),
+            Self::Variable(term) => term.optimize(cache),
+            Self::Lambda(term) => term.optimize(cache),
+            Self::Application(term) => term.optimize(cache),
+            Self::Recursive(term) => term.optimize(cache),
+            Self::Struct(term) => term.optimize(cache),
+            Self::Enum(term) => term.optimize(cache),
+            Self::Collection(term) => term.optimize(cache),
             _ => None,
         }
     }
@@ -475,10 +580,10 @@ impl Term {
     }
 }
 impl Reducible for Term {
-    fn reduce(&self) -> Option<Expression> {
+    fn reduce(&self, cache: &mut EvaluationCache) -> Option<Expression> {
         match self {
-            Self::Application(term) => term.reduce(),
-            Self::Recursive(term) => term.reduce(),
+            Self::Application(term) => term.reduce(cache),
+            Self::Recursive(term) => term.reduce(cache),
             _ => None,
         }
     }
@@ -529,16 +634,20 @@ impl Rewritable for VariableTerm {
             Self::Dynamic(term) => term.dynamic_dependencies(),
         }
     }
-    fn substitute(&self, substitutions: &Substitutions) -> Option<Expression> {
+    fn substitute(
+        &self,
+        substitutions: &Substitutions,
+        cache: &mut EvaluationCache,
+    ) -> Option<Expression> {
         match self {
-            Self::Static(term) => term.substitute(substitutions),
-            Self::Dynamic(term) => term.substitute(substitutions),
+            Self::Static(term) => term.substitute(substitutions, cache),
+            Self::Dynamic(term) => term.substitute(substitutions, cache),
         }
     }
-    fn optimize(&self) -> Option<Expression> {
+    fn optimize(&self, cache: &mut EvaluationCache) -> Option<Expression> {
         match self {
-            Self::Static(term) => term.optimize(),
-            Self::Dynamic(term) => term.optimize(),
+            Self::Static(term) => term.optimize(cache),
+            Self::Dynamic(term) => term.optimize(cache),
         }
     }
 }
@@ -580,13 +689,17 @@ impl Rewritable for StaticVariableTerm {
     fn dynamic_dependencies(&self) -> DependencyList {
         DependencyList::empty()
     }
-    fn substitute(&self, substitutions: &Substitutions) -> Option<Expression> {
-        match substitutions {
-            Substitutions::Static(substitutions) => substitutions.get(self.offset),
+    fn substitute(
+        &self,
+        substitutions: &Substitutions,
+        cache: &mut EvaluationCache,
+    ) -> Option<Expression> {
+        match substitutions.kind() {
+            SubstitutionType::Static(substitutions) => substitutions.get(self.offset, cache),
             _ => None,
         }
     }
-    fn optimize(&self) -> Option<Expression> {
+    fn optimize(&self, _cache: &mut EvaluationCache) -> Option<Expression> {
         None
     }
 }
@@ -613,16 +726,20 @@ impl Rewritable for DynamicVariableTerm {
     fn dynamic_dependencies(&self) -> DependencyList {
         DependencyList::of(DynamicDependencies::of(self.id))
     }
-    fn substitute(&self, substitutions: &Substitutions) -> Option<Expression> {
-        match substitutions {
-            Substitutions::Dynamic(state) => Some(match state.get(self.id) {
+    fn substitute(
+        &self,
+        substitutions: &Substitutions,
+        _cache: &mut EvaluationCache,
+    ) -> Option<Expression> {
+        match substitutions.kind() {
+            SubstitutionType::Dynamic(state) => Some(match state.get(self.id) {
                 Some(value) => value,
                 None => Expression::clone(&self.fallback),
             }),
             _ => None,
         }
     }
-    fn optimize(&self) -> Option<Expression> {
+    fn optimize(&self, _cache: &mut EvaluationCache) -> Option<Expression> {
         None
     }
 }
@@ -634,6 +751,15 @@ impl fmt::Display for DynamicVariableTerm {
 
 pub struct DynamicState {
     values: HashMap<StateToken, Expression>,
+}
+impl Hashable for DynamicState {
+    fn hash(&self) -> HashId {
+        hash_sequence(
+            self.values
+                .iter()
+                .map(|(key, value)| combine_hashes(hash_state_token(*key), value.hash())),
+        )
+    }
 }
 impl DynamicState {
     pub fn new() -> Self {
@@ -698,19 +824,23 @@ impl Rewritable for RecursiveTerm {
     fn dynamic_dependencies(&self) -> DependencyList {
         self.factory.dynamic_dependencies()
     }
-    fn substitute(&self, substitutions: &Substitutions) -> Option<Expression> {
+    fn substitute(
+        &self,
+        substitutions: &Substitutions,
+        cache: &mut EvaluationCache,
+    ) -> Option<Expression> {
         self.factory
-            .substitute(substitutions)
+            .substitute(substitutions, cache)
             .map(|factory| Expression::new(Term::Recursive(Self { factory })))
     }
-    fn optimize(&self) -> Option<Expression> {
+    fn optimize(&self, cache: &mut EvaluationCache) -> Option<Expression> {
         self.factory
-            .optimize()
+            .optimize(cache)
             .map(|factory| Expression::new(Term::Recursive(Self { factory })))
     }
 }
 impl Reducible for RecursiveTerm {
-    fn reduce(&self) -> Option<Expression> {
+    fn reduce(&self, cache: &mut EvaluationCache) -> Option<Expression> {
         // TODO: Implement recursion via cached circular reference cell rather than repeated factory invocation
         Expression::new(Term::Application(ApplicationTerm::new(
             Expression::clone(&self.factory),
@@ -718,7 +848,7 @@ impl Reducible for RecursiveTerm {
                 factory: Expression::clone(&self.factory),
             }))],
         )))
-        .reduce()
+        .reduce(cache)
     }
 }
 impl fmt::Display for RecursiveTerm {
@@ -741,7 +871,11 @@ impl LambdaTerm {
     pub fn new(arity: Arity, body: Expression) -> Self {
         Self { arity, body }
     }
-    fn apply(&self, args: impl IntoIterator<Item = Expression> + ExactSizeIterator) -> Expression {
+    fn apply(
+        &self,
+        args: impl IntoIterator<Item = Expression> + ExactSizeIterator,
+        cache: &mut EvaluationCache,
+    ) -> Expression {
         // TODO: support variadic 'rest args' iterator in lambda functions
         let arity = self.arity.required();
         let substitutions = args
@@ -751,9 +885,7 @@ impl LambdaTerm {
             .map(|(index, arg)| ((arity - index - 1) as StackOffset, arg))
             .collect::<Vec<_>>();
         self.body
-            .substitute(&Substitutions::Static(StaticSubstitutions::new(
-                &substitutions,
-            )))
+            .substitute(&Substitutions::new(&substitutions), cache)
             .unwrap_or_else(|| Expression::clone(&self.body))
     }
 }
@@ -765,25 +897,30 @@ impl Rewritable for LambdaTerm {
     fn dynamic_dependencies(&self) -> DependencyList {
         self.body.dynamic_dependencies()
     }
-    fn substitute<'a>(&self, substitutions: &'a Substitutions) -> Option<Expression> {
+    fn substitute<'a>(
+        &self,
+        substitutions: &'a Substitutions,
+        cache: &mut EvaluationCache,
+    ) -> Option<Expression> {
         let arity = self.arity.required() as StackOffset;
-        let body = match substitutions {
-            Substitutions::Dynamic(_) => self.body.substitute(substitutions),
-            Substitutions::Static(substitutions) => self
-                .body
-                .substitute(&Substitutions::Static(substitutions.offset(arity))),
+        let body = match substitutions.kind() {
+            SubstitutionType::Dynamic(_) => self.body.substitute(substitutions, cache),
+            SubstitutionType::Static(substitutions) => self.body.substitute(
+                &Substitutions::from(SubstitutionType::Static(substitutions.offset(arity))),
+                cache,
+            ),
         };
         body.map(|body| Expression::new(Term::Lambda(LambdaTerm::new(self.arity, body))))
     }
-    fn optimize(&self) -> Option<Expression> {
+    fn optimize(&self, cache: &mut EvaluationCache) -> Option<Expression> {
         let arity = self.arity.required() as StackOffset;
-        let reduced_body = self.body.reduce();
+        let reduced_body = self.body.reduce(cache);
         let eta_reduced_body = reduced_body.as_ref().map_or_else(
             || apply_eta_reduction(&self.body, arity),
             |body| apply_eta_reduction(&body, arity),
         );
         eta_reduced_body
-            .and_then(|body| body.reduce())
+            .and_then(|body| body.reduce(cache))
             .or(eta_reduced_body.map(Expression::clone))
             .or(reduced_body)
     }
@@ -895,9 +1032,13 @@ impl Rewritable for ApplicationTerm {
         });
         target_dependencies.extend(arg_dependencies)
     }
-    fn substitute(&self, substitutions: &Substitutions) -> Option<Expression> {
-        let target = self.target.substitute(substitutions);
-        let args = substitute_multiple(&self.args, substitutions);
+    fn substitute(
+        &self,
+        substitutions: &Substitutions,
+        cache: &mut EvaluationCache,
+    ) -> Option<Expression> {
+        let target = self.target.substitute(substitutions, cache);
+        let args = substitute_multiple(&self.args, substitutions, cache);
         if target.is_none() && args.is_none() {
             return None;
         }
@@ -905,39 +1046,46 @@ impl Rewritable for ApplicationTerm {
         let args = args.unwrap_or_else(|| self.args.clone());
         Some(Expression::new(Term::Application(Self::new(target, args))))
     }
-    fn optimize(&self) -> Option<Expression> {
-        let optimized_target = self.target.optimize();
-        let optimized_args = optimize_multiple(&self.args);
+    fn optimize(&self, cache: &mut EvaluationCache) -> Option<Expression> {
+        let optimized_target = self.target.optimize(cache);
+        let optimized_args = optimize_multiple(&self.args, cache);
         let optimized_expression = optimized_args.map(|args| {
             Expression::new(Term::Application(Self::new(
                 optimized_target.unwrap_or_else(|| Expression::clone(&self.target)),
                 args,
             )))
         });
-        optimized_expression
-            .as_ref()
-            .map_or_else(|| self.reduce(), |expression| expression.reduce())
-            .or(optimized_expression)
+        match &optimized_expression {
+            Some(expression) => expression.reduce(cache),
+            None => self.reduce(cache),
+        }
+        .or(optimized_expression)
     }
 }
 impl Reducible for ApplicationTerm {
-    fn reduce(&self) -> Option<Expression> {
-        let reduced_target = self.target.reduce();
+    fn reduce(&self, cache: &mut EvaluationCache) -> Option<Expression> {
+        let reduced_target = self.target.reduce(cache);
         let target = reduced_target
             .as_ref()
             .map_or_else(|| self.target.value(), |target| target.value());
         let result = match target {
-            Term::Lambda(target) => Ok(reduce_lambda_application(target, self.args.iter())),
+            Term::Lambda(target) => Ok(reduce_lambda_application(target, self.args.iter(), cache)),
             Term::Builtin(target) => {
-                match reduce_native_application(NativeApplicable::Builtin(target), self.args.iter())
-                {
+                match reduce_native_application(
+                    NativeApplicable::Builtin(target),
+                    self.args.iter(),
+                    cache,
+                ) {
                     Ok(result) => Ok(result),
                     Err(args) => Err(Some(args)),
                 }
             }
             Term::Native(target) => {
-                match reduce_native_application(NativeApplicable::Custom(target), self.args.iter())
-                {
+                match reduce_native_application(
+                    NativeApplicable::Custom(target),
+                    self.args.iter(),
+                    cache,
+                ) {
                     Ok(result) => Ok(result),
                     Err(args) => Err(Some(args)),
                 }
@@ -945,12 +1093,13 @@ impl Reducible for ApplicationTerm {
             Term::StructConstructor(target) => Ok(reduce_struct_constructor_application(
                 target,
                 self.args.iter(),
+                cache,
             )),
             Term::EnumConstructor(target) => Ok(target.apply(self.args.iter().cloned())),
             _ => Err(None),
         };
         match result {
-            Ok(result) => result.reduce().or_else(|| Some(result)),
+            Ok(result) => result.reduce(cache).or_else(|| Some(result)),
             Err(args) => {
                 if reduced_target.is_none() && args.is_none() {
                     None
@@ -969,23 +1118,25 @@ impl Reducible for ApplicationTerm {
 fn reduce_lambda_application<'a>(
     target: &LambdaTerm,
     args: impl IntoIterator<Item = &'a Expression> + ExactSizeIterator,
+    cache: &mut EvaluationCache,
 ) -> Expression {
     let arity = target.arity;
     assert_arity(arity, args.len());
-    match reduce_eager_args(&arity, args) {
+    match reduce_eager_args(&arity, args, cache) {
         Err(signal) => signal,
-        Ok(args) => target.apply(args.into_iter()),
+        Ok(args) => target.apply(args.into_iter(), cache),
     }
 }
 
 fn reduce_struct_constructor_application<'a>(
     target: &StructPrototype,
     args: impl IntoIterator<Item = &'a Expression> + ExactSizeIterator,
+    cache: &mut EvaluationCache,
 ) -> Expression {
     let num_keys = target.keys.len() as u8;
     let arity = Arity::from(num_keys, num_keys, None);
     assert_arity(arity, args.len());
-    match reduce_eager_args(&arity, args) {
+    match reduce_eager_args(&arity, args, cache) {
         Err(signal) => signal,
         Ok(args) => {
             let (keys, values) = args.split_at(arity.eager());
@@ -1031,6 +1182,7 @@ impl<'a> NativeApplicable<'a> {
 fn reduce_native_application<'a>(
     target: NativeApplicable<'a>,
     args: impl IntoIterator<Item = &'a Expression> + ExactSizeIterator,
+    cache: &mut EvaluationCache,
 ) -> Result<Expression, Vec<Expression>> {
     let arity = target.arity();
     if args.len() < arity.required() {
@@ -1040,7 +1192,7 @@ fn reduce_native_application<'a>(
             args.len()
         );
     }
-    match reduce_eager_args(&arity, args) {
+    match reduce_eager_args(&arity, args, cache) {
         Err(signal) => Ok(signal),
         Ok(args) => {
             let num_eager_args = match arity.variadic {
@@ -1063,6 +1215,7 @@ fn reduce_native_application<'a>(
 fn reduce_eager_args<'a>(
     arity: &Arity,
     args: impl IntoIterator<Item = &'a Expression> + ExactSizeIterator,
+    cache: &mut EvaluationCache,
 ) -> Result<Vec<Expression>, Expression> {
     // TODO: avoid unnecessary cloning if no argument reductions are needed
     let eager_arity = arity.eager();
@@ -1086,7 +1239,7 @@ fn reduce_eager_args<'a>(
         .map(|(index, arg)| {
             let is_eager = index < eager_arity || (eager_varargs && index >= required_arity);
             if is_eager {
-                let arg = arg.reduce().unwrap_or_else(|| Expression::clone(arg));
+                let arg = arg.reduce(cache).unwrap_or_else(|| Expression::clone(arg));
                 (arg, true)
             } else {
                 (Expression::clone(arg), false)
@@ -1238,12 +1391,16 @@ impl Rewritable for StructTerm {
     fn dynamic_dependencies(&self) -> DependencyList {
         dynamic_dependencies_multiple(&self.fields)
     }
-    fn substitute(&self, substitutions: &Substitutions) -> Option<Expression> {
-        substitute_multiple(&self.fields, substitutions)
+    fn substitute(
+        &self,
+        substitutions: &Substitutions,
+        cache: &mut EvaluationCache,
+    ) -> Option<Expression> {
+        substitute_multiple(&self.fields, substitutions, cache)
             .map(|fields| Expression::new(Term::Struct(Self::new(self.prototype.clone(), fields))))
     }
-    fn optimize(&self) -> Option<Expression> {
-        optimize_multiple(&self.fields)
+    fn optimize(&self, cache: &mut EvaluationCache) -> Option<Expression> {
+        optimize_multiple(&self.fields, cache)
             .map(|fields| Expression::new(Term::Struct(Self::new(self.prototype.clone(), fields))))
     }
 }
@@ -1358,12 +1515,16 @@ impl Rewritable for EnumTerm {
     fn dynamic_dependencies(&self) -> DependencyList {
         dynamic_dependencies_multiple(&self.args)
     }
-    fn substitute(&self, substitutions: &Substitutions) -> Option<Expression> {
-        substitute_multiple(&self.args, substitutions)
+    fn substitute(
+        &self,
+        substitutions: &Substitutions,
+        cache: &mut EvaluationCache,
+    ) -> Option<Expression> {
+        substitute_multiple(&self.args, substitutions, cache)
             .map(|args| Expression::new(Term::Enum(Self::new(self.index, args))))
     }
-    fn optimize(&self) -> Option<Expression> {
-        optimize_multiple(&self.args)
+    fn optimize(&self, cache: &mut EvaluationCache) -> Option<Expression> {
+        optimize_multiple(&self.args, cache)
             .map(|args| Expression::new(Term::Enum(Self::new(self.index, args))))
     }
 }
@@ -1626,17 +1787,21 @@ pub(crate) fn dynamic_dependencies_multiple(expressions: &[Expression]) -> Depen
 pub(crate) fn substitute_multiple(
     expressions: &[Expression],
     substitutions: &Substitutions,
+    cache: &mut EvaluationCache,
 ) -> Option<Vec<Expression>> {
-    transform_expressions(expressions, |arg| arg.substitute(substitutions))
+    transform_expressions(expressions, |arg| arg.substitute(substitutions, cache))
 }
 
-pub(crate) fn optimize_multiple<'a>(expressions: &[Expression]) -> Option<Vec<Expression>> {
-    transform_expressions(expressions, |expression| expression.optimize())
+pub(crate) fn optimize_multiple<'a>(
+    expressions: &[Expression],
+    cache: &mut EvaluationCache,
+) -> Option<Vec<Expression>> {
+    transform_expressions(expressions, |expression| expression.optimize(cache))
 }
 
 fn transform_expressions<'a>(
     expressions: &[Expression],
-    transform: impl Fn(&Expression) -> Option<Expression>,
+    mut transform: impl FnMut(&Expression) -> Option<Expression>,
 ) -> Option<Vec<Expression>> {
     let expressions =
         expressions
@@ -1675,7 +1840,10 @@ fn transform_expressions<'a>(
 
 #[cfg(test)]
 mod tests {
-    use crate::{parser::sexpr::parse, stdlib::builtin::BuiltinTerm, stdlib::value::ValueTerm};
+    use crate::{
+        cache::EvaluationCache, parser::sexpr::parse, stdlib::builtin::BuiltinTerm,
+        stdlib::value::ValueTerm,
+    };
 
     use super::{
         ApplicationTerm, Arity, DependencyList, DynamicState, EvaluationResult, Expression,
@@ -1685,8 +1853,9 @@ mod tests {
     #[test]
     fn value_expressions() {
         let state = DynamicState::new();
+        let mut cache = EvaluationCache::new();
         let expression = parse("3").unwrap();
-        let result = expression.evaluate(&state);
+        let result = expression.evaluate(&state, &mut cache);
         assert_eq!(
             result,
             EvaluationResult::new(
@@ -1698,18 +1867,19 @@ mod tests {
 
     #[test]
     fn lambda_optimizations() {
+        let mut cache = EvaluationCache::new();
         let expression = parse("(lambda (foo) foo)").unwrap();
-        let result = expression.value.optimize();
+        let result = expression.value.optimize(&mut cache);
         assert_eq!(expression.capture_depth(), 0);
         assert_eq!(result, None);
 
         let expression = parse("(lambda (foo bar) (+ foo bar))").unwrap();
-        let optimized = expression.value.optimize();
+        let optimized = expression.value.optimize(&mut cache);
         assert_eq!(expression.capture_depth(), 0);
         assert_eq!(optimized, Some(parse("+").unwrap()));
 
         let expression = parse("(lambda (foo bar baz) (+ foo bar))").unwrap();
-        let optimized = expression.value.optimize();
+        let optimized = expression.value.optimize(&mut cache);
         assert_eq!(expression.capture_depth(), 0);
         assert_eq!(optimized, Some(parse("+").unwrap()));
     }
@@ -1717,8 +1887,9 @@ mod tests {
     #[test]
     fn lambda_application_expressions() {
         let state = DynamicState::new();
+        let mut cache = EvaluationCache::new();
         let expression = parse("((lambda (foo) foo) 3)").unwrap();
-        let result = expression.evaluate(&state);
+        let result = expression.evaluate(&state, &mut cache);
         assert_eq!(
             result,
             EvaluationResult::new(
@@ -1728,7 +1899,7 @@ mod tests {
         );
 
         let expression = parse("((lambda (foo bar) (+ foo bar)) 3 4)").unwrap();
-        let result = expression.evaluate(&state);
+        let result = expression.evaluate(&state, &mut cache);
         assert_eq!(
             result,
             EvaluationResult::new(
@@ -1740,7 +1911,7 @@ mod tests {
         let expression =
             parse("((lambda (foo bar) (((lambda (foo bar) (lambda (foo bar) (+ foo bar))) foo bar) foo bar)) 3 4)")
                 .unwrap();
-        let result = expression.evaluate(&state);
+        let result = expression.evaluate(&state, &mut cache);
         assert_eq!(
             result,
             EvaluationResult::new(
@@ -1753,8 +1924,9 @@ mod tests {
     #[test]
     fn builtin_expressions() {
         let state = DynamicState::new();
+        let mut cache = EvaluationCache::new();
         let expression = parse("+").unwrap();
-        let result = expression.evaluate(&state);
+        let result = expression.evaluate(&state, &mut cache);
         assert_eq!(
             result,
             EvaluationResult::new(
@@ -1767,8 +1939,9 @@ mod tests {
     #[test]
     fn builtin_application_expressions() {
         let state = DynamicState::new();
+        let mut cache = EvaluationCache::new();
         let expression = parse("(+ 1 2)").unwrap();
-        let result = expression.evaluate(&state);
+        let result = expression.evaluate(&state, &mut cache);
         assert_eq!(
             result,
             EvaluationResult::new(
@@ -1781,8 +1954,9 @@ mod tests {
     #[test]
     fn let_expressions() {
         let state = DynamicState::new();
+        let mut cache = EvaluationCache::new();
         let expression = parse("(let () 3)").unwrap();
-        let result = expression.evaluate(&state);
+        let result = expression.evaluate(&state, &mut cache);
         assert_eq!(
             result,
             EvaluationResult::new(
@@ -1791,7 +1965,7 @@ mod tests {
             ),
         );
         let expression = parse("(let ((foo 3)) foo)").unwrap();
-        let result = expression.evaluate(&state);
+        let result = expression.evaluate(&state, &mut cache);
         assert_eq!(
             result,
             EvaluationResult::new(
@@ -1800,7 +1974,7 @@ mod tests {
             ),
         );
         let expression = parse("(let ((foo 3) (bar 4)) (+ foo bar))").unwrap();
-        let result = expression.evaluate(&state);
+        let result = expression.evaluate(&state, &mut cache);
         assert_eq!(
             result,
             EvaluationResult::new(
@@ -1809,7 +1983,7 @@ mod tests {
             ),
         );
         let expression = parse("(let ((first 3)) (let ((second 4)) first))").unwrap();
-        let result = expression.evaluate(&state);
+        let result = expression.evaluate(&state, &mut cache);
         assert_eq!(
             result,
             EvaluationResult::new(
@@ -1818,7 +1992,7 @@ mod tests {
             ),
         );
         let expression = parse("(let ((first 3)) (let ((second 4)) (let ((third first) (fourth second)) (+ third fourth))))").unwrap();
-        let result = expression.evaluate(&state);
+        let result = expression.evaluate(&state, &mut cache);
         assert_eq!(
             result,
             EvaluationResult::new(
@@ -1831,8 +2005,9 @@ mod tests {
     #[test]
     fn letrec_expressions() {
         let state = DynamicState::new();
+        let mut cache = EvaluationCache::new();
         let expression = parse("(letrec () 3)").unwrap();
-        let result = expression.evaluate(&state);
+        let result = expression.evaluate(&state, &mut cache);
         assert_eq!(
             result,
             EvaluationResult::new(
@@ -1841,7 +2016,7 @@ mod tests {
             ),
         );
         let expression = parse("(letrec ((foo 3)) foo)").unwrap();
-        let result = expression.evaluate(&state);
+        let result = expression.evaluate(&state, &mut cache);
         assert_eq!(
             result,
             EvaluationResult::new(
@@ -1850,7 +2025,7 @@ mod tests {
             ),
         );
         let expression = parse("(letrec ((foo 3) (bar 4)) (+ foo bar))").unwrap();
-        let result = expression.evaluate(&state);
+        let result = expression.evaluate(&state, &mut cache);
         assert_eq!(
             result,
             EvaluationResult::new(
@@ -1859,7 +2034,7 @@ mod tests {
             ),
         );
         let expression = parse("(letrec ((first 3)) (let ((second 4)) first))").unwrap();
-        let result = expression.evaluate(&state);
+        let result = expression.evaluate(&state, &mut cache);
         assert_eq!(
             result,
             EvaluationResult::new(
@@ -1868,7 +2043,7 @@ mod tests {
             ),
         );
         let expression = parse("(letrec ((first 3)) (let ((second 4)) (let ((third first) (fourth second)) (+ third fourth))))").unwrap();
-        let result = expression.evaluate(&state);
+        let result = expression.evaluate(&state, &mut cache);
         assert_eq!(
             result,
             EvaluationResult::new(
@@ -1878,7 +2053,7 @@ mod tests {
         );
 
         let expression = parse("(letrec ((foo 3) (bar foo)) (+ foo bar))").unwrap();
-        let result = expression.evaluate(&state);
+        let result = expression.evaluate(&state, &mut cache);
         assert_eq!(
             result,
             EvaluationResult::new(
@@ -1887,7 +2062,7 @@ mod tests {
             ),
         );
         let expression = parse("(letrec ((foo bar) (bar 3)) (+ foo bar))").unwrap();
-        let result = expression.evaluate(&state);
+        let result = expression.evaluate(&state, &mut cache);
         assert_eq!(
             result,
             EvaluationResult::new(
@@ -1896,7 +2071,7 @@ mod tests {
             ),
         );
         let expression = parse("(letrec ((foo 3) (bar (+ foo 1))) bar)").unwrap();
-        let result = expression.evaluate(&state);
+        let result = expression.evaluate(&state, &mut cache);
         assert_eq!(
             result,
             EvaluationResult::new(
@@ -1905,7 +2080,7 @@ mod tests {
             ),
         );
         let expression = parse("(letrec ((foo (+ bar 1)) (bar 3)) foo)").unwrap();
-        let result = expression.evaluate(&state);
+        let result = expression.evaluate(&state, &mut cache);
         assert_eq!(
             result,
             EvaluationResult::new(
@@ -1916,7 +2091,7 @@ mod tests {
         let expression =
             parse("(letrec ((fac (lambda (n) (if (= n 1) n (* n (fac (- n 1))))))) (fac 5))")
                 .unwrap();
-        let result = expression.evaluate(&state);
+        let result = expression.evaluate(&state, &mut cache);
         assert_eq!(
             result,
             EvaluationResult::new(
@@ -1927,7 +2102,7 @@ mod tests {
             ),
         );
         let expression = parse("(letrec ((is-even? (lambda (x) (if (= x 0) #t (is-odd? (- x 1))))) (is-odd? (lambda (x) (if (= x 0) #f (is-even? (- x 1)))))) (is-even? 3))").unwrap();
-        let result = expression.evaluate(&state);
+        let result = expression.evaluate(&state, &mut cache);
         assert_eq!(
             result,
             EvaluationResult::new(
@@ -1936,7 +2111,7 @@ mod tests {
             ),
         );
         let expression = parse("(letrec ((is-even? (lambda (x) (if (= x 0) #t (is-odd? (- x 1))))) (is-odd? (lambda (x) (if (= x 0) #f (is-even? (- x 1)))))) (is-odd? 3))").unwrap();
-        let result = expression.evaluate(&state);
+        let result = expression.evaluate(&state, &mut cache);
         assert_eq!(
             result,
             EvaluationResult::new(
@@ -1946,7 +2121,7 @@ mod tests {
         );
         let expression =
             parse("(letrec ((foo (cons 3 foo))) (car (cdr (cdr (cdr foo)))))").unwrap();
-        let result = expression.evaluate(&state);
+        let result = expression.evaluate(&state, &mut cache);
         assert_eq!(
             result,
             EvaluationResult::new(
@@ -1957,7 +2132,7 @@ mod tests {
         let expression =
             parse("(letrec ((foo (cons 1 bar)) (bar (cons 2 foo))) (car (cdr (cdr (cdr foo)))))")
                 .unwrap();
-        let result = expression.evaluate(&state);
+        let result = expression.evaluate(&state, &mut cache);
         assert_eq!(
             result,
             EvaluationResult::new(
@@ -1990,11 +2165,12 @@ mod tests {
         let add3 = NativeFunction::new(1, Arity::from(3, 0, None), add3);
 
         let state = DynamicState::new();
+        let mut cache = EvaluationCache::new();
         let expression = Expression::new(Term::Application(ApplicationTerm::new(
             Expression::new(Term::Native(constant)),
             vec![],
         )));
-        let result = expression.evaluate(&state);
+        let result = expression.evaluate(&state, &mut cache);
         assert_eq!(
             result,
             EvaluationResult::new(
@@ -2010,7 +2186,7 @@ mod tests {
                 Expression::new(Term::Value(ValueTerm::Int(5))),
             ],
         )));
-        let result = expression.evaluate(&state);
+        let result = expression.evaluate(&state, &mut cache);
         assert_eq!(
             result,
             EvaluationResult::new(

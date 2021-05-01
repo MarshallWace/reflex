@@ -4,6 +4,7 @@
 use std::{collections::HashSet, fmt, iter::once};
 
 use crate::{
+    cache::EvaluationCache,
     core::{
         capture_depth_multiple, dynamic_dependencies_multiple, optimize_multiple,
         substitute_multiple, DependencyList, Expression, Rewritable, StackOffset, Substitutions,
@@ -61,15 +62,19 @@ impl Rewritable for HashSetTerm {
     fn dynamic_dependencies(&self) -> DependencyList {
         dynamic_dependencies_multiple(&self.values)
     }
-    fn substitute(&self, substitutions: &Substitutions) -> Option<Expression> {
-        substitute_multiple(&self.values, substitutions).map(|updated| {
+    fn substitute(
+        &self,
+        substitutions: &Substitutions,
+        cache: &mut EvaluationCache,
+    ) -> Option<Expression> {
+        substitute_multiple(&self.values, substitutions, cache).map(|updated| {
             Expression::new(Term::Collection(CollectionTerm::HashSet(Self::new(
                 updated,
             ))))
         })
     }
-    fn optimize(&self) -> Option<Expression> {
-        optimize_multiple(&self.values).map(|updated| {
+    fn optimize(&self, cache: &mut EvaluationCache) -> Option<Expression> {
+        optimize_multiple(&self.values, cache).map(|updated| {
             Expression::new(Term::Collection(CollectionTerm::HashSet(Self::new(
                 updated,
             ))))

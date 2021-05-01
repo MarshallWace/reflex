@@ -60,6 +60,7 @@ impl BuiltinFunction for Keys {
 #[cfg(test)]
 mod tests {
     use crate::{
+        cache::EvaluationCache,
         core::{ApplicationTerm, DependencyList, DynamicState, EvaluationResult, Expression, Term},
         stdlib::{
             builtin::BuiltinTerm,
@@ -70,6 +71,7 @@ mod tests {
 
     #[test]
     fn get_hashmap_keys() {
+        let mut cache = EvaluationCache::new();
         let state = DynamicState::new();
         let expression = Expression::new(Term::Application(ApplicationTerm::new(
             Expression::new(Term::Builtin(BuiltinTerm::Keys)),
@@ -90,7 +92,7 @@ mod tests {
                 ]),
             )))],
         )));
-        let result = expression.evaluate(&state);
+        let result = expression.evaluate(&state, &mut cache);
         assert_eq!(
             result,
             EvaluationResult::new(

@@ -45,6 +45,7 @@ impl BuiltinFunction for Add {
 #[cfg(test)]
 mod tests {
     use crate::{
+        cache::EvaluationCache,
         core::{DependencyList, DynamicState, EvaluationResult, Expression, Signal, Term},
         parser::sexpr::parse,
         stdlib::{signal::SignalType, value::ValueTerm},
@@ -52,9 +53,10 @@ mod tests {
 
     #[test]
     fn add_expressions() {
+        let mut cache = EvaluationCache::new();
         let state = DynamicState::new();
         let expression = parse("(+ 0 0)").unwrap();
-        let result = expression.evaluate(&state);
+        let result = expression.evaluate(&state, &mut cache);
         assert_eq!(
             result,
             EvaluationResult::new(
@@ -63,7 +65,7 @@ mod tests {
             )
         );
         let expression = parse("(+ 3 4)").unwrap();
-        let result = expression.evaluate(&state);
+        let result = expression.evaluate(&state, &mut cache);
         assert_eq!(
             result,
             EvaluationResult::new(
@@ -72,7 +74,7 @@ mod tests {
             )
         );
         let expression = parse("(+ -3 4)").unwrap();
-        let result = expression.evaluate(&state);
+        let result = expression.evaluate(&state, &mut cache);
         assert_eq!(
             result,
             EvaluationResult::new(
@@ -81,7 +83,7 @@ mod tests {
             )
         );
         let expression = parse("(+ 3 -4)").unwrap();
-        let result = expression.evaluate(&state);
+        let result = expression.evaluate(&state, &mut cache);
         assert_eq!(
             result,
             EvaluationResult::new(
@@ -90,7 +92,7 @@ mod tests {
             )
         );
         let expression = parse("(+ -3 -4)").unwrap();
-        let result = expression.evaluate(&state);
+        let result = expression.evaluate(&state, &mut cache);
         assert_eq!(
             result,
             EvaluationResult::new(
@@ -100,7 +102,7 @@ mod tests {
         );
 
         let expression = parse("(+ 0.0 0.0)").unwrap();
-        let result = expression.evaluate(&state);
+        let result = expression.evaluate(&state, &mut cache);
         assert_eq!(
             result,
             EvaluationResult::new(
@@ -109,7 +111,7 @@ mod tests {
             )
         );
         let expression = parse("(+ 2.718 3.142)").unwrap();
-        let result = expression.evaluate(&state);
+        let result = expression.evaluate(&state, &mut cache);
         assert_eq!(
             result,
             EvaluationResult::new(
@@ -120,7 +122,7 @@ mod tests {
             )
         );
         let expression = parse("(+ -2.718 3.142)").unwrap();
-        let result = expression.evaluate(&state);
+        let result = expression.evaluate(&state, &mut cache);
         assert_eq!(
             result,
             EvaluationResult::new(
@@ -131,7 +133,7 @@ mod tests {
             )
         );
         let expression = parse("(+ 2.718 -3.142)").unwrap();
-        let result = expression.evaluate(&state);
+        let result = expression.evaluate(&state, &mut cache);
         assert_eq!(
             result,
             EvaluationResult::new(
@@ -142,7 +144,7 @@ mod tests {
             )
         );
         let expression = parse("(+ -2.718 -3.142)").unwrap();
-        let result = expression.evaluate(&state);
+        let result = expression.evaluate(&state, &mut cache);
         assert_eq!(
             result,
             EvaluationResult::new(
@@ -156,9 +158,10 @@ mod tests {
 
     #[test]
     fn invalid_add_expression_operands() {
+        let mut cache = EvaluationCache::new();
         let state = DynamicState::new();
         let expression = parse("(+ 3 3.142)").unwrap();
-        let result = expression.evaluate(&state);
+        let result = expression.evaluate(&state, &mut cache);
         assert_eq!(
             result,
             EvaluationResult::new(
@@ -172,7 +175,7 @@ mod tests {
             )
         );
         let expression = parse("(+ 3.142 3)").unwrap();
-        let result = expression.evaluate(&state);
+        let result = expression.evaluate(&state, &mut cache);
         assert_eq!(
             result,
             EvaluationResult::new(
@@ -187,7 +190,7 @@ mod tests {
         );
 
         let expression = parse("(+ 3 #f)").unwrap();
-        let result = expression.evaluate(&state);
+        let result = expression.evaluate(&state, &mut cache);
         assert_eq!(
             result,
             EvaluationResult::new(
@@ -201,7 +204,7 @@ mod tests {
             )
         );
         let expression = parse("(+ 3 \"3\")").unwrap();
-        let result = expression.evaluate(&state);
+        let result = expression.evaluate(&state, &mut cache);
         assert_eq!(
             result,
             EvaluationResult::new(
@@ -216,7 +219,7 @@ mod tests {
         );
 
         let expression = parse("(+ #f 3)").unwrap();
-        let result = expression.evaluate(&state);
+        let result = expression.evaluate(&state, &mut cache);
         assert_eq!(
             result,
             EvaluationResult::new(
@@ -230,7 +233,7 @@ mod tests {
             )
         );
         let expression = parse("(+ \"3\" 3)").unwrap();
-        let result = expression.evaluate(&state);
+        let result = expression.evaluate(&state, &mut cache);
         assert_eq!(
             result,
             EvaluationResult::new(
@@ -245,7 +248,7 @@ mod tests {
         );
 
         let expression = parse("(+ 3.142 #f)").unwrap();
-        let result = expression.evaluate(&state);
+        let result = expression.evaluate(&state, &mut cache);
         assert_eq!(
             result,
             EvaluationResult::new(
@@ -259,7 +262,7 @@ mod tests {
             )
         );
         let expression = parse("(+ 3.142 \"3\")").unwrap();
-        let result = expression.evaluate(&state);
+        let result = expression.evaluate(&state, &mut cache);
         assert_eq!(
             result,
             EvaluationResult::new(
@@ -274,7 +277,7 @@ mod tests {
         );
 
         let expression = parse("(+ #f 3.142)").unwrap();
-        let result = expression.evaluate(&state);
+        let result = expression.evaluate(&state, &mut cache);
         assert_eq!(
             result,
             EvaluationResult::new(
@@ -288,7 +291,7 @@ mod tests {
             )
         );
         let expression = parse("(+ \"3\" 3.142)").unwrap();
-        let result = expression.evaluate(&state);
+        let result = expression.evaluate(&state, &mut cache);
         assert_eq!(
             result,
             EvaluationResult::new(

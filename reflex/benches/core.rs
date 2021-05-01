@@ -7,6 +7,7 @@ extern crate test;
 use test::Bencher;
 
 use reflex::{
+    cache::EvaluationCache,
     core::{
         ApplicationTerm, Arity, DynamicState, Expression, LambdaTerm, StaticVariableTerm, Term,
         VariableTerm,
@@ -23,42 +24,60 @@ use reflex::{
 fn nested_expressions(b: &mut Bencher) {
     let state = DynamicState::new();
     let expression = parse("(+ (+ (abs -3) 4) 5)").unwrap();
-    b.iter(|| expression.evaluate(&state));
+    b.iter(|| {
+        let mut cache = EvaluationCache::new();
+        expression.evaluate(&state, &mut cache)
+    });
 }
 
 #[bench]
 fn function_application_nullary(b: &mut Bencher) {
     let state = DynamicState::new();
     let expression = parse("((lambda () 3))").unwrap();
-    b.iter(|| expression.evaluate(&state));
+    b.iter(|| {
+        let mut cache = EvaluationCache::new();
+        expression.evaluate(&state, &mut cache)
+    });
 }
 
 #[bench]
 fn function_application_unary(b: &mut Bencher) {
     let state = DynamicState::new();
     let expression = parse("((lambda (foo) foo) 3)").unwrap();
-    b.iter(|| expression.evaluate(&state));
+    b.iter(|| {
+        let mut cache = EvaluationCache::new();
+        expression.evaluate(&state, &mut cache)
+    });
 }
 
 #[bench]
 fn function_application_binary(b: &mut Bencher) {
     let state = DynamicState::new();
     let expression = parse("((lambda (foo bar) foo) 3 4)").unwrap();
-    b.iter(|| expression.evaluate(&state));
+    b.iter(|| {
+        let mut cache = EvaluationCache::new();
+        expression.evaluate(&state, &mut cache)
+    });
 }
 
 #[bench]
 fn function_application_ternary(b: &mut Bencher) {
     let state = DynamicState::new();
     let expression = parse("((lambda (foo bar baz) foo) 3 4 5)").unwrap();
-    b.iter(|| expression.evaluate(&state));
+    b.iter(|| {
+        let mut cache = EvaluationCache::new();
+        expression.evaluate(&state, &mut cache)
+    });
 }
 
 #[bench]
 fn function_application_unused_args(b: &mut Bencher) {
     let state = DynamicState::new();
     let expression = parse("((lambda (foo bar baz) 2) 3 4 5)").unwrap();
-    b.iter(|| expression.evaluate(&state));
+    b.iter(|| {
+        let mut cache = EvaluationCache::new();
+        expression.evaluate(&state, &mut cache)
+    });
 }
 
 #[bench]
@@ -68,7 +87,10 @@ fn function_application_argument_scope(b: &mut Bencher) {
             "((lambda (first second third) ((lambda (one two) ((lambda (foo bar) (+ foo bar)) one two)) first third)) 3 4 5)",
         )
         .unwrap();
-    b.iter(|| expression.evaluate(&state));
+    b.iter(|| {
+        let mut cache = EvaluationCache::new();
+        expression.evaluate(&state, &mut cache)
+    });
 }
 
 #[bench]
@@ -91,21 +113,30 @@ fn deeply_nested_function_application(b: &mut Bencher) {
             vec![Expression::new(Term::Value(ValueTerm::Int(i)))],
         )))
     });
-    b.iter(|| expression.evaluate(&state))
+    b.iter(|| {
+        let mut cache = EvaluationCache::new();
+        expression.evaluate(&state, &mut cache)
+    })
 }
 
 #[bench]
 fn function_application_closure(b: &mut Bencher) {
     let state = DynamicState::new();
     let expression = parse("(((lambda (foo) (lambda () foo)) 3))").unwrap();
-    b.iter(|| expression.evaluate(&state));
+    b.iter(|| {
+        let mut cache = EvaluationCache::new();
+        expression.evaluate(&state, &mut cache)
+    });
 }
 
 #[bench]
 fn conditional_expressions(b: &mut Bencher) {
     let state = DynamicState::new();
     let expression = parse("(if #t 3 4)").unwrap();
-    b.iter(|| expression.evaluate(&state));
+    b.iter(|| {
+        let mut cache = EvaluationCache::new();
+        expression.evaluate(&state, &mut cache)
+    });
 }
 
 #[bench]
@@ -130,5 +161,8 @@ fn list_transforms(b: &mut Bencher) {
             vec![collection, transform],
         )))],
     )));
-    b.iter(|| expression.evaluate(&state));
+    b.iter(|| {
+        let mut cache = EvaluationCache::new();
+        expression.evaluate(&state, &mut cache)
+    });
 }

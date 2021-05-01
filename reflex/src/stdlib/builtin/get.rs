@@ -119,6 +119,7 @@ impl BuiltinFunction for Get {
 #[cfg(test)]
 mod tests {
     use crate::{
+        cache::EvaluationCache,
         core::{
             ApplicationTerm, DependencyList, DynamicState, EvaluationResult, Expression,
             StructPrototype, StructTerm, Term,
@@ -133,6 +134,7 @@ mod tests {
 
     #[test]
     fn get_anonymous_struct_fields() {
+        let mut cache = EvaluationCache::new();
         let state = DynamicState::new();
         let expression = Expression::new(Term::Application(ApplicationTerm::new(
             Expression::new(Term::Builtin(BuiltinTerm::Get)),
@@ -148,7 +150,7 @@ mod tests {
                 Expression::new(Term::Value(ValueTerm::Int(1))),
             ],
         )));
-        let result = expression.evaluate(&state);
+        let result = expression.evaluate(&state, &mut cache);
         assert_eq!(
             result,
             EvaluationResult::new(
@@ -160,6 +162,7 @@ mod tests {
 
     #[test]
     fn get_named_struct_fields() {
+        let mut cache = EvaluationCache::new();
         let state = DynamicState::new();
         let expression = Expression::new(Term::Application(ApplicationTerm::new(
             Expression::new(Term::Builtin(BuiltinTerm::Get)),
@@ -179,7 +182,7 @@ mod tests {
                 Expression::new(Term::Value(ValueTerm::Symbol(4))),
             ],
         )));
-        let result = expression.evaluate(&state);
+        let result = expression.evaluate(&state, &mut cache);
         assert_eq!(
             result,
             EvaluationResult::new(
@@ -191,6 +194,7 @@ mod tests {
 
     #[test]
     fn get_hashmap_fields() {
+        let mut cache = EvaluationCache::new();
         let state = DynamicState::new();
         let expression = Expression::new(Term::Application(ApplicationTerm::new(
             Expression::new(Term::Builtin(BuiltinTerm::Get)),
@@ -220,7 +224,7 @@ mod tests {
                 Expression::new(Term::Value(ValueTerm::String(StringValue::from("bar")))),
             ],
         )));
-        let result = expression.evaluate(&state);
+        let result = expression.evaluate(&state, &mut cache);
         assert_eq!(
             result,
             EvaluationResult::new(

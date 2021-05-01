@@ -42,6 +42,7 @@ impl BuiltinFunction for Concat {
 #[cfg(test)]
 mod tests {
     use crate::{
+        cache::EvaluationCache,
         core::{DependencyList, DynamicState, EvaluationResult, Expression, Term},
         parser::sexpr::parse,
         stdlib::value::{StringValue, ValueTerm},
@@ -49,9 +50,10 @@ mod tests {
 
     #[test]
     fn concat_expressions() {
+        let mut cache = EvaluationCache::new();
         let state = DynamicState::new();
         let expression = parse("(concat \"\" \"\")").unwrap();
-        let result = expression.evaluate(&state);
+        let result = expression.evaluate(&state, &mut cache);
         assert_eq!(
             result,
             EvaluationResult::new(
@@ -62,7 +64,7 @@ mod tests {
             )
         );
         let expression = parse("(concat \"foo\" \"\")").unwrap();
-        let result = expression.evaluate(&state);
+        let result = expression.evaluate(&state, &mut cache);
         assert_eq!(
             result,
             EvaluationResult::new(
@@ -73,7 +75,7 @@ mod tests {
             )
         );
         let expression = parse("(concat \"\" \"bar\")").unwrap();
-        let result = expression.evaluate(&state);
+        let result = expression.evaluate(&state, &mut cache);
         assert_eq!(
             result,
             EvaluationResult::new(
@@ -84,7 +86,7 @@ mod tests {
             )
         );
         let expression = parse("(concat \"foo\" \"bar\")").unwrap();
-        let result = expression.evaluate(&state);
+        let result = expression.evaluate(&state, &mut cache);
         assert_eq!(
             result,
             EvaluationResult::new(
@@ -95,7 +97,7 @@ mod tests {
             )
         );
         let expression = parse("(concat \"foo\" \"bar\" \"baz\")").unwrap();
-        let result = expression.evaluate(&state);
+        let result = expression.evaluate(&state, &mut cache);
         assert_eq!(
             result,
             EvaluationResult::new(

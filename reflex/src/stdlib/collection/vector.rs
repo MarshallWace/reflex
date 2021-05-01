@@ -4,6 +4,7 @@
 use std::{fmt, iter::once};
 
 use crate::{
+    cache::EvaluationCache,
     core::{
         capture_depth_multiple, dynamic_dependencies_multiple, optimize_multiple,
         substitute_multiple, DependencyList, Expression, Rewritable, StackOffset, Substitutions,
@@ -56,13 +57,17 @@ impl Rewritable for VectorTerm {
     fn dynamic_dependencies(&self) -> DependencyList {
         dynamic_dependencies_multiple(&self.items)
     }
-    fn substitute(&self, substitutions: &Substitutions) -> Option<Expression> {
-        substitute_multiple(&self.items, substitutions).map(|items| {
+    fn substitute(
+        &self,
+        substitutions: &Substitutions,
+        cache: &mut EvaluationCache,
+    ) -> Option<Expression> {
+        substitute_multiple(&self.items, substitutions, cache).map(|items| {
             Expression::new(Term::Collection(CollectionTerm::Vector(Self::new(items))))
         })
     }
-    fn optimize(&self) -> Option<Expression> {
-        optimize_multiple(&self.items).map(|items| {
+    fn optimize(&self, cache: &mut EvaluationCache) -> Option<Expression> {
+        optimize_multiple(&self.items, cache).map(|items| {
             Expression::new(Term::Collection(CollectionTerm::Vector(Self::new(items))))
         })
     }

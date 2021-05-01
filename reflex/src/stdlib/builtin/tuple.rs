@@ -22,6 +22,7 @@ impl BuiltinFunction for Tuple {
 #[cfg(test)]
 mod tests {
     use crate::{
+        cache::EvaluationCache,
         core::{
             ApplicationTerm, DependencyList, DynamicState, EvaluationResult, Expression,
             StructTerm, Term,
@@ -32,12 +33,13 @@ mod tests {
 
     #[test]
     fn tuple_expressions() {
+        let mut cache = EvaluationCache::new();
         let state = DynamicState::new();
         let expression = Expression::new(Term::Application(ApplicationTerm::new(
             Expression::new(Term::Builtin(BuiltinTerm::Tuple)),
             vec![],
         )));
-        let result = expression.evaluate(&state);
+        let result = expression.evaluate(&state, &mut cache);
         assert_eq!(
             result,
             EvaluationResult::new(
@@ -56,7 +58,7 @@ mod tests {
                 Expression::new(Term::Value(ValueTerm::Int(5))),
             ],
         )));
-        let result = expression.evaluate(&state);
+        let result = expression.evaluate(&state, &mut cache);
         assert_eq!(
             result,
             EvaluationResult::new(
@@ -79,7 +81,7 @@ mod tests {
                 parse("(+ 5 1)").unwrap(),
             ],
         )));
-        let result = expression.evaluate(&state);
+        let result = expression.evaluate(&state, &mut cache);
         assert_eq!(
             result,
             EvaluationResult::new(

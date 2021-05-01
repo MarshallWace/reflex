@@ -77,17 +77,19 @@ impl BuiltinFunction for Map {
 #[cfg(test)]
 mod tests {
     use crate::{
+        cache::EvaluationCache,
         core::{ApplicationTerm, DependencyList, DynamicState, EvaluationResult, Expression, Term},
         parser::sexpr::parse,
         stdlib::{
             builtin::BuiltinTerm,
             collection::{vector::VectorTerm, CollectionTerm},
-            value::{ArrayValue, ValueTerm},
+            value::ValueTerm,
         },
     };
 
     #[test]
     fn map_expressions() {
+        let mut cache = EvaluationCache::new();
         let state = DynamicState::new();
         let collection = Expression::new(Term::Collection(CollectionTerm::Vector(
             VectorTerm::new(vec![
@@ -104,15 +106,15 @@ mod tests {
                 vec![collection, transform],
             )))],
         )));
-        let result = expression.evaluate(&state);
+        let result = expression.evaluate(&state, &mut cache);
         assert_eq!(
             result,
             EvaluationResult::new(
-                Ok(Expression::new(Term::Value(ValueTerm::Array(
-                    ArrayValue::new(vec![
-                        ValueTerm::Int(3 + 1 + 2),
-                        ValueTerm::Int(4 + 1 + 2),
-                        ValueTerm::Int(5 + 1 + 2),
+                Ok(Expression::new(Term::Collection(CollectionTerm::Vector(
+                    VectorTerm::new(vec![
+                        Expression::new(Term::Value(ValueTerm::Int(3 + 1 + 2))),
+                        Expression::new(Term::Value(ValueTerm::Int(4 + 1 + 2))),
+                        Expression::new(Term::Value(ValueTerm::Int(5 + 1 + 2))),
                     ]),
                 )))),
                 DependencyList::empty(),

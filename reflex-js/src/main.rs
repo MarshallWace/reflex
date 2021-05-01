@@ -4,6 +4,7 @@
 use std::{env, error::Error, fs};
 
 use reflex::{
+    cache::EvaluationCache,
     core::{DynamicState, Signal},
     stdlib::{signal::SignalType, value::ValueTerm},
 };
@@ -27,8 +28,9 @@ fn main() -> Result<(), Box<dyn Error>> {
         Err(error) => panic!(error),
         Ok(expression) => expression,
     };
+    let mut cache = EvaluationCache::new();
     let state = DynamicState::new();
-    let result = expression.evaluate(&state).unwrap();
+    let result = expression.evaluate(&state, &mut cache).unwrap();
     match result {
         Ok(result) => {
             println!("{}", result);

@@ -4,6 +4,7 @@
 use std::{collections::HashMap, fmt, iter::once, rc::Rc};
 
 use crate::{
+    cache::EvaluationCache,
     core::{
         capture_depth_multiple, dynamic_dependencies_multiple, optimize_multiple,
         substitute_multiple, ApplicationTerm, DependencyList, Expression, Rewritable, Signal,
@@ -196,15 +197,19 @@ impl Rewritable for HashMapTerm {
         let values = dynamic_dependencies_multiple(&self.values);
         keys.extend(values)
     }
-    fn substitute(&self, substitutions: &Substitutions) -> Option<Expression> {
-        let keys = substitute_multiple(&self.keys, substitutions);
-        let values = substitute_multiple(&self.values, substitutions);
+    fn substitute(
+        &self,
+        substitutions: &Substitutions,
+        cache: &mut EvaluationCache,
+    ) -> Option<Expression> {
+        let keys = substitute_multiple(&self.keys, substitutions, cache);
+        let values = substitute_multiple(&self.values, substitutions, cache);
         self.update(keys, values)
             .map(|updated| Expression::new(Term::Collection(CollectionTerm::HashMap(updated))))
     }
-    fn optimize(&self) -> Option<Expression> {
-        let keys = optimize_multiple(&self.keys);
-        let values = optimize_multiple(&self.values);
+    fn optimize(&self, cache: &mut EvaluationCache) -> Option<Expression> {
+        let keys = optimize_multiple(&self.keys, cache);
+        let values = optimize_multiple(&self.values, cache);
         self.update(keys, values)
             .map(|updated| Expression::new(Term::Collection(CollectionTerm::HashMap(updated))))
     }

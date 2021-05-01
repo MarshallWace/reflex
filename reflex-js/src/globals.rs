@@ -6,7 +6,7 @@ use std::any::TypeId;
 use reflex::{
     core::{
         ApplicationTerm, Arity, Expression, LambdaTerm, NativeFunction, Signal, SignalTerm,
-        StaticVariableTerm, StructPrototype, StructTerm, Term, VarArgs, VariableTerm,
+        StaticVariableTerm, StructPrototype, StructTerm, Term, VariableTerm,
     },
     hash::{hash_object, HashId, Hashable},
     stdlib::{
@@ -159,7 +159,7 @@ impl MapConstructor {
                             dynamic_map_constructor(),
                             vec![
                                 Expression::new(Term::Application(ApplicationTerm::new(
-                                    collect_eager_variadic_args(),
+                                    Expression::new(Term::Builtin(BuiltinTerm::CollectArgs)),
                                     keys,
                                 ))),
                                 Expression::new(Term::Collection(CollectionTerm::Vector(
@@ -255,7 +255,7 @@ impl SetConstructor {
                     true => Expression::new(Term::Application(ApplicationTerm::new(
                         dynamic_set_constructor(),
                         vec![Expression::new(Term::Application(ApplicationTerm::new(
-                            collect_eager_variadic_args(),
+                            Expression::new(Term::Builtin(BuiltinTerm::CollectArgs)),
                             entries,
                         )))],
                     ))),
@@ -302,28 +302,6 @@ impl DynamicSetConstructor {
                 ))],
             )))),
         }
-    }
-}
-
-fn collect_eager_variadic_args() -> Expression {
-    Expression::new(Term::Native(NativeFunction::new(
-        CollectEagerVariadicArgs::hash(),
-        CollectEagerVariadicArgs::arity(),
-        CollectEagerVariadicArgs::apply,
-    )))
-}
-struct CollectEagerVariadicArgs {}
-impl CollectEagerVariadicArgs {
-    fn hash() -> HashId {
-        hash_object(TypeId::of::<Self>())
-    }
-    fn arity() -> Arity {
-        Arity::from(0, 0, Some(VarArgs::Eager))
-    }
-    fn apply(args: Vec<Expression>) -> Expression {
-        Expression::new(Term::Collection(CollectionTerm::Vector(VectorTerm::new(
-            args,
-        ))))
     }
 }
 

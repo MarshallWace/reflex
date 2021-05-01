@@ -1420,6 +1420,7 @@ mod tests {
         Env,
     };
     use reflex::{
+        cache::EvaluationCache,
         core::{
             ApplicationTerm, Arity, DependencyList, DynamicState, EvaluationResult, Expression,
             LambdaTerm, StaticVariableTerm, StructPrototype, StructTerm, Term, VariableTerm,
@@ -2197,7 +2198,7 @@ mod tests {
             &env,
         )
         .unwrap();
-        let result = expression.evaluate(&DynamicState::new());
+        let result = expression.evaluate(&DynamicState::new(), &mut EvaluationCache::new());
         assert_eq!(
             result,
             EvaluationResult::new(
@@ -2222,7 +2223,7 @@ mod tests {
             &env,
         )
         .unwrap();
-        let result = expression.evaluate(&DynamicState::new());
+        let result = expression.evaluate(&DynamicState::new(), &mut EvaluationCache::new());
         assert_eq!(
             result,
             EvaluationResult::new(
@@ -2241,7 +2242,7 @@ mod tests {
             &env,
         )
         .unwrap();
-        let result = expression.evaluate(&DynamicState::new());
+        let result = expression.evaluate(&DynamicState::new(), &mut EvaluationCache::new());
         assert_eq!(
             result,
             EvaluationResult::new(
@@ -3062,7 +3063,7 @@ mod tests {
             &env,
         )
         .unwrap();
-        let result = expression.evaluate(&DynamicState::new());
+        let result = expression.evaluate(&DynamicState::new(), &mut EvaluationCache::new());
         assert_eq!(
             result,
             EvaluationResult::new(
@@ -3090,7 +3091,7 @@ mod tests {
             &env,
         )
         .unwrap();
-        let result = expression.evaluate(&DynamicState::new());
+        let result = expression.evaluate(&DynamicState::new(), &mut EvaluationCache::new());
         assert_eq!(
             result,
             EvaluationResult::new(
@@ -3123,7 +3124,7 @@ mod tests {
             &env,
         )
         .unwrap();
-        let result = expression.evaluate(&DynamicState::new());
+        let result = expression.evaluate(&DynamicState::new(), &mut EvaluationCache::new());
         assert_eq!(
             result,
             EvaluationResult::new(
@@ -3156,7 +3157,7 @@ mod tests {
             &env,
         )
         .unwrap();
-        let result = expression.evaluate(&DynamicState::new());
+        let result = expression.evaluate(&DynamicState::new(), &mut EvaluationCache::new());
         assert_eq!(
             result,
             EvaluationResult::new(
@@ -3179,7 +3180,7 @@ mod tests {
             &env,
         )
         .unwrap();
-        let result = expression.evaluate(&DynamicState::new());
+        let result = expression.evaluate(&DynamicState::new(), &mut EvaluationCache::new());
         assert_eq!(
             result,
             EvaluationResult::new(
@@ -3200,7 +3201,7 @@ mod tests {
             &env,
         )
         .unwrap();
-        let result = expression.evaluate(&DynamicState::new());
+        let result = expression.evaluate(&DynamicState::new(), &mut EvaluationCache::new());
         assert_eq!(
             result,
             EvaluationResult::new(
@@ -3226,7 +3227,7 @@ mod tests {
             &env,
         )
         .unwrap();
-        let result = expression.evaluate(&DynamicState::new());
+        let result = expression.evaluate(&DynamicState::new(), &mut EvaluationCache::new());
         assert_eq!(
             result,
             EvaluationResult::new(

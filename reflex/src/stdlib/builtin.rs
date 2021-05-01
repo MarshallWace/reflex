@@ -14,8 +14,6 @@ mod and;
 use and::And;
 mod append;
 use append::Append;
-mod array;
-use array::Array;
 mod car;
 use car::Car;
 mod cdr;
@@ -23,7 +21,7 @@ use cdr::Cdr;
 mod ceil;
 use ceil::Ceil;
 mod collect;
-use collect::Collect;
+use collect::{Collect, CollectArgs};
 mod concat;
 use concat::Concat;
 mod cons;
@@ -92,11 +90,11 @@ pub enum BuiltinTerm {
     Abs,
     And,
     Append,
-    Array,
     Car,
     Cdr,
     Ceil,
     Collect,
+    CollectArgs,
     Concat,
     Cons,
     Divide,
@@ -133,11 +131,11 @@ impl Hashable for BuiltinTerm {
             Self::Add => hash_u8(1),
             Self::And => hash_u8(2),
             Self::Append => hash_u8(3),
-            Self::Array => hash_u8(4),
-            Self::Car => hash_u8(5),
-            Self::Cdr => hash_u8(6),
-            Self::Ceil => hash_u8(7),
-            Self::Collect => hash_u8(8),
+            Self::Car => hash_u8(4),
+            Self::Cdr => hash_u8(5),
+            Self::Ceil => hash_u8(6),
+            Self::Collect => hash_u8(7),
+            Self::CollectArgs => hash_u8(8),
             Self::Concat => hash_u8(9),
             Self::Cons => hash_u8(10),
             Self::Divide => hash_u8(11),
@@ -176,11 +174,11 @@ impl BuiltinTerm {
             Self::Add => Add::arity(),
             Self::And => And::arity(),
             Self::Append => Append::arity(),
-            Self::Array => Array::arity(),
             Self::Car => Car::arity(),
             Self::Cdr => Cdr::arity(),
             Self::Ceil => Ceil::arity(),
             Self::Collect => Collect::arity(),
+            Self::CollectArgs => CollectArgs::arity(),
             Self::Concat => Concat::arity(),
             Self::Cons => Cons::arity(),
             Self::Divide => Divide::arity(),
@@ -220,11 +218,11 @@ impl BuiltinTerm {
             Self::Add => Add::apply(args),
             Self::And => And::apply(args),
             Self::Append => Append::apply(args),
-            Self::Array => Array::apply(args),
             Self::Car => Car::apply(args),
             Self::Cdr => Cdr::apply(args),
             Self::Ceil => Ceil::apply(args),
             Self::Collect => Collect::apply(args),
+            Self::CollectArgs => CollectArgs::apply(args),
             Self::Concat => Concat::apply(args),
             Self::Cons => Cons::apply(args),
             Self::Divide => Divide::apply(args),
