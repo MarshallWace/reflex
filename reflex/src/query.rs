@@ -14,7 +14,7 @@ use crate::{
         builtin::BuiltinTerm,
         collection::CollectionTerm,
         signal::SignalType,
-        value::{ArrayValue, IntValue, ValueTerm},
+        value::{IntValue, ValueTerm},
     },
 };
 
@@ -333,7 +333,7 @@ impl ToArray {
             _ => Err(format!("Invalid array values: {}", values)),
         };
         match values {
-            Ok(values) => Expression::new(Term::Value(ValueTerm::Array(ArrayValue::new(values)))),
+            Ok(values) => Expression::new(Term::Value(ValueTerm::Array(values))),
             Err(error) => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                 SignalType::Error,
                 vec![ValueTerm::String(error)],
@@ -356,7 +356,7 @@ mod tests {
             builtin::BuiltinTerm,
             collection::{vector::VectorTerm, CollectionTerm},
             signal::SignalType,
-            value::{ArrayValue, StringValue, ValueTerm},
+            value::{StringValue, ValueTerm},
         },
     };
 
@@ -405,13 +405,11 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                Ok(Expression::new(Term::Value(ValueTerm::Array(
-                    ArrayValue::new(vec![
-                        ValueTerm::Int(3 + 1),
-                        ValueTerm::Int(4 + 1),
-                        ValueTerm::Int(5 + 1)
-                    ]),
-                ))),),
+                Ok(Expression::new(Term::Value(ValueTerm::Array(vec![
+                    ValueTerm::Int(3 + 1),
+                    ValueTerm::Int(4 + 1),
+                    ValueTerm::Int(5 + 1)
+                ])))),
                 DependencyList::empty(),
             )
         );
@@ -439,12 +437,9 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                Ok(Expression::new(Term::Value(ValueTerm::Array(
-                    ArrayValue::new(vec![ValueTerm::Array(ArrayValue::new(vec![
-                        ValueTerm::Int(2),
-                        ValueTerm::Int(3),
-                    ]))]),
-                )))),
+                Ok(Expression::new(Term::Value(ValueTerm::Array(vec![
+                    ValueTerm::Array(vec![ValueTerm::Int(2), ValueTerm::Int(3)])
+                ])))),
                 DependencyList::empty(),
             )
         );
@@ -475,12 +470,9 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                Ok(Expression::new(Term::Value(ValueTerm::Array(
-                    ArrayValue::new(vec![ValueTerm::Array(ArrayValue::new(vec![
-                        ValueTerm::Int(2),
-                        ValueTerm::Int(3),
-                    ]))]),
-                )))),
+                Ok(Expression::new(Term::Value(ValueTerm::Array(vec![
+                    ValueTerm::Array(vec![ValueTerm::Int(2), ValueTerm::Int(3)])
+                ])))),
                 DependencyList::empty(),
             )
         );
@@ -515,12 +507,9 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                Ok(Expression::new(Term::Value(ValueTerm::Array(
-                    ArrayValue::new(vec![ValueTerm::Array(ArrayValue::new(vec![
-                        ValueTerm::Int(2),
-                        ValueTerm::Int(3 + 4),
-                    ]))]),
-                )))),
+                Ok(Expression::new(Term::Value(ValueTerm::Array(vec![
+                    ValueTerm::Array(vec![ValueTerm::Int(2), ValueTerm::Int(3 + 4)])
+                ])))),
                 DependencyList::empty(),
             )
         );
@@ -559,13 +548,11 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                Ok(Expression::new(Term::Value(ValueTerm::Array(
-                    ArrayValue::new(vec![
-                        ValueTerm::Int(3 + 4),
-                        ValueTerm::Int(5 + 6),
-                        ValueTerm::Int(7 + 8),
-                    ]),
-                ))),),
+                Ok(Expression::new(Term::Value(ValueTerm::Array(vec![
+                    ValueTerm::Int(3 + 4),
+                    ValueTerm::Int(5 + 6),
+                    ValueTerm::Int(7 + 8),
+                ])))),
                 DependencyList::empty(),
             )
         );
@@ -760,28 +747,22 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                Ok(Expression::new(Term::Value(ValueTerm::Array(
-                    ArrayValue::new(vec![
-                        ValueTerm::Array(ArrayValue::new(vec![
-                            ValueTerm::Array(ArrayValue::new(vec![
-                                ValueTerm::String(StringValue::from("0:1:0")),
-                                ValueTerm::String(StringValue::from("0:1:2")),
-                            ])),
-                            ValueTerm::Array(ArrayValue::new(vec![ValueTerm::String(
-                                StringValue::from("0:2:1")
-                            )])),
-                        ])),
-                        ValueTerm::Array(ArrayValue::new(vec![
-                            ValueTerm::Array(ArrayValue::new(vec![ValueTerm::String(
-                                StringValue::from("2:0:1"),
-                            )])),
-                            ValueTerm::Array(ArrayValue::new(vec![
-                                ValueTerm::String(StringValue::from("2:2:1")),
-                                ValueTerm::String(StringValue::from("2:2:2")),
-                            ])),
-                        ])),
+                Ok(Expression::new(Term::Value(ValueTerm::Array(vec![
+                    ValueTerm::Array(vec![
+                        ValueTerm::Array(vec![
+                            ValueTerm::String(StringValue::from("0:1:0")),
+                            ValueTerm::String(StringValue::from("0:1:2")),
+                        ]),
+                        ValueTerm::Array(vec![ValueTerm::String(StringValue::from("0:2:1"))]),
                     ]),
-                )))),
+                    ValueTerm::Array(vec![
+                        ValueTerm::Array(vec![ValueTerm::String(StringValue::from("2:0:1"))]),
+                        ValueTerm::Array(vec![
+                            ValueTerm::String(StringValue::from("2:2:1")),
+                            ValueTerm::String(StringValue::from("2:2:2")),
+                        ]),
+                    ]),
+                ])))),
                 DependencyList::empty(),
             )
         );
@@ -804,13 +785,11 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                Ok(Expression::new(Term::Value(ValueTerm::Array(
-                    ArrayValue::new(vec![
-                        ValueTerm::Int(3 + 1),
-                        ValueTerm::Int(4 + 1),
-                        ValueTerm::Int(5 + 1),
-                    ])
-                )))),
+                Ok(Expression::new(Term::Value(ValueTerm::Array(vec![
+                    ValueTerm::Int(3 + 1),
+                    ValueTerm::Int(4 + 1),
+                    ValueTerm::Int(5 + 1),
+                ])))),
                 DependencyList::empty(),
             )
         );
@@ -845,25 +824,23 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                Ok(Expression::new(Term::Value(ValueTerm::Array(
-                    ArrayValue::new(vec![
-                        ValueTerm::Array(ArrayValue::new(vec![
-                            ValueTerm::Int(3 + 1),
-                            ValueTerm::Int(4 + 1),
-                            ValueTerm::Int(5 + 1),
-                        ])),
-                        ValueTerm::Array(ArrayValue::new(vec![
-                            ValueTerm::Int(3 + 2),
-                            ValueTerm::Int(4 + 2),
-                            ValueTerm::Int(5 + 2),
-                        ])),
-                        ValueTerm::Array(ArrayValue::new(vec![
-                            ValueTerm::Int(3 + 3),
-                            ValueTerm::Int(4 + 3),
-                            ValueTerm::Int(5 + 3),
-                        ])),
-                    ])
-                )))),
+                Ok(Expression::new(Term::Value(ValueTerm::Array(vec![
+                    ValueTerm::Array(vec![
+                        ValueTerm::Int(3 + 1),
+                        ValueTerm::Int(4 + 1),
+                        ValueTerm::Int(5 + 1),
+                    ]),
+                    ValueTerm::Array(vec![
+                        ValueTerm::Int(3 + 2),
+                        ValueTerm::Int(4 + 2),
+                        ValueTerm::Int(5 + 2),
+                    ]),
+                    ValueTerm::Array(vec![
+                        ValueTerm::Int(3 + 3),
+                        ValueTerm::Int(4 + 3),
+                        ValueTerm::Int(5 + 3),
+                    ]),
+                ])))),
                 DependencyList::empty(),
             )
         );

@@ -21,7 +21,7 @@ pub enum ValueTerm {
     Int(IntValue),
     Float(FloatValue),
     String(StringValue),
-    Array(ArrayValue),
+    Array(Vec<ValueTerm>),
 }
 impl Hashable for ValueTerm {
     fn hash(&self) -> HashId {
@@ -32,7 +32,9 @@ impl Hashable for ValueTerm {
             Self::Int(value) => prefix_hash(3, hash_i32(*value)),
             Self::Float(value) => prefix_hash(4, hash_f64(*value)),
             Self::String(value) => prefix_hash(5, hash_string(value)),
-            Self::Array(value) => prefix_hash(6, value.hash()),
+            Self::Array(value) => {
+                prefix_hash(6, hash_sequence(value.iter().map(|value| value.hash())))
+            }
         }
     }
 }
@@ -45,44 +47,19 @@ impl fmt::Display for ValueTerm {
             Self::Int(value) => write!(f, "{:?}", value),
             Self::Float(value) => write!(f, "{:?}", value),
             Self::String(value) => write!(f, "{:?}", value),
-            Self::Array(value) => fmt::Display::fmt(value, f),
+            Self::Array(value) => write!(
+                f,
+                "[{}]",
+                value
+                    .iter()
+                    .map(|value| format!("{}", value))
+                    .collect::<Vec<_>>()
+                    .join(",")
+            ),
         }
     }
 }
 impl fmt::Debug for ValueTerm {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt::Display::fmt(self, f)
-    }
-}
-
-#[derive(PartialEq, Clone)]
-pub struct ArrayValue {
-    values: Vec<ValueTerm>,
-}
-impl Hashable for ArrayValue {
-    fn hash(&self) -> HashId {
-        hash_sequence(self.values.iter().map(|value| value.hash()))
-    }
-}
-impl ArrayValue {
-    pub fn new(values: Vec<ValueTerm>) -> Self {
-        Self { values }
-    }
-}
-impl fmt::Display for ArrayValue {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "[{}]",
-            self.values
-                .iter()
-                .map(|value| format!("{}", value))
-                .collect::<Vec<_>>()
-                .join(",")
-        )
-    }
-}
-impl fmt::Debug for ArrayValue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Display::fmt(self, f)
     }

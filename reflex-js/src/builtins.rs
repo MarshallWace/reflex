@@ -215,14 +215,21 @@ pub(crate) fn get_builtin_field<'src>(target: Option<&Term>, method: &str) -> Op
     })
 }
 
-pub(crate) fn format_value(value: &ValueTerm) -> StringValue {
+pub(crate) fn format_value(value: &ValueTerm) -> String {
     match value {
-        ValueTerm::Null => StringValue::from("null"),
+        ValueTerm::Symbol(_) => format!("{}", value),
+        ValueTerm::Null => String::from("null"),
         ValueTerm::Boolean(value) => format!("{}", value),
         ValueTerm::Int(value) => format!("{}", value),
         ValueTerm::Float(value) => format!("{}", value),
         ValueTerm::String(value) => StringValue::from(value),
-        ValueTerm::Array(value) => format!("{}", value),
-        _ => format!("{}", value),
+        ValueTerm::Array(value) => format!(
+            "[{}]",
+            value
+                .iter()
+                .map(|value| format!("{}", value))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
     }
 }
