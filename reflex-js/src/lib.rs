@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use reflex::{core::Expression, stdlib::value::SymbolId};
-use std::collections::HashMap;
+use std::{collections::HashMap};
 
 mod builtins;
 mod globals;
@@ -54,31 +54,32 @@ impl Env {
     }
 }
 
-pub struct SymbolCache<'src> {
-    cache: HashMap<Option<&'src str>, SymbolId>,
+pub struct SymbolCache {
+    cache: HashMap<Option<String>, SymbolId>,
 }
-impl<'src> SymbolCache<'src> {
+impl SymbolCache {
     pub fn new() -> Self {
         Self {
             cache: HashMap::new(),
         }
     }
-    pub fn has(&self, identifier: &str) -> bool {
+    pub fn has(&self, identifier: String) -> bool {
         self.cache.contains_key(&Some(identifier))
     }
-    pub fn get(&mut self, identifier: &'src str) -> SymbolId {
+    pub fn get(&mut self, identifier: String) -> SymbolId {
+        let key = Some(identifier);
         self.cache
-            .get(&Some(identifier))
+            .get(&key)
             .map(|value| *value)
-            .unwrap_or_else(|| self.insert(Some(identifier)))
+            .unwrap_or_else(|| self.insert(key))
     }
     pub fn generate(&mut self) -> SymbolId {
         self.insert(None)
     }
-    pub fn entries(&self) -> impl IntoIterator<Item = (&Option<&'src str>, &SymbolId)> {
+    pub fn entries(&self) -> impl IntoIterator<Item = (&Option<String>, &SymbolId)> {
         self.cache.iter()
     }
-    fn insert(&mut self, identifier: Option<&'src str>) -> SymbolId {
+    fn insert(&mut self, identifier: Option<String>) -> SymbolId {
         let id = SymbolId::from(self.cache.len() as SymbolId);
         self.cache.insert(identifier, id);
         id

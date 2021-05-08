@@ -1,0 +1,16 @@
+[package]
+name = "reflex-runtime"
+version = "0.1.0"
+license = "Apache-2.0"
+authors = ["Marshall Wace LLP <opensource@mwam.com>", "Tim Kendrick <t.kendrick@mwam.com>", "Jordan Hall <j.hall@mwam.com>", "Chris Campbell <c.campbell@mwam.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+
+reflex = { path = "../reflex" }
+reflex-js = { path = "../reflex-js" }
+hyper = { version = "0.14", features = ["full"] }
+tokio = { version = "1", features = ["full"] }
+tokio-stream = { version = "0.1", features = ["sync"] }

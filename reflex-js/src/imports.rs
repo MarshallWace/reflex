@@ -25,11 +25,11 @@ pub fn builtin_imports(symbol_cache: &mut SymbolCache) -> Vec<(&'static str, Exp
 fn import_utils(symbol_cache: &mut SymbolCache) -> Expression {
     create_struct(vec![
         (
-            ValueTerm::Symbol(symbol_cache.get("Types")),
+            ValueTerm::Symbol(symbol_cache.get(String::from("Types"))),
             import_type_constructors(symbol_cache),
         ),
         (
-            ValueTerm::Symbol(symbol_cache.get("graph")),
+            ValueTerm::Symbol(symbol_cache.get(String::from("graph"))),
             Expression::new(Term::Lambda(LambdaTerm::new(
                 Arity::from(0, 1, None),
                 Expression::new(Term::Recursive(RecursiveTerm::new(Expression::new(
@@ -44,28 +44,28 @@ fn import_type_constructors(symbol_cache: &mut SymbolCache) -> Expression {
     let null = Expression::new(Term::Value(ValueTerm::Null));
     create_struct(vec![
         (
-            ValueTerm::Symbol(symbol_cache.get("Scalar")),
+            ValueTerm::Symbol(symbol_cache.get(String::from("Scalar"))),
             create_struct(vec![
                 (
-                    ValueTerm::Symbol(symbol_cache.get("Boolean")),
+                    ValueTerm::Symbol(symbol_cache.get(String::from("Boolean"))),
                     Expression::clone(&null),
                 ),
                 (
-                    ValueTerm::Symbol(symbol_cache.get("Int")),
+                    ValueTerm::Symbol(symbol_cache.get(String::from("Int"))),
                     Expression::clone(&null),
                 ),
                 (
-                    ValueTerm::Symbol(symbol_cache.get("Float")),
+                    ValueTerm::Symbol(symbol_cache.get(String::from("Float"))),
                     Expression::clone(&null),
                 ),
                 (
-                    ValueTerm::Symbol(symbol_cache.get("String")),
+                    ValueTerm::Symbol(symbol_cache.get(String::from("String"))),
                     Expression::clone(&null),
                 ),
             ]),
         ),
         (
-            ValueTerm::Symbol(symbol_cache.get("Struct")),
+            ValueTerm::Symbol(symbol_cache.get(String::from("Struct"))),
             Expression::new(Term::Native(NativeFunction::new(
                 StructTypeConstructor::hash(),
                 StructTypeConstructor::arity(),
@@ -73,7 +73,7 @@ fn import_type_constructors(symbol_cache: &mut SymbolCache) -> Expression {
             ))),
         ),
         (
-            ValueTerm::Symbol(symbol_cache.get("Enum")),
+            ValueTerm::Symbol(symbol_cache.get(String::from("Enum"))),
             Expression::new(Term::Lambda(LambdaTerm::new(
                 Arity::from(1, 0, None),
                 Expression::new(Term::Application(ApplicationTerm::new(
@@ -96,7 +96,7 @@ fn import_type_constructors(symbol_cache: &mut SymbolCache) -> Expression {
             ))),
         ),
         (
-            ValueTerm::Symbol(symbol_cache.get("EnumVariant")),
+            ValueTerm::Symbol(symbol_cache.get(String::from("EnumVariant"))),
             Expression::new(Term::Native(NativeFunction::new(
                 EnumVariantConstructor::hash(),
                 EnumVariantConstructor::arity(),
@@ -104,7 +104,7 @@ fn import_type_constructors(symbol_cache: &mut SymbolCache) -> Expression {
             ))),
         ),
         (
-            ValueTerm::Symbol(symbol_cache.get("Fn")),
+            ValueTerm::Symbol(symbol_cache.get(String::from("Fn"))),
             Expression::new(Term::Lambda(LambdaTerm::new(
                 Arity::from(0, 0, Some(VarArgs::Eager)),
                 Expression::new(Term::Lambda(LambdaTerm::new(
@@ -114,14 +114,14 @@ fn import_type_constructors(symbol_cache: &mut SymbolCache) -> Expression {
             ))),
         ),
         (
-            ValueTerm::Symbol(symbol_cache.get("List")),
+            ValueTerm::Symbol(symbol_cache.get(String::from("List"))),
             Expression::new(Term::Lambda(LambdaTerm::new(
                 Arity::from(1, 0, None),
                 Expression::clone(&null),
             ))),
         ),
         (
-            ValueTerm::Symbol(symbol_cache.get("Maybe")),
+            ValueTerm::Symbol(symbol_cache.get(String::from("Maybe"))),
             Expression::new(Term::Lambda(LambdaTerm::new(
                 Arity::from(1, 0, None),
                 Expression::clone(&null),
@@ -302,11 +302,11 @@ impl EnumVariantConstructor {
 
 fn import_graphql(symbol_cache: &mut SymbolCache) -> Expression {
     create_struct(vec![(
-        ValueTerm::Symbol(symbol_cache.get("Resolver")),
+        ValueTerm::Symbol(symbol_cache.get(String::from("Resolver"))),
         Expression::new(Term::StructConstructor(StructPrototype::new(vec![
-            Term::Value(ValueTerm::Symbol(symbol_cache.get("query"))).hash(),
-            Term::Value(ValueTerm::Symbol(symbol_cache.get("mutation"))).hash(),
-            Term::Value(ValueTerm::Symbol(symbol_cache.get("subscription"))).hash(),
+            Term::Value(ValueTerm::Symbol(symbol_cache.get(String::from("query")))).hash(),
+            Term::Value(ValueTerm::Symbol(symbol_cache.get(String::from("mutation")))).hash(),
+            Term::Value(ValueTerm::Symbol(symbol_cache.get(String::from("subscription")))).hash(),
         ]))),
     )])
 }

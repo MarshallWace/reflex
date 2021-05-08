@@ -27,6 +27,7 @@ pub fn builtin_globals(symbol_cache: &mut SymbolCache) -> Vec<(&'static str, Exp
         ("Math", builtin_global_math(symbol_cache)),
         ("Map", builtin_global_map_constructor()),
         ("Set", builtin_global_set_constructor()),
+        ("fetch", builtin_fetch()),
     ]
 }
 
@@ -35,12 +36,13 @@ pub fn builtin_process(
     symbol_cache: &mut SymbolCache,
 ) -> Expression {
     create_struct(vec![(
-        ValueTerm::Symbol(symbol_cache.get("env")),
-        create_struct(
-            env_vars
-                .into_iter()
-                .map(|(name, value)| (ValueTerm::Symbol(symbol_cache.get(name)), value)),
-        ),
+        ValueTerm::Symbol(symbol_cache.get(String::from("env"))),
+        create_struct(env_vars.into_iter().map(|(name, value)| {
+            (
+                ValueTerm::Symbol(symbol_cache.get(String::from(name))),
+                value,
+            )
+        })),
     )])
 }
 
@@ -63,27 +65,27 @@ fn builtin_global_boolean() -> Expression {
 fn builtin_global_math(symbol_cache: &mut SymbolCache) -> Expression {
     create_struct(vec![
         (
-            ValueTerm::Symbol(symbol_cache.get("abs")),
+            ValueTerm::Symbol(symbol_cache.get(String::from("abs"))),
             Expression::new(Term::Builtin(BuiltinTerm::Abs)),
         ),
         (
-            ValueTerm::Symbol(symbol_cache.get("ceil")),
+            ValueTerm::Symbol(symbol_cache.get(String::from("ceil"))),
             Expression::new(Term::Builtin(BuiltinTerm::Ceil)),
         ),
         (
-            ValueTerm::Symbol(symbol_cache.get("floor")),
+            ValueTerm::Symbol(symbol_cache.get(String::from("floor"))),
             Expression::new(Term::Builtin(BuiltinTerm::Floor)),
         ),
         (
-            ValueTerm::Symbol(symbol_cache.get("max")),
+            ValueTerm::Symbol(symbol_cache.get(String::from("max"))),
             Expression::new(Term::Builtin(BuiltinTerm::Max)),
         ),
         (
-            ValueTerm::Symbol(symbol_cache.get("min")),
+            ValueTerm::Symbol(symbol_cache.get(String::from("min"))),
             Expression::new(Term::Builtin(BuiltinTerm::Min)),
         ),
         (
-            ValueTerm::Symbol(symbol_cache.get("round")),
+            ValueTerm::Symbol(symbol_cache.get(String::from("round"))),
             Expression::new(Term::Builtin(BuiltinTerm::Round)),
         ),
     ])
@@ -303,6 +305,21 @@ impl DynamicSetConstructor {
             )))),
         }
     }
+}
+
+fn builtin_fetch() -> Expression {
+    Expression::new(Term::Lambda(LambdaTerm::new(
+        Arity::from(0, 1, None),
+        Expression::new(Term::Application(ApplicationTerm::new(
+            Expression::new(Term::Builtin(BuiltinTerm::Effect)),
+            vec![
+                Expression::new(Term::Value(ValueTerm::String(StringValue::from("fetch")))),
+                Expression::new(Term::Variable(VariableTerm::Static(
+                    StaticVariableTerm::new(0),
+                ))),
+            ],
+        ))),
+    )))
 }
 
 fn create_struct(fields: impl IntoIterator<Item = (ValueTerm, Expression)>) -> Expression {

@@ -30,7 +30,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     };
     let mut cache = EvaluationCache::new();
     let state = DynamicState::new();
-    let result = expression.evaluate(&state, &mut cache).unwrap();
+    let (result, _) = expression.evaluate(&state, &mut cache).unwrap();
     match result {
         Ok(result) => {
             println!("{}", result);

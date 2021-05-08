@@ -5,13 +5,13 @@ use std::{
     collections::{HashMap, HashSet},
     fmt,
     iter::once,
-    rc::Rc,
+    sync::Arc,
 };
 
 use crate::{
     cache::EvaluationCache,
     hash::{
-        combine_hashes, hash_bytes, hash_option, hash_sequence, hash_u32, hash_u8,
+        combine_hashes, hash_bytes, hash_option, hash_seed, hash_sequence, hash_u32, hash_u8,
         hash_unordered_sequence, prefix_hash, HashId, Hashable,
     },
     stdlib::{
@@ -70,6 +70,7 @@ impl fmt::Display for Arity {
 pub(crate) trait Rewritable {
     fn capture_depth(&self) -> StackOffset;
     fn dynamic_dependencies(&self) -> DependencyList;
+    fn signals(&self) -> Vec<Signal>;
     fn substitute(
         &self,
         substitutions: &Substitutions,
@@ -262,12 +263,14 @@ impl WildcardStaticSubstitutions {
 
 #[derive(PartialEq, Clone)]
 pub struct Expression {
-    value: Rc<Term>,
+    value: Arc<Term>,
     hash: HashId,
     capture_depth: StackOffset,
     is_reduced: bool,
     is_optimized: bool,
     dynamic_dependencies: DependencyList,
+    // TODO: Investigate cheap cloning for signals tree
+    signals: Vec<Signal>,
 }
 impl Hashable for Expression {
     fn hash(&self) -> HashId {
@@ -299,9 +302,11 @@ impl Expression {
             cache,
             DependencyList::empty(),
         );
-        let result = match result.value() {
-            Term::Signal(signal) => Err(signal.flatten()),
-            _ => Ok(result),
+        let signals = result.signals();
+        let result = if signals.is_empty() {
+            Ok(result)
+        } else {
+            Err(signals)
         };
         EvaluationResult::new(result, dependencies)
     }
@@ -309,31 +314,35 @@ impl Expression {
         let hash = value.hash();
         let capture_depth = value.capture_depth();
         let dynamic_dependencies = value.dynamic_dependencies();
+        let signals = value.signals();
         Self {
-            value: Rc::new(value),
+            value: Arc::new(value),
             hash,
             capture_depth,
             dynamic_dependencies,
+            signals,
             is_reduced,
             is_optimized,
         }
     }
     fn reduced(existing: &Expression) -> Self {
         Self {
-            value: Rc::clone(&existing.value),
+            value: Arc::clone(&existing.value),
             hash: existing.hash,
             capture_depth: existing.capture_depth,
             dynamic_dependencies: DependencyList::clone(&existing.dynamic_dependencies),
+            signals: existing.signals.clone(),
             is_reduced: true,
             is_optimized: existing.is_optimized,
         }
     }
     fn optimized(existing: &Expression) -> Self {
         Self {
-            value: Rc::clone(&existing.value),
+            value: Arc::clone(&existing.value),
             hash: existing.hash,
             capture_depth: existing.capture_depth,
             dynamic_dependencies: DependencyList::clone(&existing.dynamic_dependencies),
+            signals: existing.signals.clone(),
             is_reduced: existing.is_reduced,
             is_optimized: true,
         }
@@ -345,6 +354,9 @@ impl Rewritable for Expression {
     }
     fn dynamic_dependencies(&self) -> DependencyList {
         DependencyList::clone(&self.dynamic_dependencies)
+    }
+    fn signals(&self) -> Vec<Signal> {
+        self.signals.clone()
     }
     fn substitute(
         &self,
@@ -441,15 +453,9 @@ impl EvaluationResult {
     pub fn dependencies(&self) -> &DependencyList {
         &self.dependencies
     }
-    pub fn unwrap(self) -> Result<Expression, Vec<Signal>> {
-        self.result
+    pub fn unwrap(self) -> (Result<Expression, Vec<Signal>>, DependencyList) {
+        (self.result, self.dependencies)
     }
-}
-
-#[derive(PartialEq, Clone, Debug)]
-pub enum EvaluationResultType {
-    Expression(Expression),
-    Signal(Vec<Signal>),
 }
 
 #[derive(Clone, PartialEq, Debug)]
@@ -465,16 +471,30 @@ impl DependencyList {
             dependencies: Some(dependencies),
         }
     }
+    pub fn from(values: impl IntoIterator<Item = StateToken>) -> Self {
+        let values = values.into_iter().collect::<Vec<_>>();
+        if values.is_empty() {
+            DependencyList::empty()
+        } else {
+            DependencyList::of(DynamicDependencies::from(values))
+        }
+    }
     pub fn is_empty(&self) -> bool {
         self.dependencies.is_none()
     }
     pub fn extend(self, other: Self) -> Self {
-        match self.dependencies {
-            None => self,
-            Some(dependencies) => match other.dependencies {
-                None => other,
-                Some(other) => DependencyList::of(dependencies.union(&other)),
+        match &self.dependencies {
+            None => other,
+            Some(dependencies) => match &other.dependencies {
+                None => self,
+                Some(other) => DependencyList::of(dependencies.union(other)),
             },
+        }
+    }
+    pub fn contains(&self, entries: &HashSet<StateToken>) -> bool {
+        match &self.dependencies {
+            None => false,
+            Some(dependencies) => dependencies.contains(entries),
         }
     }
 }
@@ -517,6 +537,19 @@ impl Hashable for Term {
     }
 }
 impl Rewritable for Term {
+    fn signals(&self) -> Vec<Signal> {
+        match self {
+            Self::Variable(term) => term.signals(),
+            Self::Lambda(term) => term.signals(),
+            Self::Application(term) => term.signals(),
+            Self::Recursive(term) => term.signals(),
+            Self::Struct(term) => term.signals(),
+            Self::Enum(term) => term.signals(),
+            Self::Collection(term) => term.signals(),
+            Self::Signal(term) => term.signals(),
+            _ => Vec::new(),
+        }
+    }
     fn capture_depth(&self) -> StackOffset {
         match self {
             Self::Variable(term) => term.capture_depth(),
@@ -526,6 +559,7 @@ impl Rewritable for Term {
             Self::Struct(term) => term.capture_depth(),
             Self::Enum(term) => term.capture_depth(),
             Self::Collection(term) => term.capture_depth(),
+            Self::Signal(term) => term.capture_depth(),
             _ => 0,
         }
     }
@@ -538,6 +572,7 @@ impl Rewritable for Term {
             Self::Struct(term) => term.dynamic_dependencies(),
             Self::Enum(term) => term.dynamic_dependencies(),
             Self::Collection(term) => term.dynamic_dependencies(),
+            Self::Signal(term) => term.dynamic_dependencies(),
             _ => DependencyList::empty(),
         }
     }
@@ -554,6 +589,7 @@ impl Rewritable for Term {
             Self::Struct(term) => term.substitute(substitutions, cache),
             Self::Enum(term) => term.substitute(substitutions, cache),
             Self::Collection(term) => term.substitute(substitutions, cache),
+            Self::Signal(term) => term.substitute(substitutions, cache),
             _ => None,
         }
     }
@@ -566,6 +602,7 @@ impl Rewritable for Term {
             Self::Struct(term) => term.optimize(cache),
             Self::Enum(term) => term.optimize(cache),
             Self::Collection(term) => term.optimize(cache),
+            Self::Signal(term) => term.optimize(cache),
             _ => None,
         }
     }
@@ -622,6 +659,12 @@ impl Hashable for VariableTerm {
     }
 }
 impl Rewritable for VariableTerm {
+    fn signals(&self) -> Vec<Signal> {
+        match self {
+            Self::Static(term) => term.signals(),
+            Self::Dynamic(term) => term.signals(),
+        }
+    }
     fn capture_depth(&self) -> StackOffset {
         match self {
             Self::Static(term) => term.capture_depth(),
@@ -683,6 +726,9 @@ impl StaticVariableTerm {
     }
 }
 impl Rewritable for StaticVariableTerm {
+    fn signals(&self) -> Vec<Signal> {
+        Vec::new()
+    }
     fn capture_depth(&self) -> StackOffset {
         self.offset + 1
     }
@@ -720,6 +766,9 @@ impl Hashable for DynamicVariableTerm {
     }
 }
 impl Rewritable for DynamicVariableTerm {
+    fn signals(&self) -> Vec<Signal> {
+        Vec::new()
+    }
     fn capture_depth(&self) -> StackOffset {
         0
     }
@@ -733,7 +782,7 @@ impl Rewritable for DynamicVariableTerm {
     ) -> Option<Expression> {
         match substitutions.kind() {
             SubstitutionType::Dynamic(state) => Some(match state.get(self.id) {
-                Some(value) => value,
+                Some(value) => Expression::clone(value),
                 None => Expression::clone(&self.fallback),
             }),
             _ => None,
@@ -750,29 +799,38 @@ impl fmt::Display for DynamicVariableTerm {
 }
 
 pub struct DynamicState {
+    hash: HashId,
     values: HashMap<StateToken, Expression>,
 }
 impl Hashable for DynamicState {
     fn hash(&self) -> HashId {
-        hash_sequence(
-            self.values
-                .iter()
-                .map(|(key, value)| combine_hashes(hash_state_token(*key), value.hash())),
-        )
+        self.hash
     }
 }
 impl DynamicState {
     pub fn new() -> Self {
         DynamicState {
+            hash: hash_seed(),
             values: HashMap::new(),
         }
     }
-    pub fn get(&self, key: StateToken) -> Option<Expression> {
-        let value = self.values.get(&key)?;
-        Some(Expression::clone(value))
+    pub fn has(&self, key: StateToken) -> bool {
+        self.values.contains_key(&key)
+    }
+    pub fn get(&self, key: StateToken) -> Option<&Expression> {
+        self.values.get(&key)
     }
     pub fn set(&mut self, key: StateToken, value: Expression) {
-        self.values.insert(key, value);
+        let value_hash = value.hash();
+        let previous = self.values.insert(key, value);
+        let has_changes = match previous {
+            Some(previous_value) => value_hash != previous_value.hash(),
+            None => true,
+        };
+        if has_changes {
+            let entry_hash = combine_hashes(hash_state_token(key), value_hash);
+            self.hash = combine_hashes(self.hash, entry_hash);
+        }
     }
 }
 
@@ -783,7 +841,7 @@ fn hash_state_token(value: StateToken) -> HashId {
 
 #[derive(PartialEq, Clone, Debug)]
 pub struct DynamicDependencies {
-    values: Rc<HashSet<StateToken>>,
+    values: Arc<HashSet<StateToken>>,
 }
 impl Hashable for DynamicDependencies {
     fn hash(&self) -> HashId {
@@ -791,15 +849,19 @@ impl Hashable for DynamicDependencies {
     }
 }
 impl DynamicDependencies {
-    pub fn of(id: StateToken) -> Self {
+    pub fn from(values: impl IntoIterator<Item = StateToken>) -> Self {
         Self {
-            values: Rc::new(once(id).collect()),
+            values: Arc::new(values.into_iter().collect()),
         }
     }
+    pub fn of(id: StateToken) -> Self {
+        Self::from(once(id))
+    }
     fn union(&self, other: &DynamicDependencies) -> Self {
-        Self {
-            values: Rc::new(self.values.union(&other.values).copied().collect()),
-        }
+        Self::from(self.values.union(&other.values).copied())
+    }
+    fn contains(&self, entries: &HashSet<StateToken>) -> bool {
+        !self.values.is_disjoint(entries)
     }
 }
 
@@ -818,6 +880,9 @@ impl RecursiveTerm {
     }
 }
 impl Rewritable for RecursiveTerm {
+    fn signals(&self) -> Vec<Signal> {
+        self.factory.signals()
+    }
     fn capture_depth(&self) -> StackOffset {
         self.factory.capture_depth()
     }
@@ -890,12 +955,15 @@ impl LambdaTerm {
     }
 }
 impl Rewritable for LambdaTerm {
+    fn signals(&self) -> Vec<Signal> {
+        Vec::new()
+    }
     fn capture_depth(&self) -> StackOffset {
         let arity = self.arity.required() as StackOffset;
         self.body.capture_depth().saturating_sub(arity)
     }
     fn dynamic_dependencies(&self) -> DependencyList {
-        self.body.dynamic_dependencies()
+        DependencyList::empty()
     }
     fn substitute<'a>(
         &self,
@@ -993,6 +1061,11 @@ impl ApplicationTerm {
     }
 }
 impl Rewritable for ApplicationTerm {
+    fn signals(&self) -> Vec<Signal> {
+        let mut signals = self.target.signals();
+        signals.extend(signals_multiple(&self.args));
+        signals
+    }
     fn capture_depth(&self) -> StackOffset {
         let target_depth = self.target.capture_depth();
         let arg_depth = capture_depth_multiple(&self.args);
@@ -1068,240 +1141,115 @@ impl Reducible for ApplicationTerm {
         let target = reduced_target
             .as_ref()
             .map_or_else(|| self.target.value(), |target| target.value());
-        let result = match target {
-            Term::Lambda(target) => Ok(reduce_lambda_application(target, self.args.iter(), cache)),
-            Term::Builtin(target) => {
-                match reduce_native_application(
-                    NativeApplicable::Builtin(target),
-                    self.args.iter(),
-                    cache,
-                ) {
-                    Ok(result) => Ok(result),
-                    Err(args) => Err(Some(args)),
-                }
+        let arity = match &target {
+            Term::Lambda(target) => Some((target.arity, false)),
+            Term::Builtin(target) => Some((target.arity(), true)),
+            Term::Native(target) => Some((target.arity, true)),
+            Term::StructConstructor(target) => {
+                let num_keys = target.keys.len() as u8;
+                Some((Arity::from(num_keys, num_keys, None), false))
             }
-            Term::Native(target) => {
-                match reduce_native_application(
-                    NativeApplicable::Custom(target),
-                    self.args.iter(),
-                    cache,
-                ) {
-                    Ok(result) => Ok(result),
-                    Err(args) => Err(Some(args)),
-                }
-            }
-            Term::StructConstructor(target) => Ok(reduce_struct_constructor_application(
-                target,
-                self.args.iter(),
-                cache,
-            )),
-            Term::EnumConstructor(target) => Ok(target.apply(self.args.iter().cloned())),
-            _ => Err(None),
+            Term::EnumConstructor(target) => Some((Arity::from(0, target.arity, None), false)),
+            _ => None,
         };
-        match result {
-            Ok(result) => result.reduce(cache).or_else(|| Some(result)),
-            Err(args) => {
-                if reduced_target.is_none() && args.is_none() {
-                    None
-                } else {
-                    let target = reduced_target.unwrap_or_else(|| Expression::clone(&self.target));
-                    let args = args.unwrap_or_else(|| self.args.clone());
-                    Some(Expression::reduced(&Expression::new(Term::Application(
-                        Self::new(target, args),
-                    ))))
+        match arity {
+            None => None,
+            Some((arity, strict)) => {
+                let result = match evaluate_args(self.args.iter(), arity, strict, cache) {
+                    Err(args) => Err(args),
+                    Ok(args) => match &target {
+                        Term::Lambda(target) => Ok(target.apply(args.into_iter(), cache)),
+                        Term::Builtin(target) => Ok(target.apply(args.into_iter())),
+                        Term::Native(target) => Ok(target.apply(args.into_iter())),
+                        Term::StructConstructor(target) => {
+                            let (keys, values) = args.split_at(arity.eager());
+                            Ok(target.apply(
+                                keys.iter()
+                                    .map(|key| key.hash())
+                                    .zip(values.iter().map(Expression::clone))
+                                    .map(|(key, value)| (key, value)),
+                            ))
+                        }
+                        Term::EnumConstructor(target) => Ok(target.apply(args.into_iter())),
+                        _ => Err(args),
+                    },
+                };
+                match result {
+                    Ok(result) => result.reduce(cache).or_else(|| Some(result)),
+                    Err(args) => {
+                        if reduced_target.is_none()
+                            && self
+                                .args
+                                .iter()
+                                .zip(args.iter())
+                                .all(|(arg, evaluated_arg)| arg.hash() == evaluated_arg.hash())
+                        {
+                            None
+                        } else {
+                            let target =
+                                reduced_target.unwrap_or_else(|| Expression::clone(&self.target));
+                            Some(Expression::new(Term::Application(Self::new(target, args))))
+                        }
+                    }
                 }
             }
         }
     }
 }
 
-fn reduce_lambda_application<'a>(
-    target: &LambdaTerm,
+fn evaluate_args<'a>(
     args: impl IntoIterator<Item = &'a Expression> + ExactSizeIterator,
+    arity: Arity,
+    strict: bool,
     cache: &mut EvaluationCache,
-) -> Expression {
-    let arity = target.arity;
-    assert_arity(arity, args.len());
-    match reduce_eager_args(&arity, args, cache) {
-        Err(signal) => signal,
-        Ok(args) => target.apply(args.into_iter(), cache),
-    }
-}
-
-fn reduce_struct_constructor_application<'a>(
-    target: &StructPrototype,
-    args: impl IntoIterator<Item = &'a Expression> + ExactSizeIterator,
-    cache: &mut EvaluationCache,
-) -> Expression {
-    let num_keys = target.keys.len() as u8;
-    let arity = Arity::from(num_keys, num_keys, None);
-    assert_arity(arity, args.len());
-    match reduce_eager_args(&arity, args, cache) {
-        Err(signal) => signal,
-        Ok(args) => {
-            let (keys, values) = args.split_at(arity.eager());
-            target.apply(
-                keys.iter()
-                    .map(|key| key.hash())
-                    .zip(values.iter().map(Expression::clone))
-                    .map(|(key, value)| (key, value)),
-            )
-        }
-    }
-}
-
-fn assert_arity(arity: Arity, num_args: usize) {
-    if num_args < arity.required() {
-        panic!(
-            "Expected {} arguments, received {}",
-            arity.required(),
-            num_args
-        )
-    }
-}
-
-enum NativeApplicable<'a> {
-    Builtin(&'a BuiltinTerm),
-    Custom(&'a NativeFunction),
-}
-impl<'a> NativeApplicable<'a> {
-    fn arity(&self) -> Arity {
-        match self {
-            NativeApplicable::Builtin(target) => target.arity(),
-            NativeApplicable::Custom(target) => target.arity,
-        }
-    }
-    fn apply(&self, args: impl IntoIterator<Item = Expression> + ExactSizeIterator) -> Expression {
-        match self {
-            Self::Builtin(target) => target.apply(args),
-            Self::Custom(target) => target.apply(args),
-        }
-    }
-}
-
-fn reduce_native_application<'a>(
-    target: NativeApplicable<'a>,
-    args: impl IntoIterator<Item = &'a Expression> + ExactSizeIterator,
-    cache: &mut EvaluationCache,
-) -> Result<Expression, Vec<Expression>> {
-    let arity = target.arity();
+) -> Result<Vec<Expression>, Vec<Expression>> {
     if args.len() < arity.required() {
+        // TODO: Handle application arity errors gracefully
         panic!(
             "Expected {} arguments, received {}",
             arity.required(),
             args.len()
         );
     }
-    match reduce_eager_args(&arity, args, cache) {
-        Err(signal) => Ok(signal),
-        Ok(args) => {
-            let num_eager_args = match arity.variadic {
-                Some(VarArgs::Eager) => args.len(),
-                _ => arity.eager(),
-            };
-            let has_unresolved_args = args
-                .iter()
-                .take(num_eager_args)
-                .any(|arg| arg.capture_depth() > 0 || !arg.dynamic_dependencies().is_empty());
-            if has_unresolved_args {
-                Err(args)
-            } else {
-                Ok(target.apply(args.into_iter()))
-            }
-        }
-    }
-}
-
-fn reduce_eager_args<'a>(
-    arity: &Arity,
-    args: impl IntoIterator<Item = &'a Expression> + ExactSizeIterator,
-    cache: &mut EvaluationCache,
-) -> Result<Vec<Expression>, Expression> {
-    // TODO: avoid unnecessary cloning if no argument reductions are needed
     let eager_arity = arity.eager();
     let eager_varargs = match arity.variadic {
         Some(VarArgs::Eager) => true,
         _ => false,
     };
     if eager_arity == 0 && !eager_varargs {
-        return Ok(args.into_iter().map(Expression::clone).collect());
-    }
-    let num_args = args.len();
-    let required_arity = arity.required();
-    enum EvaluatedArgs {
-        Args(Vec<Expression>),
-        Signal(Expression),
-        CombinedSignal(CombinedSignal),
-    }
-    let result = args
-        .into_iter()
-        .enumerate()
-        .map(|(index, arg)| {
-            let is_eager = index < eager_arity || (eager_varargs && index >= required_arity);
-            if is_eager {
-                let arg = arg.reduce(cache).unwrap_or_else(|| Expression::clone(arg));
-                (arg, true)
-            } else {
-                (Expression::clone(arg), false)
-            }
-        })
-        .fold(
-            EvaluatedArgs::Args(Vec::with_capacity(num_args)),
-            |result: EvaluatedArgs, (arg, is_eager)| match arg.value() {
-                Term::Signal(signal) if is_eager => match result {
-                    EvaluatedArgs::Args(_) => EvaluatedArgs::Signal(arg),
-                    EvaluatedArgs::Signal(existing_result) => match existing_result.value() {
-                        Term::Signal(existing) => match existing {
-                            SignalTerm::Single(existing) => match signal {
-                                SignalTerm::Single(signal) => {
-                                    if signal.hash() == existing.hash() {
-                                        EvaluatedArgs::Signal(existing_result)
-                                    } else {
-                                        EvaluatedArgs::CombinedSignal(CombinedSignal::join(
-                                            Signal::clone(existing),
-                                            Signal::clone(signal),
-                                        ))
-                                    }
-                                }
-                                SignalTerm::Combined(signal) => EvaluatedArgs::CombinedSignal(
-                                    signal.append(Signal::clone(existing)),
-                                ),
-                            },
-                            SignalTerm::Combined(existing) => match signal {
-                                SignalTerm::Single(signal) => EvaluatedArgs::CombinedSignal(
-                                    existing.append(Signal::clone(signal)),
-                                ),
-                                SignalTerm::Combined(signal) => {
-                                    EvaluatedArgs::CombinedSignal(existing.union(signal))
-                                }
-                            },
-                        },
-                        _ => panic!(),
-                    },
-                    EvaluatedArgs::CombinedSignal(existing) => match signal {
-                        SignalTerm::Single(signal) => {
-                            EvaluatedArgs::CombinedSignal(existing.append(Signal::clone(signal)))
-                        }
-                        SignalTerm::Combined(signal) => {
-                            EvaluatedArgs::CombinedSignal(existing.union(signal))
-                        }
-                    },
-                },
-                _ => match result {
-                    EvaluatedArgs::Args(mut args) => {
-                        args.push(arg);
-                        EvaluatedArgs::Args(args)
-                    }
-                    _ => result,
-                },
-            },
-        );
-    match result {
-        EvaluatedArgs::Signal(signal) => Err(signal),
-        EvaluatedArgs::CombinedSignal(signal) => {
-            Err(Expression::new(Term::Signal(SignalTerm::Combined(signal))))
+        Ok(args.into_iter().map(Expression::clone).collect::<Vec<_>>())
+    } else {
+        let required_arity = arity.required();
+        let mut has_unresolved_args = false;
+        let args = args
+            .into_iter()
+            .enumerate()
+            .map(|(index, arg)| {
+                let is_eager = index < eager_arity || (eager_varargs && index >= required_arity);
+                if is_eager {
+                    let arg = arg.reduce(cache).unwrap_or_else(|| Expression::clone(arg));
+                    has_unresolved_args = has_unresolved_args
+                        || match arg.value() {
+                            Term::Value(_) => false,
+                            Term::Signal(_) => true,
+                            _ => {
+                                strict
+                                    && (arg.capture_depth() > 0
+                                        || !arg.dynamic_dependencies().is_empty()
+                                        || !arg.signals().is_empty())
+                            }
+                        };
+                    arg
+                } else {
+                    Expression::clone(arg)
+                }
+            })
+            .collect::<Vec<_>>();
+        if has_unresolved_args {
+            Err(args)
+        } else {
+            Ok(args)
         }
-        EvaluatedArgs::Args(args) => Ok(args),
     }
 }
 
@@ -1309,18 +1257,18 @@ fn reduce_eager_args<'a>(
 pub struct NativeFunction {
     hash: HashId,
     arity: Arity,
-    body: Rc<dyn Fn(Vec<Expression>) -> Expression>,
+    body: Arc<dyn Fn(Vec<Expression>) -> Expression + Sync + Send>,
 }
 impl NativeFunction {
     pub fn new(
         hash: HashId,
         arity: Arity,
-        body: impl Fn(Vec<Expression>) -> Expression + 'static,
+        body: impl Fn(Vec<Expression>) -> Expression + Sync + Send + 'static,
     ) -> Self {
         Self {
             hash,
             arity,
-            body: Rc::new(body),
+            body: Arc::new(body),
         }
     }
     fn apply(&self, args: impl IntoIterator<Item = Expression> + ExactSizeIterator) -> Expression {
@@ -1385,11 +1333,14 @@ impl StructTerm {
     }
 }
 impl Rewritable for StructTerm {
+    fn signals(&self) -> Vec<Signal> {
+        Vec::new()
+    }
     fn capture_depth(&self) -> StackOffset {
         capture_depth_multiple(&self.fields)
     }
     fn dynamic_dependencies(&self) -> DependencyList {
-        dynamic_dependencies_multiple(&self.fields)
+        DependencyList::empty()
     }
     fn substitute(
         &self,
@@ -1509,11 +1460,14 @@ impl EnumTerm {
     }
 }
 impl Rewritable for EnumTerm {
+    fn signals(&self) -> Vec<Signal> {
+        Vec::new()
+    }
     fn capture_depth(&self) -> StackOffset {
         capture_depth_multiple(&self.args)
     }
     fn dynamic_dependencies(&self) -> DependencyList {
-        dynamic_dependencies_multiple(&self.args)
+        DependencyList::empty()
     }
     fn substitute(
         &self,
@@ -1582,56 +1536,60 @@ impl fmt::Display for EnumVariantPrototype {
 }
 
 #[derive(PartialEq, Clone, Debug)]
-pub enum SignalTerm {
-    Single(Signal),
-    Combined(CombinedSignal),
+pub struct SignalTerm {
+    signal: Signal,
 }
 impl Hashable for SignalTerm {
     fn hash(&self) -> HashId {
-        match self {
-            Self::Single(signal) => prefix_hash(0, signal.hash()),
-            Self::Combined(signal) => prefix_hash(1, signal.hash()),
+        self.signal.hash
+    }
+}
+impl Rewritable for SignalTerm {
+    fn signals(&self) -> Vec<Signal> {
+        vec![self.signal.clone()]
+    }
+    fn capture_depth(&self) -> StackOffset {
+        0
+    }
+    fn dynamic_dependencies(&self) -> DependencyList {
+        let id = self.signal.hash;
+        match self.signal.signal {
+            SignalType::Error | SignalType::Pending => DependencyList::empty(),
+            SignalType::Custom(_) => DependencyList::of(DynamicDependencies::of(id)),
         }
+    }
+    fn substitute(
+        &self,
+        substitutions: &Substitutions,
+        _cache: &mut EvaluationCache,
+    ) -> Option<Expression> {
+        let id = self.signal.hash;
+        match substitutions.substitutions {
+            SubstitutionType::Static(_) => None,
+            SubstitutionType::Dynamic(state) => state.get(id).map(Expression::clone),
+        }
+    }
+    fn optimize(&self, _cache: &mut EvaluationCache) -> Option<Expression> {
+        None
     }
 }
 impl SignalTerm {
     pub fn new(signal: Signal) -> Self {
-        Self::Single(signal)
+        Self { signal }
     }
-    pub fn combine(&self, other: &SignalTerm) -> Self {
-        match self {
-            Self::Single(existing) => match other {
-                Self::Single(other) => {
-                    if existing.hash() == other.hash() {
-                        Self::Single(Signal::clone(existing))
-                    } else {
-                        Self::Combined(CombinedSignal::join(
-                            Signal::clone(existing),
-                            Signal::clone(other),
-                        ))
-                    }
-                }
-                Self::Combined(other) => Self::Combined(other.append(Signal::clone(existing))),
-            },
-            Self::Combined(existing) => match other {
-                Self::Single(other) => Self::Combined(existing.append(Signal::clone(other))),
-                Self::Combined(other) => Self::Combined(existing.union(&other)),
-            },
-        }
+    pub fn get_type(&self) -> &SignalType {
+        self.signal.get_type()
     }
-    fn flatten(&self) -> Vec<Signal> {
-        match self {
-            Self::Single(signal) => vec![Signal::clone(signal)],
-            Self::Combined(_) => vec![],
-        }
+    pub fn is_type(&self, signal: SignalType) -> bool {
+        self.signal.is_type(signal)
+    }
+    pub fn args(&self) -> Option<&Vec<ValueTerm>> {
+        self.signal.args()
     }
 }
 impl fmt::Display for SignalTerm {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Single(signal) => fmt::Display::fmt(signal, f),
-            Self::Combined(signal) => fmt::Display::fmt(signal, f),
-        }
+        fmt::Display::fmt(&self.signal, f)
     }
 }
 
@@ -1639,7 +1597,7 @@ impl fmt::Display for SignalTerm {
 pub struct Signal {
     hash: HashId,
     signal: SignalType,
-    args: Option<Rc<Vec<ValueTerm>>>,
+    args: Option<Vec<ValueTerm>>,
 }
 impl Hashable for Signal {
     fn hash(&self) -> HashId {
@@ -1656,18 +1614,17 @@ impl Signal {
         Self {
             hash,
             signal,
-            args: if args.is_empty() {
-                None
-            } else {
-                Some(Rc::new(args))
-            },
+            args: if args.is_empty() { None } else { Some(args) },
         }
+    }
+    pub fn get_type(&self) -> &SignalType {
+        &self.signal
     }
     pub fn is_type(&self, signal: SignalType) -> bool {
         self.signal == signal
     }
     pub fn args(&self) -> Option<&Vec<ValueTerm>> {
-        self.args.as_ref().map(|args| &**args)
+        self.args.as_ref()
     }
 }
 impl fmt::Display for Signal {
@@ -1690,90 +1647,18 @@ impl fmt::Display for Signal {
     }
 }
 
-#[derive(PartialEq, Clone, Debug)]
-pub struct CombinedSignal {
-    signals: Rc<HashMap<HashId, Signal>>,
-}
-impl Hashable for CombinedSignal {
-    fn hash(&self) -> HashId {
-        hash_unordered_sequence(self.signals.iter().map(|(hash, _)| *hash))
-    }
-}
-impl CombinedSignal {
-    fn join(left: Signal, right: Signal) -> Self {
-        Self {
-            signals: Rc::new(
-                once(left)
-                    .chain(once(right))
-                    .map(|signal| (signal.hash(), signal))
-                    .collect::<HashMap<_, _>>(),
-            ),
-        }
-    }
-    fn append(&self, signal: Signal) -> Self {
-        let hash = signal.hash();
-        if self.signals.contains_key(&hash) {
-            return Self {
-                signals: Rc::clone(&self.signals),
-            };
-        }
-        let entries = self
-            .signals
-            .iter()
-            .map(|(hash, signal)| (*hash, Signal::clone(signal)))
-            .chain(once((hash, signal)))
-            .collect::<HashMap<_, _>>();
-        Self {
-            signals: Rc::new(entries),
-        }
-    }
-    fn union(&self, other: &CombinedSignal) -> Self {
-        let entries = other
-            .signals
-            .iter()
-            .filter(|(hash, _)| !self.signals.contains_key(hash))
-            .fold(None, |acc, (hash, signal)| match acc {
-                None => Some(
-                    self.signals
-                        .iter()
-                        .map(|(hash, signal)| (*hash, Signal::clone(signal)))
-                        .chain(once((*hash, Signal::clone(signal))))
-                        .collect::<HashMap<_, _>>(),
-                ),
-                Some(mut entries) => {
-                    entries.insert(*hash, Signal::clone(signal));
-                    Some(entries)
-                }
-            });
-        match entries {
-            Some(entries) => Self {
-                signals: Rc::new(entries),
-            },
-            None => Self {
-                signals: Rc::clone(&self.signals),
-            },
-        }
-    }
-}
-impl fmt::Display for CombinedSignal {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "[{}]",
-            self.signals
-                .iter()
-                .map(|(_, signal)| format!("{}", signal))
-                .collect::<Vec<_>>()
-                .join(",")
-        )
-    }
-}
-
 pub(crate) fn capture_depth_multiple(expressions: &[Expression]) -> StackOffset {
     expressions
         .iter()
         .map(|expression| expression.capture_depth())
         .fold(0 as StackOffset, |acc, depth| acc.max(depth))
+}
+
+pub(crate) fn signals_multiple(expressions: &[Expression]) -> Vec<Signal> {
+    expressions
+        .iter()
+        .flat_map(|expression| expression.signals())
+        .collect()
 }
 
 pub(crate) fn dynamic_dependencies_multiple(expressions: &[Expression]) -> DependencyList {

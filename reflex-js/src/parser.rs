@@ -85,7 +85,7 @@ impl<'src> LexicalScope<'src> {
 
 pub fn parse<'src>(
     input: &'src str,
-    symbol_cache: &mut SymbolCache<'src>,
+    symbol_cache: &mut SymbolCache,
     env: &Env,
 ) -> ParserResult<Expression> {
     let program = parse_ast(input)?;
@@ -114,7 +114,7 @@ fn parse_ast(input: &str) -> ParserResult<Vec<ProgramPart>> {
 
 fn parse_script<'src>(
     program: impl IntoIterator<Item = ProgramPart<'src>> + ExactSizeIterator,
-    symbol_cache: &mut SymbolCache<'src>,
+    symbol_cache: &mut SymbolCache,
     env: &Env,
 ) -> ParserResult<Expression> {
     let body = program
@@ -133,9 +133,9 @@ fn parse_script<'src>(
     }
 }
 
-fn parse_module<'src, 'sym>(
+fn parse_module<'src>(
     program: impl IntoIterator<Item = ProgramPart<'src>> + ExactSizeIterator,
-    symbol_cache: &'sym mut SymbolCache<'src>,
+    symbol_cache: &mut SymbolCache,
     env: &Env,
 ) -> ParserResult<Expression> {
     let num_statements = program.len();
@@ -196,7 +196,7 @@ fn parse_module<'src, 'sym>(
 
 fn parse_module_import<'src>(
     node: &ModImport<'src>,
-    symbol_cache: &mut SymbolCache<'src>,
+    symbol_cache: &mut SymbolCache,
     env: &Env,
 ) -> ParserResult<Vec<(&'src str, Expression)>> {
     let module_path = match &node.source {
@@ -239,7 +239,7 @@ fn parse_module_import<'src>(
 fn parse_block<'src: 'temp, 'temp>(
     body: impl IntoIterator<Item = &'temp ProgramPart<'src>>,
     scope: &LexicalScope,
-    symbol_cache: &mut SymbolCache<'src>,
+    symbol_cache: &mut SymbolCache,
     env: &Env,
 ) -> ParserResult<Option<Expression>> {
     parse_block_statements(body, None, scope, symbol_cache, env)
@@ -249,7 +249,7 @@ fn parse_block_statements<'src: 'temp, 'temp>(
     remaining: impl IntoIterator<Item = &'temp ProgramPart<'src>>,
     result: Option<Expression>,
     scope: &LexicalScope,
-    symbol_cache: &mut SymbolCache<'src>,
+    symbol_cache: &mut SymbolCache,
     env: &Env,
 ) -> ParserResult<Option<Expression>> {
     let mut remaining = remaining.into_iter();
@@ -356,7 +356,7 @@ fn create_declaration_block(initializers: Vec<Expression>, body: Expression) -> 
 fn parse_variable_declarators<'src>(
     declarators: &[VarDecl<'src>],
     scope: &LexicalScope,
-    symbol_cache: &mut SymbolCache<'src>,
+    symbol_cache: &mut SymbolCache,
     env: &Env,
 ) -> ParserResult<ScopeBindings<'src>> {
     declarators.iter().fold(Ok(Vec::new()), |results, node| {
@@ -370,7 +370,7 @@ fn parse_variable_declarators<'src>(
 fn parse_variable_declarator<'src>(
     node: &VarDecl<'src>,
     scope: &LexicalScope,
-    symbol_cache: &mut SymbolCache<'src>,
+    symbol_cache: &mut SymbolCache,
     env: &Env,
 ) -> ParserResult<ScopeBindings<'src>> {
     let VarDecl { id, init } = node;
@@ -401,7 +401,7 @@ fn parse_variable_object_destructuring_pattern<'src>(
     target: &Expression,
     properties: &[ObjPatPart<'src>],
     scope: &LexicalScope,
-    symbol_cache: &mut SymbolCache<'src>,
+    symbol_cache: &mut SymbolCache,
     env: &Env,
 ) -> ParserResult<ScopeBindings<'src>> {
     properties
@@ -430,7 +430,7 @@ fn parse_variable_object_destructuring_pattern<'src>(
 fn parse_destructuring_pattern_property_field_name<'src>(
     node: &Prop<'src>,
     scope: &LexicalScope,
-    symbol_cache: &mut SymbolCache<'src>,
+    symbol_cache: &mut SymbolCache,
     env: &Env,
 ) -> ParserResult<Expression> {
     match &node.key {
@@ -438,7 +438,7 @@ fn parse_destructuring_pattern_property_field_name<'src>(
             Lit::String(key) => {
                 let field_name = parse_string(key)?;
                 Ok(Expression::new(Term::Value(ValueTerm::Symbol(
-                    symbol_cache.get(field_name),
+                    symbol_cache.get(String::from(field_name)),
                 ))))
             }
             _ => parse_literal(key, scope, symbol_cache, env),
@@ -447,7 +447,7 @@ fn parse_destructuring_pattern_property_field_name<'src>(
             Pat::Ident(node) => {
                 let field_name = parse_identifier(node)?;
                 Ok(Expression::new(Term::Value(ValueTerm::Symbol(
-                    symbol_cache.get(field_name),
+                    symbol_cache.get(String::from(field_name)),
                 ))))
             }
             Pat::Obj(node) => Err(err_unimplemented(node)),
@@ -491,7 +491,7 @@ fn parse_identifier<'src>(node: &Ident<'src>) -> ParserResult<&'src str> {
 fn parse_throw_statement<'src>(
     value: &Expr<'src>,
     scope: &LexicalScope,
-    symbol_cache: &mut SymbolCache<'src>,
+    symbol_cache: &mut SymbolCache,
     env: &Env,
 ) -> ParserResult<Expression> {
     match value {
@@ -524,7 +524,7 @@ fn parse_throw_statement<'src>(
 fn parse_if_branch<'src>(
     node: &Stmt<'src>,
     scope: &LexicalScope,
-    symbol_cache: &mut SymbolCache<'src>,
+    symbol_cache: &mut SymbolCache,
     env: &Env,
 ) -> ParserResult<Expression> {
     match node {
@@ -546,7 +546,7 @@ fn parse_branch<'src: 'temp, 'temp>(
     node: &Stmt<'src>,
     body: impl IntoIterator<Item = &'temp ProgramPart<'src>>,
     scope: &LexicalScope,
-    symbol_cache: &mut SymbolCache<'src>,
+    symbol_cache: &mut SymbolCache,
     env: &Env,
 ) -> ParserResult<Expression> {
     let expression = parse_block(body, scope, symbol_cache, env)?;
@@ -559,7 +559,7 @@ fn parse_branch<'src: 'temp, 'temp>(
 fn parse_expression<'src>(
     node: &Expr<'src>,
     scope: &LexicalScope,
-    symbol_cache: &mut SymbolCache<'src>,
+    symbol_cache: &mut SymbolCache,
     env: &Env,
 ) -> ParserResult<Expression> {
     match node {
@@ -582,7 +582,7 @@ fn parse_expression<'src>(
 fn parse_expressions<'src: 'temp, 'temp>(
     expressions: impl IntoIterator<Item = &'temp Expr<'src>> + ExactSizeIterator,
     scope: &LexicalScope,
-    symbol_cache: &mut SymbolCache<'src>,
+    symbol_cache: &mut SymbolCache,
     env: &Env,
 ) -> ParserResult<Vec<Expression>> {
     let num_expressions = expressions.len();
@@ -621,7 +621,7 @@ fn parse_variable_reference<'src>(
 fn parse_literal<'src>(
     node: &Lit<'src>,
     scope: &LexicalScope,
-    symbol_cache: &mut SymbolCache<'src>,
+    symbol_cache: &mut SymbolCache,
     env: &Env,
 ) -> ParserResult<Expression> {
     match node {
@@ -670,7 +670,7 @@ fn parse_string<'src>(node: &StringLit<'src>) -> ParserResult<&'src str> {
 fn parse_template_literal<'src>(
     node: &TemplateLit<'src>,
     scope: &LexicalScope,
-    symbol_cache: &mut SymbolCache<'src>,
+    symbol_cache: &mut SymbolCache,
     env: &Env,
 ) -> ParserResult<Expression> {
     let args = node
@@ -720,7 +720,7 @@ fn parse_template_element<'src>(node: &TemplateElement<'src>) -> ParserResult<&'
 fn parse_object_literal<'src>(
     node: &ObjExpr<'src>,
     scope: &LexicalScope,
-    symbol_cache: &mut SymbolCache<'src>,
+    symbol_cache: &mut SymbolCache,
     env: &Env,
 ) -> ParserResult<Expression> {
     let properties = node
@@ -735,7 +735,7 @@ fn parse_object_literal<'src>(
                                 Lit::String(key) if !prop.computed => {
                                     let field_name = parse_string(key)?;
                                     Ok(Expression::new(Term::Value(ValueTerm::Symbol(
-                                        symbol_cache.get(field_name),
+                                        symbol_cache.get(String::from(field_name)),
                                     ))))
                                 }
                                 _ => parse_literal(key, scope, symbol_cache, env),
@@ -744,7 +744,7 @@ fn parse_object_literal<'src>(
                                 Expr::Ident(key) if !prop.computed => {
                                     let field_name = parse_identifier(key)?;
                                     Ok(Expression::new(Term::Value(ValueTerm::Symbol(
-                                        symbol_cache.get(field_name),
+                                        symbol_cache.get(String::from(field_name)),
                                     ))))
                                 }
                                 _ => parse_expression(key, scope, symbol_cache, env),
@@ -753,7 +753,7 @@ fn parse_object_literal<'src>(
                                 Pat::Ident(key) if !prop.computed => {
                                     let field_name = parse_identifier(key)?;
                                     Ok(Expression::new(Term::Value(ValueTerm::Symbol(
-                                        symbol_cache.get(field_name),
+                                        symbol_cache.get(String::from(field_name)),
                                     ))))
                                 }
                                 _ => Err(err_unimplemented(node)),
@@ -808,7 +808,7 @@ fn parse_object_literal<'src>(
 fn parse_array_literal<'src>(
     node: &ArrayExpr<'src>,
     scope: &LexicalScope,
-    symbol_cache: &mut SymbolCache<'src>,
+    symbol_cache: &mut SymbolCache,
     env: &Env,
 ) -> ParserResult<Expression> {
     let values = node
@@ -834,7 +834,7 @@ fn parse_array_literal<'src>(
 fn parse_unary_expression<'src>(
     node: &UnaryExpr<'src>,
     scope: &LexicalScope,
-    symbol_cache: &mut SymbolCache<'src>,
+    symbol_cache: &mut SymbolCache,
     env: &Env,
 ) -> ParserResult<Expression> {
     match node.operator {
@@ -848,7 +848,7 @@ fn parse_unary_expression<'src>(
 fn parse_binary_expression<'src>(
     node: &BinaryExpr<'src>,
     scope: &LexicalScope,
-    symbol_cache: &mut SymbolCache<'src>,
+    symbol_cache: &mut SymbolCache,
     env: &Env,
 ) -> ParserResult<Expression> {
     match node.operator {
@@ -873,7 +873,7 @@ fn parse_binary_expression<'src>(
 fn parse_logical_expression<'src>(
     node: &LogicalExpr<'src>,
     scope: &LexicalScope,
-    symbol_cache: &mut SymbolCache<'src>,
+    symbol_cache: &mut SymbolCache,
     env: &Env,
 ) -> ParserResult<Expression> {
     match node.operator {
@@ -885,7 +885,7 @@ fn parse_logical_expression<'src>(
 fn parse_unary_minus_expression<'src>(
     node: &UnaryExpr<'src>,
     scope: &LexicalScope,
-    symbol_cache: &mut SymbolCache<'src>,
+    symbol_cache: &mut SymbolCache,
     env: &Env,
 ) -> ParserResult<Expression> {
     let operand = parse_expression(&node.argument, scope, symbol_cache, env)?;
@@ -904,7 +904,7 @@ fn parse_unary_minus_expression<'src>(
 fn parse_unary_plus_expression<'src>(
     node: &UnaryExpr<'src>,
     scope: &LexicalScope,
-    symbol_cache: &mut SymbolCache<'src>,
+    symbol_cache: &mut SymbolCache,
     env: &Env,
 ) -> ParserResult<Expression> {
     let operand = parse_expression(&node.argument, scope, symbol_cache, env)?;
@@ -921,7 +921,7 @@ fn parse_unary_plus_expression<'src>(
 fn parse_unary_not_expression<'src>(
     node: &UnaryExpr<'src>,
     scope: &LexicalScope,
-    symbol_cache: &mut SymbolCache<'src>,
+    symbol_cache: &mut SymbolCache,
     env: &Env,
 ) -> ParserResult<Expression> {
     let operand = parse_expression(&node.argument, scope, symbol_cache, env)?;
@@ -934,7 +934,7 @@ fn parse_unary_not_expression<'src>(
 fn parse_binary_add_expression<'src>(
     node: &BinaryExpr<'src>,
     scope: &LexicalScope,
-    symbol_cache: &mut SymbolCache<'src>,
+    symbol_cache: &mut SymbolCache,
     env: &Env,
 ) -> ParserResult<Expression> {
     let left = parse_expression(&node.left, scope, symbol_cache, env)?;
@@ -948,7 +948,7 @@ fn parse_binary_add_expression<'src>(
 fn parse_binary_subtract_expression<'src>(
     node: &BinaryExpr<'src>,
     scope: &LexicalScope,
-    symbol_cache: &mut SymbolCache<'src>,
+    symbol_cache: &mut SymbolCache,
     env: &Env,
 ) -> ParserResult<Expression> {
     let left = parse_expression(&node.left, scope, symbol_cache, env)?;
@@ -962,7 +962,7 @@ fn parse_binary_subtract_expression<'src>(
 fn parse_binary_multiply_expression<'src>(
     node: &BinaryExpr<'src>,
     scope: &LexicalScope,
-    symbol_cache: &mut SymbolCache<'src>,
+    symbol_cache: &mut SymbolCache,
     env: &Env,
 ) -> ParserResult<Expression> {
     let left = parse_expression(&node.left, scope, symbol_cache, env)?;
@@ -976,7 +976,7 @@ fn parse_binary_multiply_expression<'src>(
 fn parse_binary_divide_expression<'src>(
     node: &BinaryExpr<'src>,
     scope: &LexicalScope,
-    symbol_cache: &mut SymbolCache<'src>,
+    symbol_cache: &mut SymbolCache,
     env: &Env,
 ) -> ParserResult<Expression> {
     let left = parse_expression(&node.left, scope, symbol_cache, env)?;
@@ -990,7 +990,7 @@ fn parse_binary_divide_expression<'src>(
 fn parse_binary_remainder_expression<'src>(
     node: &BinaryExpr<'src>,
     scope: &LexicalScope,
-    symbol_cache: &mut SymbolCache<'src>,
+    symbol_cache: &mut SymbolCache,
     env: &Env,
 ) -> ParserResult<Expression> {
     let left = parse_expression(&node.left, scope, symbol_cache, env)?;
@@ -1004,7 +1004,7 @@ fn parse_binary_remainder_expression<'src>(
 fn parse_binary_pow_expression<'src>(
     node: &BinaryExpr<'src>,
     scope: &LexicalScope,
-    symbol_cache: &mut SymbolCache<'src>,
+    symbol_cache: &mut SymbolCache,
     env: &Env,
 ) -> ParserResult<Expression> {
     let left = parse_expression(&node.left, scope, symbol_cache, env)?;
@@ -1018,7 +1018,7 @@ fn parse_binary_pow_expression<'src>(
 fn parse_binary_lt_expression<'src>(
     node: &BinaryExpr<'src>,
     scope: &LexicalScope,
-    symbol_cache: &mut SymbolCache<'src>,
+    symbol_cache: &mut SymbolCache,
     env: &Env,
 ) -> ParserResult<Expression> {
     let left = parse_expression(&node.left, scope, symbol_cache, env)?;
@@ -1032,7 +1032,7 @@ fn parse_binary_lt_expression<'src>(
 fn parse_binary_gt_expression<'src>(
     node: &BinaryExpr<'src>,
     scope: &LexicalScope,
-    symbol_cache: &mut SymbolCache<'src>,
+    symbol_cache: &mut SymbolCache,
     env: &Env,
 ) -> ParserResult<Expression> {
     let left = parse_expression(&node.left, scope, symbol_cache, env)?;
@@ -1046,7 +1046,7 @@ fn parse_binary_gt_expression<'src>(
 fn parse_binary_lte_expression<'src>(
     node: &BinaryExpr<'src>,
     scope: &LexicalScope,
-    symbol_cache: &mut SymbolCache<'src>,
+    symbol_cache: &mut SymbolCache,
     env: &Env,
 ) -> ParserResult<Expression> {
     let left = parse_expression(&node.left, scope, symbol_cache, env)?;
@@ -1060,7 +1060,7 @@ fn parse_binary_lte_expression<'src>(
 fn parse_binary_gte_expression<'src>(
     node: &BinaryExpr<'src>,
     scope: &LexicalScope,
-    symbol_cache: &mut SymbolCache<'src>,
+    symbol_cache: &mut SymbolCache,
     env: &Env,
 ) -> ParserResult<Expression> {
     let left = parse_expression(&node.left, scope, symbol_cache, env)?;
@@ -1074,7 +1074,7 @@ fn parse_binary_gte_expression<'src>(
 fn parse_binary_equal_expression<'src>(
     node: &BinaryExpr<'src>,
     scope: &LexicalScope,
-    symbol_cache: &mut SymbolCache<'src>,
+    symbol_cache: &mut SymbolCache,
     env: &Env,
 ) -> ParserResult<Expression> {
     let left = parse_expression(&node.left, scope, symbol_cache, env)?;
@@ -1088,7 +1088,7 @@ fn parse_binary_equal_expression<'src>(
 fn parse_binary_not_equal_expression<'src>(
     node: &BinaryExpr<'src>,
     scope: &LexicalScope,
-    symbol_cache: &mut SymbolCache<'src>,
+    symbol_cache: &mut SymbolCache,
     env: &Env,
 ) -> ParserResult<Expression> {
     let expression = parse_binary_equal_expression(node, scope, symbol_cache, env)?;
@@ -1101,7 +1101,7 @@ fn parse_binary_not_equal_expression<'src>(
 fn parse_logical_and_expression<'src>(
     node: &LogicalExpr<'src>,
     scope: &LexicalScope,
-    symbol_cache: &mut SymbolCache<'src>,
+    symbol_cache: &mut SymbolCache,
     env: &Env,
 ) -> ParserResult<Expression> {
     let left = parse_expression(&node.left, scope, symbol_cache, env)?;
@@ -1115,7 +1115,7 @@ fn parse_logical_and_expression<'src>(
 fn parse_logical_or_expression<'src>(
     node: &LogicalExpr<'src>,
     scope: &LexicalScope,
-    symbol_cache: &mut SymbolCache<'src>,
+    symbol_cache: &mut SymbolCache,
     env: &Env,
 ) -> ParserResult<Expression> {
     let left = parse_expression(&node.left, scope, symbol_cache, env)?;
@@ -1129,7 +1129,7 @@ fn parse_logical_or_expression<'src>(
 fn parse_conditional_expression<'src>(
     node: &ConditionalExpr<'src>,
     scope: &LexicalScope,
-    symbol_cache: &mut SymbolCache<'src>,
+    symbol_cache: &mut SymbolCache,
     env: &Env,
 ) -> ParserResult<Expression> {
     let condition = parse_expression(&node.test, scope, symbol_cache, env)?;
@@ -1152,7 +1152,7 @@ fn create_if_expression(
 fn parse_arrow_function_expression<'src>(
     node: &ArrowFuncExpr<'src>,
     scope: &LexicalScope,
-    symbol_cache: &mut SymbolCache<'src>,
+    symbol_cache: &mut SymbolCache,
     env: &Env,
 ) -> ParserResult<Expression> {
     if node.generator || node.is_async {
@@ -1256,7 +1256,7 @@ fn parse_arrow_function_expression<'src>(
 fn parse_member_expression<'src>(
     node: &MemberExpr<'src>,
     scope: &LexicalScope,
-    symbol_cache: &mut SymbolCache<'src>,
+    symbol_cache: &mut SymbolCache,
     env: &Env,
 ) -> ParserResult<Expression> {
     let target = parse_expression(&node.object, scope, symbol_cache, env)?;
@@ -1286,9 +1286,9 @@ fn parse_static_member_field_name<'src>(
 fn get_static_field<'src>(
     target: Expression,
     field: &'src str,
-    symbol_cache: &mut SymbolCache<'src>,
+    symbol_cache: &mut SymbolCache,
 ) -> Expression {
-    let field = Expression::new(Term::Value(ValueTerm::Symbol(symbol_cache.get(field))));
+    let field = Expression::new(Term::Value(ValueTerm::Symbol(symbol_cache.get(String::from(field)))));
     get_dynamic_field(target, field)
 }
 
@@ -1302,7 +1302,7 @@ fn get_dynamic_field<'src>(target: Expression, field: Expression) -> Expression 
 fn parse_call_expression<'src>(
     node: &CallExpr<'src>,
     scope: &LexicalScope,
-    symbol_cache: &mut SymbolCache<'src>,
+    symbol_cache: &mut SymbolCache,
     env: &Env,
 ) -> ParserResult<Expression> {
     let static_dispatch = match &*node.callee {
@@ -1342,7 +1342,7 @@ fn parse_static_method_call_expression<'src: 'temp, 'temp>(
     method_name: &'src str,
     args: impl IntoIterator<Item = &'temp Expr<'src>> + ExactSizeIterator,
     scope: &LexicalScope,
-    symbol_cache: &mut SymbolCache<'src>,
+    symbol_cache: &mut SymbolCache,
     env: &Env,
 ) -> ParserResult<Expression> {
     let target = parse_expression(target, scope, symbol_cache, env)?;
@@ -1385,7 +1385,7 @@ fn parse_function_application_expression<'src: 'temp, 'temp>(
     target: Expression,
     args: impl IntoIterator<Item = &'temp Expr<'src>> + ExactSizeIterator,
     scope: &LexicalScope,
-    symbol_cache: &mut SymbolCache<'src>,
+    symbol_cache: &mut SymbolCache,
     env: &Env,
 ) -> ParserResult<Expression> {
     let args = parse_expressions(args, scope, symbol_cache, env)?;
@@ -1397,7 +1397,7 @@ fn parse_function_application_expression<'src: 'temp, 'temp>(
 fn parse_constructor_expression<'src>(
     node: &NewExpr<'src>,
     scope: &LexicalScope,
-    symbol_cache: &mut SymbolCache<'src>,
+    symbol_cache: &mut SymbolCache,
     env: &Env,
 ) -> ParserResult<Expression> {
     let target = parse_expression(&node.callee, scope, symbol_cache, env);
@@ -1745,9 +1745,9 @@ mod tests {
             parse("({ foo: 3, bar: 4, baz: 5 })", &mut symbol_cache, &env),
             Ok(Expression::new(Term::Struct(StructTerm::new(
                 Some(StructPrototype::new(vec![
-                    Term::Value(ValueTerm::Symbol(symbol_cache.get("foo"))).hash(),
-                    Term::Value(ValueTerm::Symbol(symbol_cache.get("bar"))).hash(),
-                    Term::Value(ValueTerm::Symbol(symbol_cache.get("baz"))).hash(),
+                    Term::Value(ValueTerm::Symbol(symbol_cache.get(String::from("foo")))).hash(),
+                    Term::Value(ValueTerm::Symbol(symbol_cache.get(String::from("bar")))).hash(),
+                    Term::Value(ValueTerm::Symbol(symbol_cache.get(String::from("baz")))).hash(),
                 ])),
                 vec![
                     Expression::new(Term::Value(ValueTerm::Float(3.0))),
@@ -1760,9 +1760,9 @@ mod tests {
             parse("({ foo: 3, \"bar\": 4, baz: 5 })", &mut symbol_cache, &env,),
             Ok(Expression::new(Term::Struct(StructTerm::new(
                 Some(StructPrototype::new(vec![
-                    Term::Value(ValueTerm::Symbol(symbol_cache.get("foo"))).hash(),
-                    Term::Value(ValueTerm::Symbol(symbol_cache.get("bar"))).hash(),
-                    Term::Value(ValueTerm::Symbol(symbol_cache.get("baz"))).hash(),
+                    Term::Value(ValueTerm::Symbol(symbol_cache.get(String::from("foo")))).hash(),
+                    Term::Value(ValueTerm::Symbol(symbol_cache.get(String::from("bar")))).hash(),
+                    Term::Value(ValueTerm::Symbol(symbol_cache.get(String::from("baz")))).hash(),
                 ])),
                 vec![
                     Expression::new(Term::Value(ValueTerm::Float(3.0))),
@@ -1779,9 +1779,9 @@ mod tests {
             ),
             Ok(Expression::new(Term::Struct(StructTerm::new(
                 Some(StructPrototype::new(vec![
-                    Term::Value(ValueTerm::Symbol(symbol_cache.get("foo"))).hash(),
+                    Term::Value(ValueTerm::Symbol(symbol_cache.get(String::from("foo")))).hash(),
                     Term::Value(ValueTerm::String(StringValue::from("bar"))).hash(),
-                    Term::Value(ValueTerm::Symbol(symbol_cache.get("baz"))).hash(),
+                    Term::Value(ValueTerm::Symbol(symbol_cache.get(String::from("baz")))).hash(),
                 ])),
                 vec![
                     Expression::new(Term::Value(ValueTerm::Float(3.0))),
@@ -1837,7 +1837,7 @@ mod tests {
             Ok(Expression::new(Term::Struct(StructTerm::new(
                 Some(StructPrototype::new(vec![
                     Term::Value(ValueTerm::Float(3.0)).hash(),
-                    Term::Value(ValueTerm::Symbol(symbol_cache.get("4"))).hash(),
+                    Term::Value(ValueTerm::Symbol(symbol_cache.get(String::from("4")))).hash(),
                     Term::Value(ValueTerm::Float(5.0)).hash(),
                 ])),
                 vec![
@@ -1923,7 +1923,7 @@ mod tests {
                                     ]),
                                 ))),
                                 Expression::new(Term::Value(ValueTerm::Symbol(
-                                    symbol_cache.get("map")
+                                    symbol_cache.get(String::from("map"))
                                 ))),
                             ],
                         ))),
@@ -2018,11 +2018,11 @@ mod tests {
                             vec![
                                 Expression::new(Term::Struct(StructTerm::new(
                                     Some(StructPrototype::new(vec![
-                                        Term::Value(ValueTerm::Symbol(symbol_cache.get("foo")))
+                                        Term::Value(ValueTerm::Symbol(symbol_cache.get(String::from("foo"))))
                                             .hash(),
-                                        Term::Value(ValueTerm::Symbol(symbol_cache.get("bar")))
+                                        Term::Value(ValueTerm::Symbol(symbol_cache.get(String::from("bar"))))
                                             .hash(),
-                                        Term::Value(ValueTerm::Symbol(symbol_cache.get("baz")))
+                                        Term::Value(ValueTerm::Symbol(symbol_cache.get(String::from("baz"))))
                                             .hash(),
                                     ])),
                                     vec![
@@ -2032,7 +2032,7 @@ mod tests {
                                     ],
                                 ))),
                                 Expression::new(Term::Value(ValueTerm::Symbol(
-                                    symbol_cache.get("bar")
+                                    symbol_cache.get(String::from("bar"))
                                 ))),
                             ],
                         )))],
@@ -2043,9 +2043,9 @@ mod tests {
                     vec![
                         Expression::new(Term::Struct(StructTerm::new(
                             Some(StructPrototype::new(vec![
-                                Term::Value(ValueTerm::Symbol(symbol_cache.get("foo"))).hash(),
-                                Term::Value(ValueTerm::Symbol(symbol_cache.get("bar"))).hash(),
-                                Term::Value(ValueTerm::Symbol(symbol_cache.get("baz"))).hash(),
+                                Term::Value(ValueTerm::Symbol(symbol_cache.get(String::from("foo")))).hash(),
+                                Term::Value(ValueTerm::Symbol(symbol_cache.get(String::from("bar")))).hash(),
+                                Term::Value(ValueTerm::Symbol(symbol_cache.get(String::from("baz")))).hash(),
                             ])),
                             vec![
                                 Expression::new(Term::Value(ValueTerm::Float(3.0))),
@@ -2053,7 +2053,7 @@ mod tests {
                                 Expression::new(Term::Value(ValueTerm::Float(5.0))),
                             ],
                         ))),
-                        Expression::new(Term::Value(ValueTerm::Symbol(symbol_cache.get("foo")))),
+                        Expression::new(Term::Value(ValueTerm::Symbol(symbol_cache.get(String::from("foo"))))),
                     ],
                 )))],
             )))),
@@ -2079,11 +2079,11 @@ mod tests {
                             vec![
                                 Expression::new(Term::Struct(StructTerm::new(
                                     Some(StructPrototype::new(vec![
-                                        Term::Value(ValueTerm::Symbol(symbol_cache.get("foo")))
+                                        Term::Value(ValueTerm::Symbol(symbol_cache.get(String::from("foo"))))
                                             .hash(),
-                                        Term::Value(ValueTerm::Symbol(symbol_cache.get("bar")))
+                                        Term::Value(ValueTerm::Symbol(symbol_cache.get(String::from("bar"))))
                                             .hash(),
-                                        Term::Value(ValueTerm::Symbol(symbol_cache.get("baz")))
+                                        Term::Value(ValueTerm::Symbol(symbol_cache.get(String::from("baz"))))
                                             .hash(),
                                     ])),
                                     vec![
@@ -2093,7 +2093,7 @@ mod tests {
                                     ],
                                 ))),
                                 Expression::new(Term::Value(ValueTerm::Symbol(
-                                    symbol_cache.get("bar")
+                                    symbol_cache.get(String::from("bar"))
                                 ))),
                             ],
                         )))],
@@ -2104,9 +2104,9 @@ mod tests {
                     vec![
                         Expression::new(Term::Struct(StructTerm::new(
                             Some(StructPrototype::new(vec![
-                                Term::Value(ValueTerm::Symbol(symbol_cache.get("foo"))).hash(),
-                                Term::Value(ValueTerm::Symbol(symbol_cache.get("bar"))).hash(),
-                                Term::Value(ValueTerm::Symbol(symbol_cache.get("baz"))).hash(),
+                                Term::Value(ValueTerm::Symbol(symbol_cache.get(String::from("foo")))).hash(),
+                                Term::Value(ValueTerm::Symbol(symbol_cache.get(String::from("bar")))).hash(),
+                                Term::Value(ValueTerm::Symbol(symbol_cache.get(String::from("baz")))).hash(),
                             ])),
                             vec![
                                 Expression::new(Term::Value(ValueTerm::Float(3.0))),
@@ -2114,7 +2114,7 @@ mod tests {
                                 Expression::new(Term::Value(ValueTerm::Float(5.0))),
                             ],
                         ))),
-                        Expression::new(Term::Value(ValueTerm::Symbol(symbol_cache.get("foo")))),
+                        Expression::new(Term::Value(ValueTerm::Symbol(symbol_cache.get(String::from("foo"))))),
                     ],
                 )))],
             )))),
@@ -2140,11 +2140,11 @@ mod tests {
                             vec![
                                 Expression::new(Term::Struct(StructTerm::new(
                                     Some(StructPrototype::new(vec![
-                                        Term::Value(ValueTerm::Symbol(symbol_cache.get("foo")))
+                                        Term::Value(ValueTerm::Symbol(symbol_cache.get(String::from("foo"))))
                                             .hash(),
-                                        Term::Value(ValueTerm::Symbol(symbol_cache.get("bar")))
+                                        Term::Value(ValueTerm::Symbol(symbol_cache.get(String::from("bar"))))
                                             .hash(),
-                                        Term::Value(ValueTerm::Symbol(symbol_cache.get("baz")))
+                                        Term::Value(ValueTerm::Symbol(symbol_cache.get(String::from("baz"))))
                                             .hash(),
                                     ])),
                                     vec![
@@ -2154,7 +2154,7 @@ mod tests {
                                     ],
                                 ))),
                                 Expression::new(Term::Value(ValueTerm::Symbol(
-                                    symbol_cache.get("bar")
+                                    symbol_cache.get(String::from("bar"))
                                 ))),
                             ],
                         )))],
@@ -2165,9 +2165,9 @@ mod tests {
                     vec![
                         Expression::new(Term::Struct(StructTerm::new(
                             Some(StructPrototype::new(vec![
-                                Term::Value(ValueTerm::Symbol(symbol_cache.get("foo"))).hash(),
-                                Term::Value(ValueTerm::Symbol(symbol_cache.get("bar"))).hash(),
-                                Term::Value(ValueTerm::Symbol(symbol_cache.get("baz"))).hash(),
+                                Term::Value(ValueTerm::Symbol(symbol_cache.get(String::from("foo")))).hash(),
+                                Term::Value(ValueTerm::Symbol(symbol_cache.get(String::from("bar")))).hash(),
+                                Term::Value(ValueTerm::Symbol(symbol_cache.get(String::from("baz")))).hash(),
                             ])),
                             vec![
                                 Expression::new(Term::Value(ValueTerm::Float(3.0))),
@@ -2175,7 +2175,7 @@ mod tests {
                                 Expression::new(Term::Value(ValueTerm::Float(5.0))),
                             ],
                         ))),
-                        Expression::new(Term::Value(ValueTerm::Symbol(symbol_cache.get("foo")))),
+                        Expression::new(Term::Value(ValueTerm::Symbol(symbol_cache.get(String::from("foo"))))),
                     ],
                 )))],
             ))))
@@ -2829,7 +2829,7 @@ mod tests {
                                 StaticVariableTerm::new(0)
                             ))),
                             Expression::new(Term::Value(ValueTerm::Symbol(
-                                symbol_cache.get("foo")
+                                symbol_cache.get(String::from("foo"))
                             ))),
                         ],
                     ))),],
@@ -2863,7 +2863,7 @@ mod tests {
                                     StaticVariableTerm::new(0)
                                 ))),
                                 Expression::new(Term::Value(ValueTerm::Symbol(
-                                    symbol_cache.get("foo")
+                                    symbol_cache.get(String::from("foo"))
                                 ))),
                             ],
                         ))),
@@ -2874,7 +2874,7 @@ mod tests {
                                     StaticVariableTerm::new(0)
                                 ))),
                                 Expression::new(Term::Value(ValueTerm::Symbol(
-                                    symbol_cache.get("bar")
+                                    symbol_cache.get(String::from("bar"))
                                 ))),
                             ],
                         ))),
@@ -2933,7 +2933,7 @@ mod tests {
                                     StaticVariableTerm::new(2)
                                 ))),
                                 Expression::new(Term::Value(ValueTerm::Symbol(
-                                    symbol_cache.get("foo")
+                                    symbol_cache.get(String::from("foo"))
                                 ))),
                             ],
                         ))),
@@ -2944,7 +2944,7 @@ mod tests {
                                     StaticVariableTerm::new(2)
                                 ))),
                                 Expression::new(Term::Value(ValueTerm::Symbol(
-                                    symbol_cache.get("bar")
+                                    symbol_cache.get(String::from("bar"))
                                 ))),
                             ],
                         ))),
@@ -3069,9 +3069,9 @@ mod tests {
             EvaluationResult::new(
                 Ok(Expression::new(Term::StructConstructor(
                     StructPrototype::new(vec![
-                        Term::Value(ValueTerm::Symbol(symbol_cache.get("foo"))).hash(),
-                        Term::Value(ValueTerm::Symbol(symbol_cache.get("bar"))).hash(),
-                        Term::Value(ValueTerm::Symbol(symbol_cache.get("baz"))).hash(),
+                        Term::Value(ValueTerm::Symbol(symbol_cache.get(String::from("foo")))).hash(),
+                        Term::Value(ValueTerm::Symbol(symbol_cache.get(String::from("bar")))).hash(),
+                        Term::Value(ValueTerm::Symbol(symbol_cache.get(String::from("baz")))).hash(),
                     ])
                 ))),
                 DependencyList::empty(),
@@ -3097,9 +3097,9 @@ mod tests {
             EvaluationResult::new(
                 Ok(Expression::new(Term::Struct(StructTerm::new(
                     Some(StructPrototype::new(vec![
-                        Term::Value(ValueTerm::Symbol(symbol_cache.get("foo"))).hash(),
-                        Term::Value(ValueTerm::Symbol(symbol_cache.get("bar"))).hash(),
-                        Term::Value(ValueTerm::Symbol(symbol_cache.get("baz"))).hash(),
+                        Term::Value(ValueTerm::Symbol(symbol_cache.get(String::from("foo")))).hash(),
+                        Term::Value(ValueTerm::Symbol(symbol_cache.get(String::from("bar")))).hash(),
+                        Term::Value(ValueTerm::Symbol(symbol_cache.get(String::from("baz")))).hash(),
                     ])),
                     vec![
                         Expression::new(Term::Value(ValueTerm::Float(3.0))),
@@ -3130,9 +3130,9 @@ mod tests {
             EvaluationResult::new(
                 Ok(Expression::new(Term::Struct(StructTerm::new(
                     Some(StructPrototype::new(vec![
-                        Term::Value(ValueTerm::Symbol(symbol_cache.get("foo"))).hash(),
-                        Term::Value(ValueTerm::Symbol(symbol_cache.get("bar"))).hash(),
-                        Term::Value(ValueTerm::Symbol(symbol_cache.get("baz"))).hash(),
+                        Term::Value(ValueTerm::Symbol(symbol_cache.get(String::from("foo")))).hash(),
+                        Term::Value(ValueTerm::Symbol(symbol_cache.get(String::from("bar")))).hash(),
+                        Term::Value(ValueTerm::Symbol(symbol_cache.get(String::from("baz")))).hash(),
                     ])),
                     vec![
                         Expression::new(Term::Value(ValueTerm::Float(3.0))),

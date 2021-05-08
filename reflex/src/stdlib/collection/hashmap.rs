@@ -1,12 +1,12 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use std::{collections::HashMap, fmt, iter::once, rc::Rc};
+use std::{collections::HashMap, fmt, iter::once};
 
 use crate::{
     cache::EvaluationCache,
     core::{
-        capture_depth_multiple, dynamic_dependencies_multiple, optimize_multiple,
+        capture_depth_multiple, dynamic_dependencies_multiple, optimize_multiple, signals_multiple,
         substitute_multiple, ApplicationTerm, DependencyList, Expression, Rewritable, Signal,
         SignalTerm, StackOffset, StructTerm, Substitutions, Term,
     },
@@ -18,8 +18,8 @@ use super::CollectionTerm;
 
 #[derive(PartialEq, Clone, Debug)]
 pub struct HashMapTerm {
-    lookup: Rc<HashMap<HashId, usize>>,
-    keys: Rc<Vec<Expression>>,
+    lookup: HashMap<HashId, usize>,
+    keys: Vec<Expression>,
     values: Vec<Expression>,
 }
 impl Hashable for HashMapTerm {
@@ -36,8 +36,8 @@ impl HashMapTerm {
     pub fn new(items: impl IntoIterator<Item = (Expression, Expression)>) -> Self {
         let (keys, values): (Vec<_>, Vec<_>) = items.into_iter().unzip();
         Self {
-            lookup: Rc::new(build_lookup_table(&keys)),
-            keys: Rc::new(keys),
+            lookup: build_lookup_table(&keys),
+            keys: keys,
             values,
         }
     }
@@ -93,13 +93,13 @@ impl HashMapTerm {
                 CollectionTerm::HashMap({
                     match updated_keys {
                         Some(keys) => Self {
-                            lookup: Rc::new(build_lookup_table(&keys)),
-                            keys: Rc::new(keys),
+                            lookup: build_lookup_table(&keys),
+                            keys,
                             values,
                         },
                         None => Self {
-                            lookup: Rc::clone(&self.lookup),
-                            keys: Rc::clone(&self.keys),
+                            lookup: self.lookup.clone(),
+                            keys: self.keys.clone(),
                             values,
                         },
                     }
@@ -173,14 +173,14 @@ impl HashMapTerm {
             None => match values {
                 None => None,
                 Some(values) => Some(Self {
-                    lookup: Rc::clone(&self.lookup),
-                    keys: Rc::clone(&self.keys),
+                    lookup: self.lookup.clone(),
+                    keys: self.keys.clone(),
                     values,
                 }),
             },
             Some(keys) => Some(Self {
-                lookup: Rc::new(build_lookup_table(&keys)),
-                keys: Rc::new(keys),
+                lookup: build_lookup_table(&keys),
+                keys: keys,
                 values: values.unwrap_or_else(|| self.values.clone()),
             }),
         }
@@ -188,14 +188,13 @@ impl HashMapTerm {
 }
 impl Rewritable for HashMapTerm {
     fn capture_depth(&self) -> StackOffset {
-        let keys = capture_depth_multiple(&self.keys);
-        let values = capture_depth_multiple(&self.values);
-        keys.max(values)
+        capture_depth_multiple(&self.keys).max(capture_depth_multiple(&self.values))
     }
     fn dynamic_dependencies(&self) -> DependencyList {
-        let keys = dynamic_dependencies_multiple(&self.keys);
-        let values = dynamic_dependencies_multiple(&self.values);
-        keys.extend(values)
+        dynamic_dependencies_multiple(&self.keys)
+    }
+    fn signals(&self) -> Vec<Signal> {
+        signals_multiple(&self.keys)
     }
     fn substitute(
         &self,

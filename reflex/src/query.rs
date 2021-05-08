@@ -420,7 +420,7 @@ mod tests {
         let mut cache = EvaluationCache::new();
         let state = DynamicState::new();
         let root = Expression::new(Term::Enum(EnumTerm::new(2, vec![])));
-        let error = Expression::new(Term::Signal(SignalTerm::Single(Signal::new(
+        let error = Expression::new(Term::Signal(SignalTerm::new(Signal::new(
             SignalType::Error,
             vec![ValueTerm::String(StringValue::from("foo"))],
         ))));
@@ -453,7 +453,7 @@ mod tests {
             2,
             vec![Expression::new(Term::Value(ValueTerm::Int(3)))],
         )));
-        let error = Expression::new(Term::Signal(SignalTerm::Single(Signal::new(
+        let error = Expression::new(Term::Signal(SignalTerm::new(Signal::new(
             SignalType::Error,
             vec![ValueTerm::String(StringValue::from("foo"))],
         ))));
@@ -490,7 +490,7 @@ mod tests {
             ],
         )));
         let transform = Expression::new(Term::Builtin(BuiltinTerm::Add));
-        let error = Expression::new(Term::Signal(SignalTerm::Single(Signal::new(
+        let error = Expression::new(Term::Signal(SignalTerm::new(Signal::new(
             SignalType::Error,
             vec![ValueTerm::String(StringValue::from("foo"))],
         ))));

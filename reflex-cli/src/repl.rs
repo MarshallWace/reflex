@@ -34,7 +34,7 @@ pub fn run() -> io::Result<()> {
 
         match parse(&input) {
             Ok(expression) => {
-                let result = expression.evaluate(&state, &mut cache).unwrap();
+                let (result, _) = expression.evaluate(&state, &mut cache).unwrap();
                 match result {
                     Ok(result) => writeln!(stdout, "{}", result)?,
                     Err(signals) => {

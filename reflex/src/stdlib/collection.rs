@@ -5,7 +5,7 @@ use std::fmt;
 
 use crate::{
     cache::EvaluationCache,
-    core::{DependencyList, Expression, Rewritable, StackOffset, Substitutions},
+    core::{DependencyList, Expression, Rewritable, Signal, StackOffset, Substitutions},
     hash::{prefix_hash, HashId, Hashable},
 };
 
@@ -44,6 +44,13 @@ impl Rewritable for CollectionTerm {
             Self::HashMap(term) => term.dynamic_dependencies(),
             Self::HashSet(term) => term.dynamic_dependencies(),
             Self::Vector(term) => term.dynamic_dependencies(),
+        }
+    }
+    fn signals(&self) -> Vec<Signal> {
+        match self {
+            Self::HashMap(term) => term.signals(),
+            Self::HashSet(term) => term.signals(),
+            Self::Vector(term) => term.signals(),
         }
     }
     fn substitute(
