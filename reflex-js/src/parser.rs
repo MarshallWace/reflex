@@ -193,10 +193,10 @@ fn parse_module_import<'src>(
     env: &Env,
 ) -> ParserResult<Vec<(&'src str, Expression)>> {
     let module_path = match &node.source {
-        Lit::String(node) => parse_string(node),
+        Lit::String(node) => Ok(parse_string(node)),
         _ => Err(err_unimplemented(node)),
     }?;
-    let module = match env.import(module_path) {
+    let module = match env.import(&module_path) {
         Some(module) => Ok(module),
         None => Err(err(&format!("Invalid import: '{}'", module_path), node)),
     }?;
@@ -403,7 +403,7 @@ fn parse_destructuring_pattern_property_field_name<'src>(
     match &node.key {
         PropKey::Lit(key) => match key {
             Lit::String(key) => {
-                let field_name = parse_string(key)?;
+                let field_name = parse_string(key);
                 Ok(Expression::new(Term::Value(ValueTerm::String(
                     StringValue::from(field_name),
                 ))))
@@ -605,21 +605,38 @@ fn parse_number_literal(node: &Cow<str>) -> ParserResult<Expression> {
 }
 
 fn parse_string_literal(node: &StringLit) -> ParserResult<Expression> {
-    let value = parse_string(node)?;
+    let value = parse_string(node);
     Ok(Expression::new(Term::Value(ValueTerm::String(
         StringValue::from(value),
     ))))
 }
 
-fn parse_string<'src>(node: &StringLit<'src>) -> ParserResult<&'src str> {
+fn parse_string(node: &StringLit) -> String {
     let value = match node {
         StringLit::Double(value) => value,
         StringLit::Single(value) => value,
     };
     match value {
-        Cow::Borrowed(value) => Ok(value),
-        Cow::Owned(_) => Err(err("Invalid string", node)),
+        Cow::Borrowed(value) => parse_escaped_string(value),
+        Cow::Owned(value) => parse_escaped_string(value),
     }
+}
+
+fn parse_escaped_string(value: &str) -> String {
+    value
+        .chars()
+        .fold(
+            (String::with_capacity(value.len()), false),
+            |(mut result, is_escape), current| {
+                if current == '\\' && !is_escape {
+                    (result, true)
+                } else {
+                    result.push(current);
+                    (result, false)
+                }
+            },
+        )
+        .0
 }
 
 fn parse_template_literal<'src>(
@@ -686,7 +703,7 @@ fn parse_object_literal<'src>(
                         let key = match &prop.key {
                             PropKey::Lit(key) => match key {
                                 Lit::String(key) if !prop.computed => {
-                                    let field_name = parse_string(key)?;
+                                    let field_name = parse_string(key);
                                     Ok(Expression::new(Term::Value(ValueTerm::String(
                                         StringValue::from(field_name),
                                     ))))
@@ -1187,7 +1204,7 @@ fn parse_member_expression<'src>(
     let target = parse_expression(&node.object, scope, env)?;
     let field_name = parse_static_member_field_name(node)?;
     match field_name {
-        Some(field_name) => Ok(get_static_field(target, field_name)),
+        Some(field_name) => Ok(get_static_field(target, &field_name)),
         None => {
             let field = parse_expression(&node.property, scope, env)?;
             Ok(get_dynamic_field(target, field))
@@ -1195,13 +1212,11 @@ fn parse_member_expression<'src>(
     }
 }
 
-fn parse_static_member_field_name<'src>(
-    node: &MemberExpr<'src>,
-) -> ParserResult<Option<&'src str>> {
+fn parse_static_member_field_name(node: &MemberExpr) -> ParserResult<Option<String>> {
     Ok(match &*node.property {
-        Expr::Ident(name) => Some(parse_identifier(&name)?),
+        Expr::Ident(name) => Some(String::from(parse_identifier(&name)?)),
         Expr::Lit(name) => match name {
-            Lit::String(name) => Some(parse_string(&name)?),
+            Lit::String(name) => Some(parse_string(&name)),
             _ => None,
         },
         _ => None,
@@ -1231,7 +1246,7 @@ fn parse_call_expression<'src>(
             match method_name {
                 Some(method_name) => Some(parse_static_method_call_expression(
                     &callee.object,
-                    method_name,
+                    &method_name,
                     node.arguments.iter(),
                     scope,
                     env,
@@ -1388,6 +1403,24 @@ mod tests {
             parse("\"foo\"", &env),
             Ok(Expression::new(Term::Value(ValueTerm::String(
                 String::from("foo")
+            )))),
+        );
+        assert_eq!(
+            parse("'\"'", &env),
+            Ok(Expression::new(Term::Value(ValueTerm::String(
+                String::from("\"")
+            )))),
+        );
+        assert_eq!(
+            parse("'\\\"'", &env),
+            Ok(Expression::new(Term::Value(ValueTerm::String(
+                String::from("\"")
+            )))),
+        );
+        assert_eq!(
+            parse("\"\\\"\"", &env),
+            Ok(Expression::new(Term::Value(ValueTerm::String(
+                String::from("\"")
             )))),
         );
     }
