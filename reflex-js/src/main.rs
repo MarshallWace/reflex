@@ -8,7 +8,7 @@ use reflex::{
     core::{DynamicState, Signal},
     stdlib::{signal::SignalType, value::ValueTerm},
 };
-use reflex_js::{builtin_globals, builtin_imports, parse, Env, SymbolCache};
+use reflex_js::{builtin_globals, builtin_imports, parse, Env};
 
 fn main() -> Result<(), Box<dyn Error>> {
     let args = env::args().collect::<Vec<String>>();
@@ -20,11 +20,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
     let filename = &args[1];
     let src = fs::read_to_string(filename).expect("Failed to read input file");
-    let mut symbol_cache = SymbolCache::new();
     let env = Env::new()
-        .with_globals(builtin_globals(&mut symbol_cache))
-        .with_imports(builtin_imports(&mut symbol_cache));
-    let expression = match parse(&src, &mut symbol_cache, &env) {
+        .with_globals(builtin_globals())
+        .with_imports(builtin_imports());
+    let expression = match parse(&src, &env) {
         Err(error) => panic!(error),
         Ok(expression) => expression,
     };

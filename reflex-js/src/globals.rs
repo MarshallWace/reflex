@@ -19,12 +19,10 @@ use reflex::{
     },
 };
 
-use crate::SymbolCache;
-
-pub fn builtin_globals(symbol_cache: &mut SymbolCache) -> Vec<(&'static str, Expression)> {
+pub fn builtin_globals() -> Vec<(&'static str, Expression)> {
     vec![
         ("Boolean", builtin_global_boolean()),
-        ("Math", builtin_global_math(symbol_cache)),
+        ("Math", builtin_global_math()),
         ("Map", builtin_global_map_constructor()),
         ("Set", builtin_global_set_constructor()),
         ("fetch", builtin_fetch()),
@@ -33,16 +31,14 @@ pub fn builtin_globals(symbol_cache: &mut SymbolCache) -> Vec<(&'static str, Exp
 
 pub fn builtin_process(
     env_vars: impl IntoIterator<Item = (&'static str, Expression)>,
-    symbol_cache: &mut SymbolCache,
 ) -> Expression {
     create_struct(vec![(
-        ValueTerm::Symbol(symbol_cache.get(String::from("env"))),
-        create_struct(env_vars.into_iter().map(|(name, value)| {
-            (
-                ValueTerm::Symbol(symbol_cache.get(String::from(name))),
-                value,
-            )
-        })),
+        ValueTerm::String(StringValue::from("env")),
+        create_struct(
+            env_vars
+                .into_iter()
+                .map(|(name, value)| (ValueTerm::String(StringValue::from(name)), value)),
+        ),
     )])
 }
 
@@ -62,30 +58,30 @@ fn builtin_global_boolean() -> Expression {
     )))
 }
 
-fn builtin_global_math(symbol_cache: &mut SymbolCache) -> Expression {
+fn builtin_global_math() -> Expression {
     create_struct(vec![
         (
-            ValueTerm::Symbol(symbol_cache.get(String::from("abs"))),
+            ValueTerm::String(StringValue::from("abs")),
             Expression::new(Term::Builtin(BuiltinTerm::Abs)),
         ),
         (
-            ValueTerm::Symbol(symbol_cache.get(String::from("ceil"))),
+            ValueTerm::String(StringValue::from("ceil")),
             Expression::new(Term::Builtin(BuiltinTerm::Ceil)),
         ),
         (
-            ValueTerm::Symbol(symbol_cache.get(String::from("floor"))),
+            ValueTerm::String(StringValue::from("floor")),
             Expression::new(Term::Builtin(BuiltinTerm::Floor)),
         ),
         (
-            ValueTerm::Symbol(symbol_cache.get(String::from("max"))),
+            ValueTerm::String(StringValue::from("max")),
             Expression::new(Term::Builtin(BuiltinTerm::Max)),
         ),
         (
-            ValueTerm::Symbol(symbol_cache.get(String::from("min"))),
+            ValueTerm::String(StringValue::from("min")),
             Expression::new(Term::Builtin(BuiltinTerm::Min)),
         ),
         (
-            ValueTerm::Symbol(symbol_cache.get(String::from("round"))),
+            ValueTerm::String(StringValue::from("round")),
             Expression::new(Term::Builtin(BuiltinTerm::Round)),
         ),
     ])

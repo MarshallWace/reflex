@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use reflex::{core::Expression, stdlib::value::SymbolId};
-use std::{collections::HashMap};
+use reflex::core::Expression;
+use std::collections::HashMap;
 
 mod builtins;
 mod globals;
@@ -51,37 +51,5 @@ impl Env {
     }
     pub fn global(&self, name: &str) -> Option<Expression> {
         self.globals.get(name).map(Expression::clone)
-    }
-}
-
-pub struct SymbolCache {
-    cache: HashMap<Option<String>, SymbolId>,
-}
-impl SymbolCache {
-    pub fn new() -> Self {
-        Self {
-            cache: HashMap::new(),
-        }
-    }
-    pub fn has(&self, identifier: String) -> bool {
-        self.cache.contains_key(&Some(identifier))
-    }
-    pub fn get(&mut self, identifier: String) -> SymbolId {
-        let key = Some(identifier);
-        self.cache
-            .get(&key)
-            .map(|value| *value)
-            .unwrap_or_else(|| self.insert(key))
-    }
-    pub fn generate(&mut self) -> SymbolId {
-        self.insert(None)
-    }
-    pub fn entries(&self) -> impl IntoIterator<Item = (&Option<String>, &SymbolId)> {
-        self.cache.iter()
-    }
-    fn insert(&mut self, identifier: Option<String>) -> SymbolId {
-        let id = SymbolId::from(self.cache.len() as SymbolId);
-        self.cache.insert(identifier, id);
-        id
     }
 }

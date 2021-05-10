@@ -12,7 +12,7 @@ use reflex::{
     stdlib::{signal::SignalType, value::ValueTerm},
     store::Store,
 };
-use reflex_js::{builtin_globals, builtin_imports, parse, Env, SymbolCache};
+use reflex_js::{builtin_globals, builtin_imports, parse, Env};
 use std::{
     convert::Infallible,
     future::Future,
@@ -144,11 +144,9 @@ impl HttpResponse {
 pub async fn main() {
     let command_buffer_size = 32;
     let result_buffer_size = 32;
-    let mut symbol_cache = SymbolCache::new();
     let env = Env::new()
-        .with_globals(builtin_globals(&mut symbol_cache))
-        .with_imports(builtin_imports(&mut symbol_cache));
-    let symbol_cache = Arc::new(Mutex::new(symbol_cache));
+        .with_globals(builtin_globals())
+        .with_imports(builtin_imports());
     let env = Arc::new(env);
 
     let command_channel = create_shared_store(command_buffer_size, result_buffer_size);
@@ -157,16 +155,14 @@ pub async fn main() {
     let server = Server::bind(&address).serve(make_service_fn(|_conn| {
         let command_channel = command_channel.clone();
         let env = Arc::clone(&env);
-        let symbol_cache = Arc::clone(&symbol_cache);
         async move {
             Ok::<_, Infallible>(service_fn(move |req| {
                 let subscription_channel = command_channel.clone();
                 let env = Arc::clone(&env);
-                let symbol_cache = Arc::clone(&symbol_cache);
                 async move {
                     let response = match parse_request(req).await {
                         Err(response) => Ok(response),
-                        Ok(source) => match parse_expression(source, &symbol_cache, &env) {
+                        Ok(source) => match parse_expression(source, &env) {
                             Err(response) => Ok(response),
                             Ok(expression) => {
                                 match create_subscription(expression, &subscription_channel).await {
@@ -399,13 +395,8 @@ async fn parse_request(req: Request<Body>) -> Result<String, HttpResponse> {
     })
 }
 
-fn parse_expression(
-    source: String,
-    symbol_cache: &Mutex<SymbolCache>,
-    env: &Env,
-) -> Result<Expression, HttpResponse> {
-    let mut symbol_cache = symbol_cache.lock().unwrap();
-    match parse(&source, &mut symbol_cache, &env) {
+fn parse_expression(source: String, env: &Env) -> Result<Expression, HttpResponse> {
+    match parse(&source, &env) {
         Err(error) => Err(HttpResponse::new(StatusCode::BAD_REQUEST, error)),
         Ok(expression) => Ok(expression),
     }
