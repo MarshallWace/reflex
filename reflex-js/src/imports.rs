@@ -9,7 +9,7 @@ use reflex::{
         LambdaTerm, NativeFunction, RecursiveTerm, Signal, SignalTerm, StaticVariableTerm,
         StructPrototype, StructTerm, Term, VarArgs, VariableTerm,
     },
-    hash::{hash_object, HashId, Hashable},
+    hash::{hash_object, HashId},
     stdlib::{
         signal::SignalType,
         value::{StringValue, ValueTerm},
@@ -25,12 +25,9 @@ pub fn builtin_imports() -> Vec<(&'static str, Expression)> {
 
 fn import_utils() -> Expression {
     create_struct(vec![
+        ("Types", import_type_constructors()),
         (
-            ValueTerm::String(StringValue::from("Types")),
-            import_type_constructors(),
-        ),
-        (
-            ValueTerm::String(StringValue::from("graph")),
+            "graph",
             Expression::new(Term::Lambda(LambdaTerm::new(
                 Arity::from(0, 1, None),
                 Expression::new(Term::Recursive(RecursiveTerm::new(Expression::new(
@@ -45,28 +42,16 @@ fn import_type_constructors() -> Expression {
     let null = Expression::new(Term::Value(ValueTerm::Null));
     create_struct(vec![
         (
-            ValueTerm::String(StringValue::from("Scalar")),
+            "Scalar",
             create_struct(vec![
-                (
-                    ValueTerm::String(StringValue::from("Boolean")),
-                    Expression::clone(&null),
-                ),
-                (
-                    ValueTerm::String(StringValue::from("Int")),
-                    Expression::clone(&null),
-                ),
-                (
-                    ValueTerm::String(StringValue::from("Float")),
-                    Expression::clone(&null),
-                ),
-                (
-                    ValueTerm::String(StringValue::from("String")),
-                    Expression::clone(&null),
-                ),
+                ("Boolean", Expression::clone(&null)),
+                ("Int", Expression::clone(&null)),
+                ("Float", Expression::clone(&null)),
+                ("String", Expression::clone(&null)),
             ]),
         ),
         (
-            ValueTerm::String(StringValue::from("Struct")),
+            "Struct",
             Expression::new(Term::Native(NativeFunction::new(
                 StructTypeConstructor::hash(),
                 StructTypeConstructor::arity(),
@@ -74,7 +59,7 @@ fn import_type_constructors() -> Expression {
             ))),
         ),
         (
-            ValueTerm::String(StringValue::from("Enum")),
+            "Enum",
             Expression::new(Term::Lambda(LambdaTerm::new(
                 Arity::from(1, 0, None),
                 Expression::new(Term::Application(ApplicationTerm::new(
@@ -97,7 +82,7 @@ fn import_type_constructors() -> Expression {
             ))),
         ),
         (
-            ValueTerm::String(StringValue::from("EnumVariant")),
+            "EnumVariant",
             Expression::new(Term::Native(NativeFunction::new(
                 EnumVariantConstructor::hash(),
                 EnumVariantConstructor::arity(),
@@ -105,7 +90,7 @@ fn import_type_constructors() -> Expression {
             ))),
         ),
         (
-            ValueTerm::String(StringValue::from("Fn")),
+            "Fn",
             Expression::new(Term::Lambda(LambdaTerm::new(
                 Arity::from(0, 0, Some(VarArgs::Eager)),
                 Expression::new(Term::Lambda(LambdaTerm::new(
@@ -115,14 +100,14 @@ fn import_type_constructors() -> Expression {
             ))),
         ),
         (
-            ValueTerm::String(StringValue::from("List")),
+            "List",
             Expression::new(Term::Lambda(LambdaTerm::new(
                 Arity::from(1, 0, None),
                 Expression::clone(&null),
             ))),
         ),
         (
-            ValueTerm::String(StringValue::from("Maybe")),
+            "Maybe",
             Expression::new(Term::Lambda(LambdaTerm::new(
                 Arity::from(1, 0, None),
                 Expression::clone(&null),
@@ -303,19 +288,28 @@ impl EnumVariantConstructor {
 
 fn import_graphql() -> Expression {
     create_struct(vec![(
-        ValueTerm::String(StringValue::from("Resolver")),
+        "Resolver",
         Expression::new(Term::StructConstructor(StructPrototype::new(vec![
-            Term::Value(ValueTerm::String(StringValue::from("query"))).hash(),
-            Term::Value(ValueTerm::String(StringValue::from("mutation"))).hash(),
-            Term::Value(ValueTerm::String(StringValue::from("subscription"))).hash(),
+            Expression::new(Term::Value(ValueTerm::String(StringValue::from("query")))),
+            Expression::new(Term::Value(ValueTerm::String(StringValue::from(
+                "mutation",
+            )))),
+            Expression::new(Term::Value(ValueTerm::String(StringValue::from(
+                "subscription",
+            )))),
         ]))),
     )])
 }
 
-fn create_struct(fields: impl IntoIterator<Item = (ValueTerm, Expression)>) -> Expression {
+fn create_struct<'a>(fields: impl IntoIterator<Item = (&'a str, Expression)>) -> Expression {
     let (keys, values) = fields
         .into_iter()
-        .map(|(key, value)| (Term::Value(key).hash(), value))
+        .map(|(key, value)| {
+            (
+                Expression::new(Term::Value(ValueTerm::String(StringValue::from(key)))),
+                value,
+            )
+        })
         .unzip();
     Expression::new(Term::Struct(StructTerm::new(
         Some(StructPrototype::new(keys)),

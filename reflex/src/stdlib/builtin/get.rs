@@ -3,7 +3,6 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use crate::{
     core::{Arity, Expression, Signal, SignalTerm, StructFieldOffset, Term},
-    hash::Hashable,
     stdlib::{
         builtin::BuiltinFunction,
         collection::CollectionTerm,
@@ -33,7 +32,7 @@ impl BuiltinFunction for Get {
         match target.value() {
             Term::Struct(target) => match target.prototype() {
                 Some(constructor) => match constructor
-                    .field(key.hash())
+                    .field(&key)
                     .and_then(|field_offset| target.get(field_offset))
                 {
                     Some(expression) => Expression::clone(expression),
@@ -124,7 +123,6 @@ mod tests {
             ApplicationTerm, DependencyList, DynamicState, EvaluationResult, Expression,
             StructPrototype, StructTerm, Term,
         },
-        hash::Hashable,
         stdlib::{
             builtin::BuiltinTerm,
             collection::{hashmap::HashMapTerm, CollectionTerm},
@@ -169,9 +167,9 @@ mod tests {
             vec![
                 Expression::new(Term::Struct(StructTerm::new(
                     Some(StructPrototype::new(vec![
-                        Term::Value(ValueTerm::Symbol(3)).hash(),
-                        Term::Value(ValueTerm::Symbol(4)).hash(),
-                        Term::Value(ValueTerm::Symbol(5)).hash(),
+                        Expression::new(Term::Value(ValueTerm::Symbol(3))),
+                        Expression::new(Term::Value(ValueTerm::Symbol(4))),
+                        Expression::new(Term::Value(ValueTerm::Symbol(5))),
                     ])),
                     vec![
                         Expression::new(Term::Value(ValueTerm::Int(6))),

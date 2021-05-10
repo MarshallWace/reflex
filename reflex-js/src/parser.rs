@@ -8,7 +8,6 @@ use reflex::{
         ApplicationTerm, Arity, Expression, LambdaTerm, StackOffset, StaticVariableTerm,
         StructPrototype, StructTerm, Term, VariableTerm,
     },
-    hash::Hashable,
     stdlib::{
         builtin::BuiltinTerm,
         collection::{vector::VectorTerm, CollectionTerm},
@@ -765,9 +764,7 @@ fn parse_object_literal<'src>(
         Err(err_unimplemented(node))
     } else {
         Ok(Expression::new(Term::Struct(StructTerm::new(
-            Some(StructPrototype::new(
-                keys.iter().map(|key| key.hash()).collect(),
-            )),
+            Some(StructPrototype::new(keys)),
             values,
         ))))
     }
@@ -1348,7 +1345,6 @@ mod tests {
             ApplicationTerm, Arity, DependencyList, DynamicState, EvaluationResult, Expression,
             LambdaTerm, StaticVariableTerm, StructPrototype, StructTerm, Term, VariableTerm,
         },
-        hash::Hashable,
         stdlib::{
             builtin::BuiltinTerm,
             collection::{vector::VectorTerm, CollectionTerm},
@@ -1676,9 +1672,9 @@ mod tests {
             parse("({ foo: 3, bar: 4, baz: 5 })", &env),
             Ok(Expression::new(Term::Struct(StructTerm::new(
                 Some(StructPrototype::new(vec![
-                    Term::Value(ValueTerm::String(StringValue::from("foo"))).hash(),
-                    Term::Value(ValueTerm::String(StringValue::from("bar"))).hash(),
-                    Term::Value(ValueTerm::String(StringValue::from("baz"))).hash(),
+                    Expression::new(Term::Value(ValueTerm::String(StringValue::from("foo")))),
+                    Expression::new(Term::Value(ValueTerm::String(StringValue::from("bar")))),
+                    Expression::new(Term::Value(ValueTerm::String(StringValue::from("baz")))),
                 ])),
                 vec![
                     Expression::new(Term::Value(ValueTerm::Float(3.0))),
@@ -1691,9 +1687,9 @@ mod tests {
             parse("({ foo: 3, \"bar\": 4, baz: 5 })", &env,),
             Ok(Expression::new(Term::Struct(StructTerm::new(
                 Some(StructPrototype::new(vec![
-                    Term::Value(ValueTerm::String(StringValue::from("foo"))).hash(),
-                    Term::Value(ValueTerm::String(StringValue::from("bar"))).hash(),
-                    Term::Value(ValueTerm::String(StringValue::from("baz"))).hash(),
+                    Expression::new(Term::Value(ValueTerm::String(StringValue::from("foo")))),
+                    Expression::new(Term::Value(ValueTerm::String(StringValue::from("bar")))),
+                    Expression::new(Term::Value(ValueTerm::String(StringValue::from("baz")))),
                 ])),
                 vec![
                     Expression::new(Term::Value(ValueTerm::Float(3.0))),
@@ -1706,9 +1702,9 @@ mod tests {
             parse("({ foo: 3, [\"bar\"]: 4, baz: 5 })", &env,),
             Ok(Expression::new(Term::Struct(StructTerm::new(
                 Some(StructPrototype::new(vec![
-                    Term::Value(ValueTerm::String(StringValue::from("foo"))).hash(),
-                    Term::Value(ValueTerm::String(StringValue::from("bar"))).hash(),
-                    Term::Value(ValueTerm::String(StringValue::from("baz"))).hash(),
+                    Expression::new(Term::Value(ValueTerm::String(StringValue::from("foo")))),
+                    Expression::new(Term::Value(ValueTerm::String(StringValue::from("bar")))),
+                    Expression::new(Term::Value(ValueTerm::String(StringValue::from("baz")))),
                 ])),
                 vec![
                     Expression::new(Term::Value(ValueTerm::Float(3.0))),
@@ -1721,9 +1717,9 @@ mod tests {
             parse("({ 3: \"foo\", 4: \"bar\", 5: \"baz\" })", &env,),
             Ok(Expression::new(Term::Struct(StructTerm::new(
                 Some(StructPrototype::new(vec![
-                    Term::Value(ValueTerm::Float(3.0)).hash(),
-                    Term::Value(ValueTerm::Float(4.0)).hash(),
-                    Term::Value(ValueTerm::Float(5.0)).hash(),
+                    Expression::new(Term::Value(ValueTerm::Float(3.0))),
+                    Expression::new(Term::Value(ValueTerm::Float(4.0))),
+                    Expression::new(Term::Value(ValueTerm::Float(5.0))),
                 ])),
                 vec![
                     Expression::new(Term::Value(ValueTerm::String(StringValue::from("foo")))),
@@ -1736,9 +1732,9 @@ mod tests {
             parse("({ 3: \"foo\", [4]: \"bar\", 5: \"baz\" })", &env,),
             Ok(Expression::new(Term::Struct(StructTerm::new(
                 Some(StructPrototype::new(vec![
-                    Term::Value(ValueTerm::Float(3.0)).hash(),
-                    Term::Value(ValueTerm::Float(4.0)).hash(),
-                    Term::Value(ValueTerm::Float(5.0)).hash(),
+                    Expression::new(Term::Value(ValueTerm::Float(3.0))),
+                    Expression::new(Term::Value(ValueTerm::Float(4.0))),
+                    Expression::new(Term::Value(ValueTerm::Float(5.0))),
                 ])),
                 vec![
                     Expression::new(Term::Value(ValueTerm::String(StringValue::from("foo")))),
@@ -1751,9 +1747,9 @@ mod tests {
             parse("({ 3: \"foo\", \"4\": \"bar\", 5: \"baz\" })", &env,),
             Ok(Expression::new(Term::Struct(StructTerm::new(
                 Some(StructPrototype::new(vec![
-                    Term::Value(ValueTerm::Float(3.0)).hash(),
-                    Term::Value(ValueTerm::String(StringValue::from("4"))).hash(),
-                    Term::Value(ValueTerm::Float(5.0)).hash(),
+                    Expression::new(Term::Value(ValueTerm::Float(3.0))),
+                    Expression::new(Term::Value(ValueTerm::String(StringValue::from("4")))),
+                    Expression::new(Term::Value(ValueTerm::Float(5.0))),
                 ])),
                 vec![
                     Expression::new(Term::Value(ValueTerm::String(StringValue::from("foo")))),
@@ -1766,9 +1762,9 @@ mod tests {
             parse("({ 3: \"foo\", [\"4\"]: \"bar\", 5: \"baz\" })", &env,),
             Ok(Expression::new(Term::Struct(StructTerm::new(
                 Some(StructPrototype::new(vec![
-                    Term::Value(ValueTerm::Float(3.0)).hash(),
-                    Term::Value(ValueTerm::String(StringValue::from("4"))).hash(),
-                    Term::Value(ValueTerm::Float(5.0)).hash(),
+                    Expression::new(Term::Value(ValueTerm::Float(3.0))),
+                    Expression::new(Term::Value(ValueTerm::String(StringValue::from("4")))),
+                    Expression::new(Term::Value(ValueTerm::Float(5.0))),
                 ])),
                 vec![
                     Expression::new(Term::Value(ValueTerm::String(StringValue::from("foo")))),
@@ -1919,12 +1915,15 @@ mod tests {
                             vec![
                                 Expression::new(Term::Struct(StructTerm::new(
                                     Some(StructPrototype::new(vec![
-                                        Term::Value(ValueTerm::String(StringValue::from("foo")))
-                                            .hash(),
-                                        Term::Value(ValueTerm::String(StringValue::from("bar")))
-                                            .hash(),
-                                        Term::Value(ValueTerm::String(StringValue::from("baz")))
-                                            .hash(),
+                                        Expression::new(Term::Value(ValueTerm::String(
+                                            StringValue::from("foo")
+                                        ))),
+                                        Expression::new(Term::Value(ValueTerm::String(
+                                            StringValue::from("bar")
+                                        ))),
+                                        Expression::new(Term::Value(ValueTerm::String(
+                                            StringValue::from("baz")
+                                        ))),
                                     ])),
                                     vec![
                                         Expression::new(Term::Value(ValueTerm::Float(3.0))),
@@ -1944,9 +1943,15 @@ mod tests {
                     vec![
                         Expression::new(Term::Struct(StructTerm::new(
                             Some(StructPrototype::new(vec![
-                                Term::Value(ValueTerm::String(StringValue::from("foo"))).hash(),
-                                Term::Value(ValueTerm::String(StringValue::from("bar"))).hash(),
-                                Term::Value(ValueTerm::String(StringValue::from("baz"))).hash(),
+                                Expression::new(Term::Value(ValueTerm::String(StringValue::from(
+                                    "foo"
+                                )))),
+                                Expression::new(Term::Value(ValueTerm::String(StringValue::from(
+                                    "bar"
+                                )))),
+                                Expression::new(Term::Value(ValueTerm::String(StringValue::from(
+                                    "baz"
+                                )))),
                             ])),
                             vec![
                                 Expression::new(Term::Value(ValueTerm::Float(3.0))),
@@ -1979,12 +1984,15 @@ mod tests {
                             vec![
                                 Expression::new(Term::Struct(StructTerm::new(
                                     Some(StructPrototype::new(vec![
-                                        Term::Value(ValueTerm::String(StringValue::from("foo")))
-                                            .hash(),
-                                        Term::Value(ValueTerm::String(StringValue::from("bar")))
-                                            .hash(),
-                                        Term::Value(ValueTerm::String(StringValue::from("baz")))
-                                            .hash(),
+                                        Expression::new(Term::Value(ValueTerm::String(
+                                            StringValue::from("foo")
+                                        ))),
+                                        Expression::new(Term::Value(ValueTerm::String(
+                                            StringValue::from("bar")
+                                        ))),
+                                        Expression::new(Term::Value(ValueTerm::String(
+                                            StringValue::from("baz")
+                                        ))),
                                     ])),
                                     vec![
                                         Expression::new(Term::Value(ValueTerm::Float(3.0))),
@@ -2004,9 +2012,15 @@ mod tests {
                     vec![
                         Expression::new(Term::Struct(StructTerm::new(
                             Some(StructPrototype::new(vec![
-                                Term::Value(ValueTerm::String(StringValue::from("foo"))).hash(),
-                                Term::Value(ValueTerm::String(StringValue::from("bar"))).hash(),
-                                Term::Value(ValueTerm::String(StringValue::from("baz"))).hash(),
+                                Expression::new(Term::Value(ValueTerm::String(StringValue::from(
+                                    "foo"
+                                )))),
+                                Expression::new(Term::Value(ValueTerm::String(StringValue::from(
+                                    "bar"
+                                )))),
+                                Expression::new(Term::Value(ValueTerm::String(StringValue::from(
+                                    "baz"
+                                )))),
                             ])),
                             vec![
                                 Expression::new(Term::Value(ValueTerm::Float(3.0))),
@@ -2039,12 +2053,15 @@ mod tests {
                             vec![
                                 Expression::new(Term::Struct(StructTerm::new(
                                     Some(StructPrototype::new(vec![
-                                        Term::Value(ValueTerm::String(StringValue::from("foo")))
-                                            .hash(),
-                                        Term::Value(ValueTerm::String(StringValue::from("bar")))
-                                            .hash(),
-                                        Term::Value(ValueTerm::String(StringValue::from("baz")))
-                                            .hash(),
+                                        Expression::new(Term::Value(ValueTerm::String(
+                                            StringValue::from("foo")
+                                        ))),
+                                        Expression::new(Term::Value(ValueTerm::String(
+                                            StringValue::from("bar")
+                                        ))),
+                                        Expression::new(Term::Value(ValueTerm::String(
+                                            StringValue::from("baz")
+                                        ))),
                                     ])),
                                     vec![
                                         Expression::new(Term::Value(ValueTerm::Float(3.0))),
@@ -2064,9 +2081,15 @@ mod tests {
                     vec![
                         Expression::new(Term::Struct(StructTerm::new(
                             Some(StructPrototype::new(vec![
-                                Term::Value(ValueTerm::String(StringValue::from("foo"))).hash(),
-                                Term::Value(ValueTerm::String(StringValue::from("bar"))).hash(),
-                                Term::Value(ValueTerm::String(StringValue::from("baz"))).hash(),
+                                Expression::new(Term::Value(ValueTerm::String(StringValue::from(
+                                    "foo"
+                                )))),
+                                Expression::new(Term::Value(ValueTerm::String(StringValue::from(
+                                    "bar"
+                                )))),
+                                Expression::new(Term::Value(ValueTerm::String(StringValue::from(
+                                    "baz"
+                                )))),
                             ])),
                             vec![
                                 Expression::new(Term::Value(ValueTerm::Float(3.0))),
@@ -2937,9 +2960,9 @@ mod tests {
             EvaluationResult::new(
                 Ok(Expression::new(Term::StructConstructor(
                     StructPrototype::new(vec![
-                        Term::Value(ValueTerm::String(StringValue::from("foo"))).hash(),
-                        Term::Value(ValueTerm::String(StringValue::from("bar"))).hash(),
-                        Term::Value(ValueTerm::String(StringValue::from("baz"))).hash(),
+                        Expression::new(Term::Value(ValueTerm::String(StringValue::from("foo")))),
+                        Expression::new(Term::Value(ValueTerm::String(StringValue::from("bar")))),
+                        Expression::new(Term::Value(ValueTerm::String(StringValue::from("baz")))),
                     ])
                 ))),
                 DependencyList::empty(),
@@ -2964,9 +2987,9 @@ mod tests {
             EvaluationResult::new(
                 Ok(Expression::new(Term::Struct(StructTerm::new(
                     Some(StructPrototype::new(vec![
-                        Term::Value(ValueTerm::String(StringValue::from("foo"))).hash(),
-                        Term::Value(ValueTerm::String(StringValue::from("bar"))).hash(),
-                        Term::Value(ValueTerm::String(StringValue::from("baz"))).hash(),
+                        Expression::new(Term::Value(ValueTerm::String(StringValue::from("foo")))),
+                        Expression::new(Term::Value(ValueTerm::String(StringValue::from("bar")))),
+                        Expression::new(Term::Value(ValueTerm::String(StringValue::from("baz")))),
                     ])),
                     vec![
                         Expression::new(Term::Value(ValueTerm::Float(3.0))),
@@ -2996,9 +3019,9 @@ mod tests {
             EvaluationResult::new(
                 Ok(Expression::new(Term::Struct(StructTerm::new(
                     Some(StructPrototype::new(vec![
-                        Term::Value(ValueTerm::String(StringValue::from("foo"))).hash(),
-                        Term::Value(ValueTerm::String(StringValue::from("bar"))).hash(),
-                        Term::Value(ValueTerm::String(StringValue::from("baz"))).hash(),
+                        Expression::new(Term::Value(ValueTerm::String(StringValue::from("foo")))),
+                        Expression::new(Term::Value(ValueTerm::String(StringValue::from("bar")))),
+                        Expression::new(Term::Value(ValueTerm::String(StringValue::from("baz")))),
                     ])),
                     vec![
                         Expression::new(Term::Value(ValueTerm::Float(3.0))),

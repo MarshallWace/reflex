@@ -12,7 +12,7 @@ use reflex::{
     stdlib::{signal::SignalType, value::ValueTerm},
     store::Store,
 };
-use reflex_js::{builtin_globals, builtin_imports, parse, Env};
+use reflex_js::{builtin_globals, builtin_imports, parse, stringify, Env};
 use std::{
     convert::Infallible,
     future::Future,
@@ -421,11 +421,11 @@ fn strip_pending_results(
 
 fn format_http_response(result: SubscriptionResult) -> HttpResponse {
     match result {
-        Ok(result) => match result.value() {
-            Term::Value(value) => HttpResponse::new(StatusCode::OK, format!("{}", value)),
-            value => HttpResponse::new(
+        Ok(result) => match stringify(result.value()) {
+            Ok(output) => HttpResponse::new(StatusCode::OK, output),
+            Err(error) => HttpResponse::new(
                 StatusCode::BAD_REQUEST,
-                format!("Invalid result: {}", value),
+                format!("Invalid result: {}", error),
             ),
         },
         Err(errors) => HttpResponse::new(

@@ -9,7 +9,7 @@ mod globals;
 mod imports;
 mod parser;
 
-pub use globals::{builtin_globals, builtin_process};
+pub use globals::{builtin_globals, builtin_process, stringify};
 pub use imports::builtin_imports;
 pub use parser::parse;
 

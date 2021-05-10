@@ -73,7 +73,6 @@ impl Construct {
                                 let entries = properties_layout
                                     .keys()
                                     .iter()
-                                    .copied()
                                     .zip(properties.fields().iter().map(Expression::clone));
                                 Some(prototype.apply(entries))
                             }

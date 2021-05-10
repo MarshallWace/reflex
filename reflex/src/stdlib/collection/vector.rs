@@ -36,6 +36,9 @@ impl VectorTerm {
     pub fn len(&self) -> usize {
         self.items.len()
     }
+    pub fn items(&self) -> &[Expression] {
+        &self.items
+    }
     pub fn push(&self, value: Expression) -> Expression {
         Expression::new(Term::Collection(CollectionTerm::Vector(Self::new(
             self.items.iter().map(Expression::clone).chain(once(value)),

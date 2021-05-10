@@ -1165,7 +1165,6 @@ impl Reducible for ApplicationTerm {
                             let (keys, values) = args.split_at(arity.eager());
                             Ok(target.apply(
                                 keys.iter()
-                                    .map(|key| key.hash())
                                     .zip(values.iter().map(Expression::clone))
                                     .map(|(key, value)| (key, value)),
                             ))
@@ -1370,42 +1369,41 @@ impl fmt::Display for StructTerm {
 
 #[derive(PartialEq, Clone, Debug)]
 pub struct StructPrototype {
-    keys: Vec<HashId>,
+    keys: Vec<Expression>,
 }
 impl Hashable for StructPrototype {
     fn hash(&self) -> HashId {
-        hash_sequence(self.keys.iter().copied())
+        hash_sequence(self.keys.iter().map(|key| key.hash()))
     }
 }
 impl StructPrototype {
-    pub fn new(keys: Vec<HashId>) -> Self {
+    pub fn new(keys: Vec<Expression>) -> Self {
         Self { keys }
     }
-    pub fn field(&self, key: HashId) -> Option<StructFieldOffset> {
+    pub fn field(&self, key: &Expression) -> Option<StructFieldOffset> {
         self.keys
             .iter()
-            .copied()
             .enumerate()
-            .find(|(_, existing)| *existing == key)
+            .find(|(_, existing)| existing.hash() == key.hash())
             .map(|(index, _)| index as StructFieldOffset)
     }
-    pub fn keys(&self) -> &[HashId] {
+    pub fn keys(&self) -> &[Expression] {
         &self.keys
     }
     pub fn arity(&self) -> Arity {
         let num_keys = self.keys.len() as u8;
         Arity::from(num_keys, num_keys, None)
     }
-    pub fn apply(
+    pub fn apply<'a>(
         &self,
-        fields: impl IntoIterator<Item = (HashId, Expression)> + ExactSizeIterator,
+        fields: impl IntoIterator<Item = (&'a Expression, Expression)> + ExactSizeIterator,
     ) -> Expression {
         let fields = fields.into_iter().collect::<Vec<_>>();
         let has_correctly_ordered_keys = fields.len() >= self.keys.len()
             && fields
                 .iter()
                 .zip(self.keys.iter())
-                .all(|((id, _), key)| id == key);
+                .all(|((id, _), key)| id.hash() == key.hash());
         let fields = if has_correctly_ordered_keys {
             fields
                 .into_iter()
@@ -1419,7 +1417,7 @@ impl StructPrototype {
                 .map(|key| {
                     let index = remaining_fields
                         .iter()
-                        .position(|(id, _)| id == key)
+                        .position(|(id, _)| id.hash() == key.hash())
                         .expect("Invalid constructor call");
                     let (_, value) = remaining_fields.remove(index);
                     value
