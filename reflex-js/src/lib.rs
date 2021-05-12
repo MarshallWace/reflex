@@ -5,13 +5,15 @@ use reflex::core::Expression;
 use std::collections::HashMap;
 
 mod builtins;
-mod globals;
-mod imports;
 mod parser;
 
-pub use globals::{builtin_globals, builtin_process, stringify};
-pub use imports::builtin_imports;
 pub use parser::parse;
+pub mod stdlib {
+    pub mod globals;
+    pub mod imports;
+    pub use globals::{builtin_globals, global_process, json_stringify};
+    pub use imports::builtin_imports;
+}
 
 pub struct Env {
     globals: HashMap<&'static str, Expression>,

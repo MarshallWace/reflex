@@ -6,39 +6,16 @@ use std::{any::TypeId, iter::once};
 use reflex::{
     core::{
         ApplicationTerm, Arity, EnumConstructorArity, EnumIndex, EnumVariantPrototype, Expression,
-        LambdaTerm, NativeFunction, RecursiveTerm, Signal, SignalTerm, StaticVariableTerm,
-        StructPrototype, StructTerm, Term, VarArgs, VariableTerm,
+        LambdaTerm, NativeFunction, Signal, SignalTerm, StaticVariableTerm, StructTerm, Term,
+        VarArgs, VariableTerm,
     },
     hash::{hash_object, HashId},
-    stdlib::{
-        signal::SignalType,
-        value::{StringValue, ValueTerm},
-    },
+    stdlib::{signal::SignalType, value::ValueTerm},
 };
 
-pub fn builtin_imports() -> Vec<(&'static str, Expression)> {
-    vec![
-        ("reflex::utils", import_utils()),
-        ("reflex::graphql", import_graphql()),
-    ]
-}
+use crate::stdlib::imports::create_struct;
 
-fn import_utils() -> Expression {
-    create_struct(vec![
-        ("Types", import_type_constructors()),
-        (
-            "graph",
-            Expression::new(Term::Lambda(LambdaTerm::new(
-                Arity::from(0, 1, None),
-                Expression::new(Term::Recursive(RecursiveTerm::new(Expression::new(
-                    Term::Variable(VariableTerm::Static(StaticVariableTerm::new(0))),
-                )))),
-            ))),
-        ),
-    ])
-}
-
-fn import_type_constructors() -> Expression {
+pub(crate) fn import_types() -> Expression {
     let null = Expression::new(Term::Value(ValueTerm::Null));
     create_struct(vec![
         (
@@ -284,35 +261,4 @@ impl EnumVariantConstructor {
             0, num_args,
         )))
     }
-}
-
-fn import_graphql() -> Expression {
-    create_struct(vec![(
-        "Resolver",
-        Expression::new(Term::StructConstructor(StructPrototype::new(vec![
-            Expression::new(Term::Value(ValueTerm::String(StringValue::from("query")))),
-            Expression::new(Term::Value(ValueTerm::String(StringValue::from(
-                "mutation",
-            )))),
-            Expression::new(Term::Value(ValueTerm::String(StringValue::from(
-                "subscription",
-            )))),
-        ]))),
-    )])
-}
-
-fn create_struct<'a>(fields: impl IntoIterator<Item = (&'a str, Expression)>) -> Expression {
-    let (keys, values) = fields
-        .into_iter()
-        .map(|(key, value)| {
-            (
-                Expression::new(Term::Value(ValueTerm::String(StringValue::from(key)))),
-                value,
-            )
-        })
-        .unzip();
-    Expression::new(Term::Struct(StructTerm::new(
-        Some(StructPrototype::new(keys)),
-        values,
-    )))
 }

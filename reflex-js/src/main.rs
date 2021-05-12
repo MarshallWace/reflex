@@ -8,7 +8,11 @@ use reflex::{
     core::{DynamicState, Signal},
     stdlib::{signal::SignalType, value::ValueTerm},
 };
-use reflex_js::{builtin_globals, builtin_imports, parse, Env};
+use reflex_js::{
+    parse,
+    stdlib::{builtin_globals, builtin_imports},
+    Env,
+};
 
 fn main() -> Result<(), Box<dyn Error>> {
     let args = env::args().collect::<Vec<String>>();

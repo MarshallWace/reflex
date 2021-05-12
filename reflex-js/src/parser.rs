@@ -824,7 +824,9 @@ fn parse_binary_expression<'src>(
         BinaryOp::GreaterThan => parse_binary_gt_expression(node, scope, env),
         BinaryOp::LessThanEqual => parse_binary_lte_expression(node, scope, env),
         BinaryOp::GreaterThanEqual => parse_binary_gte_expression(node, scope, env),
+        BinaryOp::Equal => parse_binary_equal_expression(node, scope, env),
         BinaryOp::StrictEqual => parse_binary_equal_expression(node, scope, env),
+        BinaryOp::NotEqual => parse_binary_not_equal_expression(node, scope, env),
         BinaryOp::StrictNotEqual => parse_binary_not_equal_expression(node, scope, env),
         _ => Err(err_unimplemented(node)),
     }
@@ -1335,8 +1337,8 @@ fn parse_constructor_expression<'src>(
 mod tests {
     use super::parse;
     use crate::{
-        builtin_imports,
         builtins::{dispatch, throw, to_string},
+        stdlib::builtin_imports,
         Env,
     };
     use reflex::{
