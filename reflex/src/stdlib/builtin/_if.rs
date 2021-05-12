@@ -34,13 +34,7 @@ impl BuiltinFunction for If {
                 }
             }
             Term::Value(ValueTerm::Null) => alternate,
-            _ => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
-                SignalType::Error,
-                vec![ValueTerm::String(format!(
-                    "Expected (Boolean, <any>, <any>), received ({}, {}, {})",
-                    condition, consequent, alternate
-                ))],
-            )))),
+            _ => consequent,
         }
     }
 }
