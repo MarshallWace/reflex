@@ -29,41 +29,39 @@ impl BuiltinFunction for Get {
         let mut args = args.into_iter();
         let target = args.next().unwrap();
         let key = args.next().unwrap();
-        match target.value() {
+        let result = match target.value() {
             Term::Struct(target) => match target.prototype() {
-                Some(constructor) => match constructor
-                    .field(&key)
-                    .and_then(|field_offset| target.get(field_offset))
-                {
-                    Some(expression) => Expression::clone(expression),
-                    None => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
-                        SignalType::Error,
-                        vec![ValueTerm::String(format!(
+                Some(constructor) => {
+                    let field_name = match key.value() {
+                        Term::Value(key) => Some(key),
+                        _ => None,
+                    };
+                    let field_offset = field_name.and_then(|key| constructor.field(key));
+                    let value = field_offset.and_then(|field_offset| target.get(field_offset));
+                    match value {
+                        Some(expression) => Ok(Expression::clone(expression)),
+                        None => Err(format!(
                             "Invalid field access: {} on struct {}",
                             key, target
-                        ))],
-                    )))),
-                },
+                        )),
+                    }
+                }
                 None => match key.value() {
                     Term::Value(ValueTerm::Int(field_offset)) => {
-                        match target.get(*field_offset as StructFieldOffset) {
-                            Some(expression) => Expression::clone(expression),
-                            None => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
-                                SignalType::Error,
-                                vec![ValueTerm::String(format!(
-                                    "Invalid field offset: {} on struct {}",
-                                    field_offset, target
-                                ))],
-                            )))),
+                        let field_offset = *field_offset as StructFieldOffset;
+                        let value = target.get(field_offset);
+                        match value {
+                            Some(expression) => Ok(Expression::clone(expression)),
+                            None => Err(format!(
+                                "Invalid field offset: {} on struct {}",
+                                field_offset, target
+                            )),
                         }
                     }
-                    _ => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
-                        SignalType::Error,
-                        vec![ValueTerm::String(format!(
-                            "Invalid field access: Expected (<struct>, Int), received ({}, {})",
-                            target, key,
-                        ))],
-                    )))),
+                    _ => Err(format!(
+                        "Invalid field access: Expected (<struct>, Int), received ({}, {})",
+                        target, key,
+                    )),
                 },
             },
             Term::Collection(CollectionTerm::Vector(target)) => {
@@ -87,29 +85,27 @@ impl BuiltinFunction for Get {
                     _ => None,
                 };
                 match index {
-                    None => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
-                        SignalType::Error,
-                        vec![ValueTerm::String(format!(
-                            "Invalid array field access: Expected integer, received {}",
-                            key,
-                        ))],
-                    )))),
+                    None => Err(format!(
+                        "Invalid array field access: Expected integer, received {}",
+                        key,
+                    )),
                     Some(key) => match target.get(key) {
-                        Some(expression) => Expression::clone(expression),
-                        None => Expression::new(Term::Value(ValueTerm::Null)),
+                        Some(expression) => Ok(Expression::clone(expression)),
+                        None => Ok(Expression::new(Term::Value(ValueTerm::Null))),
                     },
                 }
             }
             Term::Collection(CollectionTerm::HashMap(target)) => match target.get(&key) {
-                Some(expression) => Expression::clone(expression),
-                None => Expression::new(Term::Value(ValueTerm::Null)),
+                Some(expression) => Ok(Expression::clone(expression)),
+                None => Ok(Expression::new(Term::Value(ValueTerm::Null))),
             },
-            _ => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
+            _ => Err(format!("Unable to access field {} on {}", key, target,)),
+        };
+        match result {
+            Ok(result) => result,
+            Err(error) => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                 SignalType::Error,
-                vec![ValueTerm::String(format!(
-                    "Unable to access field {} on {}",
-                    key, target,
-                ))],
+                vec![ValueTerm::String(error)],
             )))),
         }
     }
@@ -167,9 +163,9 @@ mod tests {
             vec![
                 Expression::new(Term::Struct(StructTerm::new(
                     Some(StructPrototype::new(vec![
-                        Expression::new(Term::Value(ValueTerm::Symbol(3))),
-                        Expression::new(Term::Value(ValueTerm::Symbol(4))),
-                        Expression::new(Term::Value(ValueTerm::Symbol(5))),
+                        ValueTerm::Symbol(3),
+                        ValueTerm::Symbol(4),
+                        ValueTerm::Symbol(5),
                     ])),
                     vec![
                         Expression::new(Term::Value(ValueTerm::Int(6))),

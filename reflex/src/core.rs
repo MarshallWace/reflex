@@ -1163,11 +1163,21 @@ impl Reducible for ApplicationTerm {
                         Term::Native(target) => Ok(target.apply(args.into_iter())),
                         Term::StructConstructor(target) => {
                             let (keys, values) = args.split_at(arity.eager());
-                            Ok(target.apply(
-                                keys.iter()
-                                    .zip(values.iter().map(Expression::clone))
-                                    .map(|(key, value)| (key, value)),
-                            ))
+                            let keys = keys
+                                .iter()
+                                .map(|key| match key.value() {
+                                    Term::Value(key) => Some(key),
+                                    _ => None,
+                                })
+                                .collect::<Option<Vec<_>>>();
+                            match keys {
+                                None => Err(args),
+                                Some(keys) => Ok(target.apply(
+                                    keys.into_iter()
+                                        .zip(values.iter().map(Expression::clone))
+                                        .map(|(key, value)| (key, value)),
+                                )),
+                            }
                         }
                         Term::EnumConstructor(target) => Ok(target.apply(args.into_iter())),
                         _ => Err(args),
@@ -1369,7 +1379,7 @@ impl fmt::Display for StructTerm {
 
 #[derive(PartialEq, Clone, Debug)]
 pub struct StructPrototype {
-    keys: Vec<Expression>,
+    keys: Vec<ValueTerm>,
 }
 impl Hashable for StructPrototype {
     fn hash(&self) -> HashId {
@@ -1377,17 +1387,17 @@ impl Hashable for StructPrototype {
     }
 }
 impl StructPrototype {
-    pub fn new(keys: Vec<Expression>) -> Self {
+    pub fn new(keys: Vec<ValueTerm>) -> Self {
         Self { keys }
     }
-    pub fn field(&self, key: &Expression) -> Option<StructFieldOffset> {
+    pub fn field(&self, key: &ValueTerm) -> Option<StructFieldOffset> {
         self.keys
             .iter()
             .enumerate()
             .find(|(_, existing)| existing.hash() == key.hash())
             .map(|(index, _)| index as StructFieldOffset)
     }
-    pub fn keys(&self) -> &[Expression] {
+    pub fn keys(&self) -> &[ValueTerm] {
         &self.keys
     }
     pub fn arity(&self) -> Arity {
@@ -1396,7 +1406,7 @@ impl StructPrototype {
     }
     pub fn apply<'a>(
         &self,
-        fields: impl IntoIterator<Item = (&'a Expression, Expression)> + ExactSizeIterator,
+        fields: impl IntoIterator<Item = (&'a ValueTerm, Expression)> + ExactSizeIterator,
     ) -> Expression {
         let fields = fields.into_iter().collect::<Vec<_>>();
         let has_correctly_ordered_keys = fields.len() >= self.keys.len()

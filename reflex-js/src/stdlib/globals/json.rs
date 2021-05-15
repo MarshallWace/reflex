@@ -153,12 +153,12 @@ fn stringify_struct_term<'a>(input: &'a Term, value: &'a StructTerm) -> Result<S
                 .keys()
                 .iter()
                 .zip(value.fields())
-                .map(|(key, value)| match key.value() {
-                    Term::Value(ValueTerm::String(key)) => {
+                .map(|(key, value)| match key {
+                    ValueTerm::String(key) => {
                         let value = json_stringify(value.value())?;
                         Ok(format!("{}:{}", stringify_string_value(&key), value))
                     }
-                    key => Err(key),
+                    _ => Err(input),
                 })
                 .collect::<Result<Vec<_>, _>>()?;
             Ok(format!("{{{}}}", fields.join(",")))

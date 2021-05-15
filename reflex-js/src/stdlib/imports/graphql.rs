@@ -14,12 +14,8 @@ pub(crate) fn import_graphql() -> Expression {
 
 fn import_graphql_resolver() -> Expression {
     Expression::new(Term::StructConstructor(StructPrototype::new(vec![
-        Expression::new(Term::Value(ValueTerm::String(StringValue::from("query")))),
-        Expression::new(Term::Value(ValueTerm::String(StringValue::from(
-            "mutation",
-        )))),
-        Expression::new(Term::Value(ValueTerm::String(StringValue::from(
-            "subscription",
-        )))),
+        ValueTerm::String(StringValue::from("query")),
+        ValueTerm::String(StringValue::from("mutation")),
+        ValueTerm::String(StringValue::from("subscription")),
     ])))
 }

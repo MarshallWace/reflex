@@ -34,12 +34,7 @@ pub fn builtin_globals() -> Vec<(&'static str, Expression)> {
 fn create_struct<'a>(fields: impl IntoIterator<Item = (&'a str, Expression)>) -> Expression {
     let (keys, values) = fields
         .into_iter()
-        .map(|(key, value)| {
-            (
-                Expression::new(Term::Value(ValueTerm::String(StringValue::from(key)))),
-                value,
-            )
-        })
+        .map(|(key, value)| (ValueTerm::String(StringValue::from(key)), value))
         .unzip();
     Expression::new(Term::Struct(StructTerm::new(
         Some(StructPrototype::new(keys)),
