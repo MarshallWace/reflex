@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use reflex::{
-    core::{Expression, StructPrototype, Term},
+    core::{Expression, StructPrototype, Term, VarArgs},
     stdlib::value::{StringValue, ValueTerm},
 };
 
@@ -13,9 +13,12 @@ pub(crate) fn import_graphql() -> Expression {
 }
 
 fn import_graphql_resolver() -> Expression {
-    Expression::new(Term::StructConstructor(StructPrototype::new(vec![
-        ValueTerm::String(StringValue::from("query")),
-        ValueTerm::String(StringValue::from("mutation")),
-        ValueTerm::String(StringValue::from("subscription")),
-    ])))
+    Expression::new(Term::StructConstructor(
+        VarArgs::Lazy,
+        StructPrototype::new(vec![
+            ValueTerm::String(StringValue::from("query")),
+            ValueTerm::String(StringValue::from("mutation")),
+            ValueTerm::String(StringValue::from("subscription")),
+        ]),
+    ))
 }

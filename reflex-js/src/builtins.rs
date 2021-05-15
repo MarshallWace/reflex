@@ -57,37 +57,55 @@ impl Construct {
         hash_object(TypeId::of::<Self>())
     }
     fn arity() -> Arity {
-        Arity::from(1, 0, Some(VarArgs::Eager))
+        Arity::from(1, 0, Some(VarArgs::Lazy))
     }
     fn apply(args: Vec<Expression>) -> Expression {
         let mut args = args.into_iter();
         let constructor = args.next().unwrap();
         match constructor.value() {
-            Term::StructConstructor(prototype) => {
+            Term::StructConstructor(eager, prototype) => {
                 let properties = args.next();
                 let result = match properties {
-                    None => None,
                     Some(properties) => match properties.value() {
                         Term::Struct(properties) => match properties.prototype() {
                             Some(properties_layout) => {
-                                let entries = properties_layout
-                                    .keys()
-                                    .iter()
-                                    .zip(properties.fields().iter().map(Expression::clone));
-                                Some(prototype.apply(entries))
+                                let keys = properties_layout.keys().iter();
+                                let values = properties.fields().iter().map(Expression::clone);
+                                let has_unresolved_fields = match eager {
+                                    VarArgs::Lazy => false,
+                                    VarArgs::Eager => properties
+                                        .fields()
+                                        .iter()
+                                        .any(|property| property.is_reducible()),
+                                };
+                                if has_unresolved_fields {
+                                    Ok(Expression::new(Term::Application(ApplicationTerm::new(
+                                        constructor,
+                                        keys.map(|key| Expression::new(Term::Value(key.clone())))
+                                            .chain(values)
+                                            .collect(),
+                                    ))))
+                                } else {
+                                    let entries = prototype.apply(keys.zip(values));
+                                    match entries {
+                                        Some(entries) => Ok(Expression::new(Term::Struct(entries))),
+                                        _ => Err(format!("{}", constructor)),
+                                    }
+                                }
                             }
-                            None => None,
+                            _ => Err(format!("{}", constructor)),
                         },
-                        _ => None,
+                        _ => Err(format!("{}", constructor)),
                     },
+                    _ => Err(format!("{}", constructor)),
                 };
                 match result {
-                    Some(result) => result,
-                    None => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
+                    Ok(result) => result,
+                    Err(error) => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                         SignalType::Error,
                         vec![ValueTerm::String(format!(
                             "Invalid constructor call: {}",
-                            constructor,
+                            error,
                         ))],
                     )))),
                 }
@@ -174,6 +192,61 @@ impl ToString {
                     "Expected printable value, received {}",
                     operand,
                 ))],
+            )))),
+        }
+    }
+}
+
+pub(crate) fn flatten_struct() -> Expression {
+    Expression::new(Term::Native(NativeFunction::new(
+        FlattenStruct::hash(),
+        FlattenStruct::arity(),
+        FlattenStruct::apply,
+    )))
+}
+struct FlattenStruct {}
+impl FlattenStruct {
+    fn hash() -> HashId {
+        hash_object(TypeId::of::<Self>())
+    }
+    fn arity() -> Arity {
+        Arity::from(1, 0, None)
+    }
+    fn apply(args: Vec<Expression>) -> Expression {
+        if args.len() != 1 {
+            return Expression::new(Term::Signal(SignalTerm::new(Signal::new(
+                SignalType::Error,
+                vec![ValueTerm::String(format!(
+                    "Expected 1 argument, received {}",
+                    args.len(),
+                ))],
+            ))));
+        }
+        let mut args = args.into_iter();
+        let input = args.next().unwrap();
+        let result = match input.value() {
+            Term::Struct(input) => match input.prototype() {
+                Some(prototype) => Ok(Expression::new(Term::Application(ApplicationTerm::new(
+                    Expression::new(Term::StructConstructor(VarArgs::Eager, prototype.clone())),
+                    prototype
+                        .keys()
+                        .iter()
+                        .map(|key| Expression::new(Term::Value(key.clone())))
+                        .chain(input.fields().iter().map(Expression::clone))
+                        .collect(),
+                )))),
+                None => Err(format!(
+                    "Expected named struct fields, received anonymous struct {}",
+                    input,
+                )),
+            },
+            _ => Err(format!("Expected <struct>, received {}", input)),
+        };
+        match result {
+            Ok(result) => result,
+            Err(error) => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
+                SignalType::Error,
+                vec![ValueTerm::String(error)],
             )))),
         }
     }

@@ -290,6 +290,9 @@ impl Expression {
     pub fn has_free_variables(&self) -> bool {
         self.capture_depth > 0
     }
+    pub fn is_reducible(&self) -> bool {
+        !self.is_reduced && self.value.is_reducible()
+    }
     pub fn compile(&self, cache: &mut EvaluationCache) -> Expression {
         self.optimize(cache)
             .unwrap_or_else(|| Expression::clone(self))
@@ -512,7 +515,7 @@ pub enum Term {
     Native(NativeFunction),
     Struct(StructTerm),
     Enum(EnumTerm),
-    StructConstructor(StructPrototype),
+    StructConstructor(VarArgs, StructPrototype),
     EnumConstructor(EnumVariantPrototype),
     Collection(CollectionTerm),
     Signal(SignalTerm),
@@ -529,7 +532,16 @@ impl Hashable for Term {
             Self::Native(term) => prefix_hash(6, term.hash()),
             Self::Struct(term) => prefix_hash(7, term.hash()),
             Self::Enum(term) => prefix_hash(8, term.hash()),
-            Self::StructConstructor(term) => prefix_hash(9, term.hash()),
+            Self::StructConstructor(eager, prototype) => prefix_hash(
+                9,
+                prefix_hash(
+                    match eager {
+                        VarArgs::Lazy => 0,
+                        VarArgs::Eager => 1,
+                    },
+                    prototype.hash(),
+                ),
+            ),
             Self::EnumConstructor(term) => prefix_hash(10, term.hash()),
             Self::Collection(term) => prefix_hash(11, term.hash()),
             Self::Signal(term) => prefix_hash(12, term.hash()),
@@ -637,7 +649,7 @@ impl fmt::Display for Term {
             Self::Native(term) => fmt::Display::fmt(term, f),
             Self::Struct(term) => fmt::Display::fmt(term, f),
             Self::Enum(term) => fmt::Display::fmt(term, f),
-            Self::StructConstructor(term) => fmt::Display::fmt(term, f),
+            Self::StructConstructor(_, term) => fmt::Display::fmt(term, f),
             Self::EnumConstructor(term) => fmt::Display::fmt(term, f),
             Self::Collection(term) => fmt::Display::fmt(term, f),
             Self::Signal(term) => fmt::Display::fmt(term, f),
@@ -1077,7 +1089,7 @@ impl Rewritable for ApplicationTerm {
             Term::Lambda(target) => Some(target.arity),
             Term::Builtin(target) => Some(target.arity()),
             Term::Native(target) => Some(target.arity),
-            Term::StructConstructor(target) => Some(target.arity()),
+            Term::StructConstructor(eager, prototype) => Some(prototype.arity(eager)),
             Term::EnumConstructor(target) => Some(Arity::from(0, target.arity, None)),
             _ => None,
         };
@@ -1145,10 +1157,7 @@ impl Reducible for ApplicationTerm {
             Term::Lambda(target) => Some((target.arity, false)),
             Term::Builtin(target) => Some((target.arity(), true)),
             Term::Native(target) => Some((target.arity, true)),
-            Term::StructConstructor(target) => {
-                let num_keys = target.keys.len() as u8;
-                Some((Arity::from(num_keys, num_keys, None), false))
-            }
+            Term::StructConstructor(eager, target) => Some((target.arity(eager), false)),
             Term::EnumConstructor(target) => Some((Arity::from(0, target.arity, None), false)),
             _ => None,
         };
@@ -1161,8 +1170,8 @@ impl Reducible for ApplicationTerm {
                         Term::Lambda(target) => Ok(target.apply(args.into_iter(), cache)),
                         Term::Builtin(target) => Ok(target.apply(args.into_iter())),
                         Term::Native(target) => Ok(target.apply(args.into_iter())),
-                        Term::StructConstructor(target) => {
-                            let (keys, values) = args.split_at(arity.eager());
+                        Term::StructConstructor(_, target) => {
+                            let (keys, values) = args.split_at(args.len() / 2);
                             let keys = keys
                                 .iter()
                                 .map(|key| match key.value() {
@@ -1170,13 +1179,16 @@ impl Reducible for ApplicationTerm {
                                     _ => None,
                                 })
                                 .collect::<Option<Vec<_>>>();
-                            match keys {
-                                None => Err(args),
-                                Some(keys) => Ok(target.apply(
+                            let result = keys.and_then(|keys| {
+                                target.apply(
                                     keys.into_iter()
                                         .zip(values.iter().map(Expression::clone))
                                         .map(|(key, value)| (key, value)),
-                                )),
+                                )
+                            });
+                            match result {
+                                Some(result) => Ok(Expression::new(Term::Struct(result))),
+                                None => Err(args),
                             }
                         }
                         Term::EnumConstructor(target) => Ok(target.apply(args.into_iter())),
@@ -1400,14 +1412,17 @@ impl StructPrototype {
     pub fn keys(&self) -> &[ValueTerm] {
         &self.keys
     }
-    pub fn arity(&self) -> Arity {
+    fn arity(&self, eager: &VarArgs) -> Arity {
         let num_keys = self.keys.len() as u8;
-        Arity::from(num_keys, num_keys, None)
+        match eager {
+            VarArgs::Lazy => Arity::from(num_keys, num_keys, None),
+            VarArgs::Eager => Arity::from(num_keys * 2, 0, None),
+        }
     }
     pub fn apply<'a>(
         &self,
         fields: impl IntoIterator<Item = (&'a ValueTerm, Expression)> + ExactSizeIterator,
-    ) -> Expression {
+    ) -> Option<StructTerm> {
         let fields = fields.into_iter().collect::<Vec<_>>();
         let has_correctly_ordered_keys = fields.len() >= self.keys.len()
             && fields
@@ -1415,11 +1430,13 @@ impl StructPrototype {
                 .zip(self.keys.iter())
                 .all(|((id, _), key)| id.hash() == key.hash());
         let fields = if has_correctly_ordered_keys {
-            fields
-                .into_iter()
-                .take(self.keys.len())
-                .map(|(_, value)| value)
-                .collect()
+            Some(
+                fields
+                    .into_iter()
+                    .take(self.keys.len())
+                    .map(|(_, value)| value)
+                    .collect::<Vec<_>>(),
+            )
         } else {
             let mut remaining_fields = fields;
             self.keys
@@ -1427,14 +1444,13 @@ impl StructPrototype {
                 .map(|key| {
                     let index = remaining_fields
                         .iter()
-                        .position(|(id, _)| id.hash() == key.hash())
-                        .expect("Invalid constructor call");
+                        .position(|(id, _)| id.hash() == key.hash())?;
                     let (_, value) = remaining_fields.remove(index);
-                    value
+                    Some(value)
                 })
-                .collect()
-        };
-        Expression::new(Term::Struct(StructTerm::new(Some(self.clone()), fields)))
+                .collect::<Option<Vec<_>>>()
+        }?;
+        Some(StructTerm::new(Some(self.clone()), fields))
     }
 }
 impl fmt::Display for StructPrototype {

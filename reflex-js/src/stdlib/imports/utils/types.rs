@@ -1,38 +1,33 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use std::{any::TypeId, iter::once};
+use std::any::TypeId;
 
 use reflex::{
     core::{
-        ApplicationTerm, Arity, EnumConstructorArity, EnumIndex, EnumVariantPrototype, Expression,
-        LambdaTerm, NativeFunction, Signal, SignalTerm, StaticVariableTerm, StructTerm, Term,
-        VarArgs, VariableTerm,
+        ApplicationTerm, Arity, EnumConstructorArity, EnumIndex, EnumTerm, EnumVariantPrototype,
+        Expression, LambdaTerm, NativeFunction, Signal, SignalTerm, StaticVariableTerm, StructTerm,
+        Term, VarArgs, VariableTerm,
     },
-    hash::{hash_object, HashId},
+    hash::{hash_object, HashId, Hashable},
     stdlib::{signal::SignalType, value::ValueTerm},
 };
 
-use crate::stdlib::imports::create_struct;
+use crate::{builtins::flatten_struct, stdlib::imports::create_struct};
 
 pub(crate) fn import_types() -> Expression {
     let null = Expression::new(Term::Value(ValueTerm::Null));
     create_struct(vec![
+        ("Boolean", Expression::clone(&null)),
+        ("Int", Expression::clone(&null)),
+        ("Float", Expression::clone(&null)),
+        ("String", Expression::clone(&null)),
         (
-            "Scalar",
-            create_struct(vec![
-                ("Boolean", Expression::clone(&null)),
-                ("Int", Expression::clone(&null)),
-                ("Float", Expression::clone(&null)),
-                ("String", Expression::clone(&null)),
-            ]),
-        ),
-        (
-            "Struct",
+            "Shape",
             Expression::new(Term::Native(NativeFunction::new(
-                StructTypeConstructor::hash(),
-                StructTypeConstructor::arity(),
-                StructTypeConstructor::apply,
+                StructTypeFactory::hash(),
+                StructTypeFactory::arity(),
+                StructTypeFactory::apply,
             ))),
         ),
         (
@@ -41,29 +36,25 @@ pub(crate) fn import_types() -> Expression {
                 Arity::from(1, 0, None),
                 Expression::new(Term::Application(ApplicationTerm::new(
                     Expression::new(Term::Native(NativeFunction::new(
-                        StructFlattener::hash(),
-                        StructFlattener::arity(),
-                        StructFlattener::apply,
+                        EnumTypeFactory::hash(),
+                        EnumTypeFactory::arity(),
+                        EnumTypeFactory::apply,
                     ))),
-                    vec![
-                        Expression::new(Term::Variable(VariableTerm::Static(
+                    vec![Expression::new(Term::Application(ApplicationTerm::new(
+                        flatten_struct(),
+                        vec![Expression::new(Term::Variable(VariableTerm::Static(
                             StaticVariableTerm::new(0),
-                        ))),
-                        Expression::new(Term::Native(NativeFunction::new(
-                            EnumTypeConstructor::hash(),
-                            EnumTypeConstructor::arity(),
-                            EnumTypeConstructor::apply,
-                        ))),
-                    ],
+                        )))],
+                    )))],
                 ))),
             ))),
         ),
         (
             "EnumVariant",
             Expression::new(Term::Native(NativeFunction::new(
-                EnumVariantConstructor::hash(),
-                EnumVariantConstructor::arity(),
-                EnumVariantConstructor::apply,
+                EnumVariantFactory::hash(),
+                EnumVariantFactory::arity(),
+                EnumVariantFactory::apply,
             ))),
         ),
         (
@@ -93,8 +84,8 @@ pub(crate) fn import_types() -> Expression {
     ])
 }
 
-struct StructTypeConstructor {}
-impl StructTypeConstructor {
+struct StructTypeFactory {}
+impl StructTypeFactory {
     fn hash() -> HashId {
         hash_object(TypeId::of::<Self>())
     }
@@ -113,78 +104,34 @@ impl StructTypeConstructor {
         }
         let mut args = args.into_iter();
         let shape = args.next().unwrap();
-        match shape.value() {
+        let result = match shape.value() {
             Term::Struct(shape) => match shape.prototype() {
-                Some(prototype) => Expression::new(Term::StructConstructor(prototype.clone())),
-                None => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
-                    SignalType::Error,
-                    vec![ValueTerm::String(format!(
-                        "Expected named struct shape definition fields, received, {}",
-                        shape,
-                    ))],
-                )))),
-            },
-            _ => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
-                SignalType::Error,
-                vec![ValueTerm::String(format!(
-                    "Expected struct shape definition, received {}",
-                    shape,
-                ))],
-            )))),
-        }
-    }
-}
-
-struct StructFlattener {}
-impl StructFlattener {
-    fn hash() -> HashId {
-        hash_object(TypeId::of::<Self>())
-    }
-    fn arity() -> Arity {
-        Arity::from(1, 1, None)
-    }
-    fn apply(args: Vec<Expression>) -> Expression {
-        if args.len() != 2 {
-            return Expression::new(Term::Signal(SignalTerm::new(Signal::new(
-                SignalType::Error,
-                vec![ValueTerm::String(format!(
-                    "Expected 2 arguments, received {}",
-                    args.len(),
-                ))],
-            ))));
-        }
-        let mut args = args.into_iter();
-        let input = args.next().unwrap();
-        let transform = args.next().unwrap();
-        match input.value() {
-            Term::Struct(input) => match input.prototype() {
-                Some(prototype) => Expression::new(Term::Application(ApplicationTerm::new(
-                    transform,
-                    once(Expression::new(Term::StructConstructor(prototype.clone())))
-                        .chain(input.fields().into_iter().map(Expression::clone))
-                        .collect(),
+                Some(prototype) => Ok(Expression::new(Term::StructConstructor(
+                    VarArgs::Lazy,
+                    prototype.clone(),
                 ))),
-                None => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
-                    SignalType::Error,
-                    vec![ValueTerm::String(format!(
-                        "Expected named struct fields, received anonymous struct {}",
-                        input,
-                    ))],
-                )))),
+                None => Err(format!(
+                    "Expected named struct shape definition fields, received, {}",
+                    shape,
+                )),
             },
-            _ => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
+            _ => Err(format!(
+                "Expected struct shape definition, received {}",
+                shape,
+            )),
+        };
+        match result {
+            Ok(result) => result,
+            Err(error) => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                 SignalType::Error,
-                vec![ValueTerm::String(format!(
-                    "Expected <struct>, received {}",
-                    input,
-                ))],
+                vec![ValueTerm::String(error)],
             )))),
         }
     }
 }
 
-struct EnumTypeConstructor {}
-impl EnumTypeConstructor {
+struct EnumTypeFactory {}
+impl EnumTypeFactory {
     fn hash() -> HashId {
         hash_object(TypeId::of::<Self>())
     }
@@ -203,52 +150,61 @@ impl EnumTypeConstructor {
         }
         let mut args = args.into_iter();
         let shape = args.next().unwrap();
-        match shape.value() {
-            Term::StructConstructor(keys) => {
-                let num_variants = args.len();
-                let variants = args.enumerate().fold(
-                    Ok(Vec::with_capacity(num_variants)),
-                    |results, (index, variant)| {
-                        let mut variants = results?;
-                        match variant.value() {
-                            Term::EnumConstructor(prototype) => {
-                                variants.push(Expression::new(Term::EnumConstructor(
-                                    EnumVariantPrototype::new(
-                                        index as EnumIndex,
-                                        prototype.arity(),
-                                    ),
-                                )));
-                                Ok(variants)
-                            }
-                            _ => Err(format!(
-                                "Expected enum variant definition, received {}",
-                                variant
-                            )),
-                        }
-                    },
-                );
-                match variants {
-                    Ok(variants) => {
-                        Expression::new(Term::Struct(StructTerm::new(Some(keys.clone()), variants)))
+        let result = match shape.value() {
+            Term::Struct(shape) => match shape.prototype() {
+                Some(prototype) => {
+                    let variants = shape
+                        .fields()
+                        .iter()
+                        .enumerate()
+                        .map(|(index, variant)| parse_enum_variant(variant, index as EnumIndex))
+                        .collect::<Result<Vec<_>, _>>();
+                    match variants {
+                        Ok(variants) => Ok(Expression::new(Term::Struct(StructTerm::new(
+                            Some(prototype.clone()),
+                            variants,
+                        )))),
+                        Err(error) => Err(error),
                     }
-                    Err(error) => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
-                        SignalType::Error,
-                        vec![ValueTerm::String(error)],
-                    )))),
                 }
-            }
-            _ => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
+                None => Err(format!("Expected enum definition, received {}", shape)),
+            },
+            _ => Err(format!("Expected enum definition, received {}", shape,)),
+        };
+        match result {
+            Ok(result) => result,
+            Err(error) => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                 SignalType::Error,
-                vec![ValueTerm::String(format!(
-                    "Expected enum definition, received {}",
-                    shape,
-                ))],
+                vec![ValueTerm::String(error)],
             )))),
         }
     }
 }
-struct EnumVariantConstructor {}
-impl EnumVariantConstructor {
+fn parse_enum_variant(variant: &Expression, index: EnumIndex) -> Result<Expression, String> {
+    match variant.value() {
+        Term::EnumConstructor(variant) => Ok(Expression::new(Term::EnumConstructor(
+            EnumVariantPrototype::new(index, variant.arity()),
+        ))),
+        Term::Native(term) if term.hash() == EnumVariantFactory::hash() => Ok(Expression::new(
+            Term::Enum(EnumTerm::new(index, Vec::new())),
+        )),
+        Term::Value(value)
+            if match value {
+                ValueTerm::String(_) | ValueTerm::Int(_) | ValueTerm::Float(_) => true,
+                _ => false,
+            } =>
+        {
+            Ok(Expression::clone(variant))
+        }
+        _ => Err(format!(
+            "Expected enum variant definition, received {}",
+            variant
+        )),
+    }
+}
+
+struct EnumVariantFactory {}
+impl EnumVariantFactory {
     fn hash() -> HashId {
         hash_object(TypeId::of::<Self>())
     }
@@ -260,5 +216,401 @@ impl EnumVariantConstructor {
         Expression::new(Term::EnumConstructor(EnumVariantPrototype::new(
             0, num_args,
         )))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{parse, stdlib::builtin_imports, Env};
+    use reflex::{
+        cache::EvaluationCache,
+        core::{
+            ApplicationTerm, DependencyList, DynamicState, EnumTerm, EnumVariantPrototype,
+            EvaluationResult, Expression, StructPrototype, StructTerm, Term, VarArgs,
+        },
+        stdlib::{
+            builtin::BuiltinTerm,
+            value::{StringValue, ValueTerm},
+        },
+    };
+
+    #[test]
+    fn struct_types() {
+        let env = Env::new().with_imports(builtin_imports());
+        let expression = parse(
+            "
+            import { Types } from 'reflex::utils';
+            export default Types.Shape({
+                foo: Types.Int,
+                bar: Types.Int,
+                baz: Types.Int,
+            });
+        ",
+            &env,
+        )
+        .unwrap();
+        let result = expression.evaluate(&DynamicState::new(), &mut EvaluationCache::new());
+        assert_eq!(
+            result,
+            EvaluationResult::new(
+                Ok(Expression::new(Term::StructConstructor(
+                    VarArgs::Lazy,
+                    StructPrototype::new(vec![
+                        ValueTerm::String(StringValue::from("foo")),
+                        ValueTerm::String(StringValue::from("bar")),
+                        ValueTerm::String(StringValue::from("baz")),
+                    ])
+                ))),
+                DependencyList::empty(),
+            ),
+        );
+        let expression = parse(
+            "
+            import { Types } from 'reflex::utils';
+            const Foo = Types.Shape({
+                foo: Types.Int,
+                bar: Types.Int,
+                baz: Types.Int,
+            });
+            export default new Foo({ foo: 3, bar: 4, baz: 5 });
+        ",
+            &env,
+        )
+        .unwrap();
+        let result = expression.evaluate(&DynamicState::new(), &mut EvaluationCache::new());
+        assert_eq!(
+            result,
+            EvaluationResult::new(
+                Ok(Expression::new(Term::Struct(StructTerm::new(
+                    Some(StructPrototype::new(vec![
+                        ValueTerm::String(StringValue::from("foo")),
+                        ValueTerm::String(StringValue::from("bar")),
+                        ValueTerm::String(StringValue::from("baz")),
+                    ])),
+                    vec![
+                        Expression::new(Term::Value(ValueTerm::Float(3.0))),
+                        Expression::new(Term::Value(ValueTerm::Float(4.0))),
+                        Expression::new(Term::Value(ValueTerm::Float(5.0))),
+                    ],
+                )))),
+                DependencyList::empty(),
+            ),
+        );
+        let expression = parse(
+            "
+            import { Types } from 'reflex::utils';
+            const Foo = Types.Shape({
+                foo: Types.Int,
+                bar: Types.Int,
+                baz: Types.Int,
+            });
+            export default new Foo({ baz: 5, bar: 4, foo: 3 });
+        ",
+            &env,
+        )
+        .unwrap();
+        let result = expression.evaluate(&DynamicState::new(), &mut EvaluationCache::new());
+        assert_eq!(
+            result,
+            EvaluationResult::new(
+                Ok(Expression::new(Term::Struct(StructTerm::new(
+                    Some(StructPrototype::new(vec![
+                        ValueTerm::String(StringValue::from("foo")),
+                        ValueTerm::String(StringValue::from("bar")),
+                        ValueTerm::String(StringValue::from("baz")),
+                    ])),
+                    vec![
+                        Expression::new(Term::Value(ValueTerm::Float(3.0))),
+                        Expression::new(Term::Value(ValueTerm::Float(4.0))),
+                        Expression::new(Term::Value(ValueTerm::Float(5.0))),
+                    ],
+                )))),
+                DependencyList::empty(),
+            ),
+        );
+        let expression = parse(
+            "
+            import { Types } from 'reflex::utils';
+            const Foo = Types.Shape({
+                foo: Types.Int,
+                bar: Types.Int,
+                baz: Types.Int,
+            });
+            export default new Foo({ foo: 3 + 1, bar: 4 + 1, baz: 5 + 1 });
+        ",
+            &env,
+        )
+        .unwrap();
+        let result = expression.evaluate(&DynamicState::new(), &mut EvaluationCache::new());
+        assert_eq!(
+            result,
+            EvaluationResult::new(
+                Ok(Expression::new(Term::Struct(StructTerm::new(
+                    Some(StructPrototype::new(vec![
+                        ValueTerm::String(StringValue::from("foo")),
+                        ValueTerm::String(StringValue::from("bar")),
+                        ValueTerm::String(StringValue::from("baz")),
+                    ])),
+                    vec![
+                        Expression::new(Term::Application(ApplicationTerm::new(
+                            Expression::new(Term::Builtin(BuiltinTerm::Add)),
+                            vec![
+                                Expression::new(Term::Value(ValueTerm::Float(3.0))),
+                                Expression::new(Term::Value(ValueTerm::Float(1.0))),
+                            ],
+                        ))),
+                        Expression::new(Term::Application(ApplicationTerm::new(
+                            Expression::new(Term::Builtin(BuiltinTerm::Add)),
+                            vec![
+                                Expression::new(Term::Value(ValueTerm::Float(4.0))),
+                                Expression::new(Term::Value(ValueTerm::Float(1.0))),
+                            ],
+                        ))),
+                        Expression::new(Term::Application(ApplicationTerm::new(
+                            Expression::new(Term::Builtin(BuiltinTerm::Add)),
+                            vec![
+                                Expression::new(Term::Value(ValueTerm::Float(5.0))),
+                                Expression::new(Term::Value(ValueTerm::Float(1.0))),
+                            ],
+                        ))),
+                    ],
+                )))),
+                DependencyList::empty(),
+            ),
+        );
+        let expression = parse(
+            "
+            import { Types } from 'reflex::utils';
+            const Foo = Types.Shape({
+                foo: Types.Int,
+                bar: Types.Int,
+                baz: Types.Int,
+            });
+            export default new Foo({ foo: 3, bar: 4, baz: 5 }).bar;
+        ",
+            &env,
+        )
+        .unwrap();
+        let result = expression.evaluate(&DynamicState::new(), &mut EvaluationCache::new());
+        assert_eq!(
+            result,
+            EvaluationResult::new(
+                Ok(Expression::new(Term::Value(ValueTerm::Float(4.0)))),
+                DependencyList::empty(),
+            ),
+        );
+    }
+
+    #[test]
+    fn static_enum_types() {
+        let env = Env::new().with_imports(builtin_imports());
+        let expression = parse(
+            "
+            import { Types } from 'reflex::utils';
+            export default Types.Enum({
+                Foo: \"FOO\",
+                Bar: \"BAR\",
+                Baz: \"BAZ\",
+            });
+        ",
+            &env,
+        )
+        .unwrap();
+        let result = expression.evaluate(&DynamicState::new(), &mut EvaluationCache::new());
+        assert_eq!(
+            result,
+            EvaluationResult::new(
+                Ok(Expression::new(Term::Struct(StructTerm::new(
+                    Some(StructPrototype::new(vec![
+                        ValueTerm::String(StringValue::from("Foo")),
+                        ValueTerm::String(StringValue::from("Bar")),
+                        ValueTerm::String(StringValue::from("Baz")),
+                    ])),
+                    vec![
+                        Expression::new(Term::Value(ValueTerm::String(StringValue::from("FOO")))),
+                        Expression::new(Term::Value(ValueTerm::String(StringValue::from("BAR")))),
+                        Expression::new(Term::Value(ValueTerm::String(StringValue::from("BAZ")))),
+                    ],
+                )))),
+                DependencyList::empty(),
+            ),
+        );
+        let expression = parse(
+            "
+            import { Types } from 'reflex::utils';
+            export default Types.Enum({
+                Foo: \"FOO\",
+                Bar: \"BAR\",
+                Baz: \"BAZ\",
+            }).Foo;
+        ",
+            &env,
+        )
+        .unwrap();
+        let result = expression.evaluate(&DynamicState::new(), &mut EvaluationCache::new());
+        assert_eq!(
+            result,
+            EvaluationResult::new(
+                Ok(Expression::new(Term::Value(ValueTerm::String(
+                    StringValue::from("FOO")
+                )))),
+                DependencyList::empty(),
+            ),
+        );
+        let expression = parse(
+            "
+            import { Types } from 'reflex::utils';
+            export default Types.Enum({
+                Foo: \"FOO\",
+                Bar: \"BAR\",
+                Baz: \"BAZ\",
+            }).Baz;
+        ",
+            &env,
+        )
+        .unwrap();
+        let result = expression.evaluate(&DynamicState::new(), &mut EvaluationCache::new());
+        assert_eq!(
+            result,
+            EvaluationResult::new(
+                Ok(Expression::new(Term::Value(ValueTerm::String(
+                    StringValue::from("BAZ")
+                )))),
+                DependencyList::empty(),
+            ),
+        );
+    }
+
+    #[test]
+    fn parameterized_enum_types() {
+        let env = Env::new().with_imports(builtin_imports());
+        let expression = parse(
+            "
+            import { Types } from 'reflex::utils';
+            export default Types.Enum({
+                Static: Types.EnumVariant,
+                Empty: Types.EnumVariant(),
+                Single: Types.EnumVariant(Types.Int),
+                Multiple: Types.EnumVariant(Types.Int, Types.Int, Types.Int),
+            });
+        ",
+            &env,
+        )
+        .unwrap();
+        let result = expression.evaluate(&DynamicState::new(), &mut EvaluationCache::new());
+        assert_eq!(
+            result,
+            EvaluationResult::new(
+                Ok(Expression::new(Term::Struct(StructTerm::new(
+                    Some(StructPrototype::new(vec![
+                        ValueTerm::String(StringValue::from("Static")),
+                        ValueTerm::String(StringValue::from("Empty")),
+                        ValueTerm::String(StringValue::from("Single")),
+                        ValueTerm::String(StringValue::from("Multiple")),
+                    ])),
+                    vec![
+                        Expression::new(Term::Enum(EnumTerm::new(0, Vec::new()))),
+                        Expression::new(Term::EnumConstructor(EnumVariantPrototype::new(1, 0))),
+                        Expression::new(Term::EnumConstructor(EnumVariantPrototype::new(2, 1))),
+                        Expression::new(Term::EnumConstructor(EnumVariantPrototype::new(3, 3))),
+                    ],
+                )))),
+                DependencyList::empty(),
+            ),
+        );
+        let expression = parse(
+            "
+            import { Types } from 'reflex::utils';
+            export default Types.Enum({
+                Static: Types.EnumVariant,
+                Empty: Types.EnumVariant(),
+                Single: Types.EnumVariant(Types.Int),
+                Multiple: Types.EnumVariant(Types.Int, Types.Int, Types.Int),
+            }).Static;
+        ",
+            &env,
+        )
+        .unwrap();
+        let result = expression.evaluate(&DynamicState::new(), &mut EvaluationCache::new());
+        assert_eq!(
+            result,
+            EvaluationResult::new(
+                Ok(Expression::new(Term::Enum(EnumTerm::new(0, Vec::new())))),
+                DependencyList::empty(),
+            ),
+        );
+        let expression = parse(
+            "
+            import { Types } from 'reflex::utils';
+            export default Types.Enum({
+                Static: Types.EnumVariant,
+                Empty: Types.EnumVariant(),
+                Single: Types.EnumVariant(Types.Int),
+                Multiple: Types.EnumVariant(Types.Int, Types.Int, Types.Int),
+            }).Empty();
+        ",
+            &env,
+        )
+        .unwrap();
+        let result = expression.evaluate(&DynamicState::new(), &mut EvaluationCache::new());
+        assert_eq!(
+            result,
+            EvaluationResult::new(
+                Ok(Expression::new(Term::Enum(EnumTerm::new(1, Vec::new())))),
+                DependencyList::empty(),
+            ),
+        );
+        let expression = parse(
+            "
+            import { Types } from 'reflex::utils';
+            export default Types.Enum({
+                Static: Types.EnumVariant,
+                Empty: Types.EnumVariant(),
+                Single: Types.EnumVariant(Types.Int),
+                Multiple: Types.EnumVariant(Types.Int, Types.Int, Types.Int),
+            }).Single(3);
+        ",
+            &env,
+        )
+        .unwrap();
+        let result = expression.evaluate(&DynamicState::new(), &mut EvaluationCache::new());
+        assert_eq!(
+            result,
+            EvaluationResult::new(
+                Ok(Expression::new(Term::Enum(EnumTerm::new(
+                    2,
+                    vec![Expression::new(Term::Value(ValueTerm::Float(3.0)))],
+                )))),
+                DependencyList::empty(),
+            ),
+        );
+        let expression = parse(
+            "
+            import { Types } from 'reflex::utils';
+            export default Types.Enum({
+                Static: Types.EnumVariant,
+                Empty: Types.EnumVariant(),
+                Single: Types.EnumVariant(Types.Int),
+                Multiple: Types.EnumVariant(Types.Int, Types.Int, Types.Int),
+            }).Multiple(3, 4, 5);
+        ",
+            &env,
+        )
+        .unwrap();
+        let result = expression.evaluate(&DynamicState::new(), &mut EvaluationCache::new());
+        assert_eq!(
+            result,
+            EvaluationResult::new(
+                Ok(Expression::new(Term::Enum(EnumTerm::new(
+                    3,
+                    vec![
+                        Expression::new(Term::Value(ValueTerm::Float(3.0))),
+                        Expression::new(Term::Value(ValueTerm::Float(4.0))),
+                        Expression::new(Term::Value(ValueTerm::Float(5.0))),
+                    ],
+                )))),
+                DependencyList::empty(),
+            ),
+        );
     }
 }
