@@ -29,7 +29,25 @@ impl BuiltinFunction for Entries {
         let mut args = args.into_iter();
         let target = args.next().unwrap();
         let result = match target.value() {
-            Term::Collection(collection) => match collection {
+            Term::Struct(target) => match target.prototype() {
+                Some(prototype) => {
+                    let keys = prototype.keys();
+                    let values = target.fields();
+                    Some(Expression::new(Term::Collection(CollectionTerm::Vector(
+                        VectorTerm::new(keys.iter().zip(values.iter()).map(|(key, value)| {
+                            Expression::new(Term::Struct(StructTerm::new(
+                                None,
+                                vec![
+                                    Expression::new(Term::Value(key.clone())),
+                                    Expression::clone(value),
+                                ],
+                            )))
+                        })),
+                    ))))
+                }
+                _ => None,
+            },
+            Term::Collection(target) => match target {
                 CollectionTerm::HashMap(target) => Some(Expression::new(Term::Collection(
                     CollectionTerm::Vector(VectorTerm::new(target.iterate())),
                 ))),
@@ -80,7 +98,7 @@ mod tests {
         cache::EvaluationCache,
         core::{
             ApplicationTerm, DependencyList, DynamicState, EvaluationResult, Expression,
-            StructTerm, Term,
+            StructPrototype, StructTerm, Term,
         },
         stdlib::{
             builtin::BuiltinTerm,
@@ -88,6 +106,65 @@ mod tests {
             value::{StringValue, ValueTerm},
         },
     };
+
+    #[test]
+    fn get_struct_entries() {
+        let mut cache = EvaluationCache::new();
+        let state = DynamicState::new();
+        let expression = Expression::new(Term::Application(ApplicationTerm::new(
+            Expression::new(Term::Builtin(BuiltinTerm::Entries)),
+            vec![Expression::new(Term::Struct(StructTerm::new(
+                Some(StructPrototype::new(vec![
+                    ValueTerm::String(StringValue::from("foo")),
+                    ValueTerm::String(StringValue::from("bar")),
+                    ValueTerm::String(StringValue::from("baz")),
+                ])),
+                vec![
+                    (Expression::new(Term::Value(ValueTerm::Int(3)))),
+                    (Expression::new(Term::Value(ValueTerm::Int(4)))),
+                    (Expression::new(Term::Value(ValueTerm::Int(5)))),
+                ],
+            )))],
+        )));
+        let result = expression.evaluate(&state, &mut cache);
+        assert_eq!(
+            result,
+            EvaluationResult::new(
+                Ok(Expression::new(Term::Collection(CollectionTerm::Vector(
+                    VectorTerm::new(vec![
+                        Expression::new(Term::Struct(StructTerm::new(
+                            None,
+                            vec![
+                                Expression::new(Term::Value(ValueTerm::String(StringValue::from(
+                                    "foo"
+                                )))),
+                                Expression::new(Term::Value(ValueTerm::Int(3))),
+                            ]
+                        ))),
+                        Expression::new(Term::Struct(StructTerm::new(
+                            None,
+                            vec![
+                                Expression::new(Term::Value(ValueTerm::String(StringValue::from(
+                                    "bar"
+                                )))),
+                                Expression::new(Term::Value(ValueTerm::Int(4))),
+                            ]
+                        ))),
+                        Expression::new(Term::Struct(StructTerm::new(
+                            None,
+                            vec![
+                                Expression::new(Term::Value(ValueTerm::String(StringValue::from(
+                                    "baz"
+                                )))),
+                                Expression::new(Term::Value(ValueTerm::Int(5))),
+                            ]
+                        ))),
+                    ]),
+                )))),
+                DependencyList::empty(),
+            ),
+        );
+    }
 
     #[test]
     fn get_hashmap_entries() {
