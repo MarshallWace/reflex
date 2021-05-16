@@ -34,7 +34,7 @@ fn import_http_fetch() -> Expression {
                 Expression::new(Term::Application(ApplicationTerm::new(
                     Expression::new(Term::Builtin(BuiltinTerm::Effect)),
                     vec![
-                        Expression::new(Term::Value(ValueTerm::String(StringValue::from("fetch")))),
+                        Expression::new(Term::Value(ValueTerm::String(StringValue::from("reflex::http::fetch")))),
                         Expression::new(Term::Application(ApplicationTerm::new(
                             Expression::new(Term::Builtin(BuiltinTerm::Get)),
                             vec![
