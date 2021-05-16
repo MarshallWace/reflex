@@ -4,20 +4,24 @@
 use std::{convert::Infallible, net::SocketAddr, sync::Arc};
 
 use hyper::{
+    header::HeaderValue,
     service::{make_service_fn, service_fn},
     Body, Request, Response, Server, StatusCode,
 };
-use reflex::core::Expression;
-use reflex_js::{parse, stdlib::json_stringify, Env};
+use reflex::{
+    core::{Expression, Term},
+    query::{query, QueryShape},
+};
+use reflex_js::stdlib::json_stringify;
 use reflex_runtime::{Runtime, SignalHandler, SubscriptionResult};
+mod utils;
+use utils::graphql::{parse_graphql_query, QueryTransform};
 
 pub async fn run(
-    env: Env,
+    root: Expression,
     signal_handlers: impl IntoIterator<Item = (&'static str, SignalHandler)>,
     address: &SocketAddr,
 ) -> Result<(), String> {
-    let env = Arc::new(env);
-
     // TODO: Establish sensible defaults for channel buffer sizes
     let command_buffer_size = 32;
     let result_buffer_size = 32;
@@ -27,27 +31,27 @@ pub async fn run(
 
     let server = Server::bind(&address).serve(make_service_fn(|_conn| {
         let runtime = Arc::clone(&runtime);
-        let env = Arc::clone(&env);
+        let root = Expression::clone(&root);
         async move {
             Ok::<_, Infallible>(service_fn(move |req| {
                 let runtime = Arc::clone(&runtime);
-                let env = Arc::clone(&env);
+                let root = Expression::clone(&root);
                 async move {
-                    let response = match parse_request(req).await {
+                    let response = match parse_graphql_request(req).await {
                         Err(response) => Ok(response),
-                        Ok(source) => match parse_expression(source, &env) {
-                            Err(response) => Ok(response),
-                            Ok(expression) => match runtime.subscribe(expression).await {
+                        Ok((shape, transform)) => {
+                            let expression = query(Expression::clone(&root), &shape);
+                            match runtime.subscribe(expression).await {
                                 Err(error) => Err(error),
                                 Ok(mut results) => match results.next().await {
                                     None => Err(String::from("Empty result stream")),
                                     Some(result) => match results.unsubscribe().await {
-                                        Ok(_) => Ok(format_http_response(result)),
+                                        Ok(_) => Ok(format_http_response(result, transform)),
                                         Err(error) => Err(error),
                                     },
                                 },
-                            },
-                        },
+                            }
+                        }
                     };
                     let response = match response {
                         Ok(response) => response,
@@ -56,6 +60,12 @@ pub async fn run(
                     Ok::<Response<Body>, Infallible>({
                         let status = response.status;
                         let mut response = Response::new(Body::from(response.body));
+                        if status == 200 {
+                            response.headers_mut().insert(
+                                "Content-Type",
+                                HeaderValue::from_static("application/json"),
+                            );
+                        }
                         *response.status_mut() = status;
                         response
                     })
@@ -69,10 +79,15 @@ pub async fn run(
     }
 }
 
-async fn parse_request(req: Request<Body>) -> Result<String, HttpResponse> {
+async fn parse_graphql_request(
+    req: Request<Body>,
+) -> Result<(QueryShape, QueryTransform), HttpResponse> {
     let body = match hyper::body::to_bytes(req.into_body()).await {
         Ok(body) => match String::from_utf8(body.into_iter().collect()) {
-            Ok(body) => Ok(body),
+            Ok(body) => match parse_graphql_query(&body) {
+                Ok((shape, transform)) => Ok((shape, transform)),
+                Err(error) => Err(Some(error)),
+            },
             Err(_) => Err(None),
         },
         Err(_) => Err(None),
@@ -85,13 +100,6 @@ async fn parse_request(req: Request<Body>) -> Result<String, HttpResponse> {
     })
 }
 
-fn parse_expression(source: String, env: &Env) -> Result<Expression, HttpResponse> {
-    match parse(&source, &env) {
-        Err(error) => Err(HttpResponse::new(StatusCode::BAD_REQUEST, error)),
-        Ok(expression) => Ok(expression),
-    }
-}
-
 struct HttpResponse {
     status: StatusCode,
     body: String,
@@ -102,13 +110,24 @@ impl HttpResponse {
     }
 }
 
-fn format_http_response(result: SubscriptionResult) -> HttpResponse {
+fn format_http_response(result: SubscriptionResult, transform: QueryTransform) -> HttpResponse {
     match result {
-        Ok(result) => match json_stringify(result.value()) {
-            Ok(output) => HttpResponse::new(StatusCode::OK, output),
-            Err(error) => HttpResponse::new(
+        Ok(result) => match result.value() {
+            Term::Value(result) => match transform(result) {
+                Ok(result) => match json_stringify(result.value()) {
+                    Ok(output) => HttpResponse::new(StatusCode::OK, output),
+                    Err(error) => HttpResponse::new(
+                        StatusCode::BAD_REQUEST,
+                        format!("Unable to serialize result: {}", error),
+                    ),
+                },
+                Err(error) => {
+                    HttpResponse::new(StatusCode::INTERNAL_SERVER_ERROR, format!("{}", error))
+                }
+            },
+            result => HttpResponse::new(
                 StatusCode::BAD_REQUEST,
-                format!("Invalid result: {}", error),
+                format!("Invalid result type: {}", result),
             ),
         },
         Err(errors) => HttpResponse::new(

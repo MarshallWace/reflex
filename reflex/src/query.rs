@@ -85,12 +85,25 @@ fn query_branch(target: Expression, selectors: &[FieldSelector]) -> Expression {
 
 fn query_field(target: Expression, selector: &FieldSelector) -> Expression {
     match selector {
-        FieldSelector::EnumField(variants) => query_enum_field(target, variants),
+        FieldSelector::NamedField(field_name, shape) => {
+            query_named_field(target, field_name, shape)
+        }
         FieldSelector::StructField(field_offset, shape) => {
             query_struct_field(target, *field_offset, shape)
         }
+        FieldSelector::EnumField(variants) => query_enum_field(target, variants),
         FieldSelector::FunctionField(args, shape) => query_function_field(target, args, shape),
     }
+}
+
+fn query_named_field(target: Expression, field_name: &ValueTerm, shape: &QueryShape) -> Expression {
+    query(
+        Expression::new(Term::Application(ApplicationTerm::new(
+            Expression::new(Term::Builtin(BuiltinTerm::Get)),
+            vec![target, Expression::new(Term::Value(field_name.clone()))],
+        ))),
+        shape,
+    )
 }
 
 fn query_struct_field(
@@ -209,6 +222,7 @@ fn query_list(target: Expression, shape: &QueryShape) -> Expression {
 
 #[derive(PartialEq, Clone, Debug)]
 pub enum FieldSelector {
+    NamedField(ValueTerm, QueryShape),
     StructField(StructFieldOffset, QueryShape),
     EnumField(Vec<EnumFieldSelector>),
     FunctionField(Vec<Expression>, QueryShape),
@@ -216,16 +230,19 @@ pub enum FieldSelector {
 impl Hashable for FieldSelector {
     fn hash(&self) -> HashId {
         match self {
+            FieldSelector::NamedField(field_name, shape) => {
+                prefix_hash(0, combine_hashes(field_name.hash(), shape.hash()))
+            }
             FieldSelector::StructField(offset, shape) => prefix_hash(
-                0,
+                1,
                 combine_hashes(hash_struct_field_offset(*offset), shape.hash()),
             ),
             FieldSelector::EnumField(variants) => prefix_hash(
-                1,
+                2,
                 hash_sequence(variants.iter().map(|variant| variant.hash())),
             ),
             FieldSelector::FunctionField(args, shape) => prefix_hash(
-                2,
+                3,
                 combine_hashes(
                     hash_sequence(args.iter().map(|arg| arg.hash())),
                     shape.hash(),
@@ -237,6 +254,7 @@ impl Hashable for FieldSelector {
 impl fmt::Display for FieldSelector {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            FieldSelector::NamedField(field_name, shape) => write!(f, "{:?}:{}", field_name, shape),
             FieldSelector::StructField(_, shape) => fmt::Display::fmt(shape, f),
             FieldSelector::EnumField(variants) => write!(
                 f,
@@ -349,7 +367,7 @@ mod tests {
         cache::EvaluationCache,
         core::{
             DependencyList, DynamicState, EnumTerm, EvaluationResult, Expression, Signal,
-            SignalTerm, StructTerm, Term,
+            SignalTerm, StructPrototype, StructTerm, Term,
         },
         parser::sexpr::parse,
         stdlib::{
@@ -374,6 +392,59 @@ mod tests {
             result,
             EvaluationResult::new(
                 Ok(Expression::new(Term::Value(ValueTerm::Int(3 + 4)))),
+                DependencyList::empty(),
+            )
+        );
+    }
+
+    #[test]
+    fn named_fields() {
+        let mut cache = EvaluationCache::new();
+        let state = DynamicState::new();
+        let root = Expression::new(Term::Struct(StructTerm::new(
+            Some(StructPrototype::new(vec![
+                ValueTerm::String(StringValue::from("zero")),
+                ValueTerm::String(StringValue::from("one")),
+                ValueTerm::String(StringValue::from("two")),
+                ValueTerm::String(StringValue::from("three")),
+                ValueTerm::String(StringValue::from("four")),
+                ValueTerm::String(StringValue::from("five")),
+                ValueTerm::String(StringValue::from("six")),
+            ])),
+            vec![
+                parse("(+ 0 1)").unwrap(),
+                parse("(+ 1 1)").unwrap(),
+                parse("(+ 2 1)").unwrap(),
+                parse("(+ 3 1)").unwrap(),
+                parse("(+ 4 1)").unwrap(),
+                parse("(+ 5 1)").unwrap(),
+                parse("(+ 6 1)").unwrap(),
+            ],
+        )));
+        let shape = QueryShape::branch(vec![
+            FieldSelector::NamedField(
+                ValueTerm::String(StringValue::from("three")),
+                QueryShape::Leaf,
+            ),
+            FieldSelector::NamedField(
+                ValueTerm::String(StringValue::from("four")),
+                QueryShape::Leaf,
+            ),
+            FieldSelector::NamedField(
+                ValueTerm::String(StringValue::from("five")),
+                QueryShape::Leaf,
+            ),
+        ]);
+        let expression = query(root, &shape);
+        let result = expression.evaluate(&state, &mut cache);
+        assert_eq!(
+            result,
+            EvaluationResult::new(
+                Ok(Expression::new(Term::Value(ValueTerm::Array(vec![
+                    ValueTerm::Int(3 + 1),
+                    ValueTerm::Int(4 + 1),
+                    ValueTerm::Int(5 + 1)
+                ])))),
                 DependencyList::empty(),
             )
         );

@@ -12,5 +12,6 @@ edition = "2018"
 reflex = { path = "../reflex" }
 reflex-js = { path = "../reflex-js" }
 reflex-runtime = { path = "../reflex-runtime" }
+graphql-parser = "0.3.0"
 hyper = { version = "0.14", features = ["full"] }
 tokio = { version = "1", features = ["full"] }
