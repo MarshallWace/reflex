@@ -112,7 +112,7 @@ fn stringify_value_term<'a>(input: &'a Term, value: &'a ValueTerm) -> Result<Str
         ValueTerm::Boolean(value) => Ok(String::from(if *value { "true" } else { "false" })),
         ValueTerm::Int(value) => Ok(format!("{}", value)),
         ValueTerm::Float(value) => Ok(format!("{}", value)),
-        ValueTerm::String(value) => Ok(stringify_string_value(value)),
+        ValueTerm::String(value) => Ok(json_stringify_string(value)),
         ValueTerm::Array(items) => {
             let items = items
                 .iter()
@@ -124,7 +124,7 @@ fn stringify_value_term<'a>(input: &'a Term, value: &'a ValueTerm) -> Result<Str
     }
 }
 
-fn stringify_string_value(value: &str) -> String {
+pub fn json_stringify_string(value: &str) -> String {
     let mut result = String::with_capacity(value.len() + 2);
     result.push('"');
     for current in value.chars() {
@@ -159,7 +159,7 @@ fn stringify_struct_term<'a>(input: &'a Term, value: &'a StructTerm) -> Result<S
                 .map(|(key, value)| match key {
                     ValueTerm::String(key) => {
                         let value = json_stringify(value.value())?;
-                        Ok(format!("{}:{}", stringify_string_value(&key), value))
+                        Ok(format!("{}:{}", json_stringify_string(&key), value))
                     }
                     _ => Err(input),
                 })

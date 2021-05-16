@@ -1,8 +1,9 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use std::{env, fs, net::SocketAddr, process, str::FromStr};
+use std::{convert::Infallible, env, fs, net::SocketAddr, process, str::FromStr, sync::Arc};
 
+use hyper::{server::conn::AddrStream, service::make_service_fn, Server};
 use reflex::{
     core::{Expression, Term},
     stdlib::value::{StringValue, ValueTerm},
@@ -12,8 +13,8 @@ use reflex_js::{
     stdlib::{builtin_globals, builtin_imports, global_process},
     Env,
 };
-use reflex_runtime::builtin_signal_handlers;
-use reflex_server::run;
+use reflex_runtime::{builtin_signal_handlers, Runtime, SignalHandler};
+use reflex_server::graphql_http_request_handler;
 
 #[tokio::main]
 pub async fn main() {
@@ -31,26 +32,22 @@ pub async fn main() {
     };
     let server = match config {
         Err(error) => Err(format!("Unable to start server: {}", error)),
-        Ok((env_args, root_module, address)) => {
-            let env = Env::new()
-                .with_globals(builtin_globals())
-                .with_global("process", global_process(env_args));
-            let loader = static_module_loader(builtin_imports());
-            let signal_handlers = builtin_signal_handlers();
-            let root = parse_module(&root_module, &env, &loader);
-            match root {
-                Err(error) => Err(format!("Failed to load entry point module: {}", error)),
-                Ok(root) => {
-                    let server = run(root, signal_handlers, &address);
-                    println!("Listening for incoming HTTP requests on port {}", &address.port());
-                    if let Err(error) = server.await {
-                        Err(format!("Server error: {}", error))
-                    } else {
-                        Ok(())
-                    }
+        Ok((env_args, root_module, address)) => match create_graph_root(&root_module, env_args) {
+            Err(error) => Err(format!("Failed to load entry point module: {}", error)),
+            Ok(root) => {
+                let store = create_store();
+                let server = create_server(store, root, &address);
+                println!(
+                    "Listening for incoming HTTP requests on port {}",
+                    &address.port()
+                );
+                if let Err(error) = server.await {
+                    Err(format!("Server error: {}", error))
+                } else {
+                    Ok(())
                 }
             }
-        }
+        },
     };
     process::exit(match server {
         Ok(_) => 0,
@@ -59,6 +56,54 @@ pub async fn main() {
             1
         }
     })
+}
+
+fn create_graph_root(
+    root_module: &str,
+    env_args: impl IntoIterator<Item = (String, Expression)>,
+) -> Result<Expression, String> {
+    parse_module(&root_module, &create_env(env_args), &create_module_loader())
+}
+
+fn create_env(env_args: impl IntoIterator<Item = (String, Expression)>) -> Env {
+    Env::new()
+        .with_globals(builtin_globals())
+        .with_global("process", global_process(env_args))
+}
+
+fn create_module_loader() -> impl Fn(&str) -> Result<Expression, String> {
+    static_module_loader(builtin_imports())
+}
+
+fn create_signal_handlers() -> impl IntoIterator<Item = (&'static str, SignalHandler)> {
+    builtin_signal_handlers()
+}
+
+fn create_store() -> Runtime {
+    let signal_handlers = create_signal_handlers();
+    // TODO: Establish sensible defaults for channel buffer sizes
+    let command_buffer_size = 32;
+    let result_buffer_size = 32;
+    Runtime::new(signal_handlers, command_buffer_size, result_buffer_size)
+}
+
+async fn create_server(
+    store: Runtime,
+    root: Expression,
+    address: &SocketAddr,
+) -> Result<(), String> {
+    let store = Arc::new(store);
+    let http_service_factory = make_service_fn(|_socket: &AddrStream| {
+        let store = Arc::clone(&store);
+        let root = Expression::clone(&root);
+        let service = graphql_http_request_handler(store, root);
+        async { Ok::<_, Infallible>(service) }
+    });
+    let server = Server::bind(&address).serve(http_service_factory);
+    match server.await {
+        Err(error) => Err(format!("{}", error)),
+        Ok(()) => Ok(()),
+    }
 }
 
 fn parse_args() -> Result<(String, Vec<(String, Expression)>), String> {

@@ -11,7 +11,7 @@ pub use parser::{parse, parse_module, static_module_loader};
 pub mod stdlib {
     pub mod globals;
     pub mod imports;
-    pub use globals::{builtin_globals, global_process, json_stringify};
+    pub use globals::{builtin_globals, global_process, json_stringify, json_stringify_string};
     pub use imports::builtin_imports;
 }
 

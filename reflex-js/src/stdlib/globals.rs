@@ -17,7 +17,7 @@ use math::global_math;
 mod set;
 use set::global_set;
 
-pub use json::json_stringify;
+pub use json::{json_stringify, json_stringify_string};
 mod process;
 pub use process::global_process;
 
