@@ -5,4 +5,5 @@ members = [
   "reflex-cli",
   "reflex-js",
   "reflex-runtime",
+  "reflex-server",
 ]

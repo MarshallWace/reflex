@@ -1,13 +1,12 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use hyper::{Body, Request, Uri};
 use reflex::{
     core::{Expression, Signal, SignalTerm, Term},
     stdlib::{signal::SignalType, value::ValueTerm},
 };
 
-use crate::SignalResult;
+use crate::{utils::fetch, SignalResult};
 
 pub fn handle_http_fetch(args: Option<&[ValueTerm]>) -> Result<SignalResult, String> {
     let args = args.ok_or_else(|| String::from("Invalid fetch signal: missing arguments"))?;
@@ -29,7 +28,7 @@ pub fn handle_http_fetch(args: Option<&[ValueTerm]>) -> Result<SignalResult, Str
                 Vec::new(),
             )))),
             Some(Box::pin(async move {
-                match fetch_url(method, url, headers, body).await {
+                match fetch(method, url, headers, body).await {
                     Ok(data) => Expression::new(Term::Value(ValueTerm::String(data))),
                     Err(error) => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                         SignalType::Error,
@@ -39,39 +38,6 @@ pub fn handle_http_fetch(args: Option<&[ValueTerm]>) -> Result<SignalResult, Str
             })),
         )),
         _ => Err(String::from("Invalid fetch signal arguments")),
-    }
-}
-
-async fn fetch_url(
-    method: String,
-    url: String,
-    headers: impl IntoIterator<Item = (String, String)>,
-    body: Option<String>,
-) -> Result<String, String> {
-    let client = hyper::Client::new();
-    match url.parse::<Uri>() {
-        Ok(url) => {
-            let method: &str = &method;
-            let request = Request::builder().method(method).uri(url);
-            let request = headers.into_iter().fold(request, |request, (key, value)| {
-                request.header(&key, &value)
-            });
-            let body = Body::from(body.unwrap_or(String::new()));
-            match request.body(body) {
-                Ok(request) => match client.request(request).await {
-                    Ok(result) => match hyper::body::to_bytes(result.into_body()).await {
-                        Ok(body) => match String::from_utf8(body.into_iter().collect()) {
-                            Ok(data) => Ok(data),
-                            Err(error) => Err(format!("{}", error)),
-                        },
-                        Err(error) => Err(format!("{}", error)),
-                    },
-                    Err(error) => Err(format!("{}", error)),
-                },
-                Err(error) => Err(format!("{}", error)),
-            }
-        }
-        Err(error) => Err(format!("{}", error)),
     }
 }
 
