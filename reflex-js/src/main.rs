@@ -9,25 +9,24 @@ use reflex::{
     stdlib::{signal::SignalType, value::ValueTerm},
 };
 use reflex_js::{
-    parse,
+    parse_module, static_module_loader,
     stdlib::{builtin_globals, builtin_imports},
     Env,
 };
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let args = env::args().collect::<Vec<String>>();
-    if args.len() < 2 {
+    let args = env::args().skip(1).collect::<Vec<String>>();
+    if args.len() < 1 {
         return Err("Missing input filename".into());
     }
-    if args.len() > 2 {
+    if args.len() > 1 {
         return Err("Multiple input filenames".into());
     }
-    let filename = &args[1];
+    let filename = &args[0];
     let src = fs::read_to_string(filename).expect("Failed to read input file");
-    let env = Env::new()
-        .with_globals(builtin_globals())
-        .with_imports(builtin_imports());
-    let expression = match parse(&src, &env) {
+    let env = Env::new().with_globals(builtin_globals());
+    let loader = static_module_loader(builtin_imports());
+    let expression = match parse_module(&src, &env, &loader) {
         Err(error) => panic!(error),
         Ok(expression) => expression,
     };

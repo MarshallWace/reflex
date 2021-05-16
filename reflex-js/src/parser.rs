@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use std::{borrow::Cow, iter::once};
+use std::{borrow::Cow, collections::HashMap, iter::once};
 
 use reflex::{
     core::{
@@ -84,18 +84,29 @@ impl<'src> LexicalScope<'src> {
 
 pub fn parse<'src>(input: &'src str, env: &Env) -> ParserResult<Expression> {
     let program = parse_ast(input)?;
-    let is_module = program.iter().any(|node| match node {
-        ProgramPart::Decl(node) => match node {
-            Decl::Import(_) | Decl::Export(_) => true,
-            _ => false,
-        },
-        _ => false,
-    });
-    if is_module {
-        parse_module(program.into_iter(), &env)
-    } else {
-        parse_script(program.into_iter(), &env)
+    parse_script_contents(program.into_iter(), env)
+}
+
+pub fn static_module_loader<'a>(
+    modules: impl IntoIterator<Item = (&'a str, Expression)>,
+) -> impl Fn(&str) -> Result<Expression, String> {
+    let modules = modules
+        .into_iter()
+        .map(|(key, value)| (String::from(key), value))
+        .collect::<HashMap<_, _>>();
+    move |path: &str| match modules.get(path) {
+        Some(value) => Ok(Expression::clone(value)),
+        None => Err(format!("Module not found: {}", path)),
     }
+}
+
+pub fn parse_module<'src>(
+    input: &'src str,
+    env: &Env,
+    loader: &impl Fn(&str) -> Result<Expression, String>,
+) -> ParserResult<Expression> {
+    let program = parse_ast(input)?;
+    parse_module_contents(program.into_iter(), env, loader)
 }
 
 fn parse_ast(input: &str) -> ParserResult<Vec<ProgramPart>> {
@@ -107,7 +118,7 @@ fn parse_ast(input: &str) -> ParserResult<Vec<ProgramPart>> {
         .or_else(|error| Err(format!("Parse error: {}", error)))
 }
 
-fn parse_script<'src>(
+fn parse_script_contents<'src>(
     program: impl IntoIterator<Item = ProgramPart<'src>> + ExactSizeIterator,
     env: &Env,
 ) -> ParserResult<Expression> {
@@ -127,9 +138,10 @@ fn parse_script<'src>(
     }
 }
 
-fn parse_module<'src>(
+fn parse_module_contents<'src>(
     program: impl IntoIterator<Item = ProgramPart<'src>> + ExactSizeIterator,
     env: &Env,
+    loader: &impl Fn(&str) -> Result<Expression, String>,
 ) -> ParserResult<Expression> {
     let num_statements = program.len();
     let (body, import_bindings) = program.into_iter().fold(
@@ -139,7 +151,7 @@ fn parse_module<'src>(
             match node {
                 ProgramPart::Decl(node) => match node {
                     Decl::Import(node) => {
-                        let bindings = parse_module_import(&node, &env)?;
+                        let bindings = parse_module_import(&node, loader)?;
                         import_bindings.extend(bindings);
                         Ok((body, import_bindings))
                     }
@@ -189,15 +201,18 @@ fn parse_module<'src>(
 
 fn parse_module_import<'src>(
     node: &ModImport<'src>,
-    env: &Env,
+    loader: &impl Fn(&str) -> Result<Expression, String>,
 ) -> ParserResult<Vec<(&'src str, Expression)>> {
     let module_path = match &node.source {
         Lit::String(node) => Ok(parse_string(node)),
         _ => Err(err_unimplemented(node)),
     }?;
-    let module = match env.import(&module_path) {
-        Some(module) => Ok(module),
-        None => Err(err(&format!("Invalid import: '{}'", module_path), node)),
+    let module = match loader(&module_path) {
+        Ok(module) => Ok(module),
+        Err(error) => Err(err(
+            &format!("Failed to import '{}': {}", module_path, error),
+            node,
+        )),
     }?;
     node.specifiers
         .iter()
@@ -1334,9 +1349,10 @@ fn parse_constructor_expression<'src>(
 
 #[cfg(test)]
 mod tests {
-    use super::parse;
+    use super::{parse, parse_module};
     use crate::{
         builtins::{dispatch, throw, to_string},
+        static_module_loader,
         stdlib::builtin_imports,
         Env,
     };
@@ -1875,8 +1891,9 @@ mod tests {
     #[test]
     fn modules() {
         let env = Env::new();
+        let loader = static_module_loader(Vec::new());
         assert_eq!(
-            parse("export default 3;", &env),
+            parse_module("export default 3;", &env, &loader),
             Ok(Expression::new(Term::Value(ValueTerm::Float(3.0)))),
         );
     }
@@ -2906,13 +2923,15 @@ mod tests {
 
     #[test]
     fn recursive_expressions() {
-        let env = Env::new().with_imports(builtin_imports());
-        let expression = parse(
+        let env = Env::new();
+        let loader = static_module_loader(builtin_imports());
+        let expression = parse_module(
             "
             import { graph } from 'reflex::utils';
             export default graph((foo) => 3);
         ",
             &env,
+            &loader,
         )
         .unwrap();
         let result = expression.evaluate(&DynamicState::new(), &mut EvaluationCache::new());
@@ -2923,7 +2942,7 @@ mod tests {
                 DependencyList::empty(),
             ),
         );
-        let expression = parse(
+        let expression = parse_module(
             "
             import { graph } from 'reflex::utils';
             export default graph((foo) => ({
@@ -2933,6 +2952,7 @@ mod tests {
             })).foo.foo.foo.bar;
         ",
             &env,
+            &loader
         )
         .unwrap();
         let result = expression.evaluate(&DynamicState::new(), &mut EvaluationCache::new());
@@ -2947,9 +2967,10 @@ mod tests {
 
     #[test]
     fn import_scoping() {
-        let env =
-            Env::new().with_imports(vec![("foo", Expression::new(Term::Value(ValueTerm::Null)))]);
-        let expression = parse(
+        let env = Env::new();
+        let loader =
+            static_module_loader(vec![("foo", Expression::new(Term::Value(ValueTerm::Null)))]);
+        let expression = parse_module(
             "
             import Foo from 'foo';
             const foo = 4;
@@ -2957,6 +2978,7 @@ mod tests {
             export default bar.foo;
             ",
             &env,
+            &loader,
         )
         .unwrap();
         let result = expression.evaluate(&DynamicState::new(), &mut EvaluationCache::new());

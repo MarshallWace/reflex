@@ -8,7 +8,7 @@ use reflex::{
     stdlib::value::{StringValue, ValueTerm},
 };
 use reflex_js::{
-    stdlib::{builtin_globals, builtin_imports, global_process},
+    stdlib::{builtin_globals, global_process},
     Env,
 };
 use reflex_runtime::builtin_signal_handlers;
@@ -31,7 +31,6 @@ pub async fn main() {
             let address = SocketAddr::from(([127, 0, 0, 1], port));
             let env = Env::new()
                 .with_globals(builtin_globals())
-                .with_imports(builtin_imports())
                 .with_global("process", global_process(env_args));
             let signal_handlers = builtin_signal_handlers();
             let server = run(env, signal_handlers, &address);

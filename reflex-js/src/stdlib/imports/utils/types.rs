@@ -221,7 +221,7 @@ impl EnumVariantFactory {
 
 #[cfg(test)]
 mod tests {
-    use crate::{parse, stdlib::builtin_imports, Env};
+    use crate::{parse_module, static_module_loader, stdlib::builtin_imports, Env};
     use reflex::{
         cache::EvaluationCache,
         core::{
@@ -236,8 +236,9 @@ mod tests {
 
     #[test]
     fn struct_types() {
-        let env = Env::new().with_imports(builtin_imports());
-        let expression = parse(
+        let env = Env::new();
+        let loader = static_module_loader(builtin_imports());
+        let expression = parse_module(
             "
             import { Types } from 'reflex::utils';
             export default Types.Shape({
@@ -247,6 +248,7 @@ mod tests {
             });
         ",
             &env,
+            &loader,
         )
         .unwrap();
         let result = expression.evaluate(&DynamicState::new(), &mut EvaluationCache::new());
@@ -264,7 +266,7 @@ mod tests {
                 DependencyList::empty(),
             ),
         );
-        let expression = parse(
+        let expression = parse_module(
             "
             import { Types } from 'reflex::utils';
             const Foo = Types.Shape({
@@ -275,6 +277,7 @@ mod tests {
             export default new Foo({ foo: 3, bar: 4, baz: 5 });
         ",
             &env,
+            &loader,
         )
         .unwrap();
         let result = expression.evaluate(&DynamicState::new(), &mut EvaluationCache::new());
@@ -296,7 +299,7 @@ mod tests {
                 DependencyList::empty(),
             ),
         );
-        let expression = parse(
+        let expression = parse_module(
             "
             import { Types } from 'reflex::utils';
             const Foo = Types.Shape({
@@ -307,6 +310,7 @@ mod tests {
             export default new Foo({ baz: 5, bar: 4, foo: 3 });
         ",
             &env,
+            &loader,
         )
         .unwrap();
         let result = expression.evaluate(&DynamicState::new(), &mut EvaluationCache::new());
@@ -328,7 +332,7 @@ mod tests {
                 DependencyList::empty(),
             ),
         );
-        let expression = parse(
+        let expression = parse_module(
             "
             import { Types } from 'reflex::utils';
             const Foo = Types.Shape({
@@ -339,6 +343,7 @@ mod tests {
             export default new Foo({ foo: 3 + 1, bar: 4 + 1, baz: 5 + 1 });
         ",
             &env,
+            &loader,
         )
         .unwrap();
         let result = expression.evaluate(&DynamicState::new(), &mut EvaluationCache::new());
@@ -378,7 +383,7 @@ mod tests {
                 DependencyList::empty(),
             ),
         );
-        let expression = parse(
+        let expression = parse_module(
             "
             import { Types } from 'reflex::utils';
             const Foo = Types.Shape({
@@ -389,6 +394,7 @@ mod tests {
             export default new Foo({ foo: 3, bar: 4, baz: 5 }).bar;
         ",
             &env,
+            &loader,
         )
         .unwrap();
         let result = expression.evaluate(&DynamicState::new(), &mut EvaluationCache::new());
@@ -403,8 +409,9 @@ mod tests {
 
     #[test]
     fn static_enum_types() {
-        let env = Env::new().with_imports(builtin_imports());
-        let expression = parse(
+        let env = Env::new();
+        let loader = static_module_loader(builtin_imports());
+        let expression = parse_module(
             "
             import { Types } from 'reflex::utils';
             export default Types.Enum({
@@ -414,6 +421,7 @@ mod tests {
             });
         ",
             &env,
+            &loader,
         )
         .unwrap();
         let result = expression.evaluate(&DynamicState::new(), &mut EvaluationCache::new());
@@ -435,7 +443,7 @@ mod tests {
                 DependencyList::empty(),
             ),
         );
-        let expression = parse(
+        let expression = parse_module(
             "
             import { Types } from 'reflex::utils';
             export default Types.Enum({
@@ -445,6 +453,7 @@ mod tests {
             }).Foo;
         ",
             &env,
+            &loader,
         )
         .unwrap();
         let result = expression.evaluate(&DynamicState::new(), &mut EvaluationCache::new());
@@ -457,7 +466,7 @@ mod tests {
                 DependencyList::empty(),
             ),
         );
-        let expression = parse(
+        let expression = parse_module(
             "
             import { Types } from 'reflex::utils';
             export default Types.Enum({
@@ -467,6 +476,7 @@ mod tests {
             }).Baz;
         ",
             &env,
+            &loader,
         )
         .unwrap();
         let result = expression.evaluate(&DynamicState::new(), &mut EvaluationCache::new());
@@ -483,8 +493,9 @@ mod tests {
 
     #[test]
     fn parameterized_enum_types() {
-        let env = Env::new().with_imports(builtin_imports());
-        let expression = parse(
+        let env = Env::new();
+        let loader = static_module_loader(builtin_imports());
+        let expression = parse_module(
             "
             import { Types } from 'reflex::utils';
             export default Types.Enum({
@@ -495,6 +506,7 @@ mod tests {
             });
         ",
             &env,
+            &loader,
         )
         .unwrap();
         let result = expression.evaluate(&DynamicState::new(), &mut EvaluationCache::new());
@@ -518,7 +530,7 @@ mod tests {
                 DependencyList::empty(),
             ),
         );
-        let expression = parse(
+        let expression = parse_module(
             "
             import { Types } from 'reflex::utils';
             export default Types.Enum({
@@ -529,6 +541,7 @@ mod tests {
             }).Static;
         ",
             &env,
+            &loader,
         )
         .unwrap();
         let result = expression.evaluate(&DynamicState::new(), &mut EvaluationCache::new());
@@ -539,7 +552,7 @@ mod tests {
                 DependencyList::empty(),
             ),
         );
-        let expression = parse(
+        let expression = parse_module(
             "
             import { Types } from 'reflex::utils';
             export default Types.Enum({
@@ -550,6 +563,7 @@ mod tests {
             }).Empty();
         ",
             &env,
+            &loader,
         )
         .unwrap();
         let result = expression.evaluate(&DynamicState::new(), &mut EvaluationCache::new());
@@ -560,7 +574,7 @@ mod tests {
                 DependencyList::empty(),
             ),
         );
-        let expression = parse(
+        let expression = parse_module(
             "
             import { Types } from 'reflex::utils';
             export default Types.Enum({
@@ -571,6 +585,7 @@ mod tests {
             }).Single(3);
         ",
             &env,
+            &loader,
         )
         .unwrap();
         let result = expression.evaluate(&DynamicState::new(), &mut EvaluationCache::new());
@@ -584,7 +599,7 @@ mod tests {
                 DependencyList::empty(),
             ),
         );
-        let expression = parse(
+        let expression = parse_module(
             "
             import { Types } from 'reflex::utils';
             export default Types.Enum({
@@ -595,6 +610,7 @@ mod tests {
             }).Multiple(3, 4, 5);
         ",
             &env,
+            &loader,
         )
         .unwrap();
         let result = expression.evaluate(&DynamicState::new(), &mut EvaluationCache::new());
