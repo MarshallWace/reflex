@@ -98,7 +98,10 @@ pub fn json_stringify(term: &Term) -> Result<String, &Term> {
     match term {
         Term::Value(value) => stringify_value_term(term, value),
         Term::Struct(value) => stringify_struct_term(term, value),
-        Term::Collection(value) => stringify_collection_term(term, value),
+        Term::Collection(value) => match value {
+            CollectionTerm::Vector(value) => stringify_vector_term(term, value),
+            _ => Err(term),
+        },
         _ => Err(term),
     }
 }
@@ -163,16 +166,6 @@ fn stringify_struct_term<'a>(input: &'a Term, value: &'a StructTerm) -> Result<S
                 .collect::<Result<Vec<_>, _>>()?;
             Ok(format!("{{{}}}", fields.join(",")))
         }
-    }
-}
-
-fn stringify_collection_term<'a>(
-    input: &'a Term,
-    value: &'a CollectionTerm,
-) -> Result<String, &'a Term> {
-    match value {
-        CollectionTerm::Vector(value) => stringify_vector_term(input, value),
-        _ => Err(input),
     }
 }
 
