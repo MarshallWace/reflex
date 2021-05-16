@@ -3,7 +3,7 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use reflex::{
     core::{Expression, StructPrototype, StructTerm, Term},
-    stdlib::value::{StringValue, ValueTerm},
+    stdlib::value::ValueTerm,
 };
 
 mod boolean;
@@ -31,10 +31,10 @@ pub fn builtin_globals() -> Vec<(&'static str, Expression)> {
     ]
 }
 
-fn create_struct<'a>(fields: impl IntoIterator<Item = (&'a str, Expression)>) -> Expression {
+fn create_struct(fields: impl IntoIterator<Item = (String, Expression)>) -> Expression {
     let (keys, values) = fields
         .into_iter()
-        .map(|(key, value)| (ValueTerm::String(StringValue::from(key)), value))
+        .map(|(key, value)| (ValueTerm::String(key), value))
         .unzip();
     Expression::new(Term::Struct(StructTerm::new(
         Some(StructPrototype::new(keys)),

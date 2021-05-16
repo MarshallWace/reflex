@@ -5,8 +5,6 @@ use reflex::core::Expression;
 
 use crate::stdlib::globals::create_struct;
 
-pub fn global_process(
-    env_vars: impl IntoIterator<Item = (&'static str, Expression)>,
-) -> Expression {
-    create_struct(vec![("env", create_struct(env_vars))])
+pub fn global_process(env_vars: impl IntoIterator<Item = (String, Expression)>) -> Expression {
+    create_struct(vec![(String::from("env"), create_struct(env_vars))])
 }

@@ -17,8 +17,8 @@ use crate::{parse, stdlib::globals::create_struct, Env};
 
 pub(crate) fn global_json() -> Expression {
     create_struct(vec![
-        ("parse", global_json_parse()),
-        ("stringify", global_json_stringify()),
+        (String::from("parse"), global_json_parse()),
+        (String::from("stringify"), global_json_stringify()),
     ])
 }
 

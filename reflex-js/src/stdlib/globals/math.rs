@@ -10,11 +10,29 @@ use crate::stdlib::globals::create_struct;
 
 pub(crate) fn global_math() -> Expression {
     create_struct(vec![
-        ("abs", Expression::new(Term::Builtin(BuiltinTerm::Abs))),
-        ("ceil", Expression::new(Term::Builtin(BuiltinTerm::Ceil))),
-        ("floor", Expression::new(Term::Builtin(BuiltinTerm::Floor))),
-        ("max", Expression::new(Term::Builtin(BuiltinTerm::Max))),
-        ("min", Expression::new(Term::Builtin(BuiltinTerm::Min))),
-        ("round", Expression::new(Term::Builtin(BuiltinTerm::Round))),
+        (
+            String::from("abs"),
+            Expression::new(Term::Builtin(BuiltinTerm::Abs)),
+        ),
+        (
+            String::from("ceil"),
+            Expression::new(Term::Builtin(BuiltinTerm::Ceil)),
+        ),
+        (
+            String::from("floor"),
+            Expression::new(Term::Builtin(BuiltinTerm::Floor)),
+        ),
+        (
+            String::from("max"),
+            Expression::new(Term::Builtin(BuiltinTerm::Max)),
+        ),
+        (
+            String::from("min"),
+            Expression::new(Term::Builtin(BuiltinTerm::Min)),
+        ),
+        (
+            String::from("round"),
+            Expression::new(Term::Builtin(BuiltinTerm::Round)),
+        ),
     ])
 }
