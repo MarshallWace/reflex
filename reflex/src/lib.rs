@@ -5,6 +5,8 @@ pub mod cache;
 pub mod core;
 pub mod hash;
 pub mod query;
+mod serialize;
+pub use serialize::serialize;
 pub mod store;
 
 pub mod stdlib {

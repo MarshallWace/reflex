@@ -1,8 +1,11 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+use std::borrow::Cow;
+
 use crate::{
     core::{Arity, Expression, Signal, SignalTerm, Term, VarArgs},
+    serialize,
     stdlib::{builtin::BuiltinFunction, signal::SignalType, value::ValueTerm},
 };
 
@@ -27,11 +30,14 @@ impl BuiltinFunction for Effect {
             Term::Value(ValueTerm::String(signal_type)) => {
                 let args = args
                     .into_iter()
-                    .map(|arg| match arg.value() {
-                        Term::Value(value) => Ok(value.clone()),
-                        _ => Err(format!(
-                            "Invalid signal argument: Expected <value>, received {}",
-                            arg,
+                    .map(|arg| match serialize(arg.value()) {
+                        Ok(value) => Ok(match value {
+                            Cow::Owned(value) => value,
+                            Cow::Borrowed(value) => value.clone(),
+                        }),
+                        Err(error) => Err(format!(
+                            "Invalid signal argument: Unable to serialize {}",
+                            error,
                         )),
                     })
                     .collect::<Result<Vec<_>, String>>();
