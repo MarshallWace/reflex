@@ -14,7 +14,7 @@ use reflex::{
     },
 };
 
-pub(crate) fn throw() -> Expression {
+pub fn throw() -> Expression {
     Expression::new(Term::Native(NativeFunction::new(
         Throw::hash(),
         Throw::arity(),
@@ -43,7 +43,7 @@ impl Throw {
     }
 }
 
-pub(crate) fn construct() -> Expression {
+pub fn construct() -> Expression {
     Expression::new(Term::Native(NativeFunction::new(
         Construct::hash(),
         Construct::arity(),
@@ -118,7 +118,7 @@ impl Construct {
     }
 }
 
-pub(crate) fn dispatch() -> Expression {
+pub fn dispatch() -> Expression {
     Expression::new(Term::Native(NativeFunction::new(
         Dispatch::hash(),
         Dispatch::arity(),
@@ -154,7 +154,7 @@ impl Dispatch {
     }
 }
 
-pub(crate) fn to_string() -> Expression {
+pub fn to_string() -> Expression {
     Expression::new(Term::Native(NativeFunction::new(
         ToString::hash(),
         ToString::arity(),
@@ -287,7 +287,7 @@ pub(crate) fn get_builtin_field<'src>(target: Option<&Term>, method: &str) -> Op
     })
 }
 
-pub(crate) fn format_value(value: &ValueTerm) -> String {
+pub fn format_value(value: &ValueTerm) -> String {
     match value {
         ValueTerm::Symbol(_) => format!("{}", value),
         ValueTerm::Null => String::from("null"),

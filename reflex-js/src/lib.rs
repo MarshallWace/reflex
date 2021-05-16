@@ -4,7 +4,7 @@
 use reflex::core::Expression;
 use std::collections::HashMap;
 
-mod builtins;
+pub mod builtins;
 mod parser;
 
 pub use parser::parse;
