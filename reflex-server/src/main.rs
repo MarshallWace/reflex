@@ -14,7 +14,7 @@ use reflex_js::{
     Env,
 };
 use reflex_runtime::{builtin_signal_handlers, Runtime, SignalHandler};
-use reflex_server::graphql_http_request_handler;
+use reflex_server::graphql_service;
 
 #[tokio::main]
 pub async fn main() {
@@ -93,13 +93,12 @@ async fn create_server(
     address: &SocketAddr,
 ) -> Result<(), String> {
     let store = Arc::new(store);
-    let http_service_factory = make_service_fn(|_socket: &AddrStream| {
+    let server = Server::bind(&address).serve(make_service_fn(|_socket: &AddrStream| {
         let store = Arc::clone(&store);
         let root = Expression::clone(&root);
-        let service = graphql_http_request_handler(store, root);
+        let service = graphql_service(store, root);
         async { Ok::<_, Infallible>(service) }
-    });
-    let server = Server::bind(&address).serve(http_service_factory);
+    }));
     match server.await {
         Err(error) => Err(format!("{}", error)),
         Ok(()) => Ok(()),

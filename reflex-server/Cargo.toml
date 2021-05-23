@@ -12,6 +12,9 @@ edition = "2018"
 reflex = { path = "../reflex" }
 reflex-js = { path = "../reflex-js" }
 reflex-runtime = { path = "../reflex-runtime" }
+futures = "*"
 graphql-parser = "0.3.0"
 hyper = { version = "0.14", features = ["full"] }
+hyper-tungstenite = "0.3.2"
 tokio = { version = "1", features = ["full"] }
+serde_json = "1.0"

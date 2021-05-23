@@ -9,9 +9,10 @@ use reflex::{
 };
 use std::{collections::HashMap, future::Future, pin::Pin, sync::Mutex};
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
+pub use tokio_stream::Stream;
 use tokio_stream::{
     wrappers::{BroadcastStream, WatchStream},
-    Stream, StreamExt,
+    StreamExt,
 };
 
 mod handlers;
@@ -60,7 +61,7 @@ impl<TRequest, TResponse, TUpdate> StreamOperation<TRequest, TResponse, TUpdate>
     }
 }
 
-type SubscriptionId = usize;
+pub type SubscriptionId = usize;
 
 type CommandChannel = mpsc::Sender<Command>;
 type ResultsChannel = broadcast::Sender<(SubscriptionId, SubscriptionResult)>;
@@ -135,6 +136,7 @@ impl<'a, T: Stream<Item = SubscriptionResult> + Unpin> StreamSubscription<'a, T>
 
 pub struct Runtime {
     commands: CommandChannel,
+    results: ResultsChannel,
 }
 impl Runtime {
     pub fn new(
@@ -142,9 +144,9 @@ impl Runtime {
         command_buffer_size: usize,
         result_buffer_size: usize,
     ) -> Self {
-        Self {
-            commands: create_store(signal_handlers, command_buffer_size, result_buffer_size),
-        }
+        let (commands, results) =
+            create_store(signal_handlers, command_buffer_size, result_buffer_size);
+        Self { commands, results }
     }
     pub async fn subscribe<'a>(
         &'a self,
@@ -152,45 +154,70 @@ impl Runtime {
     ) -> Result<StreamSubscription<'a, impl Stream<Item = SubscriptionResult>>, String> {
         create_subscription(expression, &self.commands).await
     }
+    pub async fn start_subscription(
+        &self,
+        expression: Expression,
+    ) -> Result<(SubscriptionId, Option<SubscriptionResult>), String> {
+        start_subscription(expression, &self.commands).await
+    }
+    pub async fn stop_subscription(&self, id: SubscriptionId) -> Result<bool, String> {
+        stop_subscription(id, &self.commands).await
+    }
+    pub fn watch_subscription(
+        &self,
+        subscription_id: SubscriptionId,
+    ) -> impl Stream<Item = SubscriptionResult> {
+        BroadcastStream::new(self.results.subscribe()).filter_map(move |payload| match payload {
+            Ok((id, result)) if id == subscription_id => match result {
+                Ok(expression) => match expression.value() {
+                    Term::Signal(signal) if signal.is_type(SignalType::Pending) => None,
+                    _ => Some(Ok(expression)),
+                },
+                Err(error) => Some(Err(error)),
+            },
+            _ => None,
+        })
+    }
 }
 
 fn create_store(
     signal_handlers: impl IntoIterator<Item = (&'static str, SignalHandler)>,
     command_buffer_size: usize,
     result_buffer_size: usize,
-) -> CommandChannel {
+) -> (CommandChannel, ResultsChannel) {
     let signal_handlers = signal_handlers
         .into_iter()
         .map(|(signal_type, handler)| (String::from(signal_type), handler))
         .collect::<HashMap<_, _>>();
     let (messages_tx, mut messages_rx) = mpsc::channel::<Command>(command_buffer_size);
+    let (results_tx, _) = broadcast::channel(result_buffer_size);
+    let results = results_tx.clone();
     let signal_messages = messages_tx.clone();
     tokio::spawn(async move {
         let mut store = Mutex::new(Store::new(None));
-        let (results_tx, _) = broadcast::channel(result_buffer_size);
         while let Some(command) = messages_rx.recv().await {
             match command {
                 Command::Subscribe(command) => process_subscribe_command(
                     command,
                     &mut store,
                     &signal_messages,
-                    &results_tx,
+                    &results,
                     &signal_handlers,
                 ),
                 Command::Unsubscribe(command) => {
-                    process_unsubscribe_command(command, &mut store, &signal_messages, &results_tx)
+                    process_unsubscribe_command(command, &mut store, &signal_messages, &results)
                 }
                 Command::Update(command) => process_update_command(
                     command,
                     &mut store,
                     &signal_messages,
-                    &results_tx,
+                    &results,
                     &signal_handlers,
                 ),
             }
         }
     });
-    messages_tx
+    (messages_tx, results_tx)
 }
 
 fn process_subscribe_command(
@@ -287,6 +314,36 @@ async fn create_subscription<'a>(
                 _ => true,
             }),
         )),
+    }
+}
+
+async fn start_subscription(
+    expression: Expression,
+    channel: &CommandChannel,
+) -> Result<(SubscriptionId, Option<SubscriptionResult>), String> {
+    let (send, receive) = oneshot::channel();
+    let (update_send, _) = watch::channel(Ok(create_pending_expression()));
+    channel
+        .send(Command::subscribe(expression, send, update_send))
+        .await
+        .ok()
+        .unwrap();
+    match receive.await {
+        Err(error) => Err(format!("{}", error)),
+        Ok(response) => Ok(response),
+    }
+}
+
+async fn stop_subscription(id: SubscriptionId, channel: &CommandChannel) -> Result<bool, String> {
+    let (send, receive) = oneshot::channel();
+    channel
+        .send(Command::unsubscribe(id, send))
+        .await
+        .ok()
+        .unwrap();
+    match receive.await {
+        Err(error) => Err(format!("{}", error)),
+        Ok(response) => Ok(response),
     }
 }
 
