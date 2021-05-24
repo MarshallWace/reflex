@@ -789,24 +789,43 @@ fn parse_array_literal<'src>(
     scope: &LexicalScope,
     env: &Env,
 ) -> ParserResult<Expression> {
-    let values = node
-        .iter()
-        .fold(Ok(Vec::with_capacity(node.len())), |results, node| {
-            let mut values = results?;
-            match node {
-                None => Err(err("Missing array item", node)),
-                Some(node) => match parse_expression(node, scope, env) {
-                    Ok(value) => {
-                        values.push(value);
-                        Ok(values)
-                    }
-                    Err(error) => Err(error),
-                },
-            }
-        })?;
-    Ok(Expression::new(Term::Collection(CollectionTerm::Vector(
-        VectorTerm::new(values),
-    ))))
+    let append_expression = match node.len() == 2 {
+        true => match (&node[0], &node[1]) {
+            (Some(Expr::Spread(base)), Some(item)) => Some((base, item)),
+            _ => None,
+        },
+        _ => None,
+    };
+    match append_expression {
+        Some((base, item)) => {
+            let base = parse_expression(base, scope, env)?;
+            let item = parse_expression(item, scope, env)?;
+            Ok(Expression::new(Term::Application(ApplicationTerm::new(
+                Expression::new(Term::Builtin(BuiltinTerm::Append)),
+                vec![base, item],
+            ))))
+        }
+        None => {
+            let values =
+                node.iter()
+                    .fold(Ok(Vec::with_capacity(node.len())), |results, node| {
+                        let mut values = results?;
+                        match node {
+                            None => Err(err("Missing array item", node)),
+                            Some(node) => match parse_expression(node, scope, env) {
+                                Ok(value) => {
+                                    values.push(value);
+                                    Ok(values)
+                                }
+                                Err(error) => Err(error),
+                            },
+                        }
+                    })?;
+            Ok(Expression::new(Term::Collection(CollectionTerm::Vector(
+                VectorTerm::new(values),
+            ))))
+        }
+    }
 }
 
 fn parse_unary_expression<'src>(
@@ -1810,6 +1829,22 @@ mod tests {
                     Expression::new(Term::Value(ValueTerm::Float(5.0))),
                 ]),
             )))),
+        );
+        assert_eq!(
+            parse("[...[3, 4, 5], 6]", &env),
+            Ok(Expression::new(Term::Application(ApplicationTerm::new(
+                Expression::new(Term::Builtin(BuiltinTerm::Append)),
+                vec![
+                    Expression::new(Term::Collection(CollectionTerm::Vector(VectorTerm::new(
+                        vec![
+                            Expression::new(Term::Value(ValueTerm::Float(3.0))),
+                            Expression::new(Term::Value(ValueTerm::Float(4.0))),
+                            Expression::new(Term::Value(ValueTerm::Float(5.0))),
+                        ]
+                    )))),
+                    Expression::new(Term::Value(ValueTerm::Float(6.0))),
+                ],
+            ))))
         );
     }
 
@@ -2952,7 +2987,7 @@ mod tests {
             })).foo.foo.foo.bar;
         ",
             &env,
-            &loader
+            &loader,
         )
         .unwrap();
         let result = expression.evaluate(&DynamicState::new(), &mut EvaluationCache::new());
