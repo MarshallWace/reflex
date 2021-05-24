@@ -70,6 +70,8 @@ mod or;
 use or::Or;
 mod pow;
 use pow::Pow;
+mod reduce;
+use reduce::Reduce;
 mod remainder;
 use remainder::Remainder;
 mod round;
@@ -121,6 +123,7 @@ pub enum BuiltinTerm {
     Not,
     Or,
     Pow,
+    Reduce,
     Remainder,
     Round,
     Subtract,
@@ -163,11 +166,12 @@ impl Hashable for BuiltinTerm {
             Self::Not => hash_u8(30),
             Self::Or => hash_u8(31),
             Self::Pow => hash_u8(32),
-            Self::Remainder => hash_u8(33),
-            Self::Round => hash_u8(34),
-            Self::Subtract => hash_u8(35),
-            Self::Tuple => hash_u8(36),
-            Self::Values => hash_u8(37),
+            Self::Reduce => hash_u8(33),
+            Self::Remainder => hash_u8(34),
+            Self::Round => hash_u8(35),
+            Self::Subtract => hash_u8(36),
+            Self::Tuple => hash_u8(37),
+            Self::Values => hash_u8(38),
         }
     }
 }
@@ -207,6 +211,7 @@ impl BuiltinTerm {
             Self::Not => Not::arity(),
             Self::Or => Or::arity(),
             Self::Pow => Pow::arity(),
+            Self::Reduce => Reduce::arity(),
             Self::Remainder => Remainder::arity(),
             Self::Round => Round::arity(),
             Self::Subtract => Subtract::arity(),
@@ -252,6 +257,7 @@ impl BuiltinTerm {
             Self::Not => Not::apply(args),
             Self::Or => Or::apply(args),
             Self::Pow => Pow::apply(args),
+            Self::Reduce => Reduce::apply(args),
             Self::Remainder => Remainder::apply(args),
             Self::Round => Round::apply(args),
             Self::Subtract => Subtract::apply(args),
