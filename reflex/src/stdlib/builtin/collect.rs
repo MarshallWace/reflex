@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use crate::{
-    core::{ApplicationTerm, Arity, Expression, Signal, SignalTerm, Term, VarArgs},
+    core::{ApplicationTerm, Arity, Expression, Signal, SignalTerm, StructTerm, Term, VarArgs},
     stdlib::{
         builtin::{BuiltinFunction, BuiltinTerm},
         collection::{vector::VectorTerm, CollectionTerm},
@@ -67,6 +67,19 @@ impl BuiltinFunction for CollectArgs {
         Expression::new(Term::Collection(CollectionTerm::Vector(VectorTerm::new(
             args.into_iter(),
         ))))
+    }
+}
+
+pub struct CollectTuple {}
+impl BuiltinFunction for CollectTuple {
+    fn arity() -> Arity {
+        Arity::from(0, 0, Some(VarArgs::Eager))
+    }
+    fn apply(args: impl IntoIterator<Item = Expression> + ExactSizeIterator) -> Expression {
+        Expression::new(Term::Struct(StructTerm::new(
+            None,
+            args.into_iter().collect(),
+        )))
     }
 }
 

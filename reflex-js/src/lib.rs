@@ -5,13 +5,17 @@ use reflex::core::Expression;
 use std::collections::HashMap;
 
 pub mod builtins;
+mod loader;
+pub use loader::{dynamic_module_loader, static_module_loader};
 mod parser;
-
-pub use parser::{parse, parse_module, static_module_loader};
+pub use parser::{parse, parse_module};
 pub mod stdlib {
     pub mod globals;
     pub mod imports;
-    pub use globals::{builtin_globals, global_process, json_stringify, json_stringify_string};
+    pub use globals::{
+        builtin_globals, global_json_parse, global_json_stringify, global_process, json_stringify,
+        json_stringify_string,
+    };
     pub use imports::builtin_imports;
 }
 

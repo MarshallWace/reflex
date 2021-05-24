@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use std::{env, error::Error, fs};
+use std::{env, error::Error, fs, path::Path};
 
 use reflex::{
     cache::EvaluationCache,
@@ -23,10 +23,11 @@ fn main() -> Result<(), Box<dyn Error>> {
         return Err("Multiple input filenames".into());
     }
     let filename = &args[0];
-    let src = fs::read_to_string(filename).expect("Failed to read input file");
+    let path = Path::new(filename);
+    let src = fs::read_to_string(path).expect("Failed to read input file");
     let env = Env::new().with_globals(builtin_globals());
     let loader = static_module_loader(builtin_imports());
-    let expression = match parse_module(&src, &env, &loader) {
+    let expression = match parse_module(&src, &env, &path, &loader) {
         Err(error) => panic!(error),
         Ok(expression) => expression,
     };

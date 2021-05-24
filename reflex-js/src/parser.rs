@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use std::{borrow::Cow, collections::HashMap, iter::once};
+use std::{borrow::Cow, iter::once, path::Path};
 
 use reflex::{
     core::{
@@ -87,26 +87,14 @@ pub fn parse<'src>(input: &'src str, env: &Env) -> ParserResult<Expression> {
     parse_script_contents(program.into_iter(), env)
 }
 
-pub fn static_module_loader<'a>(
-    modules: impl IntoIterator<Item = (&'a str, Expression)>,
-) -> impl Fn(&str) -> Result<Expression, String> {
-    let modules = modules
-        .into_iter()
-        .map(|(key, value)| (String::from(key), value))
-        .collect::<HashMap<_, _>>();
-    move |path: &str| match modules.get(path) {
-        Some(value) => Ok(Expression::clone(value)),
-        None => Err(format!("Module not found: {}", path)),
-    }
-}
-
 pub fn parse_module<'src>(
     input: &'src str,
     env: &Env,
-    loader: &impl Fn(&str) -> Result<Expression, String>,
+    path: &Path,
+    loader: &impl Fn(&str, &Path) -> Result<Expression, String>,
 ) -> ParserResult<Expression> {
     let program = parse_ast(input)?;
-    parse_module_contents(program.into_iter(), env, loader)
+    parse_module_contents(program.into_iter(), env, path, loader)
 }
 
 fn parse_ast(input: &str) -> ParserResult<Vec<ProgramPart>> {
@@ -141,7 +129,8 @@ fn parse_script_contents<'src>(
 fn parse_module_contents<'src>(
     program: impl IntoIterator<Item = ProgramPart<'src>> + ExactSizeIterator,
     env: &Env,
-    loader: &impl Fn(&str) -> Result<Expression, String>,
+    path: &Path,
+    loader: &impl Fn(&str, &Path) -> Result<Expression, String>,
 ) -> ParserResult<Expression> {
     let num_statements = program.len();
     let (body, import_bindings) = program.into_iter().fold(
@@ -151,7 +140,7 @@ fn parse_module_contents<'src>(
             match node {
                 ProgramPart::Decl(node) => match node {
                     Decl::Import(node) => {
-                        let bindings = parse_module_import(&node, loader)?;
+                        let bindings = parse_module_import(&node, path, loader)?;
                         import_bindings.extend(bindings);
                         Ok((body, import_bindings))
                     }
@@ -201,13 +190,14 @@ fn parse_module_contents<'src>(
 
 fn parse_module_import<'src>(
     node: &ModImport<'src>,
-    loader: &impl Fn(&str) -> Result<Expression, String>,
+    path: &Path,
+    loader: &impl Fn(&str, &Path) -> Result<Expression, String>,
 ) -> ParserResult<Vec<(&'src str, Expression)>> {
     let module_path = match &node.source {
         Lit::String(node) => Ok(parse_string(node)),
         _ => Err(err_unimplemented(node)),
     }?;
-    let module = match loader(&module_path) {
+    let module = match loader(&module_path, path) {
         Ok(module) => Ok(module),
         Err(error) => Err(err(
             &format!("Failed to import '{}': {}", module_path, error),
@@ -536,6 +526,7 @@ fn parse_expression<'src>(
     match node {
         Expr::Ident(node) => parse_variable_reference(node, scope, env),
         Expr::Lit(node) => parse_literal(node, scope, env),
+        Expr::TaggedTemplate(node) => parse_tagged_template(node, scope, env),
         Expr::Unary(node) => parse_unary_expression(node, scope, env),
         Expr::Binary(node) => parse_binary_expression(node, scope, env),
         Expr::Logical(node) => parse_logical_expression(node, scope, env),
@@ -700,6 +691,14 @@ fn parse_template_element<'src>(node: &TemplateElement<'src>) -> ParserResult<&'
         Cow::Borrowed(value) => Ok(value),
         Cow::Owned(_) => Err(err("Invalid template string", node)),
     }
+}
+
+fn parse_tagged_template<'src>(
+    node: &TaggedTemplateExpr<'src>,
+    scope: &LexicalScope,
+    env: &Env,
+) -> ParserResult<Expression> {
+    parse_template_literal(&node.quasi, scope, env)
 }
 
 fn parse_object_literal<'src>(
@@ -1368,6 +1367,8 @@ fn parse_constructor_expression<'src>(
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
     use super::{parse, parse_module};
     use crate::{
         builtins::{dispatch, throw, to_string},
@@ -1927,8 +1928,9 @@ mod tests {
     fn modules() {
         let env = Env::new();
         let loader = static_module_loader(Vec::new());
+        let path = Path::new("./foo.js");
         assert_eq!(
-            parse_module("export default 3;", &env, &loader),
+            parse_module("export default 3;", &env, &path, &loader),
             Ok(Expression::new(Term::Value(ValueTerm::Float(3.0)))),
         );
     }
@@ -2959,6 +2961,7 @@ mod tests {
     #[test]
     fn recursive_expressions() {
         let env = Env::new();
+        let path = Path::new("./foo.js");
         let loader = static_module_loader(builtin_imports());
         let expression = parse_module(
             "
@@ -2966,6 +2969,7 @@ mod tests {
             export default graph((foo) => 3);
         ",
             &env,
+            &path,
             &loader,
         )
         .unwrap();
@@ -2987,6 +2991,7 @@ mod tests {
             })).foo.foo.foo.bar;
         ",
             &env,
+            &path,
             &loader,
         )
         .unwrap();
@@ -3003,6 +3008,7 @@ mod tests {
     #[test]
     fn import_scoping() {
         let env = Env::new();
+        let path = Path::new("./foo.js");
         let loader =
             static_module_loader(vec![("foo", Expression::new(Term::Value(ValueTerm::Null)))]);
         let expression = parse_module(
@@ -3013,6 +3019,7 @@ mod tests {
             export default bar.foo;
             ",
             &env,
+            &path,
             &loader,
         )
         .unwrap();

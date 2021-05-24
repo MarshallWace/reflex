@@ -17,6 +17,9 @@ use reflex::core::Expression;
 use reflex_js::stdlib::json_stringify_string;
 use reflex_runtime::Runtime;
 
+pub mod loaders {
+    pub mod graphql;
+}
 mod utils;
 mod graphql {
     pub(crate) mod http;

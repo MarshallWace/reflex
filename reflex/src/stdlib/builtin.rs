@@ -21,7 +21,7 @@ use cdr::Cdr;
 mod ceil;
 use ceil::Ceil;
 mod collect;
-use collect::{Collect, CollectArgs};
+use collect::{Collect, CollectArgs, CollectTuple};
 mod concat;
 use concat::Concat;
 mod cons;
@@ -30,6 +30,8 @@ mod divide;
 use divide::Divide;
 mod effect;
 use effect::Effect;
+mod ends_with;
+use ends_with::EndsWith;
 mod entries;
 use entries::Entries;
 mod eq;
@@ -76,6 +78,8 @@ mod remainder;
 use remainder::Remainder;
 mod round;
 use round::Round;
+mod starts_with;
+use starts_with::StartsWith;
 mod subtract;
 use subtract::Subtract;
 mod tuple;
@@ -99,10 +103,12 @@ pub enum BuiltinTerm {
     Ceil,
     Collect,
     CollectArgs,
+    CollectTuple,
     Concat,
     Cons,
     Divide,
     Effect,
+    EndsWith,
     Entries,
     Eq,
     Equal,
@@ -126,6 +132,7 @@ pub enum BuiltinTerm {
     Reduce,
     Remainder,
     Round,
+    StartsWith,
     Subtract,
     Tuple,
     Values,
@@ -142,36 +149,39 @@ impl Hashable for BuiltinTerm {
             Self::Ceil => hash_u8(6),
             Self::Collect => hash_u8(7),
             Self::CollectArgs => hash_u8(8),
-            Self::Concat => hash_u8(9),
-            Self::Cons => hash_u8(10),
-            Self::Divide => hash_u8(11),
-            Self::Effect => hash_u8(12),
-            Self::Entries => hash_u8(13),
-            Self::Eq => hash_u8(14),
-            Self::Equal => hash_u8(15),
-            Self::Floor => hash_u8(16),
-            Self::Get => hash_u8(17),
-            Self::Gt => hash_u8(18),
-            Self::Gte => hash_u8(19),
-            Self::If => hash_u8(20),
-            Self::Insert => hash_u8(21),
-            Self::Keys => hash_u8(22),
-            Self::Lt => hash_u8(23),
-            Self::Lte => hash_u8(24),
-            Self::Map => hash_u8(25),
-            Self::Match => hash_u8(26),
-            Self::Max => hash_u8(27),
-            Self::Min => hash_u8(28),
-            Self::Multiply => hash_u8(29),
-            Self::Not => hash_u8(30),
-            Self::Or => hash_u8(31),
-            Self::Pow => hash_u8(32),
-            Self::Reduce => hash_u8(33),
-            Self::Remainder => hash_u8(34),
-            Self::Round => hash_u8(35),
-            Self::Subtract => hash_u8(36),
-            Self::Tuple => hash_u8(37),
-            Self::Values => hash_u8(38),
+            Self::CollectTuple => hash_u8(9),
+            Self::Concat => hash_u8(10),
+            Self::Cons => hash_u8(11),
+            Self::Divide => hash_u8(12),
+            Self::Effect => hash_u8(13),
+            Self::EndsWith => hash_u8(14),
+            Self::Entries => hash_u8(15),
+            Self::Eq => hash_u8(16),
+            Self::Equal => hash_u8(17),
+            Self::Floor => hash_u8(18),
+            Self::Get => hash_u8(19),
+            Self::Gt => hash_u8(20),
+            Self::Gte => hash_u8(21),
+            Self::If => hash_u8(22),
+            Self::Insert => hash_u8(23),
+            Self::Keys => hash_u8(24),
+            Self::Lt => hash_u8(25),
+            Self::Lte => hash_u8(26),
+            Self::Map => hash_u8(27),
+            Self::Match => hash_u8(28),
+            Self::Max => hash_u8(29),
+            Self::Min => hash_u8(30),
+            Self::Multiply => hash_u8(31),
+            Self::Not => hash_u8(32),
+            Self::Or => hash_u8(33),
+            Self::Pow => hash_u8(34),
+            Self::Reduce => hash_u8(35),
+            Self::Remainder => hash_u8(36),
+            Self::Round => hash_u8(37),
+            Self::StartsWith => hash_u8(38),
+            Self::Subtract => hash_u8(39),
+            Self::Tuple => hash_u8(40),
+            Self::Values => hash_u8(41),
         }
     }
 }
@@ -187,10 +197,12 @@ impl BuiltinTerm {
             Self::Ceil => Ceil::arity(),
             Self::Collect => Collect::arity(),
             Self::CollectArgs => CollectArgs::arity(),
+            Self::CollectTuple => CollectTuple::arity(),
             Self::Concat => Concat::arity(),
             Self::Cons => Cons::arity(),
             Self::Divide => Divide::arity(),
             Self::Effect => Effect::arity(),
+            Self::EndsWith => EndsWith::arity(),
             Self::Entries => Entries::arity(),
             Self::Eq => Eq::arity(),
             Self::Equal => Equal::arity(),
@@ -214,6 +226,7 @@ impl BuiltinTerm {
             Self::Reduce => Reduce::arity(),
             Self::Remainder => Remainder::arity(),
             Self::Round => Round::arity(),
+            Self::StartsWith => StartsWith::arity(),
             Self::Subtract => Subtract::arity(),
             Self::Tuple => Tuple::arity(),
             Self::Values => Values::arity(),
@@ -233,10 +246,12 @@ impl BuiltinTerm {
             Self::Ceil => Ceil::apply(args),
             Self::Collect => Collect::apply(args),
             Self::CollectArgs => CollectArgs::apply(args),
+            Self::CollectTuple => CollectTuple::apply(args),
             Self::Concat => Concat::apply(args),
             Self::Cons => Cons::apply(args),
             Self::Divide => Divide::apply(args),
             Self::Effect => Effect::apply(args),
+            Self::EndsWith => EndsWith::apply(args),
             Self::Entries => Entries::apply(args),
             Self::Eq => Eq::apply(args),
             Self::Equal => Equal::apply(args),
@@ -260,6 +275,7 @@ impl BuiltinTerm {
             Self::Reduce => Reduce::apply(args),
             Self::Remainder => Remainder::apply(args),
             Self::Round => Round::apply(args),
+            Self::StartsWith => StartsWith::apply(args),
             Self::Subtract => Subtract::apply(args),
             Self::Tuple => Tuple::apply(args),
             Self::Values => Values::apply(args),

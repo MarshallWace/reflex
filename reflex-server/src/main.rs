@@ -1,7 +1,9 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use std::{convert::Infallible, env, fs, net::SocketAddr, process, str::FromStr, sync::Arc};
+use std::{
+    convert::Infallible, env, fs, net::SocketAddr, path::Path, process, str::FromStr, sync::Arc,
+};
 
 use hyper::{server::conn::AddrStream, service::make_service_fn, Server};
 use reflex::{
@@ -9,12 +11,12 @@ use reflex::{
     stdlib::value::{StringValue, ValueTerm},
 };
 use reflex_js::{
-    parse_module, static_module_loader,
+    dynamic_module_loader, parse_module,
     stdlib::{builtin_globals, builtin_imports, global_process},
     Env,
 };
 use reflex_runtime::{builtin_signal_handlers, Runtime, SignalHandler};
-use reflex_server::graphql_service;
+use reflex_server::{graphql_service, loaders::graphql::graphql_module_loader};
 
 #[tokio::main]
 pub async fn main() {
@@ -22,32 +24,39 @@ pub async fn main() {
     let args = parse_args();
     let config = match args {
         Err(error) => Err(error),
-        Ok((root_path, env_args)) => match load_file(&root_path) {
+        Ok((root_path, env_args)) => match load_file(&Path::new(&root_path)) {
             Err(error) => Err(error),
-            Ok(source) => match port {
+            Ok(root_source) => match port {
                 Err(error) => Err(error),
-                Ok(port) => Ok((env_args, source, SocketAddr::from(([127, 0, 0, 1], port)))),
+                Ok(port) => Ok((
+                    env_args,
+                    root_path,
+                    root_source,
+                    SocketAddr::from(([127, 0, 0, 1], port)),
+                )),
             },
         },
     };
     let server = match config {
         Err(error) => Err(format!("Unable to start server: {}", error)),
-        Ok((env_args, root_module, address)) => match create_graph_root(&root_module, env_args) {
-            Err(error) => Err(format!("Failed to load entry point module: {}", error)),
-            Ok(root) => {
-                let store = create_store();
-                let server = create_server(store, root, &address);
-                println!(
-                    "Listening for incoming HTTP requests on port {}",
-                    &address.port()
-                );
-                if let Err(error) = server.await {
-                    Err(format!("Server error: {}", error))
-                } else {
-                    Ok(())
+        Ok((env_args, root_module_path, root_module_source, address)) => {
+            match create_graph_root(&Path::new(&root_module_path), &root_module_source, env_args) {
+                Err(error) => Err(format!("Failed to load entry point module: {}", error)),
+                Ok(root) => {
+                    let store = create_store();
+                    let server = create_server(store, root, &address);
+                    println!(
+                        "Listening for incoming HTTP requests on port {}",
+                        &address.port()
+                    );
+                    if let Err(error) = server.await {
+                        Err(format!("Server error: {}", error))
+                    } else {
+                        Ok(())
+                    }
                 }
             }
-        },
+        }
     };
     process::exit(match server {
         Ok(_) => 0,
@@ -59,20 +68,22 @@ pub async fn main() {
 }
 
 fn create_graph_root(
-    root_module: &str,
+    root_module_path: &Path,
+    root_module_source: &str,
     env_args: impl IntoIterator<Item = (String, Expression)>,
 ) -> Result<Expression, String> {
-    parse_module(&root_module, &create_env(env_args), &create_module_loader())
+    parse_module(
+        root_module_source,
+        &create_env(env_args),
+        root_module_path,
+        &dynamic_module_loader(vec![graphql_module_loader], Some(builtin_imports())),
+    )
 }
 
 fn create_env(env_args: impl IntoIterator<Item = (String, Expression)>) -> Env {
     Env::new()
         .with_globals(builtin_globals())
         .with_global("process", global_process(env_args))
-}
-
-fn create_module_loader() -> impl Fn(&str) -> Result<Expression, String> {
-    static_module_loader(builtin_imports())
 }
 
 fn create_signal_handlers() -> impl IntoIterator<Item = (&'static str, SignalHandler)> {
@@ -172,9 +183,12 @@ fn parse_env_var<T: FromStr>(key: &str) -> Result<T, String> {
     }
 }
 
-fn load_file(path: &str) -> Result<String, String> {
-    match fs::read_to_string(path) {
+fn load_file(path: &Path) -> Result<String, String> {
+    match fs::read_to_string(&path) {
         Ok(data) => Ok(data),
-        Err(_) => Err(format!("Failed to load {}", path)),
+        Err(_) => Err(format!(
+            "Failed to load {}",
+            path.to_str().unwrap_or_else(|| "file")
+        )),
     }
 }

@@ -197,15 +197,15 @@ impl ToString {
     }
 }
 
-pub(crate) fn flatten_struct() -> Expression {
+pub fn flatten_deep() -> Expression {
     Expression::new(Term::Native(NativeFunction::new(
-        FlattenStruct::hash(),
-        FlattenStruct::arity(),
-        FlattenStruct::apply,
+        FlattenDeep::hash(),
+        FlattenDeep::arity(),
+        FlattenDeep::apply,
     )))
 }
-struct FlattenStruct {}
-impl FlattenStruct {
+struct FlattenDeep {}
+impl FlattenDeep {
     fn hash() -> HashId {
         hash_object(TypeId::of::<Self>())
     }
@@ -224,30 +224,84 @@ impl FlattenStruct {
         }
         let mut args = args.into_iter();
         let input = args.next().unwrap();
-        let result = match input.value() {
-            Term::Struct(input) => match input.prototype() {
-                Some(prototype) => Ok(Expression::new(Term::Application(ApplicationTerm::new(
-                    Expression::new(Term::StructConstructor(VarArgs::Eager, prototype.clone())),
-                    prototype
-                        .keys()
-                        .iter()
-                        .map(|key| Expression::new(Term::Value(key.clone())))
-                        .chain(input.fields().iter().map(Expression::clone))
-                        .collect(),
-                )))),
-                None => Err(format!(
-                    "Expected named struct fields, received anonymous struct {}",
-                    input,
-                )),
+        match input.value() {
+            Term::Value(_) => input,
+            Term::Struct(value) => {
+                let has_dynamic_values = value.fields().iter().any(|field| match field.value() {
+                    Term::Value(_) => false,
+                    _ => true,
+                });
+                if !has_dynamic_values {
+                    input
+                } else {
+                    match value.prototype() {
+                        Some(prototype) => {
+                            Expression::new(Term::Application(ApplicationTerm::new(
+                                Expression::new(Term::StructConstructor(
+                                    VarArgs::Eager,
+                                    prototype.clone(),
+                                )),
+                                prototype
+                                    .keys()
+                                    .iter()
+                                    .map(|key| Expression::new(Term::Value(key.clone())))
+                                    .chain(value.fields().iter().map(|field| match field.value() {
+                                        Term::Value(_) => Expression::clone(field),
+                                        _ => Expression::new(Term::Application(
+                                            ApplicationTerm::new(
+                                                flatten_deep(),
+                                                vec![Expression::clone(field)],
+                                            ),
+                                        )),
+                                    }))
+                                    .collect(),
+                            )))
+                        }
+                        None => Expression::new(Term::Application(ApplicationTerm::new(
+                            Expression::new(Term::Builtin(BuiltinTerm::CollectTuple)),
+                            value
+                                .fields()
+                                .iter()
+                                .map(|field| match field.value() {
+                                    Term::Value(_) => Expression::clone(field),
+                                    _ => Expression::new(Term::Application(ApplicationTerm::new(
+                                        flatten_deep(),
+                                        vec![Expression::clone(field)],
+                                    ))),
+                                })
+                                .collect(),
+                        ))),
+                    }
+                }
+            }
+            Term::Collection(value) => match value {
+                CollectionTerm::Vector(value) => {
+                    let has_dynamic_values = value.items().iter().any(|item| match item.value() {
+                        Term::Value(_) => false,
+                        _ => true,
+                    });
+                    if !has_dynamic_values {
+                        input
+                    } else {
+                        Expression::new(Term::Application(ApplicationTerm::new(
+                            Expression::new(Term::Builtin(BuiltinTerm::CollectArgs)),
+                            value
+                                .items()
+                                .iter()
+                                .map(|item| match item.value() {
+                                    Term::Value(_) => Expression::clone(item),
+                                    _ => Expression::new(Term::Application(ApplicationTerm::new(
+                                        flatten_deep(),
+                                        vec![Expression::clone(item)],
+                                    ))),
+                                })
+                                .collect(),
+                        )))
+                    }
+                }
+                _ => input,
             },
-            _ => Err(format!("Expected <struct>, received {}", input)),
-        };
-        match result {
-            Ok(result) => result,
-            Err(error) => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
-                SignalType::Error,
-                vec![ValueTerm::String(error)],
-            )))),
+            _ => input,
         }
     }
 }

@@ -4,7 +4,10 @@
 use std::any::TypeId;
 
 use reflex::{
-    core::{Arity, Expression, NativeFunction, Signal, SignalTerm, StructTerm, Term},
+    core::{
+        ApplicationTerm, Arity, Expression, LambdaTerm, NativeFunction, Signal, SignalTerm,
+        StaticVariableTerm, StructTerm, Term, VariableTerm,
+    },
     hash::{hash_object, HashId},
     stdlib::{
         collection::{vector::VectorTerm, CollectionTerm},
@@ -13,7 +16,7 @@ use reflex::{
     },
 };
 
-use crate::{parse, stdlib::globals::create_struct, Env};
+use crate::{builtins::flatten_deep, parse, stdlib::globals::create_struct, Env};
 
 pub(crate) fn global_json() -> Expression {
     create_struct(vec![
@@ -22,7 +25,7 @@ pub(crate) fn global_json() -> Expression {
     ])
 }
 
-fn global_json_parse() -> Expression {
+pub fn global_json_parse() -> Expression {
     Expression::new(Term::Native(NativeFunction::new(
         JsonParse::hash(),
         JsonParse::arity(),
@@ -60,11 +63,22 @@ impl JsonParse {
     }
 }
 
-fn global_json_stringify() -> Expression {
-    Expression::new(Term::Native(NativeFunction::new(
-        JsonStringify::hash(),
-        JsonStringify::arity(),
-        JsonStringify::apply,
+pub fn global_json_stringify() -> Expression {
+    Expression::new(Term::Lambda(LambdaTerm::new(
+        Arity::from(1, 0, None),
+        Expression::new(Term::Application(ApplicationTerm::new(
+            Expression::new(Term::Native(NativeFunction::new(
+                JsonStringify::hash(),
+                JsonStringify::arity(),
+                JsonStringify::apply,
+            ))),
+            vec![Expression::new(Term::Application(ApplicationTerm::new(
+                flatten_deep(),
+                vec![Expression::new(Term::Variable(VariableTerm::Static(
+                    StaticVariableTerm::new(0),
+                )))],
+            )))],
+        ))),
     )))
 }
 struct JsonStringify {}
@@ -77,7 +91,6 @@ impl JsonStringify {
     }
     fn apply(args: Vec<Expression>) -> Expression {
         let mut args = args.into_iter();
-        // TODO: Flatten nested fields before JSON stringifying
         let source = args.next().unwrap();
         match json_stringify(source.value()) {
             Ok(result) => {

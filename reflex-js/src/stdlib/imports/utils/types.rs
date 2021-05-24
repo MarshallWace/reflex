@@ -13,7 +13,7 @@ use reflex::{
     stdlib::{signal::SignalType, value::ValueTerm},
 };
 
-use crate::{builtins::flatten_struct, stdlib::imports::create_struct};
+use crate::{builtins::flatten_deep, stdlib::imports::create_struct};
 
 pub(crate) fn import_types() -> Expression {
     let null = Expression::new(Term::Value(ValueTerm::Null));
@@ -41,7 +41,7 @@ pub(crate) fn import_types() -> Expression {
                         EnumTypeFactory::apply,
                     ))),
                     vec![Expression::new(Term::Application(ApplicationTerm::new(
-                        flatten_struct(),
+                        flatten_deep(),
                         vec![Expression::new(Term::Variable(VariableTerm::Static(
                             StaticVariableTerm::new(0),
                         )))],
@@ -221,6 +221,8 @@ impl EnumVariantFactory {
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
     use crate::{parse_module, static_module_loader, stdlib::builtin_imports, Env};
     use reflex::{
         cache::EvaluationCache,
@@ -237,6 +239,7 @@ mod tests {
     #[test]
     fn struct_types() {
         let env = Env::new();
+        let path = Path::new("./foo.js");
         let loader = static_module_loader(builtin_imports());
         let expression = parse_module(
             "
@@ -248,6 +251,7 @@ mod tests {
             });
         ",
             &env,
+            &path,
             &loader,
         )
         .unwrap();
@@ -277,6 +281,7 @@ mod tests {
             export default new Foo({ foo: 3, bar: 4, baz: 5 });
         ",
             &env,
+            &path,
             &loader,
         )
         .unwrap();
@@ -310,6 +315,7 @@ mod tests {
             export default new Foo({ baz: 5, bar: 4, foo: 3 });
         ",
             &env,
+            &path,
             &loader,
         )
         .unwrap();
@@ -343,6 +349,7 @@ mod tests {
             export default new Foo({ foo: 3 + 1, bar: 4 + 1, baz: 5 + 1 });
         ",
             &env,
+            &path,
             &loader,
         )
         .unwrap();
@@ -394,6 +401,7 @@ mod tests {
             export default new Foo({ foo: 3, bar: 4, baz: 5 }).bar;
         ",
             &env,
+            &path,
             &loader,
         )
         .unwrap();
@@ -410,6 +418,7 @@ mod tests {
     #[test]
     fn static_enum_types() {
         let env = Env::new();
+        let path = Path::new("./foo.js");
         let loader = static_module_loader(builtin_imports());
         let expression = parse_module(
             "
@@ -421,6 +430,7 @@ mod tests {
             });
         ",
             &env,
+            &path,
             &loader,
         )
         .unwrap();
@@ -453,6 +463,7 @@ mod tests {
             }).Foo;
         ",
             &env,
+            &path,
             &loader,
         )
         .unwrap();
@@ -476,6 +487,7 @@ mod tests {
             }).Baz;
         ",
             &env,
+            &path,
             &loader,
         )
         .unwrap();
@@ -494,6 +506,7 @@ mod tests {
     #[test]
     fn parameterized_enum_types() {
         let env = Env::new();
+        let path = Path::new("./foo.js");
         let loader = static_module_loader(builtin_imports());
         let expression = parse_module(
             "
@@ -506,6 +519,7 @@ mod tests {
             });
         ",
             &env,
+            &path,
             &loader,
         )
         .unwrap();
@@ -541,6 +555,7 @@ mod tests {
             }).Static;
         ",
             &env,
+            &path,
             &loader,
         )
         .unwrap();
@@ -563,6 +578,7 @@ mod tests {
             }).Empty();
         ",
             &env,
+            &path,
             &loader,
         )
         .unwrap();
@@ -585,6 +601,7 @@ mod tests {
             }).Single(3);
         ",
             &env,
+            &path,
             &loader,
         )
         .unwrap();
@@ -610,6 +627,7 @@ mod tests {
             }).Multiple(3, 4, 5);
         ",
             &env,
+            &path,
             &loader,
         )
         .unwrap();

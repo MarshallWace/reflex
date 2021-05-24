@@ -16,7 +16,7 @@ use reflex::{
     },
 };
 
-use crate::{builtins::flatten_struct, stdlib::imports::create_struct};
+use crate::{builtins::flatten_deep, stdlib::imports::create_struct};
 
 pub(crate) fn import_http() -> Expression {
     create_struct(vec![
@@ -34,7 +34,9 @@ fn import_http_fetch() -> Expression {
                 Expression::new(Term::Application(ApplicationTerm::new(
                     Expression::new(Term::Builtin(BuiltinTerm::Effect)),
                     vec![
-                        Expression::new(Term::Value(ValueTerm::String(StringValue::from("reflex::http::fetch")))),
+                        Expression::new(Term::Value(ValueTerm::String(StringValue::from(
+                            "reflex::http::fetch",
+                        )))),
                         Expression::new(Term::Application(ApplicationTerm::new(
                             Expression::new(Term::Builtin(BuiltinTerm::Get)),
                             vec![
@@ -60,7 +62,7 @@ fn import_http_fetch() -> Expression {
                         Expression::new(Term::Application(ApplicationTerm::new(
                             Expression::new(Term::Builtin(BuiltinTerm::Entries)),
                             vec![Expression::new(Term::Application(ApplicationTerm::new(
-                                flatten_struct(),
+                                flatten_deep(),
                                 vec![Expression::new(Term::Application(ApplicationTerm::new(
                                     Expression::new(Term::Builtin(BuiltinTerm::Get)),
                                     vec![
