@@ -690,19 +690,37 @@ dependencies = [
 ]
 
 [[package]]
+name = "reflex-handlers"
+version = "0.1.0"
+dependencies = [
+ "hyper",
+ "reflex",
+ "reflex-json",
+ "reflex-runtime",
+]
+
+[[package]]
 name = "reflex-js"
 version = "0.1.0"
 dependencies = [
  "reflex",
+ "reflex-json",
  "resast",
  "ressa",
+]
+
+[[package]]
+name = "reflex-json"
+version = "0.1.0"
+dependencies = [
+ "reflex",
+ "serde_json",
 ]
 
 [[package]]
 name = "reflex-runtime"
 version = "0.1.0"
 dependencies = [
- "hyper",
  "reflex",
  "tokio",
  "tokio-stream",
@@ -717,6 +735,7 @@ dependencies = [
  "hyper",
  "hyper-tungstenite",
  "reflex",
+ "reflex-handlers",
  "reflex-js",
  "reflex-runtime",
  "serde_json",

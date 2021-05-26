@@ -10,12 +10,13 @@ use reflex::{
     core::{Expression, Term},
     stdlib::value::{StringValue, ValueTerm},
 };
+use reflex_handlers::builtin_signal_handlers;
 use reflex_js::{
     dynamic_module_loader, parse_module,
     stdlib::{builtin_globals, builtin_imports, global_process},
     Env,
 };
-use reflex_runtime::{builtin_signal_handlers, Runtime, SignalHandler};
+use reflex_runtime::{Runtime, SignalHandler};
 use reflex_server::{graphql_service, loaders::graphql::graphql_module_loader};
 
 #[tokio::main]

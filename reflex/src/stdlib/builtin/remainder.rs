@@ -3,6 +3,7 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use crate::{
     core::{Arity, Expression, Signal, SignalTerm, Term},
+    serialize::SerializedTerm,
     stdlib::{builtin::BuiltinFunction, signal::SignalType, value::ValueTerm},
 };
 
@@ -15,7 +16,7 @@ impl BuiltinFunction for Remainder {
         if args.len() != 2 {
             return Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                 SignalType::Error,
-                vec![ValueTerm::String(format!(
+                vec![SerializedTerm::string(format!(
                     "Expected 2 arguments, received {}",
                     args.len(),
                 ))],
@@ -29,7 +30,7 @@ impl BuiltinFunction for Remainder {
                 if *right == 0 {
                     Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                         SignalType::Error,
-                        vec![ValueTerm::String(format!(
+                        vec![SerializedTerm::string(format!(
                             "Division by zero: {} % {}",
                             left, right,
                         ))],
@@ -42,7 +43,7 @@ impl BuiltinFunction for Remainder {
                 if *right == 0.0 {
                     Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                         SignalType::Error,
-                        vec![ValueTerm::String(format!(
+                        vec![SerializedTerm::string(format!(
                             "Division by zero: {} % {}",
                             left, right,
                         ))],
@@ -53,7 +54,7 @@ impl BuiltinFunction for Remainder {
             }
             _ => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                 SignalType::Error,
-                vec![ValueTerm::String(format!(
+                vec![SerializedTerm::string(format!(
                     "Expected (Int, Int) or (Float, Float), received ({}, {})",
                     left, right,
                 ))],

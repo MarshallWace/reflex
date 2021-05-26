@@ -3,6 +3,7 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use crate::{
     core::{Arity, Expression, Signal, SignalTerm, Term, VarArgs},
+    serialize::SerializedTerm,
     stdlib::{
         builtin::BuiltinFunction,
         signal::SignalType,
@@ -33,7 +34,7 @@ impl BuiltinFunction for Concat {
             Ok(result) => Expression::new(Term::Value(ValueTerm::String(result))),
             Err(error) => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                 SignalType::Error,
-                vec![ValueTerm::String(error)],
+                vec![SerializedTerm::string(error)],
             )))),
         }
     }

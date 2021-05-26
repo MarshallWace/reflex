@@ -8,9 +8,9 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-
 reflex = { path = "../reflex" }
 reflex-js = { path = "../reflex-js" }
+reflex-handlers = { path = "../reflex-handlers" }
 reflex-runtime = { path = "../reflex-runtime" }
 futures = "*"
 graphql-parser = "0.3.0"

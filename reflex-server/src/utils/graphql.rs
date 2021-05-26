@@ -3,16 +3,17 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use graphql_parser::{parse_query, query::*};
 use reflex::{
-    core::{Expression, StructPrototype, StructTerm, Term},
-    query::{FieldSelector, QueryShape},
+    core::{Expression, SerializedTerm, StructPrototype, StructTerm, Term},
     stdlib::{
         collection::{vector::VectorTerm, CollectionTerm},
         value::{StringValue, ValueTerm},
     },
 };
 
+use crate::query::{FieldSelector, QueryShape};
+
 pub type QueryTransform =
-    Box<dyn Fn(&ValueTerm) -> Result<Expression, String> + Send + Sync + 'static>;
+    Box<dyn Fn(&SerializedTerm) -> Result<Expression, String> + Send + Sync + 'static>;
 
 pub fn parse_graphql_query(source: &str) -> Result<(QueryShape, QueryTransform), String> {
     match parse_query::<&str>(source) {
@@ -76,13 +77,13 @@ fn parse_root_operation<'src>(
     selection_set: &SelectionSet<'src, &'src str>,
 ) -> Result<(QueryShape, QueryTransform), String> {
     let (inner_query, inner_transform) = parse_selection_set(selection_set)?;
-    let query = QueryShape::Branch(vec![FieldSelector::NamedField(
+    let query = QueryShape::branch(vec![FieldSelector::NamedField(
         ValueTerm::String(StringValue::from(operation_type)),
         inner_query,
     )]);
-    let transform = Box::new(move |result: &ValueTerm| match result {
-        ValueTerm::Array(value) if value.len() == 1 => {
-            inner_transform(value.iter().next().unwrap())
+    let transform = Box::new(move |result: &SerializedTerm| match result {
+        SerializedTerm::List(value) if value.items().len() == 1 => {
+            inner_transform(value.items().iter().next().unwrap())
         }
         _ => Err(format!("Invalid root operation result: {}", result)),
     });
@@ -108,10 +109,11 @@ fn parse_selection_set<'src>(
         })
         .collect::<Result<Vec<_>, _>>()?;
     let (field_queries, field_transforms): (Vec<_>, Vec<_>) = fields.into_iter().unzip();
-    let query = QueryShape::Branch(field_queries);
-    let transform = Box::new(move |result: &ValueTerm| match result {
-        ValueTerm::Array(value) => {
+    let query = QueryShape::branch(field_queries);
+    let transform = Box::new(move |result: &SerializedTerm| match result {
+        SerializedTerm::List(value) => {
             let transformed_fields = value
+                .items()
                 .iter()
                 .zip(field_transforms.iter())
                 .map(|(value, (key, transform))| match transform(value) {
@@ -131,8 +133,8 @@ fn parse_field<'src>(
 ) -> Result<(FieldSelector, QueryTransform), String> {
     let (query, transform): (QueryShape, QueryTransform) = if field.selection_set.items.is_empty() {
         (
-            QueryShape::Leaf,
-            Box::new(|result| Ok(Expression::new(Term::Value(result.clone())))),
+            QueryShape::leaf(),
+            Box::new(|result| Ok(result.deserialize())),
         )
     } else {
         parse_selection_set(&field.selection_set)?
@@ -142,10 +144,11 @@ fn parse_field<'src>(
         .iter()
         .filter(|directive| directive.name == "list");
     let (query, transform) = list_directives.fold((query, transform), |(query, transform), _| {
-        let query = QueryShape::List(Box::new(query));
-        let transform = Box::new(move |result: &ValueTerm| match result {
-            ValueTerm::Array(items) => {
-                let transformed_items = items
+        let query = QueryShape::list(query);
+        let transform = Box::new(move |result: &SerializedTerm| match result {
+            SerializedTerm::List(value) => {
+                let transformed_items = value
+                    .items()
                     .iter()
                     .map(|value| transform(value))
                     .collect::<Result<Vec<_>, _>>()?;
@@ -162,9 +165,11 @@ fn parse_field<'src>(
         (query, transform)
     } else {
         let args = parse_field_arguments(&field.arguments)?;
-        let query = QueryShape::Branch(vec![FieldSelector::FunctionField(args, query)]);
-        let transform = Box::new(move |result: &ValueTerm| match result {
-            ValueTerm::Array(value) if value.len() == 1 => transform(value.iter().next().unwrap()),
+        let query = QueryShape::branch(vec![FieldSelector::FunctionField(args, query)]);
+        let transform = Box::new(move |result: &SerializedTerm| match result {
+            SerializedTerm::List(value) if value.items().len() == 1 => {
+                transform(value.items().iter().next().unwrap())
+            }
             _ => Err(format!("Invalid function result: {}", result)),
         });
         (query, transform)

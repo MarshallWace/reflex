@@ -5,7 +5,7 @@ use std::io::{self, Write};
 
 use reflex::{
     cache::EvaluationCache,
-    core::{DynamicState, Signal},
+    core::{DynamicState, SerializedTerm},
     parser::sexpr::parse,
     stdlib::{signal::SignalType, value::ValueTerm},
 };
@@ -38,22 +38,53 @@ pub fn run() -> io::Result<()> {
                 match result {
                     Ok(result) => writeln!(stdout, "{}", result)?,
                     Err(signals) => {
-                        let (errors, signals): (Vec<Signal>, Vec<Signal>) = signals
-                            .into_iter()
-                            .map(|foo| foo)
-                            .partition(|signal| signal.is_type(SignalType::Error));
-                        for error in errors {
-                            let message = match error.args() {
-                                Some(args) => match args.get(0) {
-                                    Some(ValueTerm::String(value)) => value,
-                                    _ => "<invalid>",
-                                },
-                                _ => "<unknown>",
-                            };
-                            writeln!(stdout, "Error: {}", message)?;
-                        }
                         for signal in signals {
-                            writeln!(stdout, "{}", signal)?;
+                            let message = match signal.get_type() {
+                                SignalType::Error => {
+                                    let (message, args) = match signal.args() {
+                                        Some(args) => match args.get(0) {
+                                            Some(SerializedTerm::Value(ValueTerm::String(
+                                                message,
+                                            ))) => (Some(message.clone()), Some(&args[1..])),
+                                            _ => (None, Some(&args[..])),
+                                        },
+                                        None => (None, None),
+                                    };
+                                    format!(
+                                        "Error: {}",
+                                        match message {
+                                            Some(message) => match args {
+                                                None => format!("{}", message),
+                                                Some(args) => format!(
+                                                    "{} {}",
+                                                    message,
+                                                    args.iter()
+                                                        .map(SerializedTerm::stringify)
+                                                        .collect::<Vec<_>>()
+                                                        .join(" ")
+                                                ),
+                                            },
+                                            None => String::from("<unknown>"),
+                                        }
+                                    )
+                                }
+                                SignalType::Custom(signal_type) => format!(
+                                    "<{}>{}",
+                                    signal_type,
+                                    match signal.args() {
+                                        None => String::new(),
+                                        Some(args) => format!(
+                                            " {}",
+                                            args.iter()
+                                                .map(SerializedTerm::stringify)
+                                                .collect::<Vec<_>>()
+                                                .join(" ")
+                                        ),
+                                    }
+                                ),
+                                SignalType::Pending => String::from("<pending>"),
+                            };
+                            writeln!(stdout, "{}", message)?;
                         }
                     }
                 }

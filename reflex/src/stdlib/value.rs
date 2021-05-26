@@ -4,8 +4,7 @@
 use std::fmt;
 
 use crate::hash::{
-    hash_bool, hash_f64, hash_i32, hash_seed, hash_sequence, hash_string, hash_u32, prefix_hash,
-    HashId, Hashable,
+    hash_bool, hash_f64, hash_i32, hash_seed, hash_string, hash_u32, prefix_hash, HashId, Hashable,
 };
 
 pub type SymbolId = u32;
@@ -21,7 +20,6 @@ pub enum ValueTerm {
     Int(IntValue),
     Float(FloatValue),
     String(StringValue),
-    Array(Vec<ValueTerm>),
 }
 impl Hashable for ValueTerm {
     fn hash(&self) -> HashId {
@@ -32,9 +30,6 @@ impl Hashable for ValueTerm {
             Self::Int(value) => prefix_hash(3, hash_i32(*value)),
             Self::Float(value) => prefix_hash(4, hash_f64(*value)),
             Self::String(value) => prefix_hash(5, hash_string(value)),
-            Self::Array(value) => {
-                prefix_hash(6, hash_sequence(value.iter().map(|value| value.hash())))
-            }
         }
     }
 }
@@ -47,15 +42,6 @@ impl fmt::Display for ValueTerm {
             Self::Int(value) => write!(f, "{:?}", value),
             Self::Float(value) => write!(f, "{:?}", value),
             Self::String(value) => write!(f, "{:?}", value),
-            Self::Array(value) => write!(
-                f,
-                "[{}]",
-                value
-                    .iter()
-                    .map(|value| format!("{}", value))
-                    .collect::<Vec<_>>()
-                    .join(",")
-            ),
         }
     }
 }

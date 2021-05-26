@@ -2,10 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use reflex::{
-    core::{Expression, Signal, SignalTerm, StateToken, Term},
+    core::{Expression, SerializedTerm, Signal, SignalTerm, StateToken, Term},
     hash::Hashable,
     stdlib::{signal::SignalType, value::ValueTerm},
-    store::Store,
 };
 use std::{collections::HashMap, future::Future, pin::Pin, sync::Mutex};
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
@@ -15,20 +14,12 @@ use tokio_stream::{
     StreamExt,
 };
 
-mod handlers;
-pub use handlers::builtin_signal_handlers;
-pub(crate) mod utils;
+mod store;
+use store::Store;
 
 pub type SignalHandler =
-    Box<dyn Fn(Option<&[ValueTerm]>) -> Result<SignalResult, String> + Send + Sync + 'static>;
+    Box<dyn Fn(Option<&[SerializedTerm]>) -> Result<SignalResult, String> + Send + Sync + 'static>;
 pub type SignalResult = (Expression, Option<SignalEffect>);
-
-pub fn create_signal_handler(
-    signal_type: &'static str,
-    handler: impl Fn(Option<&[ValueTerm]>) -> Result<SignalResult, String> + Send + Sync + 'static,
-) -> (&'static str, SignalHandler) {
-    (signal_type, Box::new(handler))
-}
 
 pub type SubscriptionResult = Result<Expression, Vec<String>>;
 
@@ -417,14 +408,20 @@ fn extract_signal_effects<'a>(
     (results, effects)
 }
 
-fn parse_error_signal_message(args: Option<&Vec<ValueTerm>>) -> String {
+fn parse_error_signal_message(args: Option<&Vec<SerializedTerm>>) -> String {
     let args = match args {
         None => Vec::new(),
         Some(args) => args
             .iter()
-            .map(|arg| match arg {
-                ValueTerm::String(message) => String::from(message),
-                arg => format!("{}", arg),
+            .map(|arg| {
+                let message = match arg {
+                    SerializedTerm::Value(arg) => match arg {
+                        ValueTerm::String(message) => Some(String::from(message)),
+                        _ => None,
+                    },
+                    _ => None,
+                };
+                message.unwrap_or_else(|| format!("{}", arg))
             })
             .collect::<Vec<_>>(),
     };

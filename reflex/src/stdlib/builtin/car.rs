@@ -3,7 +3,8 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use crate::{
     core::{Arity, Expression, Signal, SignalTerm, Term},
-    stdlib::{builtin::BuiltinFunction, signal::SignalType, value::ValueTerm},
+    serialize::SerializedTerm,
+    stdlib::{builtin::BuiltinFunction, signal::SignalType},
 };
 
 pub struct Car {}
@@ -15,7 +16,7 @@ impl BuiltinFunction for Car {
         if args.len() != 1 {
             return Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                 SignalType::Error,
-                vec![ValueTerm::String(format!(
+                vec![SerializedTerm::string(format!(
                     "Expected 1 arguments, received {}",
                     args.len(),
                 ))],
@@ -29,7 +30,7 @@ impl BuiltinFunction for Car {
             }
             _ => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                 SignalType::Error,
-                vec![ValueTerm::String(format!(
+                vec![SerializedTerm::string(format!(
                     "Expected list, received {}",
                     target,
                 ))],

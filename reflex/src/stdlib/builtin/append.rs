@@ -3,9 +3,8 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use crate::{
     core::{Arity, Expression, Signal, SignalTerm, Term},
-    stdlib::{
-        builtin::BuiltinFunction, collection::CollectionTerm, signal::SignalType, value::ValueTerm,
-    },
+    serialize::SerializedTerm,
+    stdlib::{builtin::BuiltinFunction, collection::CollectionTerm, signal::SignalType},
 };
 
 pub struct Append {}
@@ -17,7 +16,7 @@ impl BuiltinFunction for Append {
         if args.len() != 2 {
             return Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                 SignalType::Error,
-                vec![ValueTerm::String(format!(
+                vec![SerializedTerm::string(format!(
                     "Expected 2 arguments, received {}",
                     args.len(),
                 ))],
@@ -34,7 +33,7 @@ impl BuiltinFunction for Append {
             },
             _ => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                 SignalType::Error,
-                vec![ValueTerm::String(format!(
+                vec![SerializedTerm::string(format!(
                     "Invalid append operation: Expected (Vector, <any>) or (HashSet, <any>), received ({}, {})",
                     target, value
                 ))],

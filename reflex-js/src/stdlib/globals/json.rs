@@ -5,8 +5,8 @@ use std::any::TypeId;
 
 use reflex::{
     core::{
-        ApplicationTerm, Arity, Expression, LambdaTerm, NativeFunction, Signal, SignalTerm,
-        StaticVariableTerm, StructTerm, Term, VariableTerm,
+        ApplicationTerm, Arity, Expression, LambdaTerm, NativeFunction, SerializedTerm, Signal,
+        SignalTerm, StaticVariableTerm, StructTerm, Term, VariableTerm,
     },
     hash::{hash_object, HashId},
     stdlib::{
@@ -15,8 +15,9 @@ use reflex::{
         value::{StringValue, ValueTerm},
     },
 };
+use reflex_json::parse;
 
-use crate::{builtins::flatten_deep, parse, stdlib::globals::create_struct, Env};
+use crate::{builtins::flatten_deep, stdlib::globals::create_struct};
 
 pub(crate) fn global_json() -> Expression {
     create_struct(vec![
@@ -44,10 +45,7 @@ impl JsonParse {
         let mut args = args.into_iter();
         let source = args.next().unwrap();
         let result = match source.value() {
-            Term::Value(ValueTerm::String(value)) => {
-                // TODO: Implement proper JSON parser
-                parse(&format!("({})", value), &Env::new())
-            }
+            Term::Value(ValueTerm::String(value)) => parse(value),
             _ => Err(format!(
                 "Invalid JSON.parse() call: expected string argument, received {}",
                 source
@@ -57,7 +55,7 @@ impl JsonParse {
             Ok(result) => result,
             Err(error) => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                 SignalType::Error,
-                vec![ValueTerm::String(error)],
+                vec![SerializedTerm::string(error)],
             )))),
         }
     }
@@ -98,7 +96,7 @@ impl JsonStringify {
             }
             Err(error) => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                 SignalType::Error,
-                vec![ValueTerm::String(format!(
+                vec![SerializedTerm::string(format!(
                     "Invalid JSON.stringify() call: unable to serialize {}",
                     error
                 ))],
@@ -126,13 +124,6 @@ fn stringify_value_term<'a>(input: &'a Term, value: &'a ValueTerm) -> Result<Str
         ValueTerm::Int(value) => Ok(format!("{}", value)),
         ValueTerm::Float(value) => Ok(format!("{}", value)),
         ValueTerm::String(value) => Ok(json_stringify_string(value)),
-        ValueTerm::Array(items) => {
-            let items = items
-                .iter()
-                .map(|value| stringify_value_term(input, value))
-                .collect::<Result<Vec<_>, _>>()?;
-            Ok(format!("[{}]", items.join(",")))
-        }
         ValueTerm::Symbol(_) => Err(input),
     }
 }

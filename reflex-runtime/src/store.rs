@@ -3,7 +3,7 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use std::{collections::HashSet, num::NonZeroUsize};
 
-use crate::{
+use reflex::{
     cache::EvaluationCache,
     core::{DependencyList, DynamicState, Expression, Signal, StateToken},
     hash::{HashId, Hashable},

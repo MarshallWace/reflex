@@ -3,7 +3,8 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use crate::{
     core::{ApplicationTerm, Arity, Expression, Signal, SignalTerm, Term},
-    stdlib::{builtin::BuiltinFunction, signal::SignalType, value::ValueTerm},
+    serialize::SerializedTerm,
+    stdlib::{builtin::BuiltinFunction, signal::SignalType},
 };
 
 pub struct Match {}
@@ -15,7 +16,7 @@ impl BuiltinFunction for Match {
         if args.len() != 2 {
             return Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                 SignalType::Error,
-                vec![ValueTerm::String(format!(
+                vec![SerializedTerm::string(format!(
                     "Expected 2 arguments, received {}",
                     args.len(),
                 ))],
@@ -33,7 +34,7 @@ impl BuiltinFunction for Match {
                     ))),
                     None => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                         SignalType::Error,
-                        vec![ValueTerm::String(format!(
+                        vec![SerializedTerm::string(format!(
                             "Unhandled enum index: {} for matcher {}",
                             target.index(),
                             matcher
@@ -43,7 +44,7 @@ impl BuiltinFunction for Match {
             }
             _ => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                 SignalType::Error,
-                vec![ValueTerm::String(format!(
+                vec![SerializedTerm::string(format!(
                     "Invalid pattern match: Expected (<enum>, <struct>), received ({}, {})",
                     target, matcher,
                 ))],
@@ -61,6 +62,7 @@ mod tests {
             Expression, LambdaTerm, Signal, SignalTerm, StaticVariableTerm, StructTerm, Term,
             VariableTerm,
         },
+        serialize::SerializedTerm,
         stdlib::builtin::BuiltinTerm,
         stdlib::signal::SignalType,
         stdlib::value::ValueTerm,
@@ -88,7 +90,7 @@ mod tests {
                             Arity::from(0, 0, None),
                             Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                                 SignalType::Error,
-                                vec![ValueTerm::String(String::from("foo"))],
+                                vec![SerializedTerm::string(String::from("foo"))],
                             )))),
                         ))),
                         Expression::new(Term::Lambda(LambdaTerm::new(
@@ -117,7 +119,7 @@ mod tests {
                             Arity::from(0, 0, None),
                             Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                                 SignalType::Error,
-                                vec![ValueTerm::String(String::from("bar"))],
+                                vec![SerializedTerm::string(String::from("bar"))],
                             )))),
                         ))),
                     ],

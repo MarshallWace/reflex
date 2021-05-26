@@ -1,10 +1,8 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use std::borrow::Cow;
-
 use crate::{
-    core::{Arity, Expression, Signal, SignalTerm, Term, VarArgs},
+    core::{Arity, Expression, SerializedTerm, Signal, SignalTerm, Term, VarArgs},
     serialize,
     stdlib::{builtin::BuiltinFunction, signal::SignalType, value::ValueTerm},
 };
@@ -18,7 +16,7 @@ impl BuiltinFunction for Effect {
         if args.len() < 1 {
             return Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                 SignalType::Error,
-                vec![ValueTerm::String(format!(
+                vec![SerializedTerm::string(format!(
                     "Expected 1 or more arguments, received {}",
                     args.len(),
                 ))],
@@ -31,20 +29,14 @@ impl BuiltinFunction for Effect {
                 let args = args
                     .into_iter()
                     .map(|arg| match serialize(arg.value()) {
-                        Ok(value) => Ok(match value {
-                            Cow::Owned(value) => value,
-                            Cow::Borrowed(value) => value.clone(),
-                        }),
-                        Err(error) => Err(format!(
-                            "Invalid signal argument: Unable to serialize {}",
-                            error,
-                        )),
+                        Ok(value) => Ok(value),
+                        Err(error) => Err(format!("Invalid signal argument: {}", error)),
                     })
                     .collect::<Result<Vec<_>, String>>();
                 match args {
                     Err(error) => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                         SignalType::Error,
-                        vec![ValueTerm::String(error)],
+                        vec![SerializedTerm::string(error)],
                     )))),
                     Ok(args) => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                         SignalType::Custom(String::from(signal_type)),
@@ -54,7 +46,7 @@ impl BuiltinFunction for Effect {
             }
             _ => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                 SignalType::Error,
-                vec![ValueTerm::String(format!(
+                vec![SerializedTerm::string(format!(
                     "Invalid signal type: Expected String, received {}",
                     signal_type,
                 ))],
@@ -72,6 +64,7 @@ mod tests {
             Expression, Signal, Term,
         },
         hash::Hashable,
+        serialize::SerializedTerm,
         stdlib::{
             builtin::BuiltinTerm,
             signal::SignalType,
@@ -94,7 +87,7 @@ mod tests {
         )));
         let signal = Signal::new(
             SignalType::Custom(String::from("fetch")),
-            vec![ValueTerm::String(StringValue::from("http://example.com/"))],
+            vec![SerializedTerm::string(String::from("http://example.com/"))],
         );
         let signal_hash = signal.hash();
         let result = expression.evaluate(&state, &mut cache);

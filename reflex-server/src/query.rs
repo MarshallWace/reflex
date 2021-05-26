@@ -1,19 +1,16 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use std::{any::TypeId, fmt};
+use std::fmt;
 
-use crate::{
+use reflex::{
     core::{
-        hash_struct_field_offset, ApplicationTerm, Arity, Expression, LambdaTerm, NativeFunction,
-        Signal, SignalTerm, StackOffset, StaticVariableTerm, StructFieldOffset, StructTerm, Term,
-        VariableTerm,
+        hash_struct_field_offset, ApplicationTerm, Arity, Expression, LambdaTerm, StackOffset,
+        StaticVariableTerm, StructFieldOffset, StructTerm, Term, VariableTerm,
     },
-    hash::{combine_hashes, hash_object, hash_seed, hash_sequence, prefix_hash, HashId, Hashable},
+    hash::{combine_hashes, hash_seed, hash_sequence, prefix_hash, HashId, Hashable},
     stdlib::{
         builtin::BuiltinTerm,
-        collection::CollectionTerm,
-        signal::SignalType,
         value::{IntValue, ValueTerm},
     },
 };
@@ -37,6 +34,9 @@ impl Hashable for QueryShape {
     }
 }
 impl QueryShape {
+    pub fn leaf() -> Self {
+        Self::Leaf
+    }
     pub fn branch(fields: Vec<FieldSelector>) -> Self {
         Self::Branch(fields)
     }
@@ -72,14 +72,11 @@ pub fn query(target: Expression, shape: &QueryShape) -> Expression {
 
 fn query_branch(target: Expression, selectors: &[FieldSelector]) -> Expression {
     Expression::new(Term::Application(ApplicationTerm::new(
-        to_array(),
-        vec![Expression::new(Term::Application(ApplicationTerm::new(
-            Expression::new(Term::Builtin(BuiltinTerm::CollectArgs)),
-            selectors
-                .iter()
-                .map(|selector| query_field(Expression::clone(&target), selector))
-                .collect(),
-        )))],
+        Expression::new(Term::Builtin(BuiltinTerm::CollectArgs)),
+        selectors
+            .iter()
+            .map(|selector| query_field(Expression::clone(&target), selector))
+            .collect(),
     )))
 }
 
@@ -172,11 +169,8 @@ fn query_enum_field(target: Expression, variants: &[EnumFieldSelector]) -> Expre
                         Expression::new(Term::Lambda(LambdaTerm::new(
                             Arity::from(num_args, 0, None),
                             Expression::new(Term::Application(ApplicationTerm::new(
-                                to_array(),
-                                vec![Expression::new(Term::Application(ApplicationTerm::new(
-                                    Expression::new(Term::Builtin(BuiltinTerm::CollectArgs)),
-                                    vec![enum_index, result],
-                                )))],
+                                Expression::new(Term::Builtin(BuiltinTerm::CollectArgs)),
+                                vec![enum_index, result],
                             ))),
                         )))
                     })
@@ -198,24 +192,21 @@ fn query_function_field(target: Expression, args: &[Expression], shape: &QuerySh
 
 fn query_list(target: Expression, shape: &QueryShape) -> Expression {
     Expression::new(Term::Application(ApplicationTerm::new(
-        to_array(),
+        Expression::new(Term::Builtin(BuiltinTerm::Collect)),
         vec![Expression::new(Term::Application(ApplicationTerm::new(
-            Expression::new(Term::Builtin(BuiltinTerm::Collect)),
-            vec![Expression::new(Term::Application(ApplicationTerm::new(
-                Expression::new(Term::Builtin(BuiltinTerm::Map)),
-                vec![
-                    target,
-                    Expression::new(Term::Lambda(LambdaTerm::new(
-                        Arity::from(0, 1, None),
-                        query(
-                            Expression::new(Term::Variable(VariableTerm::Static(
-                                StaticVariableTerm::new(0),
-                            ))),
-                            shape,
-                        ),
-                    ))),
-                ],
-            )))],
+            Expression::new(Term::Builtin(BuiltinTerm::Map)),
+            vec![
+                target,
+                Expression::new(Term::Lambda(LambdaTerm::new(
+                    Arity::from(0, 1, None),
+                    query(
+                        Expression::new(Term::Variable(VariableTerm::Static(
+                            StaticVariableTerm::new(0),
+                        ))),
+                        shape,
+                    ),
+                ))),
+            ],
         )))],
     )))
 }
@@ -298,76 +289,14 @@ impl fmt::Display for EnumFieldSelector {
     }
 }
 
-fn to_array() -> Expression {
-    Expression::new(Term::Native(NativeFunction::new(
-        ToArray::hash(),
-        ToArray::arity(),
-        ToArray::apply,
-    )))
-}
-struct ToArray {}
-impl ToArray {
-    fn hash() -> HashId {
-        hash_object(TypeId::of::<Self>())
-    }
-    fn arity() -> Arity {
-        Arity::from(1, 0, None)
-    }
-    fn apply(args: Vec<Expression>) -> Expression {
-        let mut args = args.into_iter();
-        let values = args.next().unwrap();
-        let values = match values.value() {
-            Term::Collection(CollectionTerm::Vector(values)) => {
-                let num_values = values.len();
-                match values.iterate().into_iter().fold(
-                    Ok(Vec::with_capacity(num_values)),
-                    |result, arg| match arg.value() {
-                        Term::Value(value) => match result {
-                            Ok(mut args) => {
-                                args.push(value.clone());
-                                Ok(args)
-                            }
-                            _ => result,
-                        },
-                        _ => match result {
-                            Ok(_) => Err(vec![arg]),
-                            Err(mut invalid_args) => {
-                                invalid_args.push(arg);
-                                Err(invalid_args)
-                            }
-                        },
-                    },
-                ) {
-                    Ok(values) => Ok(values),
-                    Err(args) => Err(format!(
-                        "Invalid array values: {}",
-                        args.iter()
-                            .map(|arg| format!("{}", arg))
-                            .collect::<Vec<_>>()
-                            .join(",")
-                    )),
-                }
-            }
-            _ => Err(format!("Invalid array values: {}", values)),
-        };
-        match values {
-            Ok(values) => Expression::new(Term::Value(ValueTerm::Array(values))),
-            Err(error) => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
-                SignalType::Error,
-                vec![ValueTerm::String(error)],
-            )))),
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::{EnumFieldSelector, FieldSelector, QueryShape};
-    use crate::{
+    use reflex::{
         cache::EvaluationCache,
         core::{
-            DependencyList, DynamicState, EnumTerm, EvaluationResult, Expression, Signal,
-            SignalTerm, StructPrototype, StructTerm, Term,
+            DependencyList, DynamicState, EnumTerm, EvaluationResult, Expression, SerializedTerm,
+            Signal, SignalTerm, StructPrototype, StructTerm, Term,
         },
         parser::sexpr::parse,
         stdlib::{
@@ -440,11 +369,13 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                Ok(Expression::new(Term::Value(ValueTerm::Array(vec![
-                    ValueTerm::Int(3 + 1),
-                    ValueTerm::Int(4 + 1),
-                    ValueTerm::Int(5 + 1)
-                ])))),
+                Ok(Expression::new(Term::Collection(CollectionTerm::Vector(
+                    VectorTerm::new(vec![
+                        Expression::new(Term::Value(ValueTerm::Int(3 + 1))),
+                        Expression::new(Term::Value(ValueTerm::Int(4 + 1))),
+                        Expression::new(Term::Value(ValueTerm::Int(5 + 1)))
+                    ])
+                )))),
                 DependencyList::empty(),
             )
         );
@@ -476,11 +407,13 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                Ok(Expression::new(Term::Value(ValueTerm::Array(vec![
-                    ValueTerm::Int(3 + 1),
-                    ValueTerm::Int(4 + 1),
-                    ValueTerm::Int(5 + 1)
-                ])))),
+                Ok(Expression::new(Term::Collection(CollectionTerm::Vector(
+                    VectorTerm::new(vec![
+                        Expression::new(Term::Value(ValueTerm::Int(3 + 1))),
+                        Expression::new(Term::Value(ValueTerm::Int(4 + 1))),
+                        Expression::new(Term::Value(ValueTerm::Int(5 + 1)))
+                    ])
+                )))),
                 DependencyList::empty(),
             )
         );
@@ -493,7 +426,7 @@ mod tests {
         let root = Expression::new(Term::Enum(EnumTerm::new(2, vec![])));
         let error = Expression::new(Term::Signal(SignalTerm::new(Signal::new(
             SignalType::Error,
-            vec![ValueTerm::String(StringValue::from("foo"))],
+            vec![SerializedTerm::string(StringValue::from("foo"))],
         ))));
         let shape = QueryShape::branch(vec![FieldSelector::EnumField(vec![
             EnumFieldSelector::Nullary(Expression::clone(&error)),
@@ -508,9 +441,14 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                Ok(Expression::new(Term::Value(ValueTerm::Array(vec![
-                    ValueTerm::Array(vec![ValueTerm::Int(2), ValueTerm::Int(3)])
-                ])))),
+                Ok(Expression::new(Term::Collection(CollectionTerm::Vector(
+                    VectorTerm::new(vec![Expression::new(Term::Collection(
+                        CollectionTerm::Vector(VectorTerm::new(vec![
+                            Expression::new(Term::Value(ValueTerm::Int(2))),
+                            Expression::new(Term::Value(ValueTerm::Int(3)))
+                        ]))
+                    ))])
+                )))),
                 DependencyList::empty(),
             )
         );
@@ -526,7 +464,7 @@ mod tests {
         )));
         let error = Expression::new(Term::Signal(SignalTerm::new(Signal::new(
             SignalType::Error,
-            vec![ValueTerm::String(StringValue::from("foo"))],
+            vec![SerializedTerm::string(StringValue::from("foo"))],
         ))));
         let shape = QueryShape::branch(vec![FieldSelector::EnumField(vec![
             EnumFieldSelector::Nullary(Expression::clone(&error)),
@@ -541,9 +479,14 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                Ok(Expression::new(Term::Value(ValueTerm::Array(vec![
-                    ValueTerm::Array(vec![ValueTerm::Int(2), ValueTerm::Int(3)])
-                ])))),
+                Ok(Expression::new(Term::Collection(CollectionTerm::Vector(
+                    VectorTerm::new(vec![Expression::new(Term::Collection(
+                        CollectionTerm::Vector(VectorTerm::new(vec![
+                            Expression::new(Term::Value(ValueTerm::Int(2))),
+                            Expression::new(Term::Value(ValueTerm::Int(3)))
+                        ]))
+                    ))])
+                )))),
                 DependencyList::empty(),
             )
         );
@@ -563,7 +506,7 @@ mod tests {
         let transform = Expression::new(Term::Builtin(BuiltinTerm::Add));
         let error = Expression::new(Term::Signal(SignalTerm::new(Signal::new(
             SignalType::Error,
-            vec![ValueTerm::String(StringValue::from("foo"))],
+            vec![SerializedTerm::string(StringValue::from("foo"))],
         ))));
         let shape = QueryShape::branch(vec![FieldSelector::EnumField(vec![
             EnumFieldSelector::Nullary(Expression::clone(&error)),
@@ -578,9 +521,14 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                Ok(Expression::new(Term::Value(ValueTerm::Array(vec![
-                    ValueTerm::Array(vec![ValueTerm::Int(2), ValueTerm::Int(3 + 4)])
-                ])))),
+                Ok(Expression::new(Term::Collection(CollectionTerm::Vector(
+                    VectorTerm::new(vec![Expression::new(Term::Collection(
+                        CollectionTerm::Vector(VectorTerm::new(vec![
+                            Expression::new(Term::Value(ValueTerm::Int(2))),
+                            Expression::new(Term::Value(ValueTerm::Int(3 + 4)))
+                        ]))
+                    ))])
+                )))),
                 DependencyList::empty(),
             )
         );
@@ -619,11 +567,13 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                Ok(Expression::new(Term::Value(ValueTerm::Array(vec![
-                    ValueTerm::Int(3 + 4),
-                    ValueTerm::Int(5 + 6),
-                    ValueTerm::Int(7 + 8),
-                ])))),
+                Ok(Expression::new(Term::Collection(CollectionTerm::Vector(
+                    VectorTerm::new(vec![
+                        Expression::new(Term::Value(ValueTerm::Int(3 + 4))),
+                        Expression::new(Term::Value(ValueTerm::Int(5 + 6))),
+                        Expression::new(Term::Value(ValueTerm::Int(7 + 8))),
+                    ])
+                )))),
                 DependencyList::empty(),
             )
         );
@@ -818,22 +768,48 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                Ok(Expression::new(Term::Value(ValueTerm::Array(vec![
-                    ValueTerm::Array(vec![
-                        ValueTerm::Array(vec![
-                            ValueTerm::String(StringValue::from("0:1:0")),
-                            ValueTerm::String(StringValue::from("0:1:2")),
-                        ]),
-                        ValueTerm::Array(vec![ValueTerm::String(StringValue::from("0:2:1"))]),
-                    ]),
-                    ValueTerm::Array(vec![
-                        ValueTerm::Array(vec![ValueTerm::String(StringValue::from("2:0:1"))]),
-                        ValueTerm::Array(vec![
-                            ValueTerm::String(StringValue::from("2:2:1")),
-                            ValueTerm::String(StringValue::from("2:2:2")),
-                        ]),
-                    ]),
-                ])))),
+                Ok(Expression::new(Term::Collection(CollectionTerm::Vector(
+                    VectorTerm::new(vec![
+                        Expression::new(Term::Collection(CollectionTerm::Vector(VectorTerm::new(
+                            vec![
+                                Expression::new(Term::Collection(CollectionTerm::Vector(
+                                    VectorTerm::new(vec![
+                                        Expression::new(Term::Value(ValueTerm::String(
+                                            StringValue::from("0:1:0")
+                                        ))),
+                                        Expression::new(Term::Value(ValueTerm::String(
+                                            StringValue::from("0:1:2")
+                                        ))),
+                                    ])
+                                ))),
+                                Expression::new(Term::Collection(CollectionTerm::Vector(
+                                    VectorTerm::new(vec![Expression::new(Term::Value(
+                                        ValueTerm::String(StringValue::from("0:2:1"))
+                                    ))])
+                                ))),
+                            ]
+                        )))),
+                        Expression::new(Term::Collection(CollectionTerm::Vector(VectorTerm::new(
+                            vec![
+                                Expression::new(Term::Collection(CollectionTerm::Vector(
+                                    VectorTerm::new(vec![Expression::new(Term::Value(
+                                        ValueTerm::String(StringValue::from("2:0:1"))
+                                    ))])
+                                ))),
+                                Expression::new(Term::Collection(CollectionTerm::Vector(
+                                    VectorTerm::new(vec![
+                                        Expression::new(Term::Value(ValueTerm::String(
+                                            StringValue::from("2:2:1")
+                                        ))),
+                                        Expression::new(Term::Value(ValueTerm::String(
+                                            StringValue::from("2:2:2")
+                                        ))),
+                                    ])
+                                ))),
+                            ]
+                        )))),
+                    ])
+                )))),
                 DependencyList::empty(),
             )
         );
@@ -856,11 +832,13 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                Ok(Expression::new(Term::Value(ValueTerm::Array(vec![
-                    ValueTerm::Int(3 + 1),
-                    ValueTerm::Int(4 + 1),
-                    ValueTerm::Int(5 + 1),
-                ])))),
+                Ok(Expression::new(Term::Collection(CollectionTerm::Vector(
+                    VectorTerm::new(vec![
+                        Expression::new(Term::Value(ValueTerm::Int(3 + 1))),
+                        Expression::new(Term::Value(ValueTerm::Int(4 + 1))),
+                        Expression::new(Term::Value(ValueTerm::Int(5 + 1))),
+                    ])
+                )))),
                 DependencyList::empty(),
             )
         );
@@ -895,23 +873,31 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                Ok(Expression::new(Term::Value(ValueTerm::Array(vec![
-                    ValueTerm::Array(vec![
-                        ValueTerm::Int(3 + 1),
-                        ValueTerm::Int(4 + 1),
-                        ValueTerm::Int(5 + 1),
-                    ]),
-                    ValueTerm::Array(vec![
-                        ValueTerm::Int(3 + 2),
-                        ValueTerm::Int(4 + 2),
-                        ValueTerm::Int(5 + 2),
-                    ]),
-                    ValueTerm::Array(vec![
-                        ValueTerm::Int(3 + 3),
-                        ValueTerm::Int(4 + 3),
-                        ValueTerm::Int(5 + 3),
-                    ]),
-                ])))),
+                Ok(Expression::new(Term::Collection(CollectionTerm::Vector(
+                    VectorTerm::new(vec![
+                        Expression::new(Term::Collection(CollectionTerm::Vector(VectorTerm::new(
+                            vec![
+                                Expression::new(Term::Value(ValueTerm::Int(3 + 1))),
+                                Expression::new(Term::Value(ValueTerm::Int(4 + 1))),
+                                Expression::new(Term::Value(ValueTerm::Int(5 + 1))),
+                            ]
+                        )))),
+                        Expression::new(Term::Collection(CollectionTerm::Vector(VectorTerm::new(
+                            vec![
+                                Expression::new(Term::Value(ValueTerm::Int(3 + 2))),
+                                Expression::new(Term::Value(ValueTerm::Int(4 + 2))),
+                                Expression::new(Term::Value(ValueTerm::Int(5 + 2))),
+                            ]
+                        )))),
+                        Expression::new(Term::Collection(CollectionTerm::Vector(VectorTerm::new(
+                            vec![
+                                Expression::new(Term::Value(ValueTerm::Int(3 + 3))),
+                                Expression::new(Term::Value(ValueTerm::Int(4 + 3))),
+                                Expression::new(Term::Value(ValueTerm::Int(5 + 3))),
+                            ]
+                        )))),
+                    ])
+                )))),
                 DependencyList::empty(),
             )
         );

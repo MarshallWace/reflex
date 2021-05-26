@@ -8,7 +8,7 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-
 reflex = { path = "../reflex" }
+reflex-json = { path = "../reflex-json" }
 resast = "0.4.1"
 ressa = "0.7.1"

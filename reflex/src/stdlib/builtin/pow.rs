@@ -3,7 +3,12 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use crate::{
     core::{Arity, Expression, Signal, SignalTerm, Term},
-    stdlib::{builtin::BuiltinFunction, signal::SignalType, value::{is_integer, ValueTerm}},
+    serialize::SerializedTerm,
+    stdlib::{
+        builtin::BuiltinFunction,
+        signal::SignalType,
+        value::{is_integer, ValueTerm},
+    },
 };
 
 pub struct Pow {}
@@ -15,7 +20,7 @@ impl BuiltinFunction for Pow {
         if args.len() != 2 {
             return Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                 SignalType::Error,
-                vec![ValueTerm::String(format!(
+                vec![SerializedTerm::string(format!(
                     "Expected 2 arguments, received {}",
                     args.len(),
                 ))],
@@ -43,7 +48,7 @@ impl BuiltinFunction for Pow {
                 if left < 0 && !is_integer(right) {
                     Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                         SignalType::Error,
-                        vec![ValueTerm::String(format!("Invalid exponentiation operands: ({}, {})", left, right))],
+                        vec![SerializedTerm::string(format!("Invalid exponentiation operands: ({}, {})", left, right))],
                     ))))
                 } else {
                     Expression::new(Term::Value(ValueTerm::Float((left as f64).powf(right))))
@@ -55,7 +60,7 @@ impl BuiltinFunction for Pow {
                 if left < 0.0 && !is_integer(right) {
                     Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                         SignalType::Error,
-                        vec![ValueTerm::String(format!("Invalid exponentiation operands: ({}, {})", left, right))],
+                        vec![SerializedTerm::string(format!("Invalid exponentiation operands: ({}, {})", left, right))],
                     ))))
                 } else {
                     Expression::new(Term::Value(ValueTerm::Float(left.powf(right))))
@@ -63,7 +68,7 @@ impl BuiltinFunction for Pow {
             }
             _ => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                 SignalType::Error,
-                vec![ValueTerm::String(format!(
+                vec![SerializedTerm::string(format!(
                     "Expected (Int, Int) or (Float, Int) or (Int, Float) or (Float, Float), received ({}, {})",
                     left, right,
                 ))],

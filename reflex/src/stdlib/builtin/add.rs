@@ -3,6 +3,7 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use crate::{
     core::{Arity, Expression, Signal, SignalTerm, Term},
+    serialize::SerializedTerm,
     stdlib::{builtin::BuiltinFunction, signal::SignalType, value::ValueTerm},
 };
 
@@ -15,7 +16,7 @@ impl BuiltinFunction for Add {
         if args.len() != 2 {
             return Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                 SignalType::Error,
-                vec![ValueTerm::String(format!(
+                vec![SerializedTerm::string(format!(
                     "Expected 2 arguments, received {}",
                     args.len(),
                 ))],
@@ -33,7 +34,7 @@ impl BuiltinFunction for Add {
             }
             _ => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                 SignalType::Error,
-                vec![ValueTerm::String(format!(
+                vec![SerializedTerm::string(format!(
                     "Expected (Int, Int) or (Float, Float), received ({}, {})",
                     left, right,
                 ))],
@@ -48,6 +49,7 @@ mod tests {
         cache::EvaluationCache,
         core::{DependencyList, DynamicState, EvaluationResult, Expression, Signal, Term},
         parser::sexpr::parse,
+        serialize::SerializedTerm,
         stdlib::{signal::SignalType, value::ValueTerm},
     };
 
@@ -167,7 +169,7 @@ mod tests {
             EvaluationResult::new(
                 Err(vec![Signal::new(
                     SignalType::Error,
-                    vec![ValueTerm::String(String::from(
+                    vec![SerializedTerm::string(String::from(
                         "Expected (Int, Int) or (Float, Float), received (3, 3.142)"
                     ))]
                 )]),
@@ -181,7 +183,7 @@ mod tests {
             EvaluationResult::new(
                 Err(vec![Signal::new(
                     SignalType::Error,
-                    vec![ValueTerm::String(String::from(
+                    vec![SerializedTerm::string(String::from(
                         "Expected (Int, Int) or (Float, Float), received (3.142, 3)"
                     ))]
                 )]),
@@ -196,7 +198,7 @@ mod tests {
             EvaluationResult::new(
                 Err(vec![Signal::new(
                     SignalType::Error,
-                    vec![ValueTerm::String(String::from(
+                    vec![SerializedTerm::string(String::from(
                         "Expected (Int, Int) or (Float, Float), received (3, false)"
                     ))]
                 )]),
@@ -210,7 +212,7 @@ mod tests {
             EvaluationResult::new(
                 Err(vec![Signal::new(
                     SignalType::Error,
-                    vec![ValueTerm::String(String::from(
+                    vec![SerializedTerm::string(String::from(
                         "Expected (Int, Int) or (Float, Float), received (3, \"3\")"
                     ))]
                 )]),
@@ -225,7 +227,7 @@ mod tests {
             EvaluationResult::new(
                 Err(vec![Signal::new(
                     SignalType::Error,
-                    vec![ValueTerm::String(String::from(
+                    vec![SerializedTerm::string(String::from(
                         "Expected (Int, Int) or (Float, Float), received (false, 3)"
                     ))]
                 )]),
@@ -239,7 +241,7 @@ mod tests {
             EvaluationResult::new(
                 Err(vec![Signal::new(
                     SignalType::Error,
-                    vec![ValueTerm::String(String::from(
+                    vec![SerializedTerm::string(String::from(
                         "Expected (Int, Int) or (Float, Float), received (\"3\", 3)"
                     ))]
                 )]),
@@ -254,7 +256,7 @@ mod tests {
             EvaluationResult::new(
                 Err(vec![Signal::new(
                     SignalType::Error,
-                    vec![ValueTerm::String(String::from(
+                    vec![SerializedTerm::string(String::from(
                         "Expected (Int, Int) or (Float, Float), received (3.142, false)"
                     ))]
                 )]),
@@ -268,7 +270,7 @@ mod tests {
             EvaluationResult::new(
                 Err(vec![Signal::new(
                     SignalType::Error,
-                    vec![ValueTerm::String(String::from(
+                    vec![SerializedTerm::string(String::from(
                         "Expected (Int, Int) or (Float, Float), received (3.142, \"3\")"
                     ))]
                 )]),
@@ -283,7 +285,7 @@ mod tests {
             EvaluationResult::new(
                 Err(vec![Signal::new(
                     SignalType::Error,
-                    vec![ValueTerm::String(String::from(
+                    vec![SerializedTerm::string(String::from(
                         "Expected (Int, Int) or (Float, Float), received (false, 3.142)"
                     ))]
                 )]),
@@ -297,7 +299,7 @@ mod tests {
             EvaluationResult::new(
                 Err(vec![Signal::new(
                     SignalType::Error,
-                    vec![ValueTerm::String(String::from(
+                    vec![SerializedTerm::string(String::from(
                         "Expected (Int, Int) or (Float, Float), received (\"3\", 3.142)"
                     ))]
                 )]),

@@ -1,9 +1,10 @@
 [workspace]
-
 members = [
   "reflex",
   "reflex-cli",
   "reflex-js",
+  "reflex-json",
+  "reflex-handlers",
   "reflex-runtime",
   "reflex-server",
 ]

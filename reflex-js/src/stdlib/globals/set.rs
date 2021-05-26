@@ -4,13 +4,16 @@
 use std::any::TypeId;
 
 use reflex::{
-    core::{ApplicationTerm, Arity, Expression, NativeFunction, Signal, SignalTerm, Term},
+    core::{
+        ApplicationTerm, Arity, Expression, NativeFunction, SerializedTerm, Signal, SignalTerm,
+        Term,
+    },
     hash::{hash_object, HashId},
     stdlib::{
         builtin::BuiltinTerm,
         collection::{hashset::HashSetTerm, CollectionTerm},
         signal::SignalType,
-        value::{StringValue, ValueTerm},
+        value::StringValue,
     },
 };
 
@@ -56,7 +59,7 @@ impl SetConstructor {
             }
             Err(error) => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                 SignalType::Error,
-                vec![ValueTerm::String(error)],
+                vec![SerializedTerm::string(error)],
             )))),
         }
     }
@@ -90,7 +93,7 @@ impl DynamicSetConstructor {
             ))),
             _ => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                 SignalType::Error,
-                vec![ValueTerm::String(StringValue::from(
+                vec![SerializedTerm::string(StringValue::from(
                     "Invalid Set constructor values",
                 ))],
             )))),

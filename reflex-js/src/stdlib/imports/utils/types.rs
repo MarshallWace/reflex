@@ -6,8 +6,8 @@ use std::any::TypeId;
 use reflex::{
     core::{
         ApplicationTerm, Arity, EnumConstructorArity, EnumIndex, EnumTerm, EnumVariantPrototype,
-        Expression, LambdaTerm, NativeFunction, Signal, SignalTerm, StaticVariableTerm, StructTerm,
-        Term, VarArgs, VariableTerm,
+        Expression, LambdaTerm, NativeFunction, SerializedTerm, Signal, SignalTerm,
+        StaticVariableTerm, StructTerm, Term, VarArgs, VariableTerm,
     },
     hash::{hash_object, HashId, Hashable},
     stdlib::{signal::SignalType, value::ValueTerm},
@@ -96,7 +96,7 @@ impl StructTypeFactory {
         if args.len() != 1 {
             return Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                 SignalType::Error,
-                vec![ValueTerm::String(format!(
+                vec![SerializedTerm::string(format!(
                     "Expected 1 argument, received {}",
                     args.len(),
                 ))],
@@ -124,7 +124,7 @@ impl StructTypeFactory {
             Ok(result) => result,
             Err(error) => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                 SignalType::Error,
-                vec![ValueTerm::String(error)],
+                vec![SerializedTerm::string(error)],
             )))),
         }
     }
@@ -142,7 +142,7 @@ impl EnumTypeFactory {
         if args.len() < 1 {
             return Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                 SignalType::Error,
-                vec![ValueTerm::String(format!(
+                vec![SerializedTerm::string(format!(
                     "Expected 1 or more arguments, received {}",
                     args.len(),
                 ))],
@@ -175,7 +175,7 @@ impl EnumTypeFactory {
             Ok(result) => result,
             Err(error) => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                 SignalType::Error,
-                vec![ValueTerm::String(error)],
+                vec![SerializedTerm::string(error)],
             )))),
         }
     }

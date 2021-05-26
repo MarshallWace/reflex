@@ -8,6 +8,7 @@ use std::{
     sync::Arc,
 };
 
+pub use crate::serialize::{SerializedListTerm, SerializedObjectTerm, SerializedTerm};
 use crate::{
     cache::EvaluationCache,
     hash::{
@@ -1607,7 +1608,7 @@ impl SignalTerm {
     pub fn is_type(&self, signal: SignalType) -> bool {
         self.signal.is_type(signal)
     }
-    pub fn args(&self) -> Option<&Vec<ValueTerm>> {
+    pub fn args(&self) -> Option<&Vec<SerializedTerm>> {
         self.signal.args()
     }
 }
@@ -1621,7 +1622,7 @@ impl fmt::Display for SignalTerm {
 pub struct Signal {
     hash: HashId,
     signal: SignalType,
-    args: Option<Vec<ValueTerm>>,
+    args: Option<Vec<SerializedTerm>>,
 }
 impl Hashable for Signal {
     fn hash(&self) -> HashId {
@@ -1629,7 +1630,7 @@ impl Hashable for Signal {
     }
 }
 impl Signal {
-    pub fn new(signal: SignalType, args: impl IntoIterator<Item = ValueTerm>) -> Self {
+    pub fn new(signal: SignalType, args: impl IntoIterator<Item = SerializedTerm>) -> Self {
         let args = args.into_iter().collect::<Vec<_>>();
         let hash = combine_hashes(
             signal.hash(),
@@ -1647,7 +1648,7 @@ impl Signal {
     pub fn is_type(&self, signal: SignalType) -> bool {
         self.signal == signal
     }
-    pub fn args(&self) -> Option<&Vec<ValueTerm>> {
+    pub fn args(&self) -> Option<&Vec<SerializedTerm>> {
         self.args.as_ref()
     }
 }

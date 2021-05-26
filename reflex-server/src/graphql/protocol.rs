@@ -31,7 +31,9 @@ impl GraphQlOperationPayload {
         &self.query
     }
     pub fn operation_name(&self) -> Option<&str> {
-        self.operation_name.as_ref().map(|operation| operation.as_str())
+        self.operation_name
+            .as_ref()
+            .map(|operation| operation.as_str())
     }
 }
 
@@ -49,6 +51,7 @@ fn deserialize_graphql_operation_payload(
         None => Ok(None),
         Some(value) => match value {
             serde_json::value::Value::String(value) => Ok(Some(value)),
+            serde_json::value::Value::Null => Ok(None),
             _ => Err(String::from("Invalid operation name")),
         },
     }?;

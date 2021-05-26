@@ -5,8 +5,8 @@ use std::any::TypeId;
 
 use reflex::{
     core::{
-        ApplicationTerm, Arity, Expression, LambdaTerm, NativeFunction, Signal, SignalTerm,
-        StaticVariableTerm, StructPrototype, StructTerm, Term, VarArgs, VariableTerm,
+        ApplicationTerm, Arity, Expression, LambdaTerm, NativeFunction, SerializedTerm, Signal,
+        SignalTerm, StaticVariableTerm, StructPrototype, StructTerm, Term, VarArgs, VariableTerm,
     },
     hash::{hash_object, HashId, Hashable},
     stdlib::{
@@ -27,10 +27,10 @@ pub(crate) fn import_http() -> Expression {
 
 fn import_http_fetch() -> Expression {
     Expression::new(Term::Lambda(LambdaTerm::new(
-        Arity::from(1, 0, None),
+        Arity::from(0, 1, None),
         Expression::new(Term::Application(ApplicationTerm::new(
             Expression::new(Term::Lambda(LambdaTerm::new(
-                Arity::from(1, 0, None),
+                Arity::from(0, 1, None),
                 Expression::new(Term::Application(ApplicationTerm::new(
                     Expression::new(Term::Builtin(BuiltinTerm::Effect)),
                     vec![
@@ -60,20 +60,17 @@ fn import_http_fetch() -> Expression {
                             ],
                         ))),
                         Expression::new(Term::Application(ApplicationTerm::new(
-                            Expression::new(Term::Builtin(BuiltinTerm::Entries)),
+                            flatten_deep(),
                             vec![Expression::new(Term::Application(ApplicationTerm::new(
-                                flatten_deep(),
-                                vec![Expression::new(Term::Application(ApplicationTerm::new(
-                                    Expression::new(Term::Builtin(BuiltinTerm::Get)),
-                                    vec![
-                                        Expression::new(Term::Variable(VariableTerm::Static(
-                                            StaticVariableTerm::new(0),
-                                        ))),
-                                        Expression::new(Term::Value(ValueTerm::String(
-                                            StringValue::from("headers"),
-                                        ))),
-                                    ],
-                                )))],
+                                Expression::new(Term::Builtin(BuiltinTerm::Get)),
+                                vec![
+                                    Expression::new(Term::Variable(VariableTerm::Static(
+                                        StaticVariableTerm::new(0),
+                                    ))),
+                                    Expression::new(Term::Value(ValueTerm::String(
+                                        StringValue::from("headers"),
+                                    ))),
+                                ],
                             )))],
                         ))),
                         Expression::new(Term::Application(ApplicationTerm::new(
@@ -116,7 +113,7 @@ fn http_request_prototype() -> StructPrototype {
     ])
 }
 
-pub(crate) fn to_request() -> Expression {
+fn to_request() -> Expression {
     Expression::new(Term::Native(NativeFunction::new(
         ToRequest::hash(),
         ToRequest::arity(),
@@ -135,7 +132,7 @@ impl ToRequest {
         if args.len() != 1 {
             return Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                 SignalType::Error,
-                vec![ValueTerm::String(format!(
+                vec![SerializedTerm::string(format!(
                     "Expected 1 argument, received {}",
                     args.len(),
                 ))],
@@ -183,7 +180,7 @@ impl ToRequest {
             Ok(result) => result,
             Err(error) => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                 SignalType::Error,
-                vec![ValueTerm::String(format!(
+                vec![SerializedTerm::string(format!(
                     "Expected HTTP request, received {}",
                     error
                 ))],

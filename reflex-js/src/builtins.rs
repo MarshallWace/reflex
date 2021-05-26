@@ -4,7 +4,10 @@
 use std::{any::TypeId, iter::once};
 
 use reflex::{
-    core::{ApplicationTerm, Arity, Expression, NativeFunction, Signal, SignalTerm, Term, VarArgs},
+    core::{
+        ApplicationTerm, Arity, Expression, NativeFunction, SerializedTerm, Signal, SignalTerm,
+        Term, VarArgs,
+    },
     hash::{hash_object, HashId},
     stdlib::{
         builtin::BuiltinTerm,
@@ -33,12 +36,12 @@ impl Throw {
         let mut args = args.into_iter();
         let message = args.next().unwrap();
         let message = match message.value() {
-            Term::Value(message) => ValueTerm::String(format_value(message)),
-            _ => ValueTerm::String(StringValue::from("Unknown error")),
+            Term::Value(message) => format_value(message),
+            _ => String::from("Unknown error"),
         };
         Expression::new(Term::Signal(SignalTerm::new(Signal::new(
             SignalType::Error,
-            vec![message],
+            vec![SerializedTerm::string(message)],
         ))))
     }
 }
@@ -103,7 +106,7 @@ impl Construct {
                     Ok(result) => result,
                     Err(error) => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                         SignalType::Error,
-                        vec![ValueTerm::String(format!(
+                        vec![SerializedTerm::string(format!(
                             "Invalid constructor call: {}",
                             error,
                         ))],
@@ -173,7 +176,7 @@ impl ToString {
         if args.len() != 1 {
             return Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                 SignalType::Error,
-                vec![ValueTerm::String(format!(
+                vec![SerializedTerm::string(format!(
                     "Expected 1 argument, received {}",
                     args.len(),
                 ))],
@@ -188,7 +191,7 @@ impl ToString {
             )))),
             _ => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                 SignalType::Error,
-                vec![ValueTerm::String(format!(
+                vec![SerializedTerm::string(format!(
                     "Expected printable value, received {}",
                     operand,
                 ))],
@@ -216,7 +219,7 @@ impl FlattenDeep {
         if args.len() != 1 {
             return Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                 SignalType::Error,
-                vec![ValueTerm::String(format!(
+                vec![SerializedTerm::string(format!(
                     "Expected 1 argument, received {}",
                     args.len(),
                 ))],
@@ -350,13 +353,5 @@ pub fn format_value(value: &ValueTerm) -> String {
         ValueTerm::Int(value) => format!("{}", value),
         ValueTerm::Float(value) => format!("{}", value),
         ValueTerm::String(value) => StringValue::from(value),
-        ValueTerm::Array(value) => format!(
-            "[{}]",
-            value
-                .iter()
-                .map(|value| format!("{}", value))
-                .collect::<Vec<_>>()
-                .join(", ")
-        ),
     }
 }

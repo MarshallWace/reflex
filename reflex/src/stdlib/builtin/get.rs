@@ -3,6 +3,7 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use crate::{
     core::{Arity, Expression, Signal, SignalTerm, StructFieldOffset, Term},
+    serialize::SerializedTerm,
     stdlib::{
         builtin::BuiltinFunction,
         collection::CollectionTerm,
@@ -20,7 +21,7 @@ impl BuiltinFunction for Get {
         if args.len() != 2 {
             return Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                 SignalType::Error,
-                vec![ValueTerm::String(format!(
+                vec![SerializedTerm::string(format!(
                     "Expected 2 arguments, received {}",
                     args.len(),
                 ))],
@@ -105,7 +106,7 @@ impl BuiltinFunction for Get {
             Ok(result) => result,
             Err(error) => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                 SignalType::Error,
-                vec![ValueTerm::String(error)],
+                vec![SerializedTerm::string(error)],
             )))),
         }
     }

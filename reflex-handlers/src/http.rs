@@ -2,13 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use reflex::{
-    core::{Expression, Signal, SignalTerm, Term},
+    core::{Expression, SerializedTerm, Signal, SignalTerm, Term},
     stdlib::{signal::SignalType, value::ValueTerm},
 };
 
 use crate::{utils::fetch, SignalResult};
 
-pub fn handle_http_fetch(args: Option<&[ValueTerm]>) -> Result<SignalResult, String> {
+pub fn handle_http_fetch(args: Option<&[SerializedTerm]>) -> Result<SignalResult, String> {
     let args = args.ok_or_else(|| String::from("Invalid fetch signal: missing arguments"))?;
     if args.len() != 4 {
         return Err(format!(
@@ -32,7 +32,7 @@ pub fn handle_http_fetch(args: Option<&[ValueTerm]>) -> Result<SignalResult, Str
                     Ok(data) => Expression::new(Term::Value(ValueTerm::String(data))),
                     Err(error) => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                         SignalType::Error,
-                        vec![ValueTerm::String(error)],
+                        vec![SerializedTerm::string(error)],
                     )))),
                 }
             })),
@@ -41,37 +41,37 @@ pub fn handle_http_fetch(args: Option<&[ValueTerm]>) -> Result<SignalResult, Str
     }
 }
 
-fn parse_string_arg(value: &ValueTerm) -> Option<String> {
+fn parse_string_arg(value: &SerializedTerm) -> Option<String> {
     match value {
-        ValueTerm::String(value) => Some(String::from(value)),
+        SerializedTerm::Value(value) => match value {
+            ValueTerm::String(value) => Some(value.clone()),
+            _ => None,
+        },
         _ => None,
     }
 }
 
-fn parse_optional_string_arg(value: &ValueTerm) -> Option<Option<String>> {
+fn parse_optional_string_arg(value: &SerializedTerm) -> Option<Option<String>> {
     match value {
-        ValueTerm::String(value) => Some(Some(String::from(value))),
-        ValueTerm::Null => Some(None),
+        SerializedTerm::Value(value) => match value {
+            ValueTerm::String(value) => Some(Some(value.clone())),
+            ValueTerm::Null => Some(None),
+            _ => None,
+        },
         _ => None,
     }
 }
 
-fn parse_key_values_arg(value: &ValueTerm) -> Option<Vec<(String, String)>> {
+fn parse_key_values_arg(value: &SerializedTerm) -> Option<Vec<(String, String)>> {
     match value {
-        ValueTerm::Array(values) => values
-            .into_iter()
-            .map(|entry| match entry {
-                ValueTerm::Array(entry) => {
-                    let mut entry = entry.iter();
-                    let key = entry.next();
-                    let value = entry.next();
-                    match (key, value) {
-                        (Some(ValueTerm::String(key)), Some(ValueTerm::String(value))) => {
-                            Some((String::from(key), String::from(value)))
-                        }
-                        _ => None,
-                    }
-                }
+        SerializedTerm::Object(value) => value
+            .entries()
+            .iter()
+            .map(|(key, value)| match value {
+                SerializedTerm::Value(value) => match value {
+                    ValueTerm::String(value) => Some((key.clone(), value.clone())),
+                    _ => None,
+                },
                 _ => None,
             })
             .collect::<Option<Vec<_>>>(),

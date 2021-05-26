@@ -6,6 +6,7 @@ use super::protocol::{
     GraphQlSubscriptionClientMessage, GraphQlSubscriptionServerMessage, SubscriptionId,
 };
 use crate::{
+    query::query,
     utils::graphql::{parse_graphql_query, QueryTransform},
     wrap_graphql_error_response, wrap_graphql_success_response,
 };
@@ -19,10 +20,7 @@ use hyper_tungstenite::{
     tungstenite::{error::ProtocolError, Message},
     WebSocketStream,
 };
-use reflex::{
-    core::{Expression, Term},
-    query::query,
-};
+use reflex::{core::Expression, serialize};
 use reflex_js::stdlib::json_stringify;
 use reflex_runtime::Runtime;
 use std::{
@@ -247,8 +245,8 @@ fn parse_query_result(
     result: &Expression,
     transform: &QueryTransform,
 ) -> Result<Expression, String> {
-    match result.value() {
-        Term::Value(value) => transform(value),
+    match serialize(result.value()) {
+        Ok(value) => transform(&value),
         _ => Err(format!("Invalid result type: {}", result)),
     }
 }

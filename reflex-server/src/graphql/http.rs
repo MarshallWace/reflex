@@ -4,17 +4,15 @@
 use super::protocol::deserialize_graphql_request;
 use crate::{
     create_http_response,
+    query::query,
     utils::graphql::{parse_graphql_query, QueryTransform},
     wrap_graphql_error_response, wrap_graphql_success_response,
 };
 use hyper::{header, Body, Request, Response, StatusCode};
 use reflex::{
-    core::{Expression, Signal, SignalTerm, Term},
-    query::query,
-    stdlib::{
-        signal::SignalType,
-        value::{StringValue, ValueTerm},
-    },
+    core::{Expression, SerializedTerm, Signal, SignalTerm, Term},
+    serialize,
+    stdlib::{signal::SignalType, value::StringValue},
 };
 use reflex_js::stdlib::json_stringify;
 use reflex_runtime::{Runtime, SubscriptionResult};
@@ -83,9 +81,8 @@ async fn parse_graphql_request(
             .and_then(|message| match message.operation_name() {
                 Some("IntrospectionQuery") => {
                     let expression = create_introspection_query_response();
-                    let transform: QueryTransform = Box::new(|value: &ValueTerm| {
-                        Ok(Expression::new(Term::Value(value.clone())))
-                    });
+                    let transform: QueryTransform =
+                        Box::new(|value: &SerializedTerm| Ok(value.deserialize()));
                     Ok((expression, transform))
                 }
                 _ => parse_graphql_query_expression(&root, message.query()),
@@ -111,7 +108,7 @@ fn parse_graphql_query_expression(
 fn create_introspection_query_response() -> Expression {
     Expression::new(Term::Signal(SignalTerm::new(Signal::new(
         SignalType::Error,
-        vec![ValueTerm::String(StringValue::from(
+        vec![SerializedTerm::string(StringValue::from(
             "Introspection query not yet implemented",
         ))],
     ))))
@@ -144,16 +141,16 @@ impl HttpResult {
 
 fn format_http_response(result: SubscriptionResult, transform: QueryTransform) -> HttpResult {
     match result {
-        Ok(result) => match result.value() {
-            Term::Value(result) => match transform(result) {
+        Ok(result) => match serialize(result.value()) {
+            Ok(result) => match transform(&result) {
                 Ok(result) => HttpResult::success(StatusCode::OK, result),
                 Err(error) => {
                     HttpResult::error(StatusCode::INTERNAL_SERVER_ERROR, format!("{}", error))
                 }
             },
-            result => HttpResult::error(
+            Err(error) => HttpResult::error(
                 StatusCode::NOT_ACCEPTABLE,
-                format!("Invalid result type: {}", result),
+                format!("Invalid GraphQL result: {}", error),
             ),
         },
         Err(errors) => HttpResult::errors(StatusCode::OK, errors),

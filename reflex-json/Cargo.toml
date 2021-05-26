@@ -1,5 +1,5 @@
 [package]
-name = "reflex-runtime"
+name = "reflex-json"
 version = "0.1.0"
 license = "Apache-2.0"
 authors = ["Marshall Wace LLP <opensource@mwam.com>", "Tim Kendrick <t.kendrick@mwam.com>", "Jordan Hall <j.hall@mwam.com>", "Chris Campbell <c.campbell@mwam.com>"]
@@ -9,5 +9,4 @@ edition = "2018"
 
 [dependencies]
 reflex = { path = "../reflex" }
-tokio = { version = "1", features = ["full"] }
-tokio-stream = { version = "0.1", features = ["sync"] }
+serde_json = "1.0"

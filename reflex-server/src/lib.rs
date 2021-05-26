@@ -20,12 +20,13 @@ use reflex_runtime::Runtime;
 pub mod loaders {
     pub mod graphql;
 }
+mod query;
 mod utils;
 mod graphql {
     pub(crate) mod http;
     pub(crate) mod playground;
-    pub(crate) mod websocket;
     pub(crate) mod protocol;
+    pub(crate) mod websocket;
 }
 
 pub fn graphql_service(
