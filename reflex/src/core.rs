@@ -1608,7 +1608,7 @@ impl SignalTerm {
     pub fn is_type(&self, signal: SignalType) -> bool {
         self.signal.is_type(signal)
     }
-    pub fn args(&self) -> Option<&Vec<SerializedTerm>> {
+    pub fn args(&self) -> &[SerializedTerm] {
         self.signal.args()
     }
 }
@@ -1622,7 +1622,7 @@ impl fmt::Display for SignalTerm {
 pub struct Signal {
     hash: HashId,
     signal: SignalType,
-    args: Option<Vec<SerializedTerm>>,
+    args: Vec<SerializedTerm>,
 }
 impl Hashable for Signal {
     fn hash(&self) -> HashId {
@@ -1636,11 +1636,7 @@ impl Signal {
             signal.hash(),
             hash_sequence(args.iter().map(|arg| arg.hash())),
         );
-        Self {
-            hash,
-            signal,
-            args: if args.is_empty() { None } else { Some(args) },
-        }
+        Self { hash, signal, args }
     }
     pub fn get_type(&self) -> &SignalType {
         &self.signal
@@ -1648,26 +1644,21 @@ impl Signal {
     pub fn is_type(&self, signal: SignalType) -> bool {
         self.signal == signal
     }
-    pub fn args(&self) -> Option<&Vec<SerializedTerm>> {
-        self.args.as_ref()
+    pub fn args(&self) -> &[SerializedTerm] {
+        &self.args
     }
 }
 impl fmt::Display for Signal {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "<signal:{}{}>",
+            "<signal:{}:{}>",
             self.signal,
             self.args
-                .as_ref()
-                .map(|args| format!(
-                    ":{}",
-                    args.iter()
-                        .map(|arg| format!("{}", arg))
-                        .collect::<Vec<_>>()
-                        .join(",")
-                ))
-                .unwrap_or_else(|| String::from(""))
+                .iter()
+                .map(|arg| format!("{}", arg))
+                .collect::<Vec<_>>()
+                .join(",")
         )
     }
 }

@@ -7,26 +7,30 @@ use std::{
 
 use hyper::{server::conn::AddrStream, service::make_service_fn, Server};
 use reflex::{
-    core::{Expression, Term},
+    core::{Expression, SerializedTerm, Term},
     stdlib::value::{StringValue, ValueTerm},
 };
-use reflex_handlers::builtin_signal_handlers;
+use reflex_handlers::{builtin_signal_handler, debug_signal_handler};
 use reflex_js::{
     dynamic_module_loader, parse_module,
     stdlib::{builtin_globals, builtin_imports, global_process},
     Env,
 };
-use reflex_runtime::{Runtime, SignalHandler};
+use reflex_runtime::{Runtime, SignalResult};
 use reflex_server::{graphql_service, loaders::graphql::graphql_module_loader};
+
+struct Args {
+    root_path: String,
+    debug: bool,
+}
 
 #[tokio::main]
 pub async fn main() {
     let port = parse_env_var::<u16>("PORT");
     let env_vars = parse_env_vars(env::vars());
-    let root_path = parse_args();
-    let config = match root_path {
+    let config = match parse_args() {
         Err(error) => Err(error),
-        Ok(root_path) => match load_file(&Path::new(&root_path)) {
+        Ok(Args { root_path, debug }) => match load_file(&Path::new(&root_path)) {
             Err(error) => Err(error),
             Ok(root_source) => match port {
                 Err(error) => Err(error),
@@ -35,17 +39,23 @@ pub async fn main() {
                     root_path,
                     root_source,
                     SocketAddr::from(([127, 0, 0, 1], port)),
+                    debug,
                 )),
             },
         },
     };
     let server = match config {
         Err(error) => Err(format!("Unable to start server: {}", error)),
-        Ok((env_vars, root_module_path, root_module_source, address)) => {
+        Ok((env_vars, root_module_path, root_module_source, address, debug)) => {
             match create_graph_root(&Path::new(&root_module_path), &root_module_source, env_vars) {
                 Err(error) => Err(format!("Failed to load entry point module: {}", error)),
                 Ok(root) => {
-                    let store = create_store();
+                    let signal_handler = create_signal_handler();
+                    let store = if debug {
+                        create_store(debug_signal_handler(signal_handler))
+                    } else {
+                        create_store(signal_handler)
+                    };
                     let server = create_server(store, root, &address);
                     println!(
                         "Listening for incoming HTTP requests on port {}",
@@ -69,6 +79,12 @@ pub async fn main() {
     })
 }
 
+fn create_signal_handler(
+) -> impl Fn(&str, &[SerializedTerm]) -> Option<Result<SignalResult, String>> + Send + Sync + 'static
+{
+    builtin_signal_handler()
+}
+
 fn create_graph_root(
     root_module_path: &Path,
     root_module_source: &str,
@@ -88,16 +104,15 @@ fn create_env(env_args: impl IntoIterator<Item = (String, Expression)>) -> Env {
         .with_global("process", global_process(env_args))
 }
 
-fn create_signal_handlers() -> impl IntoIterator<Item = (&'static str, SignalHandler)> {
-    builtin_signal_handlers()
-}
-
-fn create_store() -> Runtime {
-    let signal_handlers = create_signal_handlers();
+fn create_store<THandler>(signal_handler: THandler) -> Runtime
+where
+    THandler:
+        Fn(&str, &[SerializedTerm]) -> Option<Result<SignalResult, String>> + Send + Sync + 'static,
+{
     // TODO: Establish sensible defaults for channel buffer sizes
     let command_buffer_size = 32;
     let result_buffer_size = 32;
-    Runtime::new(signal_handlers, command_buffer_size, result_buffer_size)
+    Runtime::new(signal_handler, command_buffer_size, result_buffer_size)
 }
 
 async fn create_server(
@@ -118,11 +133,15 @@ async fn create_server(
     }
 }
 
-fn parse_args() -> Result<String, String> {
-    let args = env::args().skip(1);
-    match args.len() {
+fn parse_args() -> Result<Args, String> {
+    let (debug_args, path_args): (Vec<_>, Vec<_>) =
+        env::args().skip(1).partition(|arg| arg == "--debug");
+    match path_args.len() {
         0 => Err(String::from("Missing entry point module path")),
-        1 => Ok(args.into_iter().next().unwrap()),
+        1 => Ok(Args {
+            root_path: path_args.into_iter().next().unwrap(),
+            debug: !debug_args.is_empty(),
+        }),
         _ => Err(String::from("Multiple entry point modules specified")),
     }
 }

@@ -8,8 +8,7 @@ use reflex::{
 
 use crate::{utils::fetch, SignalResult};
 
-pub fn handle_http_fetch(args: Option<&[SerializedTerm]>) -> Result<SignalResult, String> {
-    let args = args.ok_or_else(|| String::from("Invalid fetch signal: missing arguments"))?;
+pub fn handle_http_fetch(args: &[SerializedTerm]) -> Result<SignalResult, String> {
     if args.len() != 4 {
         return Err(format!(
             "Invalid fetch signal: Expected 4 arguments, received {}",

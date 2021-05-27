@@ -1,7 +1,10 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use std::{collections::HashSet, num::NonZeroUsize};
+use std::{
+    collections::{HashMap, HashSet},
+    num::NonZeroUsize,
+};
 
 use reflex::{
     cache::EvaluationCache,
@@ -255,23 +258,26 @@ where
                     task.result = Some(Ok(expression));
                     None
                 }
-                Err(signals) => match signal_handler(&signals) {
-                    Err(error) => {
-                        task.result = Some(Err(error));
-                        None
-                    }
-                    Ok(values) => {
-                        if values.len() != signals.len() {
-                            panic!("Invalid signal handler result");
+                Err(signals) => {
+                    let signals = deduplicate_signals(signals);
+                    match signal_handler(&signals) {
+                        Err(error) => {
+                            task.result = Some(Err(error));
+                            None
                         }
-                        let updates = signals
-                            .iter()
-                            .map(|signal| signal.hash())
-                            .zip(values.into_iter())
-                            .collect::<Vec<_>>();
-                        Some(updates)
+                        Ok(values) => {
+                            if values.len() != signals.len() {
+                                panic!("Invalid signal handler result");
+                            }
+                            let updates = signals
+                                .iter()
+                                .map(|signal| signal.hash())
+                                .zip(values.into_iter())
+                                .collect::<Vec<_>>();
+                            Some(updates)
+                        }
                     }
-                },
+                }
             },
         };
         if let Some(updates) = signal_updates {
@@ -289,4 +295,15 @@ where
         }
     }
     tasks.into_iter().map(|task| task.result).collect()
+}
+
+fn deduplicate_signals(signals: Vec<Signal>) -> Vec<Signal> {
+    // TODO: Improve signal deduplication performance
+    signals
+        .into_iter()
+        .map(|signal| (signal.hash(), signal))
+        .collect::<HashMap<_, _>>()
+        .drain()
+        .map(|(_, signal)| signal)
+        .collect::<Vec<_>>()
 }

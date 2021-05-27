@@ -11,8 +11,7 @@ use reflex_runtime::SignalResult;
 
 use crate::utils::fetch;
 
-pub fn handle_graphql_execute(args: Option<&[SerializedTerm]>) -> Result<SignalResult, String> {
-    let args = args.ok_or_else(|| String::from("Invalid GraphQL signal: missing arguments"))?;
+pub fn handle_graphql_execute(args: &[SerializedTerm]) -> Result<SignalResult, String> {
     if args.len() != 3 {
         return Err(format!(
             "Invalid GraphQL signal: Expected 3 arguments, received {}",

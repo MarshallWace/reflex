@@ -6,7 +6,11 @@ use reflex::{
     hash::Hashable,
     stdlib::{signal::SignalType, value::ValueTerm},
 };
-use std::{collections::HashMap, future::Future, pin::Pin, sync::Mutex};
+use std::{
+    future::Future,
+    pin::Pin,
+    sync::Mutex,
+};
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
 pub use tokio_stream::Stream;
 use tokio_stream::{
@@ -17,11 +21,8 @@ use tokio_stream::{
 mod store;
 use store::Store;
 
-pub type SignalHandler =
-    Box<dyn Fn(Option<&[SerializedTerm]>) -> Result<SignalResult, String> + Send + Sync + 'static>;
-pub type SignalResult = (Expression, Option<SignalEffect>);
-
 pub type SubscriptionResult = Result<Expression, Vec<String>>;
+pub type SignalResult = (Expression, Option<SignalEffect>);
 
 struct Operation<TRequest, TResponse> {
     payload: TRequest,
@@ -62,7 +63,6 @@ type SubscribeCommand =
 type UnsubscribeCommand = Operation<SubscriptionId, bool>;
 type UpdateCommand = Operation<Vec<(StateToken, Expression)>, ()>;
 
-type SignalHandlers = HashMap<String, SignalHandler>;
 type SignalEffect = Pin<Box<dyn Future<Output = Expression> + Send + 'static>>;
 
 enum Command {
@@ -130,13 +130,19 @@ pub struct Runtime {
     results: ResultsChannel,
 }
 impl Runtime {
-    pub fn new(
-        signal_handlers: impl IntoIterator<Item = (&'static str, SignalHandler)>,
+    pub fn new<THandler>(
+        signal_handler: THandler,
         command_buffer_size: usize,
         result_buffer_size: usize,
-    ) -> Self {
+    ) -> Self
+    where
+        THandler: Fn(&str, &[SerializedTerm]) -> Option<Result<SignalResult, String>>
+            + Send
+            + Sync
+            + 'static,
+    {
         let (commands, results) =
-            create_store(signal_handlers, command_buffer_size, result_buffer_size);
+            create_store(signal_handler, command_buffer_size, result_buffer_size);
         Self { commands, results }
     }
     pub async fn subscribe<'a>(
@@ -171,15 +177,15 @@ impl Runtime {
     }
 }
 
-fn create_store(
-    signal_handlers: impl IntoIterator<Item = (&'static str, SignalHandler)>,
+fn create_store<THandler>(
+    signal_handler: THandler,
     command_buffer_size: usize,
     result_buffer_size: usize,
-) -> (CommandChannel, ResultsChannel) {
-    let signal_handlers = signal_handlers
-        .into_iter()
-        .map(|(signal_type, handler)| (String::from(signal_type), handler))
-        .collect::<HashMap<_, _>>();
+) -> (CommandChannel, ResultsChannel)
+where
+    THandler:
+        Fn(&str, &[SerializedTerm]) -> Option<Result<SignalResult, String>> + Send + Sync + 'static,
+{
     let (messages_tx, mut messages_rx) = mpsc::channel::<Command>(command_buffer_size);
     let (results_tx, _) = broadcast::channel(result_buffer_size);
     let results = results_tx.clone();
@@ -193,7 +199,7 @@ fn create_store(
                     &mut store,
                     &signal_messages,
                     &results,
-                    &signal_handlers,
+                    &signal_handler,
                 ),
                 Command::Unsubscribe(command) => {
                     process_unsubscribe_command(command, &mut store, &signal_messages, &results)
@@ -203,7 +209,7 @@ fn create_store(
                     &mut store,
                     &signal_messages,
                     &results,
-                    &signal_handlers,
+                    &signal_handler,
                 ),
             }
         }
@@ -211,17 +217,20 @@ fn create_store(
     (messages_tx, results_tx)
 }
 
-fn process_subscribe_command(
+fn process_subscribe_command<THandler>(
     command: SubscribeCommand,
     store: &mut Mutex<Store>,
     commands_tx: &CommandChannel,
     results_tx: &ResultsChannel,
-    signal_handlers: &SignalHandlers,
-) {
+    signal_handler: &THandler,
+) where
+    THandler:
+        Fn(&str, &[SerializedTerm]) -> Option<Result<SignalResult, String>> + Send + Sync + 'static,
+{
     let expression = command.payload;
     let (subscription_id, results) = {
         store.get_mut().unwrap().subscribe(expression, |signals| {
-            handle_signals(signals, commands_tx, signal_handlers)
+            handle_signals(signals, commands_tx, signal_handler)
         })
     };
     let (initial_value, results): (Vec<_>, Vec<_>) = results
@@ -258,17 +267,20 @@ fn process_unsubscribe_command(
     let _ = command.response.send(result);
 }
 
-fn process_update_command(
+fn process_update_command<THandler>(
     command: UpdateCommand,
     store: &mut Mutex<Store>,
     commands_tx: &CommandChannel,
     results_tx: &ResultsChannel,
-    signal_handlers: &SignalHandlers,
-) {
+    signal_handler: &THandler,
+) where
+    THandler:
+        Fn(&str, &[SerializedTerm]) -> Option<Result<SignalResult, String>> + Send + Sync + 'static,
+{
     let updates = command.payload;
     let results = {
         store.get_mut().unwrap().update(updates, |signals| {
-            handle_signals(signals, commands_tx, signal_handlers)
+            handle_signals(signals, commands_tx, signal_handler)
         })
     };
     let results = results
@@ -338,24 +350,25 @@ async fn stop_subscription(id: SubscriptionId, channel: &CommandChannel) -> Resu
     }
 }
 
-fn handle_signals(
+fn handle_signals<THandler>(
     signals: &[Signal],
     commands: &CommandChannel,
-    signal_handlers: &SignalHandlers,
-) -> Result<Vec<Expression>, Option<Vec<String>>> {
+    signal_handler: &THandler,
+) -> Result<Vec<Expression>, Option<Vec<String>>>
+where
+    THandler:
+        Fn(&str, &[SerializedTerm]) -> Option<Result<SignalResult, String>> + Send + Sync + 'static,
+{
     let results = signals
         .iter()
         .map(|signal| match signal.get_type() {
             SignalType::Error => Err(Some(parse_error_signal_message(signal.args()))),
             SignalType::Pending => Err(None),
             SignalType::Custom(signal_type) => {
-                let handler = signal_handlers.get(signal_type);
+                let handler = signal_handler(signal_type, signal.args());
                 match handler {
                     None => Err(Some(format!("Unhandled signal: {}", signal_type))),
-                    Some(handler) => match handler(match signal.args() {
-                        Some(args) => Some(args),
-                        None => None,
-                    }) {
+                    Some(result) => match result {
                         Ok(result) => Ok(result),
                         Err(error) => Err(Some(error)),
                     },
@@ -408,24 +421,20 @@ fn extract_signal_effects<'a>(
     (results, effects)
 }
 
-fn parse_error_signal_message(args: Option<&Vec<SerializedTerm>>) -> String {
-    let args = match args {
-        None => Vec::new(),
-        Some(args) => args
-            .iter()
-            .map(|arg| {
-                let message = match arg {
-                    SerializedTerm::Value(arg) => match arg {
-                        ValueTerm::String(message) => Some(String::from(message)),
-                        _ => None,
-                    },
+fn parse_error_signal_message(args: &[SerializedTerm]) -> String {
+    args.iter()
+        .map(|arg| {
+            let message = match arg {
+                SerializedTerm::Value(arg) => match arg {
+                    ValueTerm::String(message) => Some(String::from(message)),
                     _ => None,
-                };
-                message.unwrap_or_else(|| format!("{}", arg))
-            })
-            .collect::<Vec<_>>(),
-    };
-    args.join(" ")
+                },
+                _ => None,
+            };
+            message.unwrap_or_else(|| format!("{}", arg))
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn create_pending_expression() -> Expression {

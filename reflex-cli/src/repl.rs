@@ -41,14 +41,14 @@ pub fn run() -> io::Result<()> {
                         for signal in signals {
                             let message = match signal.get_type() {
                                 SignalType::Error => {
-                                    let (message, args) = match signal.args() {
-                                        Some(args) => match args.get(0) {
+                                    let (message, args) = {
+                                        let args = signal.args();
+                                        match args.get(0) {
                                             Some(SerializedTerm::Value(ValueTerm::String(
                                                 message,
                                             ))) => (Some(message.clone()), Some(&args[1..])),
                                             _ => (None, Some(&args[..])),
-                                        },
-                                        None => (None, None),
+                                        }
                                     };
                                     format!(
                                         "Error: {}",
@@ -71,16 +71,15 @@ pub fn run() -> io::Result<()> {
                                 SignalType::Custom(signal_type) => format!(
                                     "<{}>{}",
                                     signal_type,
-                                    match signal.args() {
-                                        None => String::new(),
-                                        Some(args) => format!(
-                                            " {}",
-                                            args.iter()
-                                                .map(SerializedTerm::stringify)
-                                                .collect::<Vec<_>>()
-                                                .join(" ")
-                                        ),
-                                    }
+                                    format!(
+                                        " {}",
+                                        signal
+                                            .args()
+                                            .iter()
+                                            .map(SerializedTerm::stringify)
+                                            .collect::<Vec<_>>()
+                                            .join(" ")
+                                    )
                                 ),
                                 SignalType::Pending => String::from("<pending>"),
                             };
