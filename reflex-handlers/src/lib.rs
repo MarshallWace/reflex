@@ -19,7 +19,7 @@ pub fn builtin_signal_handlers() -> impl IntoIterator<Item = (&'static str, Sign
     ]
 }
 
-fn create_signal_handler(
+pub fn create_signal_handler(
     signal_type: &'static str,
     handler: impl Fn(Option<&[SerializedTerm]>) -> Result<SignalResult, String> + Send + Sync + 'static,
 ) -> (&'static str, SignalHandler) {

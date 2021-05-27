@@ -22,15 +22,16 @@ use reflex_server::{graphql_service, loaders::graphql::graphql_module_loader};
 #[tokio::main]
 pub async fn main() {
     let port = parse_env_var::<u16>("PORT");
-    let args = parse_args();
-    let config = match args {
+    let env_vars = parse_env_vars(env::vars());
+    let root_path = parse_args();
+    let config = match root_path {
         Err(error) => Err(error),
-        Ok((root_path, env_args)) => match load_file(&Path::new(&root_path)) {
+        Ok(root_path) => match load_file(&Path::new(&root_path)) {
             Err(error) => Err(error),
             Ok(root_source) => match port {
                 Err(error) => Err(error),
                 Ok(port) => Ok((
-                    env_args,
+                    env_vars,
                     root_path,
                     root_source,
                     SocketAddr::from(([127, 0, 0, 1], port)),
@@ -40,8 +41,8 @@ pub async fn main() {
     };
     let server = match config {
         Err(error) => Err(format!("Unable to start server: {}", error)),
-        Ok((env_args, root_module_path, root_module_source, address)) => {
-            match create_graph_root(&Path::new(&root_module_path), &root_module_source, env_args) {
+        Ok((env_vars, root_module_path, root_module_source, address)) => {
+            match create_graph_root(&Path::new(&root_module_path), &root_module_source, env_vars) {
                 Err(error) => Err(format!("Failed to load entry point module: {}", error)),
                 Ok(root) => {
                     let store = create_store();
@@ -117,56 +118,21 @@ async fn create_server(
     }
 }
 
-fn parse_args() -> Result<(String, Vec<(String, Expression)>), String> {
-    let (path_args, env_args) = env::args().skip(1).fold(
-        Ok((Vec::<String>::new(), Vec::<(String, Expression)>::new())),
-        |result, arg| {
-            let (mut path_args, mut env_args) = result?;
-            match parse_env_arg(&arg) {
-                None => {
-                    path_args.push(arg);
-                    Ok((path_args, env_args))
-                }
-                Some(entry) => match entry {
-                    Err(error) => Err(error),
-                    Ok((key, value)) => {
-                        env_args.push((
-                            String::from(key),
-                            Expression::new(Term::Value(ValueTerm::String(StringValue::from(
-                                value,
-                            )))),
-                        ));
-                        Ok((path_args, env_args))
-                    }
-                },
-            }
-        },
-    )?;
-    match path_args.len() {
+fn parse_args() -> Result<String, String> {
+    let args = env::args().skip(1);
+    match args.len() {
         0 => Err(String::from("Missing entry point module path")),
-        1 => Ok((path_args.into_iter().next().unwrap(), env_args)),
+        1 => Ok(args.into_iter().next().unwrap()),
         _ => Err(String::from("Multiple entry point modules specified")),
     }
 }
 
-fn parse_env_arg(arg: &String) -> Option<Result<(&str, &str), String>> {
-    let equals_index = arg.find(|char| char == '=')?;
-    let key = &arg[0..equals_index];
-    let value = &arg[(equals_index + 1)..];
-    match validate_env_arg_name(key) {
-        true => Some(Ok((key, value))),
-        false => Some(Err(format!(
-            "Invalid environment variable name: \"{}\"",
-            key
-        ))),
-    }
-}
-
-fn validate_env_arg_name(name: &str) -> bool {
-    name.chars().enumerate().all(|(index, value)| match value {
-        'A'..='Z' | '_' => true,
-        '0'..='9' => index > 0,
-        _ => false,
+fn parse_env_vars(vars: env::Vars) -> impl IntoIterator<Item = (String, Expression)> {
+    vars.into_iter().map(|(name, value)| {
+        (
+            name,
+            Expression::new(Term::Value(ValueTerm::String(StringValue::from(value)))),
+        )
     })
 }
 
