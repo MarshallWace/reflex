@@ -1,10 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use crate::{
-    core::{Arity, Expression},
-    hash::{hash_u8, HashId, Hashable},
-};
+use crate::core::{Arity, Expression};
 
 mod add;
 use add::Add;
@@ -92,7 +89,7 @@ pub trait BuiltinFunction {
     fn apply(args: impl IntoIterator<Item = Expression> + ExactSizeIterator) -> Expression;
 }
 
-#[derive(PartialEq, Clone, Debug)]
+#[derive(Hash, Eq, PartialEq, Clone, Debug)]
 pub enum BuiltinTerm {
     Add,
     Abs,
@@ -136,54 +133,6 @@ pub enum BuiltinTerm {
     Subtract,
     Tuple,
     Values,
-}
-impl Hashable for BuiltinTerm {
-    fn hash(&self) -> HashId {
-        match self {
-            Self::Abs => hash_u8(0),
-            Self::Add => hash_u8(1),
-            Self::And => hash_u8(2),
-            Self::Append => hash_u8(3),
-            Self::Car => hash_u8(4),
-            Self::Cdr => hash_u8(5),
-            Self::Ceil => hash_u8(6),
-            Self::Collect => hash_u8(7),
-            Self::CollectArgs => hash_u8(8),
-            Self::CollectTuple => hash_u8(9),
-            Self::Concat => hash_u8(10),
-            Self::Cons => hash_u8(11),
-            Self::Divide => hash_u8(12),
-            Self::Effect => hash_u8(13),
-            Self::EndsWith => hash_u8(14),
-            Self::Entries => hash_u8(15),
-            Self::Eq => hash_u8(16),
-            Self::Equal => hash_u8(17),
-            Self::Floor => hash_u8(18),
-            Self::Get => hash_u8(19),
-            Self::Gt => hash_u8(20),
-            Self::Gte => hash_u8(21),
-            Self::If => hash_u8(22),
-            Self::Insert => hash_u8(23),
-            Self::Keys => hash_u8(24),
-            Self::Lt => hash_u8(25),
-            Self::Lte => hash_u8(26),
-            Self::Map => hash_u8(27),
-            Self::Match => hash_u8(28),
-            Self::Max => hash_u8(29),
-            Self::Min => hash_u8(30),
-            Self::Multiply => hash_u8(31),
-            Self::Not => hash_u8(32),
-            Self::Or => hash_u8(33),
-            Self::Pow => hash_u8(34),
-            Self::Reduce => hash_u8(35),
-            Self::Remainder => hash_u8(36),
-            Self::Round => hash_u8(37),
-            Self::StartsWith => hash_u8(38),
-            Self::Subtract => hash_u8(39),
-            Self::Tuple => hash_u8(40),
-            Self::Values => hash_u8(41),
-        }
-    }
 }
 impl BuiltinTerm {
     pub fn arity(&self) -> Arity {

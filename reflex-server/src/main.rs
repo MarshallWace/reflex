@@ -7,6 +7,7 @@ use std::{
 
 use hyper::{server::conn::AddrStream, service::make_service_fn, Server};
 use reflex::{
+    cache::GenerationalGc,
     core::{Expression, SerializedTerm, Term},
     stdlib::value::{StringValue, ValueTerm},
 };
@@ -112,7 +113,12 @@ where
     // TODO: Establish sensible defaults for channel buffer sizes
     let command_buffer_size = 32;
     let result_buffer_size = 32;
-    Runtime::new(signal_handler, command_buffer_size, result_buffer_size)
+    Runtime::new(
+        signal_handler,
+        GenerationalGc::new(),
+        command_buffer_size,
+        result_buffer_size,
+    )
 }
 
 async fn create_server(

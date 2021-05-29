@@ -3,7 +3,7 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use crate::{
     core::{Arity, Expression, Signal, SignalTerm, Term},
-    hash::Hashable,
+    hash::hash_object,
     serialize::SerializedTerm,
     stdlib::{builtin::BuiltinFunction, signal::SignalType, value::ValueTerm},
 };
@@ -26,6 +26,8 @@ impl BuiltinFunction for Eq {
         let mut args = args.into_iter();
         let left = args.next().unwrap();
         let right = args.next().unwrap();
-        Expression::new(Term::Value(ValueTerm::Boolean(left.hash() == right.hash())))
+        Expression::new(Term::Value(ValueTerm::Boolean(
+            hash_object(&left) == hash_object(&right),
+        )))
     }
 }

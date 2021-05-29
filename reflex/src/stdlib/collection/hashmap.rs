@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use std::{collections::HashMap, fmt, iter::once};
+use std::{collections::BTreeMap, fmt, hash::Hash, iter::once};
 
 use crate::{
     cache::EvaluationCache,
@@ -10,35 +10,35 @@ use crate::{
         substitute_multiple, ApplicationTerm, DependencyList, Expression, Rewritable, Signal,
         SignalTerm, StackOffset, StructTerm, Substitutions, Term,
     },
-    hash::{combine_hashes, hash_unordered_sequence, HashId, Hashable},
+    hash::hash_object,
     serialize::SerializedTerm,
     stdlib::{builtin::BuiltinTerm, signal::SignalType, value::ValueTerm},
 };
 
 use super::CollectionTerm;
 
-#[derive(PartialEq, Clone, Debug)]
+#[derive(Eq, PartialEq, Clone, Debug)]
 pub struct HashMapTerm {
-    lookup: HashMap<HashId, usize>,
+    lookup: BTreeMap<Expression, usize>,
     keys: Vec<Expression>,
     values: Vec<Expression>,
 }
-impl Hashable for HashMapTerm {
-    fn hash(&self) -> HashId {
-        hash_unordered_sequence(
-            self.keys
-                .iter()
-                .zip(self.values.iter())
-                .map(|(key, value)| combine_hashes(key.hash(), value.hash())),
-        )
+impl Hash for HashMapTerm {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        let values = &self.values;
+        for (key, index) in self.lookup.iter() {
+            let value = unsafe { values.get_unchecked(*index) };
+            key.hash(state);
+            value.hash(state);
+        }
     }
 }
 impl HashMapTerm {
     pub fn new(items: impl IntoIterator<Item = (Expression, Expression)>) -> Self {
-        let (keys, values): (Vec<_>, Vec<_>) = items.into_iter().unzip();
+        let (keys, values) = items.into_iter().unzip();
         Self {
             lookup: build_lookup_table(&keys),
-            keys: keys,
+            keys,
             values,
         }
     }
@@ -49,16 +49,16 @@ impl HashMapTerm {
         &self.values
     }
     pub fn get(&self, key: &Expression) -> Option<&Expression> {
-        match self.lookup.get(&key.hash()) {
+        match self.lookup.get(key) {
             None => None,
             Some(index) => self.values.get(*index),
         }
     }
     pub fn set(&self, key: Expression, value: Expression) -> Option<Expression> {
-        let updated_entries = match self.lookup.get(&key.hash()) {
+        let updated_entries = match self.lookup.get(&key) {
             Some(index) => {
                 let existing_value = self.values.get(*index).unwrap();
-                if existing_value.hash() == value.hash() {
+                if hash_object(&value) == hash_object(&existing_value) {
                     None
                 } else {
                     let values = self
@@ -200,14 +200,14 @@ impl Rewritable for HashMapTerm {
     fn substitute(
         &self,
         substitutions: &Substitutions,
-        cache: &mut EvaluationCache,
+        cache: &mut impl EvaluationCache,
     ) -> Option<Expression> {
         let keys = substitute_multiple(&self.keys, substitutions, cache);
         let values = substitute_multiple(&self.values, substitutions, cache);
         self.update(keys, values)
             .map(|updated| Expression::new(Term::Collection(CollectionTerm::HashMap(updated))))
     }
-    fn optimize(&self, cache: &mut EvaluationCache) -> Option<Expression> {
+    fn optimize(&self, cache: &mut impl EvaluationCache) -> Option<Expression> {
         let keys = optimize_multiple(&self.keys, cache);
         let values = optimize_multiple(&self.values, cache);
         self.update(keys, values)
@@ -222,9 +222,9 @@ impl fmt::Display for HashMapTerm {
 
 fn build_lookup_table<'a>(
     keys: impl IntoIterator<Item = &'a Expression>,
-) -> HashMap<HashId, usize> {
+) -> BTreeMap<Expression, usize> {
     keys.into_iter()
         .enumerate()
-        .map(|(index, key)| (key.hash(), index))
+        .map(|(index, key)| (Expression::clone(key), index))
         .collect()
 }

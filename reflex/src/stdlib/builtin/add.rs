@@ -46,7 +46,7 @@ impl BuiltinFunction for Add {
 #[cfg(test)]
 mod tests {
     use crate::{
-        cache::EvaluationCache,
+        cache::GenerationalGc,
         core::{DependencyList, DynamicState, EvaluationResult, Expression, Signal, Term},
         parser::sexpr::parse,
         serialize::SerializedTerm,
@@ -55,7 +55,7 @@ mod tests {
 
     #[test]
     fn add_expressions() {
-        let mut cache = EvaluationCache::new();
+        let mut cache = GenerationalGc::new();
         let state = DynamicState::new();
         let expression = parse("(+ 0 0)").unwrap();
         let result = expression.evaluate(&state, &mut cache);
@@ -160,7 +160,7 @@ mod tests {
 
     #[test]
     fn invalid_add_expression_operands() {
-        let mut cache = EvaluationCache::new();
+        let mut cache = GenerationalGc::new();
         let state = DynamicState::new();
         let expression = parse("(+ 3 3.142)").unwrap();
         let result = expression.evaluate(&state, &mut cache);

@@ -329,7 +329,7 @@ fn parse_block_statements<'src: 'temp, 'temp>(
 fn create_declaration_block(initializers: Vec<Expression>, body: Expression) -> Expression {
     Expression::new(Term::Application(ApplicationTerm::new(
         Expression::new(Term::Lambda(LambdaTerm::new(
-            Arity::from(0, initializers.len() as u8, None),
+            Arity::from(0, initializers.len(), None),
             body,
         ))),
         initializers,
@@ -1210,13 +1210,13 @@ fn parse_arrow_function_expression<'src>(
         match body {
             None => Err(err("Missing function return statement", node)),
             Some(body) => Ok(Expression::new(Term::Lambda(LambdaTerm::new(
-                Arity::from(0, num_args as u8, None),
+                Arity::from(0, num_args, None),
                 if destructuring_initializers.is_empty() {
                     body
                 } else {
                     Expression::new(Term::Application(ApplicationTerm::new(
                         Expression::new(Term::Lambda(LambdaTerm::new(
-                            Arity::from(0, destructuring_initializers.len() as u8, None),
+                            Arity::from(0, destructuring_initializers.len(), None),
                             body,
                         ))),
                         destructuring_initializers,
@@ -1377,7 +1377,7 @@ mod tests {
         Env,
     };
     use reflex::{
-        cache::EvaluationCache,
+        cache::GenerationalGc,
         core::{
             ApplicationTerm, Arity, DependencyList, DynamicState, EvaluationResult, Expression,
             LambdaTerm, StaticVariableTerm, StructPrototype, StructTerm, Term, VariableTerm,
@@ -2137,7 +2137,7 @@ mod tests {
             &env,
         )
         .unwrap();
-        let result = expression.evaluate(&DynamicState::new(), &mut EvaluationCache::new());
+        let result = expression.evaluate(&DynamicState::new(), &mut GenerationalGc::new());
         assert_eq!(
             result,
             EvaluationResult::new(
@@ -2160,7 +2160,7 @@ mod tests {
             &env,
         )
         .unwrap();
-        let result = expression.evaluate(&DynamicState::new(), &mut EvaluationCache::new());
+        let result = expression.evaluate(&DynamicState::new(), &mut GenerationalGc::new());
         assert_eq!(
             result,
             EvaluationResult::new(
@@ -2178,7 +2178,7 @@ mod tests {
             &env,
         )
         .unwrap();
-        let result = expression.evaluate(&DynamicState::new(), &mut EvaluationCache::new());
+        let result = expression.evaluate(&DynamicState::new(), &mut GenerationalGc::new());
         assert_eq!(
             result,
             EvaluationResult::new(
@@ -2973,7 +2973,7 @@ mod tests {
             &loader,
         )
         .unwrap();
-        let result = expression.evaluate(&DynamicState::new(), &mut EvaluationCache::new());
+        let result = expression.evaluate(&DynamicState::new(), &mut GenerationalGc::new());
         assert_eq!(
             result,
             EvaluationResult::new(
@@ -2995,7 +2995,7 @@ mod tests {
             &loader,
         )
         .unwrap();
-        let result = expression.evaluate(&DynamicState::new(), &mut EvaluationCache::new());
+        let result = expression.evaluate(&DynamicState::new(), &mut GenerationalGc::new());
         assert_eq!(
             result,
             EvaluationResult::new(
@@ -3023,7 +3023,7 @@ mod tests {
             &loader,
         )
         .unwrap();
-        let result = expression.evaluate(&DynamicState::new(), &mut EvaluationCache::new());
+        let result = expression.evaluate(&DynamicState::new(), &mut GenerationalGc::new());
         assert_eq!(
             result,
             EvaluationResult::new(

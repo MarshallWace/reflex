@@ -4,7 +4,7 @@
 use std::io::{self, Write};
 
 use reflex::{
-    cache::EvaluationCache,
+    cache::GenerationalGc,
     core::{DynamicState, SerializedTerm},
     parser::sexpr::parse,
     stdlib::{signal::SignalType, value::ValueTerm},
@@ -29,7 +29,7 @@ pub fn run() -> io::Result<()> {
             break;
         }
 
-        let mut cache = EvaluationCache::new();
+        let mut cache = GenerationalGc::new();
         let state = DynamicState::new();
 
         match parse(&input) {

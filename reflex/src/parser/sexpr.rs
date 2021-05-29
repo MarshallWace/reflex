@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 
 use crate::{
-    cache::EvaluationCache,
+    cache::{EvaluationCache, GenerationalGc},
     core::{
         ApplicationTerm, Arity, EnumTerm, Expression, LambdaTerm, RecursiveTerm, Rewritable,
         StackOffset, StaticVariableTerm, StructTerm, Substitutions, Term, VariableTerm,
@@ -83,7 +83,7 @@ impl<'a> SymbolCache<'a> {
             .get(identifier)
             .map(|value| *value)
             .unwrap_or_else(|| {
-                let id = SymbolId::from(self.cache.len() as u32);
+                let id = SymbolId::from(self.cache.len());
                 self.cache.insert(identifier, id);
                 id
             })
@@ -100,7 +100,7 @@ pub fn parse<'a>(input: &'a str) -> ParserResult<'a, Expression> {
     }?;
     let scope = LexicalScope::new();
     let mut symbol_cache = SymbolCache::new();
-    let mut evaluation_cache = EvaluationCache::new();
+    let mut evaluation_cache = GenerationalGc::new();
     parse_expression(&syntax, &scope, &mut symbol_cache, &mut evaluation_cache)
 }
 
@@ -108,7 +108,7 @@ fn parse_expression<'a>(
     input: &SyntaxDatum<'a>,
     scope: &LexicalScope<'a>,
     symbol_cache: &mut SymbolCache<'a>,
-    evaluation_cache: &mut EvaluationCache,
+    evaluation_cache: &mut impl EvaluationCache,
 ) -> ParserResult<'a, Expression> {
     match input {
         SyntaxDatum::IntegerLiteral(value) => Ok(parse_integer_literal(input, *value)),
@@ -179,7 +179,7 @@ fn parse_variable<'a>(
             )),
         },
         Some(offset) => Ok(Expression::new(Term::Variable(VariableTerm::Static(
-            StaticVariableTerm::new(offset as u32),
+            StaticVariableTerm::new(offset),
         )))),
     }
 }
@@ -226,7 +226,7 @@ fn parse_special_form<'a>(
     args: &[SyntaxDatum<'a>],
     scope: &LexicalScope<'a>,
     symbol_cache: &mut SymbolCache<'a>,
-    evaluation_cache: &mut EvaluationCache,
+    evaluation_cache: &mut impl EvaluationCache,
 ) -> ParserResult<'a, Option<Expression>> {
     match target {
         SyntaxDatum::Symbol(identifier) => match *identifier {
@@ -250,7 +250,7 @@ fn parse_function_application<'a>(
     args: &[SyntaxDatum<'a>],
     scope: &LexicalScope<'a>,
     symbol_cache: &mut SymbolCache<'a>,
-    evaluation_cache: &mut EvaluationCache,
+    evaluation_cache: &mut impl EvaluationCache,
 ) -> ParserResult<'a, Expression> {
     Ok(Expression::new(Term::Application(ApplicationTerm::new(
         parse_expression(target, scope, symbol_cache, evaluation_cache)?,
@@ -262,7 +262,7 @@ fn parse_function_arguments<'a>(
     items: &[SyntaxDatum<'a>],
     scope: &LexicalScope<'a>,
     symbol_cache: &mut SymbolCache<'a>,
-    evaluation_cache: &mut EvaluationCache,
+    evaluation_cache: &mut impl EvaluationCache,
 ) -> ParserResult<'a, Vec<Expression>> {
     items
         .iter()
@@ -323,7 +323,7 @@ fn parse_lambda_expression<'a>(
     args: &[SyntaxDatum<'a>],
     scope: &LexicalScope<'a>,
     symbol_cache: &mut SymbolCache<'a>,
-    evaluation_cache: &mut EvaluationCache,
+    evaluation_cache: &mut impl EvaluationCache,
 ) -> ParserResult<'a, Expression> {
     let mut args = args.iter();
     let arg_list = match args.next() {
@@ -353,7 +353,7 @@ fn parse_lambda_expression<'a>(
     match args.next() {
         Some(arg) => Err(ParserError::new(String::from("Unexpected expression"), arg)),
         None => Ok(Expression::new(Term::Lambda(LambdaTerm::new(
-            Arity::from(0, arity as u8, None),
+            Arity::from(0, arity, None),
             body,
         )))),
     }
@@ -374,7 +374,7 @@ fn parse_let_expression<'a>(
     args: &[SyntaxDatum<'a>],
     scope: &LexicalScope<'a>,
     symbol_cache: &mut SymbolCache<'a>,
-    evaluation_cache: &mut EvaluationCache,
+    evaluation_cache: &mut impl EvaluationCache,
 ) -> ParserResult<'a, Expression> {
     parse_binding_expression(
         &BindingExpressionType::Let,
@@ -391,7 +391,7 @@ fn parse_letrec_expression<'a>(
     args: &[SyntaxDatum<'a>],
     scope: &LexicalScope<'a>,
     symbol_cache: &mut SymbolCache<'a>,
-    evaluation_cache: &mut EvaluationCache,
+    evaluation_cache: &mut impl EvaluationCache,
 ) -> ParserResult<'a, Expression> {
     parse_binding_expression(
         &BindingExpressionType::LetRec,
@@ -421,7 +421,7 @@ fn parse_binding_expression<'a>(
     args: &[SyntaxDatum<'a>],
     scope: &LexicalScope<'a>,
     symbol_cache: &mut SymbolCache<'a>,
-    evaluation_cache: &mut EvaluationCache,
+    evaluation_cache: &mut impl EvaluationCache,
 ) -> ParserResult<'a, Expression> {
     let mut args = args.iter();
     let binding_definitions = match args.next() {
@@ -476,7 +476,7 @@ fn parse_binding_expression<'a>(
                 BindingExpressionType::Let => {
                     Expression::new(Term::Application(ApplicationTerm::new(
                         Expression::new(Term::Lambda(LambdaTerm::new(
-                            Arity::from(0, num_bindings as u8, None),
+                            Arity::from(0, num_bindings, None),
                             body,
                         ))),
                         initializers,
@@ -537,7 +537,7 @@ fn parse_binding_expression<'a>(
                         )));
                         Expression::new(Term::Application(ApplicationTerm::new(
                             Expression::new(Term::Lambda(LambdaTerm::new(
-                                Arity::from(0, num_bindings as u8, None),
+                                Arity::from(0, num_bindings, None),
                                 body,
                             ))),
                             (0..num_bindings)
@@ -566,7 +566,7 @@ fn parse_binding_initializers<'a>(
     binding_definitions: &[(&'a str, &SyntaxDatum<'a>)],
     scope: &LexicalScope<'a>,
     symbol_cache: &mut SymbolCache<'a>,
-    evaluation_cache: &mut EvaluationCache,
+    evaluation_cache: &mut impl EvaluationCache,
 ) -> ParserResult<'a, Vec<Expression>> {
     match binding_type {
         BindingExpressionType::Let => binding_definitions

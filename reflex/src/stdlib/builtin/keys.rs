@@ -33,7 +33,7 @@ impl BuiltinFunction for Keys {
             Term::Collection(collection) => match collection {
                 CollectionTerm::HashMap(target) => {
                     Some(Expression::new(Term::Collection(CollectionTerm::Vector(
-                        VectorTerm::new(target.keys().iter().map(Expression::clone)),
+                        VectorTerm::new(target.keys().into_iter().map(Expression::clone)),
                     ))))
                 }
                 CollectionTerm::HashSet(_) => None,
@@ -61,7 +61,7 @@ impl BuiltinFunction for Keys {
 #[cfg(test)]
 mod tests {
     use crate::{
-        cache::EvaluationCache,
+        cache::GenerationalGc,
         core::{ApplicationTerm, DependencyList, DynamicState, EvaluationResult, Expression, Term},
         stdlib::{
             builtin::BuiltinTerm,
@@ -72,7 +72,7 @@ mod tests {
 
     #[test]
     fn get_hashmap_keys() {
-        let mut cache = EvaluationCache::new();
+        let mut cache = GenerationalGc::new();
         let state = DynamicState::new();
         let expression = Expression::new(Term::Application(ApplicationTerm::new(
             Expression::new(Term::Builtin(BuiltinTerm::Keys)),

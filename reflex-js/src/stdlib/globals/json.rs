@@ -36,7 +36,7 @@ pub fn global_json_parse() -> Expression {
 struct JsonParse {}
 impl JsonParse {
     fn hash() -> HashId {
-        hash_object(TypeId::of::<Self>())
+        hash_object(&TypeId::of::<Self>())
     }
     fn arity() -> Arity {
         Arity::from(1, 0, None)
@@ -82,7 +82,7 @@ pub fn global_json_stringify() -> Expression {
 struct JsonStringify {}
 impl JsonStringify {
     fn hash() -> HashId {
-        hash_object(TypeId::of::<Self>())
+        hash_object(&TypeId::of::<Self>())
     }
     fn arity() -> Arity {
         Arity::from(1, 0, None)

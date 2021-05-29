@@ -8,7 +8,7 @@ use reflex::{
         ApplicationTerm, Arity, Expression, LambdaTerm, NativeFunction, SerializedTerm, Signal,
         SignalTerm, StaticVariableTerm, StructPrototype, StructTerm, Term, VarArgs, VariableTerm,
     },
-    hash::{hash_object, HashId, Hashable},
+    hash::{hash_object, HashId},
     stdlib::{
         builtin::BuiltinTerm,
         signal::SignalType,
@@ -126,7 +126,7 @@ impl ToRequest {
         Arity::from(1, 0, None)
     }
     fn hash() -> HashId {
-        hash_object(TypeId::of::<Self>())
+        hash_object(&TypeId::of::<Self>())
     }
     fn apply(args: Vec<Expression>) -> Expression {
         if args.len() != 1 {
@@ -157,7 +157,7 @@ impl ToRequest {
             Term::Struct(value) => match value.prototype() {
                 Some(prototype) => {
                     let request_prototype = http_request_prototype();
-                    if prototype.hash() == request_prototype.hash() {
+                    if hash_object(&prototype) == hash_object(&request_prototype) {
                         Ok(target)
                     } else {
                         let request = request_prototype.apply(

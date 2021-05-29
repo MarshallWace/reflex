@@ -2,31 +2,31 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{BTreeSet, HashSet},
     num::NonZeroUsize,
 };
 
 use reflex::{
     cache::EvaluationCache,
     core::{DependencyList, DynamicState, Expression, Signal, StateToken},
-    hash::{HashId, Hashable},
+    hash::{hash_object, HashId},
 };
 
 pub type SubscriptionToken = usize;
 
-pub struct Store {
+pub struct Store<T: EvaluationCache> {
     state: DynamicState,
-    cache: EvaluationCache,
+    cache: T,
     subscriptions: Vec<Subscription>,
     subscription_counter: usize,
     is_flushing: bool,
 }
-impl Store {
-    pub fn new(state: Option<DynamicState>) -> Self {
+impl<T: EvaluationCache> Store<T> {
+    pub fn new(cache: T, state: Option<DynamicState>) -> Self {
         Self {
             state: state.unwrap_or_else(|| DynamicState::new()),
             subscriptions: Vec::new(),
-            cache: EvaluationCache::new(),
+            cache,
             subscription_counter: 0,
             is_flushing: false,
         }
@@ -74,7 +74,7 @@ impl Store {
         let updates = updates
             .into_iter()
             .filter(|(key, value)| match self.state.get(*key) {
-                Some(existing) => existing.hash() != value.hash(),
+                Some(existing) => hash_object(&existing) != hash_object(&value),
                 None => true,
             })
             .collect::<Vec<_>>();
@@ -131,7 +131,7 @@ impl Store {
     }
 }
 
-type UpdateSet = HashSet<StateToken>;
+type UpdateSet = BTreeSet<StateToken>;
 
 struct Subscription {
     id: SubscriptionToken,
@@ -150,9 +150,9 @@ impl Subscription {
         &mut self,
         state: &DynamicState,
         updates: Option<&UpdateSet>,
-        cache: &mut EvaluationCache,
+        cache: &mut impl EvaluationCache,
     ) -> Option<Result<Expression, Vec<Signal>>> {
-        let state_hash = state.hash();
+        let state_hash = hash_object(&state);
         let is_unchanged = match updates {
             Some(updates) => match &self.dependencies {
                 Some((previous_state_hash, dependencies)) => {
@@ -175,7 +175,7 @@ impl Subscription {
 fn combine_updates<'a>(updates: impl IntoIterator<Item = &'a UpdateSet>) -> Option<UpdateSet> {
     let results = updates
         .into_iter()
-        .fold(HashSet::new(), |mut results, batch| {
+        .fold(BTreeSet::new(), |mut results, batch| {
             results.extend(batch.iter());
             results
         });
@@ -229,7 +229,7 @@ fn flush_recursive<'a, THandler, TErr>(
     mut tasks: Vec<FlushTask<'a, TErr>>,
     signal_handler: THandler,
     state: &mut DynamicState,
-    cache: &mut EvaluationCache,
+    cache: &mut impl EvaluationCache,
     mut update_batches: Vec<UpdateBatch>,
 ) -> Vec<Option<Result<Expression, TErr>>>
 where
@@ -271,7 +271,7 @@ where
                             }
                             let updates = signals
                                 .iter()
-                                .map(|signal| signal.hash())
+                                .map(|signal| signal.id())
                                 .zip(values.into_iter())
                                 .collect::<Vec<_>>();
                             Some(updates)
@@ -301,9 +301,7 @@ fn deduplicate_signals(signals: Vec<Signal>) -> Vec<Signal> {
     // TODO: Improve signal deduplication performance
     signals
         .into_iter()
-        .map(|signal| (signal.hash(), signal))
-        .collect::<HashMap<_, _>>()
+        .collect::<HashSet<_>>()
         .drain()
-        .map(|(_, signal)| signal)
         .collect::<Vec<_>>()
 }

@@ -4,7 +4,7 @@
 use std::{env, error::Error, fs, path::Path};
 
 use reflex::{
-    cache::EvaluationCache,
+    cache::GenerationalGc,
     core::{DynamicState, SerializedTerm},
     stdlib::{signal::SignalType, value::ValueTerm},
 };
@@ -31,7 +31,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         Err(error) => panic!(error),
         Ok(expression) => expression,
     };
-    let mut cache = EvaluationCache::new();
+    let mut cache = GenerationalGc::new();
     let state = DynamicState::new();
     let (result, _) = expression.evaluate(&state, &mut cache).unwrap();
     match result {

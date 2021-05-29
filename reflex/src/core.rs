@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{hash_map::DefaultHasher, BTreeSet, HashMap},
     fmt,
+    hash::{Hash, Hasher},
     iter::once,
     sync::Arc,
 };
@@ -11,44 +12,26 @@ use std::{
 pub use crate::serialize::{SerializedListTerm, SerializedObjectTerm, SerializedTerm};
 use crate::{
     cache::EvaluationCache,
-    hash::{
-        combine_hashes, hash_bytes, hash_option, hash_seed, hash_sequence, hash_u32, hash_u8,
-        hash_unordered_sequence, prefix_hash, HashId, Hashable,
-    },
+    hash::{hash_object, HashId},
     stdlib::{
         builtin::BuiltinTerm, collection::CollectionTerm, signal::SignalType, value::ValueTerm,
     },
 };
 
-#[derive(PartialEq, Clone, Copy, Debug)]
+#[derive(Hash, Eq, PartialEq, Clone, Copy, Debug)]
 pub enum VarArgs {
     Eager,
     Lazy,
 }
 
-#[derive(PartialEq, Clone, Copy, Debug)]
+#[derive(Hash, Eq, PartialEq, Clone, Copy, Debug)]
 pub struct Arity {
-    eager: u8,
-    lazy: u8,
+    eager: usize,
+    lazy: usize,
     variadic: Option<VarArgs>,
 }
-impl Hashable for Arity {
-    fn hash(&self) -> HashId {
-        hash_bytes(&[
-            self.eager,
-            self.lazy,
-            match self.variadic {
-                None => 0,
-                Some(var_args) => match var_args {
-                    VarArgs::Eager => 1,
-                    VarArgs::Lazy => 2,
-                },
-            },
-        ])
-    }
-}
 impl Arity {
-    pub fn from(eager: u8, lazy: u8, variadic: Option<VarArgs>) -> Self {
+    pub fn from(eager: usize, lazy: usize, variadic: Option<VarArgs>) -> Self {
         Self {
             eager,
             lazy,
@@ -56,10 +39,10 @@ impl Arity {
         }
     }
     fn eager(&self) -> usize {
-        self.eager as usize
+        self.eager
     }
     fn required(&self) -> usize {
-        (self.eager + self.lazy) as usize
+        self.eager + self.lazy
     }
 }
 impl fmt::Display for Arity {
@@ -75,80 +58,60 @@ pub(crate) trait Rewritable {
     fn substitute(
         &self,
         substitutions: &Substitutions,
-        cache: &mut EvaluationCache,
+        cache: &mut impl EvaluationCache,
     ) -> Option<Expression>;
-    fn optimize(&self, cache: &mut EvaluationCache) -> Option<Expression>;
+    fn optimize(&self, cache: &mut impl EvaluationCache) -> Option<Expression>;
 }
 
 pub(crate) trait Reducible {
-    fn reduce(&self, cache: &mut EvaluationCache) -> Option<Expression>;
+    fn reduce(&self, cache: &mut impl EvaluationCache) -> Option<Expression>;
 }
 
 pub struct Substitutions<'a> {
     hash: HashId,
     substitutions: SubstitutionType<'a>,
 }
-impl<'a> Hashable for Substitutions<'a> {
-    fn hash(&self) -> HashId {
-        self.hash
+impl<'a> Hash for Substitutions<'a> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        state.write_u64(self.hash)
     }
 }
 impl<'a> Substitutions<'a> {
     pub fn from(substitutions: SubstitutionType<'a>) -> Self {
-        Self {
-            hash: substitutions.hash(),
-            substitutions,
-        }
+        Self::create(substitutions)
     }
     pub fn new(substitutions: &'a [(StackOffset, Expression)]) -> Self {
-        let substitutions = SubstitutionType::Static(StaticSubstitutions::new(substitutions));
-        Self {
-            hash: substitutions.hash(),
+        Self::create(SubstitutionType::Static(StaticSubstitutions::new(
             substitutions,
-        }
+        )))
     }
     pub fn wildcard(offset: StackOffset) -> Self {
-        let substitutions = SubstitutionType::Static(StaticSubstitutions::all(offset));
-        Self {
-            hash: substitutions.hash(),
-            substitutions,
-        }
+        Self::create(SubstitutionType::Static(StaticSubstitutions::all(offset)))
     }
     pub fn dynamic(state: &'a DynamicState) -> Self {
-        let substitutions = SubstitutionType::Dynamic(state);
-        Self {
-            hash: substitutions.hash(),
-            substitutions: substitutions,
-        }
+        Self::create(SubstitutionType::Dynamic(state))
     }
     pub fn kind(&self) -> &SubstitutionType<'a> {
         &self.substitutions
     }
+    fn create(substitutions: SubstitutionType<'a>) -> Self {
+        Self {
+            hash: hash_object(&substitutions),
+            substitutions,
+        }
+    }
 }
 
+#[derive(Hash)]
 pub enum SubstitutionType<'a> {
     Static(StaticSubstitutions<'a>),
     Dynamic(&'a DynamicState),
 }
-impl<'a> Hashable for SubstitutionType<'a> {
-    fn hash(&self) -> HashId {
-        match self {
-            Self::Static(substitutions) => prefix_hash(0, substitutions.hash()),
-            Self::Dynamic(substitutions) => prefix_hash(1, substitutions.hash()),
-        }
-    }
-}
+
+#[derive(Hash, Eq, PartialEq)]
 pub enum StaticSubstitutions<'a> {
     Some(TargetedStaticSubstitutions<'a>),
     All(WildcardStaticSubstitutions),
-}
-impl<'a> Hashable for StaticSubstitutions<'a> {
-    fn hash(&self) -> HashId {
-        match self {
-            Self::Some(substitutions) => prefix_hash(0, substitutions.hash()),
-            Self::All(substitutions) => prefix_hash(1, substitutions.hash()),
-        }
-    }
 }
 impl<'a> StaticSubstitutions<'a> {
     pub fn new(substitutions: &'a [(StackOffset, Expression)]) -> Self {
@@ -169,7 +132,7 @@ impl<'a> StaticSubstitutions<'a> {
             Self::All(substitutions) => substitutions.can_skip(expression),
         }
     }
-    fn get(&self, offset: StackOffset, cache: &mut EvaluationCache) -> Option<Expression> {
+    fn get(&self, offset: StackOffset, cache: &mut impl EvaluationCache) -> Option<Expression> {
         match self {
             Self::Some(substitutions) => substitutions.get(offset, cache),
             Self::All(substitutions) => substitutions.get(offset),
@@ -177,22 +140,11 @@ impl<'a> StaticSubstitutions<'a> {
     }
 }
 
+#[derive(Hash, Eq, PartialEq)]
 pub struct TargetedStaticSubstitutions<'a> {
     substitutions: &'a [(StackOffset, Expression)],
     min_depth: StackOffset,
     offset: StackOffset,
-}
-impl<'a> Hashable for TargetedStaticSubstitutions<'a> {
-    fn hash(&self) -> HashId {
-        combine_hashes(
-            hash_stack_offset(self.offset),
-            hash_sequence(
-                self.substitutions
-                    .iter()
-                    .map(|(key, value)| combine_hashes(hash_stack_offset(*key), value.hash())),
-            ),
-        )
-    }
 }
 impl<'a> TargetedStaticSubstitutions<'a> {
     pub fn new(substitutions: &'a [(StackOffset, Expression)]) -> Self {
@@ -215,7 +167,7 @@ impl<'a> TargetedStaticSubstitutions<'a> {
         let capture_depth = expression.capture_depth();
         capture_depth == 0 || (capture_depth - 1 < self.min_depth + self.offset)
     }
-    fn get(&self, offset: StackOffset, cache: &mut EvaluationCache) -> Option<Expression> {
+    fn get(&self, offset: StackOffset, cache: &mut impl EvaluationCache) -> Option<Expression> {
         if offset < self.offset {
             return None;
         }
@@ -235,13 +187,9 @@ impl<'a> TargetedStaticSubstitutions<'a> {
     }
 }
 
+#[derive(Hash, Eq, PartialEq)]
 pub struct WildcardStaticSubstitutions {
     offset: StackOffset,
-}
-impl Hashable for WildcardStaticSubstitutions {
-    fn hash(&self) -> HashId {
-        hash_stack_offset(self.offset)
-    }
 }
 impl WildcardStaticSubstitutions {
     pub fn new(offset: StackOffset) -> Self {
@@ -262,7 +210,7 @@ impl WildcardStaticSubstitutions {
     }
 }
 
-#[derive(PartialEq, Clone)]
+#[derive(Clone)]
 pub struct Expression {
     value: Arc<Term>,
     hash: HashId,
@@ -273,11 +221,27 @@ pub struct Expression {
     // TODO: Investigate cheap cloning for signals tree
     signals: Vec<Signal>,
 }
-impl Hashable for Expression {
-    fn hash(&self) -> HashId {
-        self.hash
+impl Hash for Expression {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        state.write_u64(self.hash);
     }
 }
+impl PartialEq for Expression {
+    fn eq(&self, other: &Self) -> bool {
+        self.value.eq(&other.value)
+    }
+}
+impl Ord for Expression {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.hash.cmp(&other.hash)
+    }
+}
+impl PartialOrd for Expression {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        self.hash.partial_cmp(&other.hash)
+    }
+}
+impl Eq for Expression {}
 impl Expression {
     pub fn new(value: Term) -> Self {
         let is_reducible = value.is_reducible();
@@ -294,11 +258,15 @@ impl Expression {
     pub fn is_reducible(&self) -> bool {
         !self.is_reduced && self.value.is_reducible()
     }
-    pub fn compile(&self, cache: &mut EvaluationCache) -> Expression {
+    pub fn compile(&self, cache: &mut impl EvaluationCache) -> Expression {
         self.optimize(cache)
             .unwrap_or_else(|| Expression::clone(self))
     }
-    pub fn evaluate(&self, state: &DynamicState, cache: &mut EvaluationCache) -> EvaluationResult {
+    pub fn evaluate(
+        &self,
+        state: &DynamicState,
+        cache: &mut impl EvaluationCache,
+    ) -> EvaluationResult {
         let substitutions = Substitutions::dynamic(state);
         let (result, dependencies) = evaluate_recursive(
             Expression::clone(self),
@@ -315,7 +283,7 @@ impl Expression {
         EvaluationResult::new(result, dependencies)
     }
     fn create(value: Term, is_reduced: bool, is_optimized: bool) -> Self {
-        let hash = value.hash();
+        let hash = hash_object(&value);
         let capture_depth = value.capture_depth();
         let dynamic_dependencies = value.dynamic_dependencies();
         let signals = value.signals();
@@ -365,7 +333,7 @@ impl Rewritable for Expression {
     fn substitute(
         &self,
         substitutions: &Substitutions,
-        cache: &mut EvaluationCache,
+        cache: &mut impl EvaluationCache,
     ) -> Option<Expression> {
         let can_skip = match substitutions.kind() {
             SubstitutionType::Static(substitutions) => substitutions.can_skip(self),
@@ -383,7 +351,7 @@ impl Rewritable for Expression {
             }
         }
     }
-    fn optimize(&self, cache: &mut EvaluationCache) -> Option<Expression> {
+    fn optimize(&self, cache: &mut impl EvaluationCache) -> Option<Expression> {
         if self.is_optimized {
             return None;
         }
@@ -395,7 +363,7 @@ impl Rewritable for Expression {
     }
 }
 impl Reducible for Expression {
-    fn reduce(&self, cache: &mut EvaluationCache) -> Option<Expression> {
+    fn reduce(&self, cache: &mut impl EvaluationCache) -> Option<Expression> {
         if self.is_reduced {
             return None;
         }
@@ -426,7 +394,7 @@ impl fmt::Display for Expression {
 fn evaluate_recursive(
     expression: Expression,
     state: &Substitutions,
-    cache: &mut EvaluationCache,
+    cache: &mut impl EvaluationCache,
     dependencies: DependencyList,
 ) -> (Expression, DependencyList) {
     let dependencies = dependencies.extend(expression.dynamic_dependencies());
@@ -462,7 +430,7 @@ impl EvaluationResult {
     }
 }
 
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Hash, Eq, PartialEq, Clone, Debug)]
 pub struct DependencyList {
     dependencies: Option<DynamicDependencies>,
 }
@@ -495,7 +463,7 @@ impl DependencyList {
             },
         }
     }
-    pub fn contains(&self, entries: &HashSet<StateToken>) -> bool {
+    pub fn contains(&self, entries: &BTreeSet<StateToken>) -> bool {
         match &self.dependencies {
             None => false,
             Some(dependencies) => dependencies.contains(entries),
@@ -503,9 +471,9 @@ impl DependencyList {
     }
 }
 
-pub type EnumIndex = u8;
+pub type EnumIndex = usize;
 
-#[derive(PartialEq, Clone, Debug)]
+#[derive(Hash, Eq, PartialEq, Clone, Debug)]
 pub enum Term {
     Value(ValueTerm),
     Variable(VariableTerm),
@@ -520,34 +488,6 @@ pub enum Term {
     EnumConstructor(EnumVariantPrototype),
     Collection(CollectionTerm),
     Signal(SignalTerm),
-}
-impl Hashable for Term {
-    fn hash(&self) -> HashId {
-        match self {
-            Self::Value(term) => prefix_hash(0, term.hash()),
-            Self::Variable(term) => prefix_hash(1, term.hash()),
-            Self::Lambda(term) => prefix_hash(2, term.hash()),
-            Self::Application(term) => prefix_hash(3, term.hash()),
-            Self::Recursive(term) => prefix_hash(4, term.hash()),
-            Self::Builtin(term) => prefix_hash(5, term.hash()),
-            Self::Native(term) => prefix_hash(6, term.hash()),
-            Self::Struct(term) => prefix_hash(7, term.hash()),
-            Self::Enum(term) => prefix_hash(8, term.hash()),
-            Self::StructConstructor(eager, prototype) => prefix_hash(
-                9,
-                prefix_hash(
-                    match eager {
-                        VarArgs::Lazy => 0,
-                        VarArgs::Eager => 1,
-                    },
-                    prototype.hash(),
-                ),
-            ),
-            Self::EnumConstructor(term) => prefix_hash(10, term.hash()),
-            Self::Collection(term) => prefix_hash(11, term.hash()),
-            Self::Signal(term) => prefix_hash(12, term.hash()),
-        }
-    }
 }
 impl Rewritable for Term {
     fn signals(&self) -> Vec<Signal> {
@@ -592,7 +532,7 @@ impl Rewritable for Term {
     fn substitute(
         &self,
         substitutions: &Substitutions,
-        cache: &mut EvaluationCache,
+        cache: &mut impl EvaluationCache,
     ) -> Option<Expression> {
         match self {
             Self::Variable(term) => term.substitute(substitutions, cache),
@@ -606,7 +546,7 @@ impl Rewritable for Term {
             _ => None,
         }
     }
-    fn optimize(&self, cache: &mut EvaluationCache) -> Option<Expression> {
+    fn optimize(&self, cache: &mut impl EvaluationCache) -> Option<Expression> {
         match self {
             Self::Variable(term) => term.optimize(cache),
             Self::Lambda(term) => term.optimize(cache),
@@ -630,7 +570,7 @@ impl Term {
     }
 }
 impl Reducible for Term {
-    fn reduce(&self, cache: &mut EvaluationCache) -> Option<Expression> {
+    fn reduce(&self, cache: &mut impl EvaluationCache) -> Option<Expression> {
         match self {
             Self::Application(term) => term.reduce(cache),
             Self::Recursive(term) => term.reduce(cache),
@@ -658,18 +598,10 @@ impl fmt::Display for Term {
     }
 }
 
-#[derive(PartialEq, Clone, Debug)]
+#[derive(Hash, Eq, PartialEq, Clone, Debug)]
 pub enum VariableTerm {
     Static(StaticVariableTerm),
     Dynamic(DynamicVariableTerm),
-}
-impl Hashable for VariableTerm {
-    fn hash(&self) -> HashId {
-        match self {
-            Self::Static(term) => prefix_hash(0, term.hash()),
-            Self::Dynamic(term) => prefix_hash(1, term.hash()),
-        }
-    }
 }
 impl Rewritable for VariableTerm {
     fn signals(&self) -> Vec<Signal> {
@@ -693,14 +625,14 @@ impl Rewritable for VariableTerm {
     fn substitute(
         &self,
         substitutions: &Substitutions,
-        cache: &mut EvaluationCache,
+        cache: &mut impl EvaluationCache,
     ) -> Option<Expression> {
         match self {
             Self::Static(term) => term.substitute(substitutions, cache),
             Self::Dynamic(term) => term.substitute(substitutions, cache),
         }
     }
-    fn optimize(&self, cache: &mut EvaluationCache) -> Option<Expression> {
+    fn optimize(&self, cache: &mut impl EvaluationCache) -> Option<Expression> {
         match self {
             Self::Static(term) => term.optimize(cache),
             Self::Dynamic(term) => term.optimize(cache),
@@ -716,19 +648,11 @@ impl fmt::Display for VariableTerm {
     }
 }
 
-pub type StackOffset = u32;
-fn hash_stack_offset(value: StackOffset) -> HashId {
-    hash_u32(value)
-}
+pub type StackOffset = usize;
 
-#[derive(PartialEq, Clone, Debug)]
+#[derive(Hash, Eq, PartialEq, Clone, Debug)]
 pub struct StaticVariableTerm {
     offset: StackOffset,
-}
-impl Hashable for StaticVariableTerm {
-    fn hash(&self) -> HashId {
-        hash_stack_offset(self.offset)
-    }
 }
 impl StaticVariableTerm {
     pub fn new(offset: StackOffset) -> Self {
@@ -751,14 +675,14 @@ impl Rewritable for StaticVariableTerm {
     fn substitute(
         &self,
         substitutions: &Substitutions,
-        cache: &mut EvaluationCache,
+        cache: &mut impl EvaluationCache,
     ) -> Option<Expression> {
         match substitutions.kind() {
             SubstitutionType::Static(substitutions) => substitutions.get(self.offset, cache),
             _ => None,
         }
     }
-    fn optimize(&self, _cache: &mut EvaluationCache) -> Option<Expression> {
+    fn optimize(&self, _cache: &mut impl EvaluationCache) -> Option<Expression> {
         None
     }
 }
@@ -768,15 +692,10 @@ impl fmt::Display for StaticVariableTerm {
     }
 }
 
-#[derive(PartialEq, Clone, Debug)]
+#[derive(Hash, Eq, PartialEq, Clone, Debug)]
 pub struct DynamicVariableTerm {
     id: StateToken,
     fallback: Expression,
-}
-impl Hashable for DynamicVariableTerm {
-    fn hash(&self) -> HashId {
-        combine_hashes(hash_state_token(self.id), self.fallback.hash())
-    }
 }
 impl Rewritable for DynamicVariableTerm {
     fn signals(&self) -> Vec<Signal> {
@@ -791,7 +710,7 @@ impl Rewritable for DynamicVariableTerm {
     fn substitute(
         &self,
         substitutions: &Substitutions,
-        _cache: &mut EvaluationCache,
+        _cache: &mut impl EvaluationCache,
     ) -> Option<Expression> {
         match substitutions.kind() {
             SubstitutionType::Dynamic(state) => Some(match state.get(self.id) {
@@ -801,7 +720,7 @@ impl Rewritable for DynamicVariableTerm {
             _ => None,
         }
     }
-    fn optimize(&self, _cache: &mut EvaluationCache) -> Option<Expression> {
+    fn optimize(&self, _cache: &mut impl EvaluationCache) -> Option<Expression> {
         None
     }
 }
@@ -815,15 +734,15 @@ pub struct DynamicState {
     hash: HashId,
     values: HashMap<StateToken, Expression>,
 }
-impl Hashable for DynamicState {
-    fn hash(&self) -> HashId {
-        self.hash
+impl Hash for DynamicState {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        state.write_u64(self.hash)
     }
 }
 impl DynamicState {
     pub fn new() -> Self {
         DynamicState {
-            hash: hash_seed(),
+            hash: DefaultHasher::new().finish(),
             values: HashMap::new(),
         }
     }
@@ -834,32 +753,29 @@ impl DynamicState {
         self.values.get(&key)
     }
     pub fn set(&mut self, key: StateToken, value: Expression) {
-        let value_hash = value.hash();
+        let value_hash = hash_object(&value);
         let previous = self.values.insert(key, value);
-        let has_changes = match previous {
-            Some(previous_value) => value_hash != previous_value.hash(),
+        let has_changes = match &previous {
+            Some(previous_value) => value_hash != hash_object(previous_value),
             None => true,
         };
         if has_changes {
-            let entry_hash = combine_hashes(hash_state_token(key), value_hash);
-            self.hash = combine_hashes(self.hash, entry_hash);
+            self.hash = {
+                let mut hasher = DefaultHasher::new();
+                hasher.write_u64(self.hash);
+                hasher.write_u64(key);
+                hasher.write_u64(value_hash);
+                hasher.finish()
+            }
         }
     }
 }
 
-pub type StateToken = u32;
-fn hash_state_token(value: StateToken) -> HashId {
-    hash_u32(value)
-}
+pub type StateToken = u64;
 
-#[derive(PartialEq, Clone, Debug)]
+#[derive(Hash, Eq, PartialEq, Clone, Debug)]
 pub struct DynamicDependencies {
-    values: Arc<HashSet<StateToken>>,
-}
-impl Hashable for DynamicDependencies {
-    fn hash(&self) -> HashId {
-        hash_unordered_sequence(self.values.iter().copied())
-    }
+    values: Arc<BTreeSet<StateToken>>,
 }
 impl DynamicDependencies {
     pub fn from(values: impl IntoIterator<Item = StateToken>) -> Self {
@@ -873,19 +789,14 @@ impl DynamicDependencies {
     fn union(&self, other: &DynamicDependencies) -> Self {
         Self::from(self.values.union(&other.values).copied())
     }
-    fn contains(&self, entries: &HashSet<StateToken>) -> bool {
+    fn contains(&self, entries: &BTreeSet<StateToken>) -> bool {
         !self.values.is_disjoint(entries)
     }
 }
 
-#[derive(PartialEq, Clone, Debug)]
+#[derive(Hash, Eq, PartialEq, Clone, Debug)]
 pub struct RecursiveTerm {
     factory: Expression,
-}
-impl Hashable for RecursiveTerm {
-    fn hash(&self) -> HashId {
-        self.factory.hash()
-    }
 }
 impl RecursiveTerm {
     pub fn new(factory: Expression) -> Self {
@@ -905,20 +816,20 @@ impl Rewritable for RecursiveTerm {
     fn substitute(
         &self,
         substitutions: &Substitutions,
-        cache: &mut EvaluationCache,
+        cache: &mut impl EvaluationCache,
     ) -> Option<Expression> {
         self.factory
             .substitute(substitutions, cache)
             .map(|factory| Expression::new(Term::Recursive(Self { factory })))
     }
-    fn optimize(&self, cache: &mut EvaluationCache) -> Option<Expression> {
+    fn optimize(&self, cache: &mut impl EvaluationCache) -> Option<Expression> {
         self.factory
             .optimize(cache)
             .map(|factory| Expression::new(Term::Recursive(Self { factory })))
     }
 }
 impl Reducible for RecursiveTerm {
-    fn reduce(&self, cache: &mut EvaluationCache) -> Option<Expression> {
+    fn reduce(&self, cache: &mut impl EvaluationCache) -> Option<Expression> {
         // TODO: Implement recursion via cached circular reference cell rather than repeated factory invocation
         Expression::new(Term::Application(ApplicationTerm::new(
             Expression::clone(&self.factory),
@@ -935,15 +846,10 @@ impl fmt::Display for RecursiveTerm {
     }
 }
 
-#[derive(PartialEq, Clone, Debug)]
+#[derive(Hash, Eq, PartialEq, Clone, Debug)]
 pub struct LambdaTerm {
     arity: Arity,
     body: Expression,
-}
-impl Hashable for LambdaTerm {
-    fn hash(&self) -> HashId {
-        combine_hashes(self.arity.hash(), self.body.hash())
-    }
 }
 impl LambdaTerm {
     pub fn new(arity: Arity, body: Expression) -> Self {
@@ -952,7 +858,7 @@ impl LambdaTerm {
     fn apply(
         &self,
         args: impl IntoIterator<Item = Expression> + ExactSizeIterator,
-        cache: &mut EvaluationCache,
+        cache: &mut impl EvaluationCache,
     ) -> Expression {
         // TODO: support variadic 'rest args' iterator in lambda functions
         let arity = self.arity.required();
@@ -981,7 +887,7 @@ impl Rewritable for LambdaTerm {
     fn substitute<'a>(
         &self,
         substitutions: &'a Substitutions,
-        cache: &mut EvaluationCache,
+        cache: &mut impl EvaluationCache,
     ) -> Option<Expression> {
         let arity = self.arity.required() as StackOffset;
         let body = match substitutions.kind() {
@@ -993,7 +899,7 @@ impl Rewritable for LambdaTerm {
         };
         body.map(|body| Expression::new(Term::Lambda(LambdaTerm::new(self.arity, body))))
     }
-    fn optimize(&self, cache: &mut EvaluationCache) -> Option<Expression> {
+    fn optimize(&self, cache: &mut impl EvaluationCache) -> Option<Expression> {
         let arity = self.arity.required() as StackOffset;
         let reduced_body = self.body.reduce(cache);
         let eta_reduced_body = reduced_body.as_ref().map_or_else(
@@ -1041,7 +947,7 @@ fn apply_eta_reduction(body: &Expression, arity: StackOffset) -> Option<&Express
     }
 }
 
-#[derive(PartialEq, Clone, Debug)]
+#[derive(Hash, Eq, PartialEq, Clone, Debug)]
 pub struct ApplicationTerm {
     target: Expression,
     args: Vec<Expression>,
@@ -1057,14 +963,6 @@ impl fmt::Display for ApplicationTerm {
                 .map(|arg| format!("{}", arg))
                 .collect::<Vec<_>>()
                 .join(",")
-        )
-    }
-}
-impl Hashable for ApplicationTerm {
-    fn hash(&self) -> HashId {
-        combine_hashes(
-            self.target.hash(),
-            hash_sequence(self.args.iter().map(|arg| arg.hash())),
         )
     }
 }
@@ -1121,7 +1019,7 @@ impl Rewritable for ApplicationTerm {
     fn substitute(
         &self,
         substitutions: &Substitutions,
-        cache: &mut EvaluationCache,
+        cache: &mut impl EvaluationCache,
     ) -> Option<Expression> {
         let target = self.target.substitute(substitutions, cache);
         let args = substitute_multiple(&self.args, substitutions, cache);
@@ -1132,7 +1030,7 @@ impl Rewritable for ApplicationTerm {
         let args = args.unwrap_or_else(|| self.args.clone());
         Some(Expression::new(Term::Application(Self::new(target, args))))
     }
-    fn optimize(&self, cache: &mut EvaluationCache) -> Option<Expression> {
+    fn optimize(&self, cache: &mut impl EvaluationCache) -> Option<Expression> {
         let optimized_target = self.target.optimize(cache);
         let optimized_args = optimize_multiple(&self.args, cache);
         let optimized_expression = optimized_args.map(|args| {
@@ -1149,7 +1047,7 @@ impl Rewritable for ApplicationTerm {
     }
 }
 impl Reducible for ApplicationTerm {
-    fn reduce(&self, cache: &mut EvaluationCache) -> Option<Expression> {
+    fn reduce(&self, cache: &mut impl EvaluationCache) -> Option<Expression> {
         let reduced_target = self.target.reduce(cache);
         let target = reduced_target
             .as_ref()
@@ -1204,7 +1102,7 @@ impl Reducible for ApplicationTerm {
                                 .args
                                 .iter()
                                 .zip(args.iter())
-                                .all(|(arg, evaluated_arg)| arg.hash() == evaluated_arg.hash())
+                                .all(|(arg, evaluated_arg)| arg.hash == evaluated_arg.hash)
                         {
                             None
                         } else {
@@ -1223,7 +1121,7 @@ fn evaluate_args<'a>(
     args: impl IntoIterator<Item = &'a Expression> + ExactSizeIterator,
     arity: Arity,
     strict: bool,
-    cache: &mut EvaluationCache,
+    cache: &mut impl EvaluationCache,
 ) -> Result<Vec<Expression>, Vec<Expression>> {
     if args.len() < arity.required() {
         // TODO: Handle application arity errors gracefully
@@ -1277,39 +1175,43 @@ fn evaluate_args<'a>(
 
 #[derive(Clone)]
 pub struct NativeFunction {
-    hash: HashId,
+    uid: HashId,
     arity: Arity,
     body: Arc<dyn Fn(Vec<Expression>) -> Expression + Sync + Send>,
 }
 impl NativeFunction {
     pub fn new(
-        hash: HashId,
+        uid: HashId,
         arity: Arity,
         body: impl Fn(Vec<Expression>) -> Expression + Sync + Send + 'static,
     ) -> Self {
         Self {
-            hash,
+            uid,
             arity,
             body: Arc::new(body),
         }
+    }
+    pub fn uid(&self) -> HashId {
+        self.uid
     }
     fn apply(&self, args: impl IntoIterator<Item = Expression> + ExactSizeIterator) -> Expression {
         (self.body)(args.into_iter().collect())
     }
 }
-impl Hashable for NativeFunction {
-    fn hash(&self) -> HashId {
-        self.hash
+impl Hash for NativeFunction {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        state.write_u64(self.uid);
     }
 }
 impl PartialEq for NativeFunction {
     fn eq(&self, other: &Self) -> bool {
-        self.hash == other.hash
+        self.uid == other.uid
     }
 }
+impl Eq for NativeFunction {}
 impl fmt::Display for NativeFunction {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "<native:{}:{}>", self.arity.required(), self.hash)
+        write!(f, "<native:{}:{}>", self.arity.required(), self.uid)
     }
 }
 impl fmt::Debug for NativeFunction {
@@ -1318,34 +1220,19 @@ impl fmt::Debug for NativeFunction {
     }
 }
 
-pub type StructFieldOffset = u32;
-pub fn hash_struct_field_offset(value: StructFieldOffset) -> HashId {
-    hash_u32(value)
-}
+pub type StructFieldOffset = usize;
 
-#[derive(PartialEq, Clone, Debug)]
+#[derive(Hash, Eq, PartialEq, Clone, Debug)]
 pub struct StructTerm {
     prototype: Option<StructPrototype>,
     fields: Vec<Expression>,
-}
-impl Hashable for StructTerm {
-    fn hash(&self) -> HashId {
-        combine_hashes(
-            hash_option(
-                self.prototype
-                    .as_ref()
-                    .map(|constructor| constructor.hash()),
-            ),
-            hash_sequence(self.fields.iter().map(|field| field.hash())),
-        )
-    }
 }
 impl StructTerm {
     pub fn new(prototype: Option<StructPrototype>, fields: Vec<Expression>) -> Self {
         Self { prototype, fields }
     }
     pub fn get(&self, field_offset: StructFieldOffset) -> Option<&Expression> {
-        self.fields.get(field_offset as usize)
+        self.fields.get(field_offset)
     }
     pub fn prototype(&self) -> Option<&StructPrototype> {
         self.prototype.as_ref()
@@ -1367,12 +1254,12 @@ impl Rewritable for StructTerm {
     fn substitute(
         &self,
         substitutions: &Substitutions,
-        cache: &mut EvaluationCache,
+        cache: &mut impl EvaluationCache,
     ) -> Option<Expression> {
         substitute_multiple(&self.fields, substitutions, cache)
             .map(|fields| Expression::new(Term::Struct(Self::new(self.prototype.clone(), fields))))
     }
-    fn optimize(&self, cache: &mut EvaluationCache) -> Option<Expression> {
+    fn optimize(&self, cache: &mut impl EvaluationCache) -> Option<Expression> {
         optimize_multiple(&self.fields, cache)
             .map(|fields| Expression::new(Term::Struct(Self::new(self.prototype.clone(), fields))))
     }
@@ -1390,31 +1277,41 @@ impl fmt::Display for StructTerm {
     }
 }
 
-#[derive(PartialEq, Clone, Debug)]
+#[derive(Eq, PartialEq, Clone, Debug)]
 pub struct StructPrototype {
     keys: Vec<ValueTerm>,
+    key_hashes: Vec<HashId>,
 }
-impl Hashable for StructPrototype {
-    fn hash(&self) -> HashId {
-        hash_sequence(self.keys.iter().map(|key| key.hash()))
+impl Hash for StructPrototype {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.key_hashes
+            .iter()
+            .for_each(|hash| state.write_u64(*hash));
     }
 }
 impl StructPrototype {
     pub fn new(keys: Vec<ValueTerm>) -> Self {
-        Self { keys }
+        let key_hashes = keys.iter().map(hash_object).collect();
+        Self { keys, key_hashes }
     }
     pub fn field(&self, key: &ValueTerm) -> Option<StructFieldOffset> {
-        self.keys
+        let key_hash = hash_object(key);
+        self.key_hashes
             .iter()
             .enumerate()
-            .find(|(_, existing)| existing.hash() == key.hash())
-            .map(|(index, _)| index as StructFieldOffset)
+            .find_map(|(index, existing)| {
+                if *existing == key_hash {
+                    Some(index as StructFieldOffset)
+                } else {
+                    None
+                }
+            })
     }
     pub fn keys(&self) -> &[ValueTerm] {
         &self.keys
     }
     fn arity(&self, eager: &VarArgs) -> Arity {
-        let num_keys = self.keys.len() as u8;
+        let num_keys = self.keys.len();
         match eager {
             VarArgs::Lazy => Arity::from(num_keys, num_keys, None),
             VarArgs::Eager => Arity::from(num_keys * 2, 0, None),
@@ -1428,8 +1325,9 @@ impl StructPrototype {
         let has_correctly_ordered_keys = fields.len() >= self.keys.len()
             && fields
                 .iter()
-                .zip(self.keys.iter())
-                .all(|((id, _), key)| id.hash() == key.hash());
+                .map(hash_object)
+                .zip(self.key_hashes.iter())
+                .all(|(key_hash, existing_hash)| key_hash == *existing_hash);
         let fields = if has_correctly_ordered_keys {
             Some(
                 fields
@@ -1439,13 +1337,16 @@ impl StructPrototype {
                     .collect::<Vec<_>>(),
             )
         } else {
-            let mut remaining_fields = fields;
-            self.keys
+            let mut remaining_fields = fields
+                .into_iter()
+                .map(|(key, value)| (hash_object(key), value))
+                .collect::<Vec<_>>();
+            self.key_hashes
                 .iter()
-                .map(|key| {
+                .map(|existing_hash| {
                     let index = remaining_fields
                         .iter()
-                        .position(|(id, _)| id.hash() == key.hash())?;
+                        .position(|(key_hash, _)| *key_hash == *existing_hash)?;
                     let (_, value) = remaining_fields.remove(index);
                     Some(value)
                 })
@@ -1460,18 +1361,10 @@ impl fmt::Display for StructPrototype {
     }
 }
 
-#[derive(PartialEq, Clone, Debug)]
+#[derive(Hash, Eq, PartialEq, Clone, Debug)]
 pub struct EnumTerm {
     index: EnumIndex,
     args: Vec<Expression>,
-}
-impl Hashable for EnumTerm {
-    fn hash(&self) -> HashId {
-        prefix_hash(
-            self.index,
-            hash_sequence(self.args.iter().map(|arg| arg.hash())),
-        )
-    }
 }
 impl EnumTerm {
     pub fn new(index: EnumIndex, args: Vec<Expression>) -> Self {
@@ -1497,12 +1390,12 @@ impl Rewritable for EnumTerm {
     fn substitute(
         &self,
         substitutions: &Substitutions,
-        cache: &mut EvaluationCache,
+        cache: &mut impl EvaluationCache,
     ) -> Option<Expression> {
         substitute_multiple(&self.args, substitutions, cache)
             .map(|args| Expression::new(Term::Enum(Self::new(self.index, args))))
     }
-    fn optimize(&self, cache: &mut EvaluationCache) -> Option<Expression> {
+    fn optimize(&self, cache: &mut impl EvaluationCache) -> Option<Expression> {
         optimize_multiple(&self.args, cache)
             .map(|args| Expression::new(Term::Enum(Self::new(self.index, args))))
     }
@@ -1522,20 +1415,12 @@ impl fmt::Display for EnumTerm {
     }
 }
 
-pub type EnumConstructorArity = u8;
-fn hash_enum_constructor_arity(value: EnumConstructorArity) -> HashId {
-    hash_u8(value)
-}
+pub type EnumConstructorArity = usize;
 
-#[derive(PartialEq, Clone, Debug)]
+#[derive(Hash, Eq, PartialEq, Clone, Debug)]
 pub struct EnumVariantPrototype {
     index: EnumIndex,
     arity: EnumConstructorArity,
-}
-impl Hashable for EnumVariantPrototype {
-    fn hash(&self) -> HashId {
-        prefix_hash(self.index, hash_enum_constructor_arity(self.arity))
-    }
 }
 impl EnumVariantPrototype {
     pub fn new(index: EnumIndex, arity: EnumConstructorArity) -> Self {
@@ -1560,13 +1445,13 @@ impl fmt::Display for EnumVariantPrototype {
     }
 }
 
-#[derive(PartialEq, Clone, Debug)]
+#[derive(Eq, PartialEq, Clone, Debug)]
 pub struct SignalTerm {
     signal: Signal,
 }
-impl Hashable for SignalTerm {
-    fn hash(&self) -> HashId {
-        self.signal.hash
+impl Hash for SignalTerm {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        state.write_u64(self.signal.hash)
     }
 }
 impl Rewritable for SignalTerm {
@@ -1586,7 +1471,7 @@ impl Rewritable for SignalTerm {
     fn substitute(
         &self,
         substitutions: &Substitutions,
-        _cache: &mut EvaluationCache,
+        _cache: &mut impl EvaluationCache,
     ) -> Option<Expression> {
         let id = self.signal.hash;
         match substitutions.substitutions {
@@ -1594,7 +1479,7 @@ impl Rewritable for SignalTerm {
             SubstitutionType::Dynamic(state) => state.get(id).map(Expression::clone),
         }
     }
-    fn optimize(&self, _cache: &mut EvaluationCache) -> Option<Expression> {
+    fn optimize(&self, _cache: &mut impl EvaluationCache) -> Option<Expression> {
         None
     }
 }
@@ -1618,25 +1503,32 @@ impl fmt::Display for SignalTerm {
     }
 }
 
-#[derive(PartialEq, Clone, Debug)]
+#[derive(Eq, PartialEq, Clone, Debug)]
 pub struct Signal {
     hash: HashId,
     signal: SignalType,
     args: Vec<SerializedTerm>,
 }
-impl Hashable for Signal {
-    fn hash(&self) -> HashId {
-        self.hash
+impl Hash for Signal {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        state.write_u64(self.hash)
     }
 }
 impl Signal {
     pub fn new(signal: SignalType, args: impl IntoIterator<Item = SerializedTerm>) -> Self {
         let args = args.into_iter().collect::<Vec<_>>();
-        let hash = combine_hashes(
-            signal.hash(),
-            hash_sequence(args.iter().map(|arg| arg.hash())),
-        );
+        let hash = {
+            let mut hasher = DefaultHasher::new();
+            signal.hash(&mut hasher);
+            for arg in args.iter() {
+                arg.hash(&mut hasher);
+            }
+            hasher.finish()
+        };
         Self { hash, signal, args }
+    }
+    pub fn id(&self) -> HashId {
+        self.hash
     }
     pub fn get_type(&self) -> &SignalType {
         &self.signal
@@ -1688,19 +1580,19 @@ pub(crate) fn dynamic_dependencies_multiple(expressions: &[Expression]) -> Depen
 pub(crate) fn substitute_multiple(
     expressions: &[Expression],
     substitutions: &Substitutions,
-    cache: &mut EvaluationCache,
+    cache: &mut impl EvaluationCache,
 ) -> Option<Vec<Expression>> {
     transform_expressions(expressions, |arg| arg.substitute(substitutions, cache))
 }
 
-pub(crate) fn optimize_multiple<'a>(
+pub(crate) fn optimize_multiple(
     expressions: &[Expression],
-    cache: &mut EvaluationCache,
+    cache: &mut impl EvaluationCache,
 ) -> Option<Vec<Expression>> {
     transform_expressions(expressions, |expression| expression.optimize(cache))
 }
 
-fn transform_expressions<'a>(
+fn transform_expressions(
     expressions: &[Expression],
     mut transform: impl FnMut(&Expression) -> Option<Expression>,
 ) -> Option<Vec<Expression>> {
@@ -1742,7 +1634,7 @@ fn transform_expressions<'a>(
 #[cfg(test)]
 mod tests {
     use crate::{
-        cache::EvaluationCache, parser::sexpr::parse, stdlib::builtin::BuiltinTerm,
+        cache::GenerationalGc, parser::sexpr::parse, stdlib::builtin::BuiltinTerm,
         stdlib::value::ValueTerm,
     };
 
@@ -1754,7 +1646,7 @@ mod tests {
     #[test]
     fn value_expressions() {
         let state = DynamicState::new();
-        let mut cache = EvaluationCache::new();
+        let mut cache = GenerationalGc::new();
         let expression = parse("3").unwrap();
         let result = expression.evaluate(&state, &mut cache);
         assert_eq!(
@@ -1768,7 +1660,7 @@ mod tests {
 
     #[test]
     fn lambda_optimizations() {
-        let mut cache = EvaluationCache::new();
+        let mut cache = GenerationalGc::new();
         let expression = parse("(lambda (foo) foo)").unwrap();
         let result = expression.value.optimize(&mut cache);
         assert_eq!(expression.capture_depth(), 0);
@@ -1788,7 +1680,7 @@ mod tests {
     #[test]
     fn lambda_application_expressions() {
         let state = DynamicState::new();
-        let mut cache = EvaluationCache::new();
+        let mut cache = GenerationalGc::new();
         let expression = parse("((lambda (foo) foo) 3)").unwrap();
         let result = expression.evaluate(&state, &mut cache);
         assert_eq!(
@@ -1825,7 +1717,7 @@ mod tests {
     #[test]
     fn builtin_expressions() {
         let state = DynamicState::new();
-        let mut cache = EvaluationCache::new();
+        let mut cache = GenerationalGc::new();
         let expression = parse("+").unwrap();
         let result = expression.evaluate(&state, &mut cache);
         assert_eq!(
@@ -1840,7 +1732,7 @@ mod tests {
     #[test]
     fn builtin_application_expressions() {
         let state = DynamicState::new();
-        let mut cache = EvaluationCache::new();
+        let mut cache = GenerationalGc::new();
         let expression = parse("(+ 1 2)").unwrap();
         let result = expression.evaluate(&state, &mut cache);
         assert_eq!(
@@ -1855,7 +1747,7 @@ mod tests {
     #[test]
     fn let_expressions() {
         let state = DynamicState::new();
-        let mut cache = EvaluationCache::new();
+        let mut cache = GenerationalGc::new();
         let expression = parse("(let () 3)").unwrap();
         let result = expression.evaluate(&state, &mut cache);
         assert_eq!(
@@ -1906,7 +1798,7 @@ mod tests {
     #[test]
     fn letrec_expressions() {
         let state = DynamicState::new();
-        let mut cache = EvaluationCache::new();
+        let mut cache = GenerationalGc::new();
         let expression = parse("(letrec () 3)").unwrap();
         let result = expression.evaluate(&state, &mut cache);
         assert_eq!(
@@ -2066,7 +1958,7 @@ mod tests {
         let add3 = NativeFunction::new(1, Arity::from(3, 0, None), add3);
 
         let state = DynamicState::new();
-        let mut cache = EvaluationCache::new();
+        let mut cache = GenerationalGc::new();
         let expression = Expression::new(Term::Application(ApplicationTerm::new(
             Expression::new(Term::Native(constant)),
             vec![],

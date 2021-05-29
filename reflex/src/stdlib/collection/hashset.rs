@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use std::{collections::HashSet, fmt, iter::once};
+use std::{collections::BTreeSet, fmt, hash::Hash, iter::once};
 
 use crate::{
     cache::EvaluationCache,
@@ -10,32 +10,33 @@ use crate::{
         substitute_multiple, DependencyList, Expression, Rewritable, Signal, StackOffset,
         Substitutions, Term,
     },
-    hash::{hash_unordered_sequence, HashId, Hashable},
 };
 
 use super::CollectionTerm;
 
-#[derive(PartialEq, Clone, Debug)]
+#[derive(Eq, PartialEq, Clone, Debug)]
 pub struct HashSetTerm {
-    lookup: HashSet<HashId>,
+    lookup: BTreeSet<Expression>,
     values: Vec<Expression>,
 }
-impl Hashable for HashSetTerm {
-    fn hash(&self) -> HashId {
-        hash_unordered_sequence(self.values.iter().map(|value| value.hash()))
+impl Hash for HashSetTerm {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        for value in self.lookup.iter() {
+            value.hash(state);
+        }
     }
 }
 impl HashSetTerm {
     pub fn new(items: impl IntoIterator<Item = Expression>) -> Self {
-        let values: Vec<_> = items.into_iter().collect();
-        let lookup = values.iter().map(|value| value.hash()).collect();
+        let lookup = items.into_iter().collect::<BTreeSet<_>>();
+        let values = lookup
+            .iter()
+            .map(|value| Expression::clone(value))
+            .collect();
         Self { lookup, values }
     }
-    pub fn values(&self) -> &[Expression] {
-        &self.values
-    }
     pub fn has(&self, value: &Expression) -> bool {
-        self.lookup.contains(&value.hash())
+        self.lookup.contains(value)
     }
     pub fn add(&self, value: Expression) -> Option<Expression> {
         if self.has(&value) {
@@ -68,7 +69,7 @@ impl Rewritable for HashSetTerm {
     fn substitute(
         &self,
         substitutions: &Substitutions,
-        cache: &mut EvaluationCache,
+        cache: &mut impl EvaluationCache,
     ) -> Option<Expression> {
         substitute_multiple(&self.values, substitutions, cache).map(|updated| {
             Expression::new(Term::Collection(CollectionTerm::HashSet(Self::new(
@@ -76,7 +77,7 @@ impl Rewritable for HashSetTerm {
             ))))
         })
     }
-    fn optimize(&self, cache: &mut EvaluationCache) -> Option<Expression> {
+    fn optimize(&self, cache: &mut impl EvaluationCache) -> Option<Expression> {
         optimize_multiple(&self.values, cache).map(|updated| {
             Expression::new(Term::Collection(CollectionTerm::HashSet(Self::new(
                 updated,
@@ -86,6 +87,6 @@ impl Rewritable for HashSetTerm {
 }
 impl fmt::Display for HashSetTerm {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "<hashset:{}>", self.values.len())
+        write!(f, "<hashset:{}>", self.lookup.len())
     }
 }

@@ -1,16 +1,123 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use std::collections::HashMap;
+use std::{
+    collections::{hash_map::Entry, HashMap},
+    iter::{once, FromIterator},
+};
 
 use crate::{
     core::{Expression, Substitutions},
-    hash::{combine_hashes, HashId, Hashable},
+    hash::{hash_object, HashId},
 };
 
+pub trait EvaluationCache {
+    fn retrieve_substitution(
+        &mut self,
+        expression: &Expression,
+        substitutions: &Substitutions,
+    ) -> Option<Option<Expression>>;
+    fn store_substitution(
+        &mut self,
+        expression: &Expression,
+        substitutions: &Substitutions,
+        result: Option<&Expression>,
+    );
+    fn retrieve_reduction(&mut self, expression: &Expression) -> Option<Option<Expression>>;
+    fn store_reduction(&mut self, expression: &Expression, result: Option<&Expression>);
+}
+
+pub struct GenerationalGc {
+    current: CacheGeneration,
+    previous: Option<CacheGeneration>,
+}
+impl GenerationalGc {
+    pub fn new() -> Self {
+        Self {
+            current: CacheGeneration::new(),
+            previous: None,
+        }
+    }
+    pub fn gc(self) -> Self {
+        Self {
+            current: CacheGeneration::new(),
+            previous: Some(self.current),
+        }
+    }
+}
+impl EvaluationCache for GenerationalGc {
+    fn retrieve_substitution(
+        &mut self,
+        expression: &Expression,
+        substitutions: &Substitutions,
+    ) -> Option<Option<Expression>> {
+        match self
+            .current
+            .retrieve_substitution(expression, substitutions)
+        {
+            Some(result) => Some(match result {
+                Some(value) => Some(Expression::clone(&value)),
+                None => None,
+            }),
+            None => match &self.previous {
+                Some(previous) => match previous.retrieve_substitution(expression, substitutions) {
+                    Some(result) => Some(match result {
+                        Some(value) => {
+                            self.current.store_substitution(
+                                expression,
+                                substitutions,
+                                Some(Expression::clone(&value)),
+                            );
+                            Some(Expression::clone(&value))
+                        }
+                        None => None,
+                    }),
+                    None => None,
+                },
+                None => None,
+            },
+        }
+    }
+    fn store_substitution(
+        &mut self,
+        expression: &Expression,
+        substitutions: &Substitutions,
+        result: Option<&Expression>,
+    ) {
+        self.current
+            .store_substitution(expression, substitutions, result.map(Expression::clone));
+    }
+    fn retrieve_reduction(&mut self, expression: &Expression) -> Option<Option<Expression>> {
+        match self.current.retrieve_reduction(expression) {
+            Some(result) => Some(match result {
+                Some(value) => Some(Expression::clone(&value)),
+                None => None,
+            }),
+            None => match &self.previous {
+                Some(previous) => match previous.retrieve_reduction(expression) {
+                    Some(result) => Some(match result {
+                        Some(value) => {
+                            self.current
+                                .store_reduction(expression, Some(Expression::clone(&value)));
+                            Some(Expression::clone(&value))
+                        }
+                        None => None,
+                    }),
+                    None => None,
+                },
+                None => None,
+            },
+        }
+    }
+    fn store_reduction(&mut self, expression: &Expression, result: Option<&Expression>) {
+        self.current
+            .store_reduction(expression, result.map(Expression::clone));
+    }
+}
+
 struct CacheGeneration {
-    reductions: HashMap<HashId, Option<Expression>>,
-    substitutions: HashMap<HashId, Option<Expression>>,
+    reductions: HashMap<Expression, Option<Expression>>,
+    substitutions: HashMap<Expression, HashMap<HashId, Option<Expression>>>,
 }
 impl CacheGeneration {
     fn new() -> Self {
@@ -19,92 +126,52 @@ impl CacheGeneration {
             substitutions: HashMap::new(),
         }
     }
-}
-
-pub struct EvaluationCache {
-    current: CacheGeneration,
-    previous: Option<CacheGeneration>,
-}
-impl EvaluationCache {
-    pub fn new() -> Self {
-        Self {
-            current: CacheGeneration::new(),
-            previous: None,
+    fn retrieve_reduction(&self, expression: &Expression) -> Option<Option<Expression>> {
+        match self.reductions.get(expression) {
+            None => None,
+            Some(result) => match result {
+                None => Some(None),
+                Some(value) => Some(Some(Expression::clone(value))),
+            },
         }
     }
-    pub fn retrieve_substitution(
-        &mut self,
+    fn store_reduction(&mut self, expression: &Expression, result: Option<Expression>) {
+        self.reductions
+            .insert(Expression::clone(expression), result);
+    }
+    fn retrieve_substitution(
+        &self,
         expression: &Expression,
         substitutions: &Substitutions,
     ) -> Option<Option<Expression>> {
-        let key = combine_hashes(expression.hash(), substitutions.hash());
-        match self.current.substitutions.get(&key) {
-            Some(result) => Some(match result {
-                Some(value) => Some(Expression::clone(value)),
+        match self
+            .substitutions
+            .get(expression)
+            .and_then(|entry| entry.get(&hash_object(substitutions)))
+        {
+            None => None,
+            Some(result) => match result {
                 None => None,
-            }),
-            None => match &self.previous {
-                Some(previous) => match previous.substitutions.get(&key) {
-                    Some(result) => Some(match result {
-                        Some(value) => {
-                            self.current
-                                .substitutions
-                                .insert(key, Some(Expression::clone(value)));
-                            Some(Expression::clone(value))
-                        }
-                        None => None,
-                    }),
-                    None => None,
-                },
-                None => None,
+                Some(value) => Some(Some(Expression::clone(value))),
             },
         }
     }
-    pub fn store_substitution(
+    fn store_substitution(
         &mut self,
         expression: &Expression,
         substitutions: &Substitutions,
-        result: Option<&Expression>,
+        result: Option<Expression>,
     ) {
-        let key = combine_hashes(expression.hash(), substitutions.hash());
-        self.current
-            .substitutions
-            .insert(key, result.map(Expression::clone));
-    }
-    pub fn retrieve_reduction(&mut self, expression: &Expression) -> Option<Option<Expression>> {
-        let key = expression.hash();
-        match self.current.reductions.get(&key) {
-            Some(result) => Some(match result {
-                Some(value) => Some(Expression::clone(value)),
-                None => None,
-            }),
-            None => match &self.previous {
-                Some(previous) => match previous.reductions.get(&key) {
-                    Some(result) => Some(match result {
-                        Some(value) => {
-                            self.current
-                                .reductions
-                                .insert(key, Some(Expression::clone(value)));
-                            Some(Expression::clone(value))
-                        }
-                        None => None,
-                    }),
-                    None => None,
-                },
-                None => None,
-            },
-        }
-    }
-    pub fn store_reduction(&mut self, expression: &Expression, result: Option<&Expression>) {
-        let key = expression.hash();
-        self.current
-            .reductions
-            .insert(key, result.map(Expression::clone));
-    }
-    pub fn next(self) -> Self {
-        Self {
-            current: CacheGeneration::new(),
-            previous: Some(self.current),
+        match self.substitutions.entry(Expression::clone(expression)) {
+            Entry::Occupied(mut entry) => {
+                entry.get_mut().insert(hash_object(substitutions), result);
+            }
+            Entry::Vacant(entry) => {
+                entry.insert(HashMap::from_iter(once((
+                    hash_object(substitutions),
+                    result,
+                ))));
+            }
         }
     }
 }

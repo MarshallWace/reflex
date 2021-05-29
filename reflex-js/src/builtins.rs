@@ -27,7 +27,7 @@ pub fn throw() -> Expression {
 struct Throw {}
 impl Throw {
     fn hash() -> HashId {
-        hash_object(TypeId::of::<Self>())
+        hash_object(&TypeId::of::<Self>())
     }
     fn arity() -> Arity {
         Arity::from(1, 0, None)
@@ -57,7 +57,7 @@ pub fn construct() -> Expression {
 struct Construct {}
 impl Construct {
     fn hash() -> HashId {
-        hash_object(TypeId::of::<Self>())
+        hash_object(&TypeId::of::<Self>())
     }
     fn arity() -> Arity {
         Arity::from(1, 0, Some(VarArgs::Lazy))
@@ -131,7 +131,7 @@ pub fn dispatch() -> Expression {
 struct Dispatch {}
 impl Dispatch {
     fn hash() -> HashId {
-        hash_object(TypeId::of::<Self>())
+        hash_object(&TypeId::of::<Self>())
     }
     fn arity() -> Arity {
         Arity::from(2, 1, Some(VarArgs::Lazy))
@@ -170,7 +170,7 @@ impl ToString {
         Arity::from(1, 0, None)
     }
     fn hash() -> HashId {
-        hash_object(TypeId::of::<Self>())
+        hash_object(&TypeId::of::<Self>())
     }
     fn apply(args: Vec<Expression>) -> Expression {
         if args.len() != 1 {
@@ -210,7 +210,7 @@ pub fn flatten_deep() -> Expression {
 struct FlattenDeep {}
 impl FlattenDeep {
     fn hash() -> HashId {
-        hash_object(TypeId::of::<Self>())
+        hash_object(&TypeId::of::<Self>())
     }
     fn arity() -> Arity {
         Arity::from(1, 0, None)

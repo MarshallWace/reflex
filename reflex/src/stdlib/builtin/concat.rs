@@ -43,7 +43,7 @@ impl BuiltinFunction for Concat {
 #[cfg(test)]
 mod tests {
     use crate::{
-        cache::EvaluationCache,
+        cache::GenerationalGc,
         core::{DependencyList, DynamicState, EvaluationResult, Expression, Term},
         parser::sexpr::parse,
         stdlib::value::{StringValue, ValueTerm},
@@ -51,7 +51,7 @@ mod tests {
 
     #[test]
     fn concat_expressions() {
-        let mut cache = EvaluationCache::new();
+        let mut cache = GenerationalGc::new();
         let state = DynamicState::new();
         let expression = parse("(concat \"\" \"\")").unwrap();
         let result = expression.evaluate(&state, &mut cache);

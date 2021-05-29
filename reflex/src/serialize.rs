@@ -5,27 +5,17 @@ use std::fmt;
 
 use crate::{
     core::{Expression, StructPrototype, StructTerm, Term},
-    hash::{combine_hashes, hash_sequence, hash_string, prefix_hash, HashId, Hashable},
     stdlib::{
         collection::{vector::VectorTerm, CollectionTerm},
         value::{SymbolId, ValueTerm},
     },
 };
 
-#[derive(PartialEq, Clone, Debug)]
+#[derive(Hash, Eq, PartialEq, Clone, Debug)]
 pub enum SerializedTerm {
     Value(ValueTerm),
     Object(SerializedObjectTerm),
     List(SerializedListTerm),
-}
-impl Hashable for SerializedTerm {
-    fn hash(&self) -> HashId {
-        match self {
-            Self::Value(value) => prefix_hash(0, value.hash()),
-            Self::Object(value) => prefix_hash(1, value.hash()),
-            Self::List(value) => prefix_hash(2, value.hash()),
-        }
-    }
 }
 impl SerializedTerm {
     pub fn value(value: ValueTerm) -> Self {
@@ -68,18 +58,9 @@ impl fmt::Display for SerializedTerm {
     }
 }
 
-#[derive(PartialEq, Clone, Debug)]
+#[derive(Hash, Eq, PartialEq, Clone, Debug)]
 pub struct SerializedObjectTerm {
     entries: Vec<(String, SerializedTerm)>,
-}
-impl Hashable for SerializedObjectTerm {
-    fn hash(&self) -> HashId {
-        hash_sequence(
-            self.entries
-                .iter()
-                .map(|(key, value)| combine_hashes(hash_string(key), value.hash())),
-        )
-    }
 }
 impl SerializedObjectTerm {
     pub fn new(entries: impl IntoIterator<Item = (String, SerializedTerm)>) -> Self {
@@ -97,14 +78,9 @@ impl fmt::Display for SerializedObjectTerm {
     }
 }
 
-#[derive(PartialEq, Clone, Debug)]
+#[derive(Hash, Eq, PartialEq, Clone, Debug)]
 pub struct SerializedListTerm {
     items: Vec<SerializedTerm>,
-}
-impl Hashable for SerializedListTerm {
-    fn hash(&self) -> HashId {
-        hash_sequence(self.items.iter().map(|item| item.hash()))
-    }
 }
 impl SerializedListTerm {
     pub fn new(items: impl IntoIterator<Item = SerializedTerm>) -> Self {
@@ -419,15 +395,21 @@ mod tests {
             String::from("-3.142"),
         );
         assert_eq!(
-            stringify(&SerializedTerm::Value(ValueTerm::String(StringValue::from("")))),
+            stringify(&SerializedTerm::Value(ValueTerm::String(
+                StringValue::from("")
+            ))),
             String::from("\"\""),
         );
         assert_eq!(
-            stringify(&SerializedTerm::Value(ValueTerm::String(StringValue::from("foo")))),
+            stringify(&SerializedTerm::Value(ValueTerm::String(
+                StringValue::from("foo")
+            ))),
             String::from("\"foo\""),
         );
         assert_eq!(
-            stringify(&SerializedTerm::Value(ValueTerm::String(StringValue::from("\"\'\n\r")))),
+            stringify(&SerializedTerm::Value(ValueTerm::String(
+                StringValue::from("\"\'\n\r")
+            ))),
             String::from("\"\\\"\\\'\\n\\r\""),
         );
     }

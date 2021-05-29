@@ -58,7 +58,7 @@ impl BuiltinFunction for Values {
 #[cfg(test)]
 mod tests {
     use crate::{
-        cache::EvaluationCache,
+        cache::GenerationalGc,
         core::{ApplicationTerm, DependencyList, DynamicState, EvaluationResult, Expression, Term},
         stdlib::{
             builtin::BuiltinTerm,
@@ -69,7 +69,7 @@ mod tests {
 
     #[test]
     fn get_hashmap_values() {
-        let mut cache = EvaluationCache::new();
+        let mut cache = GenerationalGc::new();
         let state = DynamicState::new();
         let expression = Expression::new(Term::Application(ApplicationTerm::new(
             Expression::new(Term::Builtin(BuiltinTerm::Values)),

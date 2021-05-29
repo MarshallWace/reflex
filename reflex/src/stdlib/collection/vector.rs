@@ -10,19 +10,13 @@ use crate::{
         substitute_multiple, DependencyList, Expression, Rewritable, Signal, StackOffset,
         Substitutions, Term,
     },
-    hash::{hash_sequence, HashId, Hashable},
 };
 
 use super::CollectionTerm;
 
-#[derive(PartialEq, Clone, Debug)]
+#[derive(Hash, Eq, PartialEq, Clone, Debug)]
 pub struct VectorTerm {
     items: Vec<Expression>,
-}
-impl Hashable for VectorTerm {
-    fn hash(&self) -> HashId {
-        hash_sequence(self.items.iter().map(|item| item.hash()))
-    }
 }
 impl VectorTerm {
     pub fn new(items: impl IntoIterator<Item = Expression>) -> Self {
@@ -66,13 +60,13 @@ impl Rewritable for VectorTerm {
     fn substitute(
         &self,
         substitutions: &Substitutions,
-        cache: &mut EvaluationCache,
+        cache: &mut impl EvaluationCache,
     ) -> Option<Expression> {
         substitute_multiple(&self.items, substitutions, cache).map(|items| {
             Expression::new(Term::Collection(CollectionTerm::Vector(Self::new(items))))
         })
     }
-    fn optimize(&self, cache: &mut EvaluationCache) -> Option<Expression> {
+    fn optimize(&self, cache: &mut impl EvaluationCache) -> Option<Expression> {
         optimize_multiple(&self.items, cache).map(|items| {
             Expression::new(Term::Collection(CollectionTerm::Vector(Self::new(items))))
         })

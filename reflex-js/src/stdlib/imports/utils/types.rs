@@ -9,7 +9,7 @@ use reflex::{
         Expression, LambdaTerm, NativeFunction, SerializedTerm, Signal, SignalTerm,
         StaticVariableTerm, StructTerm, Term, VarArgs, VariableTerm,
     },
-    hash::{hash_object, HashId, Hashable},
+    hash::{hash_object, HashId},
     stdlib::{signal::SignalType, value::ValueTerm},
 };
 
@@ -87,7 +87,7 @@ pub(crate) fn import_types() -> Expression {
 struct StructTypeFactory {}
 impl StructTypeFactory {
     fn hash() -> HashId {
-        hash_object(TypeId::of::<Self>())
+        hash_object(&TypeId::of::<Self>())
     }
     fn arity() -> Arity {
         Arity::from(1, 0, None)
@@ -133,7 +133,7 @@ impl StructTypeFactory {
 struct EnumTypeFactory {}
 impl EnumTypeFactory {
     fn hash() -> HashId {
-        hash_object(TypeId::of::<Self>())
+        hash_object(&TypeId::of::<Self>())
     }
     fn arity() -> Arity {
         Arity::from(1, 0, Some(VarArgs::Eager))
@@ -185,7 +185,7 @@ fn parse_enum_variant(variant: &Expression, index: EnumIndex) -> Result<Expressi
         Term::EnumConstructor(variant) => Ok(Expression::new(Term::EnumConstructor(
             EnumVariantPrototype::new(index, variant.arity()),
         ))),
-        Term::Native(term) if term.hash() == EnumVariantFactory::hash() => Ok(Expression::new(
+        Term::Native(term) if term.uid() == EnumVariantFactory::hash() => Ok(Expression::new(
             Term::Enum(EnumTerm::new(index, Vec::new())),
         )),
         Term::Value(value)
@@ -206,7 +206,7 @@ fn parse_enum_variant(variant: &Expression, index: EnumIndex) -> Result<Expressi
 struct EnumVariantFactory {}
 impl EnumVariantFactory {
     fn hash() -> HashId {
-        hash_object(TypeId::of::<Self>())
+        hash_object(&TypeId::of::<Self>())
     }
     fn arity() -> Arity {
         Arity::from(0, 0, Some(VarArgs::Eager))
@@ -225,7 +225,7 @@ mod tests {
 
     use crate::{parse_module, static_module_loader, stdlib::builtin_imports, Env};
     use reflex::{
-        cache::EvaluationCache,
+        cache::GenerationalGc,
         core::{
             ApplicationTerm, DependencyList, DynamicState, EnumTerm, EnumVariantPrototype,
             EvaluationResult, Expression, StructPrototype, StructTerm, Term, VarArgs,
@@ -255,7 +255,7 @@ mod tests {
             &loader,
         )
         .unwrap();
-        let result = expression.evaluate(&DynamicState::new(), &mut EvaluationCache::new());
+        let result = expression.evaluate(&DynamicState::new(), &mut GenerationalGc::new());
         assert_eq!(
             result,
             EvaluationResult::new(
@@ -285,7 +285,7 @@ mod tests {
             &loader,
         )
         .unwrap();
-        let result = expression.evaluate(&DynamicState::new(), &mut EvaluationCache::new());
+        let result = expression.evaluate(&DynamicState::new(), &mut GenerationalGc::new());
         assert_eq!(
             result,
             EvaluationResult::new(
@@ -319,7 +319,7 @@ mod tests {
             &loader,
         )
         .unwrap();
-        let result = expression.evaluate(&DynamicState::new(), &mut EvaluationCache::new());
+        let result = expression.evaluate(&DynamicState::new(), &mut GenerationalGc::new());
         assert_eq!(
             result,
             EvaluationResult::new(
@@ -353,7 +353,7 @@ mod tests {
             &loader,
         )
         .unwrap();
-        let result = expression.evaluate(&DynamicState::new(), &mut EvaluationCache::new());
+        let result = expression.evaluate(&DynamicState::new(), &mut GenerationalGc::new());
         assert_eq!(
             result,
             EvaluationResult::new(
@@ -405,7 +405,7 @@ mod tests {
             &loader,
         )
         .unwrap();
-        let result = expression.evaluate(&DynamicState::new(), &mut EvaluationCache::new());
+        let result = expression.evaluate(&DynamicState::new(), &mut GenerationalGc::new());
         assert_eq!(
             result,
             EvaluationResult::new(
@@ -434,7 +434,7 @@ mod tests {
             &loader,
         )
         .unwrap();
-        let result = expression.evaluate(&DynamicState::new(), &mut EvaluationCache::new());
+        let result = expression.evaluate(&DynamicState::new(), &mut GenerationalGc::new());
         assert_eq!(
             result,
             EvaluationResult::new(
@@ -467,7 +467,7 @@ mod tests {
             &loader,
         )
         .unwrap();
-        let result = expression.evaluate(&DynamicState::new(), &mut EvaluationCache::new());
+        let result = expression.evaluate(&DynamicState::new(), &mut GenerationalGc::new());
         assert_eq!(
             result,
             EvaluationResult::new(
@@ -491,7 +491,7 @@ mod tests {
             &loader,
         )
         .unwrap();
-        let result = expression.evaluate(&DynamicState::new(), &mut EvaluationCache::new());
+        let result = expression.evaluate(&DynamicState::new(), &mut GenerationalGc::new());
         assert_eq!(
             result,
             EvaluationResult::new(
@@ -523,7 +523,7 @@ mod tests {
             &loader,
         )
         .unwrap();
-        let result = expression.evaluate(&DynamicState::new(), &mut EvaluationCache::new());
+        let result = expression.evaluate(&DynamicState::new(), &mut GenerationalGc::new());
         assert_eq!(
             result,
             EvaluationResult::new(
@@ -559,7 +559,7 @@ mod tests {
             &loader,
         )
         .unwrap();
-        let result = expression.evaluate(&DynamicState::new(), &mut EvaluationCache::new());
+        let result = expression.evaluate(&DynamicState::new(), &mut GenerationalGc::new());
         assert_eq!(
             result,
             EvaluationResult::new(
@@ -582,7 +582,7 @@ mod tests {
             &loader,
         )
         .unwrap();
-        let result = expression.evaluate(&DynamicState::new(), &mut EvaluationCache::new());
+        let result = expression.evaluate(&DynamicState::new(), &mut GenerationalGc::new());
         assert_eq!(
             result,
             EvaluationResult::new(
@@ -605,7 +605,7 @@ mod tests {
             &loader,
         )
         .unwrap();
-        let result = expression.evaluate(&DynamicState::new(), &mut EvaluationCache::new());
+        let result = expression.evaluate(&DynamicState::new(), &mut GenerationalGc::new());
         assert_eq!(
             result,
             EvaluationResult::new(
@@ -631,7 +631,7 @@ mod tests {
             &loader,
         )
         .unwrap();
-        let result = expression.evaluate(&DynamicState::new(), &mut EvaluationCache::new());
+        let result = expression.evaluate(&DynamicState::new(), &mut GenerationalGc::new());
         assert_eq!(
             result,
             EvaluationResult::new(

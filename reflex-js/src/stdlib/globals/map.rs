@@ -27,7 +27,7 @@ pub(crate) fn global_map() -> Expression {
 struct MapConstructor {}
 impl MapConstructor {
     fn hash() -> HashId {
-        hash_object(TypeId::of::<Self>())
+        hash_object(&TypeId::of::<Self>())
     }
     fn arity() -> Arity {
         Arity::from(1, 0, None)
@@ -116,7 +116,7 @@ fn dynamic_map_constructor() -> Expression {
 struct DynamicMapConstructor {}
 impl DynamicMapConstructor {
     fn hash() -> HashId {
-        hash_object(TypeId::of::<Self>())
+        hash_object(&TypeId::of::<Self>())
     }
     fn arity() -> Arity {
         Arity::from(2, 0, None)

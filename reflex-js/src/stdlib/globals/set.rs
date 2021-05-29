@@ -27,7 +27,7 @@ pub(crate) fn global_set() -> Expression {
 struct SetConstructor {}
 impl SetConstructor {
     fn hash() -> HashId {
-        hash_object(TypeId::of::<Self>())
+        hash_object(&TypeId::of::<Self>())
     }
     fn arity() -> Arity {
         Arity::from(1, 0, None)
@@ -75,7 +75,7 @@ fn dynamic_set_constructor() -> Expression {
 struct DynamicSetConstructor {}
 impl DynamicSetConstructor {
     fn hash() -> HashId {
-        hash_object(TypeId::of::<Self>())
+        hash_object(&TypeId::of::<Self>())
     }
     fn arity() -> Arity {
         Arity::from(1, 0, None)

@@ -2,15 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use reflex::{
+    cache::EvaluationCache,
     core::{Expression, SerializedTerm, Signal, SignalTerm, StateToken, Term},
-    hash::Hashable,
     stdlib::{signal::SignalType, value::ValueTerm},
 };
-use std::{
-    future::Future,
-    pin::Pin,
-    sync::Mutex,
-};
+use std::{future::Future, pin::Pin, sync::Mutex};
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
 pub use tokio_stream::Stream;
 use tokio_stream::{
@@ -130,8 +126,9 @@ pub struct Runtime {
     results: ResultsChannel,
 }
 impl Runtime {
-    pub fn new<THandler>(
+    pub fn new<THandler, TCache: EvaluationCache + Send + Sync + 'static>(
         signal_handler: THandler,
+        evaluation_cache: TCache,
         command_buffer_size: usize,
         result_buffer_size: usize,
     ) -> Self
@@ -141,8 +138,12 @@ impl Runtime {
             + Sync
             + 'static,
     {
-        let (commands, results) =
-            create_store(signal_handler, command_buffer_size, result_buffer_size);
+        let (commands, results) = create_store(
+            signal_handler,
+            evaluation_cache,
+            command_buffer_size,
+            result_buffer_size,
+        );
         Self { commands, results }
     }
     pub async fn subscribe<'a>(
@@ -177,8 +178,9 @@ impl Runtime {
     }
 }
 
-fn create_store<THandler>(
+fn create_store<THandler, TCache: EvaluationCache + Send + Sync + 'static>(
     signal_handler: THandler,
+    cache: TCache,
     command_buffer_size: usize,
     result_buffer_size: usize,
 ) -> (CommandChannel, ResultsChannel)
@@ -191,7 +193,7 @@ where
     let results = results_tx.clone();
     let signal_messages = messages_tx.clone();
     tokio::spawn(async move {
-        let mut store = Mutex::new(Store::new(None));
+        let mut store = Mutex::new(Store::new(cache, None));
         while let Some(command) = messages_rx.recv().await {
             match command {
                 Command::Subscribe(command) => process_subscribe_command(
@@ -217,9 +219,9 @@ where
     (messages_tx, results_tx)
 }
 
-fn process_subscribe_command<THandler>(
+fn process_subscribe_command<THandler, TCache: EvaluationCache>(
     command: SubscribeCommand,
-    store: &mut Mutex<Store>,
+    store: &mut Mutex<Store<TCache>>,
     commands_tx: &CommandChannel,
     results_tx: &ResultsChannel,
     signal_handler: &THandler,
@@ -256,9 +258,9 @@ fn process_subscribe_command<THandler>(
     });
 }
 
-fn process_unsubscribe_command(
+fn process_unsubscribe_command<TCache: EvaluationCache>(
     command: UnsubscribeCommand,
-    store: &mut Mutex<Store>,
+    store: &mut Mutex<Store<TCache>>,
     _commands_tx: &CommandChannel,
     _results_tx: &ResultsChannel,
 ) {
@@ -267,9 +269,9 @@ fn process_unsubscribe_command(
     let _ = command.response.send(result);
 }
 
-fn process_update_command<THandler>(
+fn process_update_command<THandler, TCache: EvaluationCache>(
     command: UpdateCommand,
-    store: &mut Mutex<Store>,
+    store: &mut Mutex<Store<TCache>>,
     commands_tx: &CommandChannel,
     results_tx: &ResultsChannel,
     signal_handler: &THandler,
@@ -406,7 +408,7 @@ fn extract_signal_effects<'a>(
 ) -> (Vec<Expression>, Vec<(StateToken, SignalEffect)>) {
     let (pure_results, stateful_results): (Vec<_>, Vec<_>) = results
         .into_iter()
-        .zip(signals.into_iter().map(|signal| signal.hash()))
+        .zip(signals.into_iter().map(|signal| signal.id()))
         .map(|((result, effect), id)| (result, effect.map(|effect| (id, effect))))
         .partition(|(_, effect)| effect.is_none());
     let (stateful_results, effects): (Vec<_>, Vec<_>) = stateful_results

@@ -58,12 +58,11 @@ impl BuiltinFunction for Effect {
 #[cfg(test)]
 mod tests {
     use crate::{
-        cache::EvaluationCache,
+        cache::GenerationalGc,
         core::{
             ApplicationTerm, DependencyList, DynamicDependencies, DynamicState, EvaluationResult,
             Expression, Signal, Term,
         },
-        hash::Hashable,
         serialize::SerializedTerm,
         stdlib::{
             builtin::BuiltinTerm,
@@ -74,7 +73,7 @@ mod tests {
 
     #[test]
     fn effect_expressions() {
-        let mut cache = EvaluationCache::new();
+        let mut cache = GenerationalGc::new();
         let mut state = DynamicState::new();
         let expression = Expression::new(Term::Application(ApplicationTerm::new(
             Expression::new(Term::Builtin(BuiltinTerm::Effect)),
@@ -89,7 +88,7 @@ mod tests {
             SignalType::Custom(String::from("fetch")),
             vec![SerializedTerm::string(String::from("http://example.com/"))],
         );
-        let signal_hash = signal.hash();
+        let signal_hash = signal.id();
         let result = expression.evaluate(&state, &mut cache);
         assert_eq!(
             result,

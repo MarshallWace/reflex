@@ -78,7 +78,7 @@ impl BuiltinFunction for Map {
 #[cfg(test)]
 mod tests {
     use crate::{
-        cache::EvaluationCache,
+        cache::GenerationalGc,
         core::{ApplicationTerm, DependencyList, DynamicState, EvaluationResult, Expression, Term},
         parser::sexpr::parse,
         stdlib::{
@@ -90,7 +90,7 @@ mod tests {
 
     #[test]
     fn map_expressions() {
-        let mut cache = EvaluationCache::new();
+        let mut cache = GenerationalGc::new();
         let state = DynamicState::new();
         let collection = Expression::new(Term::Collection(CollectionTerm::Vector(
             VectorTerm::new(vec![

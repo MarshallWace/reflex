@@ -27,7 +27,7 @@ impl BuiltinFunction for Match {
         let matcher = args.next().unwrap();
         match (target.value(), matcher.value()) {
             (Term::Enum(target), Term::Struct(matcher)) => {
-                match matcher.fields().get(target.index() as usize) {
+                match matcher.fields().get(target.index()) {
                     Some(handler) => Expression::new(Term::Application(ApplicationTerm::new(
                         Expression::clone(handler),
                         target.args().iter().map(Expression::clone).collect(),
@@ -56,7 +56,7 @@ impl BuiltinFunction for Match {
 #[cfg(test)]
 mod tests {
     use crate::{
-        cache::EvaluationCache,
+        cache::GenerationalGc,
         core::{
             ApplicationTerm, Arity, DependencyList, DynamicState, EnumTerm, EvaluationResult,
             Expression, LambdaTerm, Signal, SignalTerm, StaticVariableTerm, StructTerm, Term,
@@ -70,7 +70,7 @@ mod tests {
 
     #[test]
     fn match_expressions() {
-        let mut cache = EvaluationCache::new();
+        let mut cache = GenerationalGc::new();
         let state = DynamicState::new();
         let expression = Expression::new(Term::Application(ApplicationTerm::new(
             Expression::new(Term::Builtin(BuiltinTerm::Match)),

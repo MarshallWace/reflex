@@ -6,7 +6,6 @@ use std::fmt;
 use crate::{
     cache::EvaluationCache,
     core::{DependencyList, Expression, Rewritable, Signal, StackOffset, Substitutions},
-    hash::{prefix_hash, HashId, Hashable},
 };
 
 pub mod hashmap;
@@ -16,20 +15,11 @@ use hashset::HashSetTerm;
 pub mod vector;
 use vector::VectorTerm;
 
-#[derive(PartialEq, Clone, Debug)]
+#[derive(Hash, Eq, PartialEq, Clone, Debug)]
 pub enum CollectionTerm {
     HashMap(HashMapTerm),
     HashSet(HashSetTerm),
     Vector(VectorTerm),
-}
-impl Hashable for CollectionTerm {
-    fn hash(&self) -> HashId {
-        match self {
-            CollectionTerm::HashMap(term) => prefix_hash(0, term.hash()),
-            CollectionTerm::HashSet(term) => prefix_hash(1, term.hash()),
-            CollectionTerm::Vector(term) => prefix_hash(2, term.hash()),
-        }
-    }
 }
 impl Rewritable for CollectionTerm {
     fn capture_depth(&self) -> StackOffset {
@@ -56,7 +46,7 @@ impl Rewritable for CollectionTerm {
     fn substitute(
         &self,
         substitutions: &Substitutions,
-        cache: &mut EvaluationCache,
+        cache: &mut impl EvaluationCache,
     ) -> Option<Expression> {
         match self {
             Self::HashMap(term) => term.substitute(substitutions, cache),
@@ -64,7 +54,7 @@ impl Rewritable for CollectionTerm {
             Self::Vector(term) => term.substitute(substitutions, cache),
         }
     }
-    fn optimize(&self, cache: &mut EvaluationCache) -> Option<Expression> {
+    fn optimize(&self, cache: &mut impl EvaluationCache) -> Option<Expression> {
         match self {
             Self::HashMap(term) => term.optimize(cache),
             Self::HashSet(term) => term.optimize(cache),

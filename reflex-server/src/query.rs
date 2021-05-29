@@ -5,33 +5,20 @@ use std::fmt;
 
 use reflex::{
     core::{
-        hash_struct_field_offset, ApplicationTerm, Arity, Expression, LambdaTerm, StackOffset,
-        StaticVariableTerm, StructFieldOffset, StructTerm, Term, VariableTerm,
+        ApplicationTerm, Arity, EnumIndex, Expression, LambdaTerm, StackOffset, StaticVariableTerm,
+        StructFieldOffset, StructTerm, Term, VariableTerm,
     },
-    hash::{combine_hashes, hash_seed, hash_sequence, prefix_hash, HashId, Hashable},
     stdlib::{
         builtin::BuiltinTerm,
         value::{IntValue, ValueTerm},
     },
 };
 
-#[derive(PartialEq, Clone, Debug)]
+#[derive(Hash, Eq, PartialEq, Clone, Debug)]
 pub enum QueryShape {
     Leaf,
     Branch(Vec<FieldSelector>),
     List(Box<QueryShape>),
-}
-impl Hashable for QueryShape {
-    fn hash(&self) -> HashId {
-        match self {
-            QueryShape::Leaf => prefix_hash(0, hash_seed()),
-            QueryShape::Branch(branches) => prefix_hash(
-                1,
-                hash_sequence(branches.iter().map(|selector| selector.hash())),
-            ),
-            QueryShape::List(shape) => prefix_hash(2, shape.hash()),
-        }
-    }
 }
 impl QueryShape {
     pub fn leaf() -> Self {
@@ -211,36 +198,12 @@ fn query_list(target: Expression, shape: &QueryShape) -> Expression {
     )))
 }
 
-#[derive(PartialEq, Clone, Debug)]
+#[derive(Hash, Eq, PartialEq, Clone, Debug)]
 pub enum FieldSelector {
     NamedField(ValueTerm, QueryShape),
     StructField(StructFieldOffset, QueryShape),
     EnumField(Vec<EnumFieldSelector>),
     FunctionField(Vec<Expression>, QueryShape),
-}
-impl Hashable for FieldSelector {
-    fn hash(&self) -> HashId {
-        match self {
-            FieldSelector::NamedField(field_name, shape) => {
-                prefix_hash(0, combine_hashes(field_name.hash(), shape.hash()))
-            }
-            FieldSelector::StructField(offset, shape) => prefix_hash(
-                1,
-                combine_hashes(hash_struct_field_offset(*offset), shape.hash()),
-            ),
-            FieldSelector::EnumField(variants) => prefix_hash(
-                2,
-                hash_sequence(variants.iter().map(|variant| variant.hash())),
-            ),
-            FieldSelector::FunctionField(args, shape) => prefix_hash(
-                3,
-                combine_hashes(
-                    hash_sequence(args.iter().map(|arg| arg.hash())),
-                    shape.hash(),
-                ),
-            ),
-        }
-    }
 }
 impl fmt::Display for FieldSelector {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -261,23 +224,11 @@ impl fmt::Display for FieldSelector {
     }
 }
 
-#[derive(PartialEq, Clone, Debug)]
+#[derive(Hash, Eq, PartialEq, Clone, Debug)]
 pub enum EnumFieldSelector {
     Nullary(Expression),
     Unary(QueryShape),
-    Multiple(u8, Expression, QueryShape),
-}
-impl Hashable for EnumFieldSelector {
-    fn hash(&self) -> HashId {
-        match self {
-            Self::Nullary(value) => prefix_hash(0, value.hash()),
-            Self::Unary(shape) => prefix_hash(1, shape.hash()),
-            Self::Multiple(num_args, transform, shape) => prefix_hash(
-                1,
-                combine_hashes(prefix_hash(*num_args, transform.hash()), shape.hash()),
-            ),
-        }
-    }
+    Multiple(EnumIndex, Expression, QueryShape),
 }
 impl fmt::Display for EnumFieldSelector {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -293,7 +244,7 @@ impl fmt::Display for EnumFieldSelector {
 mod tests {
     use super::{EnumFieldSelector, FieldSelector, QueryShape};
     use reflex::{
-        cache::EvaluationCache,
+        cache::GenerationalGc,
         core::{
             DependencyList, DynamicState, EnumTerm, EvaluationResult, Expression, SerializedTerm,
             Signal, SignalTerm, StructPrototype, StructTerm, Term,
@@ -311,7 +262,7 @@ mod tests {
 
     #[test]
     fn leaf_queries() {
-        let mut cache = EvaluationCache::new();
+        let mut cache = GenerationalGc::new();
         let state = DynamicState::new();
         let root = parse("(+ 3 4)").unwrap();
         let shape = QueryShape::Leaf;
@@ -328,7 +279,7 @@ mod tests {
 
     #[test]
     fn named_fields() {
-        let mut cache = EvaluationCache::new();
+        let mut cache = GenerationalGc::new();
         let state = DynamicState::new();
         let root = Expression::new(Term::Struct(StructTerm::new(
             Some(StructPrototype::new(vec![
@@ -383,7 +334,7 @@ mod tests {
 
     #[test]
     fn struct_fields() {
-        let mut cache = EvaluationCache::new();
+        let mut cache = GenerationalGc::new();
         let state = DynamicState::new();
         let root = Expression::new(Term::Struct(StructTerm::new(
             None,
@@ -421,7 +372,7 @@ mod tests {
 
     #[test]
     fn enum_fields_nullary() {
-        let mut cache = EvaluationCache::new();
+        let mut cache = GenerationalGc::new();
         let state = DynamicState::new();
         let root = Expression::new(Term::Enum(EnumTerm::new(2, vec![])));
         let error = Expression::new(Term::Signal(SignalTerm::new(Signal::new(
@@ -456,7 +407,7 @@ mod tests {
 
     #[test]
     fn enum_fields_unary() {
-        let mut cache = EvaluationCache::new();
+        let mut cache = GenerationalGc::new();
         let state = DynamicState::new();
         let root = Expression::new(Term::Enum(EnumTerm::new(
             2,
@@ -494,7 +445,7 @@ mod tests {
 
     #[test]
     fn enum_fields_multiple() {
-        let mut cache = EvaluationCache::new();
+        let mut cache = GenerationalGc::new();
         let state = DynamicState::new();
         let root = Expression::new(Term::Enum(EnumTerm::new(
             2,
@@ -536,7 +487,7 @@ mod tests {
 
     #[test]
     fn function_fields() {
-        let mut cache = EvaluationCache::new();
+        let mut cache = GenerationalGc::new();
         let state = DynamicState::new();
         let root = Expression::new(Term::Builtin(BuiltinTerm::Add));
         let shape = QueryShape::branch(vec![
@@ -581,7 +532,7 @@ mod tests {
 
     #[test]
     fn deeply_nested_fields() {
-        let mut cache = EvaluationCache::new();
+        let mut cache = GenerationalGc::new();
         let state = DynamicState::new();
         let root = Expression::new(Term::Struct(StructTerm::new(
             None,
@@ -817,7 +768,7 @@ mod tests {
 
     #[test]
     fn list_queries() {
-        let mut cache = EvaluationCache::new();
+        let mut cache = GenerationalGc::new();
         let state = DynamicState::new();
         let root = Expression::new(Term::Collection(CollectionTerm::Vector(VectorTerm::new(
             vec![
