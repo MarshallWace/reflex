@@ -4,7 +4,7 @@
 pub mod cache;
 pub mod core;
 pub mod hash;
-mod serialize;
+pub mod serialize;
 pub use serialize::serialize;
 
 pub mod stdlib {

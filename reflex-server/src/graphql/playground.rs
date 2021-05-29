@@ -16,7 +16,7 @@ pub(crate) async fn handle_playground_http_request(
     };
     Ok(create_http_response(
         StatusCode::OK,
-        vec![(header::CONTENT_TYPE, "text/html")],
+        vec![(header::CONTENT_TYPE, String::from("text/html"))],
         Some(body),
     ))
 }

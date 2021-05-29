@@ -1,9 +1,14 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+use std::iter::once;
+
 use graphql_parser::{parse_query, query::*};
 use reflex::{
-    core::{Expression, SerializedTerm, StructPrototype, StructTerm, Term},
+    core::{
+        Expression, SerializedListTerm, SerializedObjectTerm, SerializedTerm, StructPrototype,
+        StructTerm, Term,
+    },
     stdlib::{
         collection::{vector::VectorTerm, CollectionTerm},
         value::{StringValue, ValueTerm},
@@ -23,6 +28,24 @@ pub fn parse_graphql_query(source: &str) -> Result<(QueryShape, QueryTransform),
         },
         Err(error) => Err(format!("{}", error)),
     }
+}
+
+pub fn wrap_graphql_success_response(value: SerializedTerm) -> SerializedTerm {
+    SerializedTerm::Object(SerializedObjectTerm::new(once((
+        String::from("data"),
+        value,
+    ))))
+}
+
+pub fn wrap_graphql_error_response(errors: Vec<String>) -> SerializedTerm {
+    SerializedTerm::Object(SerializedObjectTerm::new(once((
+        String::from("errors"),
+        SerializedTerm::List(SerializedListTerm::new(
+            errors
+                .into_iter()
+                .map(|error| SerializedTerm::Value(ValueTerm::String(error))),
+        )),
+    ))))
 }
 
 fn get_root_operation<'src, 'a>(

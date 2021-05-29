@@ -54,18 +54,18 @@ where
         Fn(&str, &[SerializedTerm]) -> Option<Result<SignalResult, String>> + Send + Sync + 'static,
 {
     move |signal_type, args| {
-        println!(
-            "{}{}",
-            signal_type,
-            if args.is_empty() {
-                String::from("")
-            } else {
+        if args.is_empty() {
+            println!("{}", signal_type)
+        } else {
+            println!(
+                "{} {}",
+                signal_type,
                 args.iter()
                     .map(|arg| format!("{}", arg))
                     .collect::<Vec<_>>()
                     .join(" ")
-            }
-        );
+            )
+        };
         handler(signal_type, args)
     }
 }

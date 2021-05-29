@@ -737,6 +737,7 @@ dependencies = [
  "reflex",
  "reflex-handlers",
  "reflex-js",
+ "reflex-json",
  "reflex-runtime",
  "serde_json",
  "tokio",

@@ -57,7 +57,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                                         "{} {}",
                                         message,
                                         args.iter()
-                                            .map(SerializedTerm::stringify)
+                                            .map(|arg| format!("{}", arg))
                                             .collect::<Vec<_>>()
                                             .join(" ")
                                     ),
@@ -74,7 +74,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                             signal
                                 .args()
                                 .iter()
-                                .map(SerializedTerm::stringify)
+                                .map(|arg| format!("{}", arg))
                                 .collect::<Vec<_>>()
                                 .join(" ")
                         )

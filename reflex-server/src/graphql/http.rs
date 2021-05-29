@@ -5,24 +5,32 @@ use super::protocol::deserialize_graphql_request;
 use crate::{
     create_http_response,
     query::query,
-    utils::graphql::{parse_graphql_query, QueryTransform},
-    wrap_graphql_error_response, wrap_graphql_success_response,
+    utils::graphql::{
+        parse_graphql_query, wrap_graphql_error_response, wrap_graphql_success_response,
+        QueryTransform,
+    },
 };
 use hyper::{header, Body, Request, Response, StatusCode};
 use reflex::{
     core::{Expression, SerializedTerm, Signal, SignalTerm, Term},
+    hash::hash_object,
     serialize,
     stdlib::{signal::SignalType, value::StringValue},
 };
-use reflex_js::stdlib::json_stringify;
+use reflex_json::stringify;
 use reflex_runtime::{Runtime, SubscriptionResult};
-use std::{convert::Infallible, sync::Arc};
+use std::{
+    convert::Infallible,
+    iter::{empty, once},
+    sync::Arc,
+};
 
 pub(crate) async fn handle_graphql_http_request(
     req: Request<Body>,
     store: Arc<Runtime>,
     root: Expression,
 ) -> Result<Response<Body>, Infallible> {
+    let request_etag = parse_request_etag(&req);
     let response = match parse_graphql_request(req, &root).await {
         Err(response) => Ok(response),
         Ok((expression, transform)) => match store.subscribe(expression).await {
@@ -35,24 +43,53 @@ pub(crate) async fn handle_graphql_http_request(
                 },
             },
         },
+    }
+    .unwrap_or_else(|error| HttpResult::error(StatusCode::INTERNAL_SERVER_ERROR, error));
+    let response_etag = parse_response_etag(&response);
+    let is_matching_etag = match (&request_etag, &response_etag) {
+        (Some(request_etag), Some(response_etag)) => request_etag == response_etag,
+        _ => false,
     };
-    let response = response
-        .unwrap_or_else(|error| HttpResult::error(StatusCode::INTERNAL_SERVER_ERROR, error));
-    let (status, body) = match response.result {
-        Err(errors) => (response.status, wrap_graphql_error_response(errors)),
-        Ok(result) => match json_stringify(result.value()) {
-            Ok(body) => (response.status, wrap_graphql_success_response(body)),
-            Err(error) => (
-                StatusCode::NOT_ACCEPTABLE,
-                wrap_graphql_error_response(vec![format!("Unable to serialize result: {}", error)]),
-            ),
-        },
+    if is_matching_etag {
+        return Ok(create_http_response(
+            StatusCode::NOT_MODIFIED,
+            empty(),
+            None,
+        ));
+    }
+    let payload = match response.result {
+        Ok(result) => serialize(result.value()).map(|result| wrap_graphql_success_response(result)),
+        Err(errors) => Ok(wrap_graphql_error_response(errors)),
     };
-    Ok::<Response<Body>, Infallible>(create_http_response(
-        status,
-        vec![(header::CONTENT_TYPE, "application/json")],
-        Some(body),
-    ))
+    let (status, body) = match payload.and_then(stringify) {
+        Ok(body) => (response.status, body),
+        Err(error) => (
+            StatusCode::NOT_ACCEPTABLE,
+            stringify(wrap_graphql_error_response(vec![format!("{}", error)])).unwrap(),
+        ),
+    };
+    let headers = once((header::CONTENT_TYPE, String::from("application/json")));
+    let response = match response_etag {
+        Some(etag) => {
+            let headers = headers.chain(once((header::ETAG, etag)));
+            create_http_response(status, headers, Some(body))
+        }
+        None => create_http_response(status, headers, Some(body)),
+    };
+    Ok::<Response<Body>, Infallible>(response)
+}
+
+fn parse_request_etag(req: &Request<Body>) -> Option<String> {
+    req.headers()
+        .get(header::IF_NONE_MATCH)
+        .and_then(|header| header.to_str().map(|value| String::from(value)).ok())
+}
+
+fn parse_response_etag(response: &HttpResult) -> Option<String> {
+    match &response.result {
+        Err(_) => None,
+        Ok(result) => Some(format!("\"{:x}\"", hash_object(&result))),
+    }
 }
 
 async fn parse_graphql_request(

@@ -58,7 +58,7 @@ pub fn run() -> io::Result<()> {
                                                     "{} {}",
                                                     message,
                                                     args.iter()
-                                                        .map(SerializedTerm::stringify)
+                                                        .map(|arg| format!("{}", arg))
                                                         .collect::<Vec<_>>()
                                                         .join(" ")
                                                 ),
@@ -75,7 +75,7 @@ pub fn run() -> io::Result<()> {
                                         signal
                                             .args()
                                             .iter()
-                                            .map(SerializedTerm::stringify)
+                                            .map(|arg| format!("{}", arg))
                                             .collect::<Vec<_>>()
                                             .join(" ")
                                     )

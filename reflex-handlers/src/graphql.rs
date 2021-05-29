@@ -7,6 +7,7 @@ use reflex::{
     core::{Expression, SerializedObjectTerm, SerializedTerm, Signal, SignalTerm, Term},
     stdlib::{signal::SignalType, value::ValueTerm},
 };
+use reflex_json::stringify;
 use reflex_runtime::SignalResult;
 
 use crate::utils::fetch;
@@ -23,78 +24,79 @@ pub fn handle_graphql_execute(args: &[SerializedTerm]) -> Result<SignalResult, S
     let query = parse_string_arg(args.next().unwrap());
     let variables = parse_object_arg(args.next().unwrap());
     match (url, query, variables) {
-        (Some(url), Some(query), Some(variables)) => Ok((
-            Expression::new(Term::Signal(SignalTerm::new(Signal::new(
-                SignalType::Pending,
-                Vec::new(),
-            )))),
-            Some(Box::pin(async move {
-                let response = fetch(
-                    String::from("POST"),
-                    url,
-                    once((
-                        String::from("Content-Type"),
-                        String::from("application/json"),
-                    )),
-                    Some(SerializedTerm::stringify(&SerializedTerm::object(vec![
-                        (String::from("query"), SerializedTerm::string(query)),
-                        (String::from("variables"), SerializedTerm::Object(variables)),
-                    ]))),
-                )
-                .await;
-                let result = match response {
-                    Ok(data) => {
-                        let result = match reflex_json::serialized(&data) {
-                            Ok(result) => match result {
-                                SerializedTerm::Object(value) => {
-                                    let (data, errors) = value.entries().iter().fold(
-                                        (None, None),
-                                        |(data, errors), (key, value)| match key.as_str() {
-                                            "data" => match value {
-                                                SerializedTerm::Object(_) => (Some(value), errors),
+        (Some(url), Some(query), Some(variables)) => {
+            let method = String::from("POST");
+            let headers = once((
+                String::from("Content-Type"),
+                String::from("application/json"),
+            ));
+            let body = stringify(SerializedTerm::object(vec![
+                (String::from("query"), SerializedTerm::string(query)),
+                (String::from("variables"), SerializedTerm::Object(variables)),
+            ]))?;
+            Ok((
+                Expression::new(Term::Signal(SignalTerm::new(Signal::new(
+                    SignalType::Pending,
+                    Vec::new(),
+                )))),
+                Some(Box::pin(async move {
+                    let response = fetch(method, url, headers, Some(body)).await;
+                    let result = match response {
+                        Ok(data) => {
+                            let result = match reflex_json::serialized(&data) {
+                                Ok(result) => match result {
+                                    SerializedTerm::Object(value) => {
+                                        let (data, errors) = value.entries().iter().fold(
+                                            (None, None),
+                                            |(data, errors), (key, value)| match key.as_str() {
+                                                "data" => match value {
+                                                    SerializedTerm::Object(_) => {
+                                                        (Some(value), errors)
+                                                    }
+                                                    _ => (data, errors),
+                                                },
+                                                "errors" => match value {
+                                                    SerializedTerm::List(list) => {
+                                                        match parse_graphql_errors(list.items()) {
+                                                            Some(errors) => (data, Some(errors)),
+                                                            _ => (None, errors),
+                                                        }
+                                                    }
+                                                    _ => (None, errors),
+                                                },
                                                 _ => (data, errors),
                                             },
-                                            "errors" => match value {
-                                                SerializedTerm::List(list) => {
-                                                    match parse_graphql_errors(list.items()) {
-                                                        Some(errors) => (data, Some(errors)),
-                                                        _ => (None, errors),
-                                                    }
-                                                }
-                                                _ => (None, errors),
-                                            },
-                                            _ => (data, errors),
-                                        },
-                                    );
-                                    match (data, errors) {
-                                        (_, Some(errors)) => Err(Some(errors)),
-                                        (Some(data), None) => Ok(data.deserialize()),
-                                        _ => Err(None),
+                                        );
+                                        match (data, errors) {
+                                            (_, Some(errors)) => Err(Some(errors)),
+                                            (Some(data), None) => Ok(data.deserialize()),
+                                            _ => Err(None),
+                                        }
                                     }
-                                }
+                                    _ => Err(None),
+                                },
                                 _ => Err(None),
-                            },
-                            _ => Err(None),
-                        };
-                        match result {
-                            Ok(result) => Ok(result),
-                            Err(Some(errors)) => {
-                                Err(format!("GraphQL error: {}", errors.join("\n")))
+                            };
+                            match result {
+                                Ok(result) => Ok(result),
+                                Err(Some(errors)) => {
+                                    Err(format!("GraphQL error: {}", errors.join("\n")))
+                                }
+                                Err(None) => Err(format!("Invalid GraphQL response")),
                             }
-                            Err(None) => Err(format!("Invalid GraphQL response")),
                         }
+                        Err(error) => Err(error),
+                    };
+                    match result {
+                        Ok(result) => result,
+                        Err(error) => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
+                            SignalType::Error,
+                            vec![SerializedTerm::string(error)],
+                        )))),
                     }
-                    Err(error) => Err(error),
-                };
-                match result {
-                    Ok(result) => result,
-                    Err(error) => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
-                        SignalType::Error,
-                        vec![SerializedTerm::string(error)],
-                    )))),
-                }
-            })),
-        )),
+                })),
+            ))
+        }
         _ => Err(String::from("Invalid GraphQL signal arguments")),
     }
 }

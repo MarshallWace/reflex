@@ -10,6 +10,7 @@ edition = "2018"
 [dependencies]
 reflex = { path = "../reflex" }
 reflex-js = { path = "../reflex-js" }
+reflex-json = { path = "../reflex-json" }
 reflex-handlers = { path = "../reflex-handlers" }
 reflex-runtime = { path = "../reflex-runtime" }
 futures = "*"

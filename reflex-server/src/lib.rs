@@ -14,7 +14,6 @@ use hyper::{
 };
 
 use reflex::core::Expression;
-use reflex_js::stdlib::json_stringify_string;
 use reflex_runtime::Runtime;
 
 pub mod loaders {
@@ -76,32 +75,17 @@ fn create_invalid_websocket_upgrade_response() -> Response<Body> {
     create_http_response(
         StatusCode::UPGRADE_REQUIRED,
         vec![
-            (header::CONNECTION, "upgrade"),
-            (header::UPGRADE, "websocket"),
-            (header::CONTENT_TYPE, "text/plain"),
+            (header::CONNECTION, String::from("upgrade")),
+            (header::UPGRADE, String::from("websocket")),
+            (header::CONTENT_TYPE, String::from("text/plain")),
         ],
         Some(String::from("Invalid protocol upgrade request")),
     )
 }
 
-fn wrap_graphql_success_response(json_output: String) -> String {
-    format!("{{\"data\":{}}}", json_output)
-}
-
-fn wrap_graphql_error_response(errors: impl IntoIterator<Item = String>) -> String {
-    format!(
-        "{{\"errors\":[{}]}}",
-        errors
-            .into_iter()
-            .map(|message| format!("{{\"message\":{}}}", json_stringify_string(&message)))
-            .collect::<Vec<_>>()
-            .join(",")
-    )
-}
-
 fn create_http_response(
     status: StatusCode,
-    headers: impl IntoIterator<Item = (HeaderName, &'static str)>,
+    headers: impl IntoIterator<Item = (HeaderName, String)>,
     body: Option<String>,
 ) -> Response<Body> {
     let body = match body {
@@ -111,8 +95,9 @@ fn create_http_response(
     let mut res = Response::new(body);
     *res.status_mut() = status;
     for (key, value) in headers.into_iter() {
-        res.headers_mut()
-            .insert(key, HeaderValue::from_static(value));
+        if let Ok(value) = HeaderValue::from_str(&value) {
+            res.headers_mut().insert(key, value);
+        }
     }
     res
 }
@@ -120,7 +105,7 @@ fn create_http_response(
 fn method_not_allowed() -> Response<Body> {
     create_http_response(
         StatusCode::METHOD_NOT_ALLOWED,
-        vec![(header::CONTENT_TYPE, "text/plain")],
+        vec![(header::CONTENT_TYPE, String::from("text/plain"))],
         Some(String::from("Method not allowed")),
     )
 }

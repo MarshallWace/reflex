@@ -45,9 +45,6 @@ impl SerializedTerm {
     pub fn string(value: String) -> Self {
         Self::Value(ValueTerm::String(value))
     }
-    pub fn stringify(&self) -> String {
-        stringify(self)
-    }
     pub fn deserialize(&self) -> Expression {
         deserialize(self)
     }
@@ -71,6 +68,9 @@ impl SerializedObjectTerm {
     pub fn entries(&self) -> &[(String, SerializedTerm)] {
         &self.entries
     }
+    pub fn into_entries(self) -> impl IntoIterator<Item = (String, SerializedTerm)> {
+        self.entries.into_iter()
+    }
 }
 impl fmt::Display for SerializedObjectTerm {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -90,6 +90,9 @@ impl SerializedListTerm {
     }
     pub fn items(&self) -> &[SerializedTerm] {
         &self.items
+    }
+    pub fn into_items(self) -> impl IntoIterator<Item = SerializedTerm> {
+        self.items.into_iter()
     }
 }
 impl fmt::Display for SerializedListTerm {
@@ -148,53 +151,6 @@ fn serialize_vector_term(value: &VectorTerm) -> Result<SerializedTerm, String> {
     Ok(SerializedTerm::List(SerializedListTerm::new(items)))
 }
 
-fn stringify(term: &SerializedTerm) -> String {
-    match term {
-        SerializedTerm::Value(value) => stringify_value(value),
-        SerializedTerm::Object(value) => stringify_object(value),
-        SerializedTerm::List(value) => stringify_list(value),
-    }
-}
-
-fn stringify_value(value: &ValueTerm) -> String {
-    match value {
-        ValueTerm::Symbol(id) => format!("Symbol({})", id),
-        ValueTerm::Null => String::from("null"),
-        ValueTerm::Boolean(value) => format!("{}", value),
-        ValueTerm::Int(value) => format!("{}", value),
-        ValueTerm::Float(value) => format!("{}", value),
-        ValueTerm::String(value) => quote_string(value),
-    }
-}
-
-fn stringify_object(value: &SerializedObjectTerm) -> String {
-    if value.entries.is_empty() {
-        String::from("{}")
-    } else {
-        format!(
-            "{{ {} }}",
-            value
-                .entries
-                .iter()
-                .map(|(key, value)| format!("{}: {}", quote_string(key), value))
-                .collect::<Vec<_>>()
-                .join(", ")
-        )
-    }
-}
-
-fn stringify_list(value: &SerializedListTerm) -> String {
-    format!(
-        "[{}]",
-        value
-            .items
-            .iter()
-            .map(|value| format!("{}", value))
-            .collect::<Vec<_>>()
-            .join(", ")
-    )
-}
-
 fn deserialize(value: &SerializedTerm) -> Expression {
     match value {
         SerializedTerm::Value(value) => Expression::new(Term::Value(value.clone())),
@@ -222,12 +178,59 @@ fn deserialize_list(value: &SerializedListTerm) -> Expression {
     ))))
 }
 
+fn stringify(term: &SerializedTerm) -> String {
+    match term {
+        SerializedTerm::Value(value) => stringify_value(value),
+        SerializedTerm::Object(value) => stringify_object(value),
+        SerializedTerm::List(value) => stringify_list(value),
+    }
+}
+
+fn stringify_value(value: &ValueTerm) -> String {
+    match value {
+        ValueTerm::Symbol(id) => format!("Symbol({})", id),
+        ValueTerm::Null => String::from("null"),
+        ValueTerm::Boolean(value) => format!("{}", value),
+        ValueTerm::Int(value) => format!("{}", value),
+        ValueTerm::Float(value) => format!("{}", value),
+        ValueTerm::String(value) => quote_string(value),
+    }
+}
+
+fn stringify_object(value: &SerializedObjectTerm) -> String {
+    if value.entries.is_empty() {
+        String::from("{}")
+    } else {
+        format!(
+            "{{ {} }}",
+            (value
+                .entries
+                .iter()
+                .map(|(key, value)| format!("{}: {}", quote_string(key), stringify(value)))
+                .collect::<Vec<_>>())
+            .join(", ")
+        )
+    }
+}
+
+fn stringify_list(value: &SerializedListTerm) -> String {
+    format!(
+        "[{}]",
+        (value
+            .items
+            .iter()
+            .map(|value| format!("{}", stringify(value)))
+            .collect::<Vec<_>>())
+        .join(", ")
+    )
+}
+
 fn quote_string(value: &str) -> String {
     let mut result = String::with_capacity(value.len() + 2);
     result.push('"');
     for current in value.chars() {
         let escape_char = match current {
-            '\\' | '"' | '\'' => Some(current),
+            '\\' | '"' => Some(current),
             '\n' | '\u{2028}' | '\u{2029}' => Some('n'),
             '\r' => Some('r'),
             _ => None,
@@ -250,14 +253,14 @@ fn quote_string(value: &str) -> String {
 mod tests {
     use crate::{
         core::{Expression, StructPrototype, StructTerm, Term},
-        serialize::{SerializedListTerm, SerializedObjectTerm, SerializedTerm},
+        serialize::{SerializedListTerm, SerializedTerm},
         stdlib::{
             collection::{vector::VectorTerm, CollectionTerm},
             value::{StringValue, ValueTerm},
         },
     };
 
-    use super::{serialize, stringify};
+    use super::serialize;
 
     #[test]
     fn serialize_primitives() {
@@ -341,126 +344,6 @@ mod tests {
                     SerializedTerm::Value(ValueTerm::Int(5))
                 ),
             ]))
-        );
-    }
-
-    #[test]
-    fn stringify_primitives() {
-        assert_eq!(
-            stringify(&SerializedTerm::Value(ValueTerm::Symbol(3))),
-            String::from("Symbol(3)"),
-        );
-        assert_eq!(
-            stringify(&SerializedTerm::Value(ValueTerm::Null)),
-            String::from("null"),
-        );
-        assert_eq!(
-            stringify(&SerializedTerm::Value(ValueTerm::Boolean(false))),
-            String::from("false"),
-        );
-        assert_eq!(
-            stringify(&SerializedTerm::Value(ValueTerm::Boolean(true))),
-            String::from("true"),
-        );
-        assert_eq!(
-            stringify(&SerializedTerm::Value(ValueTerm::Int(0))),
-            String::from("0"),
-        );
-        assert_eq!(
-            stringify(&SerializedTerm::Value(ValueTerm::Int(3))),
-            String::from("3"),
-        );
-        assert_eq!(
-            stringify(&SerializedTerm::Value(ValueTerm::Int(-0))),
-            String::from("0"),
-        );
-        assert_eq!(
-            stringify(&SerializedTerm::Value(ValueTerm::Int(-3))),
-            String::from("-3"),
-        );
-        assert_eq!(
-            stringify(&SerializedTerm::Value(ValueTerm::Float(0.0))),
-            String::from("0"),
-        );
-        assert_eq!(
-            stringify(&SerializedTerm::Value(ValueTerm::Float(3.142))),
-            String::from("3.142"),
-        );
-        assert_eq!(
-            stringify(&SerializedTerm::Value(ValueTerm::Float(-0.0))),
-            String::from("0"),
-        );
-        assert_eq!(
-            stringify(&SerializedTerm::Value(ValueTerm::Float(-3.142))),
-            String::from("-3.142"),
-        );
-        assert_eq!(
-            stringify(&SerializedTerm::Value(ValueTerm::String(
-                StringValue::from("")
-            ))),
-            String::from("\"\""),
-        );
-        assert_eq!(
-            stringify(&SerializedTerm::Value(ValueTerm::String(
-                StringValue::from("foo")
-            ))),
-            String::from("\"foo\""),
-        );
-        assert_eq!(
-            stringify(&SerializedTerm::Value(ValueTerm::String(
-                StringValue::from("\"\'\n\r")
-            ))),
-            String::from("\"\\\"\\\'\\n\\r\""),
-        );
-    }
-
-    #[test]
-    fn stringify_lists() {
-        assert_eq!(
-            stringify(&SerializedTerm::List(SerializedListTerm::new(Vec::new()))),
-            String::from("[]")
-        );
-        assert_eq!(
-            stringify(&SerializedTerm::List(SerializedListTerm::new(vec![
-                SerializedTerm::value(ValueTerm::Int(3)),
-                SerializedTerm::value(ValueTerm::Int(4)),
-                SerializedTerm::value(ValueTerm::Int(5)),
-            ]))),
-            String::from("[3, 4, 5]"),
-        );
-    }
-
-    #[test]
-    fn stringify_objects() {
-        assert_eq!(
-            stringify(&SerializedTerm::Object(SerializedObjectTerm::new(
-                Vec::new()
-            ))),
-            String::from("{}")
-        );
-        assert_eq!(
-            stringify(&SerializedTerm::Object(SerializedObjectTerm::new(vec![
-                (
-                    String::from("first"),
-                    SerializedTerm::value(ValueTerm::Int(3)),
-                ),
-                (
-                    String::from("second"),
-                    SerializedTerm::value(ValueTerm::Int(4)),
-                ),
-                (
-                    String::from("third"),
-                    SerializedTerm::value(ValueTerm::Int(5)),
-                )
-            ]))),
-            String::from("{ \"first\": 3, \"second\": 4, \"third\": 5 }"),
-        );
-        assert_eq!(
-            stringify(&SerializedTerm::Object(SerializedObjectTerm::new(vec![(
-                String::from("\"\'\n\r"),
-                SerializedTerm::value(ValueTerm::Int(3)),
-            ),]))),
-            String::from("{ \"\\\"\\\'\\n\\r\": 3 }"),
         );
     }
 }

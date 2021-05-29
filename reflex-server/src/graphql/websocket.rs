@@ -7,8 +7,10 @@ use super::protocol::{
 };
 use crate::{
     query::query,
-    utils::graphql::{parse_graphql_query, QueryTransform},
-    wrap_graphql_error_response, wrap_graphql_success_response,
+    utils::graphql::{
+        parse_graphql_query, wrap_graphql_error_response, wrap_graphql_success_response,
+        QueryTransform,
+    },
 };
 use futures::{SinkExt, StreamExt};
 use hyper::{
@@ -21,7 +23,7 @@ use hyper_tungstenite::{
     WebSocketStream,
 };
 use reflex::{core::Expression, serialize};
-use reflex_js::stdlib::json_stringify;
+use reflex_json::stringify;
 use reflex_runtime::Runtime;
 use std::{
     collections::HashMap,
@@ -255,18 +257,22 @@ fn format_subscription_result_message(
     subscription_id: &SubscriptionId,
     value: Result<Expression, Vec<String>>,
 ) -> GraphQlSubscriptionServerMessage {
-    let payload = match value {
+    let result = match value {
         Err(errors) => Err(errors),
-        Ok(result) => match json_stringify(result.value()) {
+        Ok(result) => match serialize(result.value()) {
             Ok(result) => Ok(result),
-            Err(error) => Err(vec![format!("Unable to serialize result: {}", error)]),
+            Err(error) => Err(vec![error]),
         },
     };
-    GraphQlSubscriptionServerMessage::Data(
-        subscription_id.clone(),
-        match payload {
-            Ok(data) => wrap_graphql_success_response(data),
-            Err(errors) => wrap_graphql_error_response(errors),
-        },
-    )
+    let payload = match result {
+        Ok(data) => wrap_graphql_success_response(data),
+        Err(errors) => wrap_graphql_error_response(errors),
+    };
+    match stringify(payload) {
+        Ok(payload) => GraphQlSubscriptionServerMessage::Data(subscription_id.clone(), payload),
+        Err(error) => GraphQlSubscriptionServerMessage::Error(
+            subscription_id.clone(),
+            stringify(wrap_graphql_error_response(vec![error])).unwrap(),
+        ),
+    }
 }
