@@ -5,7 +5,7 @@ use std::fmt;
 
 use crate::{
     cache::EvaluationCache,
-    core::{DependencyList, Expression, Rewritable, Signal, StackOffset, Substitutions},
+    core::{DependencyList, DynamicState, Expression, Rewritable, StackOffset, Substitutions},
 };
 
 pub mod hashmap;
@@ -36,22 +36,26 @@ impl Rewritable for CollectionTerm {
             Self::Vector(term) => term.dynamic_dependencies(),
         }
     }
-    fn signals(&self) -> Vec<Signal> {
-        match self {
-            Self::HashMap(term) => term.signals(),
-            Self::HashSet(term) => term.signals(),
-            Self::Vector(term) => term.signals(),
-        }
-    }
-    fn substitute(
+    fn substitute_static(
         &self,
         substitutions: &Substitutions,
         cache: &mut impl EvaluationCache,
     ) -> Option<Expression> {
         match self {
-            Self::HashMap(term) => term.substitute(substitutions, cache),
-            Self::HashSet(term) => term.substitute(substitutions, cache),
-            Self::Vector(term) => term.substitute(substitutions, cache),
+            Self::HashMap(term) => term.substitute_static(substitutions, cache),
+            Self::HashSet(term) => term.substitute_static(substitutions, cache),
+            Self::Vector(term) => term.substitute_static(substitutions, cache),
+        }
+    }
+    fn substitute_dynamic(
+        &self,
+        state: &DynamicState,
+        cache: &mut impl EvaluationCache,
+    ) -> Option<Expression> {
+        match self {
+            Self::HashMap(term) => term.substitute_dynamic(state, cache),
+            Self::HashSet(term) => term.substitute_dynamic(state, cache),
+            Self::Vector(term) => term.substitute_dynamic(state, cache),
         }
     }
     fn optimize(&self, cache: &mut impl EvaluationCache) -> Option<Expression> {

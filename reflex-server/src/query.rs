@@ -5,8 +5,8 @@ use std::fmt;
 
 use reflex::{
     core::{
-        ApplicationTerm, Arity, EnumIndex, Expression, LambdaTerm, StackOffset, StaticVariableTerm,
-        StructFieldOffset, StructTerm, Term, VariableTerm,
+        ApplicationTerm, Arity, EnumIndex, Expression, LambdaTerm, StructFieldOffset, StructTerm,
+        Term, VariableTerm,
     },
     stdlib::{
         builtin::BuiltinTerm,
@@ -124,12 +124,10 @@ fn query_enum_field(target: Expression, variants: &[EnumFieldSelector]) -> Expre
                             EnumFieldSelector::Unary(_) => 1,
                             EnumFieldSelector::Multiple(num_args, _, _) => *num_args,
                         };
-                        let result = match variant {
+                        let args = match variant {
                             EnumFieldSelector::Nullary(value) => Expression::clone(value),
                             EnumFieldSelector::Unary(shape) => query(
-                                Expression::new(Term::Variable(VariableTerm::Static(
-                                    StaticVariableTerm::new(0),
-                                ))),
+                                Expression::new(Term::Variable(VariableTerm::scoped(0))),
                                 shape,
                             ),
                             EnumFieldSelector::Multiple(num_args, transform, shape) => {
@@ -140,11 +138,8 @@ fn query_enum_field(target: Expression, variants: &[EnumFieldSelector]) -> Expre
                                         (0..num_args)
                                             .into_iter()
                                             .map(|index| {
-                                                let offset = (num_args - index - 1) as StackOffset;
                                                 Expression::new(Term::Variable(
-                                                    VariableTerm::Static(StaticVariableTerm::new(
-                                                        offset,
-                                                    )),
+                                                    VariableTerm::scoped(num_args - index - 1),
                                                 ))
                                             })
                                             .collect(),
@@ -154,10 +149,10 @@ fn query_enum_field(target: Expression, variants: &[EnumFieldSelector]) -> Expre
                             }
                         };
                         Expression::new(Term::Lambda(LambdaTerm::new(
-                            Arity::from(num_args, 0, None),
+                            Arity::from(0, num_args, None),
                             Expression::new(Term::Application(ApplicationTerm::new(
                                 Expression::new(Term::Builtin(BuiltinTerm::CollectArgs)),
-                                vec![enum_index, result],
+                                vec![enum_index, args],
                             ))),
                         )))
                     })
@@ -187,9 +182,7 @@ fn query_list(target: Expression, shape: &QueryShape) -> Expression {
                 Expression::new(Term::Lambda(LambdaTerm::new(
                     Arity::from(0, 1, None),
                     query(
-                        Expression::new(Term::Variable(VariableTerm::Static(
-                            StaticVariableTerm::new(0),
-                        ))),
+                        Expression::new(Term::Variable(VariableTerm::scoped(0))),
                         shape,
                     ),
                 ))),
@@ -271,7 +264,7 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                Ok(Expression::new(Term::Value(ValueTerm::Int(3 + 4)))),
+                Expression::new(Term::Value(ValueTerm::Int(3 + 4))),
                 DependencyList::empty(),
             )
         );
@@ -320,12 +313,12 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                Ok(Expression::new(Term::Collection(CollectionTerm::Vector(
-                    VectorTerm::new(vec![
+                Expression::new(Term::Collection(CollectionTerm::Vector(VectorTerm::new(
+                    vec![
                         Expression::new(Term::Value(ValueTerm::Int(3 + 1))),
                         Expression::new(Term::Value(ValueTerm::Int(4 + 1))),
                         Expression::new(Term::Value(ValueTerm::Int(5 + 1)))
-                    ])
+                    ]
                 )))),
                 DependencyList::empty(),
             )
@@ -358,12 +351,12 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                Ok(Expression::new(Term::Collection(CollectionTerm::Vector(
-                    VectorTerm::new(vec![
+                Expression::new(Term::Collection(CollectionTerm::Vector(VectorTerm::new(
+                    vec![
                         Expression::new(Term::Value(ValueTerm::Int(3 + 1))),
                         Expression::new(Term::Value(ValueTerm::Int(4 + 1))),
                         Expression::new(Term::Value(ValueTerm::Int(5 + 1)))
-                    ])
+                    ]
                 )))),
                 DependencyList::empty(),
             )
@@ -392,13 +385,13 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                Ok(Expression::new(Term::Collection(CollectionTerm::Vector(
-                    VectorTerm::new(vec![Expression::new(Term::Collection(
-                        CollectionTerm::Vector(VectorTerm::new(vec![
+                Expression::new(Term::Collection(CollectionTerm::Vector(VectorTerm::new(
+                    vec![Expression::new(Term::Collection(CollectionTerm::Vector(
+                        VectorTerm::new(vec![
                             Expression::new(Term::Value(ValueTerm::Int(2))),
                             Expression::new(Term::Value(ValueTerm::Int(3)))
-                        ]))
-                    ))])
+                        ])
+                    )))]
                 )))),
                 DependencyList::empty(),
             )
@@ -430,13 +423,13 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                Ok(Expression::new(Term::Collection(CollectionTerm::Vector(
-                    VectorTerm::new(vec![Expression::new(Term::Collection(
-                        CollectionTerm::Vector(VectorTerm::new(vec![
+                Expression::new(Term::Collection(CollectionTerm::Vector(VectorTerm::new(
+                    vec![Expression::new(Term::Collection(CollectionTerm::Vector(
+                        VectorTerm::new(vec![
                             Expression::new(Term::Value(ValueTerm::Int(2))),
                             Expression::new(Term::Value(ValueTerm::Int(3)))
-                        ]))
-                    ))])
+                        ])
+                    )))]
                 )))),
                 DependencyList::empty(),
             )
@@ -472,13 +465,13 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                Ok(Expression::new(Term::Collection(CollectionTerm::Vector(
-                    VectorTerm::new(vec![Expression::new(Term::Collection(
-                        CollectionTerm::Vector(VectorTerm::new(vec![
+                Expression::new(Term::Collection(CollectionTerm::Vector(VectorTerm::new(
+                    vec![Expression::new(Term::Collection(CollectionTerm::Vector(
+                        VectorTerm::new(vec![
                             Expression::new(Term::Value(ValueTerm::Int(2))),
                             Expression::new(Term::Value(ValueTerm::Int(3 + 4)))
-                        ]))
-                    ))])
+                        ])
+                    )))]
                 )))),
                 DependencyList::empty(),
             )
@@ -518,12 +511,12 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                Ok(Expression::new(Term::Collection(CollectionTerm::Vector(
-                    VectorTerm::new(vec![
+                Expression::new(Term::Collection(CollectionTerm::Vector(VectorTerm::new(
+                    vec![
                         Expression::new(Term::Value(ValueTerm::Int(3 + 4))),
                         Expression::new(Term::Value(ValueTerm::Int(5 + 6))),
                         Expression::new(Term::Value(ValueTerm::Int(7 + 8))),
-                    ])
+                    ]
                 )))),
                 DependencyList::empty(),
             )
@@ -719,8 +712,8 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                Ok(Expression::new(Term::Collection(CollectionTerm::Vector(
-                    VectorTerm::new(vec![
+                Expression::new(Term::Collection(CollectionTerm::Vector(VectorTerm::new(
+                    vec![
                         Expression::new(Term::Collection(CollectionTerm::Vector(VectorTerm::new(
                             vec![
                                 Expression::new(Term::Collection(CollectionTerm::Vector(
@@ -759,7 +752,7 @@ mod tests {
                                 ))),
                             ]
                         )))),
-                    ])
+                    ]
                 )))),
                 DependencyList::empty(),
             )
@@ -783,12 +776,12 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                Ok(Expression::new(Term::Collection(CollectionTerm::Vector(
-                    VectorTerm::new(vec![
+                Expression::new(Term::Collection(CollectionTerm::Vector(VectorTerm::new(
+                    vec![
                         Expression::new(Term::Value(ValueTerm::Int(3 + 1))),
                         Expression::new(Term::Value(ValueTerm::Int(4 + 1))),
                         Expression::new(Term::Value(ValueTerm::Int(5 + 1))),
-                    ])
+                    ]
                 )))),
                 DependencyList::empty(),
             )
@@ -824,8 +817,8 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                Ok(Expression::new(Term::Collection(CollectionTerm::Vector(
-                    VectorTerm::new(vec![
+                Expression::new(Term::Collection(CollectionTerm::Vector(VectorTerm::new(
+                    vec![
                         Expression::new(Term::Collection(CollectionTerm::Vector(VectorTerm::new(
                             vec![
                                 Expression::new(Term::Value(ValueTerm::Int(3 + 1))),
@@ -847,7 +840,7 @@ mod tests {
                                 Expression::new(Term::Value(ValueTerm::Int(5 + 3))),
                             ]
                         )))),
-                    ])
+                    ]
                 )))),
                 DependencyList::empty(),
             )

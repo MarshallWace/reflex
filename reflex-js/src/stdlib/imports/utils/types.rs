@@ -5,9 +5,9 @@ use std::any::TypeId;
 
 use reflex::{
     core::{
-        ApplicationTerm, Arity, EnumConstructorArity, EnumIndex, EnumTerm, EnumVariantPrototype,
-        Expression, LambdaTerm, NativeFunction, SerializedTerm, Signal, SignalTerm,
-        StaticVariableTerm, StructTerm, Term, VarArgs, VariableTerm,
+        ApplicationTerm, Arity, EnumIndex, EnumTerm, EnumVariantPrototype, Expression, LambdaTerm,
+        NativeFunction, SerializedTerm, Signal, SignalTerm, StructTerm, Term, VarArgs,
+        VariableTerm,
     },
     hash::{hash_object, HashId},
     stdlib::{signal::SignalType, value::ValueTerm},
@@ -33,7 +33,7 @@ pub(crate) fn import_types() -> Expression {
         (
             "Enum",
             Expression::new(Term::Lambda(LambdaTerm::new(
-                Arity::from(1, 0, None),
+                Arity::from(0, 1, None),
                 Expression::new(Term::Application(ApplicationTerm::new(
                     Expression::new(Term::Native(NativeFunction::new(
                         EnumTypeFactory::hash(),
@@ -42,9 +42,7 @@ pub(crate) fn import_types() -> Expression {
                     ))),
                     vec![Expression::new(Term::Application(ApplicationTerm::new(
                         flatten_deep(),
-                        vec![Expression::new(Term::Variable(VariableTerm::Static(
-                            StaticVariableTerm::new(0),
-                        )))],
+                        vec![Expression::new(Term::Variable(VariableTerm::scoped(0)))],
                     )))],
                 ))),
             ))),
@@ -60,9 +58,9 @@ pub(crate) fn import_types() -> Expression {
         (
             "Fn",
             Expression::new(Term::Lambda(LambdaTerm::new(
-                Arity::from(0, 0, Some(VarArgs::Eager)),
+                Arity::from(0, 0, Some(VarArgs::Lazy)),
                 Expression::new(Term::Lambda(LambdaTerm::new(
-                    Arity::from(1, 0, None),
+                    Arity::from(0, 1, None),
                     Expression::clone(&null),
                 ))),
             ))),
@@ -70,14 +68,14 @@ pub(crate) fn import_types() -> Expression {
         (
             "List",
             Expression::new(Term::Lambda(LambdaTerm::new(
-                Arity::from(1, 0, None),
+                Arity::from(0, 1, None),
                 Expression::clone(&null),
             ))),
         ),
         (
             "Maybe",
             Expression::new(Term::Lambda(LambdaTerm::new(
-                Arity::from(1, 0, None),
+                Arity::from(0, 1, None),
                 Expression::clone(&null),
             ))),
         ),
@@ -157,7 +155,7 @@ impl EnumTypeFactory {
                         .fields()
                         .iter()
                         .enumerate()
-                        .map(|(index, variant)| parse_enum_variant(variant, index as EnumIndex))
+                        .map(|(index, variant)| parse_enum_variant(variant, index))
                         .collect::<Result<Vec<_>, _>>();
                     match variants {
                         Ok(variants) => Ok(Expression::new(Term::Struct(StructTerm::new(
@@ -212,7 +210,7 @@ impl EnumVariantFactory {
         Arity::from(0, 0, Some(VarArgs::Eager))
     }
     fn apply(args: Vec<Expression>) -> Expression {
-        let num_args = args.len() as EnumConstructorArity;
+        let num_args = args.len();
         Expression::new(Term::EnumConstructor(EnumVariantPrototype::new(
             0, num_args,
         )))
@@ -259,14 +257,14 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                Ok(Expression::new(Term::StructConstructor(
+                Expression::new(Term::StructConstructor(
                     VarArgs::Lazy,
                     StructPrototype::new(vec![
                         ValueTerm::String(StringValue::from("foo")),
                         ValueTerm::String(StringValue::from("bar")),
                         ValueTerm::String(StringValue::from("baz")),
                     ])
-                ))),
+                )),
                 DependencyList::empty(),
             ),
         );
@@ -289,7 +287,7 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                Ok(Expression::new(Term::Struct(StructTerm::new(
+                Expression::new(Term::Struct(StructTerm::new(
                     Some(StructPrototype::new(vec![
                         ValueTerm::String(StringValue::from("foo")),
                         ValueTerm::String(StringValue::from("bar")),
@@ -300,7 +298,7 @@ mod tests {
                         Expression::new(Term::Value(ValueTerm::Float(4.0))),
                         Expression::new(Term::Value(ValueTerm::Float(5.0))),
                     ],
-                )))),
+                ))),
                 DependencyList::empty(),
             ),
         );
@@ -323,7 +321,7 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                Ok(Expression::new(Term::Struct(StructTerm::new(
+                Expression::new(Term::Struct(StructTerm::new(
                     Some(StructPrototype::new(vec![
                         ValueTerm::String(StringValue::from("foo")),
                         ValueTerm::String(StringValue::from("bar")),
@@ -334,7 +332,7 @@ mod tests {
                         Expression::new(Term::Value(ValueTerm::Float(4.0))),
                         Expression::new(Term::Value(ValueTerm::Float(5.0))),
                     ],
-                )))),
+                ))),
                 DependencyList::empty(),
             ),
         );
@@ -357,7 +355,7 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                Ok(Expression::new(Term::Struct(StructTerm::new(
+                Expression::new(Term::Struct(StructTerm::new(
                     Some(StructPrototype::new(vec![
                         ValueTerm::String(StringValue::from("foo")),
                         ValueTerm::String(StringValue::from("bar")),
@@ -386,7 +384,7 @@ mod tests {
                             ],
                         ))),
                     ],
-                )))),
+                ))),
                 DependencyList::empty(),
             ),
         );
@@ -409,7 +407,7 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                Ok(Expression::new(Term::Value(ValueTerm::Float(4.0)))),
+                Expression::new(Term::Value(ValueTerm::Float(4.0))),
                 DependencyList::empty(),
             ),
         );
@@ -438,7 +436,7 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                Ok(Expression::new(Term::Struct(StructTerm::new(
+                Expression::new(Term::Struct(StructTerm::new(
                     Some(StructPrototype::new(vec![
                         ValueTerm::String(StringValue::from("Foo")),
                         ValueTerm::String(StringValue::from("Bar")),
@@ -449,7 +447,7 @@ mod tests {
                         Expression::new(Term::Value(ValueTerm::String(StringValue::from("BAR")))),
                         Expression::new(Term::Value(ValueTerm::String(StringValue::from("BAZ")))),
                     ],
-                )))),
+                ))),
                 DependencyList::empty(),
             ),
         );
@@ -471,9 +469,7 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                Ok(Expression::new(Term::Value(ValueTerm::String(
-                    StringValue::from("FOO")
-                )))),
+                Expression::new(Term::Value(ValueTerm::String(StringValue::from("FOO")))),
                 DependencyList::empty(),
             ),
         );
@@ -495,9 +491,7 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                Ok(Expression::new(Term::Value(ValueTerm::String(
-                    StringValue::from("BAZ")
-                )))),
+                Expression::new(Term::Value(ValueTerm::String(StringValue::from("BAZ")))),
                 DependencyList::empty(),
             ),
         );
@@ -527,7 +521,7 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                Ok(Expression::new(Term::Struct(StructTerm::new(
+                Expression::new(Term::Struct(StructTerm::new(
                     Some(StructPrototype::new(vec![
                         ValueTerm::String(StringValue::from("Static")),
                         ValueTerm::String(StringValue::from("Empty")),
@@ -540,7 +534,7 @@ mod tests {
                         Expression::new(Term::EnumConstructor(EnumVariantPrototype::new(2, 1))),
                         Expression::new(Term::EnumConstructor(EnumVariantPrototype::new(3, 3))),
                     ],
-                )))),
+                ))),
                 DependencyList::empty(),
             ),
         );
@@ -563,7 +557,7 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                Ok(Expression::new(Term::Enum(EnumTerm::new(0, Vec::new())))),
+                Expression::new(Term::Enum(EnumTerm::new(0, Vec::new()))),
                 DependencyList::empty(),
             ),
         );
@@ -586,7 +580,7 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                Ok(Expression::new(Term::Enum(EnumTerm::new(1, Vec::new())))),
+                Expression::new(Term::Enum(EnumTerm::new(1, Vec::new()))),
                 DependencyList::empty(),
             ),
         );
@@ -609,10 +603,10 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                Ok(Expression::new(Term::Enum(EnumTerm::new(
+                Expression::new(Term::Enum(EnumTerm::new(
                     2,
                     vec![Expression::new(Term::Value(ValueTerm::Float(3.0)))],
-                )))),
+                ))),
                 DependencyList::empty(),
             ),
         );
@@ -635,14 +629,14 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                Ok(Expression::new(Term::Enum(EnumTerm::new(
+                Expression::new(Term::Enum(EnumTerm::new(
                     3,
                     vec![
                         Expression::new(Term::Value(ValueTerm::Float(3.0))),
                         Expression::new(Term::Value(ValueTerm::Float(4.0))),
                         Expression::new(Term::Value(ValueTerm::Float(5.0))),
                     ],
-                )))),
+                ))),
                 DependencyList::empty(),
             ),
         );

@@ -97,13 +97,13 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                Ok(Expression::new(Term::Collection(CollectionTerm::Vector(
-                    VectorTerm::new(vec![
+                Expression::new(Term::Collection(CollectionTerm::Vector(VectorTerm::new(
+                    vec![
                         Expression::new(Term::Value(ValueTerm::String(StringValue::from("foo")))),
                         Expression::new(Term::Value(ValueTerm::String(StringValue::from("bar")))),
                         Expression::new(Term::Value(ValueTerm::String(StringValue::from("baz")))),
-                    ]),
-                )))),
+                    ]
+                ),))),
                 DependencyList::empty(),
             ),
         );

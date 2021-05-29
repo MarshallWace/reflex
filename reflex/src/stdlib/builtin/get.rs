@@ -149,7 +149,7 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                Ok(Expression::new(Term::Value(ValueTerm::Int(4)))),
+                Expression::new(Term::Value(ValueTerm::Int(4))),
                 DependencyList::empty(),
             )
         )
@@ -181,7 +181,7 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                Ok(Expression::new(Term::Value(ValueTerm::Int(7)))),
+                Expression::new(Term::Value(ValueTerm::Int(7))),
                 DependencyList::empty(),
             )
         )
@@ -223,7 +223,7 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                Ok(Expression::new(Term::Value(ValueTerm::Int(4)))),
+                Expression::new(Term::Value(ValueTerm::Int(4))),
                 DependencyList::empty()
             ),
         );

@@ -5,8 +5,8 @@ use std::{borrow::Cow, iter::once, path::Path};
 
 use reflex::{
     core::{
-        ApplicationTerm, Arity, Expression, LambdaTerm, StackOffset, StaticVariableTerm,
-        StructPrototype, StructTerm, Term, VariableTerm,
+        ApplicationTerm, Arity, Expression, LambdaTerm, StructPrototype, StructTerm, Term,
+        VariableTerm,
     },
     stdlib::{
         builtin::BuiltinTerm,
@@ -569,8 +569,8 @@ fn parse_variable_reference<'src>(
     let name = parse_identifier(node)?;
     let offset = scope.get(name);
     match offset {
-        Some(offset) => Ok(Expression::new(Term::Variable(VariableTerm::Static(
-            StaticVariableTerm::new(offset as StackOffset),
+        Some(offset) => Ok(Expression::new(Term::Variable(VariableTerm::scoped(
+            offset,
         )))),
         None => match env.global(name) {
             Some(value) => Ok(value),
@@ -1184,8 +1184,8 @@ fn parse_arrow_function_expression<'src>(
             .into_iter()
             .map(|(arg_index, field_name)| {
                 get_dynamic_field(
-                    Expression::new(Term::Variable(VariableTerm::Static(
-                        StaticVariableTerm::new((num_args - arg_index - 1) as StackOffset),
+                    Expression::new(Term::Variable(VariableTerm::scoped(
+                        num_args - arg_index - 1,
                     ))),
                     field_name,
                 )
@@ -1380,7 +1380,7 @@ mod tests {
         cache::GenerationalGc,
         core::{
             ApplicationTerm, Arity, DependencyList, DynamicState, EvaluationResult, Expression,
-            LambdaTerm, StaticVariableTerm, StructPrototype, StructTerm, Term, VariableTerm,
+            LambdaTerm, StructPrototype, StructTerm, Term, VariableTerm,
         },
         stdlib::{
             builtin::BuiltinTerm,
@@ -1886,9 +1886,7 @@ mod tests {
                             Expression::new(Term::Application(ApplicationTerm::new(
                                 Expression::new(Term::Builtin(BuiltinTerm::Multiply)),
                                 vec![
-                                    Expression::new(Term::Variable(VariableTerm::Static(
-                                        StaticVariableTerm::new(0)
-                                    ))),
+                                    Expression::new(Term::Variable(VariableTerm::scoped(0))),
                                     Expression::new(Term::Value(ValueTerm::Float(2.0))),
                                 ],
                             ))),
@@ -1899,9 +1897,7 @@ mod tests {
                         Expression::new(Term::Application(ApplicationTerm::new(
                             Expression::new(Term::Builtin(BuiltinTerm::Multiply)),
                             vec![
-                                Expression::new(Term::Variable(VariableTerm::Static(
-                                    StaticVariableTerm::new(0)
-                                ))),
+                                Expression::new(Term::Variable(VariableTerm::scoped(0))),
                                 Expression::new(Term::Value(ValueTerm::Float(2.0))),
                             ],
                         ))),
@@ -1943,9 +1939,7 @@ mod tests {
             Ok(Expression::new(Term::Application(ApplicationTerm::new(
                 Expression::new(Term::Lambda(LambdaTerm::new(
                     Arity::from(0, 1, None),
-                    Expression::new(Term::Variable(VariableTerm::Static(
-                        StaticVariableTerm::new(0)
-                    ))),
+                    Expression::new(Term::Variable(VariableTerm::scoped(0))),
                 ))),
                 vec![Expression::new(Term::Value(ValueTerm::Float(3.0)))],
             )))),
@@ -1961,9 +1955,7 @@ mod tests {
                     Expression::new(Term::Application(ApplicationTerm::new(
                         Expression::new(Term::Lambda(LambdaTerm::new(
                             Arity::from(0, 1, None),
-                            Expression::new(Term::Variable(VariableTerm::Static(
-                                StaticVariableTerm::new(1)
-                            ))),
+                            Expression::new(Term::Variable(VariableTerm::scoped(1))),
                         ))),
                         vec![Expression::new(Term::Application(ApplicationTerm::new(
                             Expression::new(Term::Builtin(BuiltinTerm::Get)),
@@ -2018,9 +2010,7 @@ mod tests {
                     Expression::new(Term::Application(ApplicationTerm::new(
                         Expression::new(Term::Lambda(LambdaTerm::new(
                             Arity::from(0, 1, None),
-                            Expression::new(Term::Variable(VariableTerm::Static(
-                                StaticVariableTerm::new(1)
-                            ))),
+                            Expression::new(Term::Variable(VariableTerm::scoped(1))),
                         ))),
                         vec![Expression::new(Term::Application(ApplicationTerm::new(
                             Expression::new(Term::Builtin(BuiltinTerm::Get)),
@@ -2075,9 +2065,7 @@ mod tests {
                     Expression::new(Term::Application(ApplicationTerm::new(
                         Expression::new(Term::Lambda(LambdaTerm::new(
                             Arity::from(0, 1, None),
-                            Expression::new(Term::Variable(VariableTerm::Static(
-                                StaticVariableTerm::new(1)
-                            ))),
+                            Expression::new(Term::Variable(VariableTerm::scoped(1))),
                         ))),
                         vec![Expression::new(Term::Application(ApplicationTerm::new(
                             Expression::new(Term::Builtin(BuiltinTerm::Get)),
@@ -2141,7 +2129,7 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                Ok(Expression::new(Term::Value(ValueTerm::Float(3.0 * 2.0)))),
+                Expression::new(Term::Value(ValueTerm::Float(3.0 * 2.0))),
                 DependencyList::empty(),
             )
         )
@@ -2164,7 +2152,7 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                Ok(Expression::new(Term::Value(ValueTerm::Float(3.0)))),
+                Expression::new(Term::Value(ValueTerm::Float(3.0))),
                 DependencyList::empty(),
             ),
         );
@@ -2182,7 +2170,7 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                Ok(Expression::new(Term::Value(ValueTerm::Float(3.0)))),
+                Expression::new(Term::Value(ValueTerm::Float(3.0))),
                 DependencyList::empty(),
             ),
         );
@@ -2456,8 +2444,8 @@ mod tests {
                                             Expression::new(Term::Application(ApplicationTerm::new(
                                                 Expression::new(Term::Builtin(BuiltinTerm::Add)),
                                                 vec![
-                                                    Expression::new(Term::Variable(VariableTerm::Static(StaticVariableTerm::new(1)))),
-                                                    Expression::new(Term::Variable(VariableTerm::Static(StaticVariableTerm::new(0)))),
+                                                    Expression::new(Term::Variable(VariableTerm::scoped(1))),
+                                                    Expression::new(Term::Variable(VariableTerm::scoped(0))),
                                                 ]
                                             ))),
                                         ))),
@@ -2479,8 +2467,8 @@ mod tests {
                                             Expression::new(Term::Application(ApplicationTerm::new(
                                                 Expression::new(Term::Builtin(BuiltinTerm::Add)),
                                                 vec![
-                                                    Expression::new(Term::Variable(VariableTerm::Static(StaticVariableTerm::new(1)))),
-                                                    Expression::new(Term::Variable(VariableTerm::Static(StaticVariableTerm::new(0)))),
+                                                    Expression::new(Term::Variable(VariableTerm::scoped(1))),
+                                                    Expression::new(Term::Variable(VariableTerm::scoped(0))),
                                                 ]
                                             ))),
                                         ))),
@@ -2517,8 +2505,8 @@ mod tests {
                                             Expression::new(Term::Application(ApplicationTerm::new(
                                                 Expression::new(Term::Builtin(BuiltinTerm::Add)),
                                                 vec![
-                                                    Expression::new(Term::Variable(VariableTerm::Static(StaticVariableTerm::new(1)))),
-                                                    Expression::new(Term::Variable(VariableTerm::Static(StaticVariableTerm::new(0)))),
+                                                    Expression::new(Term::Variable(VariableTerm::scoped(1))),
+                                                    Expression::new(Term::Variable(VariableTerm::scoped(0))),
                                                 ]
                                             ))),
                                         ))),
@@ -2540,8 +2528,8 @@ mod tests {
                                             Expression::new(Term::Application(ApplicationTerm::new(
                                                 Expression::new(Term::Builtin(BuiltinTerm::Add)),
                                                 vec![
-                                                    Expression::new(Term::Variable(VariableTerm::Static(StaticVariableTerm::new(1)))),
-                                                    Expression::new(Term::Variable(VariableTerm::Static(StaticVariableTerm::new(0)))),
+                                                    Expression::new(Term::Variable(VariableTerm::scoped(1))),
+                                                    Expression::new(Term::Variable(VariableTerm::scoped(0))),
                                                 ]
                                             ))),
                                         ))),
@@ -2584,8 +2572,8 @@ mod tests {
                                             Expression::new(Term::Application(ApplicationTerm::new(
                                                 Expression::new(Term::Builtin(BuiltinTerm::Add)),
                                                 vec![
-                                                    Expression::new(Term::Variable(VariableTerm::Static(StaticVariableTerm::new(1)))),
-                                                    Expression::new(Term::Variable(VariableTerm::Static(StaticVariableTerm::new(0)))),
+                                                    Expression::new(Term::Variable(VariableTerm::scoped(1))),
+                                                    Expression::new(Term::Variable(VariableTerm::scoped(0))),
                                                 ]
                                             ))),
                                         ))),
@@ -2659,9 +2647,7 @@ mod tests {
             parse("(foo) => foo", &env),
             Ok(Expression::new(Term::Lambda(LambdaTerm::new(
                 Arity::from(0, 1, None),
-                Expression::new(Term::Variable(VariableTerm::Static(
-                    StaticVariableTerm::new(0)
-                ))),
+                Expression::new(Term::Variable(VariableTerm::scoped(0))),
             )))),
         );
         assert_eq!(
@@ -2671,12 +2657,8 @@ mod tests {
                 Expression::new(Term::Application(ApplicationTerm::new(
                     Expression::new(Term::Builtin(BuiltinTerm::Add)),
                     vec![
-                        Expression::new(Term::Variable(VariableTerm::Static(
-                            StaticVariableTerm::new(0)
-                        ))),
-                        Expression::new(Term::Variable(VariableTerm::Static(
-                            StaticVariableTerm::new(0)
-                        ))),
+                        Expression::new(Term::Variable(VariableTerm::scoped(0))),
+                        Expression::new(Term::Variable(VariableTerm::scoped(0))),
                     ],
                 ))),
             )))),
@@ -2688,12 +2670,8 @@ mod tests {
                 Expression::new(Term::Application(ApplicationTerm::new(
                     Expression::new(Term::Builtin(BuiltinTerm::Add)),
                     vec![
-                        Expression::new(Term::Variable(VariableTerm::Static(
-                            StaticVariableTerm::new(2)
-                        ))),
-                        Expression::new(Term::Variable(VariableTerm::Static(
-                            StaticVariableTerm::new(1)
-                        ))),
+                        Expression::new(Term::Variable(VariableTerm::scoped(2))),
+                        Expression::new(Term::Variable(VariableTerm::scoped(1))),
                     ],
                 ))),
             )))),
@@ -2709,12 +2687,8 @@ mod tests {
                         Expression::new(Term::Application(ApplicationTerm::new(
                             Expression::new(Term::Builtin(BuiltinTerm::Add)),
                             vec![
-                                Expression::new(Term::Variable(VariableTerm::Static(
-                                    StaticVariableTerm::new(2)
-                                ))),
-                                Expression::new(Term::Variable(VariableTerm::Static(
-                                    StaticVariableTerm::new(1)
-                                ))),
+                                Expression::new(Term::Variable(VariableTerm::scoped(2))),
+                                Expression::new(Term::Variable(VariableTerm::scoped(1))),
                             ],
                         ))),
                     ))),
@@ -2740,16 +2714,12 @@ mod tests {
                 Expression::new(Term::Application(ApplicationTerm::new(
                     Expression::new(Term::Lambda(LambdaTerm::new(
                         Arity::from(0, 1, None),
-                        Expression::new(Term::Variable(VariableTerm::Static(
-                            StaticVariableTerm::new(0)
-                        ))),
+                        Expression::new(Term::Variable(VariableTerm::scoped(0))),
                     ))),
                     vec![Expression::new(Term::Application(ApplicationTerm::new(
                         Expression::new(Term::Builtin(BuiltinTerm::Get)),
                         vec![
-                            Expression::new(Term::Variable(VariableTerm::Static(
-                                StaticVariableTerm::new(0)
-                            ))),
+                            Expression::new(Term::Variable(VariableTerm::scoped(0))),
                             Expression::new(Term::Value(ValueTerm::String(StringValue::from(
                                 "foo"
                             )))),
@@ -2768,12 +2738,8 @@ mod tests {
                         Expression::new(Term::Application(ApplicationTerm::new(
                             Expression::new(Term::Builtin(BuiltinTerm::Add)),
                             vec![
-                                Expression::new(Term::Variable(VariableTerm::Static(
-                                    StaticVariableTerm::new(1)
-                                ))),
-                                Expression::new(Term::Variable(VariableTerm::Static(
-                                    StaticVariableTerm::new(0)
-                                ))),
+                                Expression::new(Term::Variable(VariableTerm::scoped(1))),
+                                Expression::new(Term::Variable(VariableTerm::scoped(0))),
                             ],
                         ))),
                     ))),
@@ -2781,9 +2747,7 @@ mod tests {
                         Expression::new(Term::Application(ApplicationTerm::new(
                             Expression::new(Term::Builtin(BuiltinTerm::Get)),
                             vec![
-                                Expression::new(Term::Variable(VariableTerm::Static(
-                                    StaticVariableTerm::new(0)
-                                ))),
+                                Expression::new(Term::Variable(VariableTerm::scoped(0))),
                                 Expression::new(Term::Value(ValueTerm::String(StringValue::from(
                                     "foo"
                                 )))),
@@ -2792,9 +2756,7 @@ mod tests {
                         Expression::new(Term::Application(ApplicationTerm::new(
                             Expression::new(Term::Builtin(BuiltinTerm::Get)),
                             vec![
-                                Expression::new(Term::Variable(VariableTerm::Static(
-                                    StaticVariableTerm::new(0)
-                                ))),
+                                Expression::new(Term::Variable(VariableTerm::scoped(0))),
                                 Expression::new(Term::Value(ValueTerm::String(StringValue::from(
                                     "bar"
                                 )))),
@@ -2824,25 +2786,17 @@ mod tests {
                                             Expression::new(Term::Builtin(BuiltinTerm::Add)),
                                             vec![
                                                 Expression::new(Term::Variable(
-                                                    VariableTerm::Static(StaticVariableTerm::new(
-                                                        5
-                                                    ))
+                                                    VariableTerm::scoped(5)
                                                 )),
                                                 Expression::new(Term::Variable(
-                                                    VariableTerm::Static(StaticVariableTerm::new(
-                                                        1
-                                                    ))
+                                                    VariableTerm::scoped(1)
                                                 )),
                                             ],
                                         ))),
-                                        Expression::new(Term::Variable(VariableTerm::Static(
-                                            StaticVariableTerm::new(0)
-                                        ))),
+                                        Expression::new(Term::Variable(VariableTerm::scoped(0))),
                                     ],
                                 ))),
-                                Expression::new(Term::Variable(VariableTerm::Static(
-                                    StaticVariableTerm::new(2)
-                                ))),
+                                Expression::new(Term::Variable(VariableTerm::scoped(2))),
                             ],
                         ))),
                     ))),
@@ -2850,9 +2804,7 @@ mod tests {
                         Expression::new(Term::Application(ApplicationTerm::new(
                             Expression::new(Term::Builtin(BuiltinTerm::Get)),
                             vec![
-                                Expression::new(Term::Variable(VariableTerm::Static(
-                                    StaticVariableTerm::new(2)
-                                ))),
+                                Expression::new(Term::Variable(VariableTerm::scoped(2))),
                                 Expression::new(Term::Value(ValueTerm::String(StringValue::from(
                                     "foo"
                                 )))),
@@ -2861,9 +2813,7 @@ mod tests {
                         Expression::new(Term::Application(ApplicationTerm::new(
                             Expression::new(Term::Builtin(BuiltinTerm::Get)),
                             vec![
-                                Expression::new(Term::Variable(VariableTerm::Static(
-                                    StaticVariableTerm::new(2)
-                                ))),
+                                Expression::new(Term::Variable(VariableTerm::scoped(2))),
                                 Expression::new(Term::Value(ValueTerm::String(StringValue::from(
                                     "bar"
                                 )))),
@@ -2893,9 +2843,7 @@ mod tests {
             Ok(Expression::new(Term::Application(ApplicationTerm::new(
                 Expression::new(Term::Lambda(LambdaTerm::new(
                     Arity::from(0, 1, None),
-                    Expression::new(Term::Variable(VariableTerm::Static(
-                        StaticVariableTerm::new(0)
-                    ))),
+                    Expression::new(Term::Variable(VariableTerm::scoped(0))),
                 ))),
                 vec![Expression::new(Term::Value(ValueTerm::Float(3.0))),],
             )))),
@@ -2908,12 +2856,8 @@ mod tests {
                     Expression::new(Term::Application(ApplicationTerm::new(
                         Expression::new(Term::Builtin(BuiltinTerm::Add)),
                         vec![
-                            Expression::new(Term::Variable(VariableTerm::Static(
-                                StaticVariableTerm::new(2)
-                            ))),
-                            Expression::new(Term::Variable(VariableTerm::Static(
-                                StaticVariableTerm::new(1)
-                            ))),
+                            Expression::new(Term::Variable(VariableTerm::scoped(2))),
+                            Expression::new(Term::Variable(VariableTerm::scoped(1))),
                         ],
                     ))),
                 ))),
@@ -2938,11 +2882,11 @@ mod tests {
                                     Expression::new(Term::Application(ApplicationTerm::new(
                                         Expression::new(Term::Builtin(BuiltinTerm::Add)),
                                         vec![
-                                            Expression::new(Term::Variable(VariableTerm::Static(
-                                                StaticVariableTerm::new(2)
+                                            Expression::new(Term::Variable(VariableTerm::scoped(
+                                                2
                                             ))),
-                                            Expression::new(Term::Variable(VariableTerm::Static(
-                                                StaticVariableTerm::new(1)
+                                            Expression::new(Term::Variable(VariableTerm::scoped(
+                                                1
                                             ))),
                                         ],
                                     ))),
@@ -2977,7 +2921,7 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                Ok(Expression::new(Term::Value(ValueTerm::Float(3.0)))),
+                Expression::new(Term::Value(ValueTerm::Float(3.0))),
                 DependencyList::empty(),
             ),
         );
@@ -2999,7 +2943,7 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                Ok(Expression::new(Term::Value(ValueTerm::Float(3.0)))),
+                Expression::new(Term::Value(ValueTerm::Float(3.0))),
                 DependencyList::empty(),
             ),
         );
@@ -3027,7 +2971,7 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                Ok(Expression::new(Term::Value(ValueTerm::Float(3.0)))),
+                Expression::new(Term::Value(ValueTerm::Float(3.0))),
                 DependencyList::empty(),
             )
         );

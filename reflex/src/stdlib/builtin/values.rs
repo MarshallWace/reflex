@@ -94,13 +94,13 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                Ok(Expression::new(Term::Collection(CollectionTerm::Vector(
-                    VectorTerm::new(vec![
+                Expression::new(Term::Collection(CollectionTerm::Vector(VectorTerm::new(
+                    vec![
                         Expression::new(Term::Value(ValueTerm::Int(3))),
                         Expression::new(Term::Value(ValueTerm::Int(4))),
                         Expression::new(Term::Value(ValueTerm::Int(5))),
-                    ]),
-                )))),
+                    ]
+                ),))),
                 DependencyList::empty(),
             ),
         );

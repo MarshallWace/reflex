@@ -131,8 +131,8 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                Ok(Expression::new(Term::Collection(CollectionTerm::Vector(
-                    VectorTerm::new(vec![
+                Expression::new(Term::Collection(CollectionTerm::Vector(VectorTerm::new(
+                    vec![
                         Expression::new(Term::Struct(StructTerm::new(
                             None,
                             vec![
@@ -160,8 +160,8 @@ mod tests {
                                 Expression::new(Term::Value(ValueTerm::Int(5))),
                             ]
                         ))),
-                    ]),
-                )))),
+                    ]
+                ),))),
                 DependencyList::empty(),
             ),
         );
@@ -194,8 +194,8 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                Ok(Expression::new(Term::Collection(CollectionTerm::Vector(
-                    VectorTerm::new(vec![
+                Expression::new(Term::Collection(CollectionTerm::Vector(VectorTerm::new(
+                    vec![
                         Expression::new(Term::Struct(StructTerm::new(
                             None,
                             vec![
@@ -223,8 +223,8 @@ mod tests {
                                 Expression::new(Term::Value(ValueTerm::Int(5))),
                             ]
                         ))),
-                    ]),
-                )))),
+                    ]
+                ),))),
                 DependencyList::empty(),
             ),
         );

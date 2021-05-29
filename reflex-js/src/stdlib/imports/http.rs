@@ -6,7 +6,7 @@ use std::any::TypeId;
 use reflex::{
     core::{
         ApplicationTerm, Arity, Expression, LambdaTerm, NativeFunction, SerializedTerm, Signal,
-        SignalTerm, StaticVariableTerm, StructPrototype, StructTerm, Term, VarArgs, VariableTerm,
+        SignalTerm, StructPrototype, StructTerm, Term, VarArgs, VariableTerm,
     },
     hash::{hash_object, HashId},
     stdlib::{
@@ -40,9 +40,7 @@ fn import_http_fetch() -> Expression {
                         Expression::new(Term::Application(ApplicationTerm::new(
                             Expression::new(Term::Builtin(BuiltinTerm::Get)),
                             vec![
-                                Expression::new(Term::Variable(VariableTerm::Static(
-                                    StaticVariableTerm::new(0),
-                                ))),
+                                Expression::new(Term::Variable(VariableTerm::scoped(0))),
                                 Expression::new(Term::Value(ValueTerm::String(StringValue::from(
                                     "url",
                                 )))),
@@ -51,9 +49,7 @@ fn import_http_fetch() -> Expression {
                         Expression::new(Term::Application(ApplicationTerm::new(
                             Expression::new(Term::Builtin(BuiltinTerm::Get)),
                             vec![
-                                Expression::new(Term::Variable(VariableTerm::Static(
-                                    StaticVariableTerm::new(0),
-                                ))),
+                                Expression::new(Term::Variable(VariableTerm::scoped(0))),
                                 Expression::new(Term::Value(ValueTerm::String(StringValue::from(
                                     "method",
                                 )))),
@@ -64,9 +60,7 @@ fn import_http_fetch() -> Expression {
                             vec![Expression::new(Term::Application(ApplicationTerm::new(
                                 Expression::new(Term::Builtin(BuiltinTerm::Get)),
                                 vec![
-                                    Expression::new(Term::Variable(VariableTerm::Static(
-                                        StaticVariableTerm::new(0),
-                                    ))),
+                                    Expression::new(Term::Variable(VariableTerm::scoped(0))),
                                     Expression::new(Term::Value(ValueTerm::String(
                                         StringValue::from("headers"),
                                     ))),
@@ -76,9 +70,7 @@ fn import_http_fetch() -> Expression {
                         Expression::new(Term::Application(ApplicationTerm::new(
                             Expression::new(Term::Builtin(BuiltinTerm::Get)),
                             vec![
-                                Expression::new(Term::Variable(VariableTerm::Static(
-                                    StaticVariableTerm::new(0),
-                                ))),
+                                Expression::new(Term::Variable(VariableTerm::scoped(0))),
                                 Expression::new(Term::Value(ValueTerm::String(StringValue::from(
                                     "body",
                                 )))),
@@ -89,9 +81,7 @@ fn import_http_fetch() -> Expression {
             ))),
             vec![Expression::new(Term::Application(ApplicationTerm::new(
                 to_request(),
-                vec![Expression::new(Term::Variable(VariableTerm::Static(
-                    StaticVariableTerm::new(0),
-                )))],
+                vec![Expression::new(Term::Variable(VariableTerm::scoped(0)))],
             )))],
         ))),
     )))

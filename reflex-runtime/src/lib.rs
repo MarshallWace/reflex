@@ -167,9 +167,9 @@ impl Runtime {
     ) -> impl Stream<Item = SubscriptionResult> {
         BroadcastStream::new(self.results.subscribe()).filter_map(move |payload| match payload {
             Ok((id, result)) if id == subscription_id => match result {
-                Ok(expression) => match expression.value() {
-                    Term::Signal(signal) if signal.is_type(SignalType::Pending) => None,
-                    _ => Some(Ok(expression)),
+                Ok(expression) => match filter_pending_signals(expression) {
+                    Some(expression) => Some(Ok(expression)),
+                    None => None,
                 },
                 Err(error) => Some(Err(error)),
             },
@@ -311,12 +311,12 @@ async fn create_subscription<'a>(
             channel,
             id,
             initial_value,
-            WatchStream::new(update_receive).filter(|result| match result {
-                Ok(expression) => match expression.value() {
-                    Term::Signal(signal) if signal.is_type(SignalType::Pending) => false,
-                    _ => true,
+            WatchStream::new(update_receive).filter_map(|result| match result {
+                Ok(expression) => match filter_pending_signals(expression) {
+                    Some(expression) => Some(Ok(expression)),
+                    None => None,
                 },
-                _ => true,
+                Err(error) => Some(Err(error)),
             }),
         )),
     }
@@ -444,6 +444,29 @@ fn create_pending_expression() -> Expression {
         SignalType::Pending,
         Vec::new(),
     ))))
+}
+
+fn filter_pending_signals(expression: Expression) -> Option<Expression> {
+    match expression.value() {
+        Term::Signal(signal) if signal.signals().into_iter().any(is_pending_signal) => {
+            let signals = signal
+                .signals()
+                .into_iter()
+                .filter(|signal| !signal.is_type(SignalType::Pending))
+                .map(|signal| signal.clone())
+                .collect::<Vec<_>>();
+            if signals.is_empty() {
+                None
+            } else {
+                Some(Expression::new(Term::Signal(SignalTerm::from(signals))))
+            }
+        }
+        _ => Some(expression),
+    }
+}
+
+fn is_pending_signal(signal: &Signal) -> bool {
+    signal.is_type(SignalType::Pending)
 }
 
 fn strip_pending_results(

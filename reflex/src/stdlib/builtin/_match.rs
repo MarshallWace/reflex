@@ -59,8 +59,7 @@ mod tests {
         cache::GenerationalGc,
         core::{
             ApplicationTerm, Arity, DependencyList, DynamicState, EnumTerm, EvaluationResult,
-            Expression, LambdaTerm, Signal, SignalTerm, StaticVariableTerm, StructTerm, Term,
-            VariableTerm,
+            Expression, LambdaTerm, Signal, SignalTerm, StructTerm, Term, VariableTerm,
         },
         serialize::SerializedTerm,
         stdlib::builtin::BuiltinTerm,
@@ -98,18 +97,12 @@ mod tests {
                             Expression::new(Term::Application(ApplicationTerm::new(
                                 Expression::new(Term::Builtin(BuiltinTerm::Add)),
                                 vec![
-                                    Expression::new(Term::Variable(VariableTerm::Static(
-                                        StaticVariableTerm::new(2),
-                                    ))),
+                                    Expression::new(Term::Variable(VariableTerm::scoped(2))),
                                     Expression::new(Term::Application(ApplicationTerm::new(
                                         Expression::new(Term::Builtin(BuiltinTerm::Add)),
                                         vec![
-                                            Expression::new(Term::Variable(VariableTerm::Static(
-                                                StaticVariableTerm::new(1),
-                                            ))),
-                                            Expression::new(Term::Variable(VariableTerm::Static(
-                                                StaticVariableTerm::new(0),
-                                            ))),
+                                            Expression::new(Term::Variable(VariableTerm::scoped(1))),
+                                            Expression::new(Term::Variable(VariableTerm::scoped(0))),
                                         ],
                                     ))),
                                 ],
@@ -130,7 +123,7 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                Ok(Expression::new(Term::Value(ValueTerm::Int(3 + 4 + 5)))),
+                Expression::new(Term::Value(ValueTerm::Int(3 + 4 + 5))),
                 DependencyList::empty(),
             )
         )

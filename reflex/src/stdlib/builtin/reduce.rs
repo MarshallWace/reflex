@@ -74,7 +74,7 @@ mod tests {
         cache::GenerationalGc,
         core::{
             ApplicationTerm, Arity, DependencyList, DynamicState, EvaluationResult, Expression,
-            LambdaTerm, StaticVariableTerm, Term, VariableTerm,
+            LambdaTerm, Term, VariableTerm,
         },
         stdlib::{
             builtin::BuiltinTerm,
@@ -101,7 +101,7 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                Ok(Expression::new(Term::Value(ValueTerm::Int(3)))),
+                Expression::new(Term::Value(ValueTerm::Int(3))),
                 DependencyList::empty(),
             ),
         );
@@ -123,7 +123,7 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                Ok(Expression::new(Term::Value(ValueTerm::Int(3 + 4 + 5 + 6)))),
+                Expression::new(Term::Value(ValueTerm::Int(3 + 4 + 5 + 6))),
                 DependencyList::empty(),
             ),
         );
@@ -142,15 +142,11 @@ mod tests {
                     Expression::new(Term::Application(ApplicationTerm::new(
                         Expression::new(Term::Builtin(BuiltinTerm::Append)),
                         vec![
-                            Expression::new(Term::Variable(VariableTerm::Static(
-                                StaticVariableTerm::new(1),
-                            ))),
+                            Expression::new(Term::Variable(VariableTerm::scoped(1))),
                             Expression::new(Term::Application(ApplicationTerm::new(
                                 Expression::new(Term::Builtin(BuiltinTerm::Multiply)),
                                 vec![
-                                    Expression::new(Term::Variable(VariableTerm::Static(
-                                        StaticVariableTerm::new(0),
-                                    ))),
+                                    Expression::new(Term::Variable(VariableTerm::scoped(0))),
                                     Expression::new(Term::Value(ValueTerm::Int(2))),
                                 ],
                             ))),
@@ -170,13 +166,13 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                Ok(Expression::new(Term::Collection(CollectionTerm::Vector(
-                    VectorTerm::new(vec![
+                Expression::new(Term::Collection(CollectionTerm::Vector(VectorTerm::new(
+                    vec![
                         Expression::new(Term::Value(ValueTerm::Int(3))),
                         Expression::new(Term::Value(ValueTerm::Int(4 * 2))),
                         Expression::new(Term::Value(ValueTerm::Int(5 * 2))),
                         Expression::new(Term::Value(ValueTerm::Int(6 * 2))),
-                    ])
+                    ]
                 )))),
                 DependencyList::empty(),
             ),

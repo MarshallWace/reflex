@@ -6,9 +6,9 @@ use std::{collections::BTreeSet, fmt, hash::Hash, iter::once};
 use crate::{
     cache::EvaluationCache,
     core::{
-        capture_depth_multiple, dynamic_dependencies_multiple, optimize_multiple, signals_multiple,
-        substitute_multiple, DependencyList, Expression, Rewritable, Signal, StackOffset,
-        Substitutions, Term,
+        capture_depth_multiple, dynamic_dependencies_multiple, optimize_multiple,
+        substitute_dynamic_multiple, substitute_static_multiple, DependencyList, DynamicState,
+        Expression, Rewritable, StackOffset, Substitutions, Term,
     },
 };
 
@@ -63,15 +63,23 @@ impl Rewritable for HashSetTerm {
     fn dynamic_dependencies(&self) -> DependencyList {
         dynamic_dependencies_multiple(&self.values)
     }
-    fn signals(&self) -> Vec<Signal> {
-        signals_multiple(&self.values)
-    }
-    fn substitute(
+    fn substitute_static(
         &self,
         substitutions: &Substitutions,
         cache: &mut impl EvaluationCache,
     ) -> Option<Expression> {
-        substitute_multiple(&self.values, substitutions, cache).map(|updated| {
+        substitute_static_multiple(&self.values, substitutions, cache).map(|updated| {
+            Expression::new(Term::Collection(CollectionTerm::HashSet(Self::new(
+                updated,
+            ))))
+        })
+    }
+    fn substitute_dynamic(
+        &self,
+        state: &DynamicState,
+        cache: &mut impl EvaluationCache,
+    ) -> Option<Expression> {
+        substitute_dynamic_multiple(&self.values, state, cache).map(|updated| {
             Expression::new(Term::Collection(CollectionTerm::HashSet(Self::new(
                 updated,
             ))))

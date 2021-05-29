@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use crate::{
-    core::{Arity, Expression, SerializedTerm, Signal, SignalTerm, Term, VarArgs},
+    core::{Arity, Expression, SerializedTerm, Signal, SignalTerm, Term, VarArgs, VariableTerm},
     serialize,
     stdlib::{builtin::BuiltinFunction, signal::SignalType, value::ValueTerm},
 };
@@ -38,10 +38,14 @@ impl BuiltinFunction for Effect {
                         SignalType::Error,
                         vec![SerializedTerm::string(error)],
                     )))),
-                    Ok(args) => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
-                        SignalType::Custom(String::from(signal_type)),
-                        args,
-                    )))),
+                    Ok(args) => {
+                        let signal =
+                            Signal::new(SignalType::Custom(String::from(signal_type)), args);
+                        Expression::new(Term::Variable(VariableTerm::dynamic(
+                            signal.id(),
+                            Expression::new(Term::Signal(SignalTerm::new(signal))),
+                        )))
+                    }
                 }
             }
             _ => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
@@ -61,7 +65,7 @@ mod tests {
         cache::GenerationalGc,
         core::{
             ApplicationTerm, DependencyList, DynamicDependencies, DynamicState, EvaluationResult,
-            Expression, Signal, Term,
+            Expression, Signal, SignalTerm, Term,
         },
         serialize::SerializedTerm,
         stdlib::{
@@ -93,7 +97,7 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                Err(vec![signal]),
+                Expression::new(Term::Signal(SignalTerm::new(signal))),
                 DependencyList::of(DynamicDependencies::of(signal_hash))
             )
         );
@@ -105,9 +109,7 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                Ok(Expression::new(Term::Value(ValueTerm::String(
-                    StringValue::from("foo")
-                )))),
+                Expression::new(Term::Value(ValueTerm::String(StringValue::from("foo")))),
                 DependencyList::of(DynamicDependencies::of(signal_hash))
             )
         );

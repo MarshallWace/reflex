@@ -6,9 +6,10 @@ use std::{collections::BTreeMap, fmt, hash::Hash, iter::once};
 use crate::{
     cache::EvaluationCache,
     core::{
-        capture_depth_multiple, dynamic_dependencies_multiple, optimize_multiple, signals_multiple,
-        substitute_multiple, ApplicationTerm, DependencyList, Expression, Rewritable, Signal,
-        SignalTerm, StackOffset, StructTerm, Substitutions, Term,
+        capture_depth_multiple, dynamic_dependencies_multiple, optimize_multiple,
+        substitute_dynamic_multiple, substitute_static_multiple, ApplicationTerm, DependencyList,
+        DynamicState, Expression, Rewritable, Signal, SignalTerm, StackOffset, StructTerm,
+        Substitutions, Term,
     },
     hash::hash_object,
     serialize::SerializedTerm,
@@ -194,16 +195,23 @@ impl Rewritable for HashMapTerm {
     fn dynamic_dependencies(&self) -> DependencyList {
         dynamic_dependencies_multiple(&self.keys)
     }
-    fn signals(&self) -> Vec<Signal> {
-        signals_multiple(&self.keys)
-    }
-    fn substitute(
+    fn substitute_static(
         &self,
         substitutions: &Substitutions,
         cache: &mut impl EvaluationCache,
     ) -> Option<Expression> {
-        let keys = substitute_multiple(&self.keys, substitutions, cache);
-        let values = substitute_multiple(&self.values, substitutions, cache);
+        let keys = substitute_static_multiple(&self.keys, substitutions, cache);
+        let values = substitute_static_multiple(&self.values, substitutions, cache);
+        self.update(keys, values)
+            .map(|updated| Expression::new(Term::Collection(CollectionTerm::HashMap(updated))))
+    }
+    fn substitute_dynamic(
+        &self,
+        state: &DynamicState,
+        cache: &mut impl EvaluationCache,
+    ) -> Option<Expression> {
+        let keys = substitute_dynamic_multiple(&self.keys, state, cache);
+        let values = substitute_dynamic_multiple(&self.values, state, cache);
         self.update(keys, values)
             .map(|updated| Expression::new(Term::Collection(CollectionTerm::HashMap(updated))))
     }

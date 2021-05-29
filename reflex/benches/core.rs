@@ -9,7 +9,7 @@ use test::Bencher;
 use reflex::{
     cache::GenerationalGc,
     core::{
-        ApplicationTerm, Arity, DynamicState, Expression, LambdaTerm, StaticVariableTerm, Term,
+        ApplicationTerm, Arity, DynamicState, Expression, LambdaTerm, Term,
         VariableTerm,
     },
     parser::sexpr::parse,
@@ -102,12 +102,7 @@ fn deeply_nested_function_application(b: &mut Bencher) {
                 Arity::from(1, 0, None),
                 Expression::new(Term::Application(ApplicationTerm::new(
                     Expression::new(Term::Builtin(BuiltinTerm::Add)),
-                    vec![
-                        Expression::new(Term::Variable(VariableTerm::Static(
-                            StaticVariableTerm::new(0),
-                        ))),
-                        acc,
-                    ],
+                    vec![Expression::new(Term::Variable(VariableTerm::scoped(0))), acc],
                 ))),
             ))),
             vec![Expression::new(Term::Value(ValueTerm::Int(i)))],

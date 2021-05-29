@@ -6,8 +6,8 @@ use std::{fs, path::Path};
 use graphql_parser::schema::Document;
 use reflex::{
     core::{
-        ApplicationTerm, Arity, Expression, LambdaTerm, StaticVariableTerm, StructPrototype,
-        StructTerm, Term, VariableTerm,
+        ApplicationTerm, Arity, Expression, LambdaTerm, StructPrototype, StructTerm, Term,
+        VariableTerm,
     },
     stdlib::{
         builtin::BuiltinTerm,
@@ -53,9 +53,7 @@ fn create_graphql_client_constructor<'a: 'src, 'src>(
         Expression::new(Term::Application(ApplicationTerm::new(
             create_graphql_client_instance(schema),
             vec![get_struct_field(
-                Expression::new(Term::Variable(VariableTerm::Static(
-                    StaticVariableTerm::new(0),
-                ))),
+                Expression::new(Term::Variable(VariableTerm::scoped(0))),
                 String::from("url"),
             )],
         ))),
@@ -75,21 +73,15 @@ fn create_graphql_client_instance<'a: 'src, 'src>(_schema: &'a Document<&'src st
                         Expression::new(Term::Value(ValueTerm::String(StringValue::from(
                             "reflex::graphql::execute",
                         )))),
-                        Expression::new(Term::Variable(VariableTerm::Static(
-                            StaticVariableTerm::new(1),
-                        ))),
+                        Expression::new(Term::Variable(VariableTerm::scoped(1))),
                         get_struct_field(
-                            Expression::new(Term::Variable(VariableTerm::Static(
-                                StaticVariableTerm::new(0),
-                            ))),
+                            Expression::new(Term::Variable(VariableTerm::scoped(0))),
                             String::from("query"),
                         ),
                         Expression::new(Term::Application(ApplicationTerm::new(
                             flatten_deep(),
                             vec![get_struct_field(
-                                Expression::new(Term::Variable(VariableTerm::Static(
-                                    StaticVariableTerm::new(0),
-                                ))),
+                                Expression::new(Term::Variable(VariableTerm::scoped(0))),
                                 String::from("variables"),
                             )],
                         ))),

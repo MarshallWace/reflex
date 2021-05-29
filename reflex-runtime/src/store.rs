@@ -1,14 +1,11 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use std::{
-    collections::{BTreeSet, HashSet},
-    num::NonZeroUsize,
-};
+use std::{collections::BTreeSet, num::NonZeroUsize};
 
 use reflex::{
     cache::EvaluationCache,
-    core::{DependencyList, DynamicState, Expression, Signal, StateToken},
+    core::{DependencyList, DynamicState, Expression, Signal, StateToken, Term},
     hash::{hash_object, HashId},
 };
 
@@ -151,7 +148,7 @@ impl Subscription {
         state: &DynamicState,
         updates: Option<&UpdateSet>,
         cache: &mut impl EvaluationCache,
-    ) -> Option<Result<Expression, Vec<Signal>>> {
+    ) -> Option<Expression> {
         let state_hash = hash_object(&state);
         let is_unchanged = match updates {
             Some(updates) => match &self.dependencies {
@@ -253,13 +250,13 @@ where
         task.latest_update_batch = current_batch_index;
         let signal_updates = match task.subscription.execute(state, combined_updates, cache) {
             None => None,
-            Some(result) => match result {
-                Ok(expression) => {
-                    task.result = Some(Ok(expression));
-                    None
-                }
-                Err(signals) => {
-                    let signals = deduplicate_signals(signals);
+            Some(result) => match result.value() {
+                Term::Signal(term) => {
+                    let signals = &term
+                        .signals()
+                        .into_iter()
+                        .map(|signal| signal.clone())
+                        .collect::<Vec<_>>();
                     match signal_handler(&signals) {
                         Err(error) => {
                             task.result = Some(Err(error));
@@ -278,6 +275,10 @@ where
                         }
                     }
                 }
+                _ => {
+                    task.result = Some(Ok(result));
+                    None
+                }
             },
         };
         if let Some(updates) = signal_updates {
@@ -295,13 +296,4 @@ where
         }
     }
     tasks.into_iter().map(|task| task.result).collect()
-}
-
-fn deduplicate_signals(signals: Vec<Signal>) -> Vec<Signal> {
-    // TODO: Improve signal deduplication performance
-    signals
-        .into_iter()
-        .collect::<HashSet<_>>()
-        .drain()
-        .collect::<Vec<_>>()
 }

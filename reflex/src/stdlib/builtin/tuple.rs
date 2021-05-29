@@ -43,10 +43,7 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                Ok(Expression::new(Term::Struct(StructTerm::new(
-                    None,
-                    Vec::new()
-                )))),
+                Expression::new(Term::Struct(StructTerm::new(None, Vec::new()))),
                 DependencyList::empty(),
             ),
         );
@@ -62,14 +59,14 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                Ok(Expression::new(Term::Struct(StructTerm::new(
+                Expression::new(Term::Struct(StructTerm::new(
                     None,
                     vec![
                         Expression::new(Term::Value(ValueTerm::Int(3))),
                         Expression::new(Term::Value(ValueTerm::Int(4))),
                         Expression::new(Term::Value(ValueTerm::Int(5))),
                     ],
-                )))),
+                ))),
                 DependencyList::empty(),
             ),
         );
@@ -85,14 +82,14 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                Ok(Expression::new(Term::Struct(StructTerm::new(
+                Expression::new(Term::Struct(StructTerm::new(
                     None,
                     vec![
                         parse("(+ 3 1)").unwrap(),
                         parse("(+ 4 1)").unwrap(),
                         parse("(+ 5 1)").unwrap(),
                     ],
-                )))),
+                ))),
                 DependencyList::empty(),
             ),
         );

@@ -47,7 +47,9 @@ impl BuiltinFunction for Add {
 mod tests {
     use crate::{
         cache::GenerationalGc,
-        core::{DependencyList, DynamicState, EvaluationResult, Expression, Signal, Term},
+        core::{
+            DependencyList, DynamicState, EvaluationResult, Expression, Signal, SignalTerm, Term,
+        },
         parser::sexpr::parse,
         serialize::SerializedTerm,
         stdlib::{signal::SignalType, value::ValueTerm},
@@ -62,7 +64,7 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                Ok(Expression::new(Term::Value(ValueTerm::Int(0 + 0)))),
+                Expression::new(Term::Value(ValueTerm::Int(0 + 0))),
                 DependencyList::empty(),
             )
         );
@@ -71,7 +73,7 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                Ok(Expression::new(Term::Value(ValueTerm::Int(3 + 4)))),
+                Expression::new(Term::Value(ValueTerm::Int(3 + 4))),
                 DependencyList::empty(),
             )
         );
@@ -80,7 +82,7 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                Ok(Expression::new(Term::Value(ValueTerm::Int(-3 + 4)))),
+                Expression::new(Term::Value(ValueTerm::Int(-3 + 4))),
                 DependencyList::empty(),
             )
         );
@@ -89,7 +91,7 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                Ok(Expression::new(Term::Value(ValueTerm::Int(3 + -4)))),
+                Expression::new(Term::Value(ValueTerm::Int(3 + -4))),
                 DependencyList::empty(),
             )
         );
@@ -98,7 +100,7 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                Ok(Expression::new(Term::Value(ValueTerm::Int(-3 + -4)))),
+                Expression::new(Term::Value(ValueTerm::Int(-3 + -4))),
                 DependencyList::empty(),
             )
         );
@@ -108,7 +110,7 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                Ok(Expression::new(Term::Value(ValueTerm::Float(0.0 + 0.0)))),
+                Expression::new(Term::Value(ValueTerm::Float(0.0 + 0.0))),
                 DependencyList::empty(),
             )
         );
@@ -117,9 +119,7 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                Ok(Expression::new(Term::Value(ValueTerm::Float(
-                    2.718 + 3.142
-                )))),
+                Expression::new(Term::Value(ValueTerm::Float(2.718 + 3.142))),
                 DependencyList::empty(),
             )
         );
@@ -128,9 +128,7 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                Ok(Expression::new(Term::Value(ValueTerm::Float(
-                    -2.718 + 3.142
-                )))),
+                Expression::new(Term::Value(ValueTerm::Float(-2.718 + 3.142))),
                 DependencyList::empty(),
             )
         );
@@ -139,9 +137,7 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                Ok(Expression::new(Term::Value(ValueTerm::Float(
-                    2.718 + -3.142
-                )))),
+                Expression::new(Term::Value(ValueTerm::Float(2.718 + -3.142))),
                 DependencyList::empty(),
             )
         );
@@ -150,9 +146,7 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                Ok(Expression::new(Term::Value(ValueTerm::Float(
-                    -2.718 + -3.142
-                )))),
+                Expression::new(Term::Value(ValueTerm::Float(-2.718 + -3.142))),
                 DependencyList::empty(),
             )
         );
@@ -167,12 +161,12 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                Err(vec![Signal::new(
+                Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                     SignalType::Error,
                     vec![SerializedTerm::string(String::from(
                         "Expected (Int, Int) or (Float, Float), received (3, 3.142)"
                     ))]
-                )]),
+                )))),
                 DependencyList::empty()
             )
         );
@@ -181,12 +175,12 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                Err(vec![Signal::new(
+                Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                     SignalType::Error,
                     vec![SerializedTerm::string(String::from(
                         "Expected (Int, Int) or (Float, Float), received (3.142, 3)"
                     ))]
-                )]),
+                )))),
                 DependencyList::empty()
             )
         );
@@ -196,12 +190,12 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                Err(vec![Signal::new(
+                Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                     SignalType::Error,
                     vec![SerializedTerm::string(String::from(
                         "Expected (Int, Int) or (Float, Float), received (3, false)"
                     ))]
-                )]),
+                )))),
                 DependencyList::empty()
             )
         );
@@ -210,12 +204,12 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                Err(vec![Signal::new(
+                Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                     SignalType::Error,
                     vec![SerializedTerm::string(String::from(
                         "Expected (Int, Int) or (Float, Float), received (3, \"3\")"
                     ))]
-                )]),
+                )))),
                 DependencyList::empty()
             )
         );
@@ -225,12 +219,12 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                Err(vec![Signal::new(
+                Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                     SignalType::Error,
                     vec![SerializedTerm::string(String::from(
                         "Expected (Int, Int) or (Float, Float), received (false, 3)"
                     ))]
-                )]),
+                )))),
                 DependencyList::empty()
             )
         );
@@ -239,12 +233,12 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                Err(vec![Signal::new(
+                Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                     SignalType::Error,
                     vec![SerializedTerm::string(String::from(
                         "Expected (Int, Int) or (Float, Float), received (\"3\", 3)"
                     ))]
-                )]),
+                )))),
                 DependencyList::empty()
             )
         );
@@ -254,12 +248,12 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                Err(vec![Signal::new(
+                Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                     SignalType::Error,
                     vec![SerializedTerm::string(String::from(
                         "Expected (Int, Int) or (Float, Float), received (3.142, false)"
                     ))]
-                )]),
+                )))),
                 DependencyList::empty()
             )
         );
@@ -268,12 +262,12 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                Err(vec![Signal::new(
+                Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                     SignalType::Error,
                     vec![SerializedTerm::string(String::from(
                         "Expected (Int, Int) or (Float, Float), received (3.142, \"3\")"
                     ))]
-                )]),
+                )))),
                 DependencyList::empty()
             )
         );
@@ -283,12 +277,12 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                Err(vec![Signal::new(
+                Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                     SignalType::Error,
                     vec![SerializedTerm::string(String::from(
                         "Expected (Int, Int) or (Float, Float), received (false, 3.142)"
                     ))]
-                )]),
+                )))),
                 DependencyList::empty()
             )
         );
@@ -297,12 +291,12 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                Err(vec![Signal::new(
+                Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                     SignalType::Error,
                     vec![SerializedTerm::string(String::from(
                         "Expected (Int, Int) or (Float, Float), received (\"3\", 3.142)"
                     ))]
-                )]),
+                )))),
                 DependencyList::empty()
             )
         );

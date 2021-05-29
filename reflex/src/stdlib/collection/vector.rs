@@ -6,9 +6,9 @@ use std::{fmt, iter::once};
 use crate::{
     cache::EvaluationCache,
     core::{
-        capture_depth_multiple, dynamic_dependencies_multiple, optimize_multiple, signals_multiple,
-        substitute_multiple, DependencyList, Expression, Rewritable, Signal, StackOffset,
-        Substitutions, Term,
+        capture_depth_multiple, dynamic_dependencies_multiple, optimize_multiple,
+        substitute_dynamic_multiple, substitute_static_multiple, DependencyList, DynamicState,
+        Expression, Rewritable, StackOffset, Substitutions, Term,
     },
 };
 
@@ -54,15 +54,21 @@ impl Rewritable for VectorTerm {
     fn dynamic_dependencies(&self) -> DependencyList {
         dynamic_dependencies_multiple(&self.items)
     }
-    fn signals(&self) -> Vec<Signal> {
-        signals_multiple(&self.items)
-    }
-    fn substitute(
+    fn substitute_static(
         &self,
         substitutions: &Substitutions,
         cache: &mut impl EvaluationCache,
     ) -> Option<Expression> {
-        substitute_multiple(&self.items, substitutions, cache).map(|items| {
+        substitute_static_multiple(&self.items, substitutions, cache).map(|items| {
+            Expression::new(Term::Collection(CollectionTerm::Vector(Self::new(items))))
+        })
+    }
+    fn substitute_dynamic(
+        &self,
+        state: &DynamicState,
+        cache: &mut impl EvaluationCache,
+    ) -> Option<Expression> {
+        substitute_dynamic_multiple(&self.items, state, cache).map(|items| {
             Expression::new(Term::Collection(CollectionTerm::Vector(Self::new(items))))
         })
     }

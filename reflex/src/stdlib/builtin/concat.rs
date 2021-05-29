@@ -58,9 +58,7 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                Ok(Expression::new(Term::Value(ValueTerm::String(
-                    StringValue::from("")
-                )))),
+                Expression::new(Term::Value(ValueTerm::String(StringValue::from("")))),
                 DependencyList::empty(),
             )
         );
@@ -69,9 +67,7 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                Ok(Expression::new(Term::Value(ValueTerm::String(
-                    StringValue::from("foo")
-                )))),
+                Expression::new(Term::Value(ValueTerm::String(StringValue::from("foo")))),
                 DependencyList::empty(),
             )
         );
@@ -80,9 +76,7 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                Ok(Expression::new(Term::Value(ValueTerm::String(
-                    StringValue::from("bar")
-                )))),
+                Expression::new(Term::Value(ValueTerm::String(StringValue::from("bar")))),
                 DependencyList::empty(),
             )
         );
@@ -91,9 +85,7 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                Ok(Expression::new(Term::Value(ValueTerm::String(
-                    StringValue::from("foobar")
-                )))),
+                Expression::new(Term::Value(ValueTerm::String(StringValue::from("foobar")))),
                 DependencyList::empty(),
             )
         );
@@ -102,8 +94,8 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                Ok(Expression::new(Term::Value(ValueTerm::String(
-                    StringValue::from("foobarbaz")
+                Expression::new(Term::Value(ValueTerm::String(StringValue::from(
+                    "foobarbaz"
                 )))),
                 DependencyList::empty(),
             )

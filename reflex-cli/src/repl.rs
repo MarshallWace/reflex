@@ -5,7 +5,7 @@ use std::io::{self, Write};
 
 use reflex::{
     cache::GenerationalGc,
-    core::{DynamicState, SerializedTerm},
+    core::{DynamicState, SerializedTerm, Term},
     parser::sexpr::parse,
     stdlib::{signal::SignalType, value::ValueTerm},
 };
@@ -35,10 +35,9 @@ pub fn run() -> io::Result<()> {
         match parse(&input) {
             Ok(expression) => {
                 let (result, _) = expression.evaluate(&state, &mut cache).unwrap();
-                match result {
-                    Ok(result) => writeln!(stdout, "{}", result)?,
-                    Err(signals) => {
-                        for signal in signals {
+                match result.value() {
+                    Term::Signal(signal) => {
+                        for signal in signal.signals() {
                             let message = match signal.get_type() {
                                 SignalType::Error => {
                                     let (message, args) = {
@@ -86,6 +85,7 @@ pub fn run() -> io::Result<()> {
                             writeln!(stdout, "{}", message)?;
                         }
                     }
+                    _ => writeln!(stdout, "{}", result)?,
                 }
             }
             Err(err) => {

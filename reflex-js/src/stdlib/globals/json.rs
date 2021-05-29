@@ -6,7 +6,7 @@ use std::any::TypeId;
 use reflex::{
     core::{
         ApplicationTerm, Arity, Expression, LambdaTerm, NativeFunction, SerializedTerm, Signal,
-        SignalTerm, StaticVariableTerm, StructTerm, Term, VariableTerm,
+        SignalTerm, StructTerm, Term, VariableTerm,
     },
     hash::{hash_object, HashId},
     stdlib::{
@@ -63,7 +63,7 @@ impl JsonParse {
 
 pub fn global_json_stringify() -> Expression {
     Expression::new(Term::Lambda(LambdaTerm::new(
-        Arity::from(1, 0, None),
+        Arity::from(0, 1, None),
         Expression::new(Term::Application(ApplicationTerm::new(
             Expression::new(Term::Native(NativeFunction::new(
                 JsonStringify::hash(),
@@ -72,9 +72,7 @@ pub fn global_json_stringify() -> Expression {
             ))),
             vec![Expression::new(Term::Application(ApplicationTerm::new(
                 flatten_deep(),
-                vec![Expression::new(Term::Variable(VariableTerm::Static(
-                    StaticVariableTerm::new(0),
-                )))],
+                vec![Expression::new(Term::Variable(VariableTerm::scoped(0)))],
             )))],
         ))),
     )))

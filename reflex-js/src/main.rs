@@ -5,7 +5,7 @@ use std::{env, error::Error, fs, path::Path};
 
 use reflex::{
     cache::GenerationalGc,
-    core::{DynamicState, SerializedTerm},
+    core::{DynamicState, SerializedTerm, Term},
     stdlib::{signal::SignalType, value::ValueTerm},
 };
 use reflex_js::{
@@ -34,12 +34,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut cache = GenerationalGc::new();
     let state = DynamicState::new();
     let (result, _) = expression.evaluate(&state, &mut cache).unwrap();
-    match result {
-        Ok(result) => {
-            println!("{}", result);
-        }
-        Err(signals) => {
-            for signal in signals {
+    match result.value() {
+        Term::Signal(signal) => {
+            for signal in signal.signals() {
                 let message = match signal.get_type() {
                     SignalType::Error => {
                         let (message, args) = {
@@ -86,6 +83,9 @@ fn main() -> Result<(), Box<dyn Error>> {
                 };
                 println!("{}", message);
             }
+        }
+        _ => {
+            println!("{}", result);
         }
     }
     Ok(())
