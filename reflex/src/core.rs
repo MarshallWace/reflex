@@ -1027,6 +1027,20 @@ impl Reducible for ApplicationTerm {
         match arity {
             None => None,
             Some(arity) => {
+                if self.args.len() < arity.required() {
+                    // TODO: Allow consumer-provided error factory
+                    return Some(Expression::new(Term::Signal(SignalTerm::new(Signal::new(
+                        SignalType::Error,
+                        vec![SerializedTerm::Value(ValueTerm::String(format!(
+                            "Expected {}, received {}",
+                            match arity.required() {
+                                1 => String::from("1 argument"),
+                                arity => format!("{} arguments", arity),
+                            },
+                            self.args.len()
+                        )))],
+                    )))));
+                }
                 let result = match evaluate_args(self.args.iter(), arity, cache) {
                     Err(args) => Err(args),
                     Ok(args) => {
@@ -1112,14 +1126,6 @@ fn evaluate_args<'a>(
     arity: Arity,
     cache: &mut impl EvaluationCache,
 ) -> Result<Vec<Expression>, Vec<Expression>> {
-    if args.len() < arity.required() {
-        // TODO: Handle application arity errors gracefully
-        panic!(
-            "Expected {} arguments, received {}",
-            arity.required(),
-            args.len()
-        );
-    }
     let eager_arity = arity.eager();
     let eager_varargs = match arity.variadic {
         Some(VarArgs::Eager) => true,
@@ -1676,7 +1682,6 @@ mod tests {
                 DependencyList::empty(),
             ),
         );
-
         let expression = parse("((lambda (foo bar) (+ foo bar)) 3 4)").unwrap();
         let result = expression.evaluate(&state, &mut cache);
         assert_eq!(
@@ -1686,7 +1691,6 @@ mod tests {
                 DependencyList::empty(),
             ),
         );
-
         let expression =
             parse("((lambda (foo bar) (((lambda (foo bar) (lambda (foo bar) (+ foo bar))) foo bar) foo bar)) 3 4)")
                 .unwrap();
@@ -1695,6 +1699,54 @@ mod tests {
             result,
             EvaluationResult::new(
                 Expression::new(Term::Value(ValueTerm::Int(3 + 4))),
+                DependencyList::empty(),
+            ),
+        );
+    }
+
+    #[test]
+    fn invalid_function_applications() {
+        let state = DynamicState::new();
+        let mut cache = GenerationalGc::new();
+        let expression = parse("((lambda (foo) foo))").unwrap();
+        let result = expression.evaluate(&state, &mut cache);
+        assert_eq!(
+            result,
+            EvaluationResult::new(
+                Expression::new(Term::Signal(SignalTerm::new(Signal::new(
+                    SignalType::Error,
+                    vec![SerializedTerm::Value(ValueTerm::String(StringValue::from(
+                        "Expected 1 argument, received 0"
+                    )))]
+                )))),
+                DependencyList::empty(),
+            ),
+        );
+        let expression = parse("((lambda (first second third) first) 3)").unwrap();
+        let result = expression.evaluate(&state, &mut cache);
+        assert_eq!(
+            result,
+            EvaluationResult::new(
+                Expression::new(Term::Signal(SignalTerm::new(Signal::new(
+                    SignalType::Error,
+                    vec![SerializedTerm::Value(ValueTerm::String(StringValue::from(
+                        "Expected 3 arguments, received 1"
+                    )))]
+                )))),
+                DependencyList::empty(),
+            ),
+        );
+        let expression = parse("((lambda (first second third) first) 3 4)").unwrap();
+        let result = expression.evaluate(&state, &mut cache);
+        assert_eq!(
+            result,
+            EvaluationResult::new(
+                Expression::new(Term::Signal(SignalTerm::new(Signal::new(
+                    SignalType::Error,
+                    vec![SerializedTerm::Value(ValueTerm::String(StringValue::from(
+                        "Expected 3 arguments, received 2"
+                    )))]
+                )))),
                 DependencyList::empty(),
             ),
         );
