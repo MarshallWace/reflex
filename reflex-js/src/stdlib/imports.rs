@@ -6,6 +6,8 @@ use reflex::{
     stdlib::value::{StringValue, ValueTerm},
 };
 
+mod date;
+use date::import_date;
 mod graphql;
 use graphql::import_graphql;
 mod http;
@@ -16,6 +18,7 @@ use utils::import_utils;
 pub fn builtin_imports() -> Vec<(&'static str, Expression)> {
     vec![
         ("reflex::utils", import_utils()),
+        ("reflex::date", import_date()),
         ("reflex::graphql", import_graphql()),
         ("reflex::http", import_http()),
     ]

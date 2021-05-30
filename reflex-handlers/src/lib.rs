@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+pub mod date;
 pub mod graphql;
 pub mod http;
 
@@ -18,6 +19,10 @@ pub fn builtin_signal_handler(
 ) -> impl Fn(&str, &[SerializedTerm]) -> Option<Result<SignalResult, String>> + Send + Sync + 'static
 {
     create_signal_handler(vec![
+        (
+            "reflex::date::interval",
+            date::handle_date_interval as fn(&[SerializedTerm]) -> Result<SignalResult, String>,
+        ),
         (
             "reflex::http::fetch",
             http::handle_http_fetch as fn(&[SerializedTerm]) -> Result<SignalResult, String>,

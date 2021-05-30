@@ -697,6 +697,8 @@ dependencies = [
  "reflex",
  "reflex-json",
  "reflex-runtime",
+ "tokio",
+ "tokio-stream",
 ]
 
 [[package]]
