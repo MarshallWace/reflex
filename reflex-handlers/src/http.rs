@@ -5,6 +5,7 @@ use reflex::{
     core::{Expression, SerializedTerm, Signal, SignalTerm, Term},
     stdlib::{signal::SignalType, value::ValueTerm},
 };
+use reflex_runtime::RuntimeEffect;
 
 use crate::{utils::fetch, SignalResult};
 
@@ -26,7 +27,7 @@ pub fn handle_http_fetch(args: &[SerializedTerm]) -> Result<SignalResult, String
                 SignalType::Pending,
                 Vec::new(),
             )))),
-            Some(Box::pin(async move {
+            Some(RuntimeEffect::Async(Box::pin(async move {
                 match fetch(method, url, headers, body).await {
                     Ok(data) => Expression::new(Term::Value(ValueTerm::String(data))),
                     Err(error) => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
@@ -34,7 +35,7 @@ pub fn handle_http_fetch(args: &[SerializedTerm]) -> Result<SignalResult, String
                         vec![SerializedTerm::string(error)],
                     )))),
                 }
-            })),
+            }))),
         )),
         _ => Err(String::from("Invalid fetch signal arguments")),
     }

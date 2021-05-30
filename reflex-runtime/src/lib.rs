@@ -18,7 +18,7 @@ mod store;
 use store::Store;
 
 pub type SubscriptionResult = Result<Expression, Vec<String>>;
-pub type SignalResult = (Expression, Option<SignalEffect>);
+pub type SignalResult = (Expression, Option<RuntimeEffect>);
 
 struct Operation<TRequest, TResponse> {
     payload: TRequest,
@@ -59,7 +59,12 @@ type SubscribeCommand =
 type UnsubscribeCommand = Operation<SubscriptionId, bool>;
 type UpdateCommand = Operation<Vec<(StateToken, Expression)>, ()>;
 
-type SignalEffect = Pin<Box<dyn Future<Output = Expression> + Send + 'static>>;
+pub enum RuntimeEffect {
+    Async(AsyncEffect),
+    Stream(StreamEffect),
+}
+pub type AsyncEffect = Pin<Box<dyn Future<Output = Expression> + Send + 'static>>;
+pub type StreamEffect = Pin<Box<dyn Stream<Item = Expression> + Send + 'static>>;
 
 enum Command {
     Subscribe(SubscribeCommand),
@@ -386,26 +391,41 @@ where
             let (results, effects) = extract_signal_effects(signals, results);
             for (id, effect) in effects {
                 let commands = commands.clone();
-                tokio::spawn(async move {
-                    let value = effect.await;
-                    let (send, receive) = oneshot::channel();
-                    commands
-                        .send(Command::update(vec![(id, value)], send))
-                        .await
-                        .ok()
-                        .unwrap();
-                    receive.await.unwrap();
-                });
+                match effect {
+                    RuntimeEffect::Async(effect) => {
+                        tokio::spawn(async move {
+                            let value = effect.await;
+                            emit_update(id, value, &commands).await
+                        });
+                    }
+                    RuntimeEffect::Stream(mut effect) => {
+                        tokio::spawn(async move {
+                            while let Some(value) = effect.next().await {
+                                emit_update(id, value, &commands).await
+                            }
+                        });
+                    }
+                }
             }
             Ok(results)
         }
     }
 }
 
+async fn emit_update(id: StateToken, value: Expression, commands: &CommandChannel) {
+    let (send, receive) = oneshot::channel();
+    commands
+        .send(Command::update(vec![(id, value)], send))
+        .await
+        .ok()
+        .unwrap();
+    receive.await.unwrap();
+}
+
 fn extract_signal_effects<'a>(
     signals: impl IntoIterator<Item = &'a Signal>,
     results: impl IntoIterator<Item = SignalResult>,
-) -> (Vec<Expression>, Vec<(StateToken, SignalEffect)>) {
+) -> (Vec<Expression>, Vec<(StateToken, RuntimeEffect)>) {
     let (pure_results, stateful_results): (Vec<_>, Vec<_>) = results
         .into_iter()
         .zip(signals.into_iter().map(|signal| signal.id()))

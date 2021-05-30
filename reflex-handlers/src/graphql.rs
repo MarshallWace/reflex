@@ -8,7 +8,7 @@ use reflex::{
     stdlib::{signal::SignalType, value::ValueTerm},
 };
 use reflex_json::stringify;
-use reflex_runtime::SignalResult;
+use reflex_runtime::{RuntimeEffect, SignalResult};
 
 use crate::utils::fetch;
 
@@ -39,7 +39,7 @@ pub fn handle_graphql_execute(args: &[SerializedTerm]) -> Result<SignalResult, S
                     SignalType::Pending,
                     Vec::new(),
                 )))),
-                Some(Box::pin(async move {
+                Some(RuntimeEffect::Async(Box::pin(async move {
                     let response = fetch(method, url, headers, Some(body)).await;
                     let result = match response {
                         Ok(data) => {
@@ -94,7 +94,7 @@ pub fn handle_graphql_execute(args: &[SerializedTerm]) -> Result<SignalResult, S
                             vec![SerializedTerm::string(error)],
                         )))),
                     }
-                })),
+                }))),
             ))
         }
         _ => Err(String::from("Invalid GraphQL signal arguments")),
