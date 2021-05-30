@@ -16,12 +16,9 @@ use hyper::{
 use reflex::core::Expression;
 use reflex_runtime::Runtime;
 
-mod query;
-mod utils;
 mod graphql {
     pub(crate) mod http;
     pub(crate) mod playground;
-    pub(crate) mod protocol;
     pub(crate) mod websocket;
 }
 

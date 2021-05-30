@@ -1,17 +1,6 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use super::protocol::{
-    deserialize_graphql_client_message, serialize_graphql_server_message,
-    GraphQlSubscriptionClientMessage, GraphQlSubscriptionServerMessage, SubscriptionId,
-};
-use crate::{
-    query::query,
-    utils::graphql::{
-        parse_graphql_query, wrap_graphql_error_response, wrap_graphql_success_response,
-        QueryTransform,
-    },
-};
 use futures::{SinkExt, StreamExt};
 use hyper::{
     header::{self, HeaderValue},
@@ -23,7 +12,14 @@ use hyper_tungstenite::{
     WebSocketStream,
 };
 use reflex::{core::Expression, serialize};
-use reflex_json::stringify;
+use reflex_graphql::{
+    parse,
+    subscriptions::{
+        deserialize_graphql_client_message, GraphQlSubscriptionClientMessage,
+        GraphQlSubscriptionServerMessage, SubscriptionId,
+    },
+    wrap_graphql_error_response, wrap_graphql_success_response, QueryTransform,
+};
 use reflex_runtime::Runtime;
 use std::{
     collections::HashMap,
@@ -63,15 +59,26 @@ async fn handle_websocket_connection(
     root: Expression,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let output_buffer_size = 32;
-    let (messages_tx, mut messages_rx) = mpsc::channel(output_buffer_size);
+    let (messages_tx, mut messages_rx) =
+        mpsc::channel::<GraphQlSubscriptionServerMessage>(output_buffer_size);
     let mut subscriptions =
         Mutex::new(HashMap::<SubscriptionId, reflex_runtime::SubscriptionId>::new());
     let (mut websocket_output, mut websocket_input) = websocket.split();
     let output = tokio::spawn(async move {
         while let Some(message) = messages_rx.recv().await {
-            let _ = websocket_output
-                .send(Message::Text(serialize_graphql_server_message(message)))
-                .await;
+            match message.serialize() {
+                Err(error) => {
+                    match GraphQlSubscriptionServerMessage::ConnectionError(error).serialize() {
+                        Ok(message) => {
+                            let _ = websocket_output.send(Message::Text(message)).await;
+                        }
+                        Err(_) => {}
+                    }
+                }
+                Ok(message) => {
+                    let _ = websocket_output.send(Message::Text(message)).await;
+                }
+            }
         }
     });
     while let Some(message) = websocket_input.next().await {
@@ -90,7 +97,7 @@ async fn handle_websocket_connection(
                         .await;
                 }
                 GraphQlSubscriptionClientMessage::Start(message) => {
-                    match parse_graphql_query(message.query()) {
+                    match parse(message.query(), &root) {
                         Err(error) => {
                             let _ = messages_tx
                                 .send(GraphQlSubscriptionServerMessage::ConnectionError(format!(
@@ -99,9 +106,8 @@ async fn handle_websocket_connection(
                                 )))
                                 .await;
                         }
-                        Ok((shape, transform)) => {
+                        Ok((expression, transform)) => {
                             let subscription_id = message.subscription_id();
-                            let expression = query(Expression::clone(&root), &shape);
                             if subscriptions
                                 .get_mut()
                                 .unwrap()
@@ -268,11 +274,5 @@ fn format_subscription_result_message(
         Ok(data) => wrap_graphql_success_response(data),
         Err(errors) => wrap_graphql_error_response(errors),
     };
-    match stringify(payload) {
-        Ok(payload) => GraphQlSubscriptionServerMessage::Data(subscription_id.clone(), payload),
-        Err(error) => GraphQlSubscriptionServerMessage::Error(
-            subscription_id.clone(),
-            stringify(wrap_graphql_error_response(vec![error])).unwrap(),
-        ),
-    }
+    GraphQlSubscriptionServerMessage::Data(subscription_id.clone(), payload)
 }

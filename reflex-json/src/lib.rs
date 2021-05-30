@@ -4,21 +4,15 @@
 use std::iter::FromIterator;
 
 use reflex::{
-    core::{
-        Expression, SerializedListTerm, SerializedObjectTerm, SerializedTerm, StructPrototype,
-        StructTerm, Term,
-    },
-    stdlib::{
-        collection::{vector::VectorTerm, CollectionTerm},
-        value::ValueTerm,
-    },
+    core::{Expression, SerializedListTerm, SerializedObjectTerm, SerializedTerm},
+    stdlib::value::ValueTerm,
 };
 use serde_json::{Map, Value};
 
 pub fn parse(value: &str) -> Result<Expression, String> {
     match serde_json::from_str::<Value>(value) {
         Err(error) => Err(format!("JSON deserialization failed: {}", error)),
-        Ok(value) => deserialize_value(value),
+        Ok(value) => deserialize(&value).map(|result| result.deserialize()),
     }
 }
 
@@ -39,7 +33,7 @@ pub fn stringify(value: SerializedTerm) -> Result<String, String> {
     }
 }
 
-fn sanitize_term(term: SerializedTerm) -> Result<serde_json::Value, String> {
+pub fn sanitize_term(term: SerializedTerm) -> Result<serde_json::Value, String> {
     match term {
         SerializedTerm::Value(value) => sanitize_value(value),
         SerializedTerm::Object(value) => sanitize_object(value),
@@ -100,13 +94,13 @@ fn sanitize_list(value: SerializedListTerm) -> Result<serde_json::Value, String>
     Ok(serde_json::Value::Array(items))
 }
 
-fn deserialize_value(value: Value) -> Result<Expression, String> {
+pub fn deserialize(value: &Value) -> Result<SerializedTerm, String> {
     match value {
-        Value::Null => Ok(Expression::new(Term::Value(ValueTerm::Null))),
-        Value::Bool(value) => Ok(Expression::new(Term::Value(ValueTerm::Boolean(value)))),
-        Value::String(value) => Ok(Expression::new(Term::Value(ValueTerm::String(value)))),
+        Value::Null => Ok(SerializedTerm::Value(ValueTerm::Null)),
+        Value::Bool(value) => Ok(SerializedTerm::Value(ValueTerm::Boolean(*value))),
+        Value::String(value) => Ok(SerializedTerm::Value(ValueTerm::String(value.clone()))),
         Value::Number(value) => match value.as_f64() {
-            Some(value) => Ok(Expression::new(Term::Value(ValueTerm::Float(value)))),
+            Some(value) => Ok(SerializedTerm::Value(ValueTerm::Float(value))),
             None => Err(format!(
                 "JSON deserialization encountered invalid number: {}",
                 value
@@ -117,29 +111,23 @@ fn deserialize_value(value: Value) -> Result<Expression, String> {
     }
 }
 
-fn deserialize_array(value: Vec<Value>) -> Result<Expression, String> {
+fn deserialize_array(value: &Vec<Value>) -> Result<SerializedTerm, String> {
     let items = value
         .into_iter()
-        .map(deserialize_value)
+        .map(deserialize)
         .collect::<Result<Vec<_>, _>>()?;
-    Ok(Expression::new(Term::Collection(CollectionTerm::Vector(
-        VectorTerm::new(items),
-    ))))
+    Ok(SerializedTerm::List(SerializedListTerm::new(items)))
 }
 
-fn deserialize_object(value: Map<String, Value>) -> Result<Expression, String> {
+fn deserialize_object(value: &Map<String, Value>) -> Result<SerializedTerm, String> {
     let entries = value
         .into_iter()
-        .map(|(key, value)| match deserialize_value(value) {
-            Ok(value) => Ok((ValueTerm::String(key), value)),
+        .map(|(key, value)| match deserialize(value) {
+            Ok(value) => Ok((String::from(key), value)),
             Err(error) => Err(error),
         })
         .collect::<Result<Vec<_>, _>>()?;
-    let (keys, values): (Vec<_>, Vec<_>) = entries.into_iter().unzip();
-    Ok(Expression::new(Term::Struct(StructTerm::new(
-        Some(StructPrototype::new(keys)),
-        values,
-    ))))
+    Ok(SerializedTerm::Object(SerializedObjectTerm::new(entries)))
 }
 
 fn parse_value(value: Value) -> Result<SerializedTerm, String> {
@@ -296,9 +284,7 @@ mod tests {
                     SerializedTerm::value(ValueTerm::Int(5)),
                 )
             ]))),
-            Ok(String::from(
-                "{\"first\":3,\"second\":4,\"third\":5}"
-            )),
+            Ok(String::from("{\"first\":3,\"second\":4,\"third\":5}")),
         );
         assert_eq!(
             stringify(SerializedTerm::Object(SerializedObjectTerm::new(vec![(

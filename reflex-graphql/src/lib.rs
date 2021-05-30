@@ -6,25 +6,55 @@ use std::iter::once;
 use graphql_parser::{parse_query, query::*};
 use reflex::{
     core::{
-        Expression, SerializedListTerm, SerializedObjectTerm, SerializedTerm, StructPrototype,
-        StructTerm, Term,
+        Expression, SerializedListTerm, SerializedObjectTerm, SerializedTerm, Signal, SignalTerm,
+        StructPrototype, StructTerm, Term,
     },
     stdlib::{
         collection::{vector::VectorTerm, CollectionTerm},
+        signal::SignalType,
         value::{StringValue, ValueTerm},
     },
 };
 
-use crate::query::{FieldSelector, QueryShape};
+mod operation;
+pub use operation::{deserialize_graphql_operation, GraphQlOperationPayload};
+mod query;
+use query::{query, FieldSelector};
+pub use query::{QueryShape, QueryTransform};
 
-pub type QueryTransform =
-    Box<dyn Fn(&SerializedTerm) -> Result<Expression, String> + Send + Sync + 'static>;
+pub mod subscriptions;
 
-pub fn parse_graphql_query(source: &str) -> Result<(QueryShape, QueryTransform), String> {
+pub fn parse(source: &str, root: &Expression) -> Result<(Expression, QueryTransform), String> {
+    match parse_graphql_query(source) {
+        Ok((shape, transform)) => {
+            let expression = query(Expression::clone(root), &shape);
+            Ok((expression, transform))
+        }
+        Err(error) => Err(error),
+    }
+}
+
+pub fn create_introspection_query_response() -> Expression {
+    Expression::new(Term::Signal(SignalTerm::new(Signal::new(
+        SignalType::Error,
+        vec![SerializedTerm::string(StringValue::from(
+            "Introspection query not yet implemented",
+        ))],
+    ))))
+}
+
+const DEFAULT_OPERATION_TYPE: &str = "query";
+
+fn parse_graphql_query(source: &str) -> Result<(QueryShape, QueryTransform), String> {
     match parse_query::<&str>(source) {
         Ok(document) => match get_root_operation(&document) {
             Err(error) => Err(error),
-            Ok(root) => parse_operation(root),
+            Ok(root) => match root {
+                OperationDefinition::SelectionSet(selection_set) => {
+                    parse_root_operation(DEFAULT_OPERATION_TYPE, selection_set)
+                }
+                _ => parse_operation(root),
+            },
         },
         Err(error) => Err(format!("{}", error)),
     }

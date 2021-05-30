@@ -10,7 +10,7 @@ use std::{
     sync::Mutex,
 };
 
-use args::parse_args;
+use reflex_cli::parse_cli_args;
 use reflex::{
     cache::GenerationalGc,
     core::{DynamicState, Expression},
@@ -21,12 +21,11 @@ use reflex_loaders::builtin_loaders;
 use reflex_runtime::Runtime;
 use repl::ReplParser;
 
-mod args;
 mod repl;
 
 #[tokio::main]
 pub async fn main() {
-    let args = parse_args(env::args().skip(1));
+    let args = parse_cli_args(env::args().skip(1));
     let parser = match args.get("syntax") {
         Some(value) => match value {
             None => Err(String::from("Empty --syntax argument")),

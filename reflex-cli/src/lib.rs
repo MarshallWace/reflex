@@ -3,7 +3,7 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use std::{collections::HashMap, iter::FromIterator};
 
-pub fn parse_args(args: impl IntoIterator<Item = String>) -> Args {
+pub fn parse_cli_args(args: impl IntoIterator<Item = String>) -> Args {
     let (current, mut args) =
         args.into_iter()
             .fold((None, Vec::new()), |(current, mut args), arg| {

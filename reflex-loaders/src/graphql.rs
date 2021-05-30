@@ -75,6 +75,7 @@ fn create_graphql_client_instance<'a: 'src, 'src>(_schema: &'a Document<&'src st
                             Expression::new(Term::Variable(VariableTerm::scoped(0))),
                             String::from("query"),
                         ),
+                        Expression::new(Term::Value(ValueTerm::Null)),
                         Expression::new(Term::Application(ApplicationTerm::new(
                             flatten_deep(),
                             vec![get_struct_field(

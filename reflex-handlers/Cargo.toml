@@ -9,8 +9,12 @@ edition = "2018"
 
 [dependencies]
 reflex = { path = "../reflex" }
+reflex-graphql = { path = "../reflex-graphql" }
 reflex-json = { path = "../reflex-json" }
 reflex-runtime = { path = "../reflex-runtime" }
+futures-util = "0.3"
 hyper = { version = "0.14", features = ["full"] }
 tokio = { version = "1", features = ["full"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
+tokio-tungstenite = { version = "0.14" }
+uuid = { version = "0.8", features = ["v4"] }

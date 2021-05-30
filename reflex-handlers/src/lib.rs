@@ -12,7 +12,9 @@ use reflex_runtime::SignalResult;
 
 pub(crate) mod utils {
     mod fetch;
+    mod graphql;
     pub(crate) use fetch::fetch;
+    pub(crate) use graphql::{create_websocket_connection, subscribe_websocket_operation};
 }
 
 pub fn builtin_signal_handler(

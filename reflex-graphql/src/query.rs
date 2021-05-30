@@ -8,11 +8,15 @@ use reflex::{
         ApplicationTerm, Arity, EnumIndex, Expression, LambdaTerm, StructFieldOffset, StructTerm,
         Term, VariableTerm,
     },
+    serialize::SerializedTerm,
     stdlib::{
         builtin::BuiltinTerm,
         value::{IntValue, ValueTerm},
     },
 };
+
+pub type QueryTransform =
+    Box<dyn Fn(&SerializedTerm) -> Result<Expression, String> + Send + Sync + 'static>;
 
 #[derive(Hash, Eq, PartialEq, Clone, Debug)]
 pub enum QueryShape {

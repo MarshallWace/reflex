@@ -1,9 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use std::{
-    convert::Infallible, env, fs, net::SocketAddr, path::Path, process, str::FromStr, sync::Arc,
-};
+use std::{convert::Infallible, env, fs, net::SocketAddr, path::Path, process, sync::Arc};
 
 use hyper::{server::conn::AddrStream, service::make_service_fn, Server};
 use reflex::{
@@ -11,6 +9,7 @@ use reflex::{
     core::{Expression, SerializedTerm, Term},
     stdlib::value::{StringValue, ValueTerm},
 };
+use reflex_cli::parse_cli_args;
 use reflex_handlers::{builtin_signal_handler, debug_signal_handler};
 use reflex_js::{
     dynamic_module_loader, parse_module,
@@ -21,29 +20,30 @@ use reflex_loaders::builtin_loaders;
 use reflex_runtime::{Runtime, SignalResult};
 use reflex_server::graphql_service;
 
-struct Args {
-    root_path: String,
+struct CliArgs {
+    entry_point: String,
+    port: u16,
     debug: bool,
 }
 
 #[tokio::main]
 pub async fn main() {
-    let port = parse_env_var::<u16>("PORT");
     let env_vars = parse_env_vars(env::vars());
-    let config = match parse_args() {
+    let config = match parse_command_line_args() {
         Err(error) => Err(error),
-        Ok(Args { root_path, debug }) => match load_file(&Path::new(&root_path)) {
+        Ok(CliArgs {
+            entry_point,
+            port,
+            debug,
+        }) => match load_file(&Path::new(&entry_point)) {
             Err(error) => Err(error),
-            Ok(root_source) => match port {
-                Err(error) => Err(error),
-                Ok(port) => Ok((
-                    env_vars,
-                    root_path,
-                    root_source,
-                    SocketAddr::from(([127, 0, 0, 1], port)),
-                    debug,
-                )),
-            },
+            Ok(module_source) => Ok((
+                env_vars,
+                entry_point,
+                module_source,
+                SocketAddr::from(([127, 0, 0, 1], port)),
+                debug,
+            )),
         },
     };
     let server = match config {
@@ -112,8 +112,8 @@ where
         Fn(&str, &[SerializedTerm]) -> Option<Result<SignalResult, String>> + Send + Sync + 'static,
 {
     // TODO: Establish sensible defaults for channel buffer sizes
-    let command_buffer_size = 32;
-    let result_buffer_size = 32;
+    let command_buffer_size = 1024;
+    let result_buffer_size = 1024;
     Runtime::new(
         signal_handler,
         GenerationalGc::new(),
@@ -140,16 +140,32 @@ async fn create_server(
     }
 }
 
-fn parse_args() -> Result<Args, String> {
-    let (debug_args, path_args): (Vec<_>, Vec<_>) =
-        env::args().skip(1).partition(|arg| arg == "--debug");
-    match path_args.len() {
-        0 => Err(String::from("Missing entry point module path")),
-        1 => Ok(Args {
-            root_path: path_args.into_iter().next().unwrap(),
-            debug: !debug_args.is_empty(),
-        }),
-        _ => Err(String::from("Multiple entry point modules specified")),
+fn parse_command_line_args() -> Result<CliArgs, String> {
+    let args = parse_cli_args(env::args().skip(1));
+    let port = match args
+        .get("port")
+        .and_then(|port| port.map(|port| port.parse::<u16>().or_else(|_| Err(port))))
+    {
+        Some(Ok(value)) => Ok(value),
+        None => Err(String::from("Missing --port argument")),
+        Some(Err(value)) => Err(format!("Invalid --port argument: {}", value)),
+    }?;
+    let debug = args.get("debug").is_some();
+    let mut args = args.into_iter();
+    let entry_point = args.next();
+    match entry_point {
+        None => Err(String::from("Missing entry point module path")),
+        Some(entry_point) => {
+            if let Some(_) = args.next() {
+                Err(String::from("Multiple entry point modules specified"))
+            } else {
+                Ok(CliArgs {
+                    port,
+                    entry_point,
+                    debug,
+                })
+            }
+        }
     }
 }
 
@@ -160,20 +176,6 @@ fn parse_env_vars(vars: env::Vars) -> impl IntoIterator<Item = (String, Expressi
             Expression::new(Term::Value(ValueTerm::String(StringValue::from(value)))),
         )
     })
-}
-
-fn parse_env_var<T: FromStr>(key: &str) -> Result<T, String> {
-    let value = env::var(key);
-    match value {
-        Err(error) => match error {
-            env::VarError::NotPresent => Err(format!("Missing {} environment variable", key)),
-            env::VarError::NotUnicode(_) => Err(format!("Invalid {} environment variable", key)),
-        },
-        Ok(value) => match value.parse::<T>() {
-            Ok(value) => Ok(value),
-            Err(_) => Err(format!("Invalid {} environment variable: {}", key, value)),
-        },
-    }
 }
 
 fn load_file(path: &Path) -> Result<String, String> {

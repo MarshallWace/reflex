@@ -1,21 +1,16 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use super::protocol::deserialize_graphql_request;
-use crate::{
-    create_http_response,
-    query::query,
-    utils::graphql::{
-        parse_graphql_query, wrap_graphql_error_response, wrap_graphql_success_response,
-        QueryTransform,
-    },
-};
+use crate::create_http_response;
 use hyper::{header, Body, Request, Response, StatusCode};
 use reflex::{
-    core::{Expression, SerializedTerm, Signal, SignalTerm, Term},
+    core::{Expression, SerializedTerm},
     hash::hash_object,
     serialize,
-    stdlib::{signal::SignalType, value::StringValue},
+};
+use reflex_graphql::{
+    create_introspection_query_response, deserialize_graphql_operation,
+    wrap_graphql_error_response, wrap_graphql_success_response, QueryTransform,
 };
 use reflex_json::stringify;
 use reflex_runtime::{Runtime, SubscriptionResult};
@@ -112,9 +107,9 @@ async fn parse_graphql_request(
     }
     .ok_or_else(|| String::from("Invalid request body"));
     let result = content_type.and_then(|content_type| match content_type.as_str() {
-        "application/graphql" => body.and_then(|body| parse_graphql_query_expression(&root, &body)),
+        "application/graphql" => body.and_then(|body| reflex_graphql::parse(&body, &root)),
         "application/json" => body
-            .and_then(|body| deserialize_graphql_request(&body))
+            .and_then(|body| deserialize_graphql_operation(&body))
             .and_then(|message| match message.operation_name() {
                 Some("IntrospectionQuery") => {
                     let expression = create_introspection_query_response();
@@ -122,33 +117,11 @@ async fn parse_graphql_request(
                         Box::new(|value: &SerializedTerm| Ok(value.deserialize()));
                     Ok((expression, transform))
                 }
-                _ => parse_graphql_query_expression(&root, message.query()),
+                _ => reflex_graphql::parse(message.query(), &root),
             }),
         _ => Err(String::from("Unsupported Content-Type header")),
     });
     result.or_else(|error| Err(HttpResult::error(StatusCode::BAD_REQUEST, error)))
-}
-
-fn parse_graphql_query_expression(
-    root: &Expression,
-    source: &str,
-) -> Result<(Expression, QueryTransform), String> {
-    match parse_graphql_query(source) {
-        Ok((shape, transform)) => {
-            let expression = query(Expression::clone(root), &shape);
-            Ok((expression, transform))
-        }
-        Err(error) => Err(error),
-    }
-}
-
-fn create_introspection_query_response() -> Expression {
-    Expression::new(Term::Signal(SignalTerm::new(Signal::new(
-        SignalType::Error,
-        vec![SerializedTerm::string(StringValue::from(
-            "Introspection query not yet implemented",
-        ))],
-    ))))
 }
 
 struct HttpResult {
