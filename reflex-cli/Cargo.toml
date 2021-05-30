@@ -9,3 +9,8 @@ edition = "2018"
 
 [dependencies]
 reflex = { path = "../reflex" }
+reflex-handlers = { path = "../reflex-handlers" }
+reflex-loaders = { path = "../reflex-loaders" }
+reflex-js = { path = "../reflex-js" }
+reflex-runtime = { path = "../reflex-runtime" }
+tokio = { version = "1", features = ["full"] }

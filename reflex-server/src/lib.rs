@@ -16,9 +16,6 @@ use hyper::{
 use reflex::core::Expression;
 use reflex_runtime::Runtime;
 
-pub mod loaders {
-    pub mod graphql;
-}
 mod query;
 mod utils;
 mod graphql {

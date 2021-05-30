@@ -17,8 +17,9 @@ use reflex_js::{
     stdlib::{builtin_globals, builtin_imports, global_process},
     Env,
 };
+use reflex_loaders::builtin_loaders;
 use reflex_runtime::{Runtime, SignalResult};
-use reflex_server::{graphql_service, loaders::graphql::graphql_module_loader};
+use reflex_server::graphql_service;
 
 struct Args {
     root_path: String,
@@ -95,7 +96,7 @@ fn create_graph_root(
         root_module_source,
         &create_env(env_args),
         root_module_path,
-        &dynamic_module_loader(vec![graphql_module_loader], Some(builtin_imports())),
+        &dynamic_module_loader(builtin_loaders(), Some(builtin_imports())),
     )
 }
 

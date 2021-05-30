@@ -4,13 +4,18 @@
 use std::io::{self, Write};
 
 use reflex::{
-    cache::GenerationalGc,
-    core::{DynamicState, SerializedTerm, Term},
-    parser::sexpr::parse,
+    cache::EvaluationCache,
+    core::{DependencyList, DynamicState, Expression, SerializedTerm, SignalTerm, Term},
     stdlib::{signal::SignalType, value::ValueTerm},
 };
 
-pub fn run() -> io::Result<()> {
+pub(crate) type ReplParser = Box<dyn Fn(&str) -> Result<Expression, String>>;
+
+pub(crate) fn run(
+    parser: ReplParser,
+    state: &mut DynamicState,
+    cache: &mut impl EvaluationCache,
+) -> io::Result<()> {
     let stdin = io::stdin();
     let mut stdout = io::stdout();
     let mut stderr = io::stderr();
@@ -29,70 +34,78 @@ pub fn run() -> io::Result<()> {
             break;
         }
 
-        let mut cache = GenerationalGc::new();
-        let state = DynamicState::new();
-
-        match parse(&input) {
+        match parser(&input) {
             Ok(expression) => {
-                let (result, _) = expression.evaluate(&state, &mut cache).unwrap();
-                match result.value() {
-                    Term::Signal(signal) => {
-                        for signal in signal.signals() {
-                            let message = match signal.get_type() {
-                                SignalType::Error => {
-                                    let (message, args) = {
-                                        let args = signal.args();
-                                        match args.get(0) {
-                                            Some(SerializedTerm::Value(ValueTerm::String(
-                                                message,
-                                            ))) => (Some(message.clone()), Some(&args[1..])),
-                                            _ => (None, Some(&args[..])),
-                                        }
-                                    };
-                                    format!(
-                                        "Error: {}",
-                                        match message {
-                                            Some(message) => match args {
-                                                None => format!("{}", message),
-                                                Some(args) => format!(
-                                                    "{} {}",
-                                                    message,
-                                                    args.iter()
-                                                        .map(|arg| format!("{}", arg))
-                                                        .collect::<Vec<_>>()
-                                                        .join(" ")
-                                                ),
-                                            },
-                                            None => String::from("<unknown>"),
-                                        }
-                                    )
-                                }
-                                SignalType::Custom(signal_type) => format!(
-                                    "<{}>{}",
-                                    signal_type,
-                                    format!(
-                                        " {}",
-                                        signal
-                                            .args()
-                                            .iter()
-                                            .map(|arg| format!("{}", arg))
-                                            .collect::<Vec<_>>()
-                                            .join(" ")
-                                    )
-                                ),
-                                SignalType::Pending => String::from("<pending>"),
-                            };
-                            writeln!(stdout, "{}", message)?;
-                        }
-                    }
-                    _ => writeln!(stdout, "{}", result)?,
-                }
+                let (output, _) = eval(expression, state, cache);
+                writeln!(stdout, "{}", output)
             }
-            Err(err) => {
-                writeln!(stderr, "Syntax error: {}", err.message())?;
-            }
-        };
+            Err(error) => writeln!(stderr, "Syntax error: {}", error),
+        }?;
     }
-
     Ok(())
+}
+
+pub(crate) fn eval(
+    expression: Expression,
+    state: &DynamicState,
+    cache: &mut impl EvaluationCache,
+) -> (String, DependencyList) {
+    let (result, dependencies) = expression.evaluate(state, cache).unwrap();
+    let output = match result.value() {
+        Term::Signal(signal) => format_signal_output(signal),
+        value => format!("{}", value),
+    };
+    (output, dependencies)
+}
+
+fn format_signal_output(signal: &SignalTerm) -> String {
+    signal
+        .signals()
+        .into_iter()
+        .map(|signal| match signal.get_type() {
+            SignalType::Error => {
+                let (message, args) = {
+                    let args = signal.args();
+                    match args.get(0) {
+                        Some(SerializedTerm::Value(ValueTerm::String(message))) => {
+                            (Some(message.clone()), Some(&args[1..]))
+                        }
+                        _ => (None, Some(&args[..])),
+                    }
+                };
+                format!(
+                    "Error: {}",
+                    match message {
+                        Some(message) => match args {
+                            None => format!("{}", message),
+                            Some(args) => format!(
+                                "{} {}",
+                                message,
+                                args.iter()
+                                    .map(|arg| format!("{}", arg))
+                                    .collect::<Vec<_>>()
+                                    .join(" ")
+                            ),
+                        },
+                        None => String::from("<unknown>"),
+                    }
+                )
+            }
+            SignalType::Custom(signal_type) => format!(
+                "<{}>{}",
+                signal_type,
+                format!(
+                    " {}",
+                    signal
+                        .args()
+                        .iter()
+                        .map(|arg| format!("{}", arg))
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                )
+            ),
+            SignalType::Pending => String::from("<pending>"),
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }

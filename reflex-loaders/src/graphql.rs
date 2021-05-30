@@ -16,10 +16,7 @@ use reflex::{
 };
 use reflex_js::builtins::flatten_deep;
 
-pub fn graphql_module_loader(
-    import_path: &str,
-    module_path: &Path,
-) -> Option<Result<Expression, String>> {
+pub fn graphql_loader(import_path: &str, module_path: &Path) -> Option<Result<Expression, String>> {
     if !import_path.ends_with(".graphql") {
         return None;
     }

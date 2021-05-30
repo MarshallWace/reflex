@@ -9,9 +9,10 @@ edition = "2018"
 
 [dependencies]
 reflex = { path = "../reflex" }
+reflex-handlers = { path = "../reflex-handlers" }
 reflex-js = { path = "../reflex-js" }
 reflex-json = { path = "../reflex-json" }
-reflex-handlers = { path = "../reflex-handlers" }
+reflex-loaders = { path = "../reflex-loaders" }
 reflex-runtime = { path = "../reflex-runtime" }
 futures = "*"
 graphql-parser = "0.3.0"

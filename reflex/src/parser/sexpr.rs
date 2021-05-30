@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt};
 
 use crate::{
     cache::{EvaluationCache, GenerationalGc},
@@ -34,6 +34,11 @@ impl<'a> ParserError<'a> {
     }
     pub fn message(&self) -> &str {
         &self.message
+    }
+}
+impl<'a> fmt::Display for ParserError<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.message)
     }
 }
 

@@ -5,6 +5,7 @@ members = [
   "reflex-js",
   "reflex-json",
   "reflex-handlers",
+  "reflex-loaders",
   "reflex-runtime",
   "reflex-server",
 ]
