@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use hyper::{Body, Request, Uri};
+use hyper_tls::HttpsConnector;
 
 pub(crate) async fn fetch(
     method: String,
@@ -9,7 +10,8 @@ pub(crate) async fn fetch(
     headers: impl IntoIterator<Item = (String, String)>,
     body: Option<String>,
 ) -> Result<String, String> {
-    let client = hyper::Client::new();
+    let https = HttpsConnector::new();
+    let client = hyper::Client::builder().build::<_, hyper::Body>(https);
     match url.parse::<Uri>() {
         Ok(url) => {
             let method: &str = &method;

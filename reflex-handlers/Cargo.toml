@@ -14,6 +14,7 @@ reflex-json = { path = "../reflex-json" }
 reflex-runtime = { path = "../reflex-runtime" }
 futures-util = "0.3"
 hyper = { version = "0.14", features = ["full"] }
+hyper-tls = "0.5.0"
 tokio = { version = "1", features = ["full"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
 tokio-tungstenite = { version = "0.14" }
