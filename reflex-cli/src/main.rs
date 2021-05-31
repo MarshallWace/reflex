@@ -10,11 +10,11 @@ use std::{
     sync::Mutex,
 };
 
-use reflex_cli::parse_cli_args;
 use reflex::{
     cache::GenerationalGc,
     core::{DynamicState, Expression},
 };
+use reflex_cli::parse_cli_args;
 use reflex_handlers::builtin_signal_handler;
 use reflex_js::{self, dynamic_module_loader, stdlib::builtin_imports};
 use reflex_loaders::builtin_loaders;
@@ -76,8 +76,16 @@ pub async fn main() {
                                 writeln!(stdout, "{}", output)
                                     .or_else(|error| Err(format!("{}", error)))
                             } else {
+                                // TODO: Establish sensible defaults for channel buffer sizes
+                                let command_buffer_size = 32;
+                                let result_buffer_size = 32;
                                 let signal_handler = builtin_signal_handler();
-                                let runtime = Runtime::new(signal_handler, cache, 32, 32);
+                                let runtime = Runtime::new(
+                                    signal_handler,
+                                    cache,
+                                    command_buffer_size,
+                                    result_buffer_size,
+                                );
                                 let stdout = Mutex::new(stdout);
                                 async move {
                                     let expression = Expression::clone(&expression);
