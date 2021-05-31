@@ -13,16 +13,22 @@ use crate::stdlib::imports::create_struct;
 
 pub(crate) fn import_date() -> Expression {
     create_struct(vec![(
-        "interval",
+        "timestamp",
         Expression::new(Term::Lambda(LambdaTerm::new(
             Arity::from(0, 1, None),
             Expression::new(Term::Application(ApplicationTerm::new(
                 Expression::new(Term::Builtin(BuiltinTerm::Effect)),
                 vec![
                     Expression::new(Term::Value(ValueTerm::String(StringValue::from(
-                        "reflex::date::interval",
+                        "reflex::date::timestamp",
                     )))),
-                    Expression::new(Term::Variable(VariableTerm::scoped(0))),
+                    Expression::new(Term::Application(ApplicationTerm::new(
+                        Expression::new(Term::Builtin(BuiltinTerm::Get)),
+                        vec![
+                            Expression::new(Term::Variable(VariableTerm::scoped(0))),
+                            Expression::new(Term::Value(ValueTerm::String(StringValue::from("interval")))),
+                        ]
+                    )))
                 ],
             ))),
         ))),

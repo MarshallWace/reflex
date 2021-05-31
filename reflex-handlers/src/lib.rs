@@ -22,8 +22,8 @@ pub fn builtin_signal_handler(
 {
     create_signal_handler(vec![
         (
-            "reflex::date::interval",
-            date::handle_date_interval as fn(&[SerializedTerm]) -> Result<SignalResult, String>,
+            "reflex::date::timestamp",
+            date::handle_date_timestamp as fn(&[SerializedTerm]) -> Result<SignalResult, String>,
         ),
         (
             "reflex::http::fetch",

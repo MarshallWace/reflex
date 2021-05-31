@@ -13,16 +13,16 @@ use tokio_stream::{wrappers::IntervalStream, StreamExt};
 
 use crate::SignalResult;
 
-pub fn handle_date_interval(args: &[SerializedTerm]) -> Result<SignalResult, String> {
+pub fn handle_date_timestamp(args: &[SerializedTerm]) -> Result<SignalResult, String> {
     if args.len() != 1 {
         return Err(format!(
-            "Invalid interval signal: Expected 1 argument, received {}",
+            "Invalid timestamp signal: Expected 1 argument, received {}",
             args.len()
         ));
     }
     let mut args = args.into_iter();
-    let duration = parse_number_arg(args.next().unwrap());
-    match duration {
+    let interval = parse_number_arg(args.next().unwrap());
+    match interval {
         Some(duration) if duration >= 1.0 => {
             let period = Duration::from_millis(duration as u64);
             let first_update = Instant::now()
@@ -37,7 +37,7 @@ pub fn handle_date_interval(args: &[SerializedTerm]) -> Result<SignalResult, Str
                 ))),
             ))
         }
-        _ => Err(String::from("Invalid interval signal arguments")),
+        _ => Err(String::from("Invalid timestamp signal arguments")),
     }
 }
 
