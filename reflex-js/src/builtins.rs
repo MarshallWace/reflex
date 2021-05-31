@@ -318,6 +318,7 @@ pub(crate) fn get_builtin_field<'src>(target: Option<&Term>, method: &str) -> Op
             "push" => Some(Term::Builtin(BuiltinTerm::Append)),
             "reduce" => Some(Term::Builtin(BuiltinTerm::Reduce)),
             "values" => Some(Term::Builtin(BuiltinTerm::Values)),
+            "slice" => Some(Term::Builtin(BuiltinTerm::Slice)),
             _ => None,
         },
         _ => None,

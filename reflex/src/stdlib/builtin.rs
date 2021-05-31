@@ -75,6 +75,8 @@ mod remainder;
 use remainder::Remainder;
 mod round;
 use round::Round;
+mod slice;
+use slice::Slice;
 mod starts_with;
 use starts_with::StartsWith;
 mod subtract;
@@ -129,6 +131,7 @@ pub enum BuiltinTerm {
     Reduce,
     Remainder,
     Round,
+    Slice,
     StartsWith,
     Subtract,
     Tuple,
@@ -175,6 +178,7 @@ impl BuiltinTerm {
             Self::Reduce => Reduce::arity(),
             Self::Remainder => Remainder::arity(),
             Self::Round => Round::arity(),
+            Self::Slice => Slice::arity(),
             Self::StartsWith => StartsWith::arity(),
             Self::Subtract => Subtract::arity(),
             Self::Tuple => Tuple::arity(),
@@ -222,6 +226,7 @@ impl BuiltinTerm {
             Self::Or => Or::apply(args),
             Self::Pow => Pow::apply(args),
             Self::Reduce => Reduce::apply(args),
+            Self::Slice => Slice::apply(args),
             Self::Remainder => Remainder::apply(args),
             Self::Round => Round::apply(args),
             Self::StartsWith => StartsWith::apply(args),
