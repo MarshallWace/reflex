@@ -64,5 +64,14 @@ impl fmt::Debug for ValueTerm {
 }
 
 pub fn is_integer(value: f64) -> bool {
-    value == (value as u32) as f64
+    as_integer(value).is_some()
+}
+
+pub fn as_integer(value: f64) -> Option<i32> {
+    let int_value = value as i32;
+    if value == int_value as f64 {
+        Some(int_value)
+    } else {
+        None
+    }
 }

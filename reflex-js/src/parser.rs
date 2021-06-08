@@ -1847,6 +1847,15 @@ mod tests {
                 ],
             ))))
         );
+        let expression = parse("const items = [3, 4, 5]; items[1]", &env).unwrap();
+        let result = expression.evaluate(&DynamicState::new(), &mut GenerationalGc::new());
+        assert_eq!(
+            result,
+            EvaluationResult::new(
+                Expression::new(Term::Value(ValueTerm::Float(4.0))),
+                DependencyList::empty(),
+            )
+        );
     }
 
     #[test]

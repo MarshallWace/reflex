@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+use std::usize;
+
 use crate::{
     core::{Arity, Expression, Signal, SignalTerm, StructFieldOffset, Term},
     serialize::SerializedTerm,
@@ -8,7 +10,7 @@ use crate::{
         builtin::BuiltinFunction,
         collection::CollectionTerm,
         signal::SignalType,
-        value::{is_integer, ValueTerm},
+        value::{as_integer, ValueTerm},
     },
 };
 
@@ -76,11 +78,9 @@ impl BuiltinFunction for Get {
                         }
                     }
                     Term::Value(ValueTerm::Float(value)) => {
-                        let value = *value;
-                        if is_integer(value) && value >= 0.0 {
-                            Some(value as usize)
-                        } else {
-                            None
+                        match as_integer(*value) {
+                            Some(value) if value >= 0 => Some(value as usize),
+                            _ => None,
                         }
                     }
                     _ => None,
@@ -114,18 +114,10 @@ impl BuiltinFunction for Get {
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        cache::GenerationalGc,
-        core::{
+    use crate::{cache::GenerationalGc, core::{
             ApplicationTerm, DependencyList, DynamicState, EvaluationResult, Expression,
             StructPrototype, StructTerm, Term,
-        },
-        stdlib::{
-            builtin::BuiltinTerm,
-            collection::{hashmap::HashMapTerm, CollectionTerm},
-            value::{StringValue, ValueTerm},
-        },
-    };
+        }, stdlib::{builtin::BuiltinTerm, collection::{CollectionTerm, hashmap::HashMapTerm, vector::VectorTerm}, value::{StringValue, ValueTerm}}};
 
     #[test]
     fn get_anonymous_struct_fields() {
@@ -152,7 +144,7 @@ mod tests {
                 Expression::new(Term::Value(ValueTerm::Int(4))),
                 DependencyList::empty(),
             )
-        )
+        );
     }
 
     #[test]
@@ -184,7 +176,55 @@ mod tests {
                 Expression::new(Term::Value(ValueTerm::Int(7))),
                 DependencyList::empty(),
             )
-        )
+        );
+    }
+
+    #[test]
+    fn get_vector_fields() {
+        let mut cache = GenerationalGc::new();
+        let state = DynamicState::new();
+        let expression = Expression::new(Term::Application(ApplicationTerm::new(
+            Expression::new(Term::Builtin(BuiltinTerm::Get)),
+            vec![
+                Expression::new(Term::Collection(CollectionTerm::Vector(VectorTerm::new(
+                    vec![
+                        Expression::new(Term::Value(ValueTerm::Int(3))),
+                        Expression::new(Term::Value(ValueTerm::Int(4))),
+                        Expression::new(Term::Value(ValueTerm::Int(5))),
+                    ],
+                )))),
+                Expression::new(Term::Value(ValueTerm::Int(1))),
+            ],
+        )));
+        let result = expression.evaluate(&state, &mut cache);
+        assert_eq!(
+            result,
+            EvaluationResult::new(
+                Expression::new(Term::Value(ValueTerm::Int(4))),
+                DependencyList::empty(),
+            )
+        );
+        let expression = Expression::new(Term::Application(ApplicationTerm::new(
+            Expression::new(Term::Builtin(BuiltinTerm::Get)),
+            vec![
+                Expression::new(Term::Collection(CollectionTerm::Vector(VectorTerm::new(
+                    vec![
+                        Expression::new(Term::Value(ValueTerm::Int(3))),
+                        Expression::new(Term::Value(ValueTerm::Int(4))),
+                        Expression::new(Term::Value(ValueTerm::Int(5))),
+                    ],
+                )))),
+                Expression::new(Term::Value(ValueTerm::Float(1.0))),
+            ],
+        )));
+        let result = expression.evaluate(&state, &mut cache);
+        assert_eq!(
+            result,
+            EvaluationResult::new(
+                Expression::new(Term::Value(ValueTerm::Int(4))),
+                DependencyList::empty(),
+            )
+        );
     }
 
     #[test]
