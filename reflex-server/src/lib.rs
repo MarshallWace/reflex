@@ -16,6 +16,8 @@ use hyper::{
 use reflex::core::Expression;
 use reflex_runtime::Runtime;
 
+pub mod cli;
+
 mod graphql {
     pub(crate) mod http;
     pub(crate) mod playground;

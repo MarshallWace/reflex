@@ -9,6 +9,6 @@ use reflex::core::Expression;
 pub mod graphql;
 
 pub fn builtin_loaders(
-) -> impl IntoIterator<Item = impl Fn(&str, &Path) -> Option<Result<Expression, String>>> {
-    once(graphql_loader)
+) -> impl IntoIterator<Item = Box<fn(&str, &Path) -> Option<Result<Expression, String>>>> {
+    once(Box::new(graphql_loader as fn(&str, &Path) -> Option<Result<Expression, String>>))
 }
