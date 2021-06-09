@@ -16,7 +16,10 @@ use reflex::{
     },
 };
 
-use crate::{builtins::flatten_deep, stdlib::imports::create_struct};
+use crate::{
+    builtins::flatten_deep,
+    stdlib::{global_json_parse, imports::create_struct},
+};
 
 pub(crate) fn import_http() -> Expression {
     create_struct(vec![
@@ -32,51 +35,117 @@ fn import_http_fetch() -> Expression {
             Expression::new(Term::Lambda(LambdaTerm::new(
                 Arity::from(0, 1, None),
                 Expression::new(Term::Application(ApplicationTerm::new(
-                    Expression::new(Term::Builtin(BuiltinTerm::Effect)),
-                    vec![
-                        Expression::new(Term::Value(ValueTerm::String(StringValue::from(
-                            "reflex::http::fetch",
-                        )))),
-                        Expression::new(Term::Application(ApplicationTerm::new(
-                            Expression::new(Term::Builtin(BuiltinTerm::Get)),
+                    Expression::new(Term::Lambda(LambdaTerm::new(
+                        Arity::from(0, 1, None),
+                        Expression::new(Term::Struct(StructTerm::new(
+                            Some(StructPrototype::new(vec![
+                                ValueTerm::String(StringValue::from("status")),
+                                ValueTerm::String(StringValue::from("ok")),
+                                ValueTerm::String(StringValue::from("text")),
+                                ValueTerm::String(StringValue::from("json")),
+                            ])),
                             vec![
-                                Expression::new(Term::Variable(VariableTerm::scoped(0))),
-                                Expression::new(Term::Value(ValueTerm::String(StringValue::from(
-                                    "url",
-                                )))),
+                                Expression::new(Term::Application(ApplicationTerm::new(
+                                    Expression::new(Term::Builtin(BuiltinTerm::Get)),
+                                    vec![
+                                        Expression::new(Term::Variable(VariableTerm::scoped(0))),
+                                        Expression::new(Term::Value(ValueTerm::Int(0))),
+                                    ],
+                                ))),
+                                Expression::new(Term::Application(ApplicationTerm::new(
+                                    Expression::new(Term::Builtin(BuiltinTerm::Lt)),
+                                    vec![
+                                        Expression::new(Term::Application(ApplicationTerm::new(
+                                            Expression::new(Term::Builtin(BuiltinTerm::Get)),
+                                            vec![
+                                                Expression::new(Term::Variable(
+                                                    VariableTerm::scoped(0),
+                                                )),
+                                                Expression::new(Term::Value(ValueTerm::Int(0))),
+                                            ],
+                                        ))),
+                                        Expression::new(Term::Value(ValueTerm::Int(400))),
+                                    ],
+                                ))),
+                                Expression::new(Term::Lambda(LambdaTerm::new(
+                                    Arity::from(0, 0, None),
+                                    Expression::new(Term::Application(ApplicationTerm::new(
+                                        Expression::new(Term::Builtin(BuiltinTerm::Get)),
+                                        vec![
+                                            Expression::new(Term::Variable(VariableTerm::scoped(
+                                                0,
+                                            ))),
+                                            Expression::new(Term::Value(ValueTerm::Int(1))),
+                                        ],
+                                    ))),
+                                ))),
+                                Expression::new(Term::Lambda(LambdaTerm::new(
+                                    Arity::from(0, 0, None),
+                                    Expression::new(Term::Application(ApplicationTerm::new(
+                                        global_json_parse(),
+                                        vec![Expression::new(Term::Application(
+                                            ApplicationTerm::new(
+                                                Expression::new(Term::Builtin(BuiltinTerm::Get)),
+                                                vec![
+                                                    Expression::new(Term::Variable(
+                                                        VariableTerm::scoped(0),
+                                                    )),
+                                                    Expression::new(Term::Value(ValueTerm::Int(1))),
+                                                ],
+                                            ),
+                                        ))],
+                                    ))),
+                                ))),
                             ],
                         ))),
-                        Expression::new(Term::Application(ApplicationTerm::new(
-                            Expression::new(Term::Builtin(BuiltinTerm::Get)),
-                            vec![
-                                Expression::new(Term::Variable(VariableTerm::scoped(0))),
-                                Expression::new(Term::Value(ValueTerm::String(StringValue::from(
-                                    "method",
-                                )))),
-                            ],
-                        ))),
-                        Expression::new(Term::Application(ApplicationTerm::new(
-                            flatten_deep(),
-                            vec![Expression::new(Term::Application(ApplicationTerm::new(
+                    ))),
+                    vec![Expression::new(Term::Application(ApplicationTerm::new(
+                        Expression::new(Term::Builtin(BuiltinTerm::Effect)),
+                        vec![
+                            Expression::new(Term::Value(ValueTerm::String(StringValue::from(
+                                "reflex::http::fetch",
+                            )))),
+                            Expression::new(Term::Application(ApplicationTerm::new(
                                 Expression::new(Term::Builtin(BuiltinTerm::Get)),
                                 vec![
                                     Expression::new(Term::Variable(VariableTerm::scoped(0))),
                                     Expression::new(Term::Value(ValueTerm::String(
-                                        StringValue::from("headers"),
+                                        StringValue::from("url"),
                                     ))),
                                 ],
-                            )))],
-                        ))),
-                        Expression::new(Term::Application(ApplicationTerm::new(
-                            Expression::new(Term::Builtin(BuiltinTerm::Get)),
-                            vec![
-                                Expression::new(Term::Variable(VariableTerm::scoped(0))),
-                                Expression::new(Term::Value(ValueTerm::String(StringValue::from(
-                                    "body",
-                                )))),
-                            ],
-                        ))),
-                    ],
+                            ))),
+                            Expression::new(Term::Application(ApplicationTerm::new(
+                                Expression::new(Term::Builtin(BuiltinTerm::Get)),
+                                vec![
+                                    Expression::new(Term::Variable(VariableTerm::scoped(0))),
+                                    Expression::new(Term::Value(ValueTerm::String(
+                                        StringValue::from("method"),
+                                    ))),
+                                ],
+                            ))),
+                            Expression::new(Term::Application(ApplicationTerm::new(
+                                flatten_deep(),
+                                vec![Expression::new(Term::Application(ApplicationTerm::new(
+                                    Expression::new(Term::Builtin(BuiltinTerm::Get)),
+                                    vec![
+                                        Expression::new(Term::Variable(VariableTerm::scoped(0))),
+                                        Expression::new(Term::Value(ValueTerm::String(
+                                            StringValue::from("headers"),
+                                        ))),
+                                    ],
+                                )))],
+                            ))),
+                            Expression::new(Term::Application(ApplicationTerm::new(
+                                Expression::new(Term::Builtin(BuiltinTerm::Get)),
+                                vec![
+                                    Expression::new(Term::Variable(VariableTerm::scoped(0))),
+                                    Expression::new(Term::Value(ValueTerm::String(
+                                        StringValue::from("body"),
+                                    ))),
+                                ],
+                            ))),
+                        ],
+                    )))],
                 ))),
             ))),
             vec![Expression::new(Term::Application(ApplicationTerm::new(

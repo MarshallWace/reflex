@@ -59,14 +59,14 @@ fn handle_graphql_http_operation(
         Some(RuntimeEffect::Async(Box::pin(async move {
             let response = fetch(method, url, headers, Some(body)).await;
             let result = match response {
-                Ok(data) => {
+                Ok((status, data)) => {
                     let result = match reflex_json::serialized(&data) {
                         Ok(result) => parse_graphql_response_payload(result),
                         _ => Err(None),
                     };
                     match result {
                         Ok(result) => Ok(result),
-                        Err(errors) => Err(format_graphql_error(errors)),
+                        Err(errors) => Err(format_graphql_error(errors, Some(status))),
                     }
                 }
                 Err(error) => Err(error),
@@ -97,7 +97,7 @@ fn handle_graphql_ws_operation(
                             Err(error) => Err(error),
                             Ok(payload) => match parse_graphql_response_payload(payload) {
                                 Ok(result) => Ok(result),
-                                Err(errors) => Err(format_graphql_error(errors)),
+                                Err(errors) => Err(format_graphql_error(errors, None)),
                             },
                         };
                         match result {
@@ -170,10 +170,23 @@ fn parse_graphql_response_payload(
     }
 }
 
-fn format_graphql_error(errors: Option<Vec<String>>) -> String {
+fn format_graphql_error(errors: Option<Vec<String>>, status: Option<u16>) -> String {
     match errors {
-        Some(errors) => format!("GraphQL error: {}", errors.join("\n")),
-        None => format!("Invalid GraphQL response"),
+        Some(errors) => format!(
+            "GraphQL error{}: {}",
+            match status {
+                Some(status) => format!(" (HTTP status {})", status),
+                None => String::new(),
+            },
+            errors.join("\n")
+        ),
+        None => format!(
+            "Invalid GraphQL response{}",
+            match status {
+                Some(status) => format!(" (HTTP status {})", status),
+                None => String::new(),
+            }
+        ),
     }
 }
 

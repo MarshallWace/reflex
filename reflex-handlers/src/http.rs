@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use reflex::{
-    core::{Expression, SerializedTerm, Signal, SignalTerm, Term},
+    core::{Expression, SerializedTerm, Signal, SignalTerm, StructTerm, Term},
     stdlib::{signal::SignalType, value::ValueTerm},
 };
 use reflex_runtime::RuntimeEffect;
@@ -29,7 +29,13 @@ pub fn handle_http_fetch(args: &[SerializedTerm]) -> Result<SignalResult, String
             )))),
             Some(RuntimeEffect::Async(Box::pin(async move {
                 match fetch(method, url, headers, body).await {
-                    Ok(data) => Expression::new(Term::Value(ValueTerm::String(data))),
+                    Ok((status, data)) => Expression::new(Term::Struct(StructTerm::new(
+                        None,
+                        vec![
+                            Expression::new(Term::Value(ValueTerm::Int(status as i32))),
+                            Expression::new(Term::Value(ValueTerm::String(data))),
+                        ],
+                    ))),
                     Err(error) => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                         SignalType::Error,
                         vec![SerializedTerm::string(error)],

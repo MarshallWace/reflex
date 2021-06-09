@@ -107,21 +107,36 @@ async fn parse_graphql_request(
     }
     .ok_or_else(|| String::from("Invalid request body"));
     let result = content_type.and_then(|content_type| match content_type.as_str() {
-        "application/graphql" => body.and_then(|body| reflex_graphql::parse(&body, &root)),
-        "application/json" => body
-            .and_then(|body| deserialize_graphql_operation(&body))
-            .and_then(|message| match message.operation_name() {
-                Some("IntrospectionQuery") => {
-                    let expression = create_introspection_query_response();
-                    let transform: QueryTransform =
-                        Box::new(|value: &SerializedTerm| Ok(value.deserialize()));
-                    Ok((expression, transform))
-                }
-                _ => reflex_graphql::parse(message.query(), &root),
-            }),
+        "application/graphql" => body.and_then(|body| parse_request_body_graphql(&body, &root)),
+        "application/json" => body.and_then(|body| parse_request_body_graphql_json(&body, &root)),
         _ => Err(String::from("Unsupported Content-Type header")),
     });
     result.or_else(|error| Err(HttpResult::error(StatusCode::BAD_REQUEST, error)))
+}
+
+fn parse_request_body_graphql(
+    body: &str,
+    root: &Expression,
+) -> Result<(Expression, QueryTransform), String> {
+    reflex_graphql::parse(body, root)
+}
+
+fn parse_request_body_graphql_json(
+    body: &str,
+    root: &Expression,
+) -> Result<(Expression, QueryTransform), String> {
+    match deserialize_graphql_operation(&body) {
+        Err(error) => Err(error),
+        Ok(message) => match message.operation_name() {
+            Some("IntrospectionQuery") => {
+                let expression = create_introspection_query_response();
+                let transform: QueryTransform =
+                    Box::new(|value: &SerializedTerm| Ok(value.deserialize()));
+                Ok((expression, transform))
+            }
+            _ => parse_request_body_graphql(message.query(), &root),
+        },
+    }
 }
 
 struct HttpResult {

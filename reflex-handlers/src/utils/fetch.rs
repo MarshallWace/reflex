@@ -9,7 +9,7 @@ pub(crate) async fn fetch(
     url: String,
     headers: impl IntoIterator<Item = (String, String)>,
     body: Option<String>,
-) -> Result<String, String> {
+) -> Result<(u16, String), String> {
     let https = HttpsConnector::new();
     let client = hyper::Client::builder().build::<_, hyper::Body>(https);
     match url.parse::<Uri>() {
@@ -22,13 +22,16 @@ pub(crate) async fn fetch(
             let body = Body::from(body.unwrap_or(String::new()));
             match request.body(body) {
                 Ok(request) => match client.request(request).await {
-                    Ok(result) => match hyper::body::to_bytes(result.into_body()).await {
-                        Ok(body) => match String::from_utf8(body.into_iter().collect()) {
-                            Ok(data) => Ok(data),
+                    Ok(result) => {
+                        let status = result.status().as_u16();
+                        match hyper::body::to_bytes(result.into_body()).await {
+                            Ok(body) => match String::from_utf8(body.into_iter().collect()) {
+                                Ok(data) => Ok((status, data)),
+                                Err(error) => Err(format!("{}", error)),
+                            },
                             Err(error) => Err(format!("{}", error)),
-                        },
-                        Err(error) => Err(format!("{}", error)),
-                    },
+                        }
+                    }
                     Err(error) => Err(format!("{}", error)),
                 },
                 Err(error) => Err(format!("{}", error)),
