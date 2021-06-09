@@ -49,40 +49,47 @@ impl BuiltinFunction for Get {
                         )),
                     }
                 }
-                None => match key.value() {
-                    Term::Value(ValueTerm::Int(field_offset)) => {
-                        let field_offset = *field_offset as StructFieldOffset;
-                        let value = target.get(field_offset);
-                        match value {
-                            Some(expression) => Ok(Expression::clone(expression)),
-                            None => Err(format!(
-                                "Invalid field offset: {} on struct {}",
-                                field_offset, target
-                            )),
+                None => {
+                    let index = match key.value() {
+                        Term::Value(ValueTerm::Int(value)) => Some(*value),
+                        Term::Value(ValueTerm::Float(value)) => match as_integer(*value) {
+                            Some(value) if value >= 0 => Some(value),
+                            _ => None,
+                        },
+                        _ => None,
+                    };
+                    match index {
+                        Some(index) => {
+                            let value = target.get(index as StructFieldOffset);
+                            match value {
+                                Some(expression) => Ok(Expression::clone(expression)),
+                                None => Err(format!(
+                                    "Invalid field offset: {} on struct {}",
+                                    index, target
+                                )),
+                            }
                         }
+                        _ => Err(format!(
+                            "Invalid field access: Expected (<struct>, Int), received ({}, {})",
+                            target, key,
+                        )),
                     }
-                    _ => Err(format!(
-                        "Invalid field access: Expected (<struct>, Int), received ({}, {})",
-                        target, key,
-                    )),
-                },
+                }
             },
             Term::Collection(CollectionTerm::Vector(target)) => {
                 let index = match key.value() {
                     Term::Value(ValueTerm::Int(value)) => {
                         let value = *value;
                         if value >= 0 {
-                            Some(value as usize)
+                            Some(value)
                         } else {
                             None
                         }
                     }
-                    Term::Value(ValueTerm::Float(value)) => {
-                        match as_integer(*value) {
-                            Some(value) if value >= 0 => Some(value as usize),
-                            _ => None,
-                        }
-                    }
+                    Term::Value(ValueTerm::Float(value)) => match as_integer(*value) {
+                        Some(value) if value >= 0 => Some(value),
+                        _ => None,
+                    },
                     _ => None,
                 };
                 match index {
@@ -90,7 +97,7 @@ impl BuiltinFunction for Get {
                         "Invalid array field access: Expected integer, received {}",
                         key,
                     )),
-                    Some(key) => match target.get(key) {
+                    Some(key) => match target.get(key as usize) {
                         Some(expression) => Ok(Expression::clone(expression)),
                         None => Ok(Expression::new(Term::Value(ValueTerm::Null))),
                     },
@@ -114,10 +121,18 @@ impl BuiltinFunction for Get {
 
 #[cfg(test)]
 mod tests {
-    use crate::{cache::GenerationalGc, core::{
+    use crate::{
+        cache::GenerationalGc,
+        core::{
             ApplicationTerm, DependencyList, DynamicState, EvaluationResult, Expression,
             StructPrototype, StructTerm, Term,
-        }, stdlib::{builtin::BuiltinTerm, collection::{CollectionTerm, hashmap::HashMapTerm, vector::VectorTerm}, value::{StringValue, ValueTerm}}};
+        },
+        stdlib::{
+            builtin::BuiltinTerm,
+            collection::{hashmap::HashMapTerm, vector::VectorTerm, CollectionTerm},
+            value::{StringValue, ValueTerm},
+        },
+    };
 
     #[test]
     fn get_anonymous_struct_fields() {
@@ -135,6 +150,28 @@ mod tests {
                     ],
                 ))),
                 Expression::new(Term::Value(ValueTerm::Int(1))),
+            ],
+        )));
+        let result = expression.evaluate(&state, &mut cache);
+        assert_eq!(
+            result,
+            EvaluationResult::new(
+                Expression::new(Term::Value(ValueTerm::Int(4))),
+                DependencyList::empty(),
+            )
+        );
+        let expression = Expression::new(Term::Application(ApplicationTerm::new(
+            Expression::new(Term::Builtin(BuiltinTerm::Get)),
+            vec![
+                Expression::new(Term::Struct(StructTerm::new(
+                    None,
+                    vec![
+                        Expression::new(Term::Value(ValueTerm::Int(3))),
+                        Expression::new(Term::Value(ValueTerm::Int(4))),
+                        Expression::new(Term::Value(ValueTerm::Int(5))),
+                    ],
+                ))),
+                Expression::new(Term::Value(ValueTerm::Float(1.0))),
             ],
         )));
         let result = expression.evaluate(&state, &mut cache);
