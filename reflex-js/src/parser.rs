@@ -603,8 +603,15 @@ fn parse_boolean_literal(node: &bool) -> ParserResult<Expression> {
 }
 
 fn parse_number_literal(node: &Cow<str>) -> ParserResult<Expression> {
-    match node.parse::<f64>() {
+    match parse_number(node) {
         Ok(value) => Ok(Expression::new(Term::Value(ValueTerm::Float(value)))),
+        Err(error) => Err(error),
+    }
+}
+
+fn parse_number(node: &Cow<str>) -> ParserResult<f64> {
+    match node.parse::<f64>() {
+        Ok(value) => Ok(value),
         Err(_) => Err(err("Invalid number literal", node)),
     }
 }
@@ -706,38 +713,42 @@ fn parse_object_literal<'src>(
     scope: &LexicalScope,
     env: &Env,
 ) -> ParserResult<Expression> {
-    let properties = node
+    enum ObjectLiteralFields {
+        Properties(Vec<(ValueTerm, Expression)>),
+        Spread(Expression),
+    }
+    let elements = node
         .iter()
         .fold(Ok(Vec::with_capacity(node.len())), |results, node| {
-            let mut properties = results?;
+            let mut elements = results?;
             match node {
                 ObjProp::Prop(prop) => match prop.kind {
                     PropKind::Init => {
                         let key = match &prop.key {
                             PropKey::Lit(key) => match key {
-                                Lit::String(key) if !prop.computed => {
-                                    let field_name = parse_string(key);
-                                    Ok(Expression::new(Term::Value(ValueTerm::String(
-                                        StringValue::from(field_name),
-                                    ))))
-                                }
-                                _ => parse_literal(key, scope, env),
+                                Lit::Null => Ok(ValueTerm::Null),
+                                Lit::Boolean(value) => Ok(ValueTerm::Boolean(*value)),
+                                Lit::String(key) => Ok(ValueTerm::String(parse_string(key))),
+                                Lit::Number(key) => Ok(ValueTerm::Float(parse_number(key)?)),
+                                _ => Err(err_unimplemented(key)),
                             },
                             PropKey::Expr(key) => match key {
                                 Expr::Ident(key) if !prop.computed => {
                                     let field_name = parse_identifier(key)?;
-                                    Ok(Expression::new(Term::Value(ValueTerm::String(
-                                        StringValue::from(field_name),
-                                    ))))
+                                    Ok(ValueTerm::String(StringValue::from(field_name)))
                                 }
-                                _ => parse_expression(key, scope, env),
+                                _ => {
+                                    let dynamic_key = parse_expression(key, scope, env)?;
+                                    match dynamic_key.value() {
+                                        Term::Value(value) => Ok(value.clone()),
+                                        _ => Err(err_unimplemented(dynamic_key)),
+                                    }
+                                }
                             },
                             PropKey::Pat(key) => match key {
                                 Pat::Ident(key) if !prop.computed => {
                                     let field_name = parse_identifier(key)?;
-                                    Ok(Expression::new(Term::Value(ValueTerm::String(
-                                        StringValue::from(field_name),
-                                    ))))
+                                    Ok(ValueTerm::String(StringValue::from(field_name)))
                                 }
                                 _ => Err(err_unimplemented(node)),
                             },
@@ -758,29 +769,56 @@ fn parse_object_literal<'src>(
                             },
                             PropValue::Pat(node) => Err(err_unimplemented(node)),
                         }?;
-                        properties.push((key, value));
-                        Ok(properties)
+                        if let Some(ObjectLiteralFields::Properties(_)) = elements.last() {
+                            match elements.pop() {
+                                Some(ObjectLiteralFields::Properties(mut properties)) => {
+                                    properties.push((key, value));
+                                    elements.push(ObjectLiteralFields::Properties(properties));
+                                }
+                                _ => {}
+                            }
+                        } else {
+                            elements.push(ObjectLiteralFields::Properties(vec![(key, value)]))
+                        }
+                        Ok(elements)
                     }
                     PropKind::Method => Err(err_unimplemented(prop)),
                     PropKind::Ctor => Err(err_unimplemented(prop)),
                     PropKind::Get => Err(err_unimplemented(prop)),
                     PropKind::Set => Err(err_unimplemented(prop)),
                 },
-                ObjProp::Spread(node) => Err(err_unimplemented(node)),
+                ObjProp::Spread(Expr::Spread(node)) => {
+                    let value = parse_expression(node, scope, env)?;
+                    elements.push(ObjectLiteralFields::Spread(value));
+                    Ok(elements)
+                }
+                _ => Err(err_unimplemented(node)),
             }
         })?;
-    let (keys, values): (Vec<_>, Vec<_>) = properties.into_iter().unzip();
-    let keys = keys
-        .into_iter()
-        .map(|key| match key.value() {
-            Term::Value(value) => Ok(value.clone()),
-            _ => Err(err_unimplemented(node)),
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok(Expression::new(Term::Struct(StructTerm::new(
-        Some(StructPrototype::new(keys)),
-        values,
-    ))))
+    let field_sets = elements.into_iter().map(|properties| match properties {
+        ObjectLiteralFields::Spread(value) => value,
+        ObjectLiteralFields::Properties(properties) => {
+            let (keys, values): (Vec<_>, Vec<_>) = properties.into_iter().unzip();
+            Expression::new(Term::Struct(StructTerm::new(
+                Some(StructPrototype::new(keys)),
+                values,
+            )))
+        }
+    });
+    Ok(if field_sets.len() >= 2 {
+        Expression::new(Term::Application(ApplicationTerm::new(
+            Expression::new(Term::Builtin(BuiltinTerm::Merge)),
+            field_sets.collect(),
+        )))
+    } else {
+        match field_sets.into_iter().next() {
+            Some(value) => value,
+            None => Expression::new(Term::Struct(StructTerm::new(
+                Some(StructPrototype::new(Vec::new())),
+                Vec::new(),
+            ))),
+        }
+    })
 }
 
 fn parse_array_literal<'src>(
@@ -1809,6 +1847,122 @@ mod tests {
                     Expression::new(Term::Value(ValueTerm::String(StringValue::from("baz")))),
                 ],
             )))),
+        );
+    }
+
+    #[test]
+    fn object_spread() {
+        let expression = parse(
+            "({ ...({}), ...({ first: 1, second: 2 }), third: 3, fourth: 4, ...({ fifth: 5 }), first: 6, third: 7 })",
+            &Env::new(),
+        )
+        .unwrap();
+        let query = Expression::new(Term::Application(ApplicationTerm::new(
+            Expression::new(Term::Builtin(BuiltinTerm::CollectArgs)),
+            vec![
+                Expression::new(Term::Application(ApplicationTerm::new(
+                    Expression::new(Term::Builtin(BuiltinTerm::Get)),
+                    vec![
+                        Expression::clone(&expression),
+                        Expression::new(Term::Value(ValueTerm::String(StringValue::from("first")))),
+                    ],
+                ))),
+                Expression::new(Term::Application(ApplicationTerm::new(
+                    Expression::new(Term::Builtin(BuiltinTerm::Get)),
+                    vec![
+                        Expression::clone(&expression),
+                        Expression::new(Term::Value(ValueTerm::String(StringValue::from(
+                            "second",
+                        )))),
+                    ],
+                ))),
+                Expression::new(Term::Application(ApplicationTerm::new(
+                    Expression::new(Term::Builtin(BuiltinTerm::Get)),
+                    vec![
+                        Expression::clone(&expression),
+                        Expression::new(Term::Value(ValueTerm::String(StringValue::from("third")))),
+                    ],
+                ))),
+                Expression::new(Term::Application(ApplicationTerm::new(
+                    Expression::new(Term::Builtin(BuiltinTerm::Get)),
+                    vec![
+                        Expression::clone(&expression),
+                        Expression::new(Term::Value(ValueTerm::String(StringValue::from(
+                            "fourth",
+                        )))),
+                    ],
+                ))),
+                Expression::new(Term::Application(ApplicationTerm::new(
+                    Expression::new(Term::Builtin(BuiltinTerm::Get)),
+                    vec![
+                        Expression::clone(&expression),
+                        Expression::new(Term::Value(ValueTerm::String(StringValue::from("fifth")))),
+                    ],
+                ))),
+            ],
+        )));
+        let result = query.evaluate(&DynamicState::new(), &mut GenerationalGc::new());
+        assert_eq!(
+            result,
+            EvaluationResult::new(
+                Expression::new(Term::Collection(CollectionTerm::Vector(VectorTerm::new(
+                    vec![
+                        Expression::new(Term::Value(ValueTerm::Float(6.0))),
+                        Expression::new(Term::Value(ValueTerm::Float(2.0))),
+                        Expression::new(Term::Value(ValueTerm::Float(7.0))),
+                        Expression::new(Term::Value(ValueTerm::Float(4.0))),
+                        Expression::new(Term::Value(ValueTerm::Float(5.0))),
+                    ]
+                )))),
+                DependencyList::empty(),
+            ),
+        );
+        let expression = parse(
+            "const foo = { first: 1, second: 2 }; ({ ...foo, third: 3 })",
+            &Env::new(),
+        )
+        .unwrap();
+        let query = Expression::new(Term::Application(ApplicationTerm::new(
+            Expression::new(Term::Builtin(BuiltinTerm::CollectArgs)),
+            vec![
+                Expression::new(Term::Application(ApplicationTerm::new(
+                    Expression::new(Term::Builtin(BuiltinTerm::Get)),
+                    vec![
+                        Expression::clone(&expression),
+                        Expression::new(Term::Value(ValueTerm::String(StringValue::from("first")))),
+                    ],
+                ))),
+                Expression::new(Term::Application(ApplicationTerm::new(
+                    Expression::new(Term::Builtin(BuiltinTerm::Get)),
+                    vec![
+                        Expression::clone(&expression),
+                        Expression::new(Term::Value(ValueTerm::String(StringValue::from(
+                            "second",
+                        )))),
+                    ],
+                ))),
+                Expression::new(Term::Application(ApplicationTerm::new(
+                    Expression::new(Term::Builtin(BuiltinTerm::Get)),
+                    vec![
+                        Expression::clone(&expression),
+                        Expression::new(Term::Value(ValueTerm::String(StringValue::from("third")))),
+                    ],
+                ))),
+            ],
+        )));
+        let result = query.evaluate(&DynamicState::new(), &mut GenerationalGc::new());
+        assert_eq!(
+            result,
+            EvaluationResult::new(
+                Expression::new(Term::Collection(CollectionTerm::Vector(VectorTerm::new(
+                    vec![
+                        Expression::new(Term::Value(ValueTerm::Float(1.0))),
+                        Expression::new(Term::Value(ValueTerm::Float(2.0))),
+                        Expression::new(Term::Value(ValueTerm::Float(3.0))),
+                    ]
+                )))),
+                DependencyList::empty(),
+            ),
         );
     }
 

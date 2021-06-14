@@ -59,6 +59,8 @@ mod _match;
 use _match::Match;
 mod max;
 use max::Max;
+mod merge;
+use merge::Merge;
 mod min;
 use min::Min;
 mod multiply;
@@ -123,6 +125,7 @@ pub enum BuiltinTerm {
     Map,
     Match,
     Max,
+    Merge,
     Min,
     Multiply,
     Not,
@@ -170,6 +173,7 @@ impl BuiltinTerm {
             Self::Map => Map::arity(),
             Self::Match => Match::arity(),
             Self::Max => Max::arity(),
+            Self::Merge => Merge::arity(),
             Self::Min => Min::arity(),
             Self::Multiply => Multiply::arity(),
             Self::Not => Not::arity(),
@@ -220,6 +224,7 @@ impl BuiltinTerm {
             Self::Map => Map::apply(args),
             Self::Match => Match::apply(args),
             Self::Max => Max::apply(args),
+            Self::Merge => Merge::apply(args),
             Self::Min => Min::apply(args),
             Self::Multiply => Multiply::apply(args),
             Self::Not => Not::apply(args),
