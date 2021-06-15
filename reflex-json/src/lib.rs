@@ -38,6 +38,7 @@ pub fn sanitize_term(term: SerializedTerm) -> Result<serde_json::Value, String> 
         SerializedTerm::Value(value) => sanitize_value(value),
         SerializedTerm::Object(value) => sanitize_object(value),
         SerializedTerm::List(value) => sanitize_list(value),
+        SerializedTerm::Signal(value) => Err(format!("Unable to format value: {}", value)),
     }
 }
 
