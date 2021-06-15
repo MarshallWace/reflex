@@ -8,7 +8,7 @@ pub mod http;
 use std::collections::HashMap;
 
 use reflex::core::SerializedTerm;
-use reflex_runtime::SignalResult;
+use reflex_runtime::{SignalHelpers, SignalResult};
 
 pub(crate) mod utils {
     mod fetch;
@@ -18,21 +18,25 @@ pub(crate) mod utils {
 }
 
 pub fn builtin_signal_handler(
-) -> impl Fn(&str, &[SerializedTerm]) -> Option<Result<SignalResult, String>> + Send + Sync + 'static
-{
+) -> impl Fn(&str, &[SerializedTerm], &SignalHelpers) -> Option<Result<SignalResult, String>>
+       + Send
+       + Sync
+       + 'static {
     create_signal_handler(vec![
         (
             "reflex::date::timestamp",
-            date::handle_date_timestamp as fn(&[SerializedTerm]) -> Result<SignalResult, String>,
+            date::handle_date_timestamp
+                as fn(&[SerializedTerm], &SignalHelpers) -> Result<SignalResult, String>,
         ),
         (
             "reflex::http::fetch",
-            http::handle_http_fetch as fn(&[SerializedTerm]) -> Result<SignalResult, String>,
+            http::handle_http_fetch
+                as fn(&[SerializedTerm], &SignalHelpers) -> Result<SignalResult, String>,
         ),
         (
             "reflex::graphql::execute",
             graphql::handle_graphql_execute
-                as fn(&[SerializedTerm]) -> Result<SignalResult, String>,
+                as fn(&[SerializedTerm], &SignalHelpers) -> Result<SignalResult, String>,
         ),
     ])
 }
@@ -41,26 +45,33 @@ pub fn create_signal_handler(
     handlers: impl IntoIterator<
         Item = (
             &'static str,
-            fn(&[SerializedTerm]) -> Result<SignalResult, String>,
+            fn(&[SerializedTerm], &SignalHelpers) -> Result<SignalResult, String>,
         ),
     >,
-) -> impl Fn(&str, &[SerializedTerm]) -> Option<Result<SignalResult, String>> + Send + Sync + 'static
-{
+) -> impl Fn(&str, &[SerializedTerm], &SignalHelpers) -> Option<Result<SignalResult, String>>
+       + Send
+       + Sync
+       + 'static {
     let handlers = handlers.into_iter().collect::<HashMap<_, _>>();
-    move |signal_type, args| match handlers.get(signal_type) {
-        Some(handler) => Some(handler(args)),
+    move |signal_type, args, helpers| match handlers.get(signal_type) {
+        Some(handler) => Some(handler(args, helpers)),
         None => None,
     }
 }
 
 pub fn debug_signal_handler<THandler>(
     handler: THandler,
-) -> impl Fn(&str, &[SerializedTerm]) -> Option<Result<SignalResult, String>> + Send + Sync + 'static
+) -> impl Fn(&str, &[SerializedTerm], &SignalHelpers) -> Option<Result<SignalResult, String>>
+       + Send
+       + Sync
+       + 'static
 where
-    THandler:
-        Fn(&str, &[SerializedTerm]) -> Option<Result<SignalResult, String>> + Send + Sync + 'static,
+    THandler: Fn(&str, &[SerializedTerm], &SignalHelpers) -> Option<Result<SignalResult, String>>
+        + Send
+        + Sync
+        + 'static,
 {
-    move |signal_type, args| {
+    move |signal_type, args, helpers| {
         if args.is_empty() {
             eprintln!("{}", signal_type)
         } else {
@@ -73,6 +84,6 @@ where
                     .join(" ")
             )
         };
-        handler(signal_type, args)
+        handler(signal_type, args, helpers)
     }
 }

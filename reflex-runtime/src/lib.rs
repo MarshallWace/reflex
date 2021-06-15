@@ -19,6 +19,38 @@ use store::Store;
 
 pub type SubscriptionResult = Result<Expression, Vec<String>>;
 pub type SignalResult = (Expression, Option<RuntimeEffect>);
+pub struct SignalHelpers<'a> {
+    handler: Box<
+        dyn Fn(&str, &[SerializedTerm], &SignalHelpers) -> Option<Result<SignalResult, String>>
+            + Send
+            + Sync
+            + 'a,
+    >,
+}
+impl<'a> SignalHelpers<'a> {
+    fn new<THandler>(handler: &'a THandler) -> Self
+    where
+        THandler: Fn(&str, &[SerializedTerm], &SignalHelpers) -> Option<Result<SignalResult, String>>
+            + Send
+            + Sync
+            + 'a,
+    {
+        Self {
+            handler: Box::new(handler),
+        }
+    }
+    pub fn spawn(&self, signal: Signal) -> Result<SignalResult, String> {
+        // TODO: Register dependency on parent signal when spawning child signals
+        match signal.get_type() {
+            SignalType::Error | SignalType::Pending => {
+                Ok((Expression::new(Term::Signal(SignalTerm::new(signal))), None))
+            }
+            SignalType::Custom(signal_type) => {
+                handle_signal(&self.handler, signal_type, signal.args())
+            }
+        }
+    }
+}
 
 struct Operation<TRequest, TResponse> {
     payload: TRequest,
@@ -138,7 +170,7 @@ impl Runtime {
         result_buffer_size: usize,
     ) -> Self
     where
-        THandler: Fn(&str, &[SerializedTerm]) -> Option<Result<SignalResult, String>>
+        THandler: Fn(&str, &[SerializedTerm], &SignalHelpers) -> Option<Result<SignalResult, String>>
             + Send
             + Sync
             + 'static,
@@ -190,8 +222,10 @@ fn create_store<THandler, TCache: EvaluationCache + Send + Sync + 'static>(
     result_buffer_size: usize,
 ) -> (CommandChannel, ResultsChannel)
 where
-    THandler:
-        Fn(&str, &[SerializedTerm]) -> Option<Result<SignalResult, String>> + Send + Sync + 'static,
+    THandler: Fn(&str, &[SerializedTerm], &SignalHelpers) -> Option<Result<SignalResult, String>>
+        + Send
+        + Sync
+        + 'static,
 {
     let (messages_tx, mut messages_rx) = mpsc::channel::<Command>(command_buffer_size);
     let (results_tx, _) = broadcast::channel(result_buffer_size);
@@ -231,8 +265,10 @@ fn process_subscribe_command<THandler, TCache: EvaluationCache>(
     results_tx: &ResultsChannel,
     signal_handler: &THandler,
 ) where
-    THandler:
-        Fn(&str, &[SerializedTerm]) -> Option<Result<SignalResult, String>> + Send + Sync + 'static,
+    THandler: Fn(&str, &[SerializedTerm], &SignalHelpers) -> Option<Result<SignalResult, String>>
+        + Send
+        + Sync
+        + 'static,
 {
     let expression = command.payload;
     let (subscription_id, results) = {
@@ -282,8 +318,10 @@ fn process_update_command<THandler, TCache: EvaluationCache>(
     results_tx: &ResultsChannel,
     signal_handler: &THandler,
 ) where
-    THandler:
-        Fn(&str, &[SerializedTerm]) -> Option<Result<SignalResult, String>> + Send + Sync + 'static,
+    THandler: Fn(&str, &[SerializedTerm], &SignalHelpers) -> Option<Result<SignalResult, String>>
+        + Send
+        + Sync
+        + 'static,
 {
     let updates = command.payload;
     let results = {
@@ -364,8 +402,10 @@ fn handle_signals<THandler>(
     signal_handler: &THandler,
 ) -> Result<Vec<Expression>, Option<Vec<String>>>
 where
-    THandler:
-        Fn(&str, &[SerializedTerm]) -> Option<Result<SignalResult, String>> + Send + Sync + 'static,
+    THandler: Fn(&str, &[SerializedTerm], &SignalHelpers) -> Option<Result<SignalResult, String>>
+        + Send
+        + Sync
+        + 'static,
 {
     let results = signals
         .iter()
@@ -373,14 +413,7 @@ where
             SignalType::Error => Err(Some(parse_error_signal_message(signal.args()))),
             SignalType::Pending => Err(None),
             SignalType::Custom(signal_type) => {
-                let handler = signal_handler(signal_type, signal.args());
-                match handler {
-                    None => Err(Some(format!("Unhandled signal: {}", signal_type))),
-                    Some(result) => match result {
-                        Ok(result) => Ok(result),
-                        Err(error) => Err(Some(error)),
-                    },
-                }
+                handle_signal(signal_handler, signal_type, signal.args()).map_err(Some)
             }
         })
         // TODO: Allow partial errors when processing signals
@@ -410,6 +443,24 @@ where
             }
             Ok(results)
         }
+    }
+}
+
+fn handle_signal<'a, THandler>(
+    signal_handler: &THandler,
+    signal_type: &str,
+    args: &[SerializedTerm],
+) -> Result<SignalResult, String>
+where
+    THandler: Fn(&str, &[SerializedTerm], &SignalHelpers) -> Option<Result<SignalResult, String>>
+        + Send
+        + Sync
+        + 'a,
+{
+    let handler = signal_handler(signal_type, args, &SignalHelpers::new(signal_handler));
+    match handler {
+        None => Err(format!("Unhandled signal: {}", signal_type)),
+        Some(result) => result,
     }
 }
 

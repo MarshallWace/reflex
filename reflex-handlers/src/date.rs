@@ -7,13 +7,16 @@ use reflex::{
     core::{Expression, SerializedTerm, Term},
     stdlib::value::ValueTerm,
 };
-use reflex_runtime::RuntimeEffect;
+use reflex_runtime::{RuntimeEffect, SignalHelpers};
 use tokio::time::{interval_at, Instant};
 use tokio_stream::{wrappers::IntervalStream, StreamExt};
 
 use crate::SignalResult;
 
-pub fn handle_date_timestamp(args: &[SerializedTerm]) -> Result<SignalResult, String> {
+pub fn handle_date_timestamp(
+    args: &[SerializedTerm],
+    _helpers: &SignalHelpers,
+) -> Result<SignalResult, String> {
     if args.len() != 1 {
         return Err(format!(
             "Invalid timestamp signal: Expected 1 argument, received {}",

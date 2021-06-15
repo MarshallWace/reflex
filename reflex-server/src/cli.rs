@@ -24,7 +24,7 @@ use reflex_js::{
     stdlib::{builtin_globals, global_process},
     Env,
 };
-use reflex_runtime::Runtime;
+use reflex_runtime::{Runtime, SignalHelpers};
 
 pub use reflex;
 pub use reflex_handlers::builtin_signal_handler;
@@ -39,7 +39,7 @@ struct CliArgs {
 }
 
 pub async fn cli(
-    signal_handler: impl Fn(&str, &[SerializedTerm]) -> Option<Result<SignalResult, String>>
+    signal_handler: impl Fn(&str, &[SerializedTerm], &SignalHelpers) -> Option<Result<SignalResult, String>>
         + Send
         + Sync
         + 'static,
@@ -123,8 +123,10 @@ fn create_env(env_args: impl IntoIterator<Item = (String, Expression)>) -> Env {
 
 fn create_store<THandler>(signal_handler: THandler) -> Runtime
 where
-    THandler:
-        Fn(&str, &[SerializedTerm]) -> Option<Result<SignalResult, String>> + Send + Sync + 'static,
+    THandler: Fn(&str, &[SerializedTerm], &SignalHelpers) -> Option<Result<SignalResult, String>>
+        + Send
+        + Sync
+        + 'static,
 {
     // TODO: Establish sensible defaults for channel buffer sizes
     let command_buffer_size = 1024;

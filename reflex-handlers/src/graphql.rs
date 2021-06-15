@@ -9,13 +9,16 @@ use reflex::{
     stdlib::{signal::SignalType, value::ValueTerm},
 };
 use reflex_graphql::{subscriptions::SubscriptionId, GraphQlOperationPayload};
-use reflex_runtime::{RuntimeEffect, SignalResult};
+use reflex_runtime::{RuntimeEffect, SignalHelpers, SignalResult};
 use tokio_stream::Stream;
 use uuid::Uuid;
 
 use crate::utils::{create_websocket_connection, fetch, subscribe_websocket_operation};
 
-pub fn handle_graphql_execute(args: &[SerializedTerm]) -> Result<SignalResult, String> {
+pub fn handle_graphql_execute(
+    args: &[SerializedTerm],
+    _helpers: &SignalHelpers,
+) -> Result<SignalResult, String> {
     if args.len() != 4 {
         return Err(format!(
             "Invalid GraphQL signal: Expected 4 arguments, received {}",

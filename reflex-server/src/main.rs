@@ -3,6 +3,7 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use std::{path::Path, process};
 
+use reflex_runtime::SignalHelpers;
 use reflex_server::cli::{
     builtin_imports, builtin_loaders, builtin_signal_handler, cli, dynamic_module_loader,
     reflex::core::{Expression, SerializedTerm},
@@ -23,8 +24,10 @@ pub async fn main() {
 }
 
 fn create_signal_handler(
-) -> impl Fn(&str, &[SerializedTerm]) -> Option<Result<SignalResult, String>> + Send + Sync + 'static
-{
+) -> impl Fn(&str, &[SerializedTerm], &SignalHelpers) -> Option<Result<SignalResult, String>>
+       + Send
+       + Sync
+       + 'static {
     builtin_signal_handler()
 }
 

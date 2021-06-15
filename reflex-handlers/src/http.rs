@@ -5,11 +5,14 @@ use reflex::{
     core::{Expression, SerializedTerm, Signal, SignalTerm, StructTerm, Term},
     stdlib::{signal::SignalType, value::ValueTerm},
 };
-use reflex_runtime::RuntimeEffect;
+use reflex_runtime::{RuntimeEffect, SignalHelpers};
 
 use crate::{utils::fetch, SignalResult};
 
-pub fn handle_http_fetch(args: &[SerializedTerm]) -> Result<SignalResult, String> {
+pub fn handle_http_fetch(
+    args: &[SerializedTerm],
+    _helpers: &SignalHelpers,
+) -> Result<SignalResult, String> {
     if args.len() != 4 {
         return Err(format!(
             "Invalid fetch signal: Expected 4 arguments, received {}",
