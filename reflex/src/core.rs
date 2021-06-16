@@ -895,7 +895,9 @@ impl Rewritable for LambdaTerm {
         eta_reduced_body
             .and_then(|body| body.reduce(cache))
             .or(eta_reduced_body.map(Expression::clone))
-            .or(reduced_body)
+            .or(reduced_body.map(|body| {
+                Expression::new(Term::Lambda(LambdaTerm::new(self.arity.clone(), body)))
+            }))
     }
 }
 impl fmt::Display for LambdaTerm {
@@ -1028,12 +1030,18 @@ impl Rewritable for ApplicationTerm {
     fn optimize(&self, cache: &mut impl EvaluationCache) -> Option<Expression> {
         let optimized_target = self.target.optimize(cache);
         let optimized_args = optimize_multiple(&self.args, cache);
-        let optimized_expression = optimized_args.map(|args| {
-            Expression::new(Term::Application(Self::new(
+        let optimized_expression = match optimized_args {
+            Some(args) => Some(Expression::new(Term::Application(Self::new(
                 optimized_target.unwrap_or_else(|| Expression::clone(&self.target)),
                 args,
-            )))
-        });
+            )))),
+            None => optimized_target.map(|target| {
+                Expression::new(Term::Application(Self::new(
+                    target,
+                    self.args.iter().map(Expression::clone).collect(),
+                )))
+            }),
+        };
         match &optimized_expression {
             Some(expression) => expression.reduce(cache),
             None => self.reduce(cache),
