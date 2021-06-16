@@ -51,7 +51,7 @@ impl fmt::Display for Arity {
     }
 }
 
-pub(crate) trait Rewritable {
+pub trait Rewritable {
     fn capture_depth(&self) -> StackOffset;
     fn dynamic_dependencies(&self) -> DependencyList;
     fn substitute_static(
@@ -67,7 +67,7 @@ pub(crate) trait Rewritable {
     fn optimize(&self, cache: &mut impl EvaluationCache) -> Option<Expression>;
 }
 
-pub(crate) trait Reducible {
+pub trait Reducible {
     fn reduce(&self, cache: &mut impl EvaluationCache) -> Option<Expression>;
 }
 
@@ -345,7 +345,7 @@ impl EvaluationResult {
     pub fn dependencies(&self) -> &DependencyList {
         &self.dependencies
     }
-    pub fn unwrap(self) -> (Expression, DependencyList) {
+    pub fn into_parts(self) -> (Expression, DependencyList) {
         (self.result, self.dependencies)
     }
 }
@@ -387,6 +387,43 @@ impl DependencyList {
         match &self.dependencies {
             None => false,
             Some(dependencies) => dependencies.contains(entries),
+        }
+    }
+}
+impl<'a> IntoIterator for &'a DependencyList {
+    type Item = StateToken;
+    type IntoIter = DependencyListIntoIter<'a>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        match &self.dependencies {
+            Some(dependencies) => DependencyListIntoIter::Some(dependencies.iter()),
+            None => DependencyListIntoIter::None,
+        }
+    }
+}
+pub enum DependencyListIntoIter<'a> {
+    Some(DynamicDependenciesIter<'a>),
+    None,
+}
+impl<'a> Iterator for DependencyListIntoIter<'a> {
+    type Item = StateToken;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            Self::Some(iter) => iter.next(),
+            Self::None => None,
+        }
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let len = ExactSizeIterator::len(self);
+        (len, Some(len))
+    }
+}
+impl<'a> ExactSizeIterator for DependencyListIntoIter<'a> {
+    fn len(&self) -> usize {
+        match self {
+            Self::Some(items) => items.len(),
+            Self::None => 0,
         }
     }
 }
@@ -730,7 +767,11 @@ impl DynamicDependencies {
     fn contains(&self, entries: &BTreeSet<StateToken>) -> bool {
         !self.values.is_disjoint(entries)
     }
+    fn iter(&self) -> DynamicDependenciesIter<'_> {
+        self.values.iter().copied()
+    }
 }
+type DynamicDependenciesIter<'a> = std::iter::Copied<std::collections::btree_set::Iter<'a, u64>>;
 
 #[derive(Hash, Eq, PartialEq, Clone, Debug)]
 pub struct RecursiveTerm {
@@ -1457,7 +1498,7 @@ impl SignalTerm {
             signals: signals.into_iter().collect(),
         }
     }
-    pub fn signals(&self) -> impl IntoIterator<Item = &Signal> {
+    pub fn signals(&self) -> impl IntoIterator<Item = &Signal> + ExactSizeIterator {
         self.signals.iter()
     }
 }

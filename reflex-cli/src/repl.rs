@@ -50,7 +50,7 @@ pub(crate) fn eval(
     state: &DynamicState,
     cache: &mut impl EvaluationCache,
 ) -> (String, DependencyList) {
-    let (result, dependencies) = expression.evaluate(state, cache).unwrap();
+    let (result, dependencies) = expression.evaluate(state, cache).into_parts();
     let output = match result.value() {
         Term::Signal(signal) => format_signal_output(signal),
         value => format!("{}", value),

@@ -163,7 +163,7 @@ impl Subscription {
             return None;
         }
         let result = self.expression.evaluate(state, cache);
-        let (result, dependencies) = result.unwrap();
+        let (result, dependencies) = result.into_parts();
         self.dependencies = Some((state_hash, dependencies));
         Some(result)
     }
