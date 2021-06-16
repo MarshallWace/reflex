@@ -15,7 +15,7 @@ use reflex::{
     core::{DynamicState, Expression},
 };
 use reflex_cli::parse_cli_args;
-use reflex_handlers::builtin_signal_handler;
+use reflex_handlers::{builtin_signal_handler, debug_signal_handler};
 use reflex_js::{self, dynamic_module_loader, stdlib::builtin_imports};
 use reflex_loaders::builtin_loaders;
 use reflex_runtime::Runtime;
@@ -26,6 +26,7 @@ mod repl;
 #[tokio::main]
 pub async fn main() {
     let args = parse_cli_args(env::args().skip(1));
+    let debug = args.get("debug").is_some();
     let parser = match args.get("syntax") {
         Some(value) => match value {
             None => Err(String::from("Empty --syntax argument")),
@@ -80,15 +81,23 @@ pub async fn main() {
                                 let command_buffer_size = 32;
                                 let result_buffer_size = 32;
                                 let signal_handler = builtin_signal_handler();
-                                let runtime = Runtime::new(
-                                    signal_handler,
-                                    cache,
-                                    command_buffer_size,
-                                    result_buffer_size,
-                                );
+                                let runtime = if debug {
+                                    Runtime::new(
+                                        debug_signal_handler(signal_handler),
+                                        cache,
+                                        command_buffer_size,
+                                        result_buffer_size,
+                                    )
+                                } else {
+                                    Runtime::new(
+                                        signal_handler,
+                                        cache,
+                                        command_buffer_size,
+                                        result_buffer_size,
+                                    )
+                                };
                                 let stdout = Mutex::new(stdout);
                                 async move {
-                                    let expression = Expression::clone(&expression);
                                     match runtime.subscribe(expression).await {
                                         Err(error) => {
                                             writeln!(stdout.lock().unwrap(), "{}", error).unwrap();

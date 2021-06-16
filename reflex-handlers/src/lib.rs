@@ -62,9 +62,9 @@ where
 {
     move |signal_type, args| {
         if args.is_empty() {
-            println!("{}", signal_type)
+            eprintln!("{}", signal_type)
         } else {
-            println!(
+            eprintln!(
                 "{} {}",
                 signal_type,
                 args.iter()
