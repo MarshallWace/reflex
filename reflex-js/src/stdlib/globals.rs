@@ -14,6 +14,8 @@ mod map;
 use map::global_map;
 mod math;
 use math::global_math;
+mod object;
+use object::global_object;
 mod set;
 use set::global_set;
 
@@ -24,6 +26,7 @@ pub use process::global_process;
 pub fn builtin_globals() -> Vec<(&'static str, Expression)> {
     vec![
         ("Boolean", global_boolean()),
+        ("Object", global_object()),
         ("Math", global_math()),
         ("Map", global_map()),
         ("Set", global_set()),
