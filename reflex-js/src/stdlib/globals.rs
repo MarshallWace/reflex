@@ -18,6 +18,8 @@ mod object;
 use object::global_object;
 mod set;
 use set::global_set;
+mod string;
+use string::{global_string, global_encode_uri_component};
 
 pub use json::{global_json_parse, global_json_stringify, json_stringify, json_stringify_string};
 mod process;
@@ -26,11 +28,13 @@ pub use process::global_process;
 pub fn builtin_globals() -> Vec<(&'static str, Expression)> {
     vec![
         ("Boolean", global_boolean()),
+        ("String", global_string()),
         ("Object", global_object()),
         ("Math", global_math()),
         ("Map", global_map()),
         ("Set", global_set()),
         ("JSON", global_json()),
+        ("encodeURIComponent", global_encode_uri_component()),
     ]
 }
 

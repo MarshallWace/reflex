@@ -12,3 +12,4 @@ reflex = { path = "../reflex" }
 reflex-json = { path = "../reflex-json" }
 resast = "0.4.1"
 ressa = "0.7.1"
+urlencoding = "1.3.3"
