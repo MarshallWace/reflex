@@ -81,6 +81,8 @@ mod slice;
 use slice::Slice;
 mod starts_with;
 use starts_with::StartsWith;
+mod r#struct;
+use r#struct::Struct;
 mod subtract;
 use subtract::Subtract;
 mod tuple;
@@ -136,6 +138,7 @@ pub enum BuiltinTerm {
     Round,
     Slice,
     StartsWith,
+    Struct,
     Subtract,
     Tuple,
     Values,
@@ -184,6 +187,7 @@ impl BuiltinTerm {
             Self::Round => Round::arity(),
             Self::Slice => Slice::arity(),
             Self::StartsWith => StartsWith::arity(),
+            Self::Struct => Struct::arity(),
             Self::Subtract => Subtract::arity(),
             Self::Tuple => Tuple::arity(),
             Self::Values => Values::arity(),
@@ -235,6 +239,7 @@ impl BuiltinTerm {
             Self::Remainder => Remainder::apply(args),
             Self::Round => Round::apply(args),
             Self::StartsWith => StartsWith::apply(args),
+            Self::Struct => Struct::apply(args),
             Self::Subtract => Subtract::apply(args),
             Self::Tuple => Tuple::apply(args),
             Self::Values => Values::apply(args),
