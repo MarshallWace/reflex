@@ -315,7 +315,7 @@ pub(crate) fn get_builtin_field<'src>(target: Option<&Term>, method: &str) -> Op
             "entries" => Some(Term::Builtin(BuiltinTerm::Entries)),
             "keys" => Some(Term::Builtin(BuiltinTerm::Keys)),
             "map" => Some(Term::Builtin(BuiltinTerm::Map)),
-            "push" => Some(Term::Builtin(BuiltinTerm::Append)),
+            "push" => Some(Term::Builtin(BuiltinTerm::Push)),
             "reduce" => Some(Term::Builtin(BuiltinTerm::Reduce)),
             "values" => Some(Term::Builtin(BuiltinTerm::Values)),
             "slice" => Some(Term::Builtin(BuiltinTerm::Slice)),
@@ -338,7 +338,7 @@ pub(crate) fn get_builtin_field<'src>(target: Option<&Term>, method: &str) -> Op
         None | Some(Term::Collection(CollectionTerm::HashSet(_))) => match method {
             "entries" => Some(Term::Builtin(BuiltinTerm::Entries)),
             "get" => Some(Term::Builtin(BuiltinTerm::Get)),
-            "add" => Some(Term::Builtin(BuiltinTerm::Append)),
+            "add" => Some(Term::Builtin(BuiltinTerm::Push)),
             "values" => Some(Term::Builtin(BuiltinTerm::Values)),
             _ => None,
         },

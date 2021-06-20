@@ -140,7 +140,7 @@ mod tests {
                 Expression::new(Term::Lambda(LambdaTerm::new(
                     Arity::from(0, 2, None),
                     Expression::new(Term::Application(ApplicationTerm::new(
-                        Expression::new(Term::Builtin(BuiltinTerm::Append)),
+                        Expression::new(Term::Builtin(BuiltinTerm::Push)),
                         vec![
                             Expression::new(Term::Variable(VariableTerm::scoped(1))),
                             Expression::new(Term::Application(ApplicationTerm::new(

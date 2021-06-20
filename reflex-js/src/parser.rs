@@ -838,7 +838,7 @@ fn parse_array_literal<'src>(
             let base = parse_expression(base, scope, env)?;
             let item = parse_expression(item, scope, env)?;
             Ok(Expression::new(Term::Application(ApplicationTerm::new(
-                Expression::new(Term::Builtin(BuiltinTerm::Append)),
+                Expression::new(Term::Builtin(BuiltinTerm::Push)),
                 vec![base, item],
             ))))
         }
@@ -1988,7 +1988,7 @@ mod tests {
         assert_eq!(
             parse("[...[3, 4, 5], 6]", &env),
             Ok(Expression::new(Term::Application(ApplicationTerm::new(
-                Expression::new(Term::Builtin(BuiltinTerm::Append)),
+                Expression::new(Term::Builtin(BuiltinTerm::Push)),
                 vec![
                     Expression::new(Term::Collection(CollectionTerm::Vector(VectorTerm::new(
                         vec![

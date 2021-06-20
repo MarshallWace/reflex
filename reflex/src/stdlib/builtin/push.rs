@@ -7,8 +7,8 @@ use crate::{
     stdlib::{builtin::BuiltinFunction, collection::CollectionTerm, signal::SignalType},
 };
 
-pub struct Append {}
-impl BuiltinFunction for Append {
+pub struct Push {}
+impl BuiltinFunction for Push {
     fn arity() -> Arity {
         Arity::from(1, 1, None)
     }
@@ -34,7 +34,7 @@ impl BuiltinFunction for Append {
             _ => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                 SignalType::Error,
                 vec![SerializedTerm::string(format!(
-                    "Invalid append operation: Expected (Vector, <any>) or (HashSet, <any>), received ({}, {})",
+                    "Invalid push operation: Expected (Vector, <any>) or (HashSet, <any>), received ({}, {})",
                     target, value
                 ))],
             )))),
