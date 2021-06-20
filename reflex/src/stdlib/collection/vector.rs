@@ -38,6 +38,11 @@ impl VectorTerm {
             self.items.iter().map(Expression::clone).chain(once(value)),
         ))))
     }
+    pub fn push_front(&self, value: Expression) -> Expression {
+        Expression::new(Term::Collection(CollectionTerm::Vector(Self::new(
+            once(value).chain(self.items.iter().map(Expression::clone)),
+        ))))
+    }
     pub fn iterate(&self) -> impl IntoIterator<Item = Expression> + ExactSizeIterator + '_ {
         self.items.iter().map(|item| Expression::clone(item))
     }

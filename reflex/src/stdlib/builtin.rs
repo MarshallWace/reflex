@@ -9,6 +9,8 @@ mod abs;
 use abs::Abs;
 mod and;
 use and::And;
+mod append;
+use append::Append;
 mod car;
 use car::Car;
 mod cdr;
@@ -71,6 +73,8 @@ mod pow;
 use pow::Pow;
 mod push;
 use push::Push;
+mod push_front;
+use push_front::PushFront;
 mod reduce;
 use reduce::Reduce;
 mod remainder;
@@ -100,6 +104,7 @@ pub enum BuiltinTerm {
     Add,
     Abs,
     And,
+    Append,
     Car,
     Cdr,
     Ceil,
@@ -133,6 +138,7 @@ pub enum BuiltinTerm {
     Or,
     Pow,
     Push,
+    PushFront,
     Reduce,
     Remainder,
     Round,
@@ -149,6 +155,7 @@ impl BuiltinTerm {
             Self::Abs => Abs::arity(),
             Self::Add => Add::arity(),
             Self::And => And::arity(),
+            Self::Append => Append::arity(),
             Self::Car => Car::arity(),
             Self::Cdr => Cdr::arity(),
             Self::Ceil => Ceil::arity(),
@@ -182,6 +189,7 @@ impl BuiltinTerm {
             Self::Or => Or::arity(),
             Self::Pow => Pow::arity(),
             Self::Push => Push::arity(),
+            Self::PushFront => PushFront::arity(),
             Self::Reduce => Reduce::arity(),
             Self::Remainder => Remainder::arity(),
             Self::Round => Round::arity(),
@@ -201,6 +209,7 @@ impl BuiltinTerm {
             Self::Abs => Abs::apply(args),
             Self::Add => Add::apply(args),
             Self::And => And::apply(args),
+            Self::Append => Append::apply(args),
             Self::Car => Car::apply(args),
             Self::Cdr => Cdr::apply(args),
             Self::Ceil => Ceil::apply(args),
@@ -234,6 +243,7 @@ impl BuiltinTerm {
             Self::Or => Or::apply(args),
             Self::Pow => Pow::apply(args),
             Self::Push => Push::apply(args),
+            Self::PushFront => PushFront::apply(args),
             Self::Reduce => Reduce::apply(args),
             Self::Slice => Slice::apply(args),
             Self::Remainder => Remainder::apply(args),

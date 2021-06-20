@@ -826,43 +826,91 @@ fn parse_array_literal<'src>(
     scope: &LexicalScope,
     env: &Env,
 ) -> ParserResult<Expression> {
-    let append_expression = match node.len() == 2 {
-        true => match (&node[0], &node[1]) {
-            (Some(Expr::Spread(base)), Some(item)) => Some((base, item)),
-            _ => None,
-        },
-        _ => None,
-    };
-    match append_expression {
-        Some((base, item)) => {
-            let base = parse_expression(base, scope, env)?;
-            let item = parse_expression(item, scope, env)?;
-            Ok(Expression::new(Term::Application(ApplicationTerm::new(
-                Expression::new(Term::Builtin(BuiltinTerm::Push)),
-                vec![base, item],
-            ))))
-        }
-        None => {
-            let values =
-                node.iter()
-                    .fold(Ok(Vec::with_capacity(node.len())), |results, node| {
-                        let mut values = results?;
-                        match node {
-                            None => Err(err("Missing array item", node)),
-                            Some(node) => match parse_expression(node, scope, env) {
-                                Ok(value) => {
-                                    values.push(value);
-                                    Ok(values)
+    enum ArrayLiteralFields {
+        Items(Vec<Expression>),
+        Spread(Expression),
+    }
+    let elements = node
+        .iter()
+        .fold(Ok(Vec::with_capacity(node.len())), |results, node| {
+            let mut elements = results?;
+            match node {
+                None => Err(err("Missing array item", node)),
+                Some(node) => match node {
+                    Expr::Spread(node) => {
+                        let value = parse_expression(node, scope, env)?;
+                        elements.push(ArrayLiteralFields::Spread(value));
+                        Ok(elements)
+                    }
+                    _ => match parse_expression(node, scope, env) {
+                        Err(error) => Err(error),
+                        Ok(value) => {
+                            if let Some(ArrayLiteralFields::Items(_)) = elements.last() {
+                                match elements.pop() {
+                                    Some(ArrayLiteralFields::Items(mut items)) => {
+                                        items.push(value);
+                                        elements.push(ArrayLiteralFields::Items(items));
+                                    }
+                                    _ => {}
                                 }
-                                Err(error) => Err(error),
-                            },
+                            } else {
+                                elements.push(ArrayLiteralFields::Items(vec![value]))
+                            }
+                            Ok(elements)
                         }
-                    })?;
-            Ok(Expression::new(Term::Collection(CollectionTerm::Vector(
-                VectorTerm::new(values),
-            ))))
+                    },
+                },
+            }
+        })?;
+    if elements.len() == 2 {
+        let left = elements.first().unwrap();
+        let right = elements.last().unwrap();
+        match (left, right) {
+            (ArrayLiteralFields::Spread(target), ArrayLiteralFields::Items(items))
+                if items.len() == 1 =>
+            {
+                return Ok(Expression::new(Term::Application(ApplicationTerm::new(
+                    Expression::new(Term::Builtin(BuiltinTerm::Push)),
+                    vec![
+                        Expression::clone(target),
+                        items.into_iter().next().map(Expression::clone).unwrap(),
+                    ],
+                ))))
+            }
+            (ArrayLiteralFields::Items(items), ArrayLiteralFields::Spread(target))
+                if items.len() == 1 =>
+            {
+                return Ok(Expression::new(Term::Application(ApplicationTerm::new(
+                    Expression::new(Term::Builtin(BuiltinTerm::PushFront)),
+                    vec![
+                        Expression::clone(target),
+                        items.into_iter().next().map(Expression::clone).unwrap(),
+                    ],
+                ))))
+            }
+            _ => {}
         }
     }
+
+    let item_sets = elements.into_iter().map(|properties| match properties {
+        ArrayLiteralFields::Spread(value) => value,
+        ArrayLiteralFields::Items(items) => Expression::new(Term::Collection(
+            CollectionTerm::Vector(VectorTerm::new(items)),
+        )),
+    });
+    Ok(if item_sets.len() >= 2 {
+        Expression::new(Term::Application(ApplicationTerm::new(
+            Expression::new(Term::Builtin(BuiltinTerm::Append)),
+            item_sets.collect(),
+        )))
+    } else {
+        match item_sets.into_iter().next() {
+            Some(value) => value,
+            None => Expression::new(Term::Collection(CollectionTerm::Vector(VectorTerm::new(
+                Vec::new(),
+            )))),
+        }
+    })
 }
 
 fn parse_unary_expression<'src>(
@@ -1985,6 +2033,25 @@ mod tests {
                 ]),
             )))),
         );
+    }
+
+    #[test]
+    fn array_access() {
+        let env = Env::new();
+        let expression = parse("const items = [3, 4, 5]; items[1]", &env).unwrap();
+        let result = expression.evaluate(&DynamicState::new(), &mut GenerationalGc::new());
+        assert_eq!(
+            result,
+            EvaluationResult::new(
+                Expression::new(Term::Value(ValueTerm::Float(4.0))),
+                DependencyList::empty(),
+            )
+        );
+    }
+
+    #[test]
+    fn array_spread() {
+        let env = Env::new();
         assert_eq!(
             parse("[...[3, 4, 5], 6]", &env),
             Ok(Expression::new(Term::Application(ApplicationTerm::new(
@@ -2001,14 +2068,63 @@ mod tests {
                 ],
             ))))
         );
-        let expression = parse("const items = [3, 4, 5]; items[1]", &env).unwrap();
-        let result = expression.evaluate(&DynamicState::new(), &mut GenerationalGc::new());
+        assert_eq!(
+            parse("[3, ...[4, 5, 6]]", &env),
+            Ok(Expression::new(Term::Application(ApplicationTerm::new(
+                Expression::new(Term::Builtin(BuiltinTerm::PushFront)),
+                vec![
+                    Expression::new(Term::Collection(CollectionTerm::Vector(VectorTerm::new(
+                        vec![
+                            Expression::new(Term::Value(ValueTerm::Float(4.0))),
+                            Expression::new(Term::Value(ValueTerm::Float(5.0))),
+                            Expression::new(Term::Value(ValueTerm::Float(6.0))),
+                        ]
+                    )))),
+                    Expression::new(Term::Value(ValueTerm::Float(3.0))),
+                ],
+            ))))
+        );
+        let expression = parse("[ ...[], ...[1, 2], 3, 4, ...[5], 6, 7 ]", &env).unwrap();
+        let query = Expression::new(Term::Application(ApplicationTerm::new(
+            Expression::new(Term::Builtin(BuiltinTerm::Collect)),
+            vec![expression],
+        )));
+        let result = query.evaluate(&DynamicState::new(), &mut GenerationalGc::new());
         assert_eq!(
             result,
             EvaluationResult::new(
-                Expression::new(Term::Value(ValueTerm::Float(4.0))),
+                Expression::new(Term::Collection(CollectionTerm::Vector(VectorTerm::new(
+                    vec![
+                        Expression::new(Term::Value(ValueTerm::Float(1.0))),
+                        Expression::new(Term::Value(ValueTerm::Float(2.0))),
+                        Expression::new(Term::Value(ValueTerm::Float(3.0))),
+                        Expression::new(Term::Value(ValueTerm::Float(4.0))),
+                        Expression::new(Term::Value(ValueTerm::Float(5.0))),
+                        Expression::new(Term::Value(ValueTerm::Float(6.0))),
+                        Expression::new(Term::Value(ValueTerm::Float(7.0))),
+                    ]
+                )))),
                 DependencyList::empty(),
-            )
+            ),
+        );
+        let expression = parse("const foo = [1, 2]; [...foo, 3]", &env).unwrap();
+        let query = Expression::new(Term::Application(ApplicationTerm::new(
+            Expression::new(Term::Builtin(BuiltinTerm::Collect)),
+            vec![expression],
+        )));
+        let result = query.evaluate(&DynamicState::new(), &mut GenerationalGc::new());
+        assert_eq!(
+            result,
+            EvaluationResult::new(
+                Expression::new(Term::Collection(CollectionTerm::Vector(VectorTerm::new(
+                    vec![
+                        Expression::new(Term::Value(ValueTerm::Float(1.0))),
+                        Expression::new(Term::Value(ValueTerm::Float(2.0))),
+                        Expression::new(Term::Value(ValueTerm::Float(3.0))),
+                    ]
+                )))),
+                DependencyList::empty(),
+            ),
         );
     }
 
