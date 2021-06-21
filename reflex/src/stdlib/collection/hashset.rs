@@ -6,7 +6,7 @@ use std::{collections::BTreeSet, fmt, hash::Hash, iter::once};
 use crate::{
     cache::EvaluationCache,
     core::{
-        capture_depth_multiple, dynamic_dependencies_multiple, optimize_multiple,
+        capture_depth_multiple, dynamic_dependencies_multiple, normalize_multiple,
         substitute_dynamic_multiple, substitute_static_multiple, DependencyList, DynamicState,
         Expression, Rewritable, StackOffset, Substitutions, Term,
     },
@@ -85,8 +85,8 @@ impl Rewritable for HashSetTerm {
             ))))
         })
     }
-    fn optimize(&self, cache: &mut impl EvaluationCache) -> Option<Expression> {
-        optimize_multiple(&self.values, cache).map(|updated| {
+    fn normalize(&self, cache: &mut impl EvaluationCache) -> Option<Expression> {
+        normalize_multiple(&self.values, cache).map(|updated| {
             Expression::new(Term::Collection(CollectionTerm::HashSet(Self::new(
                 updated,
             ))))

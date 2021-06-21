@@ -6,7 +6,7 @@ use std::{fmt, iter::once};
 use crate::{
     cache::EvaluationCache,
     core::{
-        capture_depth_multiple, dynamic_dependencies_multiple, optimize_multiple,
+        capture_depth_multiple, dynamic_dependencies_multiple, normalize_multiple,
         substitute_dynamic_multiple, substitute_static_multiple, DependencyList, DynamicState,
         Expression, Rewritable, StackOffset, Substitutions, Term,
     },
@@ -77,8 +77,8 @@ impl Rewritable for VectorTerm {
             Expression::new(Term::Collection(CollectionTerm::Vector(Self::new(items))))
         })
     }
-    fn optimize(&self, cache: &mut impl EvaluationCache) -> Option<Expression> {
-        optimize_multiple(&self.items, cache).map(|items| {
+    fn normalize(&self, cache: &mut impl EvaluationCache) -> Option<Expression> {
+        normalize_multiple(&self.items, cache).map(|items| {
             Expression::new(Term::Collection(CollectionTerm::Vector(Self::new(items))))
         })
     }

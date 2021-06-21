@@ -58,11 +58,11 @@ impl Rewritable for CollectionTerm {
             Self::Vector(term) => term.substitute_dynamic(state, cache),
         }
     }
-    fn optimize(&self, cache: &mut impl EvaluationCache) -> Option<Expression> {
+    fn normalize(&self, cache: &mut impl EvaluationCache) -> Option<Expression> {
         match self {
-            Self::HashMap(term) => term.optimize(cache),
-            Self::HashSet(term) => term.optimize(cache),
-            Self::Vector(term) => term.optimize(cache),
+            Self::HashMap(term) => term.normalize(cache),
+            Self::HashSet(term) => term.normalize(cache),
+            Self::Vector(term) => term.normalize(cache),
         }
     }
 }

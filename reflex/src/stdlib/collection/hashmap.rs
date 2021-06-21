@@ -6,7 +6,7 @@ use std::{collections::BTreeMap, fmt, hash::Hash, iter::once};
 use crate::{
     cache::EvaluationCache,
     core::{
-        capture_depth_multiple, dynamic_dependencies_multiple, optimize_multiple,
+        capture_depth_multiple, dynamic_dependencies_multiple, normalize_multiple,
         substitute_dynamic_multiple, substitute_static_multiple, ApplicationTerm, DependencyList,
         DynamicState, Expression, Rewritable, Signal, SignalTerm, StackOffset, StructTerm,
         Substitutions, Term,
@@ -214,9 +214,9 @@ impl Rewritable for HashMapTerm {
         self.update(keys, values)
             .map(|updated| Expression::new(Term::Collection(CollectionTerm::HashMap(updated))))
     }
-    fn optimize(&self, cache: &mut impl EvaluationCache) -> Option<Expression> {
-        let keys = optimize_multiple(&self.keys, cache);
-        let values = optimize_multiple(&self.values, cache);
+    fn normalize(&self, cache: &mut impl EvaluationCache) -> Option<Expression> {
+        let keys = normalize_multiple(&self.keys, cache);
+        let values = normalize_multiple(&self.values, cache);
         self.update(keys, values)
             .map(|updated| Expression::new(Term::Collection(CollectionTerm::HashMap(updated))))
     }

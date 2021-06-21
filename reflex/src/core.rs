@@ -63,7 +63,7 @@ pub trait Rewritable {
         state: &DynamicState,
         cache: &mut impl EvaluationCache,
     ) -> Option<Expression>;
-    fn optimize(&self, cache: &mut impl EvaluationCache) -> Option<Expression>;
+    fn normalize(&self, cache: &mut impl EvaluationCache) -> Option<Expression>;
 }
 
 pub trait Reducible {
@@ -141,7 +141,7 @@ pub struct Expression {
     hash: HashId,
     capture_depth: StackOffset,
     is_reduced: bool,
-    is_optimized: bool,
+    is_normalized: bool,
     dynamic_dependencies: DependencyList,
 }
 impl Hash for Expression {
@@ -169,8 +169,8 @@ impl Expression {
     pub fn new(value: Term) -> Self {
         let is_reducible = value.is_reducible();
         let is_reduced = !is_reducible;
-        let is_optimized = false;
-        Self::create(value, is_reduced, is_optimized)
+        let is_normalized = false;
+        Self::create(value, is_reduced, is_normalized)
     }
     pub fn value(&self) -> &Term {
         &self.value
@@ -179,7 +179,7 @@ impl Expression {
         !self.is_reduced && self.value.is_reducible()
     }
     pub fn compile(&self, cache: &mut impl EvaluationCache) -> Expression {
-        self.optimize(cache)
+        self.normalize(cache)
             .unwrap_or_else(|| Expression::clone(self))
     }
     pub fn evaluate(
@@ -195,7 +195,7 @@ impl Expression {
         );
         EvaluationResult::new(result, dependencies)
     }
-    fn create(value: Term, is_reduced: bool, is_optimized: bool) -> Self {
+    fn create(value: Term, is_reduced: bool, is_normalized: bool) -> Self {
         let hash = hash_object(&value);
         let capture_depth = value.capture_depth();
         let dynamic_dependencies = value.dynamic_dependencies();
@@ -205,7 +205,7 @@ impl Expression {
             capture_depth,
             dynamic_dependencies,
             is_reduced,
-            is_optimized,
+            is_normalized,
         }
     }
     fn reduced(existing: &Expression) -> Self {
@@ -215,17 +215,17 @@ impl Expression {
             capture_depth: existing.capture_depth,
             dynamic_dependencies: DependencyList::clone(&existing.dynamic_dependencies),
             is_reduced: true,
-            is_optimized: existing.is_optimized,
+            is_normalized: existing.is_normalized,
         }
     }
-    fn optimized(existing: &Expression) -> Self {
+    fn normalized(existing: &Expression) -> Self {
         Self {
             value: Arc::clone(&existing.value),
             hash: existing.hash,
             capture_depth: existing.capture_depth,
             dynamic_dependencies: DependencyList::clone(&existing.dynamic_dependencies),
             is_reduced: existing.is_reduced,
-            is_optimized: true,
+            is_normalized: true,
         }
     }
 }
@@ -270,14 +270,14 @@ impl Rewritable for Expression {
             }
         }
     }
-    fn optimize(&self, cache: &mut impl EvaluationCache) -> Option<Expression> {
-        if self.is_optimized {
+    fn normalize(&self, cache: &mut impl EvaluationCache) -> Option<Expression> {
+        if self.is_normalized {
             return None;
         }
         Some(
             self.value
-                .optimize(cache)
-                .unwrap_or_else(|| Self::optimized(self)),
+                .normalize(cache)
+                .unwrap_or_else(|| Self::normalized(self)),
         )
     }
 }
@@ -502,15 +502,15 @@ impl Rewritable for Term {
             _ => None,
         }
     }
-    fn optimize(&self, cache: &mut impl EvaluationCache) -> Option<Expression> {
+    fn normalize(&self, cache: &mut impl EvaluationCache) -> Option<Expression> {
         match self {
-            Self::Variable(term) => term.optimize(cache),
-            Self::Lambda(term) => term.optimize(cache),
-            Self::Application(term) => term.optimize(cache),
-            Self::Recursive(term) => term.optimize(cache),
-            Self::Struct(term) => term.optimize(cache),
-            Self::Enum(term) => term.optimize(cache),
-            Self::Collection(term) => term.optimize(cache),
+            Self::Variable(term) => term.normalize(cache),
+            Self::Lambda(term) => term.normalize(cache),
+            Self::Application(term) => term.normalize(cache),
+            Self::Recursive(term) => term.normalize(cache),
+            Self::Struct(term) => term.normalize(cache),
+            Self::Enum(term) => term.normalize(cache),
+            Self::Collection(term) => term.normalize(cache),
             _ => None,
         }
     }
@@ -599,10 +599,10 @@ impl Rewritable for VariableTerm {
             Self::Dynamic(term) => term.substitute_dynamic(state, cache),
         }
     }
-    fn optimize(&self, cache: &mut impl EvaluationCache) -> Option<Expression> {
+    fn normalize(&self, cache: &mut impl EvaluationCache) -> Option<Expression> {
         match self {
-            Self::Static(term) => term.optimize(cache),
-            Self::Dynamic(term) => term.optimize(cache),
+            Self::Static(term) => term.normalize(cache),
+            Self::Dynamic(term) => term.normalize(cache),
         }
     }
 }
@@ -650,7 +650,7 @@ impl Rewritable for StaticVariableTerm {
     ) -> Option<Expression> {
         None
     }
-    fn optimize(&self, _cache: &mut impl EvaluationCache) -> Option<Expression> {
+    fn normalize(&self, _cache: &mut impl EvaluationCache) -> Option<Expression> {
         None
     }
 }
@@ -694,7 +694,7 @@ impl Rewritable for DynamicVariableTerm {
             None => Expression::clone(&self.fallback),
         })
     }
-    fn optimize(&self, _cache: &mut impl EvaluationCache) -> Option<Expression> {
+    fn normalize(&self, _cache: &mut impl EvaluationCache) -> Option<Expression> {
         None
     }
 }
@@ -806,9 +806,9 @@ impl Rewritable for RecursiveTerm {
             .substitute_dynamic(state, cache)
             .map(|factory| Expression::new(Term::Recursive(Self { factory })))
     }
-    fn optimize(&self, cache: &mut impl EvaluationCache) -> Option<Expression> {
+    fn normalize(&self, cache: &mut impl EvaluationCache) -> Option<Expression> {
         self.factory
-            .optimize(cache)
+            .normalize(cache)
             .map(|factory| Expression::new(Term::Recursive(Self { factory })))
     }
 }
@@ -884,17 +884,17 @@ impl Rewritable for LambdaTerm {
         let body = self.body.substitute_dynamic(state, cache);
         body.map(|body| Expression::new(Term::Lambda(LambdaTerm::new(self.arity, body))))
     }
-    fn optimize(&self, cache: &mut impl EvaluationCache) -> Option<Expression> {
+    fn normalize(&self, cache: &mut impl EvaluationCache) -> Option<Expression> {
         let arity = self.arity.required();
-        let reduced_body = self.body.reduce(cache);
-        let eta_reduced_body = reduced_body.as_ref().map_or_else(
+        let normalized_body = self.body.reduce(cache);
+        let eta_reduced_body = normalized_body.as_ref().map_or_else(
             || apply_eta_reduction(&self.body, arity),
             |body| apply_eta_reduction(&body, arity),
         );
         eta_reduced_body
             .and_then(|body| body.reduce(cache))
             .or(eta_reduced_body.map(Expression::clone))
-            .or(reduced_body.map(|body| {
+            .or(normalized_body.map(|body| {
                 Expression::new(Term::Lambda(LambdaTerm::new(self.arity.clone(), body)))
             }))
     }
@@ -1026,26 +1026,26 @@ impl Rewritable for ApplicationTerm {
         let args = args.unwrap_or_else(|| self.args.clone());
         Some(Expression::new(Term::Application(Self::new(target, args))))
     }
-    fn optimize(&self, cache: &mut impl EvaluationCache) -> Option<Expression> {
-        let optimized_target = self.target.optimize(cache);
-        let optimized_args = optimize_multiple(&self.args, cache);
-        let optimized_expression = match optimized_args {
+    fn normalize(&self, cache: &mut impl EvaluationCache) -> Option<Expression> {
+        let normalized_target = self.target.normalize(cache);
+        let normalized_args = normalize_multiple(&self.args, cache);
+        let normalized_expression = match normalized_args {
             Some(args) => Some(Expression::new(Term::Application(Self::new(
-                optimized_target.unwrap_or_else(|| Expression::clone(&self.target)),
+                normalized_target.unwrap_or_else(|| Expression::clone(&self.target)),
                 args,
             )))),
-            None => optimized_target.map(|target| {
+            None => normalized_target.map(|target| {
                 Expression::new(Term::Application(Self::new(
                     target,
                     self.args.iter().map(Expression::clone).collect(),
                 )))
             }),
         };
-        match &optimized_expression {
+        match &normalized_expression {
             Some(expression) => expression.reduce(cache),
             None => self.reduce(cache),
         }
-        .or(optimized_expression)
+        .or(normalized_expression)
     }
 }
 impl Reducible for ApplicationTerm {
@@ -1301,8 +1301,8 @@ impl Rewritable for StructTerm {
         substitute_dynamic_multiple(&self.fields, state, cache)
             .map(|fields| Expression::new(Term::Struct(Self::new(self.prototype.clone(), fields))))
     }
-    fn optimize(&self, cache: &mut impl EvaluationCache) -> Option<Expression> {
-        optimize_multiple(&self.fields, cache)
+    fn normalize(&self, cache: &mut impl EvaluationCache) -> Option<Expression> {
+        normalize_multiple(&self.fields, cache)
             .map(|fields| Expression::new(Term::Struct(Self::new(self.prototype.clone(), fields))))
     }
 }
@@ -1442,8 +1442,8 @@ impl Rewritable for EnumTerm {
         substitute_dynamic_multiple(&self.args, state, cache)
             .map(|args| Expression::new(Term::Enum(Self::new(self.index, args))))
     }
-    fn optimize(&self, cache: &mut impl EvaluationCache) -> Option<Expression> {
-        optimize_multiple(&self.args, cache)
+    fn normalize(&self, cache: &mut impl EvaluationCache) -> Option<Expression> {
+        normalize_multiple(&self.args, cache)
             .map(|args| Expression::new(Term::Enum(Self::new(self.index, args))))
     }
 }
@@ -1618,11 +1618,11 @@ pub(crate) fn substitute_dynamic_multiple(
     transform_expressions(expressions, |arg| arg.substitute_dynamic(state, cache))
 }
 
-pub(crate) fn optimize_multiple(
+pub(crate) fn normalize_multiple(
     expressions: &[Expression],
     cache: &mut impl EvaluationCache,
 ) -> Option<Vec<Expression>> {
-    transform_expressions(expressions, |expression| expression.optimize(cache))
+    transform_expressions(expressions, |expression| expression.normalize(cache))
 }
 
 fn transform_expressions(
@@ -1701,19 +1701,19 @@ mod tests {
     fn lambda_optimizations() {
         let mut cache = GenerationalGc::new();
         let expression = parse("(lambda (foo) foo)").unwrap();
-        let result = expression.value.optimize(&mut cache);
+        let result = expression.value.normalize(&mut cache);
         assert_eq!(expression.capture_depth(), 0);
         assert_eq!(result, None);
 
         let expression = parse("(lambda (foo bar) (+ foo bar))").unwrap();
-        let optimized = expression.value.optimize(&mut cache);
+        let normalized = expression.value.normalize(&mut cache);
         assert_eq!(expression.capture_depth(), 0);
-        assert_eq!(optimized, Some(parse("+").unwrap()));
+        assert_eq!(normalized, Some(parse("+").unwrap()));
 
         let expression = parse("(lambda (foo bar baz) (+ foo bar))").unwrap();
-        let optimized = expression.value.optimize(&mut cache);
+        let normalized = expression.value.normalize(&mut cache);
         assert_eq!(expression.capture_depth(), 0);
-        assert_eq!(optimized, Some(parse("+").unwrap()));
+        assert_eq!(normalized, Some(parse("+").unwrap()));
     }
 
     #[test]
