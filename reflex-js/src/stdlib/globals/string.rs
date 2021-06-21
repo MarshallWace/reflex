@@ -6,7 +6,6 @@ use std::any::TypeId;
 use reflex::{
     core::{Arity, Expression, NativeFunction, Signal, SignalTerm, Term},
     hash::{hash_object, HashId},
-    serialize::SerializedTerm,
     stdlib::{signal::SignalType, value::ValueTerm},
 };
 
@@ -45,7 +44,7 @@ impl EncodeUriComponent {
             Ok(result) => result,
             Err(error) => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                 SignalType::Error,
-                vec![SerializedTerm::string(error)],
+                vec![Expression::new(Term::Value(ValueTerm::String(error)))],
             )))),
         }
     }

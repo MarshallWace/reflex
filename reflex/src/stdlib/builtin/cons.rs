@@ -3,8 +3,7 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use crate::{
     core::{Arity, EnumTerm, Expression, Signal, SignalTerm, Term},
-    serialize::SerializedTerm,
-    stdlib::{builtin::BuiltinFunction, signal::SignalType},
+    stdlib::{builtin::BuiltinFunction, signal::SignalType, value::ValueTerm},
 };
 
 pub struct Cons {}
@@ -16,10 +15,10 @@ impl BuiltinFunction for Cons {
         if args.len() != 2 {
             return Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                 SignalType::Error,
-                vec![SerializedTerm::string(format!(
+                vec![Expression::new(Term::Value(ValueTerm::String(format!(
                     "Expected 2 arguments, received {}",
                     args.len(),
-                ))],
+                ))))],
             ))));
         }
         let mut args = args.into_iter();

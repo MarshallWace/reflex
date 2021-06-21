@@ -6,8 +6,7 @@ use std::{path::Path, process};
 use reflex_runtime::SignalHelpers;
 use reflex_server::cli::{
     builtin_imports, builtin_loaders, builtin_signal_handler, cli, dynamic_module_loader,
-    reflex::core::{Expression, SerializedTerm},
-    SignalResult,
+    reflex::core::Expression, SignalResult,
 };
 
 #[tokio::main]
@@ -24,7 +23,7 @@ pub async fn main() {
 }
 
 fn create_signal_handler(
-) -> impl Fn(&str, &[SerializedTerm], &SignalHelpers) -> Option<Result<SignalResult, String>>
+) -> impl Fn(&str, &[Expression], &SignalHelpers) -> Option<Result<SignalResult, String>>
        + Send
        + Sync
        + 'static {

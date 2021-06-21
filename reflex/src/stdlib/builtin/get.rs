@@ -5,7 +5,6 @@ use std::usize;
 
 use crate::{
     core::{Arity, Expression, Signal, SignalTerm, StructFieldOffset, Term},
-    serialize::SerializedTerm,
     stdlib::{
         builtin::BuiltinFunction,
         collection::CollectionTerm,
@@ -23,10 +22,10 @@ impl BuiltinFunction for Get {
         if args.len() != 2 {
             return Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                 SignalType::Error,
-                vec![SerializedTerm::string(format!(
+                vec![Expression::new(Term::Value(ValueTerm::String(format!(
                     "Expected 2 arguments, received {}",
                     args.len(),
-                ))],
+                ))))],
             ))));
         }
         let mut args = args.into_iter();
@@ -113,7 +112,7 @@ impl BuiltinFunction for Get {
             Ok(result) => result,
             Err(error) => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                 SignalType::Error,
-                vec![SerializedTerm::string(error)],
+                vec![Expression::new(Term::Value(ValueTerm::String(error)))],
             )))),
         }
     }

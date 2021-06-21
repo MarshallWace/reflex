@@ -4,7 +4,7 @@
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use reflex::{
-    core::{Expression, SerializedTerm, Term},
+    core::{Expression, Term},
     stdlib::value::ValueTerm,
 };
 use reflex_runtime::{RuntimeEffect, SignalHelpers};
@@ -14,7 +14,7 @@ use tokio_stream::{wrappers::IntervalStream, StreamExt};
 use crate::SignalResult;
 
 pub fn handle_date_timestamp(
-    args: &[SerializedTerm],
+    args: &[Expression],
     _helpers: &SignalHelpers,
 ) -> Result<SignalResult, String> {
     if args.len() != 1 {
@@ -52,9 +52,9 @@ fn get_current_time() -> f64 {
     (timestamp * 1000.0).floor()
 }
 
-fn parse_number_arg(value: &SerializedTerm) -> Option<f64> {
-    match value {
-        SerializedTerm::Value(value) => match value {
+fn parse_number_arg(value: &Expression) -> Option<f64> {
+    match value.value() {
+        Term::Value(value) => match value {
             ValueTerm::Int(value) => Some(*value as f64),
             ValueTerm::Float(value) => Some(*value),
             _ => None,

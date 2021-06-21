@@ -3,7 +3,7 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use reflex::{
     cache::EvaluationCache,
-    core::{Expression, SerializedTerm, Signal, SignalTerm, StateToken, Term},
+    core::{Expression, Signal, SignalTerm, StateToken, Term},
     stdlib::{signal::SignalType, value::ValueTerm},
 };
 use std::{future::Future, pin::Pin, sync::Mutex};
@@ -21,7 +21,7 @@ pub type SubscriptionResult = Result<Expression, Vec<String>>;
 pub type SignalResult = (Expression, Option<RuntimeEffect>);
 pub struct SignalHelpers<'a> {
     handler: Box<
-        dyn Fn(&str, &[SerializedTerm], &SignalHelpers) -> Option<Result<SignalResult, String>>
+        dyn Fn(&str, &[Expression], &SignalHelpers) -> Option<Result<SignalResult, String>>
             + Send
             + Sync
             + 'a,
@@ -30,7 +30,7 @@ pub struct SignalHelpers<'a> {
 impl<'a> SignalHelpers<'a> {
     fn new<THandler>(handler: &'a THandler) -> Self
     where
-        THandler: Fn(&str, &[SerializedTerm], &SignalHelpers) -> Option<Result<SignalResult, String>>
+        THandler: Fn(&str, &[Expression], &SignalHelpers) -> Option<Result<SignalResult, String>>
             + Send
             + Sync
             + 'a,
@@ -170,7 +170,7 @@ impl Runtime {
         result_buffer_size: usize,
     ) -> Self
     where
-        THandler: Fn(&str, &[SerializedTerm], &SignalHelpers) -> Option<Result<SignalResult, String>>
+        THandler: Fn(&str, &[Expression], &SignalHelpers) -> Option<Result<SignalResult, String>>
             + Send
             + Sync
             + 'static,
@@ -222,7 +222,7 @@ fn create_store<THandler, TCache: EvaluationCache + Send + Sync + 'static>(
     result_buffer_size: usize,
 ) -> (CommandChannel, ResultsChannel)
 where
-    THandler: Fn(&str, &[SerializedTerm], &SignalHelpers) -> Option<Result<SignalResult, String>>
+    THandler: Fn(&str, &[Expression], &SignalHelpers) -> Option<Result<SignalResult, String>>
         + Send
         + Sync
         + 'static,
@@ -265,7 +265,7 @@ fn process_subscribe_command<THandler, TCache: EvaluationCache>(
     results_tx: &ResultsChannel,
     signal_handler: &THandler,
 ) where
-    THandler: Fn(&str, &[SerializedTerm], &SignalHelpers) -> Option<Result<SignalResult, String>>
+    THandler: Fn(&str, &[Expression], &SignalHelpers) -> Option<Result<SignalResult, String>>
         + Send
         + Sync
         + 'static,
@@ -318,7 +318,7 @@ fn process_update_command<THandler, TCache: EvaluationCache>(
     results_tx: &ResultsChannel,
     signal_handler: &THandler,
 ) where
-    THandler: Fn(&str, &[SerializedTerm], &SignalHelpers) -> Option<Result<SignalResult, String>>
+    THandler: Fn(&str, &[Expression], &SignalHelpers) -> Option<Result<SignalResult, String>>
         + Send
         + Sync
         + 'static,
@@ -402,7 +402,7 @@ fn handle_signals<THandler>(
     signal_handler: &THandler,
 ) -> Result<Vec<Expression>, Option<Vec<String>>>
 where
-    THandler: Fn(&str, &[SerializedTerm], &SignalHelpers) -> Option<Result<SignalResult, String>>
+    THandler: Fn(&str, &[Expression], &SignalHelpers) -> Option<Result<SignalResult, String>>
         + Send
         + Sync
         + 'static,
@@ -449,10 +449,10 @@ where
 fn handle_signal<'a, THandler>(
     signal_handler: &THandler,
     signal_type: &str,
-    args: &[SerializedTerm],
+    args: &[Expression],
 ) -> Result<SignalResult, String>
 where
-    THandler: Fn(&str, &[SerializedTerm], &SignalHelpers) -> Option<Result<SignalResult, String>>
+    THandler: Fn(&str, &[Expression], &SignalHelpers) -> Option<Result<SignalResult, String>>
         + Send
         + Sync
         + 'a,
@@ -495,11 +495,11 @@ fn extract_signal_effects<'a>(
     (results, effects)
 }
 
-fn parse_error_signal_message(args: &[SerializedTerm]) -> String {
+fn parse_error_signal_message(args: &[Expression]) -> String {
     args.iter()
         .map(|arg| {
-            let message = match arg {
-                SerializedTerm::Value(arg) => match arg {
+            let message = match arg.value() {
+                Term::Value(arg) => match arg {
                     ValueTerm::String(message) => Some(String::from(message)),
                     _ => None,
                 },

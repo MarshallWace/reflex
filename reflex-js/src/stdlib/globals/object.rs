@@ -9,7 +9,6 @@ use reflex::{
         StructTerm, Term,
     },
     hash::{hash_object, HashId},
-    serialize::SerializedTerm,
     stdlib::{
         builtin::BuiltinTerm,
         collection::{vector::VectorTerm, CollectionTerm},
@@ -83,10 +82,10 @@ impl FromEntries {
             Ok(result) => result,
             Err(error) => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                 SignalType::Error,
-                vec![SerializedTerm::string(format!(
+                vec![Expression::new(Term::Value(ValueTerm::String(format!(
                     "Expected list, received {}",
                     error
-                ))],
+                ))))],
             )))),
         }
     }

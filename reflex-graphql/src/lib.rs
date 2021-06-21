@@ -5,10 +5,8 @@ use std::iter::once;
 
 use graphql_parser::{parse_query, query::*};
 use reflex::{
-    core::{
-        Expression, SerializedListTerm, SerializedObjectTerm, SerializedTerm, Signal, SignalTerm,
-        StructPrototype, StructTerm, Term,
-    },
+    core::{Expression, Signal, SignalTerm, StructPrototype, StructTerm, Term},
+    serialize::{SerializedListTerm, SerializedObjectTerm, SerializedTerm},
     stdlib::{
         collection::{vector::VectorTerm, CollectionTerm},
         signal::SignalType,
@@ -37,9 +35,9 @@ pub fn parse(source: &str, root: &Expression) -> Result<(Expression, QueryTransf
 pub fn create_introspection_query_response() -> Expression {
     Expression::new(Term::Signal(SignalTerm::new(Signal::new(
         SignalType::Error,
-        vec![SerializedTerm::string(StringValue::from(
-            "Introspection query not yet implemented",
-        ))],
+        vec![Expression::new(Term::Value(ValueTerm::String(
+            StringValue::from("Introspection query not yet implemented"),
+        )))],
     ))))
 }
 

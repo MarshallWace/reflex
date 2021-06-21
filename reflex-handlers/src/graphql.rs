@@ -5,7 +5,8 @@ use std::{iter::once, pin::Pin};
 
 use futures_util::{FutureExt, StreamExt};
 use reflex::{
-    core::{Expression, SerializedObjectTerm, SerializedTerm, Signal, SignalTerm, Term},
+    core::{Expression, Signal, SignalTerm, Term},
+    serialize::{serialize, SerializedObjectTerm, SerializedTerm},
     stdlib::{signal::SignalType, value::ValueTerm},
 };
 use reflex_graphql::{subscriptions::SubscriptionId, GraphQlOperationPayload};
@@ -16,7 +17,7 @@ use uuid::Uuid;
 use crate::utils::{create_websocket_connection, fetch, subscribe_websocket_operation};
 
 pub fn handle_graphql_execute(
-    args: &[SerializedTerm],
+    args: &[Expression],
     _helpers: &SignalHelpers,
 ) -> Result<SignalResult, String> {
     if args.len() != 4 {
@@ -196,13 +197,13 @@ fn format_graphql_error(errors: Option<Vec<String>>, status: Option<u16>) -> Str
 fn create_error_result(error: String) -> Expression {
     Expression::new(Term::Signal(SignalTerm::new(Signal::new(
         SignalType::Error,
-        vec![SerializedTerm::string(error)],
+        vec![Expression::new(Term::Value(ValueTerm::String(error)))],
     ))))
 }
 
-fn parse_string_arg(value: &SerializedTerm) -> Option<String> {
-    match value {
-        SerializedTerm::Value(value) => match value {
+fn parse_string_arg(value: &Expression) -> Option<String> {
+    match value.value() {
+        Term::Value(value) => match value {
             ValueTerm::String(value) => Some(value.clone()),
             _ => None,
         },
@@ -210,9 +211,9 @@ fn parse_string_arg(value: &SerializedTerm) -> Option<String> {
     }
 }
 
-fn parse_optional_string_arg(value: &SerializedTerm) -> Option<Option<String>> {
-    match value {
-        SerializedTerm::Value(value) => match value {
+fn parse_optional_string_arg(value: &Expression) -> Option<Option<String>> {
+    match value.value() {
+        Term::Value(value) => match value {
             ValueTerm::String(value) => Some(Some(value.clone())),
             ValueTerm::Null => Some(None),
             _ => None,
@@ -221,9 +222,9 @@ fn parse_optional_string_arg(value: &SerializedTerm) -> Option<Option<String>> {
     }
 }
 
-fn parse_object_arg(value: &SerializedTerm) -> Option<SerializedObjectTerm> {
-    match value {
-        SerializedTerm::Object(value) => Some(value.clone()),
+fn parse_object_arg(value: &Expression) -> Option<SerializedObjectTerm> {
+    match serialize(value.value()) {
+        Ok(SerializedTerm::Object(value)) => Some(value),
         _ => None,
     }
 }

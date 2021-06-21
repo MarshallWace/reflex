@@ -4,7 +4,6 @@
 use crate::{
     core::{Arity, Expression, Signal, SignalTerm, Term},
     hash::hash_object,
-    serialize::SerializedTerm,
     stdlib::{builtin::BuiltinFunction, signal::SignalType, value::ValueTerm},
 };
 
@@ -17,10 +16,10 @@ impl BuiltinFunction for Eq {
         if args.len() != 2 {
             return Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                 SignalType::Error,
-                vec![SerializedTerm::string(format!(
+                vec![Expression::new(Term::Value(ValueTerm::String(format!(
                     "Expected 2 arguments, received {}",
                     args.len(),
-                ))],
+                ))))],
             ))));
         }
         let mut args = args.into_iter();

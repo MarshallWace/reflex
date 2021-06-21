@@ -5,7 +5,7 @@ use std::io::{self, Write};
 
 use reflex::{
     cache::EvaluationCache,
-    core::{DependencyList, DynamicState, Expression, SerializedTerm, SignalTerm, Term},
+    core::{DependencyList, DynamicState, Expression, SignalTerm, Term},
     stdlib::{signal::SignalType, value::ValueTerm},
 };
 
@@ -66,8 +66,8 @@ fn format_signal_output(signal: &SignalTerm) -> String {
             SignalType::Error => {
                 let (message, args) = {
                     let args = signal.args();
-                    match args.get(0) {
-                        Some(SerializedTerm::Value(ValueTerm::String(message))) => {
+                    match args.get(0).map(|arg| arg.value()) {
+                        Some(Term::Value(ValueTerm::String(message))) => {
                             (Some(message.clone()), Some(&args[1..]))
                         }
                         _ => (None, Some(&args[..])),

@@ -3,8 +3,9 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use crate::{
     core::{Arity, Expression, Signal, SignalTerm, Term},
-    serialize::SerializedTerm,
-    stdlib::{builtin::BuiltinFunction, collection::CollectionTerm, signal::SignalType},
+    stdlib::{
+        builtin::BuiltinFunction, collection::CollectionTerm, signal::SignalType, value::ValueTerm,
+    },
 };
 
 pub struct PushFront {}
@@ -16,10 +17,10 @@ impl BuiltinFunction for PushFront {
         if args.len() != 2 {
             return Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                 SignalType::Error,
-                vec![SerializedTerm::string(format!(
+                vec![Expression::new(Term::Value(ValueTerm::String(format!(
                     "Expected 2 arguments, received {}",
                     args.len(),
-                ))],
+                ))))],
             ))));
         }
         let mut args = args.into_iter();
@@ -33,10 +34,10 @@ impl BuiltinFunction for PushFront {
             },
             _ => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                 SignalType::Error,
-                vec![SerializedTerm::string(format!(
+                vec![Expression::new(Term::Value(ValueTerm::String(format!(
                     "Invalid push operation: Expected (Vector, <any>) or (HashSet, <any>), received ({}, {})",
                     target, value
-                ))],
+                ))))],
             )))),
         }
     }

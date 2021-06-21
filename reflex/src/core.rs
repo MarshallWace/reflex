@@ -9,7 +9,6 @@ use std::{
     sync::Arc,
 };
 
-pub use crate::serialize::{SerializedListTerm, SerializedObjectTerm, SerializedTerm};
 use crate::{
     cache::EvaluationCache,
     hash::{hash_object, HashId},
@@ -1080,14 +1079,14 @@ impl Reducible for ApplicationTerm {
                     // TODO: Allow consumer-provided error factory
                     return Some(Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                         SignalType::Error,
-                        vec![SerializedTerm::Value(ValueTerm::String(format!(
+                        vec![Expression::new(Term::Value(ValueTerm::String(format!(
                             "Expected {}, received {}",
                             match arity.required() {
                                 1 => String::from("1 argument"),
                                 arity => format!("{} arguments", arity),
                             },
                             self.args.len()
-                        )))],
+                        ))))],
                     )))));
                 }
                 let result = match evaluate_args(self.args.iter(), arity, cache) {
@@ -1528,7 +1527,7 @@ impl fmt::Display for SignalTerm {
 pub struct Signal {
     hash: HashId,
     signal: SignalType,
-    args: Vec<SerializedTerm>,
+    args: Vec<Expression>,
 }
 impl Hash for Signal {
     fn hash<H: Hasher>(&self, state: &mut H) {
@@ -1546,7 +1545,7 @@ impl PartialOrd for Signal {
     }
 }
 impl Signal {
-    pub fn new(signal: SignalType, args: impl IntoIterator<Item = SerializedTerm>) -> Self {
+    pub fn new(signal: SignalType, args: impl IntoIterator<Item = Expression>) -> Self {
         let args = args.into_iter().collect::<Vec<_>>();
         let hash = {
             let mut hasher = DefaultHasher::new();
@@ -1567,7 +1566,7 @@ impl Signal {
     pub fn is_type(&self, signal: SignalType) -> bool {
         self.signal == signal
     }
-    pub fn args(&self) -> &[SerializedTerm] {
+    pub fn args(&self) -> &[Expression] {
         &self.args
     }
 }
@@ -1671,7 +1670,6 @@ mod tests {
         cache::GenerationalGc,
         core::{Signal, SignalTerm},
         parser::sexpr::parse,
-        serialize::SerializedTerm,
         stdlib::builtin::BuiltinTerm,
         stdlib::{
             signal::SignalType,
@@ -1764,8 +1762,8 @@ mod tests {
             EvaluationResult::new(
                 Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                     SignalType::Error,
-                    vec![SerializedTerm::Value(ValueTerm::String(StringValue::from(
-                        "Expected 1 argument, received 0"
+                    vec![Expression::new(Term::Value(ValueTerm::String(
+                        StringValue::from("Expected 1 argument, received 0")
                     )))]
                 )))),
                 DependencyList::empty(),
@@ -1778,8 +1776,8 @@ mod tests {
             EvaluationResult::new(
                 Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                     SignalType::Error,
-                    vec![SerializedTerm::Value(ValueTerm::String(StringValue::from(
-                        "Expected 3 arguments, received 1"
+                    vec![Expression::new(Term::Value(ValueTerm::String(
+                        StringValue::from("Expected 3 arguments, received 1")
                     )))]
                 )))),
                 DependencyList::empty(),
@@ -1792,8 +1790,8 @@ mod tests {
             EvaluationResult::new(
                 Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                     SignalType::Error,
-                    vec![SerializedTerm::Value(ValueTerm::String(StringValue::from(
-                        "Expected 3 arguments, received 2"
+                    vec![Expression::new(Term::Value(ValueTerm::String(
+                        StringValue::from("Expected 3 arguments, received 2")
                     )))]
                 )))),
                 DependencyList::empty(),
@@ -1842,8 +1840,8 @@ mod tests {
             EvaluationResult::new(
                 Expression::new(Term::Signal(SignalTerm::from(vec![Signal::new(
                     SignalType::Error,
-                    vec![SerializedTerm::Value(ValueTerm::String(StringValue::from(
-                        "Division by zero: 3 / 0"
+                    vec![Expression::new(Term::Value(ValueTerm::String(
+                        StringValue::from("Division by zero: 3 / 0")
                     )))]
                 ),]))),
                 DependencyList::empty(),
@@ -1856,8 +1854,8 @@ mod tests {
             EvaluationResult::new(
                 Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                     SignalType::Error,
-                    vec![SerializedTerm::Value(ValueTerm::String(StringValue::from(
-                        "Division by zero: 3 / 0"
+                    vec![Expression::new(Term::Value(ValueTerm::String(
+                        StringValue::from("Division by zero: 3 / 0")
                     )))]
                 )))),
                 DependencyList::empty(),
@@ -1870,8 +1868,8 @@ mod tests {
             EvaluationResult::new(
                 Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                     SignalType::Error,
-                    vec![SerializedTerm::Value(ValueTerm::String(StringValue::from(
-                        "Division by zero: 4 / 0"
+                    vec![Expression::new(Term::Value(ValueTerm::String(
+                        StringValue::from("Division by zero: 4 / 0")
                     )))]
                 )))),
                 DependencyList::empty(),
@@ -1885,14 +1883,14 @@ mod tests {
                 Expression::new(Term::Signal(SignalTerm::from(vec![
                     Signal::new(
                         SignalType::Error,
-                        vec![SerializedTerm::Value(ValueTerm::String(StringValue::from(
-                            "Division by zero: 3 / 0"
+                        vec![Expression::new(Term::Value(ValueTerm::String(
+                            StringValue::from("Division by zero: 3 / 0")
                         )))]
                     ),
                     Signal::new(
                         SignalType::Error,
-                        vec![SerializedTerm::Value(ValueTerm::String(StringValue::from(
-                            "Division by zero: 4 / 0"
+                        vec![Expression::new(Term::Value(ValueTerm::String(
+                            StringValue::from("Division by zero: 4 / 0")
                         )))]
                     ),
                 ]))),
@@ -1906,8 +1904,8 @@ mod tests {
             EvaluationResult::new(
                 Expression::new(Term::Signal(SignalTerm::from(vec![Signal::new(
                     SignalType::Error,
-                    vec![SerializedTerm::Value(ValueTerm::String(StringValue::from(
-                        "Division by zero: 3 / 0"
+                    vec![Expression::new(Term::Value(ValueTerm::String(
+                        StringValue::from("Division by zero: 3 / 0")
                     )))]
                 ),]))),
                 DependencyList::empty(),
@@ -1920,8 +1918,8 @@ mod tests {
             EvaluationResult::new(
                 Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                     SignalType::Error,
-                    vec![SerializedTerm::Value(ValueTerm::String(StringValue::from(
-                        "Division by zero: 3 / 0"
+                    vec![Expression::new(Term::Value(ValueTerm::String(
+                        StringValue::from("Division by zero: 3 / 0")
                     )))]
                 )))),
                 DependencyList::empty(),

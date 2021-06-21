@@ -3,8 +3,7 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use crate::{
     core::{ApplicationTerm, Arity, Expression, Signal, SignalTerm, Term},
-    serialize::SerializedTerm,
-    stdlib::{builtin::BuiltinFunction, signal::SignalType},
+    stdlib::{builtin::BuiltinFunction, signal::SignalType, value::ValueTerm},
 };
 
 pub struct Match {}
@@ -16,10 +15,10 @@ impl BuiltinFunction for Match {
         if args.len() != 2 {
             return Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                 SignalType::Error,
-                vec![SerializedTerm::string(format!(
+                vec![Expression::new(Term::Value(ValueTerm::String(format!(
                     "Expected 2 arguments, received {}",
                     args.len(),
-                ))],
+                ))))],
             ))));
         }
         let mut args = args.into_iter();
@@ -34,20 +33,20 @@ impl BuiltinFunction for Match {
                     ))),
                     None => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                         SignalType::Error,
-                        vec![SerializedTerm::string(format!(
+                        vec![Expression::new(Term::Value(ValueTerm::String(format!(
                             "Unhandled enum index: {} for matcher {}",
                             target.index(),
                             matcher
-                        ))],
+                        ))))],
                     )))),
                 }
             }
             _ => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                 SignalType::Error,
-                vec![SerializedTerm::string(format!(
+                vec![Expression::new(Term::Value(ValueTerm::String(format!(
                     "Invalid pattern match: Expected (<enum>, <struct>), received ({}, {})",
                     target, matcher,
-                ))],
+                ))))],
             )))),
         }
     }
@@ -61,7 +60,6 @@ mod tests {
             ApplicationTerm, Arity, DependencyList, DynamicState, EnumTerm, EvaluationResult,
             Expression, LambdaTerm, Signal, SignalTerm, StructTerm, Term, VariableTerm,
         },
-        serialize::SerializedTerm,
         stdlib::builtin::BuiltinTerm,
         stdlib::signal::SignalType,
         stdlib::value::ValueTerm,
@@ -89,7 +87,9 @@ mod tests {
                             Arity::from(0, 0, None),
                             Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                                 SignalType::Error,
-                                vec![SerializedTerm::string(String::from("foo"))],
+                                vec![Expression::new(Term::Value(ValueTerm::String(
+                                    String::from("foo"),
+                                )))],
                             )))),
                         ))),
                         Expression::new(Term::Lambda(LambdaTerm::new(
@@ -101,8 +101,12 @@ mod tests {
                                     Expression::new(Term::Application(ApplicationTerm::new(
                                         Expression::new(Term::Builtin(BuiltinTerm::Add)),
                                         vec![
-                                            Expression::new(Term::Variable(VariableTerm::scoped(1))),
-                                            Expression::new(Term::Variable(VariableTerm::scoped(0))),
+                                            Expression::new(Term::Variable(VariableTerm::scoped(
+                                                1,
+                                            ))),
+                                            Expression::new(Term::Variable(VariableTerm::scoped(
+                                                0,
+                                            ))),
                                         ],
                                     ))),
                                 ],
@@ -112,7 +116,9 @@ mod tests {
                             Arity::from(0, 0, None),
                             Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                                 SignalType::Error,
-                                vec![SerializedTerm::string(String::from("bar"))],
+                                vec![Expression::new(Term::Value(ValueTerm::String(
+                                    String::from("bar"),
+                                )))],
                             )))),
                         ))),
                     ],

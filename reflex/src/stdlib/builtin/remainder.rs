@@ -3,7 +3,6 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use crate::{
     core::{Arity, Expression, Signal, SignalTerm, Term},
-    serialize::SerializedTerm,
     stdlib::{builtin::BuiltinFunction, signal::SignalType, value::ValueTerm},
 };
 
@@ -16,10 +15,10 @@ impl BuiltinFunction for Remainder {
         if args.len() != 2 {
             return Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                 SignalType::Error,
-                vec![SerializedTerm::string(format!(
+                vec![Expression::new(Term::Value(ValueTerm::String(format!(
                     "Expected 2 arguments, received {}",
                     args.len(),
-                ))],
+                ))))],
             ))));
         }
         let mut args = args.into_iter();
@@ -30,10 +29,10 @@ impl BuiltinFunction for Remainder {
                 if *right == 0 {
                     Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                         SignalType::Error,
-                        vec![SerializedTerm::string(format!(
+                        vec![Expression::new(Term::Value(ValueTerm::String(format!(
                             "Division by zero: {} % {}",
                             left, right,
-                        ))],
+                        ))))],
                     ))))
                 } else {
                     Expression::new(Term::Value(ValueTerm::Int(left % right)))
@@ -43,10 +42,10 @@ impl BuiltinFunction for Remainder {
                 if *right == 0.0 {
                     Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                         SignalType::Error,
-                        vec![SerializedTerm::string(format!(
+                        vec![Expression::new(Term::Value(ValueTerm::String(format!(
                             "Division by zero: {} % {}",
                             left, right,
-                        ))],
+                        ))))],
                     ))))
                 } else {
                     Expression::new(Term::Value(ValueTerm::Float(left % right)))
@@ -54,10 +53,10 @@ impl BuiltinFunction for Remainder {
             }
             _ => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                 SignalType::Error,
-                vec![SerializedTerm::string(format!(
+                vec![Expression::new(Term::Value(ValueTerm::String(format!(
                     "Expected (Int, Int) or (Float, Float), received ({}, {})",
                     left, right,
-                ))],
+                ))))],
             )))),
         }
     }

@@ -2,8 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use crate::{
-    core::{Arity, Expression, SerializedTerm, Signal, SignalTerm, Term, VarArgs, VariableTerm},
-    serialize,
+    core::{Arity, Expression, Signal, SignalTerm, Term, VarArgs, VariableTerm},
     stdlib::{builtin::BuiltinFunction, signal::SignalType, value::ValueTerm},
 };
 
@@ -16,44 +15,28 @@ impl BuiltinFunction for Effect {
         if args.len() < 1 {
             return Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                 SignalType::Error,
-                vec![SerializedTerm::string(format!(
+                vec![Expression::new(Term::Value(ValueTerm::String(format!(
                     "Expected 1 or more arguments, received {}",
                     args.len(),
-                ))],
+                ))))],
             ))));
         }
         let mut args = args.into_iter();
         let signal_type = args.next().unwrap();
         match signal_type.value() {
             Term::Value(ValueTerm::String(signal_type)) => {
-                let args = args
-                    .into_iter()
-                    .map(|arg| match serialize(arg.value()) {
-                        Ok(value) => Ok(value),
-                        Err(error) => Err(format!("Invalid signal argument: {}", error)),
-                    })
-                    .collect::<Result<Vec<_>, String>>();
-                match args {
-                    Err(error) => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
-                        SignalType::Error,
-                        vec![SerializedTerm::string(error)],
-                    )))),
-                    Ok(args) => {
-                        let signal =
-                            Signal::new(SignalType::Custom(String::from(signal_type)), args);
-                        Expression::new(Term::Variable(VariableTerm::dynamic(
-                            signal.id(),
-                            Expression::new(Term::Signal(SignalTerm::new(signal))),
-                        )))
-                    }
-                }
+                let signal = Signal::new(SignalType::Custom(String::from(signal_type)), args);
+                Expression::new(Term::Variable(VariableTerm::dynamic(
+                    signal.id(),
+                    Expression::new(Term::Signal(SignalTerm::new(signal))),
+                )))
             }
             _ => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                 SignalType::Error,
-                vec![SerializedTerm::string(format!(
+                vec![Expression::new(Term::Value(ValueTerm::String(format!(
                     "Invalid signal type: Expected String, received {}",
                     signal_type,
-                ))],
+                ))))],
             )))),
         }
     }
@@ -67,7 +50,6 @@ mod tests {
             ApplicationTerm, DependencyList, DynamicDependencies, DynamicState, EvaluationResult,
             Expression, Signal, SignalTerm, Term,
         },
-        serialize::SerializedTerm,
         stdlib::{
             builtin::BuiltinTerm,
             signal::SignalType,
@@ -90,7 +72,9 @@ mod tests {
         )));
         let signal = Signal::new(
             SignalType::Custom(String::from("fetch")),
-            vec![SerializedTerm::string(String::from("http://example.com/"))],
+            vec![Expression::new(Term::Value(ValueTerm::String(
+                String::from("http://example.com/"),
+            )))],
         );
         let signal_hash = signal.id();
         let result = expression.evaluate(&state, &mut cache);

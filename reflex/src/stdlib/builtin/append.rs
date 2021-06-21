@@ -3,11 +3,11 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use crate::{
     core::{Arity, Expression, Signal, SignalTerm, Term, VarArgs},
-    serialize::SerializedTerm,
     stdlib::{
         builtin::BuiltinFunction,
         collection::{hashset::HashSetTerm, vector::VectorTerm, CollectionTerm},
         signal::SignalType,
+        value::ValueTerm,
     },
 };
 
@@ -20,10 +20,10 @@ impl BuiltinFunction for Append {
         if args.len() < 2 {
             return Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                 SignalType::Error,
-                vec![SerializedTerm::string(format!(
+                vec![Expression::new(Term::Value(ValueTerm::String(format!(
                     "Expected 2 or more arguments, received {}",
                     args.len(),
-                ))],
+                ))))],
             ))));
         }
         let mut args = args.into_iter();
@@ -74,7 +74,7 @@ impl BuiltinFunction for Append {
             Ok(result) => result,
             Err(error) => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                 SignalType::Error,
-                vec![SerializedTerm::string(error)],
+                vec![Expression::new(Term::Value(ValueTerm::String(error)))],
             )))),
         }
     }

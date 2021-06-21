@@ -4,7 +4,8 @@
 use std::iter::FromIterator;
 
 use reflex::{
-    core::{Expression, SerializedListTerm, SerializedObjectTerm, SerializedTerm},
+    core::Expression,
+    serialize::{SerializedListTerm, SerializedObjectTerm, SerializedTerm},
     stdlib::value::ValueTerm,
 };
 use serde_json::{Map, Value};
@@ -38,7 +39,6 @@ pub fn sanitize_term(term: SerializedTerm) -> Result<serde_json::Value, String> 
         SerializedTerm::Value(value) => sanitize_value(value),
         SerializedTerm::Object(value) => sanitize_object(value),
         SerializedTerm::List(value) => sanitize_list(value),
-        SerializedTerm::Signal(value) => Err(format!("Unable to format value: {}", value)),
     }
 }
 

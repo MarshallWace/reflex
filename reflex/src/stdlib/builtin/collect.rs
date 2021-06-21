@@ -3,11 +3,11 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use crate::{
     core::{ApplicationTerm, Arity, Expression, Signal, SignalTerm, StructTerm, Term, VarArgs},
-    serialize::SerializedTerm,
     stdlib::{
         builtin::{BuiltinFunction, BuiltinTerm},
         collection::{vector::VectorTerm, CollectionTerm},
         signal::SignalType,
+        value::ValueTerm,
     },
 };
 
@@ -20,10 +20,10 @@ impl BuiltinFunction for Collect {
         if args.len() != 1 {
             return Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                 SignalType::Error,
-                vec![SerializedTerm::string(format!(
+                vec![Expression::new(Term::Value(ValueTerm::String(format!(
                     "Expected 1 argument, received {}",
                     args.len(),
-                ))],
+                ))))],
             ))));
         }
         let mut args = args.into_iter();
@@ -49,10 +49,10 @@ impl BuiltinFunction for Collect {
             }
             _ => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                 SignalType::Error,
-                vec![SerializedTerm::string(format!(
+                vec![Expression::new(Term::Value(ValueTerm::String(format!(
                     "Expected <collection>, received {}",
                     target,
-                ))],
+                ))))],
             )))),
         }
     }
@@ -115,13 +115,13 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                Expression::new(Term::Collection(CollectionTerm::Vector(
-                    VectorTerm::new(vec![
+                Expression::new(Term::Collection(CollectionTerm::Vector(VectorTerm::new(
+                    vec![
                         Expression::new(Term::Value(ValueTerm::Int(3 + 1))),
                         Expression::new(Term::Value(ValueTerm::Int(4 + 1))),
                         Expression::new(Term::Value(ValueTerm::Int(5 + 1))),
-                    ]),
-                ))),
+                    ]
+                ),))),
                 DependencyList::empty(),
             )
         );

@@ -3,7 +3,6 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use crate::{
     core::{Arity, Expression, Signal, SignalTerm, Term},
-    serialize::SerializedTerm,
     stdlib::{
         builtin::BuiltinFunction,
         collection::{vector::VectorTerm, CollectionTerm},
@@ -21,10 +20,10 @@ impl BuiltinFunction for Keys {
         if args.len() != 1 {
             return Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                 SignalType::Error,
-                vec![SerializedTerm::string(format!(
+                vec![Expression::new(Term::Value(ValueTerm::String(format!(
                     "Expected 1 argument, received {}",
                     args.len(),
-                ))],
+                ))))],
             ))));
         }
         let mut args = args.into_iter();
@@ -49,10 +48,10 @@ impl BuiltinFunction for Keys {
             Some(result) => result,
             None => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                 SignalType::Error,
-                vec![SerializedTerm::string(format!(
+                vec![Expression::new(Term::Value(ValueTerm::String(format!(
                     "Unable to enumerate keys for {}",
                     target
-                ))],
+                ))))],
             )))),
         }
     }

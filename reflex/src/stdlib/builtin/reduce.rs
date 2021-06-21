@@ -3,8 +3,9 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use crate::{
     core::{ApplicationTerm, Arity, Expression, Signal, SignalTerm, Term},
-    serialize::SerializedTerm,
-    stdlib::{builtin::BuiltinFunction, collection::CollectionTerm, signal::SignalType},
+    stdlib::{
+        builtin::BuiltinFunction, collection::CollectionTerm, signal::SignalType, value::ValueTerm,
+    },
 };
 
 pub struct Reduce {}
@@ -16,10 +17,10 @@ impl BuiltinFunction for Reduce {
         if args.len() != 3 {
             return Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                 SignalType::Error,
-                vec![SerializedTerm::string(format!(
+                vec![Expression::new(Term::Value(ValueTerm::String(format!(
                     "Expected 3 arguments, received {}",
                     args.len(),
-                ))],
+                ))))],
             ))));
         }
         let mut args = args.into_iter();
@@ -59,10 +60,10 @@ impl BuiltinFunction for Reduce {
             Some(result) => result,
             None => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                 SignalType::Error,
-                vec![SerializedTerm::string(format!(
+                vec![Expression::new(Term::Value(ValueTerm::String(format!(
                     "Unable to reduce {}",
                     target
-                ))],
+                ))))],
             )))),
         }
     }

@@ -7,7 +7,7 @@ pub mod http;
 
 use std::collections::HashMap;
 
-use reflex::core::SerializedTerm;
+use reflex::{core::Expression, serialize};
 use reflex_runtime::{SignalHelpers, SignalResult};
 
 pub(crate) mod utils {
@@ -18,7 +18,7 @@ pub(crate) mod utils {
 }
 
 pub fn builtin_signal_handler(
-) -> impl Fn(&str, &[SerializedTerm], &SignalHelpers) -> Option<Result<SignalResult, String>>
+) -> impl Fn(&str, &[Expression], &SignalHelpers) -> Option<Result<SignalResult, String>>
        + Send
        + Sync
        + 'static {
@@ -26,17 +26,17 @@ pub fn builtin_signal_handler(
         (
             "reflex::date::timestamp",
             date::handle_date_timestamp
-                as fn(&[SerializedTerm], &SignalHelpers) -> Result<SignalResult, String>,
+                as fn(&[Expression], &SignalHelpers) -> Result<SignalResult, String>,
         ),
         (
             "reflex::http::fetch",
             http::handle_http_fetch
-                as fn(&[SerializedTerm], &SignalHelpers) -> Result<SignalResult, String>,
+                as fn(&[Expression], &SignalHelpers) -> Result<SignalResult, String>,
         ),
         (
             "reflex::graphql::execute",
             graphql::handle_graphql_execute
-                as fn(&[SerializedTerm], &SignalHelpers) -> Result<SignalResult, String>,
+                as fn(&[Expression], &SignalHelpers) -> Result<SignalResult, String>,
         ),
     ])
 }
@@ -45,10 +45,10 @@ pub fn create_signal_handler(
     handlers: impl IntoIterator<
         Item = (
             &'static str,
-            fn(&[SerializedTerm], &SignalHelpers) -> Result<SignalResult, String>,
+            fn(&[Expression], &SignalHelpers) -> Result<SignalResult, String>,
         ),
     >,
-) -> impl Fn(&str, &[SerializedTerm], &SignalHelpers) -> Option<Result<SignalResult, String>>
+) -> impl Fn(&str, &[Expression], &SignalHelpers) -> Option<Result<SignalResult, String>>
        + Send
        + Sync
        + 'static {
@@ -61,12 +61,12 @@ pub fn create_signal_handler(
 
 pub fn debug_signal_handler<THandler>(
     handler: THandler,
-) -> impl Fn(&str, &[SerializedTerm], &SignalHelpers) -> Option<Result<SignalResult, String>>
+) -> impl Fn(&str, &[Expression], &SignalHelpers) -> Option<Result<SignalResult, String>>
        + Send
        + Sync
        + 'static
 where
-    THandler: Fn(&str, &[SerializedTerm], &SignalHelpers) -> Option<Result<SignalResult, String>>
+    THandler: Fn(&str, &[Expression], &SignalHelpers) -> Option<Result<SignalResult, String>>
         + Send
         + Sync
         + 'static,
@@ -79,7 +79,10 @@ where
                 "{} {}",
                 signal_type,
                 args.iter()
-                    .map(|arg| format!("{}", arg))
+                    .map(|arg| match serialize(arg.value()) {
+                        Ok(value) => format!("{}", value),
+                        Err(_) => format!("{}", arg),
+                    })
                     .collect::<Vec<_>>()
                     .join(" ")
             )

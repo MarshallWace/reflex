@@ -5,8 +5,7 @@ use std::collections::{hash_map::Entry, HashMap};
 
 use crate::{
     core::{Arity, Expression, Signal, SignalTerm, StructPrototype, StructTerm, Term, VarArgs},
-    serialize::SerializedTerm,
-    stdlib::{builtin::BuiltinFunction, signal::SignalType},
+    stdlib::{builtin::BuiltinFunction, signal::SignalType, value::ValueTerm},
 };
 
 pub struct Merge {}
@@ -85,7 +84,7 @@ impl BuiltinFunction for Merge {
             }
             Err(error) => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                 SignalType::Error,
-                vec![SerializedTerm::string(error)],
+                vec![Expression::new(Term::Value(ValueTerm::String(error)))],
             )))),
         }
     }

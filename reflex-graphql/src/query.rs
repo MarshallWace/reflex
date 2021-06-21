@@ -243,8 +243,8 @@ mod tests {
     use reflex::{
         cache::GenerationalGc,
         core::{
-            DependencyList, DynamicState, EnumTerm, EvaluationResult, Expression, SerializedTerm,
-            Signal, SignalTerm, StructPrototype, StructTerm, Term,
+            DependencyList, DynamicState, EnumTerm, EvaluationResult, Expression, Signal,
+            SignalTerm, StructPrototype, StructTerm, Term,
         },
         parser::sexpr::parse,
         stdlib::{
@@ -374,7 +374,9 @@ mod tests {
         let root = Expression::new(Term::Enum(EnumTerm::new(2, vec![])));
         let error = Expression::new(Term::Signal(SignalTerm::new(Signal::new(
             SignalType::Error,
-            vec![SerializedTerm::string(StringValue::from("foo"))],
+            vec![Expression::new(Term::Value(ValueTerm::String(
+                StringValue::from("foo"),
+            )))],
         ))));
         let shape = QueryShape::branch(vec![FieldSelector::EnumField(vec![
             EnumFieldSelector::Nullary(Expression::clone(&error)),
@@ -412,7 +414,9 @@ mod tests {
         )));
         let error = Expression::new(Term::Signal(SignalTerm::new(Signal::new(
             SignalType::Error,
-            vec![SerializedTerm::string(StringValue::from("foo"))],
+            vec![Expression::new(Term::Value(ValueTerm::String(
+                StringValue::from("foo"),
+            )))],
         ))));
         let shape = QueryShape::branch(vec![FieldSelector::EnumField(vec![
             EnumFieldSelector::Nullary(Expression::clone(&error)),
@@ -454,7 +458,9 @@ mod tests {
         let transform = Expression::new(Term::Builtin(BuiltinTerm::Add));
         let error = Expression::new(Term::Signal(SignalTerm::new(Signal::new(
             SignalType::Error,
-            vec![SerializedTerm::string(StringValue::from("foo"))],
+            vec![Expression::new(Term::Value(ValueTerm::String(
+                StringValue::from("foo"),
+            )))],
         ))));
         let shape = QueryShape::branch(vec![FieldSelector::EnumField(vec![
             EnumFieldSelector::Nullary(Expression::clone(&error)),

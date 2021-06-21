@@ -4,10 +4,9 @@
 use std::fmt;
 
 use crate::{
-    core::{Expression, Signal, SignalTerm, StructPrototype, StructTerm, Term},
+    core::{Expression, StructPrototype, StructTerm, Term},
     stdlib::{
         collection::{vector::VectorTerm, CollectionTerm},
-        signal::SignalType,
         value::{SymbolId, ValueTerm},
     },
 };
@@ -17,7 +16,6 @@ pub enum SerializedTerm {
     Value(ValueTerm),
     Object(SerializedObjectTerm),
     List(SerializedListTerm),
-    Signal(SerializedSignalTerm),
 }
 impl SerializedTerm {
     pub fn value(value: ValueTerm) -> Self {
@@ -28,9 +26,6 @@ impl SerializedTerm {
     }
     pub fn list(items: impl IntoIterator<Item = SerializedTerm>) -> Self {
         Self::List(SerializedListTerm::new(items))
-    }
-    pub fn signal(signals: impl IntoIterator<Item = (SignalType, Vec<SerializedTerm>)>) -> Self {
-        Self::Signal(SerializedSignalTerm::new(signals))
     }
     pub fn symbol(value: SymbolId) -> Self {
         Self::Value(ValueTerm::Symbol(value))
@@ -106,26 +101,6 @@ impl fmt::Display for SerializedListTerm {
     }
 }
 
-#[derive(Hash, Eq, PartialEq, Clone, Debug)]
-pub struct SerializedSignalTerm {
-    signals: Vec<(SignalType, Vec<SerializedTerm>)>,
-}
-impl SerializedSignalTerm {
-    pub fn new(signals: impl IntoIterator<Item = (SignalType, Vec<SerializedTerm>)>) -> Self {
-        Self {
-            signals: signals.into_iter().collect(),
-        }
-    }
-    pub fn signals(&self) -> &[(SignalType, Vec<SerializedTerm>)] {
-        &self.signals
-    }
-}
-impl fmt::Display for SerializedSignalTerm {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", stringify_signal(self))
-    }
-}
-
 pub fn serialize(term: &Term) -> Result<SerializedTerm, String> {
     match term {
         Term::Value(value) => Ok(SerializedTerm::Value(value.clone())),
@@ -134,7 +109,6 @@ pub fn serialize(term: &Term) -> Result<SerializedTerm, String> {
             CollectionTerm::Vector(value) => serialize_vector_term(value),
             _ => Err(format!("Unable to serialize collection: {}", value)),
         },
-        Term::Signal(value) => serialize_signal_term(value),
         _ => Err(format!("Unable to serialize value: {}", term)),
     }
 }
@@ -177,23 +151,11 @@ fn serialize_vector_term(value: &VectorTerm) -> Result<SerializedTerm, String> {
     Ok(SerializedTerm::List(SerializedListTerm::new(items)))
 }
 
-fn serialize_signal_term(value: &SignalTerm) -> Result<SerializedTerm, String> {
-    Ok(SerializedTerm::Signal(SerializedSignalTerm::new(
-        value.signals().into_iter().map(|signal| {
-            (
-                signal.get_type().clone(),
-                signal.args().iter().cloned().collect(),
-            )
-        }),
-    )))
-}
-
 fn deserialize(value: &SerializedTerm) -> Expression {
     match value {
         SerializedTerm::Value(value) => Expression::new(Term::Value(value.clone())),
         SerializedTerm::Object(value) => deserialize_object(value),
         SerializedTerm::List(value) => deserialize_list(value),
-        SerializedTerm::Signal(value) => deserialize_signal(value),
     }
 }
 
@@ -216,18 +178,11 @@ fn deserialize_list(value: &SerializedListTerm) -> Expression {
     ))))
 }
 
-fn deserialize_signal(value: &SerializedSignalTerm) -> Expression {
-    Expression::new(Term::Signal(SignalTerm::from(value.signals.iter().map(
-        |(signal_type, args)| Signal::new(signal_type.clone(), args.iter().cloned()),
-    ))))
-}
-
 fn stringify(term: &SerializedTerm) -> String {
     match term {
         SerializedTerm::Value(value) => stringify_value(value),
         SerializedTerm::Object(value) => stringify_object(value),
         SerializedTerm::List(value) => stringify_list(value),
-        SerializedTerm::Signal(value) => stringify_signal(value),
     }
 }
 
@@ -267,39 +222,6 @@ fn stringify_list(value: &SerializedListTerm) -> String {
             .map(|value| format!("{}", stringify(value)))
             .collect::<Vec<_>>())
         .join(", ")
-    )
-}
-
-fn stringify_signal(value: &SerializedSignalTerm) -> String {
-    format!(
-        "Signal({})",
-        value
-            .signals
-            .iter()
-            .map(|(signal_type, args)| {
-                format!(
-                    "{}{}",
-                    match signal_type {
-                        SignalType::Error => String::from("Error"),
-                        SignalType::Pending => String::from("Pending"),
-                        SignalType::Custom(signal_type) => format!("\"{}\"", signal_type),
-                    },
-                    if args.is_empty() {
-                        String::from("")
-                    } else {
-                        format!(
-                            ":{}",
-                            (args
-                                .iter()
-                                .map(|value| format!("{}", stringify(value)))
-                                .collect::<Vec<_>>())
-                            .join(", ")
-                        )
-                    }
-                )
-            })
-            .collect::<Vec<_>>()
-            .join(", ")
     )
 }
 

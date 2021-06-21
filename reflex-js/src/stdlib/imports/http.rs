@@ -5,8 +5,8 @@ use std::any::TypeId;
 
 use reflex::{
     core::{
-        ApplicationTerm, Arity, Expression, LambdaTerm, NativeFunction, SerializedTerm, Signal,
-        SignalTerm, StructPrototype, StructTerm, Term, VarArgs, VariableTerm,
+        ApplicationTerm, Arity, Expression, LambdaTerm, NativeFunction, Signal, SignalTerm,
+        StructPrototype, StructTerm, Term, VarArgs, VariableTerm,
     },
     hash::{hash_object, HashId},
     stdlib::{
@@ -191,10 +191,10 @@ impl ToRequest {
         if args.len() != 1 {
             return Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                 SignalType::Error,
-                vec![SerializedTerm::string(format!(
+                vec![Expression::new(Term::Value(ValueTerm::String(format!(
                     "Expected 1 argument, received {}",
                     args.len(),
-                ))],
+                ))))],
             ))));
         }
         let mut args = args.into_iter();
@@ -239,10 +239,10 @@ impl ToRequest {
             Ok(result) => result,
             Err(error) => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                 SignalType::Error,
-                vec![SerializedTerm::string(format!(
+                vec![Expression::new(Term::Value(ValueTerm::String(format!(
                     "Expected HTTP request, received {}",
                     error
-                ))],
+                ))))],
             )))),
         }
     }

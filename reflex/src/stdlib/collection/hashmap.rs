@@ -12,7 +12,6 @@ use crate::{
         Substitutions, Term,
     },
     hash::hash_object,
-    serialize::SerializedTerm,
     stdlib::{builtin::BuiltinTerm, signal::SignalType, value::ValueTerm},
 };
 
@@ -158,7 +157,7 @@ impl HashMapTerm {
                     Err(error) => {
                         let error = Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                             SignalType::Error,
-                            vec![SerializedTerm::string(error)],
+                            vec![Expression::new(Term::Value(ValueTerm::String(error)))],
                         ))));
                         (Expression::clone(&error), error)
                     }

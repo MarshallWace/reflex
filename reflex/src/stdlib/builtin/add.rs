@@ -3,7 +3,6 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use crate::{
     core::{Arity, Expression, Signal, SignalTerm, Term},
-    serialize::SerializedTerm,
     stdlib::{builtin::BuiltinFunction, signal::SignalType, value::ValueTerm},
 };
 
@@ -16,10 +15,10 @@ impl BuiltinFunction for Add {
         if args.len() != 2 {
             return Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                 SignalType::Error,
-                vec![SerializedTerm::string(format!(
+                vec![Expression::new(Term::Value(ValueTerm::String(format!(
                     "Expected 2 arguments, received {}",
                     args.len(),
-                ))],
+                ))))],
             ))));
         }
         let mut args = args.into_iter();
@@ -34,10 +33,10 @@ impl BuiltinFunction for Add {
             }
             _ => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                 SignalType::Error,
-                vec![SerializedTerm::string(format!(
+                vec![Expression::new(Term::Value(ValueTerm::String(format!(
                     "Expected (Int, Int) or (Float, Float), received ({}, {})",
                     left, right,
-                ))],
+                ))))],
             )))),
         }
     }
@@ -51,7 +50,6 @@ mod tests {
             DependencyList, DynamicState, EvaluationResult, Expression, Signal, SignalTerm, Term,
         },
         parser::sexpr::parse,
-        serialize::SerializedTerm,
         stdlib::{signal::SignalType, value::ValueTerm},
     };
 
@@ -163,9 +161,9 @@ mod tests {
             EvaluationResult::new(
                 Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                     SignalType::Error,
-                    vec![SerializedTerm::string(String::from(
-                        "Expected (Int, Int) or (Float, Float), received (3, 3.142)"
-                    ))]
+                    vec![Expression::new(Term::Value(ValueTerm::String(
+                        String::from("Expected (Int, Int) or (Float, Float), received (3, 3.142)")
+                    )))]
                 )))),
                 DependencyList::empty()
             )
@@ -177,9 +175,9 @@ mod tests {
             EvaluationResult::new(
                 Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                     SignalType::Error,
-                    vec![SerializedTerm::string(String::from(
-                        "Expected (Int, Int) or (Float, Float), received (3.142, 3)"
-                    ))]
+                    vec![Expression::new(Term::Value(ValueTerm::String(
+                        String::from("Expected (Int, Int) or (Float, Float), received (3.142, 3)")
+                    )))]
                 )))),
                 DependencyList::empty()
             )
@@ -192,9 +190,9 @@ mod tests {
             EvaluationResult::new(
                 Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                     SignalType::Error,
-                    vec![SerializedTerm::string(String::from(
-                        "Expected (Int, Int) or (Float, Float), received (3, false)"
-                    ))]
+                    vec![Expression::new(Term::Value(ValueTerm::String(
+                        String::from("Expected (Int, Int) or (Float, Float), received (3, false)")
+                    )))]
                 )))),
                 DependencyList::empty()
             )
@@ -206,9 +204,9 @@ mod tests {
             EvaluationResult::new(
                 Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                     SignalType::Error,
-                    vec![SerializedTerm::string(String::from(
-                        "Expected (Int, Int) or (Float, Float), received (3, \"3\")"
-                    ))]
+                    vec![Expression::new(Term::Value(ValueTerm::String(
+                        String::from("Expected (Int, Int) or (Float, Float), received (3, \"3\")")
+                    )))]
                 )))),
                 DependencyList::empty()
             )
@@ -221,9 +219,9 @@ mod tests {
             EvaluationResult::new(
                 Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                     SignalType::Error,
-                    vec![SerializedTerm::string(String::from(
-                        "Expected (Int, Int) or (Float, Float), received (false, 3)"
-                    ))]
+                    vec![Expression::new(Term::Value(ValueTerm::String(
+                        String::from("Expected (Int, Int) or (Float, Float), received (false, 3)")
+                    )))]
                 )))),
                 DependencyList::empty()
             )
@@ -235,9 +233,9 @@ mod tests {
             EvaluationResult::new(
                 Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                     SignalType::Error,
-                    vec![SerializedTerm::string(String::from(
-                        "Expected (Int, Int) or (Float, Float), received (\"3\", 3)"
-                    ))]
+                    vec![Expression::new(Term::Value(ValueTerm::String(
+                        String::from("Expected (Int, Int) or (Float, Float), received (\"3\", 3)")
+                    )))]
                 )))),
                 DependencyList::empty()
             )
@@ -250,9 +248,11 @@ mod tests {
             EvaluationResult::new(
                 Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                     SignalType::Error,
-                    vec![SerializedTerm::string(String::from(
-                        "Expected (Int, Int) or (Float, Float), received (3.142, false)"
-                    ))]
+                    vec![Expression::new(Term::Value(ValueTerm::String(
+                        String::from(
+                            "Expected (Int, Int) or (Float, Float), received (3.142, false)"
+                        )
+                    )))]
                 )))),
                 DependencyList::empty()
             )
@@ -264,9 +264,11 @@ mod tests {
             EvaluationResult::new(
                 Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                     SignalType::Error,
-                    vec![SerializedTerm::string(String::from(
-                        "Expected (Int, Int) or (Float, Float), received (3.142, \"3\")"
-                    ))]
+                    vec![Expression::new(Term::Value(ValueTerm::String(
+                        String::from(
+                            "Expected (Int, Int) or (Float, Float), received (3.142, \"3\")"
+                        )
+                    )))]
                 )))),
                 DependencyList::empty()
             )
@@ -279,9 +281,11 @@ mod tests {
             EvaluationResult::new(
                 Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                     SignalType::Error,
-                    vec![SerializedTerm::string(String::from(
-                        "Expected (Int, Int) or (Float, Float), received (false, 3.142)"
-                    ))]
+                    vec![Expression::new(Term::Value(ValueTerm::String(
+                        String::from(
+                            "Expected (Int, Int) or (Float, Float), received (false, 3.142)"
+                        )
+                    )))]
                 )))),
                 DependencyList::empty()
             )
@@ -293,9 +297,11 @@ mod tests {
             EvaluationResult::new(
                 Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                     SignalType::Error,
-                    vec![SerializedTerm::string(String::from(
-                        "Expected (Int, Int) or (Float, Float), received (\"3\", 3.142)"
-                    ))]
+                    vec![Expression::new(Term::Value(ValueTerm::String(
+                        String::from(
+                            "Expected (Int, Int) or (Float, Float), received (\"3\", 3.142)"
+                        )
+                    )))]
                 )))),
                 DependencyList::empty()
             )

@@ -14,7 +14,7 @@ use crate::graphql_service;
 use hyper::{server::conn::AddrStream, service::make_service_fn, Server};
 use reflex::{
     cache::GenerationalGc,
-    core::{Expression, SerializedTerm, Term},
+    core::{Expression, Term},
     stdlib::value::{StringValue, ValueTerm},
 };
 use reflex_cli::parse_cli_args;
@@ -39,7 +39,7 @@ struct CliArgs {
 }
 
 pub async fn cli(
-    signal_handler: impl Fn(&str, &[SerializedTerm], &SignalHelpers) -> Option<Result<SignalResult, String>>
+    signal_handler: impl Fn(&str, &[Expression], &SignalHelpers) -> Option<Result<SignalResult, String>>
         + Send
         + Sync
         + 'static,
@@ -123,7 +123,7 @@ fn create_env(env_args: impl IntoIterator<Item = (String, Expression)>) -> Env {
 
 fn create_store<THandler>(signal_handler: THandler) -> Runtime
 where
-    THandler: Fn(&str, &[SerializedTerm], &SignalHelpers) -> Option<Result<SignalResult, String>>
+    THandler: Fn(&str, &[Expression], &SignalHelpers) -> Option<Result<SignalResult, String>>
         + Send
         + Sync
         + 'static,

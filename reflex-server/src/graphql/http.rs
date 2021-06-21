@@ -3,11 +3,7 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use crate::create_http_response;
 use hyper::{header, Body, Request, Response, StatusCode};
-use reflex::{
-    core::{Expression, SerializedTerm},
-    hash::hash_object,
-    serialize,
-};
+use reflex::{core::Expression, hash::hash_object, serialize, serialize::SerializedTerm};
 use reflex_graphql::{
     create_introspection_query_response, deserialize_graphql_operation,
     wrap_graphql_error_response, wrap_graphql_success_response, QueryTransform,

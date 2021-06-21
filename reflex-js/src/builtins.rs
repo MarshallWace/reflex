@@ -4,10 +4,7 @@
 use std::{any::TypeId, iter::once};
 
 use reflex::{
-    core::{
-        ApplicationTerm, Arity, Expression, NativeFunction, SerializedTerm, Signal, SignalTerm,
-        Term, VarArgs,
-    },
+    core::{ApplicationTerm, Arity, Expression, NativeFunction, Signal, SignalTerm, Term, VarArgs},
     hash::{hash_object, HashId},
     stdlib::{
         builtin::BuiltinTerm,
@@ -41,7 +38,7 @@ impl Throw {
         };
         Expression::new(Term::Signal(SignalTerm::new(Signal::new(
             SignalType::Error,
-            vec![SerializedTerm::string(message)],
+            vec![Expression::new(Term::Value(ValueTerm::String(message)))],
         ))))
     }
 }
@@ -106,10 +103,10 @@ impl Construct {
                     Ok(result) => result,
                     Err(error) => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                         SignalType::Error,
-                        vec![SerializedTerm::string(format!(
+                        vec![Expression::new(Term::Value(ValueTerm::String(format!(
                             "Invalid constructor call: {}",
                             error,
-                        ))],
+                        ))))],
                     )))),
                 }
             }
@@ -176,10 +173,10 @@ impl ToString {
         if args.len() != 1 {
             return Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                 SignalType::Error,
-                vec![SerializedTerm::string(format!(
+                vec![Expression::new(Term::Value(ValueTerm::String(format!(
                     "Expected 1 argument, received {}",
                     args.len(),
-                ))],
+                ))))],
             ))));
         }
         let mut args = args.into_iter();
@@ -191,10 +188,10 @@ impl ToString {
             )))),
             _ => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                 SignalType::Error,
-                vec![SerializedTerm::string(format!(
+                vec![Expression::new(Term::Value(ValueTerm::String(format!(
                     "Expected printable value, received {}",
                     operand,
-                ))],
+                ))))],
             )))),
         }
     }
@@ -219,10 +216,10 @@ impl FlattenDeep {
         if args.len() != 1 {
             return Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                 SignalType::Error,
-                vec![SerializedTerm::string(format!(
+                vec![Expression::new(Term::Value(ValueTerm::String(format!(
                     "Expected 1 argument, received {}",
                     args.len(),
-                ))],
+                ))))],
             ))));
         }
         let mut args = args.into_iter();

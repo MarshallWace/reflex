@@ -5,8 +5,8 @@ use std::any::TypeId;
 
 use reflex::{
     core::{
-        ApplicationTerm, Arity, Expression, LambdaTerm, NativeFunction, SerializedTerm, Signal,
-        SignalTerm, StructTerm, Term, VariableTerm,
+        ApplicationTerm, Arity, Expression, LambdaTerm, NativeFunction, Signal, SignalTerm,
+        StructTerm, Term, VariableTerm,
     },
     hash::{hash_object, HashId},
     stdlib::{
@@ -55,7 +55,7 @@ impl JsonParse {
             Ok(result) => result,
             Err(error) => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                 SignalType::Error,
-                vec![SerializedTerm::string(error)],
+                vec![Expression::new(Term::Value(ValueTerm::String(error)))],
             )))),
         }
     }
@@ -94,10 +94,10 @@ impl JsonStringify {
             }
             Err(error) => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                 SignalType::Error,
-                vec![SerializedTerm::string(format!(
+                vec![Expression::new(Term::Value(ValueTerm::String(format!(
                     "Invalid JSON.stringify() call: unable to serialize {}",
                     error
-                ))],
+                ))))],
             )))),
         }
     }
