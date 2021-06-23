@@ -92,9 +92,16 @@ type UnsubscribeCommand = Operation<SubscriptionId, bool>;
 type UpdateCommand = Operation<Vec<(StateToken, Expression)>, ()>;
 
 pub enum RuntimeEffect {
+    Assignment(AssignmentEffect),
     Async(AsyncEffect),
     Stream(StreamEffect),
 }
+impl RuntimeEffect {
+    pub fn assign(key: StateToken, value: Expression) -> Self {
+        Self::Assignment(vec![(key, value)])
+    }
+}
+pub type AssignmentEffect = Vec<(StateToken, Expression)>;
 pub type AsyncEffect = Pin<Box<dyn Future<Output = Expression> + Send + 'static>>;
 pub type StreamEffect = Pin<Box<dyn Stream<Item = Expression> + Send + 'static>>;
 
@@ -426,6 +433,13 @@ where
             for (id, effect) in effects {
                 let commands = commands.clone();
                 match effect {
+                    RuntimeEffect::Assignment(updates) => {
+                        tokio::spawn(async move {
+                            for (id, value) in updates {
+                                emit_update(id, value, &commands).await
+                            }
+                        });
+                    }
                     RuntimeEffect::Async(effect) => {
                         tokio::spawn(async move {
                             let value = effect.await;
