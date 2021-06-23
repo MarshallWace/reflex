@@ -188,6 +188,7 @@ fn stringify(term: &SerializedTerm) -> String {
 
 fn stringify_value(value: &ValueTerm) -> String {
     match value {
+        ValueTerm::Hash(id) => format!("Hash({})", id),
         ValueTerm::Symbol(id) => format!("Symbol({})", id),
         ValueTerm::Null => String::from("null"),
         ValueTerm::Boolean(value) => format!("{}", value),

@@ -345,7 +345,7 @@ pub(crate) fn get_builtin_field<'src>(target: Option<&Term>, method: &str) -> Op
 
 pub fn format_value(value: &ValueTerm) -> String {
     match value {
-        ValueTerm::Symbol(_) => format!("{}", value),
+        ValueTerm::Hash(_) | ValueTerm::Symbol(_) => format!("{}", value),
         ValueTerm::Null => String::from("null"),
         ValueTerm::Boolean(value) => format!("{}", value),
         ValueTerm::Int(value) => format!("{}", value),

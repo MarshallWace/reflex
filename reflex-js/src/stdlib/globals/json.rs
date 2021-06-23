@@ -117,12 +117,12 @@ pub fn json_stringify(term: &Term) -> Result<String, &Term> {
 
 fn stringify_value_term<'a>(input: &'a Term, value: &'a ValueTerm) -> Result<String, &'a Term> {
     match value {
+        ValueTerm::Hash(_) | ValueTerm::Symbol(_) => Err(input),
         ValueTerm::Null => Ok(String::from("null")),
         ValueTerm::Boolean(value) => Ok(String::from(if *value { "true" } else { "false" })),
         ValueTerm::Int(value) => Ok(format!("{}", value)),
         ValueTerm::Float(value) => Ok(format!("{}", value)),
         ValueTerm::String(value) => Ok(json_stringify_string(value)),
-        ValueTerm::Symbol(_) => Err(input),
     }
 }
 

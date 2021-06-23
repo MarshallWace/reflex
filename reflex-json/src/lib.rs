@@ -44,7 +44,7 @@ pub fn sanitize_term(term: SerializedTerm) -> Result<serde_json::Value, String> 
 
 fn sanitize_value(value: ValueTerm) -> Result<serde_json::Value, String> {
     match value {
-        ValueTerm::Symbol(_) => Err(format!("Unable to format value: {}", value)),
+        ValueTerm::Hash(_) | ValueTerm::Symbol(_) => Err(format!("Unable to format value: {}", value)),
         ValueTerm::Null => Ok(serde_json::Value::Null),
         ValueTerm::Boolean(value) => Ok(serde_json::Value::Bool(value)),
         ValueTerm::Int(value) => Ok(serde_json::Value::Number(value.into())),
