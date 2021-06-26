@@ -25,16 +25,18 @@ impl BuiltinFunction for If {
         let condition = args.next().unwrap();
         let consequent = args.next().unwrap();
         let alternate = args.next().unwrap();
-        match condition.value() {
-            Term::Value(ValueTerm::Boolean(condition)) => {
-                if *condition {
-                    consequent
-                } else {
-                    alternate
-                }
-            }
-            Term::Value(ValueTerm::Null) => alternate,
-            _ => consequent,
+        if is_truthy(&condition) {
+            consequent
+        } else {
+            alternate
         }
+    }
+}
+
+pub(crate) fn is_truthy(value: &Expression) -> bool {
+    match value.value() {
+        Term::Value(ValueTerm::Boolean(value)) => *value,
+        Term::Value(ValueTerm::Null) => false,
+        _ => true,
     }
 }

@@ -6,6 +6,8 @@ use crate::{
     stdlib::{builtin::BuiltinFunction, signal::SignalType, value::ValueTerm},
 };
 
+use super::r#if::is_truthy;
+
 pub struct And {}
 impl BuiltinFunction for And {
     fn arity() -> Arity {
@@ -24,15 +26,7 @@ impl BuiltinFunction for And {
         let mut args = args.into_iter();
         let left = args.next().unwrap();
         let right = args.next().unwrap();
-        let left_value = match left.value() {
-            Term::Value(ValueTerm::Boolean(false)) | Term::Value(ValueTerm::Null) => false,
-            _ => true,
-        };
-        let right_value = match right.value() {
-            Term::Value(ValueTerm::Boolean(false)) | Term::Value(ValueTerm::Null) => false,
-            _ => true,
-        };
-        if left_value && right_value {
+        if is_truthy(&left) {
             right
         } else {
             left

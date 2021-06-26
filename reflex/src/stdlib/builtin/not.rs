@@ -6,6 +6,8 @@ use crate::{
     stdlib::{builtin::BuiltinFunction, signal::SignalType, value::ValueTerm},
 };
 
+use super::r#if::is_truthy;
+
 pub struct Not {}
 impl BuiltinFunction for Not {
     fn arity() -> Arity {
@@ -23,12 +25,6 @@ impl BuiltinFunction for Not {
         }
         let mut args = args.into_iter();
         let operand = args.next().unwrap();
-        match operand.value() {
-            Term::Value(ValueTerm::Boolean(operand)) => {
-                Expression::new(Term::Value(ValueTerm::Boolean(!operand)))
-            }
-            Term::Value(ValueTerm::Null) => Expression::new(Term::Value(ValueTerm::Boolean(true))),
-            _ => Expression::new(Term::Value(ValueTerm::Boolean(false))),
-        }
+        Expression::new(Term::Value(ValueTerm::Boolean(!is_truthy(&operand))))
     }
 }
