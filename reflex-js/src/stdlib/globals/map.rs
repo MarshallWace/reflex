@@ -4,11 +4,13 @@
 use std::any::TypeId;
 
 use reflex::{
-    core::{ApplicationTerm, Arity, Expression, NativeFunction, Signal, SignalTerm, Term},
+    core::{
+        ApplicationTerm, Arity, Expression, NativeFunction, Signal, SignalTerm, StructTerm, Term,
+    },
     hash::{hash_object, HashId},
     stdlib::{
         builtin::BuiltinTerm,
-        collection::{hashmap::HashMapTerm, vector::VectorTerm, CollectionTerm},
+        collection::{hashmap::HashMapTerm, CollectionTerm},
         signal::SignalType,
         value::{StringValue, ValueTerm},
     },
@@ -41,18 +43,12 @@ impl MapConstructor {
                 let entries = entries.iterate().into_iter().collect::<Vec<_>>();
                 let has_dynamic_keys = entries.iter().any(|entry| match entry.value() {
                     Term::Struct(entry) => match entry.fields().get(0) {
-                        Some(key) => match key.value() {
-                            Term::Value(_) => false,
-                            _ => true,
-                        },
+                        Some(key) => !key.is_static(),
                         _ => true,
                     },
                     Term::Collection(entry) => match entry {
                         CollectionTerm::Vector(entry) => match entry.get(0) {
-                            Some(key) => match key.value() {
-                                Term::Value(_) => false,
-                                _ => true,
-                            },
+                            Some(key) => !key.is_static(),
                             _ => true,
                         },
                         _ => true,
@@ -84,12 +80,10 @@ impl MapConstructor {
                             dynamic_map_constructor(),
                             vec![
                                 Expression::new(Term::Application(ApplicationTerm::new(
-                                    Expression::new(Term::Builtin(BuiltinTerm::CollectArgs)),
+                                    Expression::new(Term::Builtin(BuiltinTerm::CollectTuple)),
                                     keys,
                                 ))),
-                                Expression::new(Term::Collection(CollectionTerm::Vector(
-                                    VectorTerm::new(values),
-                                ))),
+                                Expression::new(Term::Struct(StructTerm::new(None, values))),
                             ],
                         )))
                     }
@@ -123,17 +117,19 @@ impl DynamicMapConstructor {
         let keys = args.next().unwrap();
         let values = args.next().unwrap();
         let keys = match keys.value() {
-            Term::Collection(CollectionTerm::Vector(keys)) => Some(keys),
+            Term::Struct(keys) if keys.prototype().is_none() => Some(keys.fields()),
             _ => None,
         };
         let values = match values.value() {
-            Term::Collection(CollectionTerm::Vector(values)) => Some(values),
+            Term::Struct(values) if values.prototype().is_none() => Some(values.fields()),
             _ => None,
         };
         match (keys, values) {
             (Some(keys), Some(values)) if keys.len() == values.len() => {
                 Expression::new(Term::Collection(CollectionTerm::HashMap(HashMapTerm::new(
-                    keys.iterate().into_iter().zip(values.iterate().into_iter()),
+                    keys.iter()
+                        .map(Expression::clone)
+                        .zip(values.iter().map(Expression::clone)),
                 ))))
             }
             _ => Expression::new(Term::Signal(SignalTerm::new(Signal::new(

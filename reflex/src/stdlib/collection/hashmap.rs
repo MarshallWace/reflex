@@ -48,6 +48,9 @@ impl HashMapTerm {
     pub fn values(&self) -> &[Expression] {
         &self.values
     }
+    pub fn len(&self) -> usize {
+        self.values.len()
+    }
     pub fn get(&self, key: &Expression) -> Option<&Expression> {
         match self.lookup.get(key) {
             None => None,

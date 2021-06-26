@@ -4,8 +4,11 @@
 use crate::{
     core::{ApplicationTerm, Arity, Expression, Signal, SignalTerm, Term},
     stdlib::{
-        builtin::BuiltinFunction, collection::vector::VectorTerm, collection::CollectionTerm,
-        signal::SignalType, value::ValueTerm,
+        builtin::BuiltinFunction,
+        collection::CollectionTerm,
+        collection::{hashmap::HashMapTerm, hashset::HashSetTerm, vector::VectorTerm},
+        signal::SignalType,
+        value::ValueTerm,
     },
 };
 
@@ -27,48 +30,51 @@ impl BuiltinFunction for Map {
         let mut args = args.into_iter();
         let target = args.next().unwrap();
         let transform = args.next().unwrap();
-        match target.value() {
+        let result = match target.value() {
             Term::Collection(collection) => match collection {
-                CollectionTerm::Vector(target) => {
-                    let transformed_values = target.iterate().into_iter().map(|item| {
+                CollectionTerm::Vector(target) => Ok(VectorTerm::collect(
+                    target.iterate().into_iter().map(|item| {
                         Expression::new(Term::Application(ApplicationTerm::new(
                             Expression::clone(&transform),
                             vec![item],
                         )))
-                    });
-                    Expression::new(Term::Collection(CollectionTerm::Vector(
-                        VectorTerm::collect(transformed_values),
-                    )))
-                }
-                CollectionTerm::HashMap(target) => {
-                    let transformed_values = target.iterate().into_iter().map(|item| {
-                        Expression::new(Term::Application(ApplicationTerm::new(
-                            Expression::clone(&transform),
-                            vec![item],
-                        )))
-                    });
-                    Expression::new(Term::Collection(CollectionTerm::Vector(
-                        VectorTerm::collect(transformed_values),
-                    )))
-                }
-                CollectionTerm::HashSet(target) => {
-                    let transformed_values = target.iterate().into_iter().map(|item| {
-                        Expression::new(Term::Application(ApplicationTerm::new(
-                            Expression::clone(&transform),
-                            vec![item],
-                        )))
-                    });
-                    Expression::new(Term::Collection(CollectionTerm::Vector(
-                        VectorTerm::collect(transformed_values),
-                    )))
-                }
+                    }),
+                )),
+                CollectionTerm::HashMap(target) => Ok(HashMapTerm::collect(
+                    target
+                        .iterate()
+                        .into_iter()
+                        .map(|item| {
+                            Expression::new(Term::Application(ApplicationTerm::new(
+                                Expression::clone(&transform),
+                                vec![item],
+                            )))
+                        })
+                        .collect::<Vec<_>>(),
+                )),
+                CollectionTerm::HashSet(target) => Ok(HashSetTerm::collect(
+                    target
+                        .iterate()
+                        .into_iter()
+                        .map(|item| {
+                            Expression::new(Term::Application(ApplicationTerm::new(
+                                Expression::clone(&transform),
+                                vec![item],
+                            )))
+                        })
+                        .collect::<Vec<_>>(),
+                )),
             },
-            _ => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
+            _ => Err(format!(
+                "Expected (<iterable>, <function:1>), received ({}, {})",
+                target, transform,
+            )),
+        };
+        match result {
+            Ok(result) => result,
+            Err(error) => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                 SignalType::Error,
-                vec![Expression::new(Term::Value(ValueTerm::String(format!(
-                    "Expected (<iterable>, <function:1>), received ({}, {})",
-                    target, transform,
-                ))))],
+                vec![Expression::new(Term::Value(ValueTerm::String(error)))],
             )))),
         }
     }

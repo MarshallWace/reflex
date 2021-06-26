@@ -46,10 +46,8 @@ impl VectorTerm {
     pub fn iterate(&self) -> impl IntoIterator<Item = Expression> + ExactSizeIterator + '_ {
         self.items.iter().map(|item| Expression::clone(item))
     }
-    pub fn collect(items: impl IntoIterator<Item = Expression>) -> Self {
-        Self {
-            items: items.into_iter().collect(),
-        }
+    pub fn collect(items: impl IntoIterator<Item = Expression>) -> Expression {
+        Expression::new(Term::Collection(CollectionTerm::Vector(Self::new(items))))
     }
 }
 impl Rewritable for VectorTerm {

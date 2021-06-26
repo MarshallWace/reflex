@@ -31,25 +31,22 @@ impl SetConstructor {
     }
     fn apply(args: Vec<Expression>) -> Expression {
         let mut args = args.into_iter();
-        let entries = args.next().unwrap();
-        let entries = match entries.value() {
-            Term::Collection(CollectionTerm::Vector(entries)) => Ok(entries),
-            _ => Err(format!("Invalid Set constructor: {}", entries)),
+        let values = args.next().unwrap();
+        let values = match values.value() {
+            Term::Collection(CollectionTerm::Vector(values)) => Ok(values),
+            _ => Err(format!("Invalid Set constructor: {}", values)),
         };
-        match entries {
-            Ok(entries) => {
-                let entries = entries.iterate().into_iter().collect::<Vec<_>>();
-                let has_dynamic_keys = entries.iter().any(|entry| match entry.value() {
-                    Term::Value(_) => false,
-                    _ => true,
-                });
-                match has_dynamic_keys {
-                    false => HashSetTerm::collect(entries),
+        match values {
+            Ok(values) => {
+                let values = values.iterate().into_iter().collect::<Vec<_>>();
+                let has_dynamic_values = values.iter().any(|value| !value.is_static());
+                match has_dynamic_values {
+                    false => HashSetTerm::collect(values),
                     true => Expression::new(Term::Application(ApplicationTerm::new(
                         dynamic_set_constructor(),
                         vec![Expression::new(Term::Application(ApplicationTerm::new(
-                            Expression::new(Term::Builtin(BuiltinTerm::CollectArgs)),
-                            entries,
+                            Expression::new(Term::Builtin(BuiltinTerm::CollectTuple)),
+                            values,
                         )))],
                     ))),
                 }
@@ -79,14 +76,14 @@ impl DynamicSetConstructor {
     }
     fn apply(args: Vec<Expression>) -> Expression {
         let mut args = args.into_iter();
-        let entries = args.next().unwrap();
-        let entries = match entries.value() {
-            Term::Collection(CollectionTerm::Vector(entries)) => Some(entries),
+        let values = args.next().unwrap();
+        let values = match values.value() {
+            Term::Struct(values) if values.prototype().is_none() => Some(values.fields()),
             _ => None,
         };
-        match entries {
-            Some(entries) => Expression::new(Term::Collection(CollectionTerm::HashSet(
-                HashSetTerm::new(entries.iterate().into_iter()),
+        match values {
+            Some(values) => Expression::new(Term::Collection(CollectionTerm::HashSet(
+                HashSetTerm::new(values.iter().map(Expression::clone)),
             ))),
             _ => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                 SignalType::Error,

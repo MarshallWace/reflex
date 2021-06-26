@@ -5,7 +5,9 @@ use crate::{
     core::{ApplicationTerm, Arity, Expression, Signal, SignalTerm, StructTerm, Term, VarArgs},
     stdlib::{
         builtin::{BuiltinFunction, BuiltinTerm},
-        collection::{vector::VectorTerm, CollectionTerm},
+        collection::{
+            hashmap::HashMapTerm, hashset::HashSetTerm, vector::VectorTerm, CollectionTerm,
+        },
         signal::SignalType,
         value::ValueTerm,
     },
@@ -30,19 +32,25 @@ impl BuiltinFunction for Collect {
         let target = args.next().unwrap();
         match target.value() {
             Term::Collection(collection) => {
-                let items: Vec<Expression> = match collection {
-                    CollectionTerm::Vector(target) => target.iterate().into_iter().collect(),
-                    CollectionTerm::HashMap(target) => target.iterate().into_iter().collect(),
-                    CollectionTerm::HashSet(target) => target.iterate().into_iter().collect(),
+                let (items, collect) = match collection {
+                    CollectionTerm::HashMap(target) => (
+                        target.iterate().into_iter().collect::<Vec<_>>(),
+                        BuiltinTerm::CollectHashMap,
+                    ),
+                    CollectionTerm::HashSet(target) => (
+                        target.iterate().into_iter().collect::<Vec<_>>(),
+                        BuiltinTerm::CollectHashSet,
+                    ),
+                    CollectionTerm::Vector(target) => (
+                        target.iterate().into_iter().collect::<Vec<_>>(),
+                        BuiltinTerm::CollectVector,
+                    ),
                 };
-                let has_dynamic_items = items.iter().any(|item| match item.value() {
-                    Term::Value(_) => false,
-                    _ => true,
-                });
+                let has_dynamic_items = items.iter().any(|item| !item.is_static());
                 match has_dynamic_items {
                     false => Expression::clone(&target),
                     true => Expression::new(Term::Application(ApplicationTerm::new(
-                        Expression::new(Term::Builtin(BuiltinTerm::CollectArgs)),
+                        Expression::new(Term::Builtin(collect)),
                         items,
                     ))),
                 }
@@ -58,18 +66,6 @@ impl BuiltinFunction for Collect {
     }
 }
 
-pub struct CollectArgs {}
-impl BuiltinFunction for CollectArgs {
-    fn arity() -> Arity {
-        Arity::from(0, 0, Some(VarArgs::Eager))
-    }
-    fn apply(args: impl IntoIterator<Item = Expression> + ExactSizeIterator) -> Expression {
-        Expression::new(Term::Collection(CollectionTerm::Vector(VectorTerm::new(
-            args.into_iter(),
-        ))))
-    }
-}
-
 pub struct CollectTuple {}
 impl BuiltinFunction for CollectTuple {
     fn arity() -> Arity {
@@ -80,6 +76,36 @@ impl BuiltinFunction for CollectTuple {
             None,
             args.into_iter().collect(),
         )))
+    }
+}
+
+pub struct CollectVector {}
+impl BuiltinFunction for CollectVector {
+    fn arity() -> Arity {
+        Arity::from(0, 0, Some(VarArgs::Eager))
+    }
+    fn apply(args: impl IntoIterator<Item = Expression> + ExactSizeIterator) -> Expression {
+        VectorTerm::collect(args)
+    }
+}
+
+pub struct CollectHashMap {}
+impl BuiltinFunction for CollectHashMap {
+    fn arity() -> Arity {
+        Arity::from(0, 0, Some(VarArgs::Eager))
+    }
+    fn apply(args: impl IntoIterator<Item = Expression> + ExactSizeIterator) -> Expression {
+        HashMapTerm::collect(args)
+    }
+}
+
+pub struct CollectHashSet {}
+impl BuiltinFunction for CollectHashSet {
+    fn arity() -> Arity {
+        Arity::from(0, 0, Some(VarArgs::Eager))
+    }
+    fn apply(args: impl IntoIterator<Item = Expression> + ExactSizeIterator) -> Expression {
+        HashSetTerm::collect(args)
     }
 }
 

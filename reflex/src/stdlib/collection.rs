@@ -21,6 +21,18 @@ pub enum CollectionTerm {
     HashSet(HashSetTerm),
     Vector(VectorTerm),
 }
+impl CollectionTerm {
+    pub fn len(&self) -> usize {
+        match self {
+            Self::HashMap(term) => term.len(),
+            Self::HashSet(term) => term.len(),
+            Self::Vector(term) => term.len(),
+        }
+    }
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
 impl Rewritable for CollectionTerm {
     fn capture_depth(&self) -> StackOffset {
         match self {

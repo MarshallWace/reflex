@@ -225,13 +225,9 @@ impl FlattenDeep {
         let mut args = args.into_iter();
         let input = args.next().unwrap();
         match input.value() {
-            Term::Value(_) => input,
             Term::Struct(value) => {
-                let has_dynamic_values = value.fields().iter().any(|field| match field.value() {
-                    Term::Value(_) => false,
-                    _ => true,
-                });
-                if !has_dynamic_values {
+                let has_nested_fields = value.fields().iter().any(is_nested_structure);
+                if !has_nested_fields {
                     input
                 } else {
                     match value.prototype() {
@@ -245,14 +241,17 @@ impl FlattenDeep {
                                     .keys()
                                     .iter()
                                     .map(|key| Expression::new(Term::Value(key.clone())))
-                                    .chain(value.fields().iter().map(|field| match field.value() {
-                                        Term::Value(_) => Expression::clone(field),
-                                        _ => Expression::new(Term::Application(
-                                            ApplicationTerm::new(
-                                                flatten_deep(),
-                                                vec![Expression::clone(field)],
-                                            ),
-                                        )),
+                                    .chain(value.fields().iter().map(|field| {
+                                        if is_nested_structure(field) {
+                                            Expression::new(Term::Application(
+                                                ApplicationTerm::new(
+                                                    flatten_deep(),
+                                                    vec![Expression::clone(field)],
+                                                ),
+                                            ))
+                                        } else {
+                                            Expression::clone(field)
+                                        }
                                     }))
                                     .collect(),
                             )))
@@ -262,12 +261,15 @@ impl FlattenDeep {
                             value
                                 .fields()
                                 .iter()
-                                .map(|field| match field.value() {
-                                    Term::Value(_) => Expression::clone(field),
-                                    _ => Expression::new(Term::Application(ApplicationTerm::new(
-                                        flatten_deep(),
-                                        vec![Expression::clone(field)],
-                                    ))),
+                                .map(|field| {
+                                    if is_nested_structure(field) {
+                                        Expression::new(Term::Application(ApplicationTerm::new(
+                                            flatten_deep(),
+                                            vec![Expression::clone(field)],
+                                        )))
+                                    } else {
+                                        Expression::clone(field)
+                                    }
                                 })
                                 .collect(),
                         ))),
@@ -276,24 +278,24 @@ impl FlattenDeep {
             }
             Term::Collection(value) => match value {
                 CollectionTerm::Vector(value) => {
-                    let has_dynamic_values = value.items().iter().any(|item| match item.value() {
-                        Term::Value(_) => false,
-                        _ => true,
-                    });
-                    if !has_dynamic_values {
+                    let has_nested_fields = value.items().iter().any(is_nested_structure);
+                    if !has_nested_fields {
                         input
                     } else {
                         Expression::new(Term::Application(ApplicationTerm::new(
-                            Expression::new(Term::Builtin(BuiltinTerm::CollectArgs)),
+                            Expression::new(Term::Builtin(BuiltinTerm::CollectVector)),
                             value
                                 .items()
                                 .iter()
-                                .map(|item| match item.value() {
-                                    Term::Value(_) => Expression::clone(item),
-                                    _ => Expression::new(Term::Application(ApplicationTerm::new(
-                                        flatten_deep(),
-                                        vec![Expression::clone(item)],
-                                    ))),
+                                .map(|item| {
+                                    if is_nested_structure(item) {
+                                        Expression::new(Term::Application(ApplicationTerm::new(
+                                            flatten_deep(),
+                                            vec![Expression::clone(item)],
+                                        )))
+                                    } else {
+                                        Expression::clone(item)
+                                    }
                                 })
                                 .collect(),
                         )))
@@ -306,6 +308,15 @@ impl FlattenDeep {
     }
 }
 
+fn is_nested_structure(value: &Expression) -> bool {
+    match value.value() {
+        Term::Struct(term) if !term.fields().is_empty() => true,
+        Term::Enum(term) if !term.args().is_empty() => true,
+        Term::Collection(collection) if !collection.is_empty() => true,
+        _ => !value.is_static(),
+    }
+}
+
 pub(crate) fn get_builtin_field<'src>(target: Option<&Term>, method: &str) -> Option<Term> {
     None.or_else(|| match target {
         None | Some(Term::Collection(CollectionTerm::Vector(_))) => match method {
@@ -313,9 +324,9 @@ pub(crate) fn get_builtin_field<'src>(target: Option<&Term>, method: &str) -> Op
             "keys" => Some(Term::Builtin(BuiltinTerm::Keys)),
             "map" => Some(Term::Builtin(BuiltinTerm::Map)),
             "push" => Some(Term::Builtin(BuiltinTerm::Push)),
-            "reduce" => Some(Term::Builtin(BuiltinTerm::Reduce)),
-            "values" => Some(Term::Builtin(BuiltinTerm::Values)),
             "slice" => Some(Term::Builtin(BuiltinTerm::Slice)),
+            "unshift" => Some(Term::Builtin(BuiltinTerm::PushFront)),
+            "values" => Some(Term::Builtin(BuiltinTerm::Values)),
             _ => None,
         },
         _ => None,
@@ -333,9 +344,9 @@ pub(crate) fn get_builtin_field<'src>(target: Option<&Term>, method: &str) -> Op
     })
     .or_else(|| match target {
         None | Some(Term::Collection(CollectionTerm::HashSet(_))) => match method {
+            "add" => Some(Term::Builtin(BuiltinTerm::Push)),
             "entries" => Some(Term::Builtin(BuiltinTerm::Entries)),
             "get" => Some(Term::Builtin(BuiltinTerm::Get)),
-            "add" => Some(Term::Builtin(BuiltinTerm::Push)),
             "values" => Some(Term::Builtin(BuiltinTerm::Values)),
             _ => None,
         },

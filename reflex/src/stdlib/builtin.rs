@@ -18,7 +18,7 @@ use cdr::Cdr;
 mod ceil;
 use ceil::Ceil;
 mod collect;
-use collect::{Collect, CollectArgs, CollectTuple};
+use collect::{Collect, CollectHashMap, CollectHashSet, CollectTuple, CollectVector};
 mod concat;
 use concat::Concat;
 mod cons;
@@ -109,8 +109,10 @@ pub enum BuiltinTerm {
     Cdr,
     Ceil,
     Collect,
-    CollectArgs,
+    CollectHashMap,
+    CollectHashSet,
     CollectTuple,
+    CollectVector,
     Concat,
     Cons,
     Divide,
@@ -160,8 +162,10 @@ impl BuiltinTerm {
             Self::Cdr => Cdr::arity(),
             Self::Ceil => Ceil::arity(),
             Self::Collect => Collect::arity(),
-            Self::CollectArgs => CollectArgs::arity(),
+            Self::CollectHashMap => CollectHashMap::arity(),
+            Self::CollectHashSet => CollectHashSet::arity(),
             Self::CollectTuple => CollectTuple::arity(),
+            Self::CollectVector => CollectVector::arity(),
             Self::Concat => Concat::arity(),
             Self::Cons => Cons::arity(),
             Self::Divide => Divide::arity(),
@@ -214,8 +218,10 @@ impl BuiltinTerm {
             Self::Cdr => Cdr::apply(args),
             Self::Ceil => Ceil::apply(args),
             Self::Collect => Collect::apply(args),
-            Self::CollectArgs => CollectArgs::apply(args),
+            Self::CollectHashMap => CollectHashMap::apply(args),
+            Self::CollectHashSet => CollectHashSet::apply(args),
             Self::CollectTuple => CollectTuple::apply(args),
+            Self::CollectVector => CollectVector::apply(args),
             Self::Concat => Concat::apply(args),
             Self::Cons => Cons::apply(args),
             Self::Divide => Divide::apply(args),

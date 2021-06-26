@@ -35,6 +35,9 @@ impl HashSetTerm {
             .collect();
         Self { lookup, values }
     }
+    pub fn len(&self) -> usize {
+        self.values.len()
+    }
     pub fn has(&self, value: &Expression) -> bool {
         self.lookup.contains(value)
     }

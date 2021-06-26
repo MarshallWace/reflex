@@ -10,10 +10,7 @@ use reflex::{
     },
     hash::{hash_object, HashId},
     stdlib::{
-        builtin::BuiltinTerm,
-        collection::{vector::VectorTerm, CollectionTerm},
-        signal::SignalType,
-        value::ValueTerm,
+        builtin::BuiltinTerm, collection::CollectionTerm, signal::SignalType, value::ValueTerm,
     },
 };
 
@@ -64,12 +61,10 @@ impl FromEntries {
                             Expression::new(Term::Builtin(BuiltinTerm::Struct)),
                             vec![
                                 Expression::new(Term::Application(ApplicationTerm::new(
-                                    Expression::new(Term::Builtin(BuiltinTerm::CollectArgs)),
+                                    Expression::new(Term::Builtin(BuiltinTerm::CollectTuple)),
                                     keys,
                                 ))),
-                                Expression::new(Term::Collection(CollectionTerm::Vector(
-                                    VectorTerm::new(values),
-                                ))),
+                                Expression::new(Term::Struct(StructTerm::new(None, values))),
                             ],
                         ))),
                     })

@@ -1906,7 +1906,7 @@ mod tests {
         )
         .unwrap();
         let query = Expression::new(Term::Application(ApplicationTerm::new(
-            Expression::new(Term::Builtin(BuiltinTerm::CollectArgs)),
+            Expression::new(Term::Builtin(BuiltinTerm::CollectVector)),
             vec![
                 Expression::new(Term::Application(ApplicationTerm::new(
                     Expression::new(Term::Builtin(BuiltinTerm::Get)),
@@ -1971,7 +1971,7 @@ mod tests {
         )
         .unwrap();
         let query = Expression::new(Term::Application(ApplicationTerm::new(
-            Expression::new(Term::Builtin(BuiltinTerm::CollectArgs)),
+            Expression::new(Term::Builtin(BuiltinTerm::CollectVector)),
             vec![
                 Expression::new(Term::Application(ApplicationTerm::new(
                     Expression::new(Term::Builtin(BuiltinTerm::Get)),

@@ -175,6 +175,12 @@ impl Expression {
     pub fn value(&self) -> &Term {
         &self.value
     }
+    pub fn is_atomic(&self) -> bool {
+        self.value.is_atomic()
+    }
+    pub fn is_static(&self) -> bool {
+        self.value.is_static()
+    }
     pub fn is_reducible(&self) -> bool {
         !self.is_reduced && self.value.is_reducible()
     }
@@ -516,6 +522,28 @@ impl Rewritable for Term {
     }
 }
 impl Term {
+    fn is_atomic(&self) -> bool {
+        // Term is fully evaluated and contains no sub-expressions
+        match self {
+            Self::Variable(_) => false,
+            Self::Lambda(_) => false,
+            Self::Application(_) => false,
+            Self::Recursive(_) => false,
+            Self::Struct(StructTerm { fields, .. }) if !fields.is_empty() => false,
+            Self::Enum(EnumTerm { args, .. }) if !args.is_empty() => false,
+            Self::Collection(collection) if !collection.is_empty() => false,
+            _ => true,
+        }
+    }
+    fn is_static(&self) -> bool {
+        // Weak head normal form - outer term is fully evaluated, sub-expressions may contain dynamic values
+        match self {
+            Self::Variable(_) => false,
+            Self::Application(_) => false,
+            Self::Recursive(_) => false,
+            _ => true,
+        }
+    }
     fn is_reducible(&self) -> bool {
         match self {
             Self::Application(_) => true,

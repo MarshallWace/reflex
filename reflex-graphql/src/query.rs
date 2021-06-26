@@ -63,7 +63,7 @@ pub fn query(target: Expression, shape: &QueryShape) -> Expression {
 
 fn query_branch(target: Expression, selectors: &[FieldSelector]) -> Expression {
     Expression::new(Term::Application(ApplicationTerm::new(
-        Expression::new(Term::Builtin(BuiltinTerm::CollectArgs)),
+        Expression::new(Term::Builtin(BuiltinTerm::CollectVector)),
         selectors
             .iter()
             .map(|selector| query_field(Expression::clone(&target), selector))
@@ -155,7 +155,7 @@ fn query_enum_field(target: Expression, variants: &[EnumFieldSelector]) -> Expre
                         Expression::new(Term::Lambda(LambdaTerm::new(
                             Arity::from(0, num_args, None),
                             Expression::new(Term::Application(ApplicationTerm::new(
-                                Expression::new(Term::Builtin(BuiltinTerm::CollectArgs)),
+                                Expression::new(Term::Builtin(BuiltinTerm::CollectVector)),
                                 vec![enum_index, args],
                             ))),
                         )))
