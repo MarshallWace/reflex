@@ -35,6 +35,8 @@ mod eq;
 use eq::Eq;
 mod equal;
 use equal::Equal;
+mod filter;
+use filter::{CollectFilterResults, Filter};
 mod floor;
 use floor::Floor;
 mod get;
@@ -109,6 +111,7 @@ pub enum BuiltinTerm {
     Cdr,
     Ceil,
     Collect,
+    CollectFilterResults,
     CollectHashMap,
     CollectHashSet,
     CollectTuple,
@@ -121,6 +124,7 @@ pub enum BuiltinTerm {
     Entries,
     Eq,
     Equal,
+    Filter,
     Floor,
     Get,
     Gt,
@@ -162,6 +166,7 @@ impl BuiltinTerm {
             Self::Cdr => Cdr::arity(),
             Self::Ceil => Ceil::arity(),
             Self::Collect => Collect::arity(),
+            Self::CollectFilterResults => CollectFilterResults::arity(),
             Self::CollectHashMap => CollectHashMap::arity(),
             Self::CollectHashSet => CollectHashSet::arity(),
             Self::CollectTuple => CollectTuple::arity(),
@@ -174,6 +179,7 @@ impl BuiltinTerm {
             Self::Entries => Entries::arity(),
             Self::Eq => Eq::arity(),
             Self::Equal => Equal::arity(),
+            Self::Filter => Filter::arity(),
             Self::Floor => Floor::arity(),
             Self::Get => Get::arity(),
             Self::Gt => Gt::arity(),
@@ -218,6 +224,7 @@ impl BuiltinTerm {
             Self::Cdr => Cdr::apply(args),
             Self::Ceil => Ceil::apply(args),
             Self::Collect => Collect::apply(args),
+            Self::CollectFilterResults => CollectFilterResults::apply(args),
             Self::CollectHashMap => CollectHashMap::apply(args),
             Self::CollectHashSet => CollectHashSet::apply(args),
             Self::CollectTuple => CollectTuple::apply(args),
@@ -230,6 +237,7 @@ impl BuiltinTerm {
             Self::Entries => Entries::apply(args),
             Self::Eq => Eq::apply(args),
             Self::Equal => Equal::apply(args),
+            Self::Filter => Filter::apply(args),
             Self::Floor => Floor::apply(args),
             Self::Get => Get::apply(args),
             Self::Gt => Gt::apply(args),

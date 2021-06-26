@@ -321,6 +321,7 @@ pub(crate) fn get_builtin_field<'src>(target: Option<&Term>, method: &str) -> Op
     None.or_else(|| match target {
         None | Some(Term::Collection(CollectionTerm::Vector(_))) => match method {
             "entries" => Some(Term::Builtin(BuiltinTerm::Entries)),
+            "filter" => Some(Term::Builtin(BuiltinTerm::Filter)),
             "keys" => Some(Term::Builtin(BuiltinTerm::Keys)),
             "map" => Some(Term::Builtin(BuiltinTerm::Map)),
             "push" => Some(Term::Builtin(BuiltinTerm::Push)),
