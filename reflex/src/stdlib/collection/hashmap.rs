@@ -1,7 +1,12 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use std::{collections::BTreeMap, fmt, hash::Hash, iter::once};
+use std::{
+    collections::{hash_map::Entry, BTreeMap, HashMap},
+    fmt,
+    hash::Hash,
+    iter::once,
+};
 
 use crate::{
     cache::EvaluationCache,
@@ -35,9 +40,10 @@ impl Hash for HashMapTerm {
 }
 impl HashMapTerm {
     pub fn new(items: impl IntoIterator<Item = (Expression, Expression)>) -> Self {
-        let (keys, values) = items.into_iter().unzip();
+        let (keys, values) = get_unique_entries(items).into_iter().unzip();
+        let lookup = build_lookup_table(&keys);
         Self {
-            lookup: build_lookup_table(&keys),
+            lookup,
             keys,
             values,
         }
@@ -126,12 +132,14 @@ impl HashMapTerm {
         Expression::new(Term::Collection(CollectionTerm::HashMap(Self::new(
             entries.into_iter().map(|entry| {
                 let static_entry = match entry.value() {
-                    Term::Struct(entry) => match (entry.get(0), entry.get(1)) {
-                        (Some(key), Some(value)) => {
-                            Ok(Some((Expression::clone(key), Expression::clone(value))))
+                    Term::Struct(entry) if entry.prototype().is_none() => {
+                        match (entry.get(0), entry.get(1)) {
+                            (Some(key), Some(value)) => {
+                                Ok(Some((Expression::clone(key), Expression::clone(value))))
+                            }
+                            _ => Err(format!("Invalid Map entry: {}", entry)),
                         }
-                        _ => Err(format!("Invalid Map entry: {}", entry)),
-                    },
+                    }
                     Term::Collection(CollectionTerm::Vector(entry)) => {
                         match (entry.get(0), entry.get(1)) {
                             (Some(key), Some(value)) => {
@@ -227,6 +235,42 @@ impl Rewritable for HashMapTerm {
 impl fmt::Display for HashMapTerm {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "<hashmap:{}>", self.keys.len())
+    }
+}
+
+fn get_unique_entries(
+    items: impl IntoIterator<Item = (Expression, Expression)>,
+) -> impl IntoIterator<Item = (Expression, Expression)> {
+    let items = items.into_iter().collect::<Vec<_>>();
+    let num_entries = items.len();
+    let (entries, mut lookup) = items.into_iter().fold(
+        (
+            Vec::with_capacity(num_entries),
+            HashMap::with_capacity(num_entries),
+        ),
+        |(mut entries, mut lookup), (key, value)| {
+            match lookup.entry(Expression::clone(&key)) {
+                Entry::Occupied(mut entry) => {
+                    entry.insert(value);
+                }
+                Entry::Vacant(entry) => {
+                    entry.insert(Expression::clone(&value));
+                    entries.push((key, value));
+                }
+            }
+            (entries, lookup)
+        },
+    );
+    if entries.len() == num_entries {
+        entries
+    } else {
+        entries
+            .into_iter()
+            .map(|(key, _)| {
+                let value = lookup.remove(&key).unwrap();
+                (key, value)
+            })
+            .collect::<Vec<_>>()
     }
 }
 

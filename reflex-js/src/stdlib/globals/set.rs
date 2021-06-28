@@ -94,3 +94,112 @@ impl DynamicSetConstructor {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::{parse, stdlib::builtin_globals, Env};
+    use reflex::{
+        cache::GenerationalGc,
+        core::{DependencyList, DynamicState, EvaluationResult, Expression, Term},
+        stdlib::{
+            collection::{hashset::HashSetTerm, vector::VectorTerm, CollectionTerm},
+            value::{StringValue, ValueTerm},
+        },
+    };
+
+    #[test]
+    fn set_constructor() {
+        let env = Env::new().with_globals(builtin_globals());
+        let mut cache = GenerationalGc::new();
+        let state = DynamicState::new();
+        let expression = parse("new Set([])", &env).unwrap();
+        let result = expression.evaluate(&state, &mut cache);
+        assert_eq!(
+            result,
+            EvaluationResult::new(
+                Expression::new(Term::Collection(CollectionTerm::HashSet(HashSetTerm::new(
+                    vec![],
+                )))),
+                DependencyList::empty(),
+            )
+        );
+        let expression = parse("new Set(['one', 'two', 'three'])", &env).unwrap();
+        let result = expression.evaluate(&state, &mut cache);
+        assert_eq!(
+            result,
+            EvaluationResult::new(
+                Expression::new(Term::Collection(CollectionTerm::HashSet(HashSetTerm::new(
+                    vec![
+                        Expression::new(Term::Value(ValueTerm::String(StringValue::from("one")))),
+                        Expression::new(Term::Value(ValueTerm::String(StringValue::from("two")))),
+                        Expression::new(Term::Value(ValueTerm::String(StringValue::from("three")))),
+                    ],
+                )))),
+                DependencyList::empty(),
+            )
+        );
+        let expression = parse("new Set(['one', 'two', 'three', 'two'])", &env).unwrap();
+        let result = expression.evaluate(&state, &mut cache);
+        assert_eq!(
+            result,
+            EvaluationResult::new(
+                Expression::new(Term::Collection(CollectionTerm::HashSet(HashSetTerm::new(
+                    vec![
+                        Expression::new(Term::Value(ValueTerm::String(StringValue::from("one")))),
+                        Expression::new(Term::Value(ValueTerm::String(StringValue::from("two")))),
+                        Expression::new(Term::Value(ValueTerm::String(StringValue::from("three")))),
+                    ],
+                )))),
+                DependencyList::empty(),
+            )
+        );
+    }
+
+    #[test]
+    fn set_constructor_values() {
+        let env = Env::new().with_globals(builtin_globals());
+        let mut cache = GenerationalGc::new();
+        let state = DynamicState::new();
+        let expression = parse("new Set([]).values()", &env).unwrap();
+        let result = expression.evaluate(&state, &mut cache);
+        assert_eq!(
+            result,
+            EvaluationResult::new(
+                Expression::new(Term::Collection(CollectionTerm::Vector(VectorTerm::new(
+                    vec![],
+                )))),
+                DependencyList::empty(),
+            )
+        );
+        let expression = parse("new Set(['one', 'two', 'three']).values()", &env).unwrap();
+        let result = expression.evaluate(&state, &mut cache);
+        assert_eq!(
+            result,
+            EvaluationResult::new(
+                Expression::new(Term::Collection(CollectionTerm::Vector(VectorTerm::new(
+                    vec![
+                        Expression::new(Term::Value(ValueTerm::String(StringValue::from("one")))),
+                        Expression::new(Term::Value(ValueTerm::String(StringValue::from("two")))),
+                        Expression::new(Term::Value(ValueTerm::String(StringValue::from("three")))),
+                    ],
+                )))),
+                DependencyList::empty(),
+            )
+        );
+        let expression = parse("new Set(['one', 'two', 'three', 'two']).values()", &env).unwrap();
+        let result = expression.evaluate(&state, &mut cache);
+        assert_eq!(
+            result,
+            EvaluationResult::new(
+                Expression::new(Term::Collection(CollectionTerm::Vector(VectorTerm::new(
+                    vec![
+                        Expression::new(Term::Value(ValueTerm::String(StringValue::from("one")))),
+                        Expression::new(Term::Value(ValueTerm::String(StringValue::from("two")))),
+                        Expression::new(Term::Value(ValueTerm::String(StringValue::from("three")))),
+                    ],
+                )))),
+                DependencyList::empty(),
+            )
+        );
+    }
+}

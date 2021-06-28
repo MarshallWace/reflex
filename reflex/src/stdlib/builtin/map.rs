@@ -41,28 +41,20 @@ impl BuiltinFunction for Map {
                     }),
                 )),
                 CollectionTerm::HashMap(target) => Ok(HashMapTerm::collect(
-                    target
-                        .iterate()
-                        .into_iter()
-                        .map(|item| {
-                            Expression::new(Term::Application(ApplicationTerm::new(
-                                Expression::clone(&transform),
-                                vec![item],
-                            )))
-                        })
-                        .collect::<Vec<_>>(),
+                    target.iterate().into_iter().map(|item| {
+                        Expression::new(Term::Application(ApplicationTerm::new(
+                            Expression::clone(&transform),
+                            vec![item],
+                        )))
+                    }),
                 )),
                 CollectionTerm::HashSet(target) => Ok(HashSetTerm::collect(
-                    target
-                        .iterate()
-                        .into_iter()
-                        .map(|item| {
-                            Expression::new(Term::Application(ApplicationTerm::new(
-                                Expression::clone(&transform),
-                                vec![item],
-                            )))
-                        })
-                        .collect::<Vec<_>>(),
+                    target.iterate().into_iter().map(|item| {
+                        Expression::new(Term::Application(ApplicationTerm::new(
+                            Expression::clone(&transform),
+                            vec![item],
+                        )))
+                    }),
                 )),
             },
             _ => Err(format!(

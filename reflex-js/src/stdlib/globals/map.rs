@@ -42,10 +42,12 @@ impl MapConstructor {
             Ok(entries) => {
                 let entries = entries.iterate().into_iter().collect::<Vec<_>>();
                 let has_dynamic_keys = entries.iter().any(|entry| match entry.value() {
-                    Term::Struct(entry) => match entry.fields().get(0) {
-                        Some(key) => !key.is_static(),
-                        _ => true,
-                    },
+                    Term::Struct(entry) if entry.prototype().is_none() => {
+                        match entry.fields().get(0) {
+                            Some(key) => !key.is_static(),
+                            _ => true,
+                        }
+                    }
                     Term::Collection(entry) => match entry {
                         CollectionTerm::Vector(entry) => match entry.get(0) {
                             Some(key) => !key.is_static(),
@@ -139,5 +141,316 @@ impl DynamicMapConstructor {
                 )))],
             )))),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{parse, stdlib::builtin_globals, Env};
+    use reflex::{
+        cache::GenerationalGc,
+        core::{DependencyList, DynamicState, EvaluationResult, Expression, StructTerm, Term},
+        stdlib::{
+            collection::{hashmap::HashMapTerm, vector::VectorTerm, CollectionTerm},
+            value::{StringValue, ValueTerm},
+        },
+    };
+
+    #[test]
+    fn map_constructor() {
+        let env = Env::new().with_globals(builtin_globals());
+        let mut cache = GenerationalGc::new();
+        let state = DynamicState::new();
+        let expression = parse("new Map([])", &env).unwrap();
+        let result = expression.evaluate(&state, &mut cache);
+        assert_eq!(
+            result,
+            EvaluationResult::new(
+                Expression::new(Term::Collection(CollectionTerm::HashMap(HashMapTerm::new(
+                    vec![],
+                )))),
+                DependencyList::empty(),
+            )
+        );
+        let expression = parse("new Map([['one', 1], ['two', 2], ['three', 3]])", &env).unwrap();
+        let result = expression.evaluate(&state, &mut cache);
+        assert_eq!(
+            result,
+            EvaluationResult::new(
+                Expression::new(Term::Collection(CollectionTerm::HashMap(HashMapTerm::new(
+                    vec![
+                        (
+                            Expression::new(Term::Value(ValueTerm::String(StringValue::from(
+                                "one"
+                            )))),
+                            Expression::new(Term::Value(ValueTerm::Float(1.0))),
+                        ),
+                        (
+                            Expression::new(Term::Value(ValueTerm::String(StringValue::from(
+                                "two"
+                            )))),
+                            Expression::new(Term::Value(ValueTerm::Float(2.0))),
+                        ),
+                        (
+                            Expression::new(Term::Value(ValueTerm::String(StringValue::from(
+                                "three"
+                            )))),
+                            Expression::new(Term::Value(ValueTerm::Float(3.0))),
+                        ),
+                    ],
+                )))),
+                DependencyList::empty(),
+            )
+        );
+        let expression = parse(
+            "new Map([['one', 1], ['two', 2], ['three', 3], ['two', 4]])",
+            &env,
+        )
+        .unwrap();
+        let result = expression.evaluate(&state, &mut cache);
+        assert_eq!(
+            result,
+            EvaluationResult::new(
+                Expression::new(Term::Collection(CollectionTerm::HashMap(HashMapTerm::new(
+                    vec![
+                        (
+                            Expression::new(Term::Value(ValueTerm::String(StringValue::from(
+                                "one"
+                            )))),
+                            Expression::new(Term::Value(ValueTerm::Float(1.0))),
+                        ),
+                        (
+                            Expression::new(Term::Value(ValueTerm::String(StringValue::from(
+                                "two"
+                            )))),
+                            Expression::new(Term::Value(ValueTerm::Float(4.0))),
+                        ),
+                        (
+                            Expression::new(Term::Value(ValueTerm::String(StringValue::from(
+                                "three"
+                            )))),
+                            Expression::new(Term::Value(ValueTerm::Float(3.0))),
+                        ),
+                    ],
+                )))),
+                DependencyList::empty(),
+            )
+        );
+    }
+
+    #[test]
+    fn map_constructor_entries() {
+        let env = Env::new().with_globals(builtin_globals());
+        let mut cache = GenerationalGc::new();
+        let state = DynamicState::new();
+        let expression = parse("new Map([]).entries()", &env).unwrap();
+        let result = expression.evaluate(&state, &mut cache);
+        assert_eq!(
+            result,
+            EvaluationResult::new(
+                Expression::new(Term::Collection(CollectionTerm::Vector(VectorTerm::new(
+                    vec![],
+                )))),
+                DependencyList::empty(),
+            )
+        );
+        let expression = parse(
+            "new Map([['one', 1], ['two', 2], ['three', 3]]).entries()",
+            &env,
+        )
+        .unwrap();
+        let result = expression.evaluate(&state, &mut cache);
+        assert_eq!(
+            result,
+            EvaluationResult::new(
+                Expression::new(Term::Collection(CollectionTerm::Vector(VectorTerm::new(
+                    vec![
+                        Expression::new(Term::Struct(StructTerm::new(
+                            None,
+                            vec![
+                                Expression::new(Term::Value(ValueTerm::String(StringValue::from(
+                                    "one"
+                                )))),
+                                Expression::new(Term::Value(ValueTerm::Float(1.0))),
+                            ]
+                        ))),
+                        Expression::new(Term::Struct(StructTerm::new(
+                            None,
+                            vec![
+                                Expression::new(Term::Value(ValueTerm::String(StringValue::from(
+                                    "two"
+                                )))),
+                                Expression::new(Term::Value(ValueTerm::Float(2.0))),
+                            ]
+                        ))),
+                        Expression::new(Term::Struct(StructTerm::new(
+                            None,
+                            vec![
+                                Expression::new(Term::Value(ValueTerm::String(StringValue::from(
+                                    "three"
+                                )))),
+                                Expression::new(Term::Value(ValueTerm::Float(3.0))),
+                            ]
+                        ))),
+                    ],
+                )))),
+                DependencyList::empty(),
+            )
+        );
+        let expression = parse(
+            "new Map([['one', 1], ['two', 2], ['three', 3], ['two', 4]]).entries()",
+            &env,
+        )
+        .unwrap();
+        let result = expression.evaluate(&state, &mut cache);
+        assert_eq!(
+            result,
+            EvaluationResult::new(
+                Expression::new(Term::Collection(CollectionTerm::Vector(VectorTerm::new(
+                    vec![
+                        Expression::new(Term::Struct(StructTerm::new(
+                            None,
+                            vec![
+                                Expression::new(Term::Value(ValueTerm::String(StringValue::from(
+                                    "one"
+                                )))),
+                                Expression::new(Term::Value(ValueTerm::Float(1.0))),
+                            ]
+                        ))),
+                        Expression::new(Term::Struct(StructTerm::new(
+                            None,
+                            vec![
+                                Expression::new(Term::Value(ValueTerm::String(StringValue::from(
+                                    "two"
+                                )))),
+                                Expression::new(Term::Value(ValueTerm::Float(4.0))),
+                            ]
+                        ))),
+                        Expression::new(Term::Struct(StructTerm::new(
+                            None,
+                            vec![
+                                Expression::new(Term::Value(ValueTerm::String(StringValue::from(
+                                    "three"
+                                )))),
+                                Expression::new(Term::Value(ValueTerm::Float(3.0))),
+                            ]
+                        ))),
+                    ],
+                )))),
+                DependencyList::empty(),
+            )
+        );
+    }
+
+    #[test]
+    fn map_constructor_keys() {
+        let env = Env::new().with_globals(builtin_globals());
+        let mut cache = GenerationalGc::new();
+        let state = DynamicState::new();
+        let expression = parse("new Map([]).keys()", &env).unwrap();
+        let result = expression.evaluate(&state, &mut cache);
+        assert_eq!(
+            result,
+            EvaluationResult::new(
+                Expression::new(Term::Collection(CollectionTerm::Vector(VectorTerm::new(
+                    vec![],
+                )))),
+                DependencyList::empty(),
+            )
+        );
+        let expression = parse(
+            "new Map([['one', 1], ['two', 2], ['three', 3]]).keys()",
+            &env,
+        )
+        .unwrap();
+        let result = expression.evaluate(&state, &mut cache);
+        assert_eq!(
+            result,
+            EvaluationResult::new(
+                Expression::new(Term::Collection(CollectionTerm::Vector(VectorTerm::new(
+                    vec![
+                        Expression::new(Term::Value(ValueTerm::String(StringValue::from("one")))),
+                        Expression::new(Term::Value(ValueTerm::String(StringValue::from("two")))),
+                        Expression::new(Term::Value(ValueTerm::String(StringValue::from("three")))),
+                    ],
+                )))),
+                DependencyList::empty(),
+            )
+        );
+        let expression = parse(
+            "new Map([['one', 1], ['two', 2], ['three', 3], ['two', 4]]).keys()",
+            &env,
+        )
+        .unwrap();
+        let result = expression.evaluate(&state, &mut cache);
+        assert_eq!(
+            result,
+            EvaluationResult::new(
+                Expression::new(Term::Collection(CollectionTerm::Vector(VectorTerm::new(
+                    vec![
+                        Expression::new(Term::Value(ValueTerm::String(StringValue::from("one")))),
+                        Expression::new(Term::Value(ValueTerm::String(StringValue::from("two")))),
+                        Expression::new(Term::Value(ValueTerm::String(StringValue::from("three")))),
+                    ],
+                )))),
+                DependencyList::empty(),
+            )
+        );
+    }
+
+    #[test]
+    fn map_constructor_values() {
+        let env = Env::new().with_globals(builtin_globals());
+        let mut cache = GenerationalGc::new();
+        let state = DynamicState::new();
+        let expression = parse("new Map([]).values()", &env).unwrap();
+        let result = expression.evaluate(&state, &mut cache);
+        assert_eq!(
+            result,
+            EvaluationResult::new(
+                Expression::new(Term::Collection(CollectionTerm::Vector(VectorTerm::new(
+                    vec![],
+                )))),
+                DependencyList::empty(),
+            )
+        );
+        let expression = parse(
+            "new Map([['one', 1], ['two', 2], ['three', 3]]).values()",
+            &env,
+        )
+        .unwrap();
+        let result = expression.evaluate(&state, &mut cache);
+        assert_eq!(
+            result,
+            EvaluationResult::new(
+                Expression::new(Term::Collection(CollectionTerm::Vector(VectorTerm::new(
+                    vec![
+                        Expression::new(Term::Value(ValueTerm::Float(1.0))),
+                        Expression::new(Term::Value(ValueTerm::Float(2.0))),
+                        Expression::new(Term::Value(ValueTerm::Float(3.0))),
+                    ],
+                )))),
+                DependencyList::empty(),
+            )
+        );
+        let expression = parse(
+            "new Map([['one', 1], ['two', 2], ['three', 3], ['two', 4]]).values()",
+            &env,
+        )
+        .unwrap();
+        let result = expression.evaluate(&state, &mut cache);
+        assert_eq!(
+            result,
+            EvaluationResult::new(
+                Expression::new(Term::Collection(CollectionTerm::Vector(VectorTerm::new(
+                    vec![
+                        Expression::new(Term::Value(ValueTerm::Float(1.0))),
+                        Expression::new(Term::Value(ValueTerm::Float(4.0))),
+                        Expression::new(Term::Value(ValueTerm::Float(3.0))),
+                    ],
+                )))),
+                DependencyList::empty(),
+            )
+        );
     }
 }

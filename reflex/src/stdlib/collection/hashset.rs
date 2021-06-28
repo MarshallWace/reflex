@@ -1,7 +1,12 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use std::{collections::BTreeSet, fmt, hash::Hash, iter::once};
+use std::{
+    collections::{BTreeSet, HashSet},
+    fmt,
+    hash::Hash,
+    iter::once,
+};
 
 use crate::{
     cache::EvaluationCache,
@@ -28,11 +33,11 @@ impl Hash for HashSetTerm {
 }
 impl HashSetTerm {
     pub fn new(items: impl IntoIterator<Item = Expression>) -> Self {
-        let lookup = items.into_iter().collect::<BTreeSet<_>>();
-        let values = lookup
+        let values = get_unique_values(items);
+        let lookup = values
             .iter()
-            .map(|value| Expression::clone(value))
-            .collect();
+            .map(Expression::clone)
+            .collect::<BTreeSet<_>>();
         Self { lookup, values }
     }
     pub fn len(&self) -> usize {
@@ -100,4 +105,22 @@ impl fmt::Display for HashSetTerm {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "<hashset:{}>", self.lookup.len())
     }
+}
+
+fn get_unique_values(items: impl IntoIterator<Item = Expression>) -> Vec<Expression> {
+    let items = items.into_iter().collect::<Vec<_>>();
+    let num_values = items.len();
+    let (values, _) = items.into_iter().fold(
+        (
+            Vec::with_capacity(num_values),
+            HashSet::with_capacity(num_values),
+        ),
+        |(mut values, mut lookup), value| {
+            if lookup.insert(Expression::clone(&value)) {
+                values.push(value);
+            }
+            (values, lookup)
+        },
+    );
+    values
 }
