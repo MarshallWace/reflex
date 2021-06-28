@@ -23,6 +23,8 @@ mod concat;
 use concat::Concat;
 mod cons;
 use cons::Cons;
+mod contains;
+use contains::Contains;
 mod divide;
 use divide::Divide;
 mod effect;
@@ -118,6 +120,7 @@ pub enum BuiltinTerm {
     CollectVector,
     Concat,
     Cons,
+    Contains,
     Divide,
     Effect,
     EndsWith,
@@ -173,6 +176,7 @@ impl BuiltinTerm {
             Self::CollectVector => CollectVector::arity(),
             Self::Concat => Concat::arity(),
             Self::Cons => Cons::arity(),
+            Self::Contains => Contains::arity(),
             Self::Divide => Divide::arity(),
             Self::Effect => Effect::arity(),
             Self::EndsWith => EndsWith::arity(),
@@ -231,6 +235,7 @@ impl BuiltinTerm {
             Self::CollectVector => CollectVector::apply(args),
             Self::Concat => Concat::apply(args),
             Self::Cons => Cons::apply(args),
+            Self::Contains => Contains::apply(args),
             Self::Divide => Divide::apply(args),
             Self::Effect => Effect::apply(args),
             Self::EndsWith => EndsWith::apply(args),

@@ -43,11 +43,11 @@ impl HashSetTerm {
     pub fn len(&self) -> usize {
         self.values.len()
     }
-    pub fn has(&self, value: &Expression) -> bool {
+    pub fn contains(&self, value: &Expression) -> bool {
         self.lookup.contains(value)
     }
     pub fn add(&self, value: Expression) -> Option<Expression> {
-        if self.has(&value) {
+        if self.contains(&value) {
             None
         } else {
             Some(Expression::new(Term::Collection(CollectionTerm::HashSet(
