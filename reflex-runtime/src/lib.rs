@@ -4,9 +4,10 @@
 use reflex::{
     cache::EvaluationCache,
     core::{Expression, Signal, SignalTerm, StateToken, Term, VariableTerm},
+    hash::{hash_object, HashId},
     stdlib::{signal::SignalType, value::ValueTerm},
 };
-use std::{future::Future, pin::Pin, sync::Mutex};
+use std::{any::TypeId, future::Future, pin::Pin, sync::Mutex};
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
 pub use tokio_stream::Stream;
 use tokio_stream::{
@@ -56,16 +57,18 @@ impl<'a> SignalHelpers<'a> {
         &self,
         expression: Expression,
     ) -> impl Stream<Item = Expression> + Send + Sync + 'static {
-        let (results_tx, results_rx) = watch::channel(create_pending_expression());
+        let (results_tx, results_rx) = watch::channel(None);
         let commands = self.commands.clone();
         // TODO: Unsubscribe signal handler watch expressions
         tokio::spawn(async move {
             match create_subscription(expression, &commands).await {
                 Err(error) => {
                     results_tx
-                        .send(Expression::new(Term::Signal(SignalTerm::new(Signal::new(
-                            SignalType::Error,
-                            vec![Expression::new(Term::Value(ValueTerm::String(error)))],
+                        .send(Some(Expression::new(Term::Signal(SignalTerm::new(
+                            Signal::new(
+                                SignalType::Error,
+                                vec![Expression::new(Term::Value(ValueTerm::String(error)))],
+                            ),
                         )))))
                         .unwrap();
                 }
@@ -84,12 +87,12 @@ impl<'a> SignalHelpers<'a> {
                                 }),
                             ))),
                         };
-                        results_tx.send(value).unwrap();
+                        results_tx.send(Some(value)).unwrap();
                     }
                 }
             }
         });
-        Box::pin(WatchStream::new(results_rx))
+        Box::pin(WatchStream::new(results_rx).filter_map(|value| value))
     }
     pub fn watch_state(
         &self,
@@ -97,8 +100,25 @@ impl<'a> SignalHelpers<'a> {
     ) -> impl Stream<Item = Expression> + Send + Sync + 'static {
         self.watch_expression(Expression::new(Term::Variable(VariableTerm::dynamic(
             state_token,
-            create_pending_expression(),
+            Void::create(),
         ))))
+        .filter(|value| !Void::is(value))
+    }
+}
+
+struct Void {}
+impl Void {
+    fn hash() -> HashId {
+        hash_object(&TypeId::of::<Self>())
+    }
+    fn create() -> Expression {
+        Expression::new(Term::Value(ValueTerm::Hash(Self::hash())))
+    }
+    fn is(value: &Expression) -> bool {
+        match value.value() {
+            Term::Value(ValueTerm::Hash(hash)) if *hash == Self::hash() => true,
+            _ => false,
+        }
     }
 }
 
@@ -136,8 +156,11 @@ pub type SubscriptionId = usize;
 type CommandChannel = mpsc::Sender<Command>;
 type ResultsChannel = broadcast::Sender<(SubscriptionId, SubscriptionResult)>;
 
-type SubscribeCommand =
-    StreamOperation<Expression, (SubscriptionId, Option<SubscriptionResult>), SubscriptionResult>;
+type SubscribeCommand = StreamOperation<
+    Expression,
+    (SubscriptionId, Option<SubscriptionResult>),
+    Option<SubscriptionResult>,
+>;
 type UnsubscribeCommand = Operation<SubscriptionId, bool>;
 type UpdateCommand = Operation<Vec<(StateToken, Expression)>, ()>;
 
@@ -164,7 +187,7 @@ impl Command {
     fn subscribe(
         expression: Expression,
         response: oneshot::Sender<(SubscriptionId, Option<SubscriptionResult>)>,
-        update: watch::Sender<SubscriptionResult>,
+        update: watch::Sender<Option<SubscriptionResult>>,
     ) -> Self {
         Self::Subscribe(StreamOperation::new(expression, response, update))
     }
@@ -352,7 +375,7 @@ fn process_subscribe_command<THandler, TCache: EvaluationCache>(
     tokio::spawn(async move {
         while let Some(update) = stream.next().await {
             // TODO: Handle update channel errors
-            update_stream.send(update).unwrap();
+            update_stream.send(Some(update)).unwrap();
         }
     });
 }
@@ -400,7 +423,7 @@ async fn create_subscription<'a>(
     channel: &'a CommandChannel,
 ) -> Result<StreamSubscription<'a, impl Stream<Item = SubscriptionResult>>, String> {
     let (send, receive) = oneshot::channel();
-    let (update_send, update_receive) = watch::channel(Ok(create_pending_expression()));
+    let (update_send, update_receive) = watch::channel(None);
     channel
         .send(Command::subscribe(expression, send, update_send))
         .await
@@ -412,13 +435,15 @@ async fn create_subscription<'a>(
             channel,
             id,
             initial_value,
-            WatchStream::new(update_receive).filter_map(|result| match result {
-                Ok(expression) => match filter_pending_signals(expression) {
-                    Some(expression) => Some(Ok(expression)),
-                    None => None,
-                },
-                Err(error) => Some(Err(error)),
-            }),
+            WatchStream::new(update_receive)
+                .filter_map(|result| result)
+                .filter_map(|result| match result {
+                    Ok(expression) => match filter_pending_signals(expression) {
+                        Some(expression) => Some(Ok(expression)),
+                        None => None,
+                    },
+                    Err(error) => Some(Err(error)),
+                }),
         )),
     }
 }
@@ -428,7 +453,7 @@ async fn start_subscription(
     channel: &CommandChannel,
 ) -> Result<(SubscriptionId, Option<SubscriptionResult>), String> {
     let (send, receive) = oneshot::channel();
-    let (update_send, _) = watch::channel(Ok(create_pending_expression()));
+    let (update_send, _) = watch::channel(None);
     channel
         .send(Command::subscribe(expression, send, update_send))
         .await
@@ -578,13 +603,6 @@ fn parse_error_signal_message(args: &[Expression]) -> String {
         })
         .collect::<Vec<_>>()
         .join(" ")
-}
-
-fn create_pending_expression() -> Expression {
-    Expression::new(Term::Signal(SignalTerm::new(Signal::new(
-        SignalType::Pending,
-        Vec::new(),
-    ))))
 }
 
 fn filter_pending_signals(expression: Expression) -> Option<Expression> {
