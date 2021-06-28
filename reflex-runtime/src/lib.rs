@@ -3,7 +3,7 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use reflex::{
     cache::EvaluationCache,
-    core::{Expression, Signal, SignalTerm, StateToken, Term},
+    core::{Expression, Signal, SignalTerm, StateToken, Term, VariableTerm},
     stdlib::{signal::SignalType, value::ValueTerm},
 };
 use std::{future::Future, pin::Pin, sync::Mutex};
@@ -26,28 +26,19 @@ pub struct SignalHelpers<'a> {
             + Sync
             + 'a,
     >,
-    watcher: Box<
-        dyn Fn(Expression) -> Pin<Box<dyn Stream<Item = Expression> + Send + Sync + 'static>>
-            + Send
-            + Sync
-            + 'a,
-    >,
+    commands: CommandChannel,
 }
 impl<'a> SignalHelpers<'a> {
-    fn new<THandler, TWatcher>(handler: &'a THandler, watcher: &'a TWatcher) -> Self
+    fn new<THandler>(handler: &'a THandler, commands: CommandChannel) -> Self
     where
         THandler: Fn(&str, &[Expression], &SignalHelpers) -> Option<Result<SignalResult, String>>
-            + Send
-            + Sync
-            + 'a,
-        TWatcher: Fn(Expression) -> Pin<Box<dyn Stream<Item = Expression> + Send + Sync + 'static>>
             + Send
             + Sync
             + 'a,
     {
         Self {
             handler: Box::new(handler),
-            watcher: Box::new(watcher),
+            commands,
         }
     }
     pub fn spawn(&self, signal: Signal) -> Result<SignalResult, String> {
@@ -57,15 +48,57 @@ impl<'a> SignalHelpers<'a> {
                 Ok((Expression::new(Term::Signal(SignalTerm::new(signal))), None))
             }
             SignalType::Custom(signal_type) => {
-                handle_signal(&self.handler, signal_type, signal.args(), &self.watcher)
+                handle_signal(&self.handler, signal_type, signal.args(), &self.commands)
             }
         }
     }
-    pub fn watch(
+    pub fn watch_expression(
         &self,
         expression: Expression,
     ) -> impl Stream<Item = Expression> + Send + Sync + 'static {
-        (self.watcher)(expression)
+        let (results_tx, results_rx) = watch::channel(create_pending_expression());
+        let commands = self.commands.clone();
+        // TODO: Unsubscribe signal handler watch expressions
+        tokio::spawn(async move {
+            match create_subscription(expression, &commands).await {
+                Err(error) => {
+                    results_tx
+                        .send(Expression::new(Term::Signal(SignalTerm::new(Signal::new(
+                            SignalType::Error,
+                            vec![Expression::new(Term::Value(ValueTerm::String(error)))],
+                        )))))
+                        .unwrap();
+                }
+                Ok(mut subscription) => {
+                    while let Some(result) = subscription.next().await {
+                        let value = match result {
+                            Ok(value) => value,
+                            Err(errors) => Expression::new(Term::Signal(SignalTerm::from(
+                                errors.into_iter().map(|error| {
+                                    Signal::new(
+                                        SignalType::Error,
+                                        vec![Expression::new(Term::Value(ValueTerm::String(
+                                            error,
+                                        )))],
+                                    )
+                                }),
+                            ))),
+                        };
+                        results_tx.send(value).unwrap();
+                    }
+                }
+            }
+        });
+        Box::pin(WatchStream::new(results_rx))
+    }
+    pub fn watch_state(
+        &self,
+        state_token: StateToken,
+    ) -> impl Stream<Item = Expression> + Send + Sync + 'static {
+        self.watch_expression(Expression::new(Term::Variable(VariableTerm::dynamic(
+            state_token,
+            create_pending_expression(),
+        ))))
     }
 }
 
@@ -255,7 +288,6 @@ where
     let (results_tx, _) = broadcast::channel(result_buffer_size);
     let results = results_tx.clone();
     let signal_messages = messages_tx.clone();
-    let watcher = create_expression_watcher(messages_tx.clone());
     tokio::spawn(async move {
         let mut store = Mutex::new(Store::new(cache, None));
         while let Some(command) = messages_rx.recv().await {
@@ -266,7 +298,6 @@ where
                     &signal_messages,
                     &results,
                     &signal_handler,
-                    &watcher,
                 ),
                 Command::Unsubscribe(command) => {
                     process_unsubscribe_command(command, &mut store, &signal_messages, &results)
@@ -277,7 +308,6 @@ where
                     &signal_messages,
                     &results,
                     &signal_handler,
-                    &watcher,
                 ),
             }
         }
@@ -285,63 +315,14 @@ where
     (messages_tx, results_tx)
 }
 
-fn create_expression_watcher(
-    commands: CommandChannel,
-) -> impl Fn(Expression) -> Pin<Box<dyn Stream<Item = Expression> + Send + Sync + 'static>>
-       + Send
-       + Sync
-       + 'static {
-    move |expression| {
-        let (results_tx, results_rx) = watch::channel(create_pending_expression());
-        let commands = commands.clone();
-        // TODO: Unsubscribe signal handler watch expressions
-        tokio::spawn(async move {
-            match create_subscription(expression, &commands).await {
-                Err(error) => {
-                    results_tx
-                        .send(Expression::new(Term::Signal(SignalTerm::new(Signal::new(
-                            SignalType::Error,
-                            vec![Expression::new(Term::Value(ValueTerm::String(error)))],
-                        )))))
-                        .unwrap();
-                }
-                Ok(mut subscription) => {
-                    while let Some(result) = subscription.next().await {
-                        let value = match result {
-                            Ok(value) => value,
-                            Err(errors) => Expression::new(Term::Signal(SignalTerm::from(
-                                errors.into_iter().map(|error| {
-                                    Signal::new(
-                                        SignalType::Error,
-                                        vec![Expression::new(Term::Value(ValueTerm::String(
-                                            error,
-                                        )))],
-                                    )
-                                }),
-                            ))),
-                        };
-                        results_tx.send(value).unwrap();
-                    }
-                }
-            }
-        });
-        Box::pin(WatchStream::new(results_rx))
-    }
-}
-
-fn process_subscribe_command<THandler, TWatcher, TCache: EvaluationCache>(
+fn process_subscribe_command<THandler, TCache: EvaluationCache>(
     command: SubscribeCommand,
     store: &mut Mutex<Store<TCache>>,
     commands_tx: &CommandChannel,
     results_tx: &ResultsChannel,
     signal_handler: &THandler,
-    watcher: &TWatcher,
 ) where
     THandler: Fn(&str, &[Expression], &SignalHelpers) -> Option<Result<SignalResult, String>>
-        + Send
-        + Sync
-        + 'static,
-    TWatcher: Fn(Expression) -> Pin<Box<dyn Stream<Item = Expression> + Send + Sync + 'static>>
         + Send
         + Sync
         + 'static,
@@ -349,7 +330,7 @@ fn process_subscribe_command<THandler, TWatcher, TCache: EvaluationCache>(
     let expression = command.payload;
     let (subscription_id, results) = {
         store.get_mut().unwrap().subscribe(expression, |signals| {
-            handle_signals(signals, commands_tx, signal_handler, watcher)
+            handle_signals(signals, commands_tx, signal_handler)
         })
     };
     let (initial_value, results): (Vec<_>, Vec<_>) = results
@@ -387,19 +368,14 @@ fn process_unsubscribe_command<TCache: EvaluationCache>(
     let _ = command.response.send(result);
 }
 
-fn process_update_command<THandler, TWatcher, TCache: EvaluationCache>(
+fn process_update_command<THandler, TCache: EvaluationCache>(
     command: UpdateCommand,
     store: &mut Mutex<Store<TCache>>,
     commands_tx: &CommandChannel,
     results_tx: &ResultsChannel,
     signal_handler: &THandler,
-    watcher: &TWatcher,
 ) where
     THandler: Fn(&str, &[Expression], &SignalHelpers) -> Option<Result<SignalResult, String>>
-        + Send
-        + Sync
-        + 'static,
-    TWatcher: Fn(Expression) -> Pin<Box<dyn Stream<Item = Expression> + Send + Sync + 'static>>
         + Send
         + Sync
         + 'static,
@@ -407,7 +383,7 @@ fn process_update_command<THandler, TWatcher, TCache: EvaluationCache>(
     let updates = command.payload;
     let results = {
         store.get_mut().unwrap().update(updates, |signals| {
-            handle_signals(signals, commands_tx, signal_handler, watcher)
+            handle_signals(signals, commands_tx, signal_handler)
         })
     };
     let results = results
@@ -477,18 +453,13 @@ async fn stop_subscription(id: SubscriptionId, channel: &CommandChannel) -> Resu
     }
 }
 
-fn handle_signals<THandler, TWatcher>(
+fn handle_signals<THandler>(
     signals: &[Signal],
     commands: &CommandChannel,
     signal_handler: &THandler,
-    watcher: &TWatcher,
 ) -> Result<Vec<Expression>, Option<Vec<String>>>
 where
     THandler: Fn(&str, &[Expression], &SignalHelpers) -> Option<Result<SignalResult, String>>
-        + Send
-        + Sync
-        + 'static,
-    TWatcher: Fn(Expression) -> Pin<Box<dyn Stream<Item = Expression> + Send + Sync + 'static>>
         + Send
         + Sync
         + 'static,
@@ -499,7 +470,7 @@ where
             SignalType::Error => Err(Some(parse_error_signal_message(signal.args()))),
             SignalType::Pending => Err(None),
             SignalType::Custom(signal_type) => {
-                handle_signal(signal_handler, signal_type, signal.args(), watcher).map_err(Some)
+                handle_signal(signal_handler, signal_type, signal.args(), commands).map_err(Some)
             }
         })
         // TODO: Allow partial errors when processing signals
@@ -539,18 +510,14 @@ where
     }
 }
 
-fn handle_signal<'a, THandler, TWatcher>(
+fn handle_signal<'a, THandler>(
     signal_handler: &THandler,
     signal_type: &str,
     args: &[Expression],
-    watcher: &TWatcher,
+    commands: &CommandChannel,
 ) -> Result<SignalResult, String>
 where
     THandler: Fn(&str, &[Expression], &SignalHelpers) -> Option<Result<SignalResult, String>>
-        + Send
-        + Sync
-        + 'a,
-    TWatcher: Fn(Expression) -> Pin<Box<dyn Stream<Item = Expression> + Send + Sync + 'static>>
         + Send
         + Sync
         + 'a,
@@ -558,7 +525,7 @@ where
     let handler = signal_handler(
         signal_type,
         args,
-        &SignalHelpers::new(signal_handler, watcher),
+        &SignalHelpers::new(signal_handler, commands.clone()),
     );
     match handler {
         None => Err(format!("Unhandled signal: {}", signal_type)),
