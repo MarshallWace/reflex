@@ -234,7 +234,29 @@ impl Rewritable for HashMapTerm {
 }
 impl fmt::Display for HashMapTerm {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "<hashmap:{}>", self.keys.len())
+        let max_displayed_entries = 10;
+        let entries = self.keys.iter().zip(self.values.iter());
+        let num_entries = entries.len();
+        write!(
+            f,
+            "HashMap({})",
+            if num_entries <= max_displayed_entries {
+                entries
+                    .map(|(key, value)| format!("{} => {}", key, value))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            } else {
+                entries
+                    .take(max_displayed_entries - 1)
+                    .map(|(key, value)| format!("{} => {}", key, value))
+                    .chain(once(format!(
+                        "...{} more entries",
+                        num_entries - (max_displayed_entries - 1)
+                    )))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            }
+        )
     }
 }
 

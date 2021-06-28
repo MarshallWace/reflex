@@ -1336,14 +1336,31 @@ impl Rewritable for StructTerm {
 }
 impl fmt::Display for StructTerm {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "<struct:{}>",
-            self.prototype.as_ref().map_or_else(
-                || format!("{}", self.fields.len()),
-                |prototype| format!("{}", prototype)
+        match &self.prototype {
+            Some(prototype) => match prototype.keys.len() {
+                0 => write!(f, "{{}}"),
+                _ => write!(
+                    f,
+                    "{{ {} }}",
+                    prototype
+                        .keys
+                        .iter()
+                        .zip(self.fields.iter())
+                        .map(|(key, value)| format!("{}: {}", key, value))
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                ),
+            },
+            None => write!(
+                f,
+                "({})",
+                self.fields
+                    .iter()
+                    .map(|value| format!("{}", value))
+                    .collect::<Vec<_>>()
+                    .join(", "),
             ),
-        )
+        }
     }
 }
 
@@ -1541,7 +1558,7 @@ impl fmt::Display for SignalTerm {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "{{{}}}",
+            "Signal({})",
             self.signals
                 .iter()
                 .map(|signal| format!("{}", signal))

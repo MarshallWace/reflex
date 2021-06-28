@@ -103,7 +103,31 @@ impl Rewritable for HashSetTerm {
 }
 impl fmt::Display for HashSetTerm {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "<hashset:{}>", self.lookup.len())
+        let max_displayed_values = 10;
+        let values = &self.values;
+        let num_values = values.len();
+        write!(
+            f,
+            "HashSet({})",
+            if num_values <= max_displayed_values {
+                values
+                    .iter()
+                    .map(|value| format!("{}", value))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            } else {
+                values
+                    .iter()
+                    .take(max_displayed_values - 1)
+                    .map(|value| format!("{}", value))
+                    .chain(once(format!(
+                        "...{} more values",
+                        num_values - (max_displayed_values - 1)
+                    )))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            }
+        )
     }
 }
 

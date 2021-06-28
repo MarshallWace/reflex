@@ -83,6 +83,30 @@ impl Rewritable for VectorTerm {
 }
 impl fmt::Display for VectorTerm {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "<vector:{}>", self.items.len())
+        let max_displayed_items = 100;
+        let items = &self.items;
+        let num_items = items.len();
+        write!(
+            f,
+            "[{}]",
+            if num_items <= max_displayed_items {
+                items
+                    .iter()
+                    .map(|item| format!("{}", item))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            } else {
+                items
+                    .iter()
+                    .take(max_displayed_items - 1)
+                    .map(|item| format!("{}", item))
+                    .chain(once(format!(
+                        "...{} more items",
+                        num_items - (max_displayed_items - 1)
+                    )))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            }
+        )
     }
 }
