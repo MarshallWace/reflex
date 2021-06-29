@@ -271,12 +271,9 @@ fn parse_block_statements<'src: 'temp, 'temp>(
                                 parse_block_statements(remaining, result, &child_scope, env)?;
                             match body {
                                 None => Ok(None),
-                                Some(body) => Ok(Some(initializers.into_iter().fold(
-                                    body,
-                                    |body, initializer| {
-                                        create_declaration_block(vec![initializer], body)
-                                    },
-                                ))),
+                                Some(body) => {
+                                    Ok(Some(create_declaration_block(initializers, body)))
+                                }
                             }
                         }
                         _ => Err(err_unimplemented(node)),
@@ -332,7 +329,7 @@ fn create_declaration_block(initializers: Vec<Expression>, body: Expression) -> 
             Arity::from(0, initializers.len(), None),
             body,
         ))),
-        initializers,
+        initializers.into_iter().collect(),
     )))
 }
 
@@ -366,20 +363,39 @@ fn parse_variable_declarator<'src>(
             Ok(bindings)
         }
         Pat::Obj(properties) => {
-            parse_variable_object_destructuring_pattern(&value, properties, scope, env)
+            let bindings = parse_object_destructuring_pattern_bindings(properties, scope, env)?;
+            Ok(bindings
+                .into_iter()
+                .map(|(identifier, field_name)| {
+                    (
+                        identifier,
+                        get_dynamic_field(Expression::clone(&value), field_name),
+                    )
+                })
+                .collect())
         }
-        Pat::Array(_) => Err(err_unimplemented(node)),
+        Pat::Array(accessors) => {
+            let bindings = parse_array_destructuring_pattern_bindings(accessors, scope, env)?;
+            Ok(bindings
+                .into_iter()
+                .map(|(identifier, index)| {
+                    (
+                        identifier,
+                        get_indexed_field(Expression::clone(&value), index),
+                    )
+                })
+                .collect())
+        }
         Pat::RestElement(_) => Err(err_unimplemented(node)),
         Pat::Assign(_) => Err(err_unimplemented(node)),
     }
 }
 
-fn parse_variable_object_destructuring_pattern<'src>(
-    target: &Expression,
+fn parse_object_destructuring_pattern_bindings<'src>(
     properties: &[ObjPatPart<'src>],
     scope: &LexicalScope,
     env: &Env,
-) -> ParserResult<ScopeBindings<'src>> {
+) -> ParserResult<impl IntoIterator<Item = (&'src str, Expression)>> {
     properties
         .iter()
         .map(|property| match property {
@@ -387,16 +403,15 @@ fn parse_variable_object_destructuring_pattern<'src>(
                 if node.computed {
                     Err(err_unimplemented(node))
                 } else {
+                    let identifier = parse_destructuring_pattern_property_identifier(node)?;
                     let field_name =
                         parse_destructuring_pattern_property_field_name(node, scope, env)?;
-                    let identifier = parse_destructuring_pattern_property_identifier(node)?;
-                    let value = get_dynamic_field(Expression::clone(target), field_name);
-                    Ok((identifier, value))
+                    Ok((identifier, field_name))
                 }
             }
             ObjPatPart::Rest(node) => Err(err_unimplemented(node)),
         })
-        .collect()
+        .collect::<ParserResult<Vec<_>>>()
 }
 
 fn parse_destructuring_pattern_property_field_name<'src>(
@@ -450,6 +465,32 @@ fn parse_destructuring_pattern_property_identifier<'src>(
             _ => Err(err_unimplemented(&node.key)),
         },
     }
+}
+
+fn parse_array_destructuring_pattern_bindings<'src>(
+    accessors: &[Option<ArrayPatPart<'src>>],
+    _scope: &LexicalScope,
+    _env: &Env,
+) -> ParserResult<impl IntoIterator<Item = (&'src str, usize)>> {
+    accessors
+        .iter()
+        .enumerate()
+        .filter_map(|(index, accessor)| match accessor {
+            Some(accessor) => Some((index, accessor)),
+            None => None,
+        })
+        .map(|(index, accessor)| match accessor {
+            ArrayPatPart::Pat(pattern) => match pattern {
+                Pat::Ident(identifier) => {
+                    let field_name = parse_identifier(identifier)?;
+                    Ok((field_name, index))
+                }
+                Pat::RestElement(_) => Err(err_unimplemented(pattern)),
+                _ => Err(err_unimplemented(pattern)),
+            },
+            ArrayPatPart::Expr(node) => Err(err_unimplemented(node)),
+        })
+        .collect::<ParserResult<Vec<_>>>()
 }
 
 fn parse_identifier<'src>(node: &Ident<'src>) -> ParserResult<&'src str> {
@@ -1231,25 +1272,33 @@ fn parse_arrow_function_expression<'src>(
                         }
                         Pat::Obj(properties) => {
                             arg_names.push(None);
-                            let bindings = properties
-                                .iter()
-                                .map(|node| match node {
-                                    ObjPatPart::Assign(node) => {
-                                        if node.computed {
-                                            Err(err_unimplemented(node))
-                                        } else {
-                                            let field_name = parse_destructuring_pattern_property_field_name(node, scope, env)?;
-                                            let identifier = parse_destructuring_pattern_property_identifier(node)?;
-                                            Ok((identifier, (arg_index, field_name)))
-                                        }
-                                    }
-                                    ObjPatPart::Rest(_) => Err(err_unimplemented(node)),
-                                })
-                                .collect::<ParserResult<Vec<_>>>()?;
-                            destructuring_assignments.extend(bindings);
+                            let bindings = parse_object_destructuring_pattern_bindings(
+                                properties, scope, env,
+                            )?;
+                            destructuring_assignments.extend(bindings.into_iter().map(
+                                |(identifier, field_name)| (identifier, (arg_index, field_name)),
+                            ));
                             Ok((arg_names, destructuring_assignments))
                         }
-                        Pat::Array(_) => Err(err_unimplemented(node)),
+                        Pat::Array(accessors) => {
+                            arg_names.push(None);
+                            let bindings =
+                                parse_array_destructuring_pattern_bindings(accessors, scope, env)?;
+                            destructuring_assignments.extend(bindings.into_iter().map(
+                                |(identifier, index)| {
+                                    (
+                                        identifier,
+                                        (
+                                            arg_index,
+                                            Expression::new(Term::Value(ValueTerm::Int(
+                                                index as i32,
+                                            ))),
+                                        ),
+                                    )
+                                },
+                            ));
+                            Ok((arg_names, destructuring_assignments))
+                        }
                         Pat::RestElement(_) => Err(err_unimplemented(node)),
                         Pat::Assign(_) => Err(err_unimplemented(node)),
                     },
@@ -1268,12 +1317,12 @@ fn parse_arrow_function_expression<'src>(
             destructuring_assignments.into_iter().unzip();
         let destructuring_initializers = destructured_arg_indices
             .into_iter()
-            .map(|(arg_index, field_name)| {
+            .map(|(arg_index, accessor)| {
                 get_dynamic_field(
                     Expression::new(Term::Variable(VariableTerm::scoped(
                         num_args - arg_index - 1,
                     ))),
-                    field_name,
+                    accessor,
                 )
             })
             .collect::<Vec<_>>();
@@ -1340,16 +1389,23 @@ fn parse_static_member_field_name(node: &MemberExpr) -> ParserResult<Option<Stri
     })
 }
 
-fn get_static_field<'src>(target: Expression, field: &'src str) -> Expression {
+fn get_static_field(target: Expression, field: &str) -> Expression {
     let field = Expression::new(Term::Value(ValueTerm::String(StringValue::from(field))));
     get_dynamic_field(target, field)
 }
 
-fn get_dynamic_field<'src>(target: Expression, field: Expression) -> Expression {
+fn get_dynamic_field(target: Expression, field: Expression) -> Expression {
     Expression::new(Term::Application(ApplicationTerm::new(
         Expression::new(Term::Builtin(BuiltinTerm::Get)),
         vec![target, field],
     )))
+}
+
+fn get_indexed_field(target: Expression, index: usize) -> Expression {
+    get_dynamic_field(
+        target,
+        Expression::new(Term::Value(ValueTerm::Int(index as i32))),
+    )
 }
 
 fn parse_call_expression<'src>(
@@ -2223,6 +2279,75 @@ mod tests {
                 vec![Expression::new(Term::Value(ValueTerm::Float(3.0)))],
             )))),
         );
+    }
+
+    #[test]
+    fn variable_declaration_object_destructuring() {
+        let env = Env::new();
+        assert_eq!(
+            parse("const {} = { foo: 3, bar: 4, baz: 5 }; true;", &env,),
+            Ok(Expression::new(Term::Application(ApplicationTerm::new(
+                Expression::new(Term::Lambda(LambdaTerm::new(
+                    Arity::from(0, 0, None),
+                    Expression::new(Term::Value(ValueTerm::Boolean(true))),
+                ))),
+                vec![],
+            )))),
+        );
+        assert_eq!(
+            parse(
+                "const { bar, foo } = { foo: 3, bar: 4, baz: 5 }; foo;",
+                &env,
+            ),
+            Ok(Expression::new(Term::Application(ApplicationTerm::new(
+                Expression::new(Term::Lambda(LambdaTerm::new(
+                    Arity::from(0, 2, None),
+                    Expression::new(Term::Variable(VariableTerm::scoped(0))),
+                ))),
+                vec![
+                    Expression::new(Term::Application(ApplicationTerm::new(
+                        Expression::new(Term::Builtin(BuiltinTerm::Get)),
+                        vec![
+                            Expression::new(Term::Struct(StructTerm::new(
+                                Some(StructPrototype::new(vec![
+                                    ValueTerm::String(StringValue::from("foo")),
+                                    ValueTerm::String(StringValue::from("bar")),
+                                    ValueTerm::String(StringValue::from("baz")),
+                                ])),
+                                vec![
+                                    Expression::new(Term::Value(ValueTerm::Float(3.0))),
+                                    Expression::new(Term::Value(ValueTerm::Float(4.0))),
+                                    Expression::new(Term::Value(ValueTerm::Float(5.0))),
+                                ],
+                            ))),
+                            Expression::new(Term::Value(ValueTerm::String(StringValue::from(
+                                "bar"
+                            )))),
+                        ],
+                    ))),
+                    Expression::new(Term::Application(ApplicationTerm::new(
+                        Expression::new(Term::Builtin(BuiltinTerm::Get)),
+                        vec![
+                            Expression::new(Term::Struct(StructTerm::new(
+                                Some(StructPrototype::new(vec![
+                                    ValueTerm::String(StringValue::from("foo")),
+                                    ValueTerm::String(StringValue::from("bar")),
+                                    ValueTerm::String(StringValue::from("baz")),
+                                ])),
+                                vec![
+                                    Expression::new(Term::Value(ValueTerm::Float(3.0))),
+                                    Expression::new(Term::Value(ValueTerm::Float(4.0))),
+                                    Expression::new(Term::Value(ValueTerm::Float(5.0))),
+                                ],
+                            ))),
+                            Expression::new(Term::Value(ValueTerm::String(StringValue::from(
+                                "foo"
+                            )))),
+                        ],
+                    ))),
+                ],
+            )))),
+        );
         assert_eq!(
             parse(
                 "const { bar, foo } = { foo: 3, bar: 4, baz: 5 }; bar;",
@@ -2230,52 +2355,51 @@ mod tests {
             ),
             Ok(Expression::new(Term::Application(ApplicationTerm::new(
                 Expression::new(Term::Lambda(LambdaTerm::new(
-                    Arity::from(0, 1, None),
-                    Expression::new(Term::Application(ApplicationTerm::new(
-                        Expression::new(Term::Lambda(LambdaTerm::new(
-                            Arity::from(0, 1, None),
-                            Expression::new(Term::Variable(VariableTerm::scoped(1))),
-                        ))),
-                        vec![Expression::new(Term::Application(ApplicationTerm::new(
-                            Expression::new(Term::Builtin(BuiltinTerm::Get)),
-                            vec![
-                                Expression::new(Term::Struct(StructTerm::new(
-                                    Some(StructPrototype::new(vec![
-                                        ValueTerm::String(StringValue::from("foo")),
-                                        ValueTerm::String(StringValue::from("bar")),
-                                        ValueTerm::String(StringValue::from("baz")),
-                                    ])),
-                                    vec![
-                                        Expression::new(Term::Value(ValueTerm::Float(3.0))),
-                                        Expression::new(Term::Value(ValueTerm::Float(4.0))),
-                                        Expression::new(Term::Value(ValueTerm::Float(5.0))),
-                                    ],
-                                ))),
-                                Expression::new(Term::Value(ValueTerm::String(StringValue::from(
-                                    "bar"
-                                )))),
-                            ],
-                        )))],
-                    ))),
+                    Arity::from(0, 2, None),
+                    Expression::new(Term::Variable(VariableTerm::scoped(1))),
                 ))),
-                vec![Expression::new(Term::Application(ApplicationTerm::new(
-                    Expression::new(Term::Builtin(BuiltinTerm::Get)),
-                    vec![
-                        Expression::new(Term::Struct(StructTerm::new(
-                            Some(StructPrototype::new(vec![
-                                ValueTerm::String(StringValue::from("foo")),
-                                ValueTerm::String(StringValue::from("bar")),
-                                ValueTerm::String(StringValue::from("baz")),
-                            ])),
-                            vec![
-                                Expression::new(Term::Value(ValueTerm::Float(3.0))),
-                                Expression::new(Term::Value(ValueTerm::Float(4.0))),
-                                Expression::new(Term::Value(ValueTerm::Float(5.0))),
-                            ],
-                        ))),
-                        Expression::new(Term::Value(ValueTerm::String(StringValue::from("foo")))),
-                    ],
-                )))],
+                vec![
+                    Expression::new(Term::Application(ApplicationTerm::new(
+                        Expression::new(Term::Builtin(BuiltinTerm::Get)),
+                        vec![
+                            Expression::new(Term::Struct(StructTerm::new(
+                                Some(StructPrototype::new(vec![
+                                    ValueTerm::String(StringValue::from("foo")),
+                                    ValueTerm::String(StringValue::from("bar")),
+                                    ValueTerm::String(StringValue::from("baz")),
+                                ])),
+                                vec![
+                                    Expression::new(Term::Value(ValueTerm::Float(3.0))),
+                                    Expression::new(Term::Value(ValueTerm::Float(4.0))),
+                                    Expression::new(Term::Value(ValueTerm::Float(5.0))),
+                                ],
+                            ))),
+                            Expression::new(Term::Value(ValueTerm::String(StringValue::from(
+                                "bar"
+                            )))),
+                        ],
+                    ))),
+                    Expression::new(Term::Application(ApplicationTerm::new(
+                        Expression::new(Term::Builtin(BuiltinTerm::Get)),
+                        vec![
+                            Expression::new(Term::Struct(StructTerm::new(
+                                Some(StructPrototype::new(vec![
+                                    ValueTerm::String(StringValue::from("foo")),
+                                    ValueTerm::String(StringValue::from("bar")),
+                                    ValueTerm::String(StringValue::from("baz")),
+                                ])),
+                                vec![
+                                    Expression::new(Term::Value(ValueTerm::Float(3.0))),
+                                    Expression::new(Term::Value(ValueTerm::Float(4.0))),
+                                    Expression::new(Term::Value(ValueTerm::Float(5.0))),
+                                ],
+                            ))),
+                            Expression::new(Term::Value(ValueTerm::String(StringValue::from(
+                                "foo"
+                            )))),
+                        ],
+                    ))),
+                ],
             )))),
         );
         assert_eq!(
@@ -2285,52 +2409,51 @@ mod tests {
             ),
             Ok(Expression::new(Term::Application(ApplicationTerm::new(
                 Expression::new(Term::Lambda(LambdaTerm::new(
-                    Arity::from(0, 1, None),
-                    Expression::new(Term::Application(ApplicationTerm::new(
-                        Expression::new(Term::Lambda(LambdaTerm::new(
-                            Arity::from(0, 1, None),
-                            Expression::new(Term::Variable(VariableTerm::scoped(1))),
-                        ))),
-                        vec![Expression::new(Term::Application(ApplicationTerm::new(
-                            Expression::new(Term::Builtin(BuiltinTerm::Get)),
-                            vec![
-                                Expression::new(Term::Struct(StructTerm::new(
-                                    Some(StructPrototype::new(vec![
-                                        ValueTerm::String(StringValue::from("foo")),
-                                        ValueTerm::String(StringValue::from("bar")),
-                                        ValueTerm::String(StringValue::from("baz")),
-                                    ])),
-                                    vec![
-                                        Expression::new(Term::Value(ValueTerm::Float(3.0))),
-                                        Expression::new(Term::Value(ValueTerm::Float(4.0))),
-                                        Expression::new(Term::Value(ValueTerm::Float(5.0))),
-                                    ],
-                                ))),
-                                Expression::new(Term::Value(ValueTerm::String(StringValue::from(
-                                    "bar"
-                                )))),
-                            ],
-                        )))],
-                    ))),
+                    Arity::from(0, 2, None),
+                    Expression::new(Term::Variable(VariableTerm::scoped(1))),
                 ))),
-                vec![Expression::new(Term::Application(ApplicationTerm::new(
-                    Expression::new(Term::Builtin(BuiltinTerm::Get)),
-                    vec![
-                        Expression::new(Term::Struct(StructTerm::new(
-                            Some(StructPrototype::new(vec![
-                                ValueTerm::String(StringValue::from("foo")),
-                                ValueTerm::String(StringValue::from("bar")),
-                                ValueTerm::String(StringValue::from("baz")),
-                            ])),
-                            vec![
-                                Expression::new(Term::Value(ValueTerm::Float(3.0))),
-                                Expression::new(Term::Value(ValueTerm::Float(4.0))),
-                                Expression::new(Term::Value(ValueTerm::Float(5.0))),
-                            ],
-                        ))),
-                        Expression::new(Term::Value(ValueTerm::String(StringValue::from("foo")))),
-                    ],
-                )))],
+                vec![
+                    Expression::new(Term::Application(ApplicationTerm::new(
+                        Expression::new(Term::Builtin(BuiltinTerm::Get)),
+                        vec![
+                            Expression::new(Term::Struct(StructTerm::new(
+                                Some(StructPrototype::new(vec![
+                                    ValueTerm::String(StringValue::from("foo")),
+                                    ValueTerm::String(StringValue::from("bar")),
+                                    ValueTerm::String(StringValue::from("baz")),
+                                ])),
+                                vec![
+                                    Expression::new(Term::Value(ValueTerm::Float(3.0))),
+                                    Expression::new(Term::Value(ValueTerm::Float(4.0))),
+                                    Expression::new(Term::Value(ValueTerm::Float(5.0))),
+                                ],
+                            ))),
+                            Expression::new(Term::Value(ValueTerm::String(StringValue::from(
+                                "bar"
+                            )))),
+                        ],
+                    ))),
+                    Expression::new(Term::Application(ApplicationTerm::new(
+                        Expression::new(Term::Builtin(BuiltinTerm::Get)),
+                        vec![
+                            Expression::new(Term::Struct(StructTerm::new(
+                                Some(StructPrototype::new(vec![
+                                    ValueTerm::String(StringValue::from("foo")),
+                                    ValueTerm::String(StringValue::from("bar")),
+                                    ValueTerm::String(StringValue::from("baz")),
+                                ])),
+                                vec![
+                                    Expression::new(Term::Value(ValueTerm::Float(3.0))),
+                                    Expression::new(Term::Value(ValueTerm::Float(4.0))),
+                                    Expression::new(Term::Value(ValueTerm::Float(5.0))),
+                                ],
+                            ))),
+                            Expression::new(Term::Value(ValueTerm::String(StringValue::from(
+                                "foo"
+                            )))),
+                        ],
+                    ))),
+                ],
             )))),
         );
         assert_eq!(
@@ -2340,53 +2463,294 @@ mod tests {
             ),
             Ok(Expression::new(Term::Application(ApplicationTerm::new(
                 Expression::new(Term::Lambda(LambdaTerm::new(
+                    Arity::from(0, 2, None),
+                    Expression::new(Term::Variable(VariableTerm::scoped(1))),
+                ))),
+                vec![
+                    Expression::new(Term::Application(ApplicationTerm::new(
+                        Expression::new(Term::Builtin(BuiltinTerm::Get)),
+                        vec![
+                            Expression::new(Term::Struct(StructTerm::new(
+                                Some(StructPrototype::new(vec![
+                                    ValueTerm::String(StringValue::from("foo")),
+                                    ValueTerm::String(StringValue::from("bar")),
+                                    ValueTerm::String(StringValue::from("baz")),
+                                ])),
+                                vec![
+                                    Expression::new(Term::Value(ValueTerm::Float(3.0))),
+                                    Expression::new(Term::Value(ValueTerm::Float(4.0))),
+                                    Expression::new(Term::Value(ValueTerm::Float(5.0))),
+                                ],
+                            ))),
+                            Expression::new(Term::Value(ValueTerm::String(StringValue::from(
+                                "bar"
+                            )))),
+                        ],
+                    ))),
+                    Expression::new(Term::Application(ApplicationTerm::new(
+                        Expression::new(Term::Builtin(BuiltinTerm::Get)),
+                        vec![
+                            Expression::new(Term::Struct(StructTerm::new(
+                                Some(StructPrototype::new(vec![
+                                    ValueTerm::String(StringValue::from("foo")),
+                                    ValueTerm::String(StringValue::from("bar")),
+                                    ValueTerm::String(StringValue::from("baz")),
+                                ])),
+                                vec![
+                                    Expression::new(Term::Value(ValueTerm::Float(3.0))),
+                                    Expression::new(Term::Value(ValueTerm::Float(4.0))),
+                                    Expression::new(Term::Value(ValueTerm::Float(5.0))),
+                                ],
+                            ))),
+                            Expression::new(Term::Value(ValueTerm::String(StringValue::from(
+                                "foo"
+                            )))),
+                        ],
+                    ))),
+                ],
+            )))),
+        );
+        assert_eq!(
+            parse(
+                "const { one, two } = { one: { a: 1, b: 2 }, two: { c: 3, d: 4 }}; const { a, b } = one; const { c, d } = two; a;",
+                &env,
+            ),
+            Ok(Expression::new(Term::Application(ApplicationTerm::new(
+                Expression::new(Term::Lambda(LambdaTerm::new(
+                    Arity::from(0, 2, None),
+                    Expression::new(Term::Application(ApplicationTerm::new(
+                        Expression::new(Term::Lambda(LambdaTerm::new(
+                            Arity::from(0, 2, None),
+                            Expression::new(Term::Application(ApplicationTerm::new(
+                                Expression::new(Term::Lambda(LambdaTerm::new(
+                                    Arity::from(0, 2, None),
+                                    Expression::new(Term::Variable(VariableTerm::scoped(3))),
+                                ))),
+                                vec![
+                                    Expression::new(Term::Application(ApplicationTerm::new(
+                                        Expression::new(Term::Builtin(BuiltinTerm::Get)),
+                                        vec![
+                                            Expression::new(Term::Variable(VariableTerm::scoped(2))),
+                                            Expression::new(Term::Value(ValueTerm::String(StringValue::from("c")))),
+                                        ],
+                                    ))),
+                                    Expression::new(Term::Application(ApplicationTerm::new(
+                                        Expression::new(Term::Builtin(BuiltinTerm::Get)),
+                                        vec![
+                                            Expression::new(Term::Variable(VariableTerm::scoped(2))),
+                                            Expression::new(Term::Value(ValueTerm::String(StringValue::from("d")))),
+                                        ],
+                                    ))),
+                                ],
+                            ))),
+                        ))),
+                        vec![
+                            Expression::new(Term::Application(ApplicationTerm::new(
+                                Expression::new(Term::Builtin(BuiltinTerm::Get)),
+                                vec![
+                                    Expression::new(Term::Variable(VariableTerm::scoped(1))),
+                                    Expression::new(Term::Value(ValueTerm::String(StringValue::from("a")))),
+                                ],
+                            ))),
+                            Expression::new(Term::Application(ApplicationTerm::new(
+                                Expression::new(Term::Builtin(BuiltinTerm::Get)),
+                                vec![
+                                    Expression::new(Term::Variable(VariableTerm::scoped(1))),
+                                    Expression::new(Term::Value(ValueTerm::String(StringValue::from("b")))),
+                                ],
+                            ))),
+                        ],
+                    ))),
+                ))),
+                vec![
+                    Expression::new(Term::Application(ApplicationTerm::new(
+                        Expression::new(Term::Builtin(BuiltinTerm::Get)),
+                        vec![
+                            Expression::new(Term::Struct(StructTerm::new(
+                                Some(StructPrototype::new(vec![
+                                    ValueTerm::String(StringValue::from("one")),
+                                    ValueTerm::String(StringValue::from("two")),
+                                ])),
+                                vec![
+                                    Expression::new(Term::Struct(StructTerm::new(
+                                        Some(StructPrototype::new(vec![
+                                            ValueTerm::String(StringValue::from("a")),
+                                            ValueTerm::String(StringValue::from("b")),
+                                        ])),
+                                        vec![
+                                            Expression::new(Term::Value(ValueTerm::Float(1.0))),
+                                            Expression::new(Term::Value(ValueTerm::Float(2.0))),
+                                        ],
+                                    ))),
+                                    Expression::new(Term::Struct(StructTerm::new(
+                                        Some(StructPrototype::new(vec![
+                                            ValueTerm::String(StringValue::from("c")),
+                                            ValueTerm::String(StringValue::from("d")),
+                                        ])),
+                                        vec![
+                                            Expression::new(Term::Value(ValueTerm::Float(3.0))),
+                                            Expression::new(Term::Value(ValueTerm::Float(4.0))),
+                                        ],
+                                    ))),
+                                ],
+                            ))),
+                            Expression::new(Term::Value(ValueTerm::String(StringValue::from(
+                                "one"
+                            )))),
+                        ],
+                    ))),
+                    Expression::new(Term::Application(ApplicationTerm::new(
+                        Expression::new(Term::Builtin(BuiltinTerm::Get)),
+                        vec![
+                            Expression::new(Term::Struct(StructTerm::new(
+                                Some(StructPrototype::new(vec![
+                                    ValueTerm::String(StringValue::from("one")),
+                                    ValueTerm::String(StringValue::from("two")),
+                                ])),
+                                vec![
+                                    Expression::new(Term::Struct(StructTerm::new(
+                                        Some(StructPrototype::new(vec![
+                                            ValueTerm::String(StringValue::from("a")),
+                                            ValueTerm::String(StringValue::from("b")),
+                                        ])),
+                                        vec![
+                                            Expression::new(Term::Value(ValueTerm::Float(1.0))),
+                                            Expression::new(Term::Value(ValueTerm::Float(2.0))),
+                                        ],
+                                    ))),
+                                    Expression::new(Term::Struct(StructTerm::new(
+                                        Some(StructPrototype::new(vec![
+                                            ValueTerm::String(StringValue::from("c")),
+                                            ValueTerm::String(StringValue::from("d")),
+                                        ])),
+                                        vec![
+                                            Expression::new(Term::Value(ValueTerm::Float(3.0))),
+                                            Expression::new(Term::Value(ValueTerm::Float(4.0))),
+                                        ],
+                                    ))),
+                                ],
+                            ))),
+                            Expression::new(Term::Value(ValueTerm::String(StringValue::from(
+                                "two"
+                            )))),
+                        ],
+                    ))),
+                ],
+            )))),
+        );
+        assert_eq!(
+            parse("((input) => { const { foo, bar } = input; return bar; })({ foo: false, bar: true });", &env),
+            Ok(Expression::new(Term::Application(ApplicationTerm::new(
+                Expression::new(Term::Lambda(LambdaTerm::new(
                     Arity::from(0, 1, None),
                     Expression::new(Term::Application(ApplicationTerm::new(
                         Expression::new(Term::Lambda(LambdaTerm::new(
-                            Arity::from(0, 1, None),
-                            Expression::new(Term::Variable(VariableTerm::scoped(1))),
+                            Arity::from(0, 2, None),
+                            Expression::new(Term::Variable(VariableTerm::scoped(0))),
                         ))),
-                        vec![Expression::new(Term::Application(ApplicationTerm::new(
-                            Expression::new(Term::Builtin(BuiltinTerm::Get)),
-                            vec![
-                                Expression::new(Term::Struct(StructTerm::new(
-                                    Some(StructPrototype::new(vec![
-                                        ValueTerm::String(StringValue::from("foo")),
-                                        ValueTerm::String(StringValue::from("bar")),
-                                        ValueTerm::String(StringValue::from("baz")),
-                                    ])),
-                                    vec![
-                                        Expression::new(Term::Value(ValueTerm::Float(3.0))),
-                                        Expression::new(Term::Value(ValueTerm::Float(4.0))),
-                                        Expression::new(Term::Value(ValueTerm::Float(5.0))),
-                                    ],
-                                ))),
-                                Expression::new(Term::Value(ValueTerm::String(StringValue::from(
-                                    "bar"
-                                )))),
-                            ],
-                        )))],
+                        vec![
+                            Expression::new(Term::Application(ApplicationTerm::new(
+                                Expression::new(Term::Builtin(BuiltinTerm::Get)),
+                                vec![
+                                    Expression::new(Term::Variable(VariableTerm::scoped(0))),
+                                    Expression::new(Term::Value(ValueTerm::String(StringValue::from("foo")))),
+                                ],
+                            ))),
+                            Expression::new(Term::Application(ApplicationTerm::new(
+                                Expression::new(Term::Builtin(BuiltinTerm::Get)),
+                                vec![
+                                    Expression::new(Term::Variable(VariableTerm::scoped(0))),
+                                    Expression::new(Term::Value(ValueTerm::String(StringValue::from("bar")))),
+                                ],
+                            ))),
+                        ],
                     ))),
+                ))),
+                vec![Expression::new(Term::Struct(StructTerm::new(
+                    Some(StructPrototype::new(vec![
+                        ValueTerm::String(StringValue::from("foo")),
+                        ValueTerm::String(StringValue::from("bar")),
+                    ])),
+                    vec![
+                        Expression::new(Term::Value(ValueTerm::Boolean(false))),
+                        Expression::new(Term::Value(ValueTerm::Boolean(true))),
+                    ],
+                )))],
+            )))),
+        );
+    }
+
+    #[test]
+    fn variable_declaration_array_destructuring() {
+        let env = Env::new();
+        assert_eq!(
+            parse("const [] = [3, 4, 5]; true;", &env,),
+            Ok(Expression::new(Term::Application(ApplicationTerm::new(
+                Expression::new(Term::Lambda(LambdaTerm::new(
+                    Arity::from(0, 0, None),
+                    Expression::new(Term::Value(ValueTerm::Boolean(true))),
+                ))),
+                vec![],
+            )))),
+        );
+        assert_eq!(
+            parse("const [foo, bar] = [3, 4, 5]; foo;", &env,),
+            Ok(Expression::new(Term::Application(ApplicationTerm::new(
+                Expression::new(Term::Lambda(LambdaTerm::new(
+                    Arity::from(0, 2, None),
+                    Expression::new(Term::Variable(VariableTerm::scoped(1))),
+                ))),
+                vec![
+                    Expression::new(Term::Application(ApplicationTerm::new(
+                        Expression::new(Term::Builtin(BuiltinTerm::Get)),
+                        vec![
+                            Expression::new(Term::Collection(CollectionTerm::Vector(
+                                VectorTerm::new(vec![
+                                    Expression::new(Term::Value(ValueTerm::Float(3.0))),
+                                    Expression::new(Term::Value(ValueTerm::Float(4.0))),
+                                    Expression::new(Term::Value(ValueTerm::Float(5.0))),
+                                ]),
+                            ))),
+                            Expression::new(Term::Value(ValueTerm::Int(0))),
+                        ],
+                    ))),
+                    Expression::new(Term::Application(ApplicationTerm::new(
+                        Expression::new(Term::Builtin(BuiltinTerm::Get)),
+                        vec![
+                            Expression::new(Term::Collection(CollectionTerm::Vector(
+                                VectorTerm::new(vec![
+                                    Expression::new(Term::Value(ValueTerm::Float(3.0))),
+                                    Expression::new(Term::Value(ValueTerm::Float(4.0))),
+                                    Expression::new(Term::Value(ValueTerm::Float(5.0))),
+                                ]),
+                            ))),
+                            Expression::new(Term::Value(ValueTerm::Int(1))),
+                        ],
+                    ))),
+                ],
+            )))),
+        );
+        assert_eq!(
+            parse("const [, , foo] = [3, 4, 5]; foo;", &env,),
+            Ok(Expression::new(Term::Application(ApplicationTerm::new(
+                Expression::new(Term::Lambda(LambdaTerm::new(
+                    Arity::from(0, 1, None),
+                    Expression::new(Term::Variable(VariableTerm::scoped(0))),
                 ))),
                 vec![Expression::new(Term::Application(ApplicationTerm::new(
                     Expression::new(Term::Builtin(BuiltinTerm::Get)),
                     vec![
-                        Expression::new(Term::Struct(StructTerm::new(
-                            Some(StructPrototype::new(vec![
-                                ValueTerm::String(StringValue::from("foo")),
-                                ValueTerm::String(StringValue::from("bar")),
-                                ValueTerm::String(StringValue::from("baz")),
-                            ])),
+                        Expression::new(Term::Collection(CollectionTerm::Vector(VectorTerm::new(
                             vec![
                                 Expression::new(Term::Value(ValueTerm::Float(3.0))),
                                 Expression::new(Term::Value(ValueTerm::Float(4.0))),
                                 Expression::new(Term::Value(ValueTerm::Float(5.0))),
-                            ],
-                        ))),
-                        Expression::new(Term::Value(ValueTerm::String(StringValue::from("foo")))),
+                            ]
+                        ),))),
+                        Expression::new(Term::Value(ValueTerm::Int(2))),
                     ],
                 )))],
-            ))))
+            )))),
         );
     }
 
@@ -2410,8 +2774,27 @@ mod tests {
             EvaluationResult::new(
                 Expression::new(Term::Value(ValueTerm::Float(3.0 * 2.0))),
                 DependencyList::empty(),
-            )
+            ),
+        );
+        let expression = parse(
+            "
+            ((value) => {
+                const { foo, bar } = { foo: value * 2, bar: value };
+                if (foo === 3) return false;
+                return foo;
+              })(3);
+            ",
+            &env,
         )
+        .unwrap();
+        let result = expression.evaluate(&DynamicState::new(), &mut GenerationalGc::new());
+        assert_eq!(
+            result,
+            EvaluationResult::new(
+                Expression::new(Term::Value(ValueTerm::Float(3.0 * 2.0))),
+                DependencyList::empty(),
+            ),
+        );
     }
 
     #[test]
@@ -2977,7 +3360,7 @@ mod tests {
     }
 
     #[test]
-    fn arrow_function_destructuring() {
+    fn arrow_function_object_destructuring() {
         let env = Env::new();
         assert_eq!(
             parse("({}) => 3", &env),
@@ -3096,6 +3479,143 @@ mod tests {
                                 Expression::new(Term::Value(ValueTerm::String(StringValue::from(
                                     "bar"
                                 )))),
+                            ],
+                        ))),
+                    ],
+                ))),
+            )))),
+        );
+    }
+
+    #[test]
+    fn arrow_function_array_destructuring() {
+        let env = Env::new();
+        assert_eq!(
+            parse("([]) => 3", &env),
+            Ok(Expression::new(Term::Lambda(LambdaTerm::new(
+                Arity::from(0, 1, None),
+                Expression::new(Term::Value(ValueTerm::Float(3.0))),
+            )))),
+        );
+        assert_eq!(
+            parse("([foo]) => foo", &env),
+            Ok(Expression::new(Term::Lambda(LambdaTerm::new(
+                Arity::from(0, 1, None),
+                Expression::new(Term::Application(ApplicationTerm::new(
+                    Expression::new(Term::Lambda(LambdaTerm::new(
+                        Arity::from(0, 1, None),
+                        Expression::new(Term::Variable(VariableTerm::scoped(0))),
+                    ))),
+                    vec![Expression::new(Term::Application(ApplicationTerm::new(
+                        Expression::new(Term::Builtin(BuiltinTerm::Get)),
+                        vec![
+                            Expression::new(Term::Variable(VariableTerm::scoped(0))),
+                            Expression::new(Term::Value(ValueTerm::Int(0))),
+                        ],
+                    ))),],
+                ))),
+            )))),
+        );
+        assert_eq!(
+            parse("([foo, bar]) => foo + bar", &env),
+            Ok(Expression::new(Term::Lambda(LambdaTerm::new(
+                Arity::from(0, 1, None),
+                Expression::new(Term::Application(ApplicationTerm::new(
+                    Expression::new(Term::Lambda(LambdaTerm::new(
+                        Arity::from(0, 2, None),
+                        Expression::new(Term::Application(ApplicationTerm::new(
+                            Expression::new(Term::Builtin(BuiltinTerm::Add)),
+                            vec![
+                                Expression::new(Term::Variable(VariableTerm::scoped(1))),
+                                Expression::new(Term::Variable(VariableTerm::scoped(0))),
+                            ],
+                        ))),
+                    ))),
+                    vec![
+                        Expression::new(Term::Application(ApplicationTerm::new(
+                            Expression::new(Term::Builtin(BuiltinTerm::Get)),
+                            vec![
+                                Expression::new(Term::Variable(VariableTerm::scoped(0))),
+                                Expression::new(Term::Value(ValueTerm::Int(0))),
+                            ],
+                        ))),
+                        Expression::new(Term::Application(ApplicationTerm::new(
+                            Expression::new(Term::Builtin(BuiltinTerm::Get)),
+                            vec![
+                                Expression::new(Term::Variable(VariableTerm::scoped(0))),
+                                Expression::new(Term::Value(ValueTerm::Int(1))),
+                            ],
+                        ))),
+                    ],
+                ))),
+            )))),
+        );
+        assert_eq!(
+            parse("([, , foo]) => foo", &env),
+            Ok(Expression::new(Term::Lambda(LambdaTerm::new(
+                Arity::from(0, 1, None),
+                Expression::new(Term::Application(ApplicationTerm::new(
+                    Expression::new(Term::Lambda(LambdaTerm::new(
+                        Arity::from(0, 1, None),
+                        Expression::new(Term::Variable(VariableTerm::scoped(0))),
+                    ))),
+                    vec![Expression::new(Term::Application(ApplicationTerm::new(
+                        Expression::new(Term::Builtin(BuiltinTerm::Get)),
+                        vec![
+                            Expression::new(Term::Variable(VariableTerm::scoped(0))),
+                            Expression::new(Term::Value(ValueTerm::Int(2))),
+                        ],
+                    )))],
+                ))),
+            )))),
+        );
+        assert_eq!(
+            parse(
+                "(first, [foo, bar], second, third) => ((first + foo) + bar) + third",
+                &env,
+            ),
+            Ok(Expression::new(Term::Lambda(LambdaTerm::new(
+                Arity::from(0, 4, None),
+                Expression::new(Term::Application(ApplicationTerm::new(
+                    Expression::new(Term::Lambda(LambdaTerm::new(
+                        Arity::from(0, 2, None),
+                        Expression::new(Term::Application(ApplicationTerm::new(
+                            Expression::new(Term::Builtin(BuiltinTerm::Add)),
+                            vec![
+                                Expression::new(Term::Application(ApplicationTerm::new(
+                                    Expression::new(Term::Builtin(BuiltinTerm::Add)),
+                                    vec![
+                                        Expression::new(Term::Application(ApplicationTerm::new(
+                                            Expression::new(Term::Builtin(BuiltinTerm::Add)),
+                                            vec![
+                                                Expression::new(Term::Variable(
+                                                    VariableTerm::scoped(5)
+                                                )),
+                                                Expression::new(Term::Variable(
+                                                    VariableTerm::scoped(1)
+                                                )),
+                                            ],
+                                        ))),
+                                        Expression::new(Term::Variable(VariableTerm::scoped(0))),
+                                    ],
+                                ))),
+                                Expression::new(Term::Variable(VariableTerm::scoped(2))),
+                            ],
+                        ))),
+                    ))),
+                    vec![
+                        Expression::new(Term::Application(ApplicationTerm::new(
+                            Expression::new(Term::Builtin(BuiltinTerm::Get)),
+                            vec![
+                                Expression::new(Term::Variable(VariableTerm::scoped(2))),
+                                Expression::new(Term::Value(ValueTerm::Int(0))),
+                            ],
+                        ))),
+                        Expression::new(Term::Application(ApplicationTerm::new(
+                            Expression::new(Term::Builtin(BuiltinTerm::Get)),
+                            vec![
+                                Expression::new(Term::Variable(VariableTerm::scoped(2))),
+                                Expression::new(Term::Value(ValueTerm::Int(1))),
                             ],
                         ))),
                     ],
