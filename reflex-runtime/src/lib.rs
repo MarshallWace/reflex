@@ -185,7 +185,11 @@ type SubscribeCommand = StreamOperation<
     Option<SubscriptionResult>,
 >;
 type UnsubscribeCommand = Operation<SubscriptionId, bool>;
-type UpdateCommand = Operation<Vec<(StateToken, Expression)>, ()>;
+type UpdateCommand = Operation<Vec<(StateToken, StateUpdate)>, ()>;
+pub enum StateUpdate {
+    Value(Expression),
+    Patch(Box<dyn Fn(Option<&Expression>) -> Expression + Send + Sync + 'static>),
+}
 
 pub enum RuntimeEffect {
     Assignment(AssignmentEffect),
@@ -194,10 +198,16 @@ pub enum RuntimeEffect {
 }
 impl RuntimeEffect {
     pub fn assign(key: StateToken, value: Expression) -> Self {
-        Self::Assignment(vec![(key, value)])
+        Self::Assignment(vec![(key, StateUpdate::Value(value))])
+    }
+    pub fn update(
+        key: StateToken,
+        updater: impl Fn(Option<&Expression>) -> Expression + Send + Sync + 'static,
+    ) -> Self {
+        Self::Assignment(vec![(key, StateUpdate::Patch(Box::new(updater)))])
     }
 }
-pub type AssignmentEffect = Vec<(StateToken, Expression)>;
+pub type AssignmentEffect = Vec<(StateToken, StateUpdate)>;
 pub type AsyncEffect = Pin<Box<dyn Future<Output = Expression> + Send + 'static>>;
 pub type StreamEffect = Pin<Box<dyn Stream<Item = Expression> + Send + 'static>>;
 
@@ -217,7 +227,7 @@ impl Command {
     fn unsubscribe(id: SubscriptionId, response: oneshot::Sender<bool>) -> Self {
         Self::Unsubscribe(Operation::new(id, response))
     }
-    fn update(updates: Vec<(StateToken, Expression)>, response: oneshot::Sender<()>) -> Self {
+    fn update(updates: Vec<(StateToken, StateUpdate)>, response: oneshot::Sender<()>) -> Self {
         Self::Update(Operation::new(updates, response))
     }
 }
@@ -533,21 +543,21 @@ where
                 match effect {
                     RuntimeEffect::Assignment(updates) => {
                         tokio::spawn(async move {
-                            for (id, value) in updates {
-                                emit_update(id, value, &commands).await
+                            for (id, update) in updates {
+                                emit_update(id, update, &commands).await
                             }
                         });
                     }
                     RuntimeEffect::Async(effect) => {
                         tokio::spawn(async move {
                             let value = effect.await;
-                            emit_update(id, value, &commands).await
+                            emit_update(id, StateUpdate::Value(value), &commands).await
                         });
                     }
                     RuntimeEffect::Stream(mut effect) => {
                         tokio::spawn(async move {
                             while let Some(value) = effect.next().await {
-                                emit_update(id, value, &commands).await
+                                emit_update(id, StateUpdate::Value(value), &commands).await
                             }
                         });
                     }
@@ -581,10 +591,10 @@ where
     }
 }
 
-async fn emit_update(id: StateToken, value: Expression, commands: &CommandChannel) {
+async fn emit_update(id: StateToken, update: StateUpdate, commands: &CommandChannel) {
     let (send, receive) = oneshot::channel();
     commands
-        .send(Command::update(vec![(id, value)], send))
+        .send(Command::update(vec![(id, update)], send))
         .await
         .ok()
         .unwrap();

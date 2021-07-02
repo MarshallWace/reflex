@@ -8,6 +8,7 @@ use reflex::{
     core::{DependencyList, DynamicState, Expression, Signal, StateToken, Term},
     hash::{hash_object, HashId},
 };
+use crate::StateUpdate;
 
 pub type SubscriptionToken = usize;
 
@@ -62,7 +63,7 @@ impl<T: EvaluationCache> Store<T> {
     }
     pub fn update<THandler, TErr>(
         &mut self,
-        updates: impl IntoIterator<Item = (StateToken, Expression)>,
+        updates: impl IntoIterator<Item = (StateToken, StateUpdate)>,
         signal_handler: THandler,
     ) -> Vec<(SubscriptionToken, Result<Expression, TErr>)>
     where
@@ -70,9 +71,17 @@ impl<T: EvaluationCache> Store<T> {
     {
         let updates = updates
             .into_iter()
-            .filter(|(key, value)| match self.state.get(*key) {
-                Some(existing) => hash_object(&existing) != hash_object(&value),
-                None => true,
+            .filter_map(|(key, update)| {
+                let existing_value = self.state.get(key);
+                let existing_hash = existing_value.map(hash_object);
+                let value = match update {
+                    StateUpdate::Value(value) => value,
+                    StateUpdate::Patch(updater) => updater(existing_value),
+                };
+                match existing_hash {
+                    Some(hash) if hash == hash_object(&value) => None,
+                    _ => Some((key, value))
+                }
             })
             .collect::<Vec<_>>();
         if updates.is_empty() {
