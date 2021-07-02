@@ -11,7 +11,7 @@ use super::r#if::is_truthy;
 pub struct Or {}
 impl BuiltinFunction for Or {
     fn arity() -> Arity {
-        Arity::from(2, 0, None)
+        Arity::from(1, 1, None)
     }
     fn apply(args: impl IntoIterator<Item = Expression> + ExactSizeIterator) -> Expression {
         if args.len() != 2 {
