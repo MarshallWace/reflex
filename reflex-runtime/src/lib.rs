@@ -57,11 +57,34 @@ impl<'a> SignalHelpers<'a> {
         &self,
         expression: Expression,
     ) -> impl Stream<Item = Expression> + Send + Sync + 'static {
+        self.watcher().watch_expression(expression)
+    }
+    pub fn watch_state(
+        &self,
+        state_token: StateToken,
+    ) -> impl Stream<Item = Expression> + Send + Sync + 'static {
+        self.watcher().watch_state(state_token)
+    }
+    pub fn watcher(&self) -> ExpressionWatcher {
+        ExpressionWatcher::new(self.commands.clone())
+    }
+}
+#[derive(Clone)]
+pub struct ExpressionWatcher {
+    commands: CommandChannel,
+}
+impl ExpressionWatcher {
+    fn new(commands: CommandChannel) -> Self {
+        Self { commands }
+    }
+    pub fn watch_expression(
+        self,
+        expression: Expression,
+    ) -> impl Stream<Item = Expression> + Send + Sync + 'static {
         let (results_tx, results_rx) = watch::channel(None);
-        let commands = self.commands.clone();
         // TODO: Unsubscribe signal handler watch expressions
         tokio::spawn(async move {
-            match create_subscription(expression, &commands).await {
+            match create_subscription(expression, &self.commands).await {
                 Err(error) => {
                     results_tx
                         .send(Some(Expression::new(Term::Signal(SignalTerm::new(
@@ -95,7 +118,7 @@ impl<'a> SignalHelpers<'a> {
         Box::pin(WatchStream::new(results_rx).filter_map(|value| value))
     }
     pub fn watch_state(
-        &self,
+        self,
         state_token: StateToken,
     ) -> impl Stream<Item = Expression> + Send + Sync + 'static {
         self.watch_expression(Expression::new(Term::Variable(VariableTerm::dynamic(
