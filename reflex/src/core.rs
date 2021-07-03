@@ -1119,60 +1119,40 @@ impl Reducible for ApplicationTerm {
                 }
                 let result = match evaluate_args(self.args.iter(), arity, cache) {
                     Err(args) => Err(args),
-                    Ok(args) => {
-                        let num_signal_args =
-                            args.iter().fold(0, |result, arg| match arg.value() {
-                                Term::Signal(_) => result + 1,
-                                _ => result,
-                            });
-                        match num_signal_args {
-                            0 => match &target {
-                                Term::Lambda(target) => Ok(target.apply(args.into_iter(), cache)),
-                                Term::Builtin(target) => Ok(target.apply(args.into_iter())),
-                                Term::Native(target) => Ok(target.apply(args.into_iter())),
-                                Term::StructConstructor(_, target) => {
-                                    let (keys, values) = args.split_at(args.len() / 2);
-                                    let keys = keys
-                                        .iter()
-                                        .map(|key| match key.value() {
-                                            Term::Value(key) => Some(key),
-                                            _ => None,
-                                        })
-                                        .collect::<Option<Vec<_>>>();
-                                    let result = keys.and_then(|keys| {
-                                        target.apply(
-                                            keys.into_iter()
-                                                .zip(values.iter().map(Expression::clone))
-                                                .map(|(key, value)| (key, value)),
-                                        )
-                                    });
-                                    match result {
-                                        Some(result) => Ok(Expression::new(Term::Struct(result))),
-                                        None => Err(args),
-                                    }
-                                }
-                                Term::EnumConstructor(target) => Ok(target.apply(args.into_iter())),
-                                _ => Err(args),
-                            },
-                            1 => Ok(args
-                                .into_iter()
-                                .find(|arg| match arg.value() {
-                                    Term::Signal(_) => true,
-                                    _ => false,
-                                })
-                                .unwrap()),
-                            _ => Ok(Expression::new(Term::Signal(SignalTerm::from(
-                                args.iter()
-                                    .filter_map(|arg| match arg.value() {
-                                        Term::Signal(term) => Some(term),
+                    Ok((args, signals)) => match signals {
+                        SignalArgs::None => match &target {
+                            Term::Lambda(target) => Ok(target.apply(args.into_iter(), cache)),
+                            Term::Builtin(target) => Ok(target.apply(args.into_iter())),
+                            Term::Native(target) => Ok(target.apply(args.into_iter())),
+                            Term::StructConstructor(_, target) => {
+                                let (keys, values) = args.split_at(args.len() / 2);
+                                let keys = keys
+                                    .iter()
+                                    .map(|key| match key.value() {
+                                        Term::Value(key) => Some(key),
                                         _ => None,
                                     })
-                                    .flat_map(|term| {
-                                        term.signals().into_iter().map(|signal| signal.clone())
-                                    }),
-                            )))),
+                                    .collect::<Option<Vec<_>>>();
+                                let result = keys.and_then(|keys| {
+                                    target.apply(
+                                        keys.into_iter()
+                                            .zip(values.iter().map(Expression::clone))
+                                            .map(|(key, value)| (key, value)),
+                                    )
+                                });
+                                match result {
+                                    Some(result) => Ok(Expression::new(Term::Struct(result))),
+                                    None => Err(args),
+                                }
+                            }
+                            Term::EnumConstructor(target) => Ok(target.apply(args.into_iter())),
+                            _ => Err(args),
+                        },
+                        SignalArgs::Single(signal) => Ok(signal),
+                        SignalArgs::Multiple(signals) => {
+                            Ok(Expression::new(Term::Signal(SignalTerm::from(signals))))
                         }
-                    }
+                    },
                 };
                 match result {
                     Ok(result) => result.reduce(cache).or_else(|| Some(result)),
@@ -1201,40 +1181,88 @@ fn evaluate_args<'a>(
     args: impl IntoIterator<Item = &'a Expression> + ExactSizeIterator,
     arity: Arity,
     cache: &mut impl EvaluationCache,
-) -> Result<Vec<Expression>, Vec<Expression>> {
+) -> Result<(Vec<Expression>, SignalArgs), Vec<Expression>> {
+    let args = with_eagerness(args, &arity)
+        .into_iter()
+        .map(|(arg, is_eager)| {
+            if is_eager {
+                arg.reduce(cache).unwrap_or_else(|| Expression::clone(arg))
+            } else {
+                Expression::clone(arg)
+            }
+        })
+        .collect::<Vec<_>>();
+    let has_unresolved_args =
+        with_eagerness(args.iter(), &arity)
+            .into_iter()
+            .any(|(arg, is_eager)| {
+                is_eager
+                    && match arg.value() {
+                        Term::Variable(_) => true,
+                        term => term.is_reducible(),
+                    }
+            });
+    if has_unresolved_args {
+        return Err(args);
+    }
+    let signals = SignalArgs::new(with_eagerness(args.iter(), &arity).into_iter().filter_map(
+        |(arg, is_eager)| {
+            if is_eager {
+                match arg.value() {
+                    Term::Signal(_) => Some(Expression::clone(arg)),
+                    _ => None,
+                }
+            } else {
+                None
+            }
+        },
+    ));
+    Ok((args, signals))
+}
+fn with_eagerness<T>(
+    args: impl IntoIterator<Item = T>,
+    arity: &Arity,
+) -> impl IntoIterator<Item = (T, bool)> {
+    let required_arity = arity.required();
     let eager_arity = arity.eager();
     let eager_varargs = match arity.variadic {
         Some(VarArgs::Eager) => true,
         _ => false,
     };
-    if eager_arity == 0 && !eager_varargs {
-        Ok(args.into_iter().map(Expression::clone).collect::<Vec<_>>())
-    } else {
-        let required_arity = arity.required();
-        let mut has_unresolved_args = false;
-        let args = args
-            .into_iter()
-            .enumerate()
-            .map(|(index, arg)| {
-                let is_eager = index < eager_arity || (eager_varargs && index >= required_arity);
-                if is_eager {
-                    let arg = arg.reduce(cache).unwrap_or_else(|| Expression::clone(arg));
-                    has_unresolved_args = has_unresolved_args
-                        || match arg.value() {
-                            Term::Variable(_) => true,
-                            term => term.is_reducible(),
-                        };
-                    arg
-                } else {
-                    Expression::clone(arg)
-                }
+    args.into_iter().enumerate().map(move |(index, arg)| {
+        let is_eager = index < eager_arity || (eager_varargs && index >= required_arity);
+        (arg, is_eager)
+    })
+}
+enum SignalArgs {
+    None,
+    Single(Expression),
+    Multiple(Vec<Signal>),
+}
+impl SignalArgs {
+    fn new(args: impl IntoIterator<Item = Expression>) -> Self {
+        args.into_iter()
+            .fold(Self::None, |existing, arg| match arg.value() {
+                Term::Signal(signal) => match existing {
+                    Self::None => Self::Single(arg),
+                    Self::Single(existing) => match existing.value() {
+                        Term::Signal(existing) => Self::Multiple(
+                            existing
+                                .signals()
+                                .into_iter()
+                                .chain(signal.signals().into_iter())
+                                .map(Signal::clone)
+                                .collect(),
+                        ),
+                        _ => panic!("Invalid signal args"),
+                    },
+                    Self::Multiple(mut signals) => {
+                        signals.extend(signal.signals().into_iter().map(Signal::clone));
+                        Self::Multiple(signals)
+                    }
+                },
+                _ => existing,
             })
-            .collect::<Vec<_>>();
-        if has_unresolved_args {
-            Err(args)
-        } else {
-            Ok(args)
-        }
     }
 }
 
