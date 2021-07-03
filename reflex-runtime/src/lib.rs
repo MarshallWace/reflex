@@ -515,55 +515,72 @@ fn handle_signals<THandler>(
     signals: &[Signal],
     commands: &CommandChannel,
     signal_handler: &THandler,
-) -> Result<Vec<Expression>, Option<Vec<String>>>
+) -> Vec<Result<Expression, Option<String>>>
 where
     THandler: Fn(&str, &[Expression], &SignalHelpers) -> Option<Result<SignalResult, String>>
         + Send
         + Sync
         + 'static,
 {
-    let results = signals
+    let (results, effects) = signals
         .iter()
         .map(|signal| match signal.get_type() {
-            SignalType::Error => Err(Some(parse_error_signal_message(signal.args()))),
-            SignalType::Pending => Err(None),
+            SignalType::Error => (Err(Some(parse_error_signal_message(signal.args()))), None),
+            SignalType::Pending => (Err(None), None),
             SignalType::Custom(signal_type) => {
-                handle_signal(signal_handler, signal_type, signal.args(), commands).map_err(Some)
-            }
-        })
-        // TODO: Allow partial errors when processing signals
-        .collect::<Result<Vec<_>, _>>()
-        .or_else(|error| Err(error.map(|error| vec![error])));
-    match results {
-        Err(errors) => Err(errors),
-        Ok(results) => {
-            let (results, effects) = extract_signal_effects(signals, results);
-            for (id, effect) in effects {
-                let commands = commands.clone();
-                match effect {
-                    RuntimeEffect::Assignment(updates) => {
-                        tokio::spawn(async move {
-                            for (id, update) in updates {
-                                emit_update(id, update, &commands).await
-                            }
-                        });
-                    }
-                    RuntimeEffect::Async(effect) => {
-                        tokio::spawn(async move {
-                            let value = effect.await;
-                            emit_update(id, StateUpdate::Value(value), &commands).await
-                        });
-                    }
-                    RuntimeEffect::Stream(mut effect) => {
-                        tokio::spawn(async move {
-                            while let Some(value) = effect.next().await {
-                                emit_update(id, StateUpdate::Value(value), &commands).await
-                            }
-                        });
-                    }
+                match handle_signal(signal_handler, signal_type, signal.args(), commands) {
+                    Err(error) => (Err(Some(error)), None),
+                    Ok((result, effect)) => (Ok(result), effect),
                 }
             }
-            Ok(results)
+        })
+        .zip(signals.iter())
+        .fold(
+            (
+                Vec::with_capacity(signals.len()),
+                Vec::with_capacity(signals.len()),
+            ),
+            |(mut results, mut effects), ((result, effect), signal)| {
+                results.push(result);
+                if let Some(effect) = effect {
+                    effects.push((signal.id(), effect));
+                }
+                return (results, effects);
+            },
+        );
+
+    apply_effects(effects, commands);
+
+    results
+}
+
+fn apply_effects(
+    effects: impl IntoIterator<Item = (StateToken, RuntimeEffect)>,
+    commands: &CommandChannel,
+) {
+    for (id, effect) in effects {
+        let commands = commands.clone();
+        match effect {
+            RuntimeEffect::Assignment(updates) => {
+                tokio::spawn(async move {
+                    for (id, update) in updates {
+                        emit_update(id, update, &commands).await
+                    }
+                });
+            }
+            RuntimeEffect::Async(effect) => {
+                tokio::spawn(async move {
+                    let value = effect.await;
+                    emit_update(id, StateUpdate::Value(value), &commands).await
+                });
+            }
+            RuntimeEffect::Stream(mut effect) => {
+                tokio::spawn(async move {
+                    while let Some(value) = effect.next().await {
+                        emit_update(id, StateUpdate::Value(value), &commands).await
+                    }
+                });
+            }
         }
     }
 }
@@ -599,27 +616,6 @@ async fn emit_update(id: StateToken, update: StateUpdate, commands: &CommandChan
         .ok()
         .unwrap();
     receive.await.unwrap();
-}
-
-fn extract_signal_effects<'a>(
-    signals: impl IntoIterator<Item = &'a Signal>,
-    results: impl IntoIterator<Item = SignalResult>,
-) -> (Vec<Expression>, Vec<(StateToken, RuntimeEffect)>) {
-    let (pure_results, stateful_results): (Vec<_>, Vec<_>) = results
-        .into_iter()
-        .zip(signals.into_iter().map(|signal| signal.id()))
-        .map(|((result, effect), id)| (result, effect.map(|effect| (id, effect))))
-        .partition(|(_, effect)| effect.is_none());
-    let (stateful_results, effects): (Vec<_>, Vec<_>) = stateful_results
-        .into_iter()
-        .filter_map(|(result, effect)| effect.map(|effect| (result, effect)))
-        .unzip();
-    let results = pure_results
-        .into_iter()
-        .map(|(result, _)| result)
-        .chain(stateful_results.into_iter())
-        .collect::<Vec<_>>();
-    (results, effects)
 }
 
 fn parse_error_signal_message(args: &[Expression]) -> String {
@@ -662,11 +658,20 @@ fn is_pending_signal(signal: &Signal) -> bool {
 }
 
 fn strip_pending_results(
-    result: Result<Expression, Option<Vec<String>>>,
+    result: Result<Expression, Vec<Option<String>>>,
 ) -> Option<SubscriptionResult> {
     match result {
         Ok(result) => Some(Ok(result)),
-        Err(Some(errors)) => Some(Err(errors)),
-        Err(None) => None,
+        Err(errors) => {
+            let errors = errors
+                .into_iter()
+                .filter_map(|error| error)
+                .collect::<Vec<_>>();
+            if errors.is_empty() {
+                None
+            } else {
+                Some(Err(errors))
+            }
+        }
     }
 }
