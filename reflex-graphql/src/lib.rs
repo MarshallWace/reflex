@@ -3,6 +3,7 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use std::{collections::HashMap, iter::once};
 
+use either::Either;
 use graphql_parser::{parse_query, query::*};
 use reflex::{
     core::{Expression, Signal, SignalTerm, StructPrototype, StructTerm, Term},
@@ -25,6 +26,7 @@ pub use query::{QueryShape, QueryTransform};
 pub mod subscriptions;
 
 type QueryVariables<'a> = HashMap<&'a str, Expression>;
+type QueryFragments<'a> = HashMap<&'a str, &'a FragmentDefinition<'a, &'a str>>;
 
 pub fn parse<'v>(
     source: &str,
@@ -57,15 +59,28 @@ fn parse_graphql_query(
     variables: &QueryVariables,
 ) -> Result<(QueryShape, QueryTransform), String> {
     match parse_query::<&str>(source) {
-        Ok(document) => match get_root_operation(&document) {
-            Err(error) => Err(error),
-            Ok(root) => match root {
-                OperationDefinition::SelectionSet(selection_set) => {
-                    parse_root_operation(DEFAULT_OPERATION_TYPE, selection_set, variables)
-                }
-                _ => parse_operation(root, variables),
-            },
-        },
+        Ok(document) => {
+            let fragments = document
+                .definitions
+                .iter()
+                .filter_map(|definition| match definition {
+                    Definition::Fragment(fragment) => Some((fragment.name, fragment)),
+                    _ => None,
+                })
+                .collect::<QueryFragments>();
+            match get_root_operation(&document) {
+                Err(error) => Err(error),
+                Ok(root) => match root {
+                    OperationDefinition::SelectionSet(selection_set) => parse_root_operation(
+                        DEFAULT_OPERATION_TYPE,
+                        selection_set,
+                        variables,
+                        &fragments,
+                    ),
+                    _ => parse_operation(root, variables, &fragments),
+                },
+            }
+        }
         Err(error) => Err(format!("{}", error)),
     }
 }
@@ -109,44 +124,60 @@ fn get_root_operation<'src, 'a>(
 fn parse_operation<'src>(
     operation: &OperationDefinition<'src, &'src str>,
     variables: &QueryVariables,
+    fragments: &QueryFragments,
 ) -> Result<(QueryShape, QueryTransform), String> {
     match operation {
-        OperationDefinition::Query(operation) => parse_query_operation(operation, variables),
-        OperationDefinition::Mutation(operation) => parse_mutation_operation(operation, variables),
-        OperationDefinition::Subscription(operation) => {
-            parse_subscription_operation(operation, variables)
+        OperationDefinition::Query(operation) => {
+            parse_query_operation(operation, variables, fragments)
         }
-        OperationDefinition::SelectionSet(selection) => parse_selection_set(selection, variables),
+        OperationDefinition::Mutation(operation) => {
+            parse_mutation_operation(operation, variables, fragments)
+        }
+        OperationDefinition::Subscription(operation) => {
+            parse_subscription_operation(operation, variables, fragments)
+        }
+        OperationDefinition::SelectionSet(selection) => {
+            parse_selection_set(selection, variables, fragments)
+        }
     }
 }
 
 fn parse_query_operation<'src>(
     operation: &Query<'src, &'src str>,
     variables: &QueryVariables,
+    fragments: &QueryFragments,
 ) -> Result<(QueryShape, QueryTransform), String> {
-    parse_root_operation("query", &operation.selection_set, variables)
+    parse_root_operation("query", &operation.selection_set, variables, fragments)
 }
 
 fn parse_mutation_operation<'src>(
     operation: &Mutation<'src, &'src str>,
     variables: &QueryVariables,
+    fragments: &QueryFragments,
 ) -> Result<(QueryShape, QueryTransform), String> {
-    parse_root_operation("mutation", &operation.selection_set, variables)
+    parse_root_operation("mutation", &operation.selection_set, variables, fragments)
 }
 
 fn parse_subscription_operation<'src>(
     operation: &Subscription<'src, &'src str>,
     variables: &QueryVariables,
+    fragments: &QueryFragments,
 ) -> Result<(QueryShape, QueryTransform), String> {
-    parse_root_operation("subscription", &operation.selection_set, variables)
+    parse_root_operation(
+        "subscription",
+        &operation.selection_set,
+        variables,
+        fragments,
+    )
 }
 
 fn parse_root_operation<'src>(
     operation_type: &str,
     selection_set: &SelectionSet<'src, &'src str>,
     variables: &QueryVariables,
+    fragments: &QueryFragments,
 ) -> Result<(QueryShape, QueryTransform), String> {
-    let (inner_query, inner_transform) = parse_selection_set(selection_set, variables)?;
+    let (inner_query, inner_transform) = parse_selection_set(selection_set, variables, fragments)?;
     let query = QueryShape::branch(vec![FieldSelector::NamedField(
         ValueTerm::String(StringValue::from(operation_type)),
         inner_query,
@@ -163,22 +194,9 @@ fn parse_root_operation<'src>(
 fn parse_selection_set<'src>(
     selection_set: &SelectionSet<'src, &'src str>,
     variables: &QueryVariables,
+    fragments: &QueryFragments,
 ) -> Result<(QueryShape, QueryTransform), String> {
-    let fields = selection_set
-        .items
-        .iter()
-        .map(|field| match field {
-            Selection::Field(field) => {
-                let (query, transform) = parse_field(field, variables)?;
-                let key = field.alias.unwrap_or(field.name);
-                Ok((query, (String::from(key), transform)))
-            }
-            Selection::FragmentSpread(_) => Err(String::from("Fragments not yet implemented")),
-            Selection::InlineFragment(_) => {
-                Err(String::from("Inline fragments not yet implemented"))
-            }
-        })
-        .collect::<Result<Vec<_>, _>>()?;
+    let fields = parse_selection_set_fields(selection_set, variables, fragments)?;
     let (field_queries, field_transforms): (Vec<_>, Vec<_>) = fields.into_iter().unzip();
     let query = QueryShape::branch(field_queries);
     let transform = Box::new(move |result: &SerializedTerm| match result {
@@ -199,9 +217,53 @@ fn parse_selection_set<'src>(
     Ok((query, transform))
 }
 
+fn parse_selection_set_fields<'src>(
+    selection_set: &SelectionSet<'src, &'src str>,
+    variables: &QueryVariables,
+    fragments: &QueryFragments,
+) -> Result<Vec<(FieldSelector, (String, QueryTransform))>, String> {
+    selection_set
+        .items
+        .iter()
+        .flat_map(|field| match field {
+            Selection::Field(field) => match parse_field(field, variables, fragments) {
+                Ok((query, transform)) => {
+                    let key = field.alias.unwrap_or(field.name);
+                    Either::Left(once(Ok((query, (String::from(key), transform)))))
+                }
+                Err(error) => Either::Left(once(Err(error))),
+            },
+            Selection::FragmentSpread(fragment) => match fragments.get(fragment.fragment_name) {
+                Some(fragment) => {
+                    Either::Right(parse_fragment_fields(fragment, variables, fragments).into_iter())
+                }
+                None => Either::Left(once(Err(format!(
+                    "Invalid fragment name: {}",
+                    fragment.fragment_name
+                )))),
+            },
+            Selection::InlineFragment(_) => Either::Left(once(Err(String::from(
+                "Inline fragments not yet implemented",
+            )))),
+        })
+        .collect::<Result<Vec<_>, _>>()
+}
+
+fn parse_fragment_fields<'src>(
+    fragment: &FragmentDefinition<'src, &'src str>,
+    variables: &QueryVariables,
+    fragments: &QueryFragments,
+) -> impl IntoIterator<Item = Result<(FieldSelector, (String, QueryTransform)), String>> {
+    match parse_selection_set_fields(&fragment.selection_set, variables, fragments) {
+        Err(error) => Either::Left(once(Err(error))),
+        Ok(fields) => Either::Right(fields.into_iter().map(Ok)),
+    }
+}
+
 fn parse_field<'src>(
     field: &Field<'src, &'src str>,
     variables: &QueryVariables,
+    fragments: &QueryFragments,
 ) -> Result<(FieldSelector, QueryTransform), String> {
     let (query, transform): (QueryShape, QueryTransform) = if field.selection_set.items.is_empty() {
         (
@@ -209,7 +271,7 @@ fn parse_field<'src>(
             Box::new(|result| Ok(result.deserialize())),
         )
     } else {
-        parse_selection_set(&field.selection_set, variables)?
+        parse_selection_set(&field.selection_set, variables, fragments)?
     };
     let list_directives = field
         .directives
@@ -236,7 +298,7 @@ fn parse_field<'src>(
     let (query, transform): (QueryShape, QueryTransform) = if field.arguments.is_empty() {
         (query, transform)
     } else {
-        let args = parse_field_arguments(&field.arguments, variables)?;
+        let args = parse_field_arguments(&field.arguments, variables, fragments)?;
         let query = QueryShape::branch(vec![FieldSelector::FunctionField(args, query)]);
         let transform = Box::new(move |result: &SerializedTerm| match result {
             SerializedTerm::List(value) if value.items().len() == 1 => {
@@ -252,13 +314,16 @@ fn parse_field<'src>(
 fn parse_field_arguments<'src>(
     args: &Vec<(&'src str, Value<'src, &'src str>)>,
     variables: &QueryVariables,
+    fragments: &QueryFragments,
 ) -> Result<Vec<Expression>, String> {
     let arg_fields = args
         .iter()
-        .map(|(key, value)| match parse_value(value, variables) {
-            Ok(value) => Ok((String::from(*key), value)),
-            Err(error) => Err(error),
-        })
+        .map(
+            |(key, value)| match parse_value(value, variables, fragments) {
+                Ok(value) => Ok((String::from(*key), value)),
+                Err(error) => Err(error),
+            },
+        )
         .collect::<Result<Vec<_>, _>>()?;
     let arg = create_struct(arg_fields);
     Ok(vec![arg])
@@ -267,6 +332,7 @@ fn parse_field_arguments<'src>(
 fn parse_value<'src>(
     value: &Value<'src, &'src str>,
     variables: &QueryVariables,
+    fragments: &QueryFragments,
 ) -> Result<Expression, String> {
     match value {
         Value::Variable(name) => match variables.get(*name) {
@@ -291,7 +357,7 @@ fn parse_value<'src>(
         Value::List(value) => {
             let values = value
                 .iter()
-                .map(|item| parse_value(item, variables))
+                .map(|item| parse_value(item, variables, fragments))
                 .collect::<Result<Vec<_>, _>>()?;
             Ok(Expression::new(Term::Collection(CollectionTerm::Vector(
                 VectorTerm::new(values),
@@ -300,10 +366,12 @@ fn parse_value<'src>(
         Value::Object(value) => {
             let fields = value
                 .iter()
-                .map(|(key, value)| match parse_value(value, variables) {
-                    Ok(value) => Ok((StringValue::from(*key), value)),
-                    Err(error) => Err(error),
-                })
+                .map(
+                    |(key, value)| match parse_value(value, variables, fragments) {
+                        Ok(value) => Ok((StringValue::from(*key), value)),
+                        Err(error) => Err(error),
+                    },
+                )
                 .collect::<Result<Vec<_>, _>>()?;
             Ok(create_struct(fields))
         }

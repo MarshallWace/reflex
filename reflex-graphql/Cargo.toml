@@ -10,5 +10,6 @@ edition = "2018"
 [dependencies]
 reflex = { path = "../reflex" }
 reflex-json = { path = "../reflex-json" }
+either = "1.6.1"
 graphql-parser = "0.3.0"
 serde_json = "1.0"
