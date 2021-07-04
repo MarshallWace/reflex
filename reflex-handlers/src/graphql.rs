@@ -20,9 +20,9 @@ pub fn handle_graphql_execute(
     args: &[Expression],
     _helpers: &SignalHelpers,
 ) -> Result<SignalResult, String> {
-    if args.len() != 4 {
+    if args.len() != 5 {
         return Err(format!(
-            "Invalid GraphQL signal: Expected 4 arguments, received {}",
+            "Invalid GraphQL signal: Expected 5 arguments, received {}",
             args.len()
         ));
     }
@@ -31,9 +31,11 @@ pub fn handle_graphql_execute(
     let query = parse_string_arg(args.next().unwrap());
     let operation_name = parse_optional_string_arg(args.next().unwrap());
     let variables = parse_object_arg(args.next().unwrap());
-    match (url, query, operation_name, variables) {
-        (Some(url), Some(query), Some(operation_name), Some(variables)) => {
-            let operation = GraphQlOperationPayload::new(query.clone(), operation_name, variables);
+    let extensions = parse_object_arg(args.next().unwrap());
+    match (url, query, operation_name, variables, extensions) {
+        (Some(url), Some(query), Some(operation_name), Some(variables), Some(extensions)) => {
+            let operation =
+                GraphQlOperationPayload::new(query.clone(), operation_name, variables, extensions);
             if url.starts_with("ws") {
                 handle_graphql_ws_operation(&url, operation)
             } else {

@@ -83,6 +83,10 @@ fn create_graphql_client_instance<'a: 'src, 'src>(_schema: &'a Document<&'src st
                                 String::from("variables"),
                             )],
                         ))),
+                        Expression::new(Term::Struct(StructTerm::new(
+                            Some(StructPrototype::new(Vec::new())),
+                            Vec::new(),
+                        ))),
                     ],
                 ))),
             ))),

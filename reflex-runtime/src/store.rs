@@ -142,14 +142,14 @@ type UpdateSet = BTreeSet<StateToken>;
 struct Subscription {
     id: SubscriptionToken,
     expression: Expression,
-    dependencies: Option<(HashId, DependencyList)>,
+    result: Option<(HashId, Expression, DependencyList)>,
 }
 impl Subscription {
     fn new(id: SubscriptionToken, expression: Expression) -> Self {
         Self {
             id,
             expression,
-            dependencies: None,
+            result: None,
         }
     }
     fn execute(
@@ -160,8 +160,8 @@ impl Subscription {
     ) -> Option<Expression> {
         let state_hash = hash_object(&state);
         let is_unchanged = match updates {
-            Some(updates) => match &self.dependencies {
-                Some((previous_state_hash, dependencies)) => {
+            Some(updates) => match &self.result {
+                Some((previous_state_hash, _, dependencies)) => {
                     *previous_state_hash == state_hash || !dependencies.contains(updates)
                 }
                 _ => false,
@@ -173,8 +173,16 @@ impl Subscription {
         }
         let result = self.expression.evaluate(state, cache);
         let (result, dependencies) = result.into_parts();
-        self.dependencies = Some((state_hash, dependencies));
-        Some(result)
+        let updated_result = match &self.result {
+            Some((_, previous_result, _))
+                if (hash_object(&result) == hash_object(previous_result)) =>
+            {
+                None
+            }
+            _ => Some(Expression::clone(&result)),
+        };
+        self.result = Some((state_hash, result, dependencies));
+        updated_result
     }
 }
 

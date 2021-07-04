@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use futures::{SinkExt, StreamExt};
+use futures::{stream, SinkExt, Stream, StreamExt};
 use hyper::{
     header::{self, HeaderValue},
     upgrade::Upgraded,
@@ -11,12 +11,16 @@ use hyper_tungstenite::{
     tungstenite::{error::ProtocolError, Message},
     WebSocketStream,
 };
-use reflex::{core::Expression, serialize};
+use reflex::{
+    core::Expression,
+    serialize::{serialize, SerializedListTerm, SerializedObjectTerm, SerializedTerm},
+    stdlib::value::ValueTerm,
+};
 use reflex_graphql::{
     parse,
     subscriptions::{
         deserialize_graphql_client_message, GraphQlSubscriptionClientMessage,
-        GraphQlSubscriptionServerMessage, SubscriptionId,
+        GraphQlSubscriptionServerMessage, GraphQlSubscriptionStartMessage, SubscriptionId,
     },
     wrap_graphql_error_response, wrap_graphql_success_response, QueryTransform,
 };
@@ -136,38 +140,28 @@ async fn handle_websocket_connection(
                                             .get_mut()
                                             .unwrap()
                                             .insert(subscription_id.clone(), store_id);
-                                        let initial_result = match initial_result {
-                                            None => None,
-                                            Some(initial_result) => Some(match initial_result {
-                                                Err(errors) => Err(errors),
-                                                Ok(result) => {
+
+                                        let store = Arc::clone(&store);
+                                        let results = stream::iter(initial_result.into_iter())
+                                            .chain(store.watch_subscription(store_id))
+                                            .map(move |result| {
+                                                result.and_then(|result| {
                                                     match parse_query_result(&result, &transform) {
                                                         Ok(result) => Ok(result),
                                                         Err(error) => Err(vec![error]),
                                                     }
-                                                }
-                                            }),
+                                                })
+                                            });
+                                        let should_diff = is_diff_subscription(&message);
+                                        let mut results = match should_diff {
+                                            false => results
+                                                .map(|result| result.map(|value| (value, false)))
+                                                .left_stream(),
+                                            true => create_diff_stream(results).right_stream(),
                                         };
-                                        if let Some(initial_value) = initial_result {
-                                            let _ = messages_tx
-                                                .send(format_subscription_result_message(
-                                                    message.subscription_id(),
-                                                    initial_value,
-                                                ))
-                                                .await;
-                                        }
-                                        let store = Arc::clone(&store);
                                         // TODO: Dispose subscription threads
                                         tokio::spawn(async move {
-                                            while let Some(result) =
-                                                store.watch_subscription(store_id).next().await
-                                            {
-                                                let result = result.and_then(|result| {
-                                                    match parse_query_result(&result, &transform) {
-                                                        Ok(result) => Ok(result),
-                                                        Err(error) => Err(vec![error]),
-                                                    }
-                                                });
+                                            while let Some(result) = results.next().await {
                                                 let _ = messages_tx
                                                     .send(format_subscription_result_message(
                                                         message.subscription_id(),
@@ -252,27 +246,148 @@ async fn handle_websocket_connection(
 fn parse_query_result(
     result: &Expression,
     transform: &QueryTransform,
-) -> Result<Expression, String> {
+) -> Result<SerializedTerm, String> {
     match serialize(result.value()) {
-        Ok(value) => transform(&value),
+        Ok(value) => transform(&value).and_then(|result| serialize(result.value())),
         _ => Err(format!("Invalid result type: {}", result)),
+    }
+}
+
+fn is_diff_subscription(message: &GraphQlSubscriptionStartMessage) -> bool {
+    find_serialized_object_property(message.extensions(), "diff")
+        .map(|value| match value {
+            SerializedTerm::Value(ValueTerm::Boolean(value)) => *value == true,
+            _ => false,
+        })
+        .unwrap_or(false)
+}
+
+fn find_serialized_object_property<'a>(
+    value: &'a SerializedObjectTerm,
+    key: &str,
+) -> Option<&'a SerializedTerm> {
+    value.entries().iter().find_map(|(existing_key, value)| {
+        if key == existing_key {
+            Some(value)
+        } else {
+            None
+        }
+    })
+}
+
+fn create_diff_stream(
+    results: impl Stream<Item = Result<SerializedTerm, Vec<String>>>,
+) -> impl Stream<Item = Result<(SerializedTerm, bool), Vec<String>>> {
+    results
+        .scan(None, |previous, value| {
+            let result = match (&previous, &value) {
+                (Some(previous_value), Ok(current_value)) => {
+                    let diff = diff_results(previous_value, current_value);
+                    *previous = value.ok();
+                    Ok(diff.map(|value| (value, true)))
+                }
+                _ => {
+                    *previous = value.as_ref().ok().cloned();
+                    value.map(|value| Some((value, false)))
+                }
+            };
+            Box::pin(async { Some(result) })
+        })
+        .filter_map(|result| {
+            let result = match result {
+                Ok(None) => None,
+                Ok(Some(result)) => Some(Ok(result)),
+                Err(error) => Some(Err(error)),
+            };
+            Box::pin(async { result })
+        })
+}
+
+fn diff_results(previous: &SerializedTerm, current: &SerializedTerm) -> Option<SerializedTerm> {
+    if current == previous {
+        return None;
+    }
+    match previous {
+        SerializedTerm::Value(_) => Some(current.clone()),
+        SerializedTerm::Object(previous) => match current {
+            SerializedTerm::Object(current) => diff_objects(previous, current),
+            _ => Some(current.clone()),
+        },
+        SerializedTerm::List(previous) => match current {
+            SerializedTerm::List(current) => diff_lists(previous, current),
+            _ => Some(current.clone()),
+        },
+    }
+}
+
+fn diff_objects(
+    previous: &SerializedObjectTerm,
+    current: &SerializedObjectTerm,
+) -> Option<SerializedTerm> {
+    let previous_entries = previous
+        .entries()
+        .iter()
+        .map(|(key, value)| (key, value))
+        .collect::<HashMap<_, _>>();
+    let updates =
+        SerializedObjectTerm::new(current.entries().iter().filter_map(|(key, current_value)| {
+            previous_entries.get(key).and_then(|previous_value| {
+                diff_results(previous_value, current_value).map(|value| (key.clone(), value))
+            })
+        }));
+    if updates.entries().is_empty() {
+        None
+    } else {
+        Some(SerializedTerm::Object(updates))
+    }
+}
+
+fn diff_lists(
+    previous: &SerializedListTerm,
+    current: &SerializedListTerm,
+) -> Option<SerializedTerm> {
+    let updates = current
+        .items()
+        .iter()
+        .zip(previous.items().iter())
+        .map(|(current, previous)| diff_results(previous, current))
+        .chain(
+            current
+                .items()
+                .iter()
+                .skip(previous.items().len())
+                .map(|item| Some(item.clone())),
+        )
+        .collect::<Vec<_>>();
+    let updates = SerializedObjectTerm::new(
+        updates
+            .into_iter()
+            .enumerate()
+            .filter_map(|(index, item)| item.map(|value| (index.to_string(), value))),
+    );
+    if updates.entries().is_empty() {
+        None
+    } else {
+        Some(SerializedTerm::Object(updates))
     }
 }
 
 fn format_subscription_result_message(
     subscription_id: &SubscriptionId,
-    value: Result<Expression, Vec<String>>,
+    result: Result<(SerializedTerm, bool), Vec<String>>,
 ) -> GraphQlSubscriptionServerMessage {
-    let result = match value {
-        Err(errors) => Err(errors),
-        Ok(result) => match serialize(result.value()) {
-            Ok(result) => Ok(result),
-            Err(error) => Err(vec![error]),
-        },
-    };
-    let payload = match result {
-        Ok(data) => wrap_graphql_success_response(data),
-        Err(errors) => wrap_graphql_error_response(errors),
-    };
-    GraphQlSubscriptionServerMessage::Data(subscription_id.clone(), payload)
+    match result {
+        Ok((data, is_diff)) => {
+            let payload = wrap_graphql_success_response(data);
+            if is_diff {
+                GraphQlSubscriptionServerMessage::Patch(subscription_id.clone(), payload)
+            } else {
+                GraphQlSubscriptionServerMessage::Data(subscription_id.clone(), payload)
+            }
+        }
+        Err(errors) => {
+            let payload = wrap_graphql_error_response(errors);
+            GraphQlSubscriptionServerMessage::Data(subscription_id.clone(), payload)
+        }
+    }
 }

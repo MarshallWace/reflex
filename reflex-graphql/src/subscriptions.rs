@@ -3,7 +3,7 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use std::iter::{once, FromIterator};
 
-use reflex::serialize::SerializedTerm;
+use reflex::serialize::{SerializedObjectTerm, SerializedTerm};
 use reflex_json::{deserialize, sanitize_term};
 
 use crate::operation::{deserialize_graphql_operation_payload, GraphQlOperationPayload};
@@ -57,7 +57,16 @@ impl GraphQlSubscriptionStartMessage {
         &self.id
     }
     pub fn query(&self) -> &str {
-        &self.payload.query()
+        self.payload.query()
+    }
+    pub fn operation_name(&self) -> Option<&str> {
+        self.payload.operation_name()
+    }
+    pub fn variables(&self) -> &SerializedObjectTerm {
+        self.payload.variables()
+    }
+    pub fn extensions(&self) -> &SerializedObjectTerm {
+        self.payload.extensions()
     }
 }
 
@@ -78,6 +87,7 @@ pub enum GraphQlSubscriptionServerMessage {
     ConnectionAck,
     ConnectionError(String),
     Data(SubscriptionId, SerializedTerm),
+    Patch(SubscriptionId, SerializedTerm),
     Error(SubscriptionId, String),
     Complete(SubscriptionId),
     // TODO: Implement keepalive
@@ -96,6 +106,10 @@ impl GraphQlSubscriptionServerMessage {
             Self::Data(id, payload) => {
                 let payload = sanitize_term(payload.clone())?;
                 Ok(serialize_message("data", Some(id), Some(payload)))
+            }
+            Self::Patch(id, payload) => {
+                let payload = sanitize_term(payload.clone())?;
+                Ok(serialize_message("patch", Some(id), Some(payload)))
             }
             Self::Error(id, error) => Ok(serialize_message(
                 "error",

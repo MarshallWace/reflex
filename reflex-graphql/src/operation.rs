@@ -26,17 +26,20 @@ pub struct GraphQlOperationPayload {
     query: String,
     operation_name: Option<String>,
     variables: SerializedObjectTerm,
+    extensions: SerializedObjectTerm,
 }
 impl GraphQlOperationPayload {
     pub fn new(
         query: String,
         operation_name: Option<String>,
         variables: SerializedObjectTerm,
+        extensions: SerializedObjectTerm,
     ) -> Self {
         Self {
             query,
             operation_name,
             variables,
+            extensions,
         }
     }
     pub fn query(&self) -> &str {
@@ -46,6 +49,12 @@ impl GraphQlOperationPayload {
         self.operation_name
             .as_ref()
             .map(|operation| operation.as_str())
+    }
+    pub fn variables(&self) -> &SerializedObjectTerm {
+        &self.variables
+    }
+    pub fn extensions(&self) -> &SerializedObjectTerm {
+        &self.extensions
     }
     pub(crate) fn serialize(&self) -> Result<serde_json::Value, String> {
         let variables = sanitize_term(SerializedTerm::Object(self.variables.clone()))?;
@@ -95,7 +104,16 @@ pub(crate) fn deserialize_graphql_operation_payload(
         Some(variables) => match deserialize(variables)? {
             SerializedTerm::Value(ValueTerm::Null) => Ok(None),
             SerializedTerm::Object(variables) => Ok(Some(variables)),
-            _ => Err(String::from("Invalid")),
+            _ => Err(String::from("Invalid variables")),
+        },
+    }?
+    .unwrap_or_else(|| SerializedObjectTerm::new(empty()));
+    let extensions = match payload.get("extensions") {
+        None => Ok(None),
+        Some(extensions) => match deserialize(extensions)? {
+            SerializedTerm::Value(ValueTerm::Null) => Ok(None),
+            SerializedTerm::Object(extensions) => Ok(Some(extensions)),
+            _ => Err(String::from("Invalid extensions")),
         },
     }?
     .unwrap_or_else(|| SerializedObjectTerm::new(empty()));
@@ -103,5 +121,6 @@ pub(crate) fn deserialize_graphql_operation_payload(
         String::from(query),
         operation_name,
         variables,
+        extensions,
     ))
 }
