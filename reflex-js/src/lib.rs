@@ -6,7 +6,9 @@ use std::collections::HashMap;
 
 pub mod builtins;
 mod loader;
-pub use loader::{dynamic_module_loader, static_module_loader};
+pub use loader::{
+    compose_module_loaders, create_js_env, create_module_loader, static_module_loader,
+};
 mod parser;
 pub use parser::{parse, parse_module};
 pub mod stdlib {
@@ -19,6 +21,7 @@ pub mod stdlib {
     pub use imports::builtin_imports;
 }
 
+#[derive(Clone)]
 pub struct Env {
     globals: HashMap<&'static str, Expression>,
 }

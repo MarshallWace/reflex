@@ -16,8 +16,9 @@ use reflex::{
 };
 use reflex_cli::parse_cli_args;
 use reflex_handlers::{builtin_signal_handler, debug_signal_handler};
-use reflex_js::{self, dynamic_module_loader, stdlib::builtin_imports};
-use reflex_loaders::builtin_loaders;
+use reflex_js::{
+    self, create_js_env, create_module_loader, stdlib::imports::builtin_imports_loader,
+};
 use reflex_runtime::Runtime;
 use repl::ReplParser;
 
@@ -33,7 +34,7 @@ pub async fn main() {
             Some(value) => match value {
                 "js" | "javascript" => Ok(match args.iter().next() {
                     None => create_js_script_parser(),
-                    Some(path) => create_js_module_parser(path),
+                    Some(path) => create_js_module_parser(path, env::vars()),
                 }),
                 "sexpr" | "lisp" => Ok(create_sexpr_parser()),
                 _ => Err(format!("Invalid --syntax argument: {}", value)),
@@ -142,10 +143,13 @@ fn create_js_script_parser() -> ReplParser {
     Box::new(move |input: &str| reflex_js::parse(input, &env))
 }
 
-fn create_js_module_parser(path: &str) -> ReplParser {
+fn create_js_module_parser(
+    path: &str,
+    env_vars: impl IntoIterator<Item = (String, String)>,
+) -> ReplParser {
     let path = PathBuf::from_str(&path).unwrap();
-    let env = reflex_js::Env::new().with_globals(reflex_js::stdlib::builtin_globals());
-    let loader = dynamic_module_loader(builtin_loaders(), Some(builtin_imports()));
+    let env = create_js_env(env_vars);
+    let loader = create_module_loader(env.clone(), Some(builtin_imports_loader()));
     Box::new(move |input: &str| reflex_js::parse_module(input, &env, &path, &loader))
 }
 

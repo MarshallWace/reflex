@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+use std::path::Path;
+
 use reflex::{
     core::{Expression, StructPrototype, StructTerm, Term},
     stdlib::value::{StringValue, ValueTerm},
@@ -15,6 +17,8 @@ use http::import_http;
 mod utils;
 use utils::import_utils;
 
+use crate::static_module_loader;
+
 pub fn builtin_imports() -> Vec<(&'static str, Expression)> {
     vec![
         ("reflex::utils", import_utils()),
@@ -22,6 +26,10 @@ pub fn builtin_imports() -> Vec<(&'static str, Expression)> {
         ("reflex::graphql", import_graphql()),
         ("reflex::http", import_http()),
     ]
+}
+
+pub fn builtin_imports_loader() -> impl Fn(&str, &Path) -> Option<Result<Expression, String>> {
+    static_module_loader(builtin_imports())
 }
 
 fn create_struct<'a>(fields: impl IntoIterator<Item = (&'a str, Expression)>) -> Expression {

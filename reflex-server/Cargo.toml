@@ -14,7 +14,6 @@ reflex-graphql = { path = "../reflex-graphql" }
 reflex-handlers = { path = "../reflex-handlers" }
 reflex-js = { path = "../reflex-js" }
 reflex-json = { path = "../reflex-json" }
-reflex-loaders = { path = "../reflex-loaders" }
 reflex-runtime = { path = "../reflex-runtime" }
 futures = "*"
 hyper = { version = "0.14", features = ["full"] }

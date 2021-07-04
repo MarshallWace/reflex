@@ -14,6 +14,8 @@ use reflex::{
     },
 };
 
+mod loader;
+pub use loader::graphql_loader;
 mod operation;
 pub use operation::{deserialize_graphql_operation, GraphQlOperationPayload};
 mod query;

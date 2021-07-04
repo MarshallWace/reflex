@@ -91,7 +91,7 @@ pub fn parse_module<'src>(
     input: &'src str,
     env: &Env,
     path: &Path,
-    loader: &impl Fn(&str, &Path) -> Result<Expression, String>,
+    loader: &impl Fn(&str, &Path) -> Option<Result<Expression, String>>,
 ) -> ParserResult<Expression> {
     let program = parse_ast(input)?;
     parse_module_contents(program.into_iter(), env, path, loader)
@@ -130,7 +130,7 @@ fn parse_module_contents<'src>(
     program: impl IntoIterator<Item = ProgramPart<'src>> + ExactSizeIterator,
     env: &Env,
     path: &Path,
-    loader: &impl Fn(&str, &Path) -> Result<Expression, String>,
+    loader: &impl Fn(&str, &Path) -> Option<Result<Expression, String>>,
 ) -> ParserResult<Expression> {
     let num_statements = program.len();
     let (body, import_bindings) = program.into_iter().fold(
@@ -191,13 +191,15 @@ fn parse_module_contents<'src>(
 fn parse_module_import<'src>(
     node: &ModImport<'src>,
     path: &Path,
-    loader: &impl Fn(&str, &Path) -> Result<Expression, String>,
+    loader: &impl Fn(&str, &Path) -> Option<Result<Expression, String>>,
 ) -> ParserResult<Vec<(&'src str, Expression)>> {
     let module_path = match &node.source {
         Lit::String(node) => Ok(parse_string(node)),
         _ => Err(err_unimplemented(node)),
     }?;
-    let module = match loader(&module_path, path) {
+    let module = match loader(&module_path, path)
+        .unwrap_or_else(|| Err(String::from("No compatible loaders registered")))
+    {
         Ok(module) => Ok(module),
         Err(error) => Err(err(
             &format!("Failed to import '{}': {}", module_path, error),

@@ -800,7 +800,6 @@ dependencies = [
  "reflex",
  "reflex-handlers",
  "reflex-js",
- "reflex-loaders",
  "reflex-runtime",
  "tokio",
 ]
@@ -852,16 +851,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "reflex-loaders"
-version = "0.1.0"
-dependencies = [
- "graphql-parser",
- "reflex",
- "reflex-js",
- "reflex-runtime",
-]
-
-[[package]]
 name = "reflex-runtime"
 version = "0.1.0"
 dependencies = [
@@ -883,7 +872,6 @@ dependencies = [
  "reflex-handlers",
  "reflex-js",
  "reflex-json",
- "reflex-loaders",
  "reflex-runtime",
  "serde_json",
  "tokio",

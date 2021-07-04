@@ -12,24 +12,17 @@ use std::{
 
 use crate::graphql_service;
 use hyper::{server::conn::AddrStream, service::make_service_fn, Server};
-use reflex::{
-    cache::GenerationalGc,
-    core::{Expression, Term},
-    stdlib::value::{StringValue, ValueTerm},
-};
+use reflex::{cache::GenerationalGc, core::Expression};
 use reflex_cli::parse_cli_args;
 use reflex_handlers::debug_signal_handler;
-use reflex_js::{
-    parse_module,
-    stdlib::{builtin_globals, global_process},
-    Env,
-};
+use reflex_js::{create_js_env, parse_module};
 use reflex_runtime::{Runtime, SignalHelpers};
 
 pub use reflex;
 pub use reflex_handlers::builtin_signal_handler;
-pub use reflex_js::{dynamic_module_loader, stdlib::builtin_imports};
-pub use reflex_loaders::builtin_loaders;
+pub use reflex_js::{
+    compose_module_loaders, create_module_loader, static_module_loader, stdlib::builtin_imports,
+};
 pub use reflex_runtime::SignalResult;
 
 struct CliArgs {
@@ -43,9 +36,8 @@ pub async fn cli(
         + Send
         + Sync
         + 'static,
-    module_loader: impl Fn(&str, &Path) -> Result<Expression, String>,
+    custom_loader: Option<impl Fn(&str, &Path) -> Option<Result<Expression, String>> + 'static>,
 ) -> Result<(), String> {
-    let env_vars = parse_env_vars(env::vars());
     let config = match parse_command_line_args() {
         Err(error) => Err(error),
         Ok(CliArgs {
@@ -60,7 +52,7 @@ pub async fn cli(
             match entry_point {
                 Err(error) => Err(error),
                 Ok(entry_point) => Ok((
-                    env_vars,
+                    env::vars(),
                     entry_point,
                     SocketAddr::from(([127, 0, 0, 1], port)),
                     debug,
@@ -76,7 +68,7 @@ pub async fn cli(
                 &root_module_path,
                 &root_module_source,
                 env_vars,
-                module_loader,
+                custom_loader,
             ) {
                 Err(error) => Err(format!("Failed to load entry point module: {}", error)),
                 Ok(root) => {
@@ -104,21 +96,12 @@ pub async fn cli(
 fn create_graph_root(
     root_module_path: &Path,
     root_module_source: &str,
-    env_args: impl IntoIterator<Item = (String, Expression)>,
-    module_loader: impl Fn(&str, &Path) -> Result<Expression, String>,
+    env_args: impl IntoIterator<Item = (String, String)>,
+    custom_loader: Option<impl Fn(&str, &Path) -> Option<Result<Expression, String>> + 'static>,
 ) -> Result<Expression, String> {
-    parse_module(
-        root_module_source,
-        &create_env(env_args),
-        root_module_path,
-        &module_loader,
-    )
-}
-
-fn create_env(env_args: impl IntoIterator<Item = (String, Expression)>) -> Env {
-    Env::new()
-        .with_globals(builtin_globals())
-        .with_global("process", global_process(env_args))
+    let env = create_js_env(env_args);
+    let module_loader = create_module_loader(env.clone(), custom_loader);
+    parse_module(root_module_source, &env, root_module_path, &module_loader)
 }
 
 fn create_store<THandler>(signal_handler: THandler) -> Runtime
@@ -184,15 +167,6 @@ fn parse_command_line_args() -> Result<CliArgs, String> {
             }
         }
     }
-}
-
-fn parse_env_vars(vars: env::Vars) -> impl IntoIterator<Item = (String, Expression)> {
-    vars.into_iter().map(|(name, value)| {
-        (
-            name,
-            Expression::new(Term::Value(ValueTerm::String(StringValue::from(value)))),
-        )
-    })
 }
 
 fn load_file(path: &Path) -> Result<String, String> {
