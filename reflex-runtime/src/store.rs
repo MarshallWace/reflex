@@ -1,7 +1,10 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use std::{collections::BTreeSet, num::NonZeroUsize};
+use std::{
+    collections::{hash_map::Entry, BTreeSet, HashMap},
+    num::NonZeroUsize,
+};
 
 use crate::StateUpdate;
 use reflex::{
@@ -12,9 +15,13 @@ use reflex::{
 
 pub type SubscriptionToken = usize;
 
+type SignalCache = HashMap<StateToken, Result<Expression, HandlerError>>;
+type HandlerError = Option<String>;
+
 pub struct Store<T: EvaluationCache> {
     state: DynamicState,
     cache: T,
+    signal_cache: SignalCache,
     subscriptions: Vec<Subscription>,
     subscription_counter: usize,
     is_flushing: bool,
@@ -23,22 +30,23 @@ impl<T: EvaluationCache> Store<T> {
     pub fn new(cache: T, state: Option<DynamicState>) -> Self {
         Self {
             state: state.unwrap_or_else(|| DynamicState::new()),
-            subscriptions: Vec::new(),
             cache,
+            signal_cache: SignalCache::new(),
+            subscriptions: Vec::new(),
             subscription_counter: 0,
             is_flushing: false,
         }
     }
-    pub fn subscribe<THandler, TErr>(
+    pub fn subscribe<THandler>(
         &mut self,
         expression: Expression,
         signal_handler: THandler,
     ) -> (
         SubscriptionToken,
-        Vec<(SubscriptionToken, Result<Expression, Vec<TErr>>)>,
+        Vec<(SubscriptionToken, Result<Expression, Vec<HandlerError>>)>,
     )
     where
-        THandler: Fn(&[Signal]) -> Vec<Result<Expression, TErr>> + Sync + Send,
+        THandler: Fn(&Signal) -> Result<Expression, HandlerError> + Sync + Send,
     {
         self.subscription_counter += 1;
         let id = self.subscription_counter;
@@ -61,13 +69,13 @@ impl<T: EvaluationCache> Store<T> {
             })
             .unwrap_or(false)
     }
-    pub fn update<THandler, TErr>(
+    pub fn update<THandler>(
         &mut self,
         updates: impl IntoIterator<Item = (StateToken, StateUpdate)>,
         signal_handler: THandler,
-    ) -> Vec<(SubscriptionToken, Result<Expression, Vec<TErr>>)>
+    ) -> Vec<(SubscriptionToken, Result<Expression, Vec<HandlerError>>)>
     where
-        THandler: Fn(&[Signal]) -> Vec<Result<Expression, TErr>> + Sync + Send,
+        THandler: Fn(&Signal) -> Result<Expression, HandlerError> + Sync + Send,
     {
         let updates = updates
             .into_iter()
@@ -98,13 +106,13 @@ impl<T: EvaluationCache> Store<T> {
             .collect::<Vec<_>>();
         updates
     }
-    fn flush<'a: 'b, 'b, THandler, TErr: 'b>(
-        &'a mut self,
+    fn flush<THandler>(
+        &mut self,
         updates: Option<UpdateBatch>,
         signal_handler: THandler,
-    ) -> impl IntoIterator<Item = (&Subscription, Result<Expression, Vec<TErr>>)> + 'b
+    ) -> impl IntoIterator<Item = (&Subscription, Result<Expression, Vec<HandlerError>>)>
     where
-        THandler: Fn(&[Signal]) -> Vec<Result<Expression, TErr>> + Sync + Send,
+        THandler: Fn(&Signal) -> Result<Expression, HandlerError> + Sync + Send,
     {
         if self.is_flushing {
             panic!("Flush already in progress");
@@ -121,6 +129,7 @@ impl<T: EvaluationCache> Store<T> {
             signal_handler,
             &mut self.state,
             &mut self.cache,
+            &mut self.signal_cache,
             match updates {
                 Some(updates) => vec![updates],
                 None => Vec::new(),
@@ -200,12 +209,12 @@ fn combine_updates<'a>(updates: impl IntoIterator<Item = &'a UpdateSet>) -> Opti
     }
 }
 
-struct FlushTask<'a, TErr> {
+struct FlushTask<'a> {
     subscription: &'a mut Subscription,
-    result: Option<Result<Expression, Vec<TErr>>>,
+    result: Option<Result<Expression, Vec<HandlerError>>>,
     latest_update_batch: Option<NonZeroUsize>,
 }
-impl<'a, TErr> FlushTask<'a, TErr> {
+impl<'a> FlushTask<'a> {
     fn new(subscription: &'a mut Subscription) -> Self {
         Self {
             subscription,
@@ -239,15 +248,16 @@ impl UpdateBatch {
     }
 }
 
-fn flush_recursive<'a, THandler, TErr>(
-    mut tasks: Vec<FlushTask<'a, TErr>>,
+fn flush_recursive<'a, THandler>(
+    mut tasks: Vec<FlushTask<'a>>,
     signal_handler: THandler,
     state: &mut DynamicState,
     cache: &mut impl EvaluationCache,
+    signal_cache: &mut SignalCache,
     mut update_batches: Vec<UpdateBatch>,
-) -> Vec<Option<Result<Expression, Vec<TErr>>>>
+) -> Vec<Option<Result<Expression, Vec<HandlerError>>>>
 where
-    THandler: Fn(&[Signal]) -> Vec<Result<Expression, TErr>>,
+    THandler: Fn(&Signal) -> Result<Expression, HandlerError>,
 {
     let current_batch_index = NonZeroUsize::new(update_batches.len());
     for task in tasks.iter_mut() {
@@ -269,23 +279,27 @@ where
             None => None,
             Some(result) => match result.value() {
                 Term::Signal(term) => {
-                    let signals = &term
-                        .signals()
-                        .into_iter()
-                        .map(|signal| signal.clone())
-                        .collect::<Vec<_>>();
-                    let results = signal_handler(&signals);
-                    if results.len() != signals.len() {
-                        panic!("Invalid signal handler result");
-                    }
-                    let updates = signals.iter().zip(results.into_iter()).map(
-                        |(signal, result)| match result {
-                            Ok(result) => Ok((signal.id(), result)),
-                            Err(error) => Err(error),
-                        },
-                    );
-                    let (updates, errors): (Vec<_>, Vec<_>) = partition_results(updates);
-                    // TODO: Investigate storing signal handler result subscriptions/dependencies
+                    let results = term.signals().into_iter().map(|signal| {
+                        let signal_id = signal.id();
+                        match signal_cache.entry(signal_id) {
+                            Entry::Occupied(entry) => match entry.get() {
+                                Ok(result) => Ok((signal_id, Expression::clone(result))),
+                                Err(error) => Err(error.clone()),
+                            },
+                            Entry::Vacant(entry) => {
+                                let result = signal_handler(signal);
+                                entry.insert(match &result {
+                                    Ok(result) => Ok(Expression::clone(result)),
+                                    Err(error) => Err(error.as_ref().cloned()),
+                                });
+                                match result {
+                                    Ok(result) => Ok((signal_id, result)),
+                                    Err(error) => Err(error),
+                                }
+                            }
+                        }
+                    });
+                    let (updates, errors): (Vec<_>, Vec<_>) = partition_results(results);
                     Some(Err((updates, errors)))
                 }
                 _ => Some(Ok(result)),
@@ -309,7 +323,14 @@ where
                 for (key, value) in updates {
                     state.set(key, value);
                 }
-                return flush_recursive(tasks, signal_handler, state, cache, update_batches);
+                return flush_recursive(
+                    tasks,
+                    signal_handler,
+                    state,
+                    cache,
+                    signal_cache,
+                    update_batches,
+                );
             }
             _ => {}
         }

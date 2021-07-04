@@ -49,7 +49,7 @@ impl<'a> SignalHelpers<'a> {
                 Ok((Expression::new(Term::Signal(SignalTerm::new(signal))), None))
             }
             SignalType::Custom(signal_type) => {
-                handle_signal(&self.handler, signal_type, signal.args(), &self.commands)
+                handle_custom_signal(&self.handler, signal_type, signal.args(), &self.commands)
             }
         }
     }
@@ -385,8 +385,8 @@ fn process_subscribe_command<THandler, TCache: EvaluationCache>(
 {
     let expression = command.payload;
     let (subscription_id, results) = {
-        store.get_mut().unwrap().subscribe(expression, |signals| {
-            handle_signals(signals, commands_tx, signal_handler)
+        store.get_mut().unwrap().subscribe(expression, |signal| {
+            handle_signal(signal, commands_tx, signal_handler)
         })
     };
     let (initial_value, results): (Vec<_>, Vec<_>) = results
@@ -438,8 +438,8 @@ fn process_update_command<THandler, TCache: EvaluationCache>(
 {
     let updates = command.payload;
     let results = {
-        store.get_mut().unwrap().update(updates, |signals| {
-            handle_signals(signals, commands_tx, signal_handler)
+        store.get_mut().unwrap().update(updates, |signal| {
+            handle_signal(signal, commands_tx, signal_handler)
         })
     };
     let results = results
@@ -511,81 +511,63 @@ async fn stop_subscription(id: SubscriptionId, channel: &CommandChannel) -> Resu
     }
 }
 
-fn handle_signals<THandler>(
-    signals: &[Signal],
+fn handle_signal<THandler>(
+    signal: &Signal,
     commands: &CommandChannel,
     signal_handler: &THandler,
-) -> Vec<Result<Expression, Option<String>>>
+) -> Result<Expression, Option<String>>
 where
     THandler: Fn(&str, &[Expression], &SignalHelpers) -> Option<Result<SignalResult, String>>
         + Send
         + Sync
         + 'static,
 {
-    let (results, effects) = signals
-        .iter()
-        .map(|signal| match signal.get_type() {
-            SignalType::Error => (Err(Some(parse_error_signal_message(signal.args()))), None),
-            SignalType::Pending => (Err(None), None),
-            SignalType::Custom(signal_type) => {
-                match handle_signal(signal_handler, signal_type, signal.args(), commands) {
-                    Err(error) => (Err(Some(error)), None),
-                    Ok((result, effect)) => (Ok(result), effect),
-                }
+    let (result, effect) = match signal.get_type() {
+        SignalType::Error => (Err(Some(parse_error_signal_message(signal.args()))), None),
+        SignalType::Pending => (Err(None), None),
+        SignalType::Custom(signal_type) => {
+            match handle_custom_signal(signal_handler, signal_type, signal.args(), commands) {
+                Err(error) => (Err(Some(error)), None),
+                Ok((result, effect)) => (Ok(result), effect),
             }
-        })
-        .zip(signals.iter())
-        .fold(
-            (
-                Vec::with_capacity(signals.len()),
-                Vec::with_capacity(signals.len()),
-            ),
-            |(mut results, mut effects), ((result, effect), signal)| {
-                results.push(result);
-                if let Some(effect) = effect {
-                    effects.push((signal.id(), effect));
-                }
-                return (results, effects);
-            },
-        );
+        }
+    };
 
-    apply_effects(effects, commands);
+    if let Some(effect) = effect {
+        apply_signal_effect(signal, effect, commands);
+    }
 
-    results
+    result
 }
 
-fn apply_effects(
-    effects: impl IntoIterator<Item = (StateToken, RuntimeEffect)>,
-    commands: &CommandChannel,
-) {
-    for (id, effect) in effects {
-        let commands = commands.clone();
-        match effect {
-            RuntimeEffect::Assignment(updates) => {
-                tokio::spawn(async move {
-                    for (id, update) in updates {
-                        emit_update(id, update, &commands).await
-                    }
-                });
-            }
-            RuntimeEffect::Async(effect) => {
-                tokio::spawn(async move {
-                    let value = effect.await;
+fn apply_signal_effect(signal: &Signal, effect: RuntimeEffect, commands: &CommandChannel) {
+    let id = signal.id();
+    let commands = commands.clone();
+    match effect {
+        RuntimeEffect::Assignment(updates) => {
+            tokio::spawn(async move {
+                for (id, update) in updates {
+                    emit_update(id, update, &commands).await
+                }
+            });
+        }
+        RuntimeEffect::Async(effect) => {
+            tokio::spawn(async move {
+                let value = effect.await;
+                emit_update(id, StateUpdate::Value(value), &commands).await
+            });
+        }
+        RuntimeEffect::Stream(mut effect) => {
+            tokio::spawn(async move {
+                while let Some(value) = effect.next().await {
                     emit_update(id, StateUpdate::Value(value), &commands).await
-                });
-            }
-            RuntimeEffect::Stream(mut effect) => {
-                tokio::spawn(async move {
-                    while let Some(value) = effect.next().await {
-                        emit_update(id, StateUpdate::Value(value), &commands).await
-                    }
-                });
-            }
+                }
+            });
         }
     }
 }
 
-fn handle_signal<'a, THandler>(
+fn handle_custom_signal<'a, THandler>(
     signal_handler: &THandler,
     signal_type: &str,
     args: &[Expression],
