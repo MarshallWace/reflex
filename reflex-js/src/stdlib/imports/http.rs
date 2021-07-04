@@ -16,10 +16,7 @@ use reflex::{
     },
 };
 
-use crate::{
-    builtins::flatten_deep,
-    stdlib::{global_json_parse, imports::create_struct},
-};
+use crate::stdlib::{global_json_parse, imports::create_struct};
 
 pub(crate) fn import_http() -> Expression {
     create_struct(vec![
@@ -124,7 +121,7 @@ fn import_http_fetch() -> Expression {
                                 ],
                             ))),
                             Expression::new(Term::Application(ApplicationTerm::new(
-                                flatten_deep(),
+                                Expression::new(Term::Builtin(BuiltinTerm::ResolveDeep)),
                                 vec![Expression::new(Term::Application(ApplicationTerm::new(
                                     Expression::new(Term::Builtin(BuiltinTerm::Get)),
                                     vec![

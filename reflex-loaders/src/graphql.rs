@@ -14,7 +14,6 @@ use reflex::{
         value::{StringValue, ValueTerm},
     },
 };
-use reflex_js::builtins::flatten_deep;
 
 pub fn graphql_loader(import_path: &str, module_path: &Path) -> Option<Result<Expression, String>> {
     if !import_path.ends_with(".graphql") {
@@ -77,7 +76,7 @@ fn create_graphql_client_instance<'a: 'src, 'src>(_schema: &'a Document<&'src st
                         ),
                         Expression::new(Term::Value(ValueTerm::Null)),
                         Expression::new(Term::Application(ApplicationTerm::new(
-                            flatten_deep(),
+                            Expression::new(Term::Builtin(BuiltinTerm::ResolveDeep)),
                             vec![get_struct_field(
                                 Expression::new(Term::Variable(VariableTerm::scoped(0))),
                                 String::from("variables"),

@@ -6,14 +6,13 @@ use std::any::TypeId;
 use reflex::{
     core::{
         ApplicationTerm, Arity, EnumIndex, EnumTerm, EnumVariantPrototype, Expression, LambdaTerm,
-        NativeFunction, Signal, SignalTerm, StructTerm, Term, VarArgs,
-        VariableTerm,
+        NativeFunction, Signal, SignalTerm, StructTerm, Term, VarArgs, VariableTerm,
     },
     hash::{hash_object, HashId},
-    stdlib::{signal::SignalType, value::ValueTerm},
+    stdlib::{builtin::BuiltinTerm, signal::SignalType, value::ValueTerm},
 };
 
-use crate::{builtins::flatten_deep, stdlib::imports::create_struct};
+use crate::stdlib::imports::create_struct;
 
 pub(crate) fn import_types() -> Expression {
     let null = Expression::new(Term::Value(ValueTerm::Null));
@@ -41,7 +40,7 @@ pub(crate) fn import_types() -> Expression {
                         EnumTypeFactory::apply,
                     ))),
                     vec![Expression::new(Term::Application(ApplicationTerm::new(
-                        flatten_deep(),
+                        Expression::new(Term::Builtin(BuiltinTerm::ResolveDeep)),
                         vec![Expression::new(Term::Variable(VariableTerm::scoped(0)))],
                     )))],
                 ))),

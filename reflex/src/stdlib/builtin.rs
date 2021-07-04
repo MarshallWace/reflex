@@ -83,6 +83,8 @@ mod reduce;
 use reduce::Reduce;
 mod remainder;
 use remainder::Remainder;
+mod resolve_deep;
+use resolve_deep::ResolveDeep;
 mod round;
 use round::Round;
 mod slice;
@@ -150,6 +152,7 @@ pub enum BuiltinTerm {
     PushFront,
     Reduce,
     Remainder,
+    ResolveDeep,
     Round,
     Slice,
     StartsWith,
@@ -206,6 +209,7 @@ impl BuiltinTerm {
             Self::PushFront => PushFront::arity(),
             Self::Reduce => Reduce::arity(),
             Self::Remainder => Remainder::arity(),
+            Self::ResolveDeep => ResolveDeep::arity(),
             Self::Round => Round::arity(),
             Self::Slice => Slice::arity(),
             Self::StartsWith => StartsWith::arity(),
@@ -266,6 +270,7 @@ impl BuiltinTerm {
             Self::Reduce => Reduce::apply(args),
             Self::Slice => Slice::apply(args),
             Self::Remainder => Remainder::apply(args),
+            Self::ResolveDeep => ResolveDeep::apply(args),
             Self::Round => Round::apply(args),
             Self::StartsWith => StartsWith::apply(args),
             Self::Struct => Struct::apply(args),

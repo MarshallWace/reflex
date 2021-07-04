@@ -10,6 +10,7 @@ use reflex::{
     },
     hash::{hash_object, HashId},
     stdlib::{
+        builtin::BuiltinTerm,
         collection::{vector::VectorTerm, CollectionTerm},
         signal::SignalType,
         value::{StringValue, ValueTerm},
@@ -17,7 +18,7 @@ use reflex::{
 };
 use reflex_json::parse;
 
-use crate::{builtins::flatten_deep, stdlib::globals::create_struct};
+use crate::stdlib::globals::create_struct;
 
 pub(crate) fn global_json() -> Expression {
     create_struct(vec![
@@ -71,7 +72,7 @@ pub fn global_json_stringify() -> Expression {
                 JsonStringify::apply,
             ))),
             vec![Expression::new(Term::Application(ApplicationTerm::new(
-                flatten_deep(),
+                Expression::new(Term::Builtin(BuiltinTerm::ResolveDeep)),
                 vec![Expression::new(Term::Variable(VariableTerm::scoped(0)))],
             )))],
         ))),
