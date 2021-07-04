@@ -101,7 +101,12 @@ async fn handle_websocket_connection(
                         .await;
                 }
                 GraphQlSubscriptionClientMessage::Start(message) => {
-                    match parse(message.query(), &root) {
+                    let variables = message
+                        .variables()
+                        .entries()
+                        .iter()
+                        .map(|(key, value)| (key.as_str(), value.deserialize()));
+                    match parse(message.query(), variables, &root) {
                         Err(error) => {
                             let _ = messages_tx
                                 .send(GraphQlSubscriptionServerMessage::ConnectionError(format!(

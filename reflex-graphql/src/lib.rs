@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use std::iter::once;
+use std::{collections::HashMap, iter::once};
 
 use graphql_parser::{parse_query, query::*};
 use reflex::{
@@ -24,8 +24,15 @@ pub use query::{QueryShape, QueryTransform};
 
 pub mod subscriptions;
 
-pub fn parse(source: &str, root: &Expression) -> Result<(Expression, QueryTransform), String> {
-    match parse_graphql_query(source) {
+type QueryVariables<'a> = HashMap<&'a str, Expression>;
+
+pub fn parse<'v>(
+    source: &str,
+    variables: impl IntoIterator<Item = (&'v str, Expression)>,
+    root: &Expression,
+) -> Result<(Expression, QueryTransform), String> {
+    let variables = variables.into_iter().collect::<HashMap<_, _>>();
+    match parse_graphql_query(source, &variables) {
         Ok((shape, transform)) => {
             let expression = query(Expression::clone(root), &shape);
             Ok((expression, transform))
@@ -45,15 +52,18 @@ pub fn create_introspection_query_response() -> Expression {
 
 const DEFAULT_OPERATION_TYPE: &str = "query";
 
-fn parse_graphql_query(source: &str) -> Result<(QueryShape, QueryTransform), String> {
+fn parse_graphql_query(
+    source: &str,
+    variables: &QueryVariables,
+) -> Result<(QueryShape, QueryTransform), String> {
     match parse_query::<&str>(source) {
         Ok(document) => match get_root_operation(&document) {
             Err(error) => Err(error),
             Ok(root) => match root {
                 OperationDefinition::SelectionSet(selection_set) => {
-                    parse_root_operation(DEFAULT_OPERATION_TYPE, selection_set)
+                    parse_root_operation(DEFAULT_OPERATION_TYPE, selection_set, variables)
                 }
-                _ => parse_operation(root),
+                _ => parse_operation(root, variables),
             },
         },
         Err(error) => Err(format!("{}", error)),
@@ -98,38 +108,45 @@ fn get_root_operation<'src, 'a>(
 
 fn parse_operation<'src>(
     operation: &OperationDefinition<'src, &'src str>,
+    variables: &QueryVariables,
 ) -> Result<(QueryShape, QueryTransform), String> {
     match operation {
-        OperationDefinition::Query(operation) => parse_query_operation(operation),
-        OperationDefinition::Mutation(operation) => parse_mutation_operation(operation),
-        OperationDefinition::Subscription(operation) => parse_subscription_operation(operation),
-        OperationDefinition::SelectionSet(selection) => parse_selection_set(selection),
+        OperationDefinition::Query(operation) => parse_query_operation(operation, variables),
+        OperationDefinition::Mutation(operation) => parse_mutation_operation(operation, variables),
+        OperationDefinition::Subscription(operation) => {
+            parse_subscription_operation(operation, variables)
+        }
+        OperationDefinition::SelectionSet(selection) => parse_selection_set(selection, variables),
     }
 }
 
 fn parse_query_operation<'src>(
     operation: &Query<'src, &'src str>,
+    variables: &QueryVariables,
 ) -> Result<(QueryShape, QueryTransform), String> {
-    parse_root_operation("query", &operation.selection_set)
+    parse_root_operation("query", &operation.selection_set, variables)
 }
 
 fn parse_mutation_operation<'src>(
     operation: &Mutation<'src, &'src str>,
+    variables: &QueryVariables,
 ) -> Result<(QueryShape, QueryTransform), String> {
-    parse_root_operation("mutation", &operation.selection_set)
+    parse_root_operation("mutation", &operation.selection_set, variables)
 }
 
 fn parse_subscription_operation<'src>(
     operation: &Subscription<'src, &'src str>,
+    variables: &QueryVariables,
 ) -> Result<(QueryShape, QueryTransform), String> {
-    parse_root_operation("subscription", &operation.selection_set)
+    parse_root_operation("subscription", &operation.selection_set, variables)
 }
 
 fn parse_root_operation<'src>(
     operation_type: &str,
     selection_set: &SelectionSet<'src, &'src str>,
+    variables: &QueryVariables,
 ) -> Result<(QueryShape, QueryTransform), String> {
-    let (inner_query, inner_transform) = parse_selection_set(selection_set)?;
+    let (inner_query, inner_transform) = parse_selection_set(selection_set, variables)?;
     let query = QueryShape::branch(vec![FieldSelector::NamedField(
         ValueTerm::String(StringValue::from(operation_type)),
         inner_query,
@@ -145,13 +162,14 @@ fn parse_root_operation<'src>(
 
 fn parse_selection_set<'src>(
     selection_set: &SelectionSet<'src, &'src str>,
+    variables: &QueryVariables,
 ) -> Result<(QueryShape, QueryTransform), String> {
     let fields = selection_set
         .items
         .iter()
         .map(|field| match field {
             Selection::Field(field) => {
-                let (query, transform) = parse_field(field)?;
+                let (query, transform) = parse_field(field, variables)?;
                 let key = field.alias.unwrap_or(field.name);
                 Ok((query, (String::from(key), transform)))
             }
@@ -183,6 +201,7 @@ fn parse_selection_set<'src>(
 
 fn parse_field<'src>(
     field: &Field<'src, &'src str>,
+    variables: &QueryVariables,
 ) -> Result<(FieldSelector, QueryTransform), String> {
     let (query, transform): (QueryShape, QueryTransform) = if field.selection_set.items.is_empty() {
         (
@@ -190,7 +209,7 @@ fn parse_field<'src>(
             Box::new(|result| Ok(result.deserialize())),
         )
     } else {
-        parse_selection_set(&field.selection_set)?
+        parse_selection_set(&field.selection_set, variables)?
     };
     let list_directives = field
         .directives
@@ -217,7 +236,7 @@ fn parse_field<'src>(
     let (query, transform): (QueryShape, QueryTransform) = if field.arguments.is_empty() {
         (query, transform)
     } else {
-        let args = parse_field_arguments(&field.arguments)?;
+        let args = parse_field_arguments(&field.arguments, variables)?;
         let query = QueryShape::branch(vec![FieldSelector::FunctionField(args, query)]);
         let transform = Box::new(move |result: &SerializedTerm| match result {
             SerializedTerm::List(value) if value.items().len() == 1 => {
@@ -232,10 +251,11 @@ fn parse_field<'src>(
 
 fn parse_field_arguments<'src>(
     args: &Vec<(&'src str, Value<'src, &'src str>)>,
+    variables: &QueryVariables,
 ) -> Result<Vec<Expression>, String> {
     let arg_fields = args
         .iter()
-        .map(|(key, value)| match parse_value(value) {
+        .map(|(key, value)| match parse_value(value, variables) {
             Ok(value) => Ok((String::from(*key), value)),
             Err(error) => Err(error),
         })
@@ -244,9 +264,15 @@ fn parse_field_arguments<'src>(
     Ok(vec![arg])
 }
 
-fn parse_value<'src>(value: &Value<'src, &'src str>) -> Result<Expression, String> {
+fn parse_value<'src>(
+    value: &Value<'src, &'src str>,
+    variables: &QueryVariables,
+) -> Result<Expression, String> {
     match value {
-        Value::Variable(_) => Err(String::from("Query variables not yet implemented")),
+        Value::Variable(name) => match variables.get(*name) {
+            Some(value) => Ok(Expression::clone(value)),
+            None => Err(format!("Missing query variable: {}", name)),
+        },
         Value::Int(value) => Ok(Expression::new(Term::Value(ValueTerm::Float(
             value
                 .as_i64()
@@ -265,7 +291,7 @@ fn parse_value<'src>(value: &Value<'src, &'src str>) -> Result<Expression, Strin
         Value::List(value) => {
             let values = value
                 .iter()
-                .map(parse_value)
+                .map(|item| parse_value(item, variables))
                 .collect::<Result<Vec<_>, _>>()?;
             Ok(Expression::new(Term::Collection(CollectionTerm::Vector(
                 VectorTerm::new(values),
@@ -274,7 +300,7 @@ fn parse_value<'src>(value: &Value<'src, &'src str>) -> Result<Expression, Strin
         Value::Object(value) => {
             let fields = value
                 .iter()
-                .map(|(key, value)| match parse_value(value) {
+                .map(|(key, value)| match parse_value(value, variables) {
                     Ok(value) => Ok((StringValue::from(*key), value)),
                     Err(error) => Err(error),
                 })

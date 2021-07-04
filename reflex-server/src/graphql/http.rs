@@ -3,7 +3,12 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use crate::create_http_response;
 use hyper::{header, Body, Request, Response, StatusCode};
-use reflex::{core::Expression, hash::hash_object, serialize, serialize::SerializedTerm};
+use reflex::{
+    core::Expression,
+    hash::hash_object,
+    serialize::SerializedTerm,
+    serialize::{serialize, SerializedObjectTerm},
+};
 use reflex_graphql::{
     create_introspection_query_response, deserialize_graphql_operation,
     wrap_graphql_error_response, wrap_graphql_success_response, QueryTransform,
@@ -103,7 +108,10 @@ async fn parse_graphql_request(
     }
     .ok_or_else(|| String::from("Invalid request body"));
     let result = content_type.and_then(|content_type| match content_type.as_str() {
-        "application/graphql" => body.and_then(|body| parse_request_body_graphql(&body, &root)),
+        "application/graphql" => body.and_then(|body| {
+            let variables = SerializedObjectTerm::new(Vec::new());
+            parse_request_body_graphql(&body, &variables, &root)
+        }),
         "application/json" => body.and_then(|body| parse_request_body_graphql_json(&body, &root)),
         _ => Err(String::from("Unsupported Content-Type header")),
     });
@@ -112,9 +120,14 @@ async fn parse_graphql_request(
 
 fn parse_request_body_graphql(
     body: &str,
+    variables: &SerializedObjectTerm,
     root: &Expression,
 ) -> Result<(Expression, QueryTransform), String> {
-    reflex_graphql::parse(body, root)
+    let variables = variables
+        .entries()
+        .iter()
+        .map(|(key, value)| (key.as_str(), value.deserialize()));
+    reflex_graphql::parse(body, variables, root)
 }
 
 fn parse_request_body_graphql_json(
@@ -130,7 +143,7 @@ fn parse_request_body_graphql_json(
                     Box::new(|value: &SerializedTerm| Ok(value.deserialize()));
                 Ok((expression, transform))
             }
-            _ => parse_request_body_graphql(message.query(), &root),
+            _ => parse_request_body_graphql(message.query(), message.variables(), &root),
         },
     }
 }
