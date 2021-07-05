@@ -1,14 +1,19 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use std::{collections::HashMap, iter::once};
+use std::{any::TypeId, collections::HashMap, iter::once};
 
 use either::Either;
 use graphql_parser::{parse_query, query::*};
 use reflex::{
-    core::{Expression, Signal, SignalTerm, StructPrototype, StructTerm, Term},
+    core::{
+        ApplicationTerm, Arity, Expression, LambdaTerm, NativeFunction, Signal, SignalTerm,
+        StackOffset, StructPrototype, StructTerm, Term, VariableTerm,
+    },
+    hash::{hash_object, HashId},
     serialize::{SerializedListTerm, SerializedObjectTerm, SerializedTerm},
     stdlib::{
+        builtin::BuiltinTerm,
         collection::{vector::VectorTerm, CollectionTerm},
         signal::SignalType,
         value::{StringValue, ValueTerm},
@@ -19,29 +24,11 @@ mod loader;
 pub use loader::graphql_loader;
 mod operation;
 pub use operation::{deserialize_graphql_operation, GraphQlOperationPayload};
-mod query;
-use query::{query, FieldSelector};
-pub use query::{QueryShape, QueryTransform};
 
 pub mod subscriptions;
 
 type QueryVariables<'a> = HashMap<&'a str, Expression>;
 type QueryFragments<'a> = HashMap<&'a str, &'a FragmentDefinition<'a, &'a str>>;
-
-pub fn parse<'v>(
-    source: &str,
-    variables: impl IntoIterator<Item = (&'v str, Expression)>,
-    root: &Expression,
-) -> Result<(Expression, QueryTransform), String> {
-    let variables = variables.into_iter().collect::<HashMap<_, _>>();
-    match parse_graphql_query(source, &variables) {
-        Ok((shape, transform)) => {
-            let expression = query(Expression::clone(root), &shape);
-            Ok((expression, transform))
-        }
-        Err(error) => Err(error),
-    }
-}
 
 pub fn create_introspection_query_response() -> Expression {
     Expression::new(Term::Signal(SignalTerm::new(Signal::new(
@@ -50,39 +37,6 @@ pub fn create_introspection_query_response() -> Expression {
             StringValue::from("Introspection query not yet implemented"),
         )))],
     ))))
-}
-
-const DEFAULT_OPERATION_TYPE: &str = "query";
-
-fn parse_graphql_query(
-    source: &str,
-    variables: &QueryVariables,
-) -> Result<(QueryShape, QueryTransform), String> {
-    match parse_query::<&str>(source) {
-        Ok(document) => {
-            let fragments = document
-                .definitions
-                .iter()
-                .filter_map(|definition| match definition {
-                    Definition::Fragment(fragment) => Some((fragment.name, fragment)),
-                    _ => None,
-                })
-                .collect::<QueryFragments>();
-            match get_root_operation(&document) {
-                Err(error) => Err(error),
-                Ok(root) => match root {
-                    OperationDefinition::SelectionSet(selection_set) => parse_root_operation(
-                        DEFAULT_OPERATION_TYPE,
-                        selection_set,
-                        variables,
-                        &fragments,
-                    ),
-                    _ => parse_operation(root, variables, &fragments),
-                },
-            }
-        }
-        Err(error) => Err(format!("{}", error)),
-    }
 }
 
 pub fn wrap_graphql_success_response(value: SerializedTerm) -> SerializedTerm {
@@ -101,6 +55,40 @@ pub fn wrap_graphql_error_response(errors: Vec<String>) -> SerializedTerm {
                 .map(|error| SerializedTerm::Value(ValueTerm::String(error))),
         )),
     ))))
+}
+
+const DEFAULT_OPERATION_TYPE: &str = "query";
+
+pub fn parse<'v>(
+    source: &str,
+    variables: impl IntoIterator<Item = (&'v str, Expression)>,
+) -> Result<Expression, String> {
+    let variables = &variables.into_iter().collect::<QueryVariables>();
+    match parse_query::<&str>(source) {
+        Ok(document) => {
+            let fragments = document
+                .definitions
+                .iter()
+                .filter_map(|definition| match definition {
+                    Definition::Fragment(fragment) => Some((fragment.name, fragment)),
+                    _ => None,
+                })
+                .collect::<QueryFragments>();
+            match get_root_operation(&document) {
+                Err(error) => Err(error),
+                Ok(operation) => match operation {
+                    OperationDefinition::SelectionSet(selection_set) => parse_root_operation(
+                        DEFAULT_OPERATION_TYPE,
+                        selection_set,
+                        variables,
+                        &fragments,
+                    ),
+                    _ => parse_operation(operation, variables, &fragments),
+                },
+            }
+        }
+        Err(error) => Err(format!("{}", error)),
+    }
 }
 
 fn get_root_operation<'src, 'a>(
@@ -125,7 +113,7 @@ fn parse_operation<'src>(
     operation: &OperationDefinition<'src, &'src str>,
     variables: &QueryVariables,
     fragments: &QueryFragments,
-) -> Result<(QueryShape, QueryTransform), String> {
+) -> Result<Expression, String> {
     match operation {
         OperationDefinition::Query(operation) => {
             parse_query_operation(operation, variables, fragments)
@@ -146,7 +134,7 @@ fn parse_query_operation<'src>(
     operation: &Query<'src, &'src str>,
     variables: &QueryVariables,
     fragments: &QueryFragments,
-) -> Result<(QueryShape, QueryTransform), String> {
+) -> Result<Expression, String> {
     parse_root_operation("query", &operation.selection_set, variables, fragments)
 }
 
@@ -154,7 +142,7 @@ fn parse_mutation_operation<'src>(
     operation: &Mutation<'src, &'src str>,
     variables: &QueryVariables,
     fragments: &QueryFragments,
-) -> Result<(QueryShape, QueryTransform), String> {
+) -> Result<Expression, String> {
     parse_root_operation("mutation", &operation.selection_set, variables, fragments)
 }
 
@@ -162,7 +150,7 @@ fn parse_subscription_operation<'src>(
     operation: &Subscription<'src, &'src str>,
     variables: &QueryVariables,
     fragments: &QueryFragments,
-) -> Result<(QueryShape, QueryTransform), String> {
+) -> Result<Expression, String> {
     parse_root_operation(
         "subscription",
         &operation.selection_set,
@@ -176,66 +164,73 @@ fn parse_root_operation<'src>(
     selection_set: &SelectionSet<'src, &'src str>,
     variables: &QueryVariables,
     fragments: &QueryFragments,
-) -> Result<(QueryShape, QueryTransform), String> {
-    let (inner_query, inner_transform) = parse_selection_set(selection_set, variables, fragments)?;
-    let query = QueryShape::branch(vec![FieldSelector::NamedField(
-        ValueTerm::String(StringValue::from(operation_type)),
-        inner_query,
-    )]);
-    let transform = Box::new(move |result: &SerializedTerm| match result {
-        SerializedTerm::List(value) if value.items().len() == 1 => {
-            inner_transform(value.items().iter().next().unwrap())
-        }
-        _ => Err(format!("Invalid root operation result: {}", result)),
-    });
-    Ok((query, transform))
+) -> Result<Expression, String> {
+    let query = parse_selection_set(selection_set, variables, fragments)?;
+    Ok(create_lambda(
+        Arity::from(1, 0, None),
+        create_function_application(
+            query,
+            vec![create_function_application(
+                create_builtin(BuiltinTerm::Get),
+                vec![
+                    create_scoped_variable(0),
+                    create_string(String::from(operation_type)),
+                ],
+            )],
+        ),
+    ))
 }
 
 fn parse_selection_set<'src>(
     selection_set: &SelectionSet<'src, &'src str>,
     variables: &QueryVariables,
     fragments: &QueryFragments,
-) -> Result<(QueryShape, QueryTransform), String> {
-    let fields = parse_selection_set_fields(selection_set, variables, fragments)?;
-    let (field_queries, field_transforms): (Vec<_>, Vec<_>) = fields.into_iter().unzip();
-    let query = QueryShape::branch(field_queries);
-    let transform = Box::new(move |result: &SerializedTerm| match result {
-        SerializedTerm::List(value) => {
-            let transformed_fields = value
-                .items()
-                .iter()
-                .zip(field_transforms.iter())
-                .map(|(value, (key, transform))| match transform(value) {
-                    Err(error) => Err(error),
-                    Ok(value) => Ok((String::from(key), value)),
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-            Ok(create_struct(transformed_fields))
-        }
-        _ => Err(format!("Invalid branch result: {}", result)),
-    });
-    Ok((query, transform))
+) -> Result<Expression, String> {
+    if selection_set.items.is_empty() {
+        parse_leaf()
+    } else {
+        let fields = parse_selection_set_fields(selection_set, variables, fragments)?;
+        Ok(create_query_branch(create_lambda(
+            Arity::from(1, 0, None),
+            Expression::new(Term::Application(ApplicationTerm::new(
+                Expression::new(Term::Builtin(BuiltinTerm::CollectStruct)),
+                fields
+                    .into_iter()
+                    .flat_map(|(key, query)| {
+                        once(Expression::new(Term::Value(ValueTerm::String(key)))).chain(once(
+                            create_function_application(query, vec![create_scoped_variable(0)]),
+                        ))
+                    })
+                    .collect::<Vec<_>>(),
+            ))),
+        )))
+    }
+}
+
+fn parse_leaf() -> Result<Expression, String> {
+    Ok(flatten_deep())
 }
 
 fn parse_selection_set_fields<'src>(
     selection_set: &SelectionSet<'src, &'src str>,
     variables: &QueryVariables,
     fragments: &QueryFragments,
-) -> Result<Vec<(FieldSelector, (String, QueryTransform))>, String> {
+) -> Result<Vec<(String, Expression)>, String> {
     selection_set
         .items
         .iter()
         .flat_map(|field| match field {
             Selection::Field(field) => match parse_field(field, variables, fragments) {
-                Ok((query, transform)) => {
+                Ok(result) => {
                     let key = field.alias.unwrap_or(field.name);
-                    Either::Left(once(Ok((query, (String::from(key), transform)))))
+                    Either::Left(once(Ok((String::from(key), result))))
                 }
                 Err(error) => Either::Left(once(Err(error))),
             },
             Selection::FragmentSpread(fragment) => match fragments.get(fragment.fragment_name) {
                 Some(fragment) => {
-                    Either::Right(parse_fragment_fields(fragment, variables, fragments).into_iter())
+                    let fields = parse_fragment_fields(fragment, variables, fragments);
+                    Either::Right(fields.into_iter())
                 }
                 None => Either::Left(once(Err(format!(
                     "Invalid fragment name: {}",
@@ -253,7 +248,7 @@ fn parse_fragment_fields<'src>(
     fragment: &FragmentDefinition<'src, &'src str>,
     variables: &QueryVariables,
     fragments: &QueryFragments,
-) -> impl IntoIterator<Item = Result<(FieldSelector, (String, QueryTransform)), String>> {
+) -> impl IntoIterator<Item = Result<(String, Expression), String>> {
     match parse_selection_set_fields(&fragment.selection_set, variables, fragments) {
         Err(error) => Either::Left(once(Err(error))),
         Ok(fields) => Either::Right(fields.into_iter().map(Ok)),
@@ -264,51 +259,36 @@ fn parse_field<'src>(
     field: &Field<'src, &'src str>,
     variables: &QueryVariables,
     fragments: &QueryFragments,
-) -> Result<(FieldSelector, QueryTransform), String> {
-    let (query, transform): (QueryShape, QueryTransform) = if field.selection_set.items.is_empty() {
-        (
-            QueryShape::leaf(),
-            Box::new(|result| Ok(result.deserialize())),
-        )
+) -> Result<Expression, String> {
+    let field_args = if field.arguments.is_empty() {
+        None
     } else {
-        parse_selection_set(&field.selection_set, variables, fragments)?
+        Some(parse_field_arguments(
+            &field.arguments,
+            variables,
+            fragments,
+        )?)
     };
-    let list_directives = field
-        .directives
-        .iter()
-        .filter(|directive| directive.name == "list");
-    let (query, transform) = list_directives.fold((query, transform), |(query, transform), _| {
-        let query = QueryShape::list(query);
-        let transform = Box::new(move |result: &SerializedTerm| match result {
-            SerializedTerm::List(value) => {
-                let transformed_items = value
-                    .items()
-                    .iter()
-                    .map(|value| transform(value))
-                    .collect::<Result<Vec<_>, _>>()?;
-                Ok(Expression::new(Term::Collection(CollectionTerm::Vector(
-                    VectorTerm::new(transformed_items),
-                ))))
-            }
-            _ => Err(format!("Invalid list result: {}", result)),
-        });
-        (query, transform)
-    });
-    let field_name = ValueTerm::String(StringValue::from(field.name));
-    let (query, transform): (QueryShape, QueryTransform) = if field.arguments.is_empty() {
-        (query, transform)
-    } else {
-        let args = parse_field_arguments(&field.arguments, variables, fragments)?;
-        let query = QueryShape::branch(vec![FieldSelector::FunctionField(args, query)]);
-        let transform = Box::new(move |result: &SerializedTerm| match result {
-            SerializedTerm::List(value) if value.items().len() == 1 => {
-                transform(value.items().iter().next().unwrap())
-            }
-            _ => Err(format!("Invalid function result: {}", result)),
-        });
-        (query, transform)
-    };
-    Ok((FieldSelector::NamedField(field_name, query), transform))
+    let body = parse_selection_set(&field.selection_set, variables, fragments)?;
+    Ok(create_lambda(
+        Arity::from(1, 0, None),
+        create_function_application(
+            body,
+            vec![{
+                let field = create_function_application(
+                    create_builtin(BuiltinTerm::Get),
+                    vec![
+                        create_scoped_variable(0),
+                        create_string(String::from(field.name)),
+                    ],
+                );
+                match field_args {
+                    None => field,
+                    Some(field_args) => create_function_application(field, field_args),
+                }
+            }],
+        ),
+    ))
 }
 
 fn parse_field_arguments<'src>(
@@ -378,6 +358,133 @@ fn parse_value<'src>(
     }
 }
 
+fn create_query_branch(shape: Expression) -> Expression {
+    create_lambda(
+        Arity::from(1, 0, None),
+        create_function_application(
+            dynamic_query_branch(),
+            vec![create_scoped_variable(0), shape],
+        ),
+    )
+}
+
+fn flatten_deep() -> Expression {
+    Expression::new(Term::Native(NativeFunction::new(
+        FlattenDeep::hash(),
+        FlattenDeep::arity(),
+        FlattenDeep::apply,
+    )))
+}
+struct FlattenDeep {}
+impl FlattenDeep {
+    fn hash() -> HashId {
+        hash_object(&TypeId::of::<Self>())
+    }
+    fn arity() -> Arity {
+        Arity::from(1, 0, None)
+    }
+    fn apply(args: Vec<Expression>) -> Expression {
+        if args.len() != 1 {
+            return Expression::new(Term::Signal(SignalTerm::new(Signal::new(
+                SignalType::Error,
+                vec![Expression::new(Term::Value(ValueTerm::String(
+                    StringValue::from(format!("Expected 1 argument, received {}", args.len())),
+                )))],
+            ))));
+        }
+        let mut args = args.into_iter();
+        let target = args.next().unwrap();
+        match target.value() {
+            Term::Value(ValueTerm::Null) => target,
+            Term::Collection(CollectionTerm::Vector(collection)) => {
+                Expression::new(Term::Application(ApplicationTerm::new(
+                    Expression::new(Term::Builtin(BuiltinTerm::CollectVector)),
+                    collection
+                        .iterate()
+                        .into_iter()
+                        .map(|item| {
+                            Expression::new(Term::Application(ApplicationTerm::new(
+                                flatten_deep(),
+                                vec![item],
+                            )))
+                        })
+                        .collect(),
+                )))
+            }
+            _ => target,
+        }
+    }
+}
+
+fn dynamic_query_branch() -> Expression {
+    Expression::new(Term::Native(NativeFunction::new(
+        DynamicQueryBranch::hash(),
+        DynamicQueryBranch::arity(),
+        DynamicQueryBranch::apply,
+    )))
+}
+struct DynamicQueryBranch {}
+impl DynamicQueryBranch {
+    fn hash() -> HashId {
+        hash_object(&TypeId::of::<Self>())
+    }
+    fn arity() -> Arity {
+        Arity::from(2, 0, None)
+    }
+    fn apply(args: Vec<Expression>) -> Expression {
+        if args.len() != 2 {
+            return Expression::new(Term::Signal(SignalTerm::new(Signal::new(
+                SignalType::Error,
+                vec![Expression::new(Term::Value(ValueTerm::String(
+                    StringValue::from(format!("Expected 2 arguments, received {}", args.len())),
+                )))],
+            ))));
+        }
+        let mut args = args.into_iter();
+        let target = args.next().unwrap();
+        let shape = args.next().unwrap();
+        match target.value() {
+            Term::Value(ValueTerm::Null) => target,
+            Term::Collection(CollectionTerm::Vector(collection)) => {
+                Expression::new(Term::Application(ApplicationTerm::new(
+                    Expression::new(Term::Builtin(BuiltinTerm::CollectVector)),
+                    collection
+                        .iterate()
+                        .into_iter()
+                        .map(|item| {
+                            Expression::new(Term::Application(ApplicationTerm::new(
+                                dynamic_query_branch(),
+                                vec![item, Expression::clone(&shape)],
+                            )))
+                        })
+                        .collect(),
+                )))
+            }
+            _ => Expression::new(Term::Application(ApplicationTerm::new(shape, vec![target]))),
+        }
+    }
+}
+
+fn create_function_application(target: Expression, args: Vec<Expression>) -> Expression {
+    Expression::new(Term::Application(ApplicationTerm::new(target, args)))
+}
+
+fn create_lambda(arity: Arity, body: Expression) -> Expression {
+    Expression::new(Term::Lambda(LambdaTerm::new(arity, body)))
+}
+
+fn create_scoped_variable(offset: StackOffset) -> Expression {
+    Expression::new(Term::Variable(VariableTerm::scoped(offset)))
+}
+
+fn create_builtin(target: BuiltinTerm) -> Expression {
+    Expression::new(Term::Builtin(target))
+}
+
+fn create_string(value: String) -> Expression {
+    Expression::new(Term::Value(ValueTerm::String(value)))
+}
+
 fn create_struct(fields: impl IntoIterator<Item = (String, Expression)>) -> Expression {
     let (keys, values) = fields
         .into_iter()
@@ -387,4 +494,362 @@ fn create_struct(fields: impl IntoIterator<Item = (String, Expression)>) -> Expr
         Some(StructPrototype::new(keys)),
         values,
     )))
+}
+
+#[cfg(test)]
+mod tests {
+    use reflex::{
+        cache::GenerationalGc,
+        core::{
+            ApplicationTerm, Arity, DependencyList, DynamicState, EvaluationResult, Expression,
+            LambdaTerm, StackOffset, StructPrototype, StructTerm, Term, VariableTerm,
+        },
+        stdlib::{
+            builtin::BuiltinTerm,
+            collection::{vector::VectorTerm, CollectionTerm},
+            value::ValueTerm,
+        },
+    };
+
+    use crate::create_function_application;
+
+    use super::parse;
+
+    #[test]
+    fn leaf_queries() {
+        let root = create_struct(vec![
+            (
+                "query",
+                create_struct(vec![
+                    ("first", create_integer(3)),
+                    ("second", create_integer(4)),
+                    ("third", create_integer(5)),
+                ]),
+            ),
+            ("mutation", create_null()),
+            ("subscription", create_null()),
+        ]);
+        let variables = Vec::new();
+        let query = parse(
+            "
+                query {
+                    second
+                    third
+                }
+            ",
+            variables,
+        )
+        .unwrap();
+        let result = apply_query(query, root);
+        assert_eq!(
+            result,
+            EvaluationResult::new(
+                create_struct(vec![
+                    ("second", create_integer(4)),
+                    ("third", create_integer(5)),
+                ]),
+                DependencyList::empty()
+            )
+        );
+    }
+
+    #[test]
+    fn computed_leaf_queries() {
+        let root = create_struct(vec![
+            (
+                "query",
+                create_function_application(
+                    create_lambda(
+                        Arity::from(0, 1, None),
+                        create_struct(vec![
+                            (
+                                "first",
+                                create_function_application(
+                                    create_builtin(BuiltinTerm::Add),
+                                    vec![create_integer(3), create_scoped_variable(0)],
+                                ),
+                            ),
+                            (
+                                "second",
+                                create_function_application(
+                                    create_builtin(BuiltinTerm::Add),
+                                    vec![create_integer(4), create_scoped_variable(0)],
+                                ),
+                            ),
+                            (
+                                "third",
+                                create_function_application(
+                                    create_builtin(BuiltinTerm::Add),
+                                    vec![create_integer(5), create_scoped_variable(0)],
+                                ),
+                            ),
+                        ]),
+                    ),
+                    vec![create_integer(10)],
+                ),
+            ),
+            ("mutation", create_null()),
+            ("subscription", create_null()),
+        ]);
+        let variables = Vec::new();
+        let query = parse(
+            "
+                query {
+                    second
+                    third
+                }
+            ",
+            variables,
+        )
+        .unwrap();
+        let result = apply_query(query, root);
+        assert_eq!(
+            result,
+            EvaluationResult::new(
+                create_struct(vec![
+                    ("second", create_integer(4 + 10)),
+                    ("third", create_integer(5 + 10)),
+                ]),
+                DependencyList::empty()
+            )
+        );
+    }
+
+    #[test]
+    fn list_leaf_queries() {
+        let root = create_struct(vec![
+            (
+                "query",
+                create_struct(vec![
+                    ("foo", create_null()),
+                    (
+                        "items",
+                        create_vector(vec![
+                            create_integer(3),
+                            create_integer(4),
+                            create_integer(5),
+                        ]),
+                    ),
+                    ("bar", create_null()),
+                ]),
+            ),
+            ("mutation", create_null()),
+            ("subscription", create_null()),
+        ]);
+        let variables = Vec::new();
+        let query = parse(
+            "
+                query {
+                    items
+                }
+            ",
+            variables,
+        )
+        .unwrap();
+        let result = apply_query(query, root);
+        assert_eq!(
+            result,
+            EvaluationResult::new(
+                create_struct(vec![(
+                    "items",
+                    create_vector(vec![
+                        create_integer(3),
+                        create_integer(4),
+                        create_integer(5)
+                    ])
+                ),]),
+                DependencyList::empty()
+            )
+        );
+    }
+
+    #[test]
+    fn deeply_nested_list_leaf_queries() {
+        let root = create_struct(vec![
+            (
+                "query",
+                create_struct(vec![
+                    ("foo", create_null()),
+                    (
+                        "items",
+                        create_vector(vec![
+                            create_vector(vec![
+                                create_vector(vec![
+                                    create_float(1.1),
+                                    create_float(1.2),
+                                    create_float(1.3),
+                                ]),
+                                create_vector(vec![
+                                    create_float(1.4),
+                                    create_float(1.5),
+                                    create_float(1.6),
+                                ]),
+                                create_vector(vec![
+                                    create_float(1.7),
+                                    create_float(1.8),
+                                    create_float(1.9),
+                                ]),
+                            ]),
+                            create_vector(vec![
+                                create_vector(vec![
+                                    create_float(2.1),
+                                    create_float(2.2),
+                                    create_float(2.3),
+                                ]),
+                                create_vector(vec![
+                                    create_float(2.4),
+                                    create_float(2.5),
+                                    create_float(2.6),
+                                ]),
+                                create_vector(vec![
+                                    create_float(2.7),
+                                    create_float(2.8),
+                                    create_float(2.9),
+                                ]),
+                            ]),
+                            create_vector(vec![
+                                create_vector(vec![
+                                    create_float(3.1),
+                                    create_float(3.2),
+                                    create_float(3.3),
+                                ]),
+                                create_vector(vec![
+                                    create_float(3.4),
+                                    create_float(3.5),
+                                    create_float(3.6),
+                                ]),
+                                create_vector(vec![
+                                    create_float(3.7),
+                                    create_float(3.8),
+                                    create_float(3.9),
+                                ]),
+                            ]),
+                        ]),
+                    ),
+                    ("bar", create_null()),
+                ]),
+            ),
+            ("mutation", create_null()),
+            ("subscription", create_null()),
+        ]);
+        let variables = Vec::new();
+        let query = parse(
+            "
+                query {
+                    items
+                }
+            ",
+            variables,
+        )
+        .unwrap();
+        let result = apply_query(query, root);
+        assert_eq!(
+            result,
+            EvaluationResult::new(
+                create_struct(vec![(
+                    "items",
+                    create_vector(vec![
+                        create_vector(vec![
+                            create_vector(vec![
+                                create_float(1.1),
+                                create_float(1.2),
+                                create_float(1.3),
+                            ]),
+                            create_vector(vec![
+                                create_float(1.4),
+                                create_float(1.5),
+                                create_float(1.6),
+                            ]),
+                            create_vector(vec![
+                                create_float(1.7),
+                                create_float(1.8),
+                                create_float(1.9),
+                            ]),
+                        ]),
+                        create_vector(vec![
+                            create_vector(vec![
+                                create_float(2.1),
+                                create_float(2.2),
+                                create_float(2.3),
+                            ]),
+                            create_vector(vec![
+                                create_float(2.4),
+                                create_float(2.5),
+                                create_float(2.6),
+                            ]),
+                            create_vector(vec![
+                                create_float(2.7),
+                                create_float(2.8),
+                                create_float(2.9),
+                            ]),
+                        ]),
+                        create_vector(vec![
+                            create_vector(vec![
+                                create_float(3.1),
+                                create_float(3.2),
+                                create_float(3.3),
+                            ]),
+                            create_vector(vec![
+                                create_float(3.4),
+                                create_float(3.5),
+                                create_float(3.6),
+                            ]),
+                            create_vector(vec![
+                                create_float(3.7),
+                                create_float(3.8),
+                                create_float(3.9),
+                            ]),
+                        ]),
+                    ]),
+                ),]),
+                DependencyList::empty()
+            )
+        );
+    }
+
+    fn apply_query(query: Expression, root: Expression) -> EvaluationResult {
+        Expression::new(Term::Application(ApplicationTerm::new(query, vec![root])))
+            .evaluate(&DynamicState::new(), &mut GenerationalGc::new())
+    }
+
+    fn create_struct<'a>(fields: impl IntoIterator<Item = (&'a str, Expression)>) -> Expression {
+        let (keys, values) = fields
+            .into_iter()
+            .map(|(key, value)| (ValueTerm::String(String::from(key)), value))
+            .unzip();
+        Expression::new(Term::Struct(StructTerm::new(
+            Some(StructPrototype::new(keys)),
+            values,
+        )))
+    }
+
+    fn create_vector(items: impl IntoIterator<Item = Expression>) -> Expression {
+        Expression::new(Term::Collection(CollectionTerm::Vector(VectorTerm::new(
+            items,
+        ))))
+    }
+
+    fn create_builtin(target: BuiltinTerm) -> Expression {
+        Expression::new(Term::Builtin(target))
+    }
+
+    fn create_integer(value: i32) -> Expression {
+        Expression::new(Term::Value(ValueTerm::Int(value)))
+    }
+
+    fn create_float(value: f64) -> Expression {
+        Expression::new(Term::Value(ValueTerm::Float(value)))
+    }
+
+    fn create_null() -> Expression {
+        Expression::new(Term::Value(ValueTerm::Null))
+    }
+
+    fn create_lambda(arity: Arity, body: Expression) -> Expression {
+        Expression::new(Term::Lambda(LambdaTerm::new(arity, body)))
+    }
+
+    fn create_scoped_variable(offset: StackOffset) -> Expression {
+        Expression::new(Term::Variable(VariableTerm::scoped(offset)))
+    }
 }

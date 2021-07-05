@@ -2,14 +2,17 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use crate::{
-    core::{ApplicationTerm, Arity, Expression, Signal, SignalTerm, StructTerm, Term, VarArgs},
+    core::{
+        ApplicationTerm, Arity, Expression, Signal, SignalTerm, StructPrototype, StructTerm, Term,
+        VarArgs,
+    },
     stdlib::{
         builtin::{BuiltinFunction, BuiltinTerm},
         collection::{
             hashmap::HashMapTerm, hashset::HashSetTerm, vector::VectorTerm, CollectionTerm,
         },
         signal::SignalType,
-        value::ValueTerm,
+        value::{StringValue, ValueTerm},
     },
 };
 
@@ -76,6 +79,58 @@ impl BuiltinFunction for CollectTuple {
             None,
             args.into_iter().collect(),
         )))
+    }
+}
+
+pub struct CollectStruct {}
+impl BuiltinFunction for CollectStruct {
+    fn arity() -> Arity {
+        Arity::from(0, 0, Some(VarArgs::Eager))
+    }
+    fn apply(args: impl IntoIterator<Item = Expression> + ExactSizeIterator) -> Expression {
+        let fields = {
+            if args.len() % 2 != 0 {
+                Err(format!(
+                    "Expected even number of arguments, received {}",
+                    args.len()
+                ))
+            } else {
+                let num_fields = args.len() / 2;
+                args.into_iter().enumerate().fold(
+                    Ok((
+                        Vec::with_capacity(num_fields),
+                        Vec::with_capacity(num_fields),
+                    )),
+                    |results, (index, arg)| {
+                        let (mut keys, mut values) = results?;
+                        if index % 2 == 0 {
+                            match arg.value() {
+                                Term::Value(key) => {
+                                    keys.push(key.clone());
+                                    Ok((keys, values))
+                                }
+                                _ => Err(format!("Invalid key: {}", arg)),
+                            }
+                        } else {
+                            values.push(arg);
+                            Ok((keys, values))
+                        }
+                    },
+                )
+            }
+        };
+        match fields {
+            Err(error) => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
+                SignalType::Error,
+                vec![Expression::new(Term::Value(ValueTerm::String(
+                    StringValue::from(error),
+                )))],
+            )))),
+            Ok((keys, values)) => Expression::new(Term::Struct(StructTerm::new(
+                Some(StructPrototype::new(keys)),
+                values,
+            ))),
+        }
     }
 }
 

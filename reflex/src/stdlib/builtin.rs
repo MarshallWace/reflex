@@ -18,7 +18,7 @@ use cdr::Cdr;
 mod ceil;
 use ceil::Ceil;
 mod collect;
-use collect::{Collect, CollectHashMap, CollectHashSet, CollectTuple, CollectVector};
+use collect::{Collect, CollectHashMap, CollectHashSet, CollectStruct, CollectTuple, CollectVector};
 mod concat;
 use concat::Concat;
 mod cons;
@@ -118,6 +118,7 @@ pub enum BuiltinTerm {
     CollectFilterResults,
     CollectHashMap,
     CollectHashSet,
+    CollectStruct,
     CollectTuple,
     CollectVector,
     Concat,
@@ -175,6 +176,7 @@ impl BuiltinTerm {
             Self::CollectFilterResults => CollectFilterResults::arity(),
             Self::CollectHashMap => CollectHashMap::arity(),
             Self::CollectHashSet => CollectHashSet::arity(),
+            Self::CollectStruct => CollectStruct::arity(),
             Self::CollectTuple => CollectTuple::arity(),
             Self::CollectVector => CollectVector::arity(),
             Self::Concat => Concat::arity(),
@@ -235,6 +237,7 @@ impl BuiltinTerm {
             Self::CollectFilterResults => CollectFilterResults::apply(args),
             Self::CollectHashMap => CollectHashMap::apply(args),
             Self::CollectHashSet => CollectHashSet::apply(args),
+            Self::CollectStruct => CollectStruct::apply(args),
             Self::CollectTuple => CollectTuple::apply(args),
             Self::CollectVector => CollectVector::apply(args),
             Self::Concat => Concat::apply(args),

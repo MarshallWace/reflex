@@ -3,15 +3,10 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use crate::create_http_response;
 use hyper::{header, Body, Request, Response, StatusCode};
-use reflex::{
-    core::Expression,
-    hash::hash_object,
-    serialize::SerializedTerm,
-    serialize::{serialize, SerializedObjectTerm},
-};
+use reflex::{core::{ApplicationTerm, Expression, Term}, hash::hash_object, serialize::{serialize, SerializedObjectTerm}};
 use reflex_graphql::{
     create_introspection_query_response, deserialize_graphql_operation,
-    wrap_graphql_error_response, wrap_graphql_success_response, QueryTransform,
+    wrap_graphql_error_response, wrap_graphql_success_response,
 };
 use reflex_json::stringify;
 use reflex_runtime::{Runtime, SubscriptionResult};
@@ -29,12 +24,12 @@ pub(crate) async fn handle_graphql_http_request(
     let request_etag = parse_request_etag(&req);
     let response = match parse_graphql_request(req, &root).await {
         Err(response) => Ok(response),
-        Ok((expression, transform)) => match store.subscribe(expression).await {
+        Ok(expression) => match store.subscribe(expression).await {
             Err(error) => Err(error),
             Ok(mut results) => match results.next().await {
                 None => Err(String::from("Empty result stream")),
                 Some(result) => match results.unsubscribe().await {
-                    Ok(_) => Ok(format_http_response(result, transform)),
+                    Ok(_) => Ok(format_http_response(result)),
                     Err(error) => Err(error),
                 },
             },
@@ -91,7 +86,7 @@ fn parse_response_etag(response: &HttpResult) -> Option<String> {
 async fn parse_graphql_request(
     req: Request<Body>,
     root: &Expression,
-) -> Result<(Expression, QueryTransform), HttpResult> {
+) -> Result<Expression, HttpResult> {
     let content_type = match req.headers().get(header::CONTENT_TYPE) {
         Some(value) => match value.to_str() {
             Ok(value) => Ok(String::from(value)),
@@ -122,27 +117,23 @@ fn parse_request_body_graphql(
     body: &str,
     variables: &SerializedObjectTerm,
     root: &Expression,
-) -> Result<(Expression, QueryTransform), String> {
+) -> Result<Expression, String> {
     let variables = variables
         .entries()
         .iter()
         .map(|(key, value)| (key.as_str(), value.deserialize()));
-    reflex_graphql::parse(body, variables, root)
+    let query = reflex_graphql::parse(body, variables)?;
+    Ok(Expression::new(Term::Application(ApplicationTerm::new(
+        query,
+        vec![Expression::clone(root)]
+    ))))
 }
 
-fn parse_request_body_graphql_json(
-    body: &str,
-    root: &Expression,
-) -> Result<(Expression, QueryTransform), String> {
+fn parse_request_body_graphql_json(body: &str, root: &Expression) -> Result<Expression, String> {
     match deserialize_graphql_operation(&body) {
         Err(error) => Err(error),
         Ok(message) => match message.operation_name() {
-            Some("IntrospectionQuery") => {
-                let expression = create_introspection_query_response();
-                let transform: QueryTransform =
-                    Box::new(|value: &SerializedTerm| Ok(value.deserialize()));
-                Ok((expression, transform))
-            }
+            Some("IntrospectionQuery") => Ok(create_introspection_query_response()),
             _ => parse_request_body_graphql(message.query(), message.variables(), &root),
         },
     }
@@ -173,20 +164,9 @@ impl HttpResult {
     }
 }
 
-fn format_http_response(result: SubscriptionResult, transform: QueryTransform) -> HttpResult {
+fn format_http_response(result: SubscriptionResult) -> HttpResult {
     match result {
-        Ok(result) => match serialize(result.value()) {
-            Ok(result) => match transform(&result) {
-                Ok(result) => HttpResult::success(StatusCode::OK, result),
-                Err(error) => {
-                    HttpResult::error(StatusCode::INTERNAL_SERVER_ERROR, format!("{}", error))
-                }
-            },
-            Err(error) => HttpResult::error(
-                StatusCode::NOT_ACCEPTABLE,
-                format!("Invalid GraphQL result: {}", error),
-            ),
-        },
+        Ok(result) => HttpResult::success(StatusCode::OK, result),
         Err(errors) => HttpResult::errors(StatusCode::OK, errors),
     }
 }

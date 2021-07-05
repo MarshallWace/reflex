@@ -12,7 +12,7 @@ use hyper_tungstenite::{
     WebSocketStream,
 };
 use reflex::{
-    core::Expression,
+    core::{ApplicationTerm, Expression, Term},
     serialize::{serialize, SerializedListTerm, SerializedObjectTerm, SerializedTerm},
     stdlib::value::ValueTerm,
 };
@@ -22,7 +22,7 @@ use reflex_graphql::{
         deserialize_graphql_client_message, GraphQlSubscriptionClientMessage,
         GraphQlSubscriptionServerMessage, GraphQlSubscriptionStartMessage, SubscriptionId,
     },
-    wrap_graphql_error_response, wrap_graphql_success_response, QueryTransform,
+    wrap_graphql_error_response, wrap_graphql_success_response,
 };
 use reflex_runtime::Runtime;
 use std::{
@@ -106,7 +106,7 @@ async fn handle_websocket_connection(
                         .entries()
                         .iter()
                         .map(|(key, value)| (key.as_str(), value.deserialize()));
-                    match parse(message.query(), variables, &root) {
+                    match parse(message.query(), variables) {
                         Err(error) => {
                             let _ = messages_tx
                                 .send(GraphQlSubscriptionServerMessage::ConnectionError(format!(
@@ -115,7 +115,7 @@ async fn handle_websocket_connection(
                                 )))
                                 .await;
                         }
-                        Ok((expression, transform)) => {
+                        Ok(query) => {
                             let subscription_id = message.subscription_id();
                             if subscriptions
                                 .get_mut()
@@ -131,6 +131,9 @@ async fn handle_websocket_connection(
                                     ))
                                     .await;
                             } else {
+                                let expression = Expression::new(Term::Application(
+                                    ApplicationTerm::new(query, vec![Expression::clone(&root)]),
+                                ));
                                 match store.start_subscription(expression).await {
                                     Err(error) => {
                                         let _ = messages_tx
@@ -151,7 +154,7 @@ async fn handle_websocket_connection(
                                             .chain(store.watch_subscription(store_id))
                                             .map(move |result| {
                                                 result.and_then(|result| {
-                                                    match parse_query_result(&result, &transform) {
+                                                    match serialize(result.value()) {
                                                         Ok(result) => Ok(result),
                                                         Err(error) => Err(vec![error]),
                                                     }
@@ -246,16 +249,6 @@ async fn handle_websocket_connection(
     }
     output.abort();
     Ok(())
-}
-
-fn parse_query_result(
-    result: &Expression,
-    transform: &QueryTransform,
-) -> Result<SerializedTerm, String> {
-    match serialize(result.value()) {
-        Ok(value) => transform(&value).and_then(|result| serialize(result.value())),
-        _ => Err(format!("Invalid result type: {}", result)),
-    }
 }
 
 fn is_diff_subscription(message: &GraphQlSubscriptionStartMessage) -> bool {
