@@ -89,6 +89,8 @@ mod round;
 use round::Round;
 mod slice;
 use slice::Slice;
+mod split;
+use split::Split;
 mod starts_with;
 use starts_with::StartsWith;
 mod r#struct;
@@ -156,6 +158,7 @@ pub enum BuiltinTerm {
     ResolveDeep,
     Round,
     Slice,
+    Split,
     StartsWith,
     Struct,
     Subtract,
@@ -214,6 +217,7 @@ impl BuiltinTerm {
             Self::ResolveDeep => ResolveDeep::arity(),
             Self::Round => Round::arity(),
             Self::Slice => Slice::arity(),
+            Self::Split => Split::arity(),
             Self::StartsWith => StartsWith::arity(),
             Self::Struct => Struct::arity(),
             Self::Subtract => Subtract::arity(),
@@ -271,10 +275,11 @@ impl BuiltinTerm {
             Self::Push => Push::apply(args),
             Self::PushFront => PushFront::apply(args),
             Self::Reduce => Reduce::apply(args),
-            Self::Slice => Slice::apply(args),
             Self::Remainder => Remainder::apply(args),
             Self::ResolveDeep => ResolveDeep::apply(args),
             Self::Round => Round::apply(args),
+            Self::Slice => Slice::apply(args),
+            Self::Split => Split::apply(args),
             Self::StartsWith => StartsWith::apply(args),
             Self::Struct => Struct::apply(args),
             Self::Subtract => Subtract::apply(args),

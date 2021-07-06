@@ -199,6 +199,13 @@ impl ToString {
 
 pub(crate) fn get_builtin_field<'src>(target: Option<&Term>, method: &str) -> Option<Term> {
     None.or_else(|| match target {
+        None | Some(Term::Value(ValueTerm::String(_))) => match method {
+            "split" => Some(Term::Builtin(BuiltinTerm::Split)),
+            _ => None,
+        },
+        _ => None,
+    })
+    .or_else(|| match target {
         None | Some(Term::Collection(CollectionTerm::Vector(_))) => match method {
             "entries" => Some(Term::Builtin(BuiltinTerm::Entries)),
             "filter" => Some(Term::Builtin(BuiltinTerm::Filter)),
