@@ -450,6 +450,7 @@ pub enum Term {
     EnumConstructor(EnumVariantPrototype),
     Collection(CollectionTerm),
     Signal(SignalTerm),
+    SignalHandler(SignalHandlerTerm),
 }
 impl Rewritable for Term {
     fn capture_depth(&self) -> StackOffset {
@@ -461,6 +462,7 @@ impl Rewritable for Term {
             Self::Struct(term) => term.capture_depth(),
             Self::Enum(term) => term.capture_depth(),
             Self::Collection(term) => term.capture_depth(),
+            Self::SignalHandler(term) => term.capture_depth(),
             _ => 0,
         }
     }
@@ -473,6 +475,7 @@ impl Rewritable for Term {
             Self::Struct(term) => term.dynamic_dependencies(),
             Self::Enum(term) => term.dynamic_dependencies(),
             Self::Collection(term) => term.dynamic_dependencies(),
+            Self::SignalHandler(term) => term.dynamic_dependencies(),
             _ => DependencyList::empty(),
         }
     }
@@ -489,6 +492,7 @@ impl Rewritable for Term {
             Self::Struct(term) => term.substitute_static(substitutions, cache),
             Self::Enum(term) => term.substitute_static(substitutions, cache),
             Self::Collection(term) => term.substitute_static(substitutions, cache),
+            Self::SignalHandler(term) => term.substitute_static(substitutions, cache),
             _ => None,
         }
     }
@@ -505,6 +509,7 @@ impl Rewritable for Term {
             Self::Struct(term) => term.substitute_dynamic(state, cache),
             Self::Enum(term) => term.substitute_dynamic(state, cache),
             Self::Collection(term) => term.substitute_dynamic(state, cache),
+            Self::SignalHandler(term) => term.substitute_dynamic(state, cache),
             _ => None,
         }
     }
@@ -517,6 +522,7 @@ impl Rewritable for Term {
             Self::Struct(term) => term.normalize(cache),
             Self::Enum(term) => term.normalize(cache),
             Self::Collection(term) => term.normalize(cache),
+            Self::SignalHandler(term) => term.normalize(cache),
             _ => None,
         }
     }
@@ -532,6 +538,7 @@ impl Term {
             Self::Struct(StructTerm { fields, .. }) if !fields.is_empty() => false,
             Self::Enum(EnumTerm { args, .. }) if !args.is_empty() => false,
             Self::Collection(collection) if !collection.is_empty() => false,
+            Self::SignalHandler(_) => false,
             _ => true,
         }
     }
@@ -577,6 +584,7 @@ impl fmt::Display for Term {
             Self::EnumConstructor(term) => fmt::Display::fmt(term, f),
             Self::Collection(term) => fmt::Display::fmt(term, f),
             Self::Signal(term) => fmt::Display::fmt(term, f),
+            Self::SignalHandler(term) => fmt::Display::fmt(term, f),
         }
     }
 }
@@ -1000,6 +1008,7 @@ impl Rewritable for ApplicationTerm {
             Term::Native(target) => Some(target.arity),
             Term::StructConstructor(eager, prototype) => Some(prototype.arity(eager)),
             Term::EnumConstructor(target) => Some(Arity::from(0, target.arity, None)),
+            Term::SignalHandler(_) => Some(Arity::from(1, 0, None)),
             _ => None,
         };
         let eager_arity = arity.map(|arity| arity.eager()).unwrap_or(0);
@@ -1098,6 +1107,7 @@ impl Reducible for ApplicationTerm {
             Term::Native(target) => Some(target.arity),
             Term::StructConstructor(eager, target) => Some(target.arity(eager)),
             Term::EnumConstructor(target) => Some(Arity::from(0, target.arity, None)),
+            Term::SignalHandler(_) => Some(Arity::from(1, 0, None)),
             _ => None,
         };
         match arity {
@@ -1146,11 +1156,19 @@ impl Reducible for ApplicationTerm {
                                 }
                             }
                             Term::EnumConstructor(target) => Ok(target.apply(args.into_iter())),
+                            Term::SignalHandler(_) => Ok(args.into_iter().next().unwrap()),
                             _ => Err(args),
                         },
-                        SignalArgs::Single(signal) => Ok(signal),
+                        SignalArgs::Single(signal) => match &target {
+                            Term::SignalHandler(target) => Ok(target.apply(signal)),
+                            _ => Ok(signal),
+                        },
                         SignalArgs::Multiple(signals) => {
-                            Ok(Expression::new(Term::Signal(SignalTerm::from(signals))))
+                            let signal = Expression::new(Term::Signal(SignalTerm::from(signals)));
+                            match &target {
+                                Term::SignalHandler(target) => Ok(target.apply(signal)),
+                                _ => Ok(signal),
+                            }
                         }
                     },
                 };
@@ -1655,6 +1673,58 @@ impl fmt::Display for Signal {
                 .collect::<Vec<_>>()
                 .join(",")
         )
+    }
+}
+
+#[derive(Hash, Eq, PartialEq, Clone, Debug)]
+pub struct SignalHandlerTerm {
+    handler: Expression,
+}
+impl SignalHandlerTerm {
+    pub fn new(handler: Expression) -> Self {
+        Self { handler }
+    }
+    fn apply(&self, signal: Expression) -> Expression {
+        Expression::new(Term::Application(ApplicationTerm::new(
+            Expression::clone(&self.handler),
+            vec![signal],
+        )))
+    }
+}
+impl Rewritable for SignalHandlerTerm {
+    fn capture_depth(&self) -> StackOffset {
+        self.handler.capture_depth()
+    }
+    fn dynamic_dependencies(&self) -> DependencyList {
+        self.handler.dynamic_dependencies()
+    }
+    fn substitute_static(
+        &self,
+        substitutions: &Substitutions,
+        cache: &mut impl EvaluationCache,
+    ) -> Option<Expression> {
+        self.handler
+            .substitute_static(substitutions, cache)
+            .map(|handler| Expression::new(Term::SignalHandler(Self::new(handler))))
+    }
+    fn substitute_dynamic(
+        &self,
+        state: &DynamicState,
+        cache: &mut impl EvaluationCache,
+    ) -> Option<Expression> {
+        self.handler
+            .substitute_dynamic(state, cache)
+            .map(|handler| Expression::new(Term::SignalHandler(Self::new(handler))))
+    }
+    fn normalize(&self, cache: &mut impl EvaluationCache) -> Option<Expression> {
+        self.handler
+            .normalize(cache)
+            .map(|handler| Expression::new(Term::SignalHandler(Self::new(handler))))
+    }
+}
+impl fmt::Display for SignalHandlerTerm {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "<handler:{}>", self.handler)
     }
 }
 
