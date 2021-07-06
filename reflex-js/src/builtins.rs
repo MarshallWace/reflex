@@ -205,6 +205,7 @@ pub(crate) fn get_builtin_field<'src>(target: Option<&Term>, method: &str) -> Op
             "keys" => Some(Term::Builtin(BuiltinTerm::Keys)),
             "map" => Some(Term::Builtin(BuiltinTerm::Map)),
             "push" => Some(Term::Builtin(BuiltinTerm::Push)),
+            "reduce" => Some(Term::Builtin(BuiltinTerm::Reduce)),
             "slice" => Some(Term::Builtin(BuiltinTerm::Slice)),
             "unshift" => Some(Term::Builtin(BuiltinTerm::PushFront)),
             "values" => Some(Term::Builtin(BuiltinTerm::Values)),
