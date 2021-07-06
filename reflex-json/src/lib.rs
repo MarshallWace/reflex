@@ -44,7 +44,9 @@ pub fn sanitize_term(term: SerializedTerm) -> Result<serde_json::Value, String> 
 
 fn sanitize_value(value: ValueTerm) -> Result<serde_json::Value, String> {
     match value {
-        ValueTerm::Hash(_) | ValueTerm::Symbol(_) => Err(format!("Unable to format value: {}", value)),
+        ValueTerm::Hash(_) | ValueTerm::Symbol(_) => {
+            Err(format!("Unable to format value: {}", value))
+        }
         ValueTerm::Null => Ok(serde_json::Value::Null),
         ValueTerm::Boolean(value) => Ok(serde_json::Value::Bool(value)),
         ValueTerm::Int(value) => Ok(serde_json::Value::Number(value.into())),
@@ -54,21 +56,9 @@ fn sanitize_value(value: ValueTerm) -> Result<serde_json::Value, String> {
 }
 
 fn sanitize_float(value: f64) -> Result<serde_json::Value, String> {
-    match parse_integer_float(value) {
-        Some(value) => Ok(serde_json::Value::Number(value.into())),
-        None => match serde_json::Number::from_f64(value) {
-            Some(value) => Ok(serde_json::Value::Number(value)),
-            None => Err(format!("Unable to format value: {}", value)),
-        },
-    }
-}
-
-fn parse_integer_float(value: f64) -> Option<u64> {
-    let int_value = value as u64;
-    if value == (int_value as f64) {
-        Some(int_value)
-    } else {
-        None
+    match serde_json::Number::from_f64(value) {
+        Some(value) => Ok(serde_json::Value::Number(value)),
+        None => Err(format!("Unable to format value: {}", value)),
     }
 }
 
@@ -100,12 +90,15 @@ pub fn deserialize(value: &Value) -> Result<SerializedTerm, String> {
         Value::Null => Ok(SerializedTerm::Value(ValueTerm::Null)),
         Value::Bool(value) => Ok(SerializedTerm::Value(ValueTerm::Boolean(*value))),
         Value::String(value) => Ok(SerializedTerm::Value(ValueTerm::String(value.clone()))),
-        Value::Number(value) => match value.as_f64() {
-            Some(value) => Ok(SerializedTerm::Value(ValueTerm::Float(value))),
-            None => Err(format!(
-                "JSON deserialization encountered invalid number: {}",
-                value
-            )),
+        Value::Number(value) => match value.as_i64() {
+            Some(value) => Ok(SerializedTerm::Value(ValueTerm::Int(value as i32))),
+            None => match value.as_f64() {
+                Some(value) => Ok(SerializedTerm::Value(ValueTerm::Float(value))),
+                None => Err(format!(
+                    "JSON deserialization encountered invalid number: {}",
+                    value
+                )),
+            },
         },
         Value::Array(value) => deserialize_array(value),
         Value::Object(value) => deserialize_object(value),
@@ -170,11 +163,12 @@ fn parse_object(value: Map<String, Value>) -> Result<SerializedTerm, String> {
 #[cfg(test)]
 mod tests {
     use reflex::{
+        core::{Expression, Term},
         serialize::{SerializedListTerm, SerializedObjectTerm, SerializedTerm},
         stdlib::value::{StringValue, ValueTerm},
     };
 
-    use super::stringify;
+    use super::{parse, stringify};
 
     #[test]
     fn stringify_primitives() {
@@ -195,12 +189,12 @@ mod tests {
             Ok(String::from("true")),
         );
         assert_eq!(
-            stringify(SerializedTerm::Value(ValueTerm::Int(0))),
-            Ok(String::from("0")),
-        );
-        assert_eq!(
             stringify(SerializedTerm::Value(ValueTerm::Int(3))),
             Ok(String::from("3")),
+        );
+        assert_eq!(
+            stringify(SerializedTerm::Value(ValueTerm::Int(0))),
+            Ok(String::from("0")),
         );
         assert_eq!(
             stringify(SerializedTerm::Value(ValueTerm::Int(-0))),
@@ -211,16 +205,24 @@ mod tests {
             Ok(String::from("-3")),
         );
         assert_eq!(
-            stringify(SerializedTerm::Value(ValueTerm::Float(0.0))),
-            Ok(String::from("0")),
-        );
-        assert_eq!(
             stringify(SerializedTerm::Value(ValueTerm::Float(3.142))),
             Ok(String::from("3.142")),
         );
         assert_eq!(
+            stringify(SerializedTerm::Value(ValueTerm::Float(3.0))),
+            Ok(String::from("3.0")),
+        );
+        assert_eq!(
+            stringify(SerializedTerm::Value(ValueTerm::Float(0.0))),
+            Ok(String::from("0.0")),
+        );
+        assert_eq!(
             stringify(SerializedTerm::Value(ValueTerm::Float(-0.0))),
-            Ok(String::from("0")),
+            Ok(String::from("-0.0")),
+        );
+        assert_eq!(
+            stringify(SerializedTerm::Value(ValueTerm::Float(-3.0))),
+            Ok(String::from("-3.0")),
         );
         assert_eq!(
             stringify(SerializedTerm::Value(ValueTerm::Float(-3.142))),
@@ -293,6 +295,50 @@ mod tests {
                 SerializedTerm::value(ValueTerm::Int(3)),
             ),]))),
             Ok(String::from("{\"\\\"\'\\n\\r\":3}")),
+        );
+    }
+
+    #[test]
+    fn parse_numbers() {
+        assert_eq!(
+            parse("3"),
+            Ok(Expression::new(Term::Value(ValueTerm::Int(3)))),
+        );
+        assert_eq!(
+            parse("0"),
+            Ok(Expression::new(Term::Value(ValueTerm::Int(0)))),
+        );
+        assert_eq!(
+            parse("-0"),
+            Ok(Expression::new(Term::Value(ValueTerm::Int(0)))),
+        );
+        assert_eq!(
+            parse("-3"),
+            Ok(Expression::new(Term::Value(ValueTerm::Int(-3)))),
+        );
+        assert_eq!(
+            parse("3.142"),
+            Ok(Expression::new(Term::Value(ValueTerm::Float(3.142)))),
+        );
+        assert_eq!(
+            parse("3.0"),
+            Ok(Expression::new(Term::Value(ValueTerm::Float(3.0)))),
+        );
+        assert_eq!(
+            parse("0.0"),
+            Ok(Expression::new(Term::Value(ValueTerm::Float(0.0)))),
+        );
+        assert_eq!(
+            parse("-0.0"),
+            Ok(Expression::new(Term::Value(ValueTerm::Float(-0.0)))),
+        );
+        assert_eq!(
+            parse("-3.0"),
+            Ok(Expression::new(Term::Value(ValueTerm::Float(-3.0)))),
+        );
+        assert_eq!(
+            parse("-3.142"),
+            Ok(Expression::new(Term::Value(ValueTerm::Float(-3.142)))),
         );
     }
 }
