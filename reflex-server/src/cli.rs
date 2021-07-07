@@ -12,7 +12,10 @@ use std::{
 
 use crate::graphql_service;
 use hyper::{server::conn::AddrStream, service::make_service_fn, Server};
-use reflex::{cache::GenerationalGc, core::Expression};
+use reflex::{
+    cache::GenerationalGc,
+    core::{Expression, Signal},
+};
 use reflex_cli::parse_cli_args;
 use reflex_handlers::debug_signal_handler;
 use reflex_js::{create_js_env, parse_module};
@@ -23,7 +26,7 @@ pub use reflex_handlers::builtin_signal_handler;
 pub use reflex_js::{
     compose_module_loaders, create_module_loader, static_module_loader, stdlib::builtin_imports,
 };
-pub use reflex_runtime::SignalResult;
+pub use reflex_runtime::{SignalHandlerResult, SignalResult};
 
 struct CliArgs {
     entry_point: String,
@@ -32,7 +35,7 @@ struct CliArgs {
 }
 
 pub async fn cli(
-    signal_handler: impl Fn(&str, &[Expression], &SignalHelpers) -> Option<Result<SignalResult, String>>
+    signal_handler: impl Fn(&str, &[&Signal], &SignalHelpers) -> SignalHandlerResult
         + Send
         + Sync
         + 'static,
@@ -106,10 +109,7 @@ fn create_graph_root(
 
 fn create_store<THandler>(signal_handler: THandler) -> Runtime
 where
-    THandler: Fn(&str, &[Expression], &SignalHelpers) -> Option<Result<SignalResult, String>>
-        + Send
-        + Sync
-        + 'static,
+    THandler: Fn(&str, &[&Signal], &SignalHelpers) -> SignalHandlerResult + Send + Sync + 'static,
 {
     // TODO: Establish sensible defaults for channel buffer sizes
     let command_buffer_size = 1024;

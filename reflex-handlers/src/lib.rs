@@ -5,10 +5,9 @@ pub mod date;
 pub mod graphql;
 pub mod http;
 
-use std::collections::HashMap;
-
-use reflex::{core::Expression, serialize};
-use reflex_runtime::{SignalHelpers, SignalResult};
+use graphql::graphql_execute_handler;
+use reflex::{core::Signal, serialize};
+use reflex_runtime::{SignalHandlerResult, SignalHelpers, SignalResult};
 
 pub(crate) mod utils {
     mod fetch;
@@ -18,75 +17,58 @@ pub(crate) mod utils {
 }
 
 pub fn builtin_signal_handler(
-) -> impl Fn(&str, &[Expression], &SignalHelpers) -> Option<Result<SignalResult, String>>
-       + Send
-       + Sync
-       + 'static {
-    create_signal_handler(vec![
-        (
-            "reflex::date::timestamp",
-            date::handle_date_timestamp
-                as fn(&[Expression], &SignalHelpers) -> Result<SignalResult, String>,
-        ),
-        (
-            "reflex::http::fetch",
-            http::handle_http_fetch
-                as fn(&[Expression], &SignalHelpers) -> Result<SignalResult, String>,
-        ),
-        (
-            "reflex::graphql::execute",
-            graphql::handle_graphql_execute
-                as fn(&[Expression], &SignalHelpers) -> Result<SignalResult, String>,
-        ),
-    ])
+) -> impl Fn(&str, &[&Signal], &SignalHelpers) -> SignalHandlerResult + Send + Sync + 'static {
+    compose_signal_handlers(
+        date::date_timestamp_handler,
+        compose_signal_handlers(http::http_fetch_handler, graphql_execute_handler),
+    )
 }
 
-pub fn create_signal_handler(
-    handlers: impl IntoIterator<
-        Item = (
-            &'static str,
-            fn(&[Expression], &SignalHelpers) -> Result<SignalResult, String>,
-        ),
-    >,
-) -> impl Fn(&str, &[Expression], &SignalHelpers) -> Option<Result<SignalResult, String>>
-       + Send
-       + Sync
-       + 'static {
-    let handlers = handlers.into_iter().collect::<HashMap<_, _>>();
-    move |signal_type, args, helpers| match handlers.get(signal_type) {
-        Some(handler) => Some(handler(args, helpers)),
-        None => None,
+pub fn compose_signal_handlers(
+    head: impl Fn(&str, &[&Signal], &SignalHelpers) -> SignalHandlerResult + 'static,
+    tail: impl Fn(&str, &[&Signal], &SignalHelpers) -> SignalHandlerResult + 'static,
+) -> impl Fn(&str, &[&Signal], &SignalHelpers) -> SignalHandlerResult {
+    move |signal_type: &str, signals: &[&Signal], helpers: &SignalHelpers| match head(
+        signal_type,
+        signals,
+        helpers,
+    ) {
+        Some(result) => Some(result),
+        None => tail(signal_type, signals, helpers),
     }
 }
 
 pub fn debug_signal_handler<THandler>(
     handler: THandler,
-) -> impl Fn(&str, &[Expression], &SignalHelpers) -> Option<Result<SignalResult, String>>
-       + Send
-       + Sync
-       + 'static
+) -> impl Fn(&str, &[&Signal], &SignalHelpers) -> SignalHandlerResult + Send + Sync + 'static
 where
-    THandler: Fn(&str, &[Expression], &SignalHelpers) -> Option<Result<SignalResult, String>>
-        + Send
-        + Sync
-        + 'static,
+    THandler: Fn(&str, &[&Signal], &SignalHelpers) -> SignalHandlerResult + Send + Sync + 'static,
 {
-    move |signal_type, args, helpers| {
-        if args.is_empty() {
-            eprintln!("{}", signal_type)
-        } else {
-            eprintln!(
-                "{} {}",
-                signal_type,
-                args.iter()
-                    .map(|arg| match serialize(arg.value()) {
-                        Ok(value) => format!("{}", value),
-                        Err(_) => format!("{}", arg),
-                    })
-                    .collect::<Vec<_>>()
-                    .join(" ")
-            )
-        };
-        handler(signal_type, args, helpers)
+    move |signal_type, signals, helpers| {
+        eprintln!(
+            "[{}]{}",
+            signal_type,
+            if signals.len() == 1 {
+                String::new()
+            } else {
+                format!(" x {}", signals.len())
+            }
+        );
+        for signal in signals.iter() {
+            let args = signal.args();
+            if !args.is_empty() {
+                eprintln!(
+                    "  {}",
+                    args.iter()
+                        .map(|arg| match serialize(arg.value()) {
+                            Ok(value) => format!("{}", value),
+                            Err(_) => format!("{}", arg),
+                        })
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                )
+            };
+        }
+        handler(signal_type, signals, helpers)
     }
 }

@@ -10,16 +10,29 @@ use reflex::{
     stdlib::{signal::SignalType, value::ValueTerm},
 };
 use reflex_graphql::{subscriptions::SubscriptionId, GraphQlOperationPayload};
-use reflex_runtime::{RuntimeEffect, SignalHelpers, SignalResult};
+use reflex_runtime::{RuntimeEffect, SignalHandlerResult, SignalHelpers, SignalResult};
 use tokio_stream::Stream;
 use uuid::Uuid;
 
 use crate::utils::{create_websocket_connection, fetch, subscribe_websocket_operation};
 
-pub fn handle_graphql_execute(
-    args: &[Expression],
+pub fn graphql_execute_handler(
+    signal_type: &str,
+    signals: &[&Signal],
     _helpers: &SignalHelpers,
-) -> Result<SignalResult, String> {
+) -> SignalHandlerResult {
+    if signal_type != "reflex::graphql::execute" {
+        return None;
+    }
+    Some(
+        signals
+            .iter()
+            .map(|signal| handle_graphql_execute_signal(signal.args()))
+            .collect(),
+    )
+}
+
+fn handle_graphql_execute_signal(args: &[Expression]) -> Result<SignalResult, String> {
     if args.len() != 5 {
         return Err(format!(
             "Invalid GraphQL signal: Expected 5 arguments, received {}",

@@ -4,19 +4,32 @@
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use reflex::{
-    core::{Expression, Term},
+    core::{Expression, Signal, Term},
     stdlib::value::ValueTerm,
 };
-use reflex_runtime::{RuntimeEffect, SignalHelpers};
+use reflex_runtime::{RuntimeEffect, SignalHandlerResult, SignalHelpers};
 use tokio::time::{interval_at, Instant};
 use tokio_stream::{wrappers::IntervalStream, StreamExt};
 
 use crate::SignalResult;
 
-pub fn handle_date_timestamp(
-    args: &[Expression],
+pub fn date_timestamp_handler(
+    signal_type: &str,
+    signals: &[&Signal],
     _helpers: &SignalHelpers,
-) -> Result<SignalResult, String> {
+) -> SignalHandlerResult {
+    if signal_type != "reflex::date::timestamp" {
+        return None;
+    }
+    Some(
+        signals
+            .iter()
+            .map(|signal| handle_date_timestamp_signal(signal.args()))
+            .collect(),
+    )
+}
+
+fn handle_date_timestamp_signal(args: &[Expression]) -> Result<SignalResult, String> {
     if args.len() != 1 {
         return Err(format!(
             "Invalid timestamp signal: Expected 1 argument, received {}",

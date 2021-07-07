@@ -7,7 +7,13 @@ use reflex::{
     hash::{hash_object, HashId},
     stdlib::{signal::SignalType, value::ValueTerm},
 };
-use std::{any::TypeId, future::Future, pin::Pin, sync::Mutex};
+use std::{
+    any::TypeId,
+    collections::{hash_map::Entry, HashMap},
+    future::Future,
+    pin::Pin,
+    sync::Mutex,
+};
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
 pub use tokio_stream::Stream;
 use tokio_stream::{
@@ -20,60 +26,13 @@ use store::Store;
 
 pub type SubscriptionResult = Result<Expression, Vec<String>>;
 pub type SignalResult = (Expression, Option<RuntimeEffect>);
-pub struct SignalHelpers<'a> {
-    handler: Box<
-        dyn Fn(&str, &[Expression], &SignalHelpers) -> Option<Result<SignalResult, String>>
-            + Send
-            + Sync
-            + 'a,
-    >,
-    commands: CommandChannel,
-}
-impl<'a> SignalHelpers<'a> {
-    fn new<THandler>(handler: &'a THandler, commands: CommandChannel) -> Self
-    where
-        THandler: Fn(&str, &[Expression], &SignalHelpers) -> Option<Result<SignalResult, String>>
-            + Send
-            + Sync
-            + 'a,
-    {
-        Self {
-            handler: Box::new(handler),
-            commands,
-        }
-    }
-    pub fn spawn(&self, signal: Signal) -> Result<SignalResult, String> {
-        // TODO: Register dependency on parent signal when spawning child signals
-        match signal.get_type() {
-            SignalType::Error | SignalType::Pending => {
-                Ok((Expression::new(Term::Signal(SignalTerm::new(signal))), None))
-            }
-            SignalType::Custom(signal_type) => {
-                handle_custom_signal(&self.handler, signal_type, signal.args(), &self.commands)
-            }
-        }
-    }
-    pub fn watch_expression(
-        &self,
-        expression: Expression,
-    ) -> impl Stream<Item = Expression> + Send + Sync + 'static {
-        self.watcher().watch_expression(expression)
-    }
-    pub fn watch_state(
-        &self,
-        state_token: StateToken,
-    ) -> impl Stream<Item = Expression> + Send + Sync + 'static {
-        self.watcher().watch_state(state_token)
-    }
-    pub fn watcher(&self) -> ExpressionWatcher {
-        ExpressionWatcher::new(self.commands.clone())
-    }
-}
+pub type SignalHandlerResult = Option<Vec<Result<SignalResult, String>>>;
+
 #[derive(Clone)]
-pub struct ExpressionWatcher {
+pub struct SignalHelpers {
     commands: CommandChannel,
 }
-impl ExpressionWatcher {
+impl SignalHelpers {
     fn new(commands: CommandChannel) -> Self {
         Self { commands }
     }
@@ -283,10 +242,8 @@ impl Runtime {
         result_buffer_size: usize,
     ) -> Self
     where
-        THandler: Fn(&str, &[Expression], &SignalHelpers) -> Option<Result<SignalResult, String>>
-            + Send
-            + Sync
-            + 'static,
+        THandler:
+            Fn(&str, &[&Signal], &SignalHelpers) -> SignalHandlerResult + Send + Sync + 'static,
     {
         let (commands, results) = create_store(
             signal_handler,
@@ -335,10 +292,7 @@ fn create_store<THandler, TCache: EvaluationCache + Send + Sync + 'static>(
     result_buffer_size: usize,
 ) -> (CommandChannel, ResultsChannel)
 where
-    THandler: Fn(&str, &[Expression], &SignalHelpers) -> Option<Result<SignalResult, String>>
-        + Send
-        + Sync
-        + 'static,
+    THandler: Fn(&str, &[&Signal], &SignalHelpers) -> SignalHandlerResult + Send + Sync + 'static,
 {
     let (messages_tx, mut messages_rx) = mpsc::channel::<Command>(command_buffer_size);
     let (results_tx, _) = broadcast::channel(result_buffer_size);
@@ -378,15 +332,12 @@ fn process_subscribe_command<THandler, TCache: EvaluationCache>(
     results_tx: &ResultsChannel,
     signal_handler: &THandler,
 ) where
-    THandler: Fn(&str, &[Expression], &SignalHelpers) -> Option<Result<SignalResult, String>>
-        + Send
-        + Sync
-        + 'static,
+    THandler: Fn(&str, &[&Signal], &SignalHelpers) -> SignalHandlerResult + Send + Sync + 'static,
 {
     let expression = command.payload;
     let (subscription_id, results) = {
-        store.get_mut().unwrap().subscribe(expression, |signal| {
-            handle_signal(signal, commands_tx, signal_handler)
+        store.get_mut().unwrap().subscribe(expression, |signals| {
+            handle_signals(signals, commands_tx, signal_handler)
         })
     };
     let (initial_value, results): (Vec<_>, Vec<_>) = results
@@ -431,15 +382,12 @@ fn process_update_command<THandler, TCache: EvaluationCache>(
     results_tx: &ResultsChannel,
     signal_handler: &THandler,
 ) where
-    THandler: Fn(&str, &[Expression], &SignalHelpers) -> Option<Result<SignalResult, String>>
-        + Send
-        + Sync
-        + 'static,
+    THandler: Fn(&str, &[&Signal], &SignalHelpers) -> SignalHandlerResult + Send + Sync + 'static,
 {
     let updates = command.payload;
     let results = {
-        store.get_mut().unwrap().update(updates, |signal| {
-            handle_signal(signal, commands_tx, signal_handler)
+        store.get_mut().unwrap().update(updates, |signals| {
+            handle_signals(signals, commands_tx, signal_handler)
         })
     };
     let results = results
@@ -511,33 +459,78 @@ async fn stop_subscription(id: SubscriptionId, channel: &CommandChannel) -> Resu
     }
 }
 
-fn handle_signal<THandler>(
-    signal: &Signal,
+fn handle_signals<THandler>(
+    signals: &[&Signal],
     commands: &CommandChannel,
     signal_handler: &THandler,
-) -> Result<Expression, Option<String>>
+) -> Vec<Result<Expression, Option<String>>>
 where
-    THandler: Fn(&str, &[Expression], &SignalHelpers) -> Option<Result<SignalResult, String>>
-        + Send
-        + Sync
-        + 'static,
+    THandler: Fn(&str, &[&Signal], &SignalHelpers) -> SignalHandlerResult + Send + Sync + 'static,
 {
-    let (result, effect) = match signal.get_type() {
-        SignalType::Error => (Err(Some(parse_error_signal_message(signal.args()))), None),
-        SignalType::Pending => (Err(None), None),
-        SignalType::Custom(signal_type) => {
-            match handle_custom_signal(signal_handler, signal_type, signal.args(), commands) {
-                Err(error) => (Err(Some(error)), None),
-                Ok((result, effect)) => (Ok(result), effect),
+    let custom_signals = signals.iter().filter_map(|signal| match signal.get_type() {
+        SignalType::Custom(signal_type) => Some((signal, signal_type)),
+        _ => None,
+    });
+    let custom_signals_by_type = custom_signals.fold(
+        HashMap::<&String, Vec<&Signal>>::new(),
+        |mut results, (signal, signal_type)| {
+            match results.entry(signal_type) {
+                Entry::Occupied(mut entry) => {
+                    entry.get_mut().push(signal);
+                }
+                Entry::Vacant(entry) => {
+                    entry.insert(vec![signal]);
+                }
+            }
+            results
+        },
+    );
+    let mut custom_signal_results = HashMap::with_capacity(signals.len());
+    for (signal_type, signals) in custom_signals_by_type {
+        let results = signal_handler(signal_type, &signals, &SignalHelpers::new(commands.clone()));
+        if let Some(results) = results {
+            let signal_ids = signals.iter().map(|signal| signal.id());
+            if results.len() == signals.len() {
+                custom_signal_results.extend(signal_ids.zip(results));
+            } else {
+                custom_signal_results.extend(signal_ids.map(|id| {
+                    (
+                        id,
+                        Err(format!(
+                            "Expected {} results from {} handler, received {}",
+                            signals.len(),
+                            signal_type,
+                            results.len()
+                        )),
+                    )
+                }));
             }
         }
-    };
-
-    if let Some(effect) = effect {
-        apply_signal_effect(signal, effect, commands);
     }
 
-    result
+    let (results, effects): (Vec<_>, Vec<Option<(_, _)>>) = signals
+        .into_iter()
+        .map(|signal| match signal.get_type() {
+            SignalType::Error => Err(Some(parse_error_signal_message(signal.args()))),
+            SignalType::Pending => Err(None),
+            SignalType::Custom(_) => match custom_signal_results.remove(&signal.id()) {
+                Some(result) => match result {
+                    Ok(result) => Ok((signal, result)),
+                    Err(error) => Err(Some(error)),
+                },
+                None => Err(Some(format!("Unhandled signal: {}", signal))),
+            },
+        })
+        .map(|result| match result {
+            Err(error) => (Err(error), None),
+            Ok((signal, (result, effect))) => (Ok(result), effect.map(|effect| (signal, effect))),
+        })
+        .unzip();
+
+    for (signal, effect) in effects.into_iter().filter_map(|effect| effect) {
+        apply_signal_effect(signal, effect, commands)
+    }
+    results
 }
 
 fn apply_signal_effect(signal: &Signal, effect: RuntimeEffect, commands: &CommandChannel) {
@@ -564,29 +557,6 @@ fn apply_signal_effect(signal: &Signal, effect: RuntimeEffect, commands: &Comman
                 }
             });
         }
-    }
-}
-
-fn handle_custom_signal<'a, THandler>(
-    signal_handler: &THandler,
-    signal_type: &str,
-    args: &[Expression],
-    commands: &CommandChannel,
-) -> Result<SignalResult, String>
-where
-    THandler: Fn(&str, &[Expression], &SignalHelpers) -> Option<Result<SignalResult, String>>
-        + Send
-        + Sync
-        + 'a,
-{
-    let handler = signal_handler(
-        signal_type,
-        args,
-        &SignalHelpers::new(signal_handler, commands.clone()),
-    );
-    match handler {
-        None => Err(format!("Unhandled signal: {}", signal_type)),
-        Some(result) => result,
     }
 }
 
@@ -639,16 +609,10 @@ fn is_pending_signal(signal: &Signal) -> bool {
     signal.is_type(SignalType::Pending)
 }
 
-fn strip_pending_results(
-    result: Result<Expression, Vec<Option<String>>>,
-) -> Option<SubscriptionResult> {
+fn strip_pending_results(result: Result<Expression, Vec<String>>) -> Option<SubscriptionResult> {
     match result {
         Ok(result) => Some(Ok(result)),
         Err(errors) => {
-            let errors = errors
-                .into_iter()
-                .filter_map(|error| error)
-                .collect::<Vec<_>>();
             if errors.is_empty() {
                 None
             } else {
