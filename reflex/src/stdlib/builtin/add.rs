@@ -31,6 +31,12 @@ impl BuiltinFunction for Add {
             (Term::Value(ValueTerm::Float(left)), Term::Value(ValueTerm::Float(right))) => {
                 Expression::new(Term::Value(ValueTerm::Float(left + right)))
             }
+            (Term::Value(ValueTerm::Int(left)), Term::Value(ValueTerm::Float(right))) => {
+                Expression::new(Term::Value(ValueTerm::Float((*left as f64) + right)))
+            }
+            (Term::Value(ValueTerm::Float(left)), Term::Value(ValueTerm::Int(right))) => {
+                Expression::new(Term::Value(ValueTerm::Float(left + (*right as f64))))
+            }
             _ => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                 SignalType::Error,
                 vec![Expression::new(Term::Value(ValueTerm::String(format!(
@@ -154,35 +160,6 @@ mod tests {
     fn invalid_add_expression_operands() {
         let mut cache = GenerationalGc::new();
         let state = DynamicState::new();
-        let expression = parse("(+ 3 3.142)").unwrap();
-        let result = expression.evaluate(&state, &mut cache);
-        assert_eq!(
-            result,
-            EvaluationResult::new(
-                Expression::new(Term::Signal(SignalTerm::new(Signal::new(
-                    SignalType::Error,
-                    vec![Expression::new(Term::Value(ValueTerm::String(
-                        String::from("Expected (Int, Int) or (Float, Float), received (3, 3.142)")
-                    )))]
-                )))),
-                DependencyList::empty()
-            )
-        );
-        let expression = parse("(+ 3.142 3)").unwrap();
-        let result = expression.evaluate(&state, &mut cache);
-        assert_eq!(
-            result,
-            EvaluationResult::new(
-                Expression::new(Term::Signal(SignalTerm::new(Signal::new(
-                    SignalType::Error,
-                    vec![Expression::new(Term::Value(ValueTerm::String(
-                        String::from("Expected (Int, Int) or (Float, Float), received (3.142, 3)")
-                    )))]
-                )))),
-                DependencyList::empty()
-            )
-        );
-
         let expression = parse("(+ 3 #f)").unwrap();
         let result = expression.evaluate(&state, &mut cache);
         assert_eq!(

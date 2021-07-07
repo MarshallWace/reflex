@@ -51,6 +51,32 @@ impl BuiltinFunction for Divide {
                     Expression::new(Term::Value(ValueTerm::Float(left / right)))
                 }
             }
+            (Term::Value(ValueTerm::Int(left)), Term::Value(ValueTerm::Float(right))) => {
+                if *right == 0.0 {
+                    Expression::new(Term::Signal(SignalTerm::new(Signal::new(
+                        SignalType::Error,
+                        vec![Expression::new(Term::Value(ValueTerm::String(format!(
+                            "Division by zero: {} / {}",
+                            left, right,
+                        ))))],
+                    ))))
+                } else {
+                    Expression::new(Term::Value(ValueTerm::Float((*left as f64) / right)))
+                }
+            }
+            (Term::Value(ValueTerm::Float(left)), Term::Value(ValueTerm::Int(right))) => {
+                if *right == 0 {
+                    Expression::new(Term::Signal(SignalTerm::new(Signal::new(
+                        SignalType::Error,
+                        vec![Expression::new(Term::Value(ValueTerm::String(format!(
+                            "Division by zero: {} / {}",
+                            left, right,
+                        ))))],
+                    ))))
+                } else {
+                    Expression::new(Term::Value(ValueTerm::Float(left / (*right as f64))))
+                }
+            }
             _ => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                 SignalType::Error,
                 vec![Expression::new(Term::Value(ValueTerm::String(format!(

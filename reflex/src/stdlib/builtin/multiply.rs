@@ -31,6 +31,12 @@ impl BuiltinFunction for Multiply {
             (Term::Value(ValueTerm::Float(left)), Term::Value(ValueTerm::Float(right))) => {
                 Expression::new(Term::Value(ValueTerm::Float(left * right)))
             }
+            (Term::Value(ValueTerm::Int(left)), Term::Value(ValueTerm::Float(right))) => {
+                Expression::new(Term::Value(ValueTerm::Float((*left as f64) * right)))
+            }
+            (Term::Value(ValueTerm::Float(left)), Term::Value(ValueTerm::Int(right))) => {
+                Expression::new(Term::Value(ValueTerm::Float(left * (*right as f64))))
+            }
             _ => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                 SignalType::Error,
                 vec![Expression::new(Term::Value(ValueTerm::String(format!(
