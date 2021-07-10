@@ -101,36 +101,34 @@ async fn handle_websocket_connection(
                         .await;
                 }
                 GraphQlSubscriptionClientMessage::Start(message) => {
-                    let variables = message
-                        .variables()
-                        .entries()
-                        .iter()
-                        .map(|(key, value)| (key.as_str(), value.deserialize()));
-                    match parse(message.query(), variables) {
-                        Err(error) => {
-                            let _ = messages_tx
-                                .send(GraphQlSubscriptionServerMessage::ConnectionError(format!(
-                                    "Invalid query: {}",
-                                    error
-                                )))
-                                .await;
-                        }
-                        Ok(query) => {
-                            let subscription_id = message.subscription_id();
-                            if subscriptions
-                                .get_mut()
-                                .unwrap()
-                                .contains_key(subscription_id)
-                            {
+                    let subscription_id = message.subscription_id();
+                    if subscriptions
+                        .get_mut()
+                        .unwrap()
+                        .contains_key(subscription_id)
+                    {
+                        let _ = messages_tx
+                            .send(GraphQlSubscriptionServerMessage::ConnectionError(format!(
+                                "Subscription ID already exists: {}",
+                                subscription_id
+                            )))
+                            .await;
+                    } else {
+                        let variables = message
+                            .variables()
+                            .entries()
+                            .iter()
+                            .map(|(key, value)| (key.as_str(), value.deserialize()));
+                        match parse(message.query(), variables) {
+                            Err(error) => {
                                 let _ = messages_tx
-                                    .send(GraphQlSubscriptionServerMessage::ConnectionError(
-                                        format!(
-                                            "Subscription ID already exists: {}",
-                                            subscription_id
-                                        ),
+                                    .send(GraphQlSubscriptionServerMessage::Error(
+                                        subscription_id.clone(),
+                                        format!("Invalid query: {}", error),
                                     ))
                                     .await;
-                            } else {
+                            }
+                            Ok(query) => {
                                 let expression = Expression::new(Term::Application(
                                     ApplicationTerm::new(query, vec![Expression::clone(&root)]),
                                 ));
