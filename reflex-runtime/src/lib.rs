@@ -359,7 +359,7 @@ fn process_subscribe_command<THandler, TCache: EvaluationCache>(
     tokio::spawn(async move {
         while let Some(update) = stream.next().await {
             // TODO: Handle update channel errors
-            update_stream.send(Some(update)).unwrap();
+            let _ = update_stream.send(Some(update));
         }
     });
 }
