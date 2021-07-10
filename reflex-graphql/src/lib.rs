@@ -49,11 +49,12 @@ pub fn wrap_graphql_success_response(value: SerializedTerm) -> SerializedTerm {
 pub fn wrap_graphql_error_response(errors: Vec<String>) -> SerializedTerm {
     SerializedTerm::Object(SerializedObjectTerm::new(once((
         String::from("errors"),
-        SerializedTerm::List(SerializedListTerm::new(
-            errors
-                .into_iter()
-                .map(|error| SerializedTerm::Value(ValueTerm::String(error))),
-        )),
+        SerializedTerm::List(SerializedListTerm::new(errors.into_iter().map(|error| {
+            SerializedTerm::Object(SerializedObjectTerm::new(once((
+                String::from("message"),
+                SerializedTerm::Value(ValueTerm::String(error)),
+            ))))
+        }))),
     ))))
 }
 
@@ -80,6 +81,7 @@ pub fn parse<'v>(
                     OperationDefinition::SelectionSet(selection_set) => parse_root_operation(
                         DEFAULT_OPERATION_TYPE,
                         selection_set,
+                        &Vec::new(),
                         variables,
                         &fragments,
                     ),
@@ -135,7 +137,13 @@ fn parse_query_operation<'src>(
     variables: &QueryVariables,
     fragments: &QueryFragments,
 ) -> Result<Expression, String> {
-    parse_root_operation("query", &operation.selection_set, variables, fragments)
+    parse_root_operation(
+        "query",
+        &operation.selection_set,
+        &operation.variable_definitions,
+        variables,
+        fragments,
+    )
 }
 
 fn parse_mutation_operation<'src>(
@@ -143,7 +151,13 @@ fn parse_mutation_operation<'src>(
     variables: &QueryVariables,
     fragments: &QueryFragments,
 ) -> Result<Expression, String> {
-    parse_root_operation("mutation", &operation.selection_set, variables, fragments)
+    parse_root_operation(
+        "mutation",
+        &operation.selection_set,
+        &operation.variable_definitions,
+        variables,
+        fragments,
+    )
 }
 
 fn parse_subscription_operation<'src>(
@@ -154,6 +168,7 @@ fn parse_subscription_operation<'src>(
     parse_root_operation(
         "subscription",
         &operation.selection_set,
+        &operation.variable_definitions,
         variables,
         fragments,
     )
@@ -162,10 +177,12 @@ fn parse_subscription_operation<'src>(
 fn parse_root_operation<'src>(
     operation_type: &str,
     selection_set: &SelectionSet<'src, &'src str>,
+    variable_definitions: &[VariableDefinition<'src, &'src str>],
     variables: &QueryVariables,
     fragments: &QueryFragments,
 ) -> Result<Expression, String> {
-    let query = parse_selection_set(selection_set, variables, fragments)?;
+    let variables = parse_operation_variables(variable_definitions, variables)?;
+    let query = parse_selection_set(selection_set, &variables, fragments)?;
     Ok(create_lambda(
         Arity::from(1, 0, None),
         create_function_application(
@@ -179,6 +196,48 @@ fn parse_root_operation<'src>(
             )],
         ),
     ))
+}
+
+fn parse_operation_variables<'src>(
+    variable_definitions: &[VariableDefinition<'src, &'src str>],
+    variables: &QueryVariables,
+) -> Result<QueryVariables<'src>, String> {
+    variable_definitions
+        .iter()
+        .map(|definition| {
+            let value = variables.get(definition.name).map(Expression::clone);
+            let value = match value {
+                Some(value) => Some(value),
+                None => match &definition.default_value {
+                    Some(value) => Some(parse_value(
+                        value,
+                        &QueryVariables::new(),
+                        &QueryFragments::new(),
+                    )?),
+                    None => None,
+                },
+            };
+            Ok((
+                definition.name,
+                validate_variable(value, definition.name, &definition.var_type)?,
+            ))
+        })
+        .collect::<Result<QueryVariables, _>>()
+}
+
+fn validate_variable<'src>(
+    value: Option<Expression>,
+    name: &'src str,
+    var_type: &Type<'src, &'src str>,
+) -> Result<Expression, String> {
+    match var_type {
+        Type::NonNullType(_) => {
+            value.ok_or_else(|| format!("Missing required query variable: {}", name))
+        }
+        // TODO: Validate query variable types
+        // TODO: Differentiate between missing optional variables and null values
+        _ => Ok(value.unwrap_or_else(|| Expression::new(Term::Value(ValueTerm::Null)))),
+    }
 }
 
 fn parse_selection_set<'src>(
@@ -317,13 +376,13 @@ fn parse_value<'src>(
     match value {
         Value::Variable(name) => match variables.get(*name) {
             Some(value) => Ok(Expression::clone(value)),
-            None => Err(format!("Missing query variable: {}", name)),
+            None => Err(format!("Undeclared query variable: {}", name)),
         },
-        Value::Int(value) => Ok(Expression::new(Term::Value(ValueTerm::Float(
+        Value::Int(value) => Ok(Expression::new(Term::Value(ValueTerm::Int(
             value
                 .as_i64()
                 .ok_or_else(|| format!("Invalid integer argument: {:?}", value))?
-                as f64,
+                as i32,
         )))),
         Value::Float(value) => Ok(Expression::new(Term::Value(ValueTerm::Float(*value)))),
         Value::String(value) => Ok(Expression::new(Term::Value(ValueTerm::String(
