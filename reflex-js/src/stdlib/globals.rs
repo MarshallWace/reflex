@@ -7,23 +7,23 @@ use reflex::{
 };
 
 mod boolean;
-use boolean::global_boolean;
+pub use boolean::global_boolean;
 mod json;
-use json::global_json;
+pub use json::{
+    global_json, global_json_parse, global_json_stringify, json_stringify, json_stringify_string,
+};
 mod map;
-use map::global_map;
+pub use map::global_map;
 mod math;
-use math::global_math;
+pub use math::global_math;
 mod object;
-use object::global_object;
-mod set;
-use set::global_set;
-mod string;
-use string::{global_string, global_encode_uri_component};
-
-pub use json::{global_json_parse, global_json_stringify, json_stringify, json_stringify_string};
+pub use object::global_object;
 mod process;
 pub use process::global_process;
+mod set;
+pub use set::global_set;
+mod string;
+pub use string::{global_encode_uri_component, global_string};
 
 pub fn builtin_globals() -> Vec<(&'static str, Expression)> {
     vec![

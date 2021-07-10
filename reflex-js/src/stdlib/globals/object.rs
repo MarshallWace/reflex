@@ -16,7 +16,7 @@ use reflex::{
 
 use super::create_struct;
 
-pub(crate) fn global_object() -> Expression {
+pub fn global_object() -> Expression {
     create_struct(vec![(String::from("fromEntries"), from_entries())])
 }
 

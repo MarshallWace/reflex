@@ -14,7 +14,7 @@ use reflex::{
     },
 };
 
-pub(crate) fn global_set() -> Expression {
+pub fn global_set() -> Expression {
     Expression::new(Term::Native(NativeFunction::new(
         SetConstructor::hash(),
         SetConstructor::arity(),

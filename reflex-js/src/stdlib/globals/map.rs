@@ -16,7 +16,7 @@ use reflex::{
     },
 };
 
-pub(crate) fn global_map() -> Expression {
+pub fn global_map() -> Expression {
     Expression::new(Term::Native(NativeFunction::new(
         MapConstructor::hash(),
         MapConstructor::arity(),

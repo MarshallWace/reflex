@@ -11,11 +11,11 @@ use reflex::{
 
 use crate::builtins::to_string;
 
-pub(crate) fn global_string() -> Expression {
+pub fn global_string() -> Expression {
     to_string()
 }
 
-pub(crate) fn global_encode_uri_component() -> Expression {
+pub fn global_encode_uri_component() -> Expression {
     Expression::new(Term::Native(NativeFunction::new(
         EncodeUriComponent::hash(),
         EncodeUriComponent::arity(),

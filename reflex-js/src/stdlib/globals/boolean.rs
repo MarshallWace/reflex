@@ -6,7 +6,7 @@ use reflex::{
     stdlib::{builtin::BuiltinTerm, value::ValueTerm},
 };
 
-pub(crate) fn global_boolean() -> Expression {
+pub fn global_boolean() -> Expression {
     Expression::new(Term::Lambda(LambdaTerm::new(
         Arity::from(0, 1, None),
         Expression::new(Term::Application(ApplicationTerm::new(

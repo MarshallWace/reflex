@@ -20,7 +20,7 @@ use reflex_json::parse;
 
 use crate::stdlib::globals::create_struct;
 
-pub(crate) fn global_json() -> Expression {
+pub fn global_json() -> Expression {
     create_struct(vec![
         (String::from("parse"), global_json_parse()),
         (String::from("stringify"), global_json_stringify()),

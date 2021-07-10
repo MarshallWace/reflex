@@ -8,7 +8,7 @@ use reflex::{
 
 use crate::stdlib::globals::create_struct;
 
-pub(crate) fn global_math() -> Expression {
+pub fn global_math() -> Expression {
     create_struct(vec![
         (
             String::from("abs"),
