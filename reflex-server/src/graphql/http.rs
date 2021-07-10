@@ -1,26 +1,27 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use crate::create_http_response;
+use crate::{create_http_response, get_cors_headers};
 use hyper::{header, Body, Request, Response, StatusCode};
-use reflex::{core::{ApplicationTerm, Expression, Term}, hash::hash_object, serialize::{serialize, SerializedObjectTerm}};
+use reflex::{
+    core::{ApplicationTerm, Expression, Term},
+    hash::hash_object,
+    serialize::{serialize, SerializedObjectTerm},
+};
 use reflex_graphql::{
     create_introspection_query_response, deserialize_graphql_operation,
     wrap_graphql_error_response, wrap_graphql_success_response,
 };
 use reflex_json::stringify;
 use reflex_runtime::{Runtime, SubscriptionResult};
-use std::{
-    convert::Infallible,
-    iter::{empty, once},
-    sync::Arc,
-};
+use std::{convert::Infallible, iter::once, sync::Arc};
 
 pub(crate) async fn handle_graphql_http_request(
     req: Request<Body>,
     store: Arc<Runtime>,
     root: Expression,
 ) -> Result<Response<Body>, Infallible> {
+    let cors_headers = get_cors_headers(&req);
     let request_etag = parse_request_etag(&req);
     let response = match parse_graphql_request(req, &root).await {
         Err(response) => Ok(response),
@@ -44,7 +45,7 @@ pub(crate) async fn handle_graphql_http_request(
     if is_matching_etag {
         return Ok(create_http_response(
             StatusCode::NOT_MODIFIED,
-            empty(),
+            cors_headers,
             None,
         ));
     }
@@ -59,7 +60,10 @@ pub(crate) async fn handle_graphql_http_request(
             stringify(wrap_graphql_error_response(vec![format!("{}", error)])).unwrap(),
         ),
     };
-    let headers = once((header::CONTENT_TYPE, String::from("application/json")));
+    let headers = cors_headers.into_iter().chain(once((
+        header::CONTENT_TYPE,
+        String::from("application/json"),
+    )));
     let response = match response_etag {
         Some(etag) => {
             let headers = headers.chain(once((header::ETAG, etag)));
@@ -125,7 +129,7 @@ fn parse_request_body_graphql(
     let query = reflex_graphql::parse(body, variables)?;
     Ok(Expression::new(Term::Application(ApplicationTerm::new(
         query,
-        vec![Expression::clone(root)]
+        vec![Expression::clone(root)],
     ))))
 }
 

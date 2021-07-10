@@ -5,10 +5,10 @@ use graphql::{
     http::handle_graphql_http_request, playground::handle_playground_http_request,
     websocket::handle_graphql_ws_request,
 };
-use std::{convert::Infallible, future::Future, sync::Arc};
+use std::{convert::Infallible, future::Future, iter::once, sync::Arc};
 
 use hyper::{
-    header::{self, HeaderName, HeaderValue},
+    header::{self, HeaderName, HeaderValue, ACCESS_CONTROL_ALLOW_CREDENTIALS},
     service::{service_fn, Service},
     Body, Method, Request, Response, StatusCode,
 };
@@ -45,11 +45,20 @@ pub fn graphql_service(
                         handle_playground_http_request(req).await
                     }
                 }
+                &Method::OPTIONS => handle_cors_preflight_request(req),
                 &Method::POST => handle_graphql_http_request(req, store, root).await,
                 _ => Ok(method_not_allowed()),
             }
         }
     })
+}
+
+fn handle_cors_preflight_request(req: Request<Body>) -> Result<Response<Body>, Infallible> {
+    Ok(create_http_response(
+        StatusCode::NO_CONTENT,
+        get_cors_headers(&req),
+        None,
+    ))
 }
 
 async fn handle_graphql_upgrade_request(
@@ -77,6 +86,31 @@ fn create_invalid_websocket_upgrade_response() -> Response<Body> {
         ],
         Some(String::from("Invalid protocol upgrade request")),
     )
+}
+
+fn get_cors_headers(req: &Request<Body>) -> impl IntoIterator<Item = (HeaderName, String)> {
+    once((
+        header::ACCESS_CONTROL_ALLOW_METHODS,
+        String::from("OPTIONS, GET, POST"),
+    ))
+    .chain(once((
+        ACCESS_CONTROL_ALLOW_CREDENTIALS,
+        String::from("true"),
+    )))
+    .chain(once((
+        header::ACCESS_CONTROL_ALLOW_ORIGIN,
+        req.headers()
+            .get(header::ORIGIN)
+            .and_then(|header| header.to_str().ok().map(String::from))
+            .unwrap_or_else(|| String::from("*")),
+    )))
+    .chain(once((
+        header::ACCESS_CONTROL_ALLOW_HEADERS,
+        req.headers()
+            .get(header::ACCESS_CONTROL_REQUEST_HEADERS)
+            .and_then(|header| header.to_str().ok().map(String::from))
+            .unwrap_or_else(|| String::from("*")),
+    )))
 }
 
 fn create_http_response(
