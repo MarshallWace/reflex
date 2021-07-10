@@ -60,7 +60,10 @@ impl fmt::Display for ValueTerm {
             Self::Null => write!(f, "<null>"),
             Self::Boolean(value) => write!(f, "{}", value),
             Self::Int(value) => write!(f, "{:?}", value),
-            Self::Float(value) => write!(f, "{:?}", value),
+            Self::Float(value) => match as_integer(*value) {
+                Some(value) => write!(f, "{}.0", value),
+                None => write!(f, "{:?}", value),
+            },
             Self::String(value) => write!(f, "{:?}", value),
         }
     }
@@ -81,5 +84,20 @@ pub fn as_integer(value: f64) -> Option<i32> {
         Some(int_value)
     } else {
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::stdlib::value::ValueTerm;
+
+    #[test]
+    fn format_float_values() {
+        assert_eq!(format!("{}", ValueTerm::Float(3.142)), "3.142");
+        assert_eq!(format!("{}", ValueTerm::Float(3.0)), "3.0");
+        assert_eq!(format!("{}", ValueTerm::Float(0.0)), "0.0");
+        assert_eq!(format!("{}", ValueTerm::Float(-0.0)), "0.0");
+        assert_eq!(format!("{}", ValueTerm::Float(-3.0)), "-3.0");
+        assert_eq!(format!("{}", ValueTerm::Float(-3.142)), "-3.142");
     }
 }
