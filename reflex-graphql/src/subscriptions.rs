@@ -238,6 +238,11 @@ fn deserialize_error_payload(payload: &serde_json::Value) -> Option<String> {
             },
             None => None,
         },
+        serde_json::Value::Array(payload) => payload
+            .iter()
+            .map(deserialize_error_payload)
+            .collect::<Option<Vec<_>>>()
+            .map(|messages| messages.join("\n")),
         _ => None,
     }
 }
