@@ -57,7 +57,7 @@ pub async fn cli(
                 Ok(entry_point) => Ok((
                     env::vars(),
                     entry_point,
-                    SocketAddr::from(([127, 0, 0, 1], port)),
+                    SocketAddr::from(([0, 0, 0, 0], port)),
                     debug,
                 )),
             }
