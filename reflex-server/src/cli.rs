@@ -80,6 +80,7 @@ pub async fn cli(
                     } else {
                         create_store(signal_handler)
                     };
+                    let root = root.optimize(&mut GenerationalGc::new()).unwrap_or(root);
                     let server = create_server(store, root, &address);
                     println!(
                         "Listening for incoming HTTP requests on port {}",
@@ -130,8 +131,7 @@ async fn create_server(
     let store = Arc::new(store);
     let server = Server::bind(&address).serve(make_service_fn(|_socket: &AddrStream| {
         let store = Arc::clone(&store);
-        let root = Expression::clone(&root);
-        let service = graphql_service(store, root);
+        let service = graphql_service(store, Expression::clone(&root));
         async { Ok::<_, Infallible>(service) }
     }));
     match server.await {

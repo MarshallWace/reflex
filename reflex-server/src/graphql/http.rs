@@ -4,6 +4,7 @@
 use crate::{create_http_response, get_cors_headers};
 use hyper::{header, Body, Request, Response, StatusCode};
 use reflex::{
+    cache::GenerationalGc,
     core::{ApplicationTerm, Expression, Term},
     hash::hash_object,
     serialize::{serialize, SerializedObjectTerm},
@@ -25,16 +26,19 @@ pub(crate) async fn handle_graphql_http_request(
     let request_etag = parse_request_etag(&req);
     let response = match parse_graphql_request(req, &root).await {
         Err(response) => Ok(response),
-        Ok(expression) => match store.subscribe(expression).await {
-            Err(error) => Err(error),
-            Ok(mut results) => match results.next().await {
-                None => Err(String::from("Empty result stream")),
-                Some(result) => match results.unsubscribe().await {
-                    Ok(_) => Ok(format_http_response(result)),
-                    Err(error) => Err(error),
+        Ok(query) => {
+            let query = query.optimize(&mut GenerationalGc::new()).unwrap_or(query);
+            match store.subscribe(query).await {
+                Err(error) => Err(error),
+                Ok(mut results) => match results.next().await {
+                    None => Err(String::from("Empty result stream")),
+                    Some(result) => match results.unsubscribe().await {
+                        Ok(_) => Ok(format_http_response(result)),
+                        Err(error) => Err(error),
+                    },
                 },
-            },
-        },
+            }
+        }
     }
     .unwrap_or_else(|error| HttpResult::error(StatusCode::INTERNAL_SERVER_ERROR, error));
     let response_etag = parse_response_etag(&response);

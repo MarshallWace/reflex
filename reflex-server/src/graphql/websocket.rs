@@ -12,6 +12,7 @@ use hyper_tungstenite::{
     WebSocketStream,
 };
 use reflex::{
+    cache::GenerationalGc,
     core::{ApplicationTerm, Expression, Term},
     serialize::{serialize, SerializedListTerm, SerializedObjectTerm, SerializedTerm},
     stdlib::value::ValueTerm,
@@ -129,10 +130,12 @@ async fn handle_websocket_connection(
                                     .await;
                             }
                             Ok(query) => {
-                                let expression = Expression::new(Term::Application(
+                                let query = Expression::new(Term::Application(
                                     ApplicationTerm::new(query, vec![Expression::clone(&root)]),
                                 ));
-                                match store.start_subscription(expression).await {
+                                let query =
+                                    query.optimize(&mut GenerationalGc::new()).unwrap_or(query);
+                                match store.start_subscription(query).await {
                                     Err(error) => {
                                         let _ = messages_tx
                                             .send(GraphQlSubscriptionServerMessage::Error(
