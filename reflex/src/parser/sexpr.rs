@@ -183,7 +183,9 @@ fn parse_variable<'a>(
                 input,
             )),
         },
-        Some(offset) => Ok(Expression::new(Term::Variable(VariableTerm::scoped(offset)))),
+        Some(offset) => Ok(Expression::new(Term::Variable(VariableTerm::scoped(
+            offset,
+        )))),
     }
 }
 
@@ -506,7 +508,9 @@ fn parse_binding_expression<'a>(
                                     Expression::new(Term::Application(ApplicationTerm::new(
                                         Expression::new(Term::Builtin(BuiltinTerm::Get)),
                                         vec![
-                                            Expression::new(Term::Variable(VariableTerm::scoped(0))),
+                                            Expression::new(Term::Variable(VariableTerm::scoped(
+                                                0,
+                                            ))),
                                             Expression::new(Term::Value(ValueTerm::Int(
                                                 index as i32,
                                             ))),
@@ -516,7 +520,7 @@ fn parse_binding_expression<'a>(
                             })
                             .collect::<Vec<_>>();
                         let initializer_substitutions =
-                            Substitutions::named(&initializer_replacements);
+                            Substitutions::named(&initializer_replacements, None);
                         let bindings = Expression::new(Term::Recursive(RecursiveTerm::new(
                             Expression::new(Term::Lambda(LambdaTerm::new(
                                 Arity::from(0, 1, None),
@@ -1719,7 +1723,9 @@ mod tests {
                                     Expression::new(Term::Application(ApplicationTerm::new(
                                         Expression::new(Term::Builtin(BuiltinTerm::Equal)),
                                         vec![
-                                            Expression::new(Term::Variable(VariableTerm::scoped(0))),
+                                            Expression::new(Term::Variable(VariableTerm::scoped(
+                                                0
+                                            ))),
                                             Expression::new(Term::Value(ValueTerm::Int(1))),
                                         ],
                                     ))),
@@ -1727,7 +1733,9 @@ mod tests {
                                     Expression::new(Term::Application(ApplicationTerm::new(
                                         Expression::new(Term::Builtin(BuiltinTerm::Multiply)),
                                         vec![
-                                            Expression::new(Term::Variable(VariableTerm::scoped(0))),
+                                            Expression::new(Term::Variable(VariableTerm::scoped(
+                                                0
+                                            ))),
                                             Expression::new(Term::Application(
                                                 ApplicationTerm::new(
                                                     Expression::new(Term::Variable(

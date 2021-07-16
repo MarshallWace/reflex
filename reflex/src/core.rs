@@ -72,65 +72,99 @@ pub trait Reducible {
 
 #[derive(Hash, Eq, PartialEq, Debug)]
 pub struct Substitutions<'a> {
-    substitutions: Option<&'a [(StackOffset, Expression)]>,
+    entries: Option<&'a [(StackOffset, Expression)]>,
+    scope_offset: Option<ScopeOffset>,
     min_depth: StackOffset,
     offset: StackOffset,
 }
+#[derive(Hash, Eq, PartialEq, Debug, Clone, Copy)]
+pub enum ScopeOffset {
+    Wrap(usize),
+    Unwrap(usize),
+}
 impl<'a> Substitutions<'a> {
-    pub fn named(substitutions: &'a [(StackOffset, Expression)]) -> Self {
+    pub fn named(
+        entries: &'a [(StackOffset, Expression)],
+        scope_offset: Option<ScopeOffset>,
+    ) -> Self {
         Self {
-            substitutions: Some(substitutions),
-            min_depth: substitutions
+            entries: Some(entries),
+            scope_offset,
+            min_depth: entries
                 .iter()
-                .fold(StackOffset::MAX, |acc, (offset, _)| acc.min(*offset)),
+                .map(|(offset, _)| offset)
+                .fold(StackOffset::MAX, |acc, offset| acc.min(*offset)),
             offset: 0,
         }
     }
-    pub fn wildcard(offset: StackOffset) -> Self {
+    pub fn wrap(depth: StackOffset) -> Self {
         Self {
-            substitutions: None,
+            entries: None,
+            scope_offset: Some(ScopeOffset::Wrap(depth)),
             min_depth: 0,
-            offset,
+            offset: 0,
+        }
+    }
+    pub fn unwrap(depth: StackOffset) -> Self {
+        Self {
+            entries: None,
+            scope_offset: Some(ScopeOffset::Unwrap(depth)),
+            min_depth: 0,
+            offset: 0,
         }
     }
     fn offset(&self, offset: StackOffset) -> Self {
         Self {
-            substitutions: match self.substitutions {
-                Some(entries) => Some(entries),
-                None => None,
-            },
+            entries: self.entries.as_ref().copied(),
+            scope_offset: self.scope_offset.as_ref().copied(),
             min_depth: self.min_depth,
             offset: self.offset + offset,
         }
     }
     fn can_skip(&self, expression: &Expression) -> bool {
         let capture_depth = expression.capture_depth();
-        capture_depth == 0
-            || self.substitutions.is_some() && (capture_depth - 1 < self.min_depth + self.offset)
+        if capture_depth == 0 {
+            true
+        } else {
+            expression.capture_depth() - 1 < self.min_depth + self.offset
+        }
     }
     fn get(&self, offset: StackOffset, cache: &mut impl EvaluationCache) -> Option<Expression> {
-        match self.substitutions {
-            None => Some(Expression::new(Term::Variable(VariableTerm::scoped(
-                self.offset + offset,
-            )))),
-            Some(entries) => {
-                if offset < self.offset {
-                    return None;
+        if offset < self.offset {
+            return None;
+        }
+        let target_offset = offset - self.offset;
+        let replacement = self.entries.and_then(|entries| {
+            entries.iter().find_map(|(offset, replacement)| {
+                if *offset == target_offset {
+                    Some(replacement)
+                } else {
+                    None
                 }
-                let target_offset = offset - self.offset;
-                entries
-                    .iter()
-                    .find(|(offset, _)| (*offset == target_offset))
-                    .map(|(_, expression)| {
-                        if expression.capture_depth() > 0 {
-                            expression
-                                .substitute_static(&Substitutions::wildcard(self.offset), cache)
-                                .unwrap_or_else(|| Expression::clone(expression))
-                        } else {
-                            Expression::clone(expression)
-                        }
-                    })
-            }
+            })
+        });
+        match replacement {
+            Some(replacement) => Some(
+                replacement
+                    .substitute_static(&Substitutions::wrap(self.offset), cache)
+                    .unwrap_or_else(|| Expression::clone(replacement)),
+            ),
+            None => match &self.scope_offset {
+                Some(scope_offset) => {
+                    let target_offset = match scope_offset {
+                        ScopeOffset::Wrap(scope_offset) => offset + scope_offset,
+                        ScopeOffset::Unwrap(scope_offset) => offset - scope_offset,
+                    };
+                    if target_offset != offset {
+                        Some(Expression::new(Term::Variable(VariableTerm::scoped(
+                            target_offset,
+                        ))))
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            },
         }
     }
 }
@@ -184,9 +218,8 @@ impl Expression {
     pub fn is_reducible(&self) -> bool {
         !self.is_reduced && self.value.is_reducible()
     }
-    pub fn compile(&self, cache: &mut impl EvaluationCache) -> Expression {
+    pub fn optimize(&self, cache: &mut impl EvaluationCache) -> Option<Expression> {
         self.normalize(cache)
-            .unwrap_or_else(|| Expression::clone(self))
     }
     pub fn evaluate(
         &self,
@@ -214,24 +247,23 @@ impl Expression {
             is_normalized,
         }
     }
-    fn reduced(existing: &Expression) -> Self {
+    fn reduced(value: Term) -> Self {
+        Self::create(value, true, false)
+    }
+    fn normalized(value: Term) -> Self {
+        Self::create(value, true, true)
+    }
+    fn into_reduced(self) -> Self {
         Self {
-            value: Arc::clone(&existing.value),
-            hash: existing.hash,
-            capture_depth: existing.capture_depth,
-            dynamic_dependencies: DependencyList::clone(&existing.dynamic_dependencies),
             is_reduced: true,
-            is_normalized: existing.is_normalized,
+            ..self
         }
     }
-    fn normalized(existing: &Expression) -> Self {
+    fn into_normalized(self) -> Self {
         Self {
-            value: Arc::clone(&existing.value),
-            hash: existing.hash,
-            capture_depth: existing.capture_depth,
-            dynamic_dependencies: DependencyList::clone(&existing.dynamic_dependencies),
-            is_reduced: existing.is_reduced,
+            is_reduced: true,
             is_normalized: true,
+            ..self
         }
     }
 }
@@ -280,11 +312,7 @@ impl Rewritable for Expression {
         if self.is_normalized {
             return None;
         }
-        Some(
-            self.value
-                .normalize(cache)
-                .unwrap_or_else(|| Self::normalized(self)),
-        )
+        self.value.normalize(cache)
     }
 }
 impl Reducible for Expression {
@@ -295,12 +323,8 @@ impl Reducible for Expression {
         match cache.retrieve_reduction(self) {
             Some(result) => result,
             None => {
-                let result = Some(
-                    self.value
-                        .reduce(cache)
-                        .unwrap_or_else(|| Self::reduced(self)),
-                );
-                cache.store_reduction(self, result.as_ref());
+                let result = self.value.reduce(cache);
+                cache.store_reduction(self, result.as_ref().map(Expression::clone));
                 result
             }
         }
@@ -845,7 +869,7 @@ impl Rewritable for RecursiveTerm {
     fn normalize(&self, cache: &mut impl EvaluationCache) -> Option<Expression> {
         self.factory
             .normalize(cache)
-            .map(|factory| Expression::new(Term::Recursive(Self { factory })))
+            .map(|factory| Expression::normalized(Term::Recursive(Self { factory })))
     }
 }
 impl Reducible for RecursiveTerm {
@@ -882,15 +906,23 @@ impl LambdaTerm {
     ) -> Expression {
         // TODO: support variadic 'rest args' iterator in lambda functions
         let arity = self.arity.required();
-        let substitutions = args
-            .into_iter()
-            .take(arity)
-            .enumerate()
-            .map(|(index, arg)| ((arity - index - 1), arg))
-            .collect::<Vec<_>>();
-        self.body
-            .substitute_static(&Substitutions::named(&substitutions), cache)
-            .unwrap_or_else(|| Expression::clone(&self.body))
+        if arity == 0 || self.body.capture_depth() == 0 {
+            Expression::clone(&self.body)
+        } else {
+            let substitutions = args
+                .into_iter()
+                .take(arity)
+                .enumerate()
+                .map(|(index, arg)| ((arity - index - 1), arg))
+                .collect::<Vec<_>>();
+            let substitutions = Substitutions::named(
+                &substitutions,
+                Some(ScopeOffset::Unwrap(arity)),
+            );
+            self.body
+                .substitute_static(&substitutions, cache)
+                .unwrap_or_else(|| Expression::clone(&self.body))
+        }
     }
 }
 impl Rewritable for LambdaTerm {
@@ -922,16 +954,17 @@ impl Rewritable for LambdaTerm {
     }
     fn normalize(&self, cache: &mut impl EvaluationCache) -> Option<Expression> {
         let arity = self.arity.required();
-        let normalized_body = self.body.reduce(cache);
-        let eta_reduced_body = normalized_body.as_ref().map_or_else(
-            || apply_eta_reduction(&self.body, arity),
-            |body| apply_eta_reduction(&body, arity),
-        );
+        let normalized_body = self.body.normalize(cache);
+        let eta_reduced_body =
+            apply_eta_reduction(normalized_body.as_ref().unwrap_or(&self.body), arity);
         eta_reduced_body
-            .and_then(|body| body.reduce(cache))
-            .or(eta_reduced_body.map(Expression::clone))
+            .and_then(|eta_reduced_body| {
+                eta_reduced_body
+                    .normalize(cache)
+                    .or_else(|| Some(Expression::clone(eta_reduced_body).into_normalized()))
+            })
             .or(normalized_body.map(|body| {
-                Expression::new(Term::Lambda(LambdaTerm::new(self.arity.clone(), body)))
+                Expression::normalized(Term::Lambda(LambdaTerm::new(self.arity.clone(), body)))
             }))
     }
 }
@@ -1066,42 +1099,48 @@ impl Rewritable for ApplicationTerm {
     fn normalize(&self, cache: &mut impl EvaluationCache) -> Option<Expression> {
         let normalized_target = self.target.normalize(cache);
         let normalized_args = normalize_multiple(&self.args, cache);
-        let normalized_expression = match normalized_args {
+        let substituted_expression = match normalized_args {
             Some(args) => Some(Expression::new(Term::Application(Self::new(
-                normalized_target.unwrap_or_else(|| Expression::clone(&self.target)),
+                normalized_target
+                    .unwrap_or_else(|| Expression::clone(&self.target).into_normalized()),
                 args,
             )))),
             None => normalized_target.map(|target| {
                 Expression::new(Term::Application(Self::new(
                     target,
-                    self.args.iter().map(Expression::clone).collect(),
+                    self.args
+                        .iter()
+                        .map(|arg| Expression::clone(arg).into_normalized())
+                        .collect(),
                 )))
             }),
         };
-        match &normalized_expression {
-            Some(expression) => expression.reduce(cache),
+        let reduced_expression = match substituted_expression {
+            Some(expression) => expression
+                .reduce(cache)
+                .or_else(|| Some(expression.into_normalized())),
             None => self.reduce(cache),
-        }
-        .or(normalized_expression)
+        };
+        reduced_expression.and_then(|expression| {
+            expression
+                .normalize(cache)
+                .or_else(|| Some(expression.into_normalized()))
+        })
     }
 }
 impl Reducible for ApplicationTerm {
     fn reduce(&self, cache: &mut impl EvaluationCache) -> Option<Expression> {
         let reduced_target = self.target.reduce(cache);
-        let short_circuit_target = match &reduced_target {
-            Some(target) => match target.value() {
-                Term::Signal(_) => true,
-                _ => false,
-            },
+        let target = reduced_target.as_ref().unwrap_or(&self.target);
+        let target_term = target.value();
+        let short_circuit_target = match target_term {
+            Term::Signal(_) => true,
             _ => false,
         };
         if short_circuit_target {
-            return reduced_target;
+            return reduced_target.or_else(|| Some(Expression::clone(&self.target)));
         }
-        let target = reduced_target
-            .as_ref()
-            .map_or_else(|| self.target.value(), |target| target.value());
-        let arity = match &target {
+        let arity = match target_term {
             Term::Lambda(target) => Some(target.arity),
             Term::Builtin(target) => Some(target.arity()),
             Term::Native(target) => Some(target.arity),
@@ -1130,7 +1169,7 @@ impl Reducible for ApplicationTerm {
                 let result = match evaluate_args(self.args.iter(), arity, cache) {
                     Err(args) => Err(args),
                     Ok((args, signals)) => match signals {
-                        SignalArgs::None => match &target {
+                        SignalArgs::None => match target_term {
                             Term::Lambda(target) => Ok(target.apply(args.into_iter(), cache)),
                             Term::Builtin(target) => Ok(target.apply(args.into_iter())),
                             Term::Native(target) => Ok(target.apply(args.into_iter())),
@@ -1159,13 +1198,13 @@ impl Reducible for ApplicationTerm {
                             Term::SignalHandler(_) => Ok(args.into_iter().next().unwrap()),
                             _ => Err(args),
                         },
-                        SignalArgs::Single(signal) => match &target {
+                        SignalArgs::Single(signal) => match target_term {
                             Term::SignalHandler(target) => Ok(target.apply(signal)),
                             _ => Ok(signal),
                         },
                         SignalArgs::Multiple(signals) => {
                             let signal = Expression::new(Term::Signal(SignalTerm::from(signals)));
-                            match &target {
+                            match &target_term {
                                 Term::SignalHandler(target) => Ok(target.apply(signal)),
                                 _ => Ok(signal),
                             }
@@ -1173,7 +1212,10 @@ impl Reducible for ApplicationTerm {
                     },
                 };
                 match result {
-                    Ok(result) => result.reduce(cache).or_else(|| Some(result)),
+                    Ok(result) => result
+                        .reduce(cache)
+                        .or_else(|| Some(result))
+                        .map(|result| result.into_reduced()),
                     Err(args) => {
                         if reduced_target.is_none()
                             && self
@@ -1186,7 +1228,9 @@ impl Reducible for ApplicationTerm {
                         } else {
                             let target =
                                 reduced_target.unwrap_or_else(|| Expression::clone(&self.target));
-                            Some(Expression::new(Term::Application(Self::new(target, args))))
+                            Some(Expression::reduced(Term::Application(Self::new(
+                                target, args,
+                            ))))
                         }
                     }
                 }
@@ -1376,8 +1420,9 @@ impl Rewritable for StructTerm {
             .map(|fields| Expression::new(Term::Struct(Self::new(self.prototype.clone(), fields))))
     }
     fn normalize(&self, cache: &mut impl EvaluationCache) -> Option<Expression> {
-        normalize_multiple(&self.fields, cache)
-            .map(|fields| Expression::new(Term::Struct(Self::new(self.prototype.clone(), fields))))
+        normalize_multiple(&self.fields, cache).map(|fields| {
+            Expression::normalized(Term::Struct(Self::new(self.prototype.clone(), fields)))
+        })
     }
 }
 impl fmt::Display for StructTerm {
@@ -1535,7 +1580,7 @@ impl Rewritable for EnumTerm {
     }
     fn normalize(&self, cache: &mut impl EvaluationCache) -> Option<Expression> {
         normalize_multiple(&self.args, cache)
-            .map(|args| Expression::new(Term::Enum(Self::new(self.index, args))))
+            .map(|args| Expression::normalized(Term::Enum(Self::new(self.index, args))))
     }
 }
 impl fmt::Display for EnumTerm {
@@ -1719,7 +1764,7 @@ impl Rewritable for SignalHandlerTerm {
     fn normalize(&self, cache: &mut impl EvaluationCache) -> Option<Expression> {
         self.handler
             .normalize(cache)
-            .map(|handler| Expression::new(Term::SignalHandler(Self::new(handler))))
+            .map(|handler| Expression::normalized(Term::SignalHandler(Self::new(handler))))
     }
 }
 impl fmt::Display for SignalHandlerTerm {
@@ -2310,6 +2355,30 @@ mod tests {
                 Expression::new(Term::Value(ValueTerm::Int(3 + 4 + 5))),
                 DependencyList::empty(),
             ),
+        );
+    }
+
+    #[test]
+    fn partial_evaluation() {
+        let expression =
+            parse("((lambda (foo) ((lambda (bar) (foo 3)) #f)) (lambda (foo) #t))").unwrap();
+        assert_eq!(
+            expression.optimize(&mut GenerationalGc::new()),
+            Some(Expression::new(Term::Value(ValueTerm::Boolean(true))))
+        );
+
+        let expression = parse(
+            "
+            (let ((identity (lambda (value) value)))
+                (let ((identity2 (lambda (value) (identity value))))
+                    ((lambda (value) (identity2 (* value 2)))
+                      3)))
+        ",
+        )
+        .unwrap();
+        assert_eq!(
+            expression.optimize(&mut GenerationalGc::new()),
+            Some(Expression::new(Term::Value(ValueTerm::Int(6))))
         );
     }
 }

@@ -32,7 +32,7 @@ pub trait EvaluationCache {
         result: Option<&Expression>,
     );
     fn retrieve_reduction(&mut self, expression: &Expression) -> Option<Option<Expression>>;
-    fn store_reduction(&mut self, expression: &Expression, result: Option<&Expression>);
+    fn store_reduction(&mut self, expression: &Expression, result: Option<Expression>);
 }
 
 pub struct GenerationalGc {
@@ -76,9 +76,8 @@ impl EvaluationCache for GenerationalGc {
             },
         }
     }
-    fn store_reduction(&mut self, expression: &Expression, result: Option<&Expression>) {
-        self.current
-            .store_reduction(expression, result.map(Expression::clone));
+    fn store_reduction(&mut self, expression: &Expression, result: Option<Expression>) {
+        self.current.store_reduction(expression, result);
     }
     fn retrieve_static_substitution(
         &mut self,
