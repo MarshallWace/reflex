@@ -14,7 +14,7 @@ use reflex_graphql::{
     wrap_graphql_error_response, wrap_graphql_success_response,
 };
 use reflex_json::stringify;
-use reflex_runtime::{Runtime, SubscriptionResult};
+use reflex_runtime::{Runtime, StreamExt, SubscriptionResult};
 use std::{convert::Infallible, iter::once, sync::Arc};
 
 pub(crate) async fn handle_graphql_http_request(

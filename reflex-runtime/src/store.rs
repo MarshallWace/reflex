@@ -25,7 +25,7 @@ pub struct Store<T: EvaluationCache> {
     signal_cache: SignalCache,
     subscriptions: Vec<Subscription>,
     subscription_counter: usize,
-    is_flushing: bool,
+    pending_updates: Option<UpdateBatch>,
 }
 impl<T: EvaluationCache> Store<T> {
     pub fn new(cache: T, state: Option<DynamicState>) -> Self {
@@ -35,49 +35,27 @@ impl<T: EvaluationCache> Store<T> {
             signal_cache: SignalCache::new(),
             subscriptions: Vec::new(),
             subscription_counter: 0,
-            is_flushing: false,
+            pending_updates: None,
         }
     }
-    pub fn subscribe<THandler>(
-        &mut self,
-        expression: Expression,
-        signal_handler: THandler,
-    ) -> (
-        SubscriptionToken,
-        Vec<(SubscriptionToken, Result<Expression, Vec<String>>)>,
-    )
-    where
-        THandler: Fn(&[&Signal]) -> Vec<Result<Expression, HandlerError>> + Sync + Send,
-    {
+    pub fn subscribe(&mut self, expression: Expression) -> SubscriptionToken {
         self.subscription_counter += 1;
-        let id = self.subscription_counter;
-        let subscription = Subscription::new(id, expression);
+        let subscription_id = self.subscription_counter;
+        let subscription = Subscription::new(subscription_id, expression);
         self.subscriptions.push(subscription);
-        let updates = self
-            .flush(None, signal_handler)
-            .into_iter()
-            .map(|(subscription, result)| (subscription.id, result))
-            .collect::<Vec<_>>();
-        (id, updates)
+        subscription_id
     }
-    pub fn unsubscribe(&mut self, id: SubscriptionToken) -> bool {
+    pub fn unsubscribe(&mut self, subscription_id: SubscriptionToken) -> bool {
         self.subscriptions
             .iter()
-            .position(|subscription| subscription.id == id)
+            .position(|subscription| subscription.id == subscription_id)
             .map(|index| {
                 self.subscriptions.remove(index);
                 true
             })
             .unwrap_or(false)
     }
-    pub fn update<THandler>(
-        &mut self,
-        updates: impl IntoIterator<Item = (StateToken, StateUpdate)>,
-        signal_handler: THandler,
-    ) -> Vec<(SubscriptionToken, Result<Expression, Vec<String>>)>
-    where
-        THandler: Fn(&[&Signal]) -> Vec<Result<Expression, HandlerError>> + Sync + Send,
-    {
+    pub fn update(&mut self, updates: impl IntoIterator<Item = (StateToken, StateUpdate)>) {
         let updates = updates
             .into_iter()
             .filter_map(|(key, update)| {
@@ -94,37 +72,30 @@ impl<T: EvaluationCache> Store<T> {
             })
             .collect::<Vec<_>>();
         if updates.is_empty() {
-            return Vec::new();
+            return;
         }
-        let updated_keys = UpdateBatch::from(updates.iter().map(|(key, _)| *key));
+        let updated_keys = updates.iter().map(|(key, _)| *key);
+        self.pending_updates = Some(match self.pending_updates.take() {
+            Some(existing) => existing.extend(updated_keys),
+            None => UpdateBatch::from(updated_keys),
+        });
         for (key, value) in updates {
             self.state.set(key, value);
         }
-        let updates = self
-            .flush(Some(updated_keys), signal_handler)
-            .into_iter()
-            .map(|(subscription, result)| (subscription.id, result))
-            .collect::<Vec<_>>();
-        updates
     }
-    fn flush<THandler>(
+    pub fn flush<THandler>(
         &mut self,
-        updates: Option<UpdateBatch>,
         signal_handler: THandler,
-    ) -> impl IntoIterator<Item = (&Subscription, Result<Expression, Vec<String>>)>
+    ) -> impl IntoIterator<Item = (SubscriptionToken, Result<Expression, Vec<String>>)> + '_
     where
         THandler: Fn(&[&Signal]) -> Vec<Result<Expression, HandlerError>> + Sync + Send,
     {
-        if self.is_flushing {
-            panic!("Flush already in progress");
-        } else {
-            self.is_flushing = true;
-        }
         let tasks = self
             .subscriptions
             .iter_mut()
             .map(FlushTask::new)
             .collect::<Vec<_>>();
+        let updates = self.pending_updates.take();
         let results = flush_recursive(
             tasks,
             signal_handler,
@@ -136,13 +107,13 @@ impl<T: EvaluationCache> Store<T> {
                 None => Vec::new(),
             },
         );
-        self.is_flushing = false;
         self.subscriptions
             .iter()
+            .map(|subscription| subscription.id)
             .zip(results)
-            .filter_map(|(subscription, result)| match result {
+            .filter_map(|(subscription_id, result)| match result {
                 None => None,
-                Some(result) => Some((subscription, result)),
+                Some(result) => Some((subscription_id, result)),
             })
     }
 }
@@ -234,6 +205,26 @@ impl UpdateBatch {
         Self {
             current: keys.into_iter().collect(),
             combined: None,
+        }
+    }
+    fn extend(mut self, keys: impl IntoIterator<Item = StateToken>) -> Self {
+        match self.combined {
+            None => {
+                self.current.extend(keys);
+                Self {
+                    current: self.current,
+                    combined: None,
+                }
+            }
+            Some(mut combined) => {
+                let keys = keys.into_iter().collect::<Vec<_>>();
+                self.current.extend(keys.iter().copied());
+                combined.extend(keys.iter().copied());
+                Self {
+                    current: self.current,
+                    combined: Some(combined),
+                }
+            }
         }
     }
     fn append(&self, keys: impl IntoIterator<Item = StateToken>) -> Self {

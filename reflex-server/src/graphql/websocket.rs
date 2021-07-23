@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use futures::{stream, SinkExt, Stream, StreamExt};
+use futures::{SinkExt, Stream, StreamExt};
 use hyper::{
     header::{self, HeaderValue},
     upgrade::Upgraded,
@@ -135,7 +135,7 @@ async fn handle_websocket_connection(
                                 ));
                                 let query =
                                     query.optimize(&mut GenerationalGc::new()).unwrap_or(query);
-                                match store.start_subscription(query).await {
+                                match store.subscribe(query).await {
                                     Err(error) => {
                                         let _ = messages_tx
                                             .send(GraphQlSubscriptionServerMessage::Error(
@@ -144,29 +144,26 @@ async fn handle_websocket_connection(
                                             ))
                                             .await;
                                     }
-                                    Ok((store_id, initial_result)) => {
+                                    Ok(subscription) => {
+                                        let store_id = subscription.id();
                                         subscriptions
                                             .get_mut()
                                             .unwrap()
                                             .insert(subscription_id.clone(), store_id);
-
-                                        let store = Arc::clone(&store);
-                                        let results = stream::iter(initial_result.into_iter())
-                                            .chain(store.watch_subscription(store_id))
-                                            .map(move |result| {
-                                                result.and_then(|result| {
-                                                    match serialize(result.value()) {
-                                                        Ok(result) => Ok(result),
-                                                        Err(error) => Err(vec![error]),
-                                                    }
-                                                })
-                                            });
-                                        let should_diff = is_diff_subscription(&message);
-                                        let mut results = match should_diff {
-                                            false => results
+                                        let results = subscription.into_stream().map(|result| {
+                                            result.and_then(|result| {
+                                                match serialize(result.value()) {
+                                                    Ok(result) => Ok(result),
+                                                    Err(error) => Err(vec![error]),
+                                                }
+                                            })
+                                        });
+                                        let mut results = if is_diff_subscription(&message) {
+                                            create_diff_stream(results).left_stream()
+                                        } else {
+                                            results
                                                 .map(|result| result.map(|value| (value, false)))
-                                                .left_stream(),
-                                            true => create_diff_stream(results).right_stream(),
+                                                .right_stream()
                                         };
                                         // TODO: Dispose subscription threads
                                         tokio::spawn(async move {
@@ -196,7 +193,7 @@ async fn handle_websocket_connection(
                                 )))
                                 .await;
                         }
-                        Some(store_id) => match store.stop_subscription(store_id).await {
+                        Some(store_id) => match store.unsubscribe(store_id).await {
                             Ok(result) => {
                                 if result {
                                     let _ = messages_tx
@@ -236,7 +233,7 @@ async fn handle_websocket_connection(
                         .drain()
                         .map(|(_, store_id)| store_id);
                     for id in store_ids {
-                        let _ = store.stop_subscription(id).await;
+                        let _ = store.unsubscribe(id).await;
                     }
                 }
             },

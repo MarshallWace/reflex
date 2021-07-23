@@ -19,7 +19,7 @@ use reflex_handlers::{builtin_signal_handler, debug_signal_handler};
 use reflex_js::{
     self, create_js_env, create_module_loader, stdlib::imports::builtin_imports_loader,
 };
-use reflex_runtime::Runtime;
+use reflex_runtime::{Runtime, StreamExt};
 use repl::ReplParser;
 
 mod repl;
