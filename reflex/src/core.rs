@@ -9,6 +9,8 @@ use std::{
     sync::Arc,
 };
 
+use im::OrdSet;
+
 use crate::{
     cache::EvaluationCache,
     hash::{hash_object, HashId},
@@ -379,43 +381,57 @@ impl EvaluationResult {
     }
 }
 
+pub type StateToken = HashId;
+
 #[derive(Hash, Eq, PartialEq, Clone, Debug)]
 pub struct DependencyList {
-    dependencies: Option<DynamicDependencies>,
+    state_tokens: Option<OrdSet<StateToken>>,
 }
 impl DependencyList {
     pub fn empty() -> Self {
-        Self { dependencies: None }
+        Self { state_tokens: None }
     }
-    pub fn of(dependencies: DynamicDependencies) -> Self {
+    pub fn of(state_token: StateToken) -> Self {
         Self {
-            dependencies: Some(dependencies),
+            state_tokens: Some(OrdSet::unit(state_token)),
         }
     }
-    pub fn from(values: impl IntoIterator<Item = StateToken>) -> Self {
-        let values = values.into_iter().collect::<Vec<_>>();
-        if values.is_empty() {
-            DependencyList::empty()
-        } else {
-            DependencyList::of(DynamicDependencies::from(values))
+    pub fn from(state_tokens: impl IntoIterator<Item = StateToken>) -> Self {
+        let dependencies = state_tokens.into_iter().collect::<OrdSet<_>>();
+        Self {
+            state_tokens: if dependencies.is_empty() {
+                None
+            } else {
+                Some(dependencies)
+            },
+        }
+    }
+    pub fn len(&self) -> usize {
+        match &self.state_tokens {
+            None => 0,
+            Some(dependencies) => dependencies.len(),
         }
     }
     pub fn is_empty(&self) -> bool {
-        self.dependencies.is_none()
+        self.state_tokens.is_none()
     }
     pub fn extend(self, other: Self) -> Self {
-        match &self.dependencies {
+        match self.state_tokens {
             None => other,
-            Some(dependencies) => match &other.dependencies {
-                None => self,
-                Some(other) => DependencyList::of(dependencies.union(other)),
+            Some(existing) => Self {
+                state_tokens: Some(match other.state_tokens {
+                    Some(other) => existing.union(other),
+                    None => existing,
+                }),
             },
         }
     }
     pub fn contains(&self, entries: &BTreeSet<StateToken>) -> bool {
-        match &self.dependencies {
+        match &self.state_tokens {
             None => false,
-            Some(dependencies) => dependencies.contains(entries),
+            Some(dependencies) => dependencies
+                .iter()
+                .any(|dependency| entries.contains(dependency)),
         }
     }
 }
@@ -424,14 +440,14 @@ impl<'a> IntoIterator for &'a DependencyList {
     type IntoIter = DependencyListIntoIter<'a>;
 
     fn into_iter(self) -> Self::IntoIter {
-        match &self.dependencies {
+        match &self.state_tokens {
             Some(dependencies) => DependencyListIntoIter::Some(dependencies.iter()),
             None => DependencyListIntoIter::None,
         }
     }
 }
 pub enum DependencyListIntoIter<'a> {
-    Some(DynamicDependenciesIter<'a>),
+    Some(im::ordset::Iter<'a, StateToken>),
     None,
 }
 impl<'a> Iterator for DependencyListIntoIter<'a> {
@@ -439,7 +455,7 @@ impl<'a> Iterator for DependencyListIntoIter<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         match self {
-            Self::Some(iter) => iter.next(),
+            Self::Some(iter) => iter.next().copied(),
             Self::None => None,
         }
     }
@@ -735,7 +751,7 @@ impl Rewritable for DynamicVariableTerm {
         0
     }
     fn dynamic_dependencies(&self) -> DependencyList {
-        DependencyList::of(DynamicDependencies::of(self.id))
+        DependencyList::of(self.id)
     }
     fn substitute_static(
         &self,
@@ -804,33 +820,6 @@ impl DynamicState {
         }
     }
 }
-
-pub type StateToken = HashId;
-
-#[derive(Hash, Eq, PartialEq, Clone, Debug)]
-pub struct DynamicDependencies {
-    values: Arc<BTreeSet<StateToken>>,
-}
-impl DynamicDependencies {
-    pub fn from(values: impl IntoIterator<Item = StateToken>) -> Self {
-        Self {
-            values: Arc::new(values.into_iter().collect()),
-        }
-    }
-    pub fn of(id: StateToken) -> Self {
-        Self::from(once(id))
-    }
-    fn union(&self, other: &DynamicDependencies) -> Self {
-        Self::from(self.values.union(&other.values).copied())
-    }
-    fn contains(&self, entries: &BTreeSet<StateToken>) -> bool {
-        !self.values.is_disjoint(entries)
-    }
-    fn iter(&self) -> DynamicDependenciesIter<'_> {
-        self.values.iter().copied()
-    }
-}
-type DynamicDependenciesIter<'a> = std::iter::Copied<std::collections::btree_set::Iter<'a, u64>>;
 
 #[derive(Hash, Eq, PartialEq, Clone, Debug)]
 pub struct RecursiveTerm {
@@ -915,10 +904,8 @@ impl LambdaTerm {
                 .enumerate()
                 .map(|(index, arg)| ((arity - index - 1), arg))
                 .collect::<Vec<_>>();
-            let substitutions = Substitutions::named(
-                &substitutions,
-                Some(ScopeOffset::Unwrap(arity)),
-            );
+            let substitutions =
+                Substitutions::named(&substitutions, Some(ScopeOffset::Unwrap(arity)));
             self.body
                 .substitute_static(&substitutions, cache)
                 .unwrap_or_else(|| Expression::clone(&self.body))
@@ -1035,38 +1022,17 @@ impl Rewritable for ApplicationTerm {
     }
     fn dynamic_dependencies(&self) -> DependencyList {
         let target_dependencies = self.target.dynamic_dependencies();
-        let arity = match self.target.value() {
-            Term::Lambda(target) => Some(target.arity),
-            Term::Builtin(target) => Some(target.arity()),
-            Term::Native(target) => Some(target.arity),
-            Term::StructConstructor(eager, prototype) => Some(prototype.arity(eager)),
-            Term::EnumConstructor(target) => Some(Arity::from(0, target.arity, None)),
-            Term::SignalHandler(_) => Some(Arity::from(1, 0, None)),
-            _ => None,
-        };
-        let eager_arity = arity.map(|arity| arity.eager()).unwrap_or(0);
-        let eager_varargs = match arity {
-            Some(Arity {
-                variadic: Some(VarArgs::Eager),
-                ..
-            }) => true,
-            _ => false,
-        };
-        let required_arity = arity.map(|arity| arity.required()).unwrap_or(0);
-        let eager_args = self
-            .args
-            .iter()
-            .enumerate()
-            .filter(|(index, _)| {
-                let index = *index;
-                let is_eager = index < eager_arity || (eager_varargs && index >= required_arity);
-                is_eager
-            })
-            .map(|(_, arg)| arg);
-        let arg_dependencies = eager_args.fold(DependencyList::empty(), |acc, arg| {
-            acc.extend(arg.dynamic_dependencies())
+        let eager_args = get_function_arity(self.target.value()).map(|arity| {
+            with_eagerness(self.args.iter(), &arity)
+                .into_iter()
+                .filter_map(|(arg, is_eager)| if is_eager { Some(arg) } else { None })
         });
-        target_dependencies.extend(arg_dependencies)
+        match eager_args {
+            None => target_dependencies,
+            Some(args) => args.fold(target_dependencies, |acc, arg| {
+                acc.extend(arg.dynamic_dependencies())
+            }),
+        }
     }
     fn substitute_static(
         &self,
@@ -1088,7 +1054,27 @@ impl Rewritable for ApplicationTerm {
         cache: &mut impl EvaluationCache,
     ) -> Option<Expression> {
         let target = self.target.substitute_dynamic(state, cache);
-        let args = substitute_dynamic_multiple(&self.args, state, cache);
+        let has_dynamic_args = self
+            .args
+            .iter()
+            .any(|arg| !arg.dynamic_dependencies().is_empty());
+        let args = if has_dynamic_args {
+            get_function_arity(self.target.value()).map(|arity| {
+                with_eagerness(self.args.iter(), &arity)
+                    .into_iter()
+                    .map(|(arg, is_eager)| {
+                        if is_eager {
+                            arg.substitute_dynamic(state, cache)
+                                .unwrap_or(Expression::clone(arg))
+                        } else {
+                            Expression::clone(arg)
+                        }
+                    })
+                    .collect::<Vec<_>>()
+            })
+        } else {
+            None
+        };
         if target.is_none() && args.is_none() {
             return None;
         }
@@ -1121,10 +1107,14 @@ impl Rewritable for ApplicationTerm {
                 .or_else(|| Some(expression.into_normalized())),
             None => self.reduce(cache),
         };
-        reduced_expression.and_then(|expression| {
-            expression
-                .normalize(cache)
-                .or_else(|| Some(expression.into_normalized()))
+        reduced_expression.map(|expression| {
+            if expression.is_normalized {
+                expression
+            } else {
+                expression
+                    .normalize(cache)
+                    .unwrap_or_else(|| expression.into_normalized())
+            }
         })
     }
 }
@@ -1140,16 +1130,7 @@ impl Reducible for ApplicationTerm {
         if short_circuit_target {
             return reduced_target.or_else(|| Some(Expression::clone(&self.target)));
         }
-        let arity = match target_term {
-            Term::Lambda(target) => Some(target.arity),
-            Term::Builtin(target) => Some(target.arity()),
-            Term::Native(target) => Some(target.arity),
-            Term::StructConstructor(eager, target) => Some(target.arity(eager)),
-            Term::EnumConstructor(target) => Some(Arity::from(0, target.arity, None)),
-            Term::SignalHandler(_) => Some(Arity::from(1, 0, None)),
-            _ => None,
-        };
-        match arity {
+        match get_function_arity(target_term) {
             None => None,
             Some(arity) => {
                 if self.args.len() < arity.required() {
@@ -1166,43 +1147,15 @@ impl Reducible for ApplicationTerm {
                         ))))],
                     )))));
                 }
-                let result = match evaluate_args(self.args.iter(), arity, cache) {
+                let result = match evaluate_function_args(self.args.iter(), arity, cache) {
                     Err(args) => Err(args),
                     Ok((args, signals)) => match signals {
-                        SignalArgs::None => match target_term {
-                            Term::Lambda(target) => Ok(target.apply(args.into_iter(), cache)),
-                            Term::Builtin(target) => Ok(target.apply(args.into_iter())),
-                            Term::Native(target) => Ok(target.apply(args.into_iter())),
-                            Term::StructConstructor(_, target) => {
-                                let (keys, values) = args.split_at(args.len() / 2);
-                                let keys = keys
-                                    .iter()
-                                    .map(|key| match key.value() {
-                                        Term::Value(key) => Some(key),
-                                        _ => None,
-                                    })
-                                    .collect::<Option<Vec<_>>>();
-                                let result = keys.and_then(|keys| {
-                                    target.apply(
-                                        keys.into_iter()
-                                            .zip(values.iter().map(Expression::clone))
-                                            .map(|(key, value)| (key, value)),
-                                    )
-                                });
-                                match result {
-                                    Some(result) => Ok(Expression::new(Term::Struct(result))),
-                                    None => Err(args),
-                                }
-                            }
-                            Term::EnumConstructor(target) => Ok(target.apply(args.into_iter())),
-                            Term::SignalHandler(_) => Ok(args.into_iter().next().unwrap()),
-                            _ => Err(args),
-                        },
-                        SignalArgs::Single(signal) => match target_term {
+                        ShortCircuitArgs::None => apply_function(target_term, args, cache),
+                        ShortCircuitArgs::Single(signal) => match target_term {
                             Term::SignalHandler(target) => Ok(target.apply(signal)),
                             _ => Ok(signal),
                         },
-                        SignalArgs::Multiple(signals) => {
+                        ShortCircuitArgs::Multiple(signals) => {
                             let signal = Expression::new(Term::Signal(SignalTerm::from(signals)));
                             match &target_term {
                                 Term::SignalHandler(target) => Ok(target.apply(signal)),
@@ -1239,11 +1192,22 @@ impl Reducible for ApplicationTerm {
     }
 }
 
-fn evaluate_args<'a>(
+fn get_function_arity(target: &Term) -> Option<Arity> {
+    match target {
+        Term::Lambda(target) => Some(target.arity),
+        Term::Builtin(target) => Some(target.arity()),
+        Term::Native(target) => Some(target.arity),
+        Term::StructConstructor(eager, target) => Some(target.arity(eager)),
+        Term::EnumConstructor(target) => Some(Arity::from(0, target.arity, None)),
+        Term::SignalHandler(_) => Some(Arity::from(1, 0, None)),
+        _ => None,
+    }
+}
+fn evaluate_function_args<'a>(
     args: impl IntoIterator<Item = &'a Expression> + ExactSizeIterator,
     arity: Arity,
     cache: &mut impl EvaluationCache,
-) -> Result<(Vec<Expression>, SignalArgs), Vec<Expression>> {
+) -> Result<(Vec<Expression>, ShortCircuitArgs), Vec<Expression>> {
     let args = with_eagerness(args, &arity)
         .into_iter()
         .map(|(arg, is_eager)| {
@@ -1254,32 +1218,29 @@ fn evaluate_args<'a>(
             }
         })
         .collect::<Vec<_>>();
-    let has_unresolved_args =
-        with_eagerness(args.iter(), &arity)
-            .into_iter()
-            .any(|(arg, is_eager)| {
-                is_eager
-                    && match arg.value() {
-                        Term::Variable(_) => true,
-                        term => term.is_reducible(),
-                    }
-            });
+    let has_unresolved_args = with_eagerness(args.iter(), &arity)
+        .into_iter()
+        .any(|(arg, is_eager)| is_eager && is_unresolved_arg(arg));
     if has_unresolved_args {
         return Err(args);
     }
-    let signals = SignalArgs::new(with_eagerness(args.iter(), &arity).into_iter().filter_map(
-        |(arg, is_eager)| {
-            if is_eager {
-                match arg.value() {
-                    Term::Signal(_) => Some(Expression::clone(arg)),
-                    _ => None,
+    let signals =
+        ShortCircuitArgs::from_args(with_eagerness(args.iter(), &arity).into_iter().filter_map(
+            |(arg, is_eager)| {
+                if is_eager {
+                    match arg.value() {
+                        Term::Signal(_) => Some(Expression::clone(arg)),
+                        _ => None,
+                    }
+                } else {
+                    None
                 }
-            } else {
-                None
-            }
-        },
-    ));
+            },
+        ));
     Ok((args, signals))
+}
+fn is_unresolved_arg(arg: &Expression) -> bool {
+    arg.capture_depth() > 0 || !arg.dynamic_dependencies.is_empty() || arg.is_reducible()
 }
 fn with_eagerness<T>(
     args: impl IntoIterator<Item = T>,
@@ -1296,13 +1257,48 @@ fn with_eagerness<T>(
         (arg, is_eager)
     })
 }
-enum SignalArgs {
+fn apply_function(
+    target: &Term,
+    args: Vec<Expression>,
+    cache: &mut impl EvaluationCache,
+) -> Result<Expression, Vec<Expression>> {
+    match target {
+        Term::Lambda(target) => Ok(target.apply(args.into_iter(), cache)),
+        Term::Builtin(target) => Ok(target.apply(args.into_iter())),
+        Term::Native(target) => Ok(target.apply(args.into_iter())),
+        Term::StructConstructor(_, target) => {
+            let (keys, values) = args.split_at(args.len() / 2);
+            let keys = keys
+                .iter()
+                .map(|key| match key.value() {
+                    Term::Value(key) => Some(key),
+                    _ => None,
+                })
+                .collect::<Option<Vec<_>>>();
+            let result = keys.and_then(|keys| {
+                target.apply(
+                    keys.into_iter()
+                        .zip(values.iter().map(Expression::clone))
+                        .map(|(key, value)| (key, value)),
+                )
+            });
+            match result {
+                Some(result) => Ok(Expression::new(Term::Struct(result))),
+                None => Err(args),
+            }
+        }
+        Term::EnumConstructor(target) => Ok(target.apply(args.into_iter())),
+        Term::SignalHandler(_) => Ok(args.into_iter().next().unwrap()),
+        _ => Err(args),
+    }
+}
+enum ShortCircuitArgs {
     None,
     Single(Expression),
     Multiple(Vec<Signal>),
 }
-impl SignalArgs {
-    fn new(args: impl IntoIterator<Item = Expression>) -> Self {
+impl ShortCircuitArgs {
+    fn from_args(args: impl IntoIterator<Item = Expression>) -> Self {
         args.into_iter()
             .fold(Self::None, |existing, arg| match arg.value() {
                 Term::Signal(signal) => match existing {

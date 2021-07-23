@@ -47,8 +47,8 @@ mod tests {
     use crate::{
         cache::GenerationalGc,
         core::{
-            ApplicationTerm, DependencyList, DynamicDependencies, DynamicState, EvaluationResult,
-            Expression, Signal, SignalTerm, Term,
+            ApplicationTerm, DependencyList, DynamicState, EvaluationResult, Expression, Signal,
+            SignalTerm, Term,
         },
         stdlib::{
             builtin::BuiltinTerm,
@@ -82,7 +82,7 @@ mod tests {
             result,
             EvaluationResult::new(
                 Expression::new(Term::Signal(SignalTerm::new(signal))),
-                DependencyList::of(DynamicDependencies::of(signal_hash))
+                DependencyList::of(signal_hash)
             )
         );
         state.set(
@@ -94,7 +94,7 @@ mod tests {
             result,
             EvaluationResult::new(
                 Expression::new(Term::Value(ValueTerm::String(StringValue::from("foo")))),
-                DependencyList::of(DynamicDependencies::of(signal_hash))
+                DependencyList::of(signal_hash)
             )
         );
     }
