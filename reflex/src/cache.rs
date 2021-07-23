@@ -1,10 +1,16 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use std::collections::{hash_map::Entry, HashMap};
+use std::{
+    collections::{
+        hash_map::{DefaultHasher, Entry},
+        HashMap,
+    },
+    hash::{Hash, Hasher},
+};
 
 use crate::{
-    core::{DynamicState, Expression, Substitutions},
+    core::{DynamicState, Expression, Rewritable, StateToken, Substitutions},
     hash::{hash_object, HashId},
 };
 
@@ -32,7 +38,7 @@ pub trait EvaluationCache {
         result: Option<&Expression>,
     );
     fn retrieve_reduction(&mut self, expression: &Expression) -> Option<Option<Expression>>;
-    fn store_reduction(&mut self, expression: &Expression, result: Option<Expression>);
+    fn store_reduction(&mut self, expression: &Expression, result: Option<&Expression>);
 }
 
 pub struct GenerationalGc {
@@ -76,8 +82,9 @@ impl EvaluationCache for GenerationalGc {
             },
         }
     }
-    fn store_reduction(&mut self, expression: &Expression, result: Option<Expression>) {
-        self.current.store_reduction(expression, result);
+    fn store_reduction(&mut self, expression: &Expression, result: Option<&Expression>) {
+        self.current
+            .store_reduction(expression, result.map(Expression::clone));
     }
     fn retrieve_static_substitution(
         &mut self,
@@ -178,15 +185,21 @@ impl CacheGeneration {
         }
     }
     fn retrieve_reduction(&self, expression: &Expression) -> Option<Option<Expression>> {
+        if !expression.is_reducible() {
+            return None;
+        }
         self.entries
             .get(expression)
             .map(|entry| entry.get_reduce().map(Expression::clone))
     }
     fn store_reduction(&mut self, expression: &Expression, result: Option<Expression>) {
+        if !expression.is_reducible() {
+            return;
+        }
         match self.entries.entry(Expression::clone(expression)) {
             Entry::Occupied(mut entry) => entry.get_mut().set_reduce(result),
             Entry::Vacant(entry) => {
-                entry.insert(CacheEntry::from_reduce(result));
+                entry.insert(CacheEntry::from_reduce(expression, result));
             }
         }
     }
@@ -195,6 +208,9 @@ impl CacheGeneration {
         expression: &Expression,
         substitutions: &Substitutions,
     ) -> Option<Option<Expression>> {
+        if expression.capture_depth() == 0 {
+            return None;
+        }
         match self.entries.get(expression) {
             Some(entry) => match entry.get_substitute_static(substitutions) {
                 Some(value) => Some(value.map(Expression::clone)),
@@ -209,12 +225,19 @@ impl CacheGeneration {
         substitutions: &Substitutions,
         result: Option<Expression>,
     ) {
+        if expression.capture_depth() == 0 {
+            return;
+        }
         match self.entries.entry(Expression::clone(expression)) {
             Entry::Occupied(mut entry) => {
                 entry.get_mut().set_substitute_static(substitutions, result)
             }
             Entry::Vacant(entry) => {
-                entry.insert(CacheEntry::from_substitute_static(substitutions, result));
+                entry.insert(CacheEntry::from_substitute_static(
+                    expression,
+                    substitutions,
+                    result,
+                ));
             }
         }
     }
@@ -223,6 +246,9 @@ impl CacheGeneration {
         expression: &Expression,
         state: &DynamicState,
     ) -> Option<Option<Expression>> {
+        if expression.dynamic_dependencies().is_empty() {
+            return None;
+        }
         match self.entries.get(expression) {
             Some(entry) => match entry.get_substitute_dynamic(state) {
                 Some(value) => Some(value.map(Expression::clone)),
@@ -237,40 +263,55 @@ impl CacheGeneration {
         state: &DynamicState,
         result: Option<Expression>,
     ) {
+        if expression.dynamic_dependencies().is_empty() {
+            return;
+        }
         match self.entries.entry(Expression::clone(expression)) {
             Entry::Occupied(mut entry) => entry.get_mut().set_substitute_dynamic(state, result),
             Entry::Vacant(entry) => {
-                entry.insert(CacheEntry::from_substitute_dynamic(state, result));
+                entry.insert(CacheEntry::from_substitute_dynamic(
+                    expression, state, result,
+                ));
             }
         }
     }
 }
 
 struct CacheEntry {
+    state_dependencies: Vec<StateToken>,
     reduce: Option<Expression>,
     substitute_static: HashMap<HashId, Option<Expression>>,
     substitute_dynamic: HashMap<HashId, Option<Expression>>,
 }
 impl CacheEntry {
-    fn new() -> Self {
+    fn new(target: &Expression) -> Self {
         Self {
+            state_dependencies: target.dynamic_dependencies().into_iter().collect(),
             reduce: None,
             substitute_static: HashMap::new(),
             substitute_dynamic: HashMap::new(),
         }
     }
-    fn from_reduce(value: Option<Expression>) -> Self {
-        let mut entry = Self::new();
+    fn from_reduce(target: &Expression, value: Option<Expression>) -> Self {
+        let mut entry = Self::new(target);
         entry.set_reduce(value);
         entry
     }
-    fn from_substitute_static(substitutions: &Substitutions, value: Option<Expression>) -> Self {
-        let mut entry = Self::new();
+    fn from_substitute_static(
+        target: &Expression,
+        substitutions: &Substitutions,
+        value: Option<Expression>,
+    ) -> Self {
+        let mut entry = Self::new(target);
         entry.set_substitute_static(substitutions, value);
         entry
     }
-    fn from_substitute_dynamic(state: &DynamicState, value: Option<Expression>) -> Self {
-        let mut entry = Self::new();
+    fn from_substitute_dynamic(
+        target: &Expression,
+        state: &DynamicState,
+        value: Option<Expression>,
+    ) -> Self {
+        let mut entry = Self::new(target);
         entry.set_substitute_dynamic(state, value);
         entry
     }
@@ -290,11 +331,35 @@ impl CacheEntry {
             .insert(hash_object(substitutions), value);
     }
     fn get_substitute_dynamic(&self, state: &DynamicState) -> Option<Option<&Expression>> {
+        let overall_state_hash = hash_object(state);
         self.substitute_dynamic
-            .get(&hash_object(state))
+            .get(&overall_state_hash)
+            .or_else(|| {
+                let minimal_state_hash =
+                    hash_state_values(state, self.state_dependencies.iter().copied());
+                self.substitute_dynamic.get(&minimal_state_hash)
+            })
             .map(|entry| entry.as_ref())
     }
     fn set_substitute_dynamic(&mut self, state: &DynamicState, value: Option<Expression>) {
-        self.substitute_dynamic.insert(hash_object(state), value);
+        let overall_state_hash = hash_object(state);
+        self.substitute_dynamic
+            .insert(overall_state_hash, value.clone());
+        let minimal_state_hash = hash_state_values(state, self.state_dependencies.iter().copied());
+        self.substitute_dynamic.insert(minimal_state_hash, value);
     }
+}
+
+fn hash_state_values(
+    state: &DynamicState,
+    state_tokens: impl IntoIterator<Item = StateToken>,
+) -> HashId {
+    let mut hasher = DefaultHasher::new();
+    for state_token in state_tokens {
+        match state.get(state_token) {
+            None => hasher.write_u8(0),
+            Some(value) => value.hash(&mut hasher),
+        }
+    }
+    hasher.finish()
 }

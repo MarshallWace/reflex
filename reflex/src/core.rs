@@ -332,7 +332,7 @@ impl Reducible for Expression {
             Some(result) => result,
             None => {
                 let result = self.value.reduce(cache);
-                cache.store_reduction(self, result.as_ref().map(Expression::clone));
+                cache.store_reduction(self, result.as_ref());
                 result
             }
         }
