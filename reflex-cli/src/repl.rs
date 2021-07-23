@@ -62,7 +62,7 @@ fn format_signal_output(signal: &SignalTerm) -> String {
     signal
         .signals()
         .into_iter()
-        .map(|signal| match signal.get_type() {
+        .map(|signal| match signal.signal_type() {
             SignalType::Error => {
                 let (message, args) = {
                     let args = signal.args();

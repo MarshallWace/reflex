@@ -39,10 +39,16 @@ impl Arity {
             variadic,
         }
     }
-    fn eager(&self) -> usize {
+    pub fn eager(&self) -> usize {
         self.eager
     }
-    fn required(&self) -> usize {
+    pub fn lazy(&self) -> usize {
+        self.lazy
+    }
+    pub fn variadic(&self) -> Option<VarArgs> {
+        self.variadic
+    }
+    pub fn required(&self) -> usize {
         self.eager + self.lazy
     }
 }
@@ -701,7 +707,7 @@ impl StaticVariableTerm {
     fn new(offset: StackOffset) -> Self {
         Self { offset }
     }
-    fn offset(&self) -> StackOffset {
+    pub fn offset(&self) -> StackOffset {
         self.offset
     }
 }
@@ -744,6 +750,12 @@ pub struct DynamicVariableTerm {
 impl DynamicVariableTerm {
     fn new(id: StateToken, fallback: Expression) -> Self {
         Self { id, fallback }
+    }
+    pub fn id(&self) -> StateToken {
+        self.id
+    }
+    pub fn fallback(&self) -> &Expression {
+        &self.fallback
     }
 }
 impl Rewritable for DynamicVariableTerm {
@@ -829,6 +841,9 @@ impl RecursiveTerm {
     pub fn new(factory: Expression) -> Self {
         Self { factory }
     }
+    pub fn factory(&self) -> &Expression {
+        &self.factory
+    }
 }
 impl Rewritable for RecursiveTerm {
     fn capture_depth(&self) -> StackOffset {
@@ -887,6 +902,9 @@ pub struct LambdaTerm {
 impl LambdaTerm {
     pub fn new(arity: Arity, body: Expression) -> Self {
         Self { arity, body }
+    }
+    pub fn arity(&self) -> &Arity {
+        &self.arity
     }
     fn apply(
         &self,
@@ -1012,6 +1030,12 @@ impl fmt::Display for ApplicationTerm {
 impl ApplicationTerm {
     pub fn new(target: Expression, args: Vec<Expression>) -> ApplicationTerm {
         Self { target, args }
+    }
+    pub fn target(&self) -> &Expression {
+        &self.target
+    }
+    pub fn args(&self) -> &[Expression] {
+        &self.args
     }
 }
 impl Rewritable for ApplicationTerm {
@@ -1345,6 +1369,9 @@ impl NativeFunction {
     pub fn uid(&self) -> HashId {
         self.uid
     }
+    pub fn arity(&self) -> &Arity {
+        &self.arity
+    }
     fn apply(&self, args: impl IntoIterator<Item = Expression> + ExactSizeIterator) -> Expression {
         (self.body)(args.into_iter().collect())
     }
@@ -1382,14 +1409,14 @@ impl StructTerm {
     pub fn new(prototype: Option<StructPrototype>, fields: Vec<Expression>) -> Self {
         Self { prototype, fields }
     }
-    pub fn get(&self, field_offset: StructFieldOffset) -> Option<&Expression> {
-        self.fields.get(field_offset)
-    }
     pub fn prototype(&self) -> Option<&StructPrototype> {
         self.prototype.as_ref()
     }
     pub fn fields(&self) -> &[Expression] {
         &self.fields
+    }
+    pub fn get(&self, field_offset: StructFieldOffset) -> Option<&Expression> {
+        self.fields.get(field_offset)
     }
 }
 impl Rewritable for StructTerm {
@@ -1468,6 +1495,9 @@ impl StructPrototype {
         let key_hashes = keys.iter().map(hash_object).collect();
         Self { keys, key_hashes }
     }
+    pub fn keys(&self) -> &[ValueTerm] {
+        &self.keys
+    }
     pub fn field(&self, key: &ValueTerm) -> Option<StructFieldOffset> {
         let key_hash = hash_object(key);
         self.key_hashes
@@ -1480,9 +1510,6 @@ impl StructPrototype {
                     None
                 }
             })
-    }
-    pub fn keys(&self) -> &[ValueTerm] {
-        &self.keys
     }
     fn arity(&self, eager: &VarArgs) -> Arity {
         let num_keys = self.keys.len();
@@ -1605,17 +1632,17 @@ impl EnumVariantPrototype {
     pub fn new(index: EnumIndex, arity: EnumConstructorArity) -> Self {
         Self { index, arity }
     }
-    fn apply(&self, args: impl IntoIterator<Item = Expression> + ExactSizeIterator) -> Expression {
-        Expression::new(Term::Enum(EnumTerm::new(
-            self.index,
-            args.into_iter().collect(),
-        )))
-    }
     pub fn index(&self) -> EnumIndex {
         self.index
     }
     pub fn arity(&self) -> EnumConstructorArity {
         self.arity
+    }
+    fn apply(&self, args: impl IntoIterator<Item = Expression> + ExactSizeIterator) -> Expression {
+        Expression::new(Term::Enum(EnumTerm::new(
+            self.index,
+            args.into_iter().collect(),
+        )))
     }
 }
 impl fmt::Display for EnumVariantPrototype {
@@ -1658,7 +1685,7 @@ impl fmt::Display for SignalTerm {
 #[derive(Eq, PartialEq, Clone, Debug)]
 pub struct Signal {
     hash: HashId,
-    signal: SignalType,
+    signal_type: SignalType,
     args: Vec<Expression>,
 }
 impl Hash for Signal {
@@ -1677,29 +1704,33 @@ impl PartialOrd for Signal {
     }
 }
 impl Signal {
-    pub fn new(signal: SignalType, args: impl IntoIterator<Item = Expression>) -> Self {
+    pub fn new(signal_type: SignalType, args: impl IntoIterator<Item = Expression>) -> Self {
         let args = args.into_iter().collect::<Vec<_>>();
         let hash = {
             let mut hasher = DefaultHasher::new();
-            signal.hash(&mut hasher);
+            signal_type.hash(&mut hasher);
             for arg in args.iter() {
                 arg.hash(&mut hasher);
             }
             hasher.finish()
         };
-        Self { hash, signal, args }
+        Self {
+            hash,
+            signal_type,
+            args,
+        }
     }
     pub fn id(&self) -> StateToken {
         self.hash
     }
-    pub fn get_type(&self) -> &SignalType {
-        &self.signal
-    }
-    pub fn is_type(&self, signal: SignalType) -> bool {
-        self.signal == signal
+    pub fn signal_type(&self) -> &SignalType {
+        &self.signal_type
     }
     pub fn args(&self) -> &[Expression] {
         &self.args
+    }
+    pub fn is_type(&self, signal: SignalType) -> bool {
+        self.signal_type == signal
     }
 }
 impl fmt::Display for Signal {
@@ -1707,7 +1738,7 @@ impl fmt::Display for Signal {
         write!(
             f,
             "<signal:{}:{}>",
-            self.signal,
+            self.signal_type,
             self.args
                 .iter()
                 .map(|arg| format!("{}", arg))
@@ -1724,6 +1755,9 @@ pub struct SignalHandlerTerm {
 impl SignalHandlerTerm {
     pub fn new(handler: Expression) -> Self {
         Self { handler }
+    }
+    pub fn handler(&self) -> &Expression {
+        &self.handler
     }
     fn apply(&self, signal: Expression) -> Expression {
         Expression::new(Term::Application(ApplicationTerm::new(

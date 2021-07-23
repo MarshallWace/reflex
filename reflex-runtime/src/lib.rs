@@ -467,7 +467,7 @@ fn handle_signals<THandler>(
 where
     THandler: Fn(&str, &[&Signal], &SignalHelpers) -> SignalHandlerResult + Send + Sync + 'static,
 {
-    let custom_signals = signals.iter().filter_map(|signal| match signal.get_type() {
+    let custom_signals = signals.iter().filter_map(|signal| match signal.signal_type() {
         SignalType::Custom(signal_type) => Some((signal, signal_type)),
         _ => None,
     });
@@ -510,7 +510,7 @@ where
 
     let (results, effects): (Vec<_>, Vec<Option<(_, _)>>) = signals
         .into_iter()
-        .map(|signal| match signal.get_type() {
+        .map(|signal| match signal.signal_type() {
             SignalType::Error => Err(Some(parse_error_signal_message(signal.args()))),
             SignalType::Pending => Err(None),
             SignalType::Custom(_) => match custom_signal_results.remove(&signal.id()) {

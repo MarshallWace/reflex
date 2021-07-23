@@ -24,14 +24,14 @@ impl VectorTerm {
             items: items.into_iter().collect(),
         }
     }
+    pub fn items(&self) -> &[Expression] {
+        &self.items
+    }
     pub fn get(&self, index: usize) -> Option<&Expression> {
         self.items.get(index)
     }
     pub fn len(&self) -> usize {
         self.items.len()
-    }
-    pub fn items(&self) -> &[Expression] {
-        &self.items
     }
     pub fn push(&self, value: Expression) -> Expression {
         Expression::new(Term::Collection(CollectionTerm::Vector(Self::new(

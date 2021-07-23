@@ -40,6 +40,9 @@ impl HashSetTerm {
             .collect::<BTreeSet<_>>();
         Self { lookup, values }
     }
+    pub fn values(&self) -> &[Expression] {
+        &self.values
+    }
     pub fn len(&self) -> usize {
         self.values.len()
     }
