@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+use futures::FutureExt;
 use reflex::{
     cache::EvaluationCache,
     core::{Expression, Signal, SignalTerm, StateToken, Term, VariableTerm},
@@ -11,6 +12,7 @@ use std::{
     any::TypeId,
     collections::{hash_map::Entry, HashMap},
     future::Future,
+    iter::once,
     pin::Pin,
     sync::Mutex,
     task::{Context, Poll},
@@ -141,31 +143,90 @@ type ResultsChannel = broadcast::Sender<(SubscriptionId, SubscriptionResult)>;
 
 type SubscribeCommand = StreamOperation<Expression, SubscriptionId, Option<SubscriptionResult>>;
 type UnsubscribeCommand = Operation<SubscriptionId, bool>;
-type UpdateCommand = Operation<Vec<(StateToken, StateUpdate)>, ()>;
-pub enum StateUpdate {
+type UpdateCommand = Operation<Vec<StateUpdate>, ()>;
+
+pub struct StateUpdate {
+    state_token: StateToken,
+    update: StateUpdateType,
+}
+pub enum StateUpdateType {
     Value(Expression),
     Patch(Box<dyn Fn(Option<&Expression>) -> Expression + Send + Sync + 'static>),
 }
+impl StateUpdate {
+    pub fn value(state_token: StateToken, value: Expression) -> Self {
+        Self {
+            state_token,
+            update: StateUpdateType::Value(value),
+        }
+    }
+    pub fn patch(
+        state_token: StateToken,
+        updater: impl Fn(Option<&Expression>) -> Expression + Send + Sync + 'static,
+    ) -> Self {
+        Self {
+            state_token,
+            update: StateUpdateType::Patch(Box::new(updater)),
+        }
+    }
+}
 
 pub enum RuntimeEffect {
-    Assignment(AssignmentEffect),
+    Sync(SyncEffect),
     Async(AsyncEffect),
     Stream(StreamEffect),
 }
+pub type SyncEffect = Vec<StateUpdate>;
+pub type AsyncEffect = Pin<Box<dyn Future<Output = Vec<StateUpdate>> + Send + 'static>>;
+pub type StreamEffect = Pin<Box<dyn Stream<Item = Vec<StateUpdate>> + Send + 'static>>;
 impl RuntimeEffect {
-    pub fn assign(key: StateToken, value: Expression) -> Self {
-        Self::Assignment(vec![(key, StateUpdate::Value(value))])
+    pub fn assign(state_token: StateToken, value: Expression) -> Self {
+        Self::batch_assign(once((state_token, value)))
     }
     pub fn update(
-        key: StateToken,
+        state_token: StateToken,
         updater: impl Fn(Option<&Expression>) -> Expression + Send + Sync + 'static,
     ) -> Self {
-        Self::Assignment(vec![(key, StateUpdate::Patch(Box::new(updater)))])
+        Self::batch_update(once((state_token, updater)))
+    }
+    pub fn deferred(update: impl Future<Output = StateUpdate> + Send + 'static) -> Self {
+        Self::batch_deferred(update.map(|update| vec![update]))
+    }
+    pub fn stream(update: impl Stream<Item = StateUpdate> + Send + 'static) -> Self {
+        Self::batch_stream(update.map(|update| vec![update]))
+    }
+    pub fn batch_assign(values: impl IntoIterator<Item = (StateToken, Expression)>) -> Self {
+        Self::Sync(
+            values
+                .into_iter()
+                .map(|(state_token, value)| StateUpdate::value(state_token, value))
+                .collect::<Vec<_>>(),
+        )
+    }
+    pub fn batch_update(
+        updates: impl IntoIterator<
+            Item = (
+                StateToken,
+                impl Fn(Option<&Expression>) -> Expression + Send + Sync + 'static,
+            ),
+        >,
+    ) -> Self {
+        Self::Sync(
+            updates
+                .into_iter()
+                .map(|(state_token, updater)| StateUpdate::patch(state_token, Box::new(updater)))
+                .collect::<Vec<_>>(),
+        )
+    }
+    pub fn batch_deferred(
+        updates: impl Future<Output = Vec<StateUpdate>> + Send + 'static,
+    ) -> Self {
+        Self::Async(Box::pin(updates))
+    }
+    pub fn batch_stream(updates: impl Stream<Item = Vec<StateUpdate>> + Send + 'static) -> Self {
+        Self::Stream(Box::pin(updates))
     }
 }
-pub type AssignmentEffect = Vec<(StateToken, StateUpdate)>;
-pub type AsyncEffect = Pin<Box<dyn Future<Output = Expression> + Send + 'static>>;
-pub type StreamEffect = Pin<Box<dyn Stream<Item = Expression> + Send + 'static>>;
 
 enum Command {
     Subscribe(SubscribeCommand),
@@ -183,7 +244,7 @@ impl Command {
     fn unsubscribe(id: SubscriptionId, response: oneshot::Sender<bool>) -> Self {
         Self::Unsubscribe(Operation::new(id, response))
     }
-    fn update(updates: Vec<(StateToken, StateUpdate)>, response: oneshot::Sender<()>) -> Self {
+    fn update(updates: Vec<StateUpdate>, response: oneshot::Sender<()>) -> Self {
         Self::Update(Operation::new(updates, response))
     }
 }
@@ -320,12 +381,13 @@ where
                 .get_mut()
                 .unwrap()
                 .flush(|signals| handle_signals(signals, &signal_messages, &signal_handler));
-            let updated_results = updated_results.into_iter().filter_map(|(id, result)| {
-                match strip_pending_results(result) {
-                    None => None,
-                    Some(result) => Some((id, result)),
-                }
-            });
+            let updated_results =
+                updated_results
+                    .into_iter()
+                    .filter_map(|(id, result)| match strip_pending_results(result) {
+                        None => None,
+                        Some(result) => Some((id, result)),
+                    });
             for update in updated_results {
                 results.send(update).unwrap();
             }
@@ -477,14 +539,14 @@ where
         }
     }
 
-    let (results, effects): (Vec<_>, Vec<Option<(_, _)>>) = signals
+    let (results, effects): (Vec<_>, Vec<Option<_>>) = signals
         .into_iter()
         .map(|signal| match signal.signal_type() {
             SignalType::Error => Err(Some(parse_error_signal_message(signal.args()))),
             SignalType::Pending => Err(None),
             SignalType::Custom(_) => match custom_signal_results.remove(&signal.id()) {
                 Some(result) => match result {
-                    Ok(result) => Ok((signal, result)),
+                    Ok(result) => Ok(result),
                     Err(error) => Err(Some(error)),
                 },
                 None => Err(Some(format!("Unhandled signal: {}", signal))),
@@ -492,47 +554,42 @@ where
         })
         .map(|result| match result {
             Err(error) => (Err(error), None),
-            Ok((signal, (result, effect))) => (Ok(result), effect.map(|effect| (signal, effect))),
+            Ok((result, effect)) => (Ok(result), effect),
         })
         .unzip();
 
-    for (signal, effect) in effects.into_iter().filter_map(|effect| effect) {
-        apply_signal_effect(signal, effect, commands)
+    for effect in effects.into_iter().filter_map(|effect| effect) {
+        apply_effect(effect, commands)
     }
     results
 }
 
-fn apply_signal_effect(signal: &Signal, effect: RuntimeEffect, commands: &CommandChannel) {
-    let id = signal.id();
+fn apply_effect(effect: RuntimeEffect, commands: &CommandChannel) {
     let commands = commands.clone();
     match effect {
-        RuntimeEffect::Assignment(updates) => {
-            tokio::spawn(async move {
-                for (id, update) in updates {
-                    emit_update(id, update, &commands).await
-                }
-            });
+        RuntimeEffect::Sync(updates) => {
+            tokio::spawn(async move { emit_updates(updates, &commands).await });
         }
         RuntimeEffect::Async(effect) => {
             tokio::spawn(async move {
-                let value = effect.await;
-                emit_update(id, StateUpdate::Value(value), &commands).await
+                let updates = effect.await;
+                emit_updates(updates, &commands).await
             });
         }
         RuntimeEffect::Stream(mut effect) => {
             tokio::spawn(async move {
-                while let Some(value) = effect.next().await {
-                    emit_update(id, StateUpdate::Value(value), &commands).await
+                while let Some(updates) = effect.next().await {
+                    emit_updates(updates, &commands).await
                 }
             });
         }
     }
 }
 
-async fn emit_update(id: StateToken, update: StateUpdate, commands: &CommandChannel) {
+async fn emit_updates(updates: Vec<StateUpdate>, commands: &CommandChannel) {
     let (send, receive) = oneshot::channel();
     commands
-        .send(Command::update(vec![(id, update)], send))
+        .send(Command::update(updates, send))
         .await
         .ok()
         .unwrap();

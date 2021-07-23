@@ -6,7 +6,7 @@ use std::{
     num::NonZeroUsize,
 };
 
-use crate::StateUpdate;
+use crate::{StateUpdate, StateUpdateType};
 use itertools::{Either, Itertools};
 use reflex::{
     cache::EvaluationCache,
@@ -55,15 +55,16 @@ impl<T: EvaluationCache> Store<T> {
             })
             .unwrap_or(false)
     }
-    pub fn update(&mut self, updates: impl IntoIterator<Item = (StateToken, StateUpdate)>) {
+    pub fn update(&mut self, updates: impl IntoIterator<Item = StateUpdate>) {
         let updates = updates
             .into_iter()
-            .filter_map(|(key, update)| {
+            .filter_map(|update| {
+                let key = update.state_token;
                 let existing_value = self.state.get(key);
                 let existing_hash = existing_value.map(hash_object);
-                let value = match update {
-                    StateUpdate::Value(value) => value,
-                    StateUpdate::Patch(updater) => updater(existing_value),
+                let value = match update.update {
+                    StateUpdateType::Value(value) => value,
+                    StateUpdateType::Patch(updater) => updater(existing_value),
                 };
                 match existing_hash {
                     Some(hash) if hash == hash_object(&value) => None,

@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use reflex::{
-    core::{Expression, Signal, SignalTerm, StructTerm, Term},
+    core::{Expression, Signal, SignalTerm, StateToken, StructTerm, Term},
     stdlib::{signal::SignalType, value::ValueTerm},
 };
-use reflex_runtime::{RuntimeEffect, SignalHandlerResult, SignalHelpers};
+use reflex_runtime::{RuntimeEffect, SignalHandlerResult, SignalHelpers, StateUpdate};
 
 use crate::{utils::fetch, SignalResult};
 
@@ -20,12 +20,15 @@ pub fn http_fetch_handler(
     Some(
         signals
             .iter()
-            .map(|signal| handle_http_fetch_signal(signal.args()))
+            .map(|signal| handle_http_fetch_signal(signal.id(), signal.args()))
             .collect(),
     )
 }
 
-fn handle_http_fetch_signal(args: &[Expression]) -> Result<SignalResult, String> {
+fn handle_http_fetch_signal(
+    signal_id: StateToken,
+    args: &[Expression],
+) -> Result<SignalResult, String> {
     if args.len() != 4 {
         return Err(format!(
             "Invalid fetch signal: Expected 4 arguments, received {}",
@@ -43,8 +46,8 @@ fn handle_http_fetch_signal(args: &[Expression]) -> Result<SignalResult, String>
                 SignalType::Pending,
                 Vec::new(),
             )))),
-            Some(RuntimeEffect::Async(Box::pin(async move {
-                match fetch(method, url, headers, body).await {
+            Some(RuntimeEffect::deferred(async move {
+                let value = match fetch(method, url, headers, body).await {
                     Ok((status, data)) => Expression::new(Term::Struct(StructTerm::new(
                         None,
                         vec![
@@ -56,8 +59,9 @@ fn handle_http_fetch_signal(args: &[Expression]) -> Result<SignalResult, String>
                         SignalType::Error,
                         vec![Expression::new(Term::Value(ValueTerm::String(error)))],
                     )))),
-                }
-            }))),
+                };
+                StateUpdate::value(signal_id, value)
+            })),
         )),
         _ => Err(String::from("Invalid fetch signal arguments")),
     }

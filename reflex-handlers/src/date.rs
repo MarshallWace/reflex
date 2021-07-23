@@ -4,10 +4,10 @@
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use reflex::{
-    core::{Expression, Signal, Term},
+    core::{Expression, Signal, StateToken, Term},
     stdlib::value::ValueTerm,
 };
-use reflex_runtime::{RuntimeEffect, SignalHandlerResult, SignalHelpers};
+use reflex_runtime::{RuntimeEffect, SignalHandlerResult, SignalHelpers, StateUpdate};
 use tokio::time::{interval_at, Instant};
 use tokio_stream::{wrappers::IntervalStream, StreamExt};
 
@@ -24,12 +24,15 @@ pub fn date_timestamp_handler(
     Some(
         signals
             .iter()
-            .map(|signal| handle_date_timestamp_signal(signal.args()))
+            .map(|signal| handle_date_timestamp_signal(signal.id(), signal.args()))
             .collect(),
     )
 }
 
-fn handle_date_timestamp_signal(args: &[Expression]) -> Result<SignalResult, String> {
+fn handle_date_timestamp_signal(
+    signal_id: StateToken,
+    args: &[Expression],
+) -> Result<SignalResult, String> {
     if args.len() != 1 {
         return Err(format!(
             "Invalid timestamp signal: Expected 1 argument, received {}",
@@ -46,9 +49,12 @@ fn handle_date_timestamp_signal(args: &[Expression]) -> Result<SignalResult, Str
                 .unwrap_or_else(|| Instant::now());
             Ok((
                 Expression::new(Term::Value(ValueTerm::Float(get_current_time()))),
-                Some(RuntimeEffect::Stream(Box::pin(
-                    IntervalStream::new(interval_at(first_update, period)).map(|_| {
-                        Expression::new(Term::Value(ValueTerm::Float(get_current_time())))
+                Some(RuntimeEffect::stream(Box::pin(
+                    IntervalStream::new(interval_at(first_update, period)).map(move |_| {
+                        StateUpdate::value(
+                            signal_id,
+                            Expression::new(Term::Value(ValueTerm::Float(get_current_time()))),
+                        )
                     }),
                 ))),
             ))

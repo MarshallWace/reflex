@@ -5,12 +5,14 @@ use std::{iter::once, pin::Pin};
 
 use futures_util::{FutureExt, StreamExt};
 use reflex::{
-    core::{Expression, Signal, SignalTerm, Term},
+    core::{Expression, Signal, SignalTerm, StateToken, Term},
     serialize::{serialize, SerializedObjectTerm, SerializedTerm},
     stdlib::{signal::SignalType, value::ValueTerm},
 };
 use reflex_graphql::{subscriptions::SubscriptionId, GraphQlOperationPayload};
-use reflex_runtime::{RuntimeEffect, SignalHandlerResult, SignalHelpers, SignalResult};
+use reflex_runtime::{
+    RuntimeEffect, SignalHandlerResult, SignalHelpers, SignalResult, StateUpdate,
+};
 use tokio_stream::Stream;
 use uuid::Uuid;
 
@@ -27,12 +29,15 @@ pub fn graphql_execute_handler(
     Some(
         signals
             .iter()
-            .map(|signal| handle_graphql_execute_signal(signal.args()))
+            .map(|signal| handle_graphql_execute_signal(signal.id(), signal.args()))
             .collect(),
     )
 }
 
-fn handle_graphql_execute_signal(args: &[Expression]) -> Result<SignalResult, String> {
+fn handle_graphql_execute_signal(
+    signal_id: StateToken,
+    args: &[Expression],
+) -> Result<SignalResult, String> {
     if args.len() != 5 {
         return Err(format!(
             "Invalid GraphQL signal: Expected 5 arguments, received {}",
@@ -50,9 +55,9 @@ fn handle_graphql_execute_signal(args: &[Expression]) -> Result<SignalResult, St
             let operation =
                 GraphQlOperationPayload::new(query.clone(), operation_name, variables, extensions);
             if url.starts_with("ws") {
-                handle_graphql_ws_operation(&url, operation)
+                handle_graphql_ws_operation(signal_id, &url, operation)
             } else {
-                handle_graphql_http_operation(&url, operation)
+                handle_graphql_http_operation(signal_id, &url, operation)
             }
         }
         _ => Err(String::from("Invalid GraphQL signal arguments")),
@@ -60,9 +65,10 @@ fn handle_graphql_execute_signal(args: &[Expression]) -> Result<SignalResult, St
 }
 
 fn handle_graphql_http_operation(
+    signal_id: StateToken,
     url: &str,
     operation: GraphQlOperationPayload,
-) -> Result<(Expression, Option<RuntimeEffect>), String> {
+) -> Result<SignalResult, String> {
     let url = String::from(url);
     let method = String::from("POST");
     let headers = once((
@@ -75,7 +81,7 @@ fn handle_graphql_http_operation(
             SignalType::Pending,
             Vec::new(),
         )))),
-        Some(RuntimeEffect::Async(Box::pin(async move {
+        Some(RuntimeEffect::deferred(Box::pin(async move {
             let response = fetch(method, url, headers, Some(body)).await;
             let result = match response {
                 Ok((status, data)) => {
@@ -90,24 +96,26 @@ fn handle_graphql_http_operation(
                 }
                 Err(error) => Err(error),
             };
-            match result {
+            let result = match result {
                 Ok(result) => result,
                 Err(error) => create_error_result(error),
-            }
+            };
+            StateUpdate::value(signal_id, result)
         }))),
     ))
 }
 
 fn handle_graphql_ws_operation(
+    signal_id: StateToken,
     url: &str,
     operation: GraphQlOperationPayload,
-) -> Result<(Expression, Option<RuntimeEffect>), String> {
+) -> Result<SignalResult, String> {
     Ok((
         Expression::new(Term::Signal(SignalTerm::new(Signal::new(
             SignalType::Pending,
             Vec::new(),
         )))),
-        Some(RuntimeEffect::Stream(Box::pin(
+        Some(RuntimeEffect::stream(Box::pin(
             create_graphql_subscription(String::from(url), operation)
                 .into_stream()
                 .flat_map(|(_subscription_id, stream)| {
@@ -124,7 +132,8 @@ fn handle_graphql_ws_operation(
                             Err(error) => create_error_result(error),
                         }
                     })
-                }),
+                })
+                .map(move |value| StateUpdate::value(signal_id, value)),
         ))),
     ))
 }
