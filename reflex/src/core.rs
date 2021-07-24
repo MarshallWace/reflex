@@ -744,15 +744,18 @@ impl fmt::Display for StaticVariableTerm {
 
 #[derive(Hash, Eq, PartialEq, Clone, Debug)]
 pub struct DynamicVariableTerm {
-    id: StateToken,
+    state_token: StateToken,
     fallback: Expression,
 }
 impl DynamicVariableTerm {
-    fn new(id: StateToken, fallback: Expression) -> Self {
-        Self { id, fallback }
+    fn new(state_token: StateToken, fallback: Expression) -> Self {
+        Self {
+            state_token,
+            fallback,
+        }
     }
-    pub fn id(&self) -> StateToken {
-        self.id
+    pub fn state_token(&self) -> StateToken {
+        self.state_token
     }
     pub fn fallback(&self) -> &Expression {
         &self.fallback
@@ -763,7 +766,7 @@ impl Rewritable for DynamicVariableTerm {
         0
     }
     fn dynamic_dependencies(&self) -> DependencyList {
-        DependencyList::of(self.id)
+        DependencyList::of(self.state_token)
     }
     fn substitute_static(
         &self,
@@ -777,7 +780,7 @@ impl Rewritable for DynamicVariableTerm {
         state: &DynamicState,
         _cache: &mut impl EvaluationCache,
     ) -> Option<Expression> {
-        Some(match state.get(self.id) {
+        Some(match state.get(self.state_token) {
             Some(value) => Expression::clone(value),
             None => Expression::clone(&self.fallback),
         })
@@ -788,7 +791,7 @@ impl Rewritable for DynamicVariableTerm {
 }
 impl fmt::Display for DynamicVariableTerm {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "<dynamic:{}>", self.id)
+        write!(f, "<dynamic:{}>", self.state_token)
     }
 }
 
@@ -1174,7 +1177,9 @@ impl Reducible for ApplicationTerm {
                 let result = match evaluate_function_args(self.args.iter(), arity, cache) {
                     Err(args) => Err(args),
                     Ok((args, signals)) => match signals {
-                        ShortCircuitArgs::None => apply_function(target_term, args, cache),
+                        ShortCircuitArgs::None => {
+                            apply_function(target_term, args.into_iter(), cache)
+                        }
                         ShortCircuitArgs::Single(signal) => match target_term {
                             Term::SignalHandler(target) => Ok(target.apply(signal)),
                             _ => Ok(signal),
@@ -1216,17 +1221,6 @@ impl Reducible for ApplicationTerm {
     }
 }
 
-fn get_function_arity(target: &Term) -> Option<Arity> {
-    match target {
-        Term::Lambda(target) => Some(target.arity),
-        Term::Builtin(target) => Some(target.arity()),
-        Term::Native(target) => Some(target.arity),
-        Term::StructConstructor(eager, target) => Some(target.arity(eager)),
-        Term::EnumConstructor(target) => Some(Arity::from(0, target.arity, None)),
-        Term::SignalHandler(_) => Some(Arity::from(1, 0, None)),
-        _ => None,
-    }
-}
 fn evaluate_function_args<'a>(
     args: impl IntoIterator<Item = &'a Expression> + ExactSizeIterator,
     arity: Arity,
@@ -1281,39 +1275,50 @@ fn with_eagerness<T>(
         (arg, is_eager)
     })
 }
-fn apply_function(
+pub(crate) fn get_function_arity(target: &Term) -> Option<Arity> {
+    match target {
+        Term::Lambda(target) => Some(target.arity),
+        Term::Builtin(target) => Some(target.arity()),
+        Term::Native(target) => Some(target.arity),
+        Term::StructConstructor(eager, target) => Some(target.arity(eager)),
+        Term::EnumConstructor(target) => Some(Arity::from(0, target.arity, None)),
+        Term::SignalHandler(_) => Some(Arity::from(1, 0, None)),
+        _ => None,
+    }
+}
+pub(crate) fn apply_function(
     target: &Term,
-    args: Vec<Expression>,
+    args: impl IntoIterator<Item = Expression> + ExactSizeIterator,
     cache: &mut impl EvaluationCache,
 ) -> Result<Expression, Vec<Expression>> {
     match target {
-        Term::Lambda(target) => Ok(target.apply(args.into_iter(), cache)),
-        Term::Builtin(target) => Ok(target.apply(args.into_iter())),
-        Term::Native(target) => Ok(target.apply(args.into_iter())),
+        Term::Lambda(target) => Ok(target.apply(args, cache)),
+        Term::Builtin(target) => Ok(target.apply(args)),
+        Term::Native(target) => Ok(target.apply(args)),
         Term::StructConstructor(_, target) => {
-            let (keys, values) = args.split_at(args.len() / 2);
+            let num_fields = args.len() / 2;
+            let args = args.into_iter().collect::<Vec<_>>();
+            let (keys, values) = args.split_at(num_fields);
             let keys = keys
-                .iter()
+                .into_iter()
                 .map(|key| match key.value() {
                     Term::Value(key) => Some(key),
                     _ => None,
                 })
                 .collect::<Option<Vec<_>>>();
-            let result = keys.and_then(|keys| {
-                target.apply(
-                    keys.into_iter()
-                        .zip(values.iter().map(Expression::clone))
-                        .map(|(key, value)| (key, value)),
-                )
-            });
+            let values = values.into_iter().map(Expression::clone);
+            let result = match keys {
+                None => None,
+                Some(keys) => target.apply(keys.into_iter().zip(values)),
+            };
             match result {
                 Some(result) => Ok(Expression::new(Term::Struct(result))),
                 None => Err(args),
             }
         }
-        Term::EnumConstructor(target) => Ok(target.apply(args.into_iter())),
+        Term::EnumConstructor(target) => Ok(target.apply(args)),
         Term::SignalHandler(_) => Ok(args.into_iter().next().unwrap()),
-        _ => Err(args),
+        _ => Err(args.into_iter().collect::<Vec<_>>()),
     }
 }
 enum ShortCircuitArgs {

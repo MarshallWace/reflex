@@ -99,7 +99,7 @@ fn deeply_nested_function_application(b: &mut Bencher) {
     let expression = (1..=100).fold(Expression::new(Term::Value(ValueTerm::Int(0))), |acc, i| {
         Expression::new(Term::Application(ApplicationTerm::new(
             Expression::new(Term::Lambda(LambdaTerm::new(
-                Arity::from(1, 0, None),
+                Arity::from(0, 1, None),
                 Expression::new(Term::Application(ApplicationTerm::new(
                     Expression::new(Term::Builtin(BuiltinTerm::Add)),
                     vec![Expression::new(Term::Variable(VariableTerm::scoped(0))), acc],

@@ -30,8 +30,7 @@ impl BuiltinFunction for ResolveDeep {
         let input = args.next().unwrap();
         match input.value() {
             Term::Struct(value) => {
-                let has_nested_fields = value.fields().iter().any(is_nested_structure);
-                if !has_nested_fields {
+                if value.fields().iter().all(Expression::is_atomic) {
                     input
                 } else {
                     match value.prototype() {
@@ -46,7 +45,9 @@ impl BuiltinFunction for ResolveDeep {
                                     .iter()
                                     .map(|key| Expression::new(Term::Value(key.clone())))
                                     .chain(value.fields().iter().map(|field| {
-                                        if is_nested_structure(field) {
+                                        if field.is_atomic() {
+                                            Expression::clone(field)
+                                        } else {
                                             Expression::new(Term::Application(
                                                 ApplicationTerm::new(
                                                     Expression::new(Term::Builtin(
@@ -55,8 +56,6 @@ impl BuiltinFunction for ResolveDeep {
                                                     vec![Expression::clone(field)],
                                                 ),
                                             ))
-                                        } else {
-                                            Expression::clone(field)
                                         }
                                     }))
                                     .collect(),
@@ -68,15 +67,15 @@ impl BuiltinFunction for ResolveDeep {
                                 .fields()
                                 .iter()
                                 .map(|field| {
-                                    if is_nested_structure(field) {
+                                    if field.is_atomic() {
+                                        Expression::clone(field)
+                                    } else {
                                         Expression::new(Term::Application(ApplicationTerm::new(
                                             Expression::new(Term::Builtin(
                                                 BuiltinTerm::ResolveDeep,
                                             )),
                                             vec![Expression::clone(field)],
                                         )))
-                                    } else {
-                                        Expression::clone(field)
                                     }
                                 })
                                 .collect(),
@@ -88,8 +87,7 @@ impl BuiltinFunction for ResolveDeep {
                 // TODO: Flatten HashMap collection type
                 // TODO: Flatten HashSet collection type
                 CollectionTerm::Vector(value) => {
-                    let has_nested_fields = value.items().iter().any(is_nested_structure);
-                    if !has_nested_fields {
+                    if value.items().iter().all(Expression::is_atomic) {
                         input
                     } else {
                         Expression::new(Term::Application(ApplicationTerm::new(
@@ -98,15 +96,15 @@ impl BuiltinFunction for ResolveDeep {
                                 .items()
                                 .iter()
                                 .map(|item| {
-                                    if is_nested_structure(item) {
+                                    if item.is_atomic() {
+                                        Expression::clone(item)
+                                    } else {
                                         Expression::new(Term::Application(ApplicationTerm::new(
                                             Expression::new(Term::Builtin(
                                                 BuiltinTerm::ResolveDeep,
                                             )),
                                             vec![Expression::clone(item)],
                                         )))
-                                    } else {
-                                        Expression::clone(item)
                                     }
                                 })
                                 .collect(),
@@ -117,14 +115,5 @@ impl BuiltinFunction for ResolveDeep {
             },
             _ => input,
         }
-    }
-}
-
-fn is_nested_structure(value: &Expression) -> bool {
-    match value.value() {
-        Term::Struct(term) if !term.fields().is_empty() => true,
-        Term::Enum(term) if !term.args().is_empty() => true,
-        Term::Collection(collection) if !collection.is_empty() => true,
-        _ => !value.is_static(),
     }
 }
