@@ -207,27 +207,10 @@ impl ToRequest {
                     vec![target, method, headers, body],
                 ))))
             }
-            Term::Struct(value) => match value.prototype() {
-                Some(prototype) => {
-                    let request_prototype = http_request_prototype();
-                    if hash_object(&prototype) == hash_object(&request_prototype) {
-                        Ok(target)
-                    } else {
-                        let request = request_prototype.apply(
-                            prototype
-                                .keys()
-                                .iter()
-                                .zip(value.fields().iter().map(Expression::clone)),
-                        );
-                        match request {
-                            Some(request) => Ok(Expression::new(Term::Struct(request))),
-                            _ => Err(format!("{}", target)),
-                        }
-                    }
-                }
+            _ => match http_request_prototype().parse_struct(&target) {
+                Some(result) => Ok(result),
                 _ => Err(format!("{}", target)),
             },
-            _ => Err(format!("{}", target)),
         };
         match result {
             Ok(result) => result,

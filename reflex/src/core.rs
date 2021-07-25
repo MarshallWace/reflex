@@ -1290,27 +1290,7 @@ pub(crate) fn apply_function(
         Term::Lambda(target) => Ok(target.apply(args, cache)),
         Term::Builtin(target) => Ok(target.apply(args)),
         Term::Native(target) => Ok(target.apply(args)),
-        Term::Constructor(target, _) => {
-            let num_fields = args.len() / 2;
-            let args = args.into_iter().collect::<Vec<_>>();
-            let (keys, values) = args.split_at(num_fields);
-            let keys = keys
-                .into_iter()
-                .map(|key| match key.value() {
-                    Term::Value(key) => Some(key),
-                    _ => None,
-                })
-                .collect::<Option<Vec<_>>>();
-            let values = values.into_iter().map(Expression::clone);
-            let result = match keys {
-                None => None,
-                Some(keys) => target.apply(keys.into_iter().zip(values)),
-            };
-            match result {
-                Some(result) => Ok(Expression::new(Term::Struct(result))),
-                None => Err(args),
-            }
-        }
+        Term::Constructor(target, _) => Ok(target.apply(args)),
         Term::SignalHandler(_) => Ok(args.into_iter().next().unwrap()),
         _ => Err(args.into_iter().collect::<Vec<_>>()),
     }
@@ -1517,42 +1497,50 @@ impl StructPrototype {
             VarArgs::Eager => Arity::from(num_keys * 2, 0, None),
         }
     }
-    pub fn apply<'a>(
+    pub fn apply(
         &self,
-        fields: impl IntoIterator<Item = (&'a ValueTerm, Expression)> + ExactSizeIterator,
-    ) -> Option<StructTerm> {
-        let fields = fields.into_iter().collect::<Vec<_>>();
-        let has_correctly_ordered_keys = fields.len() >= self.keys.len()
-            && fields
-                .iter()
-                .map(hash_object)
-                .zip(self.key_hashes.iter())
-                .all(|(key_hash, existing_hash)| key_hash == *existing_hash);
-        let fields = if has_correctly_ordered_keys {
-            Some(
-                fields
-                    .into_iter()
-                    .take(self.keys.len())
-                    .map(|(_, value)| value)
-                    .collect::<Vec<_>>(),
-            )
+        values: impl IntoIterator<Item = Expression> + ExactSizeIterator,
+    ) -> Expression {
+        if values.len() != self.keys.len() {
+            // TODO: Allow consumer-provided error factory
+            Expression::new(Term::Signal(SignalTerm::new(Signal::new(
+                SignalType::Error,
+                vec![Expression::new(Term::Value(ValueTerm::String(format!(
+                    "Invalid constructor call: Expected {} arguments, received {}",
+                    self.keys.len(),
+                    values.len()
+                ))))],
+            ))))
         } else {
-            let mut remaining_fields = fields
-                .into_iter()
-                .map(|(key, value)| (hash_object(key), value))
-                .collect::<Vec<_>>();
-            self.key_hashes
-                .iter()
-                .map(|existing_hash| {
-                    let index = remaining_fields
+            Expression::new(Term::Struct(StructTerm::new(
+                // TODO: Share struction prototype instances instead of cloning
+                Some(self.clone()),
+                values.into_iter().collect(),
+            )))
+        }
+    }
+    pub fn parse_struct(&self, existing: &Expression) -> Option<Expression> {
+        match existing.value() {
+            Term::Struct(target) => target.prototype().and_then(|prototype| {
+                if hash_object(prototype) == hash_object(self) {
+                    Some(Expression::clone(existing))
+                } else if prototype.keys().len() >= self.keys().len() {
+                    let values = self
+                        .keys()
                         .iter()
-                        .position(|(key_hash, _)| *key_hash == *existing_hash)?;
-                    let (_, value) = remaining_fields.remove(index);
-                    Some(value)
-                })
-                .collect::<Option<Vec<_>>>()
-        }?;
-        Some(StructTerm::new(Some(self.clone()), fields))
+                        .map(|key| {
+                            prototype.field(key).and_then(|field_offset| {
+                                target.get(field_offset).map(Expression::clone)
+                            })
+                        })
+                        .collect::<Option<Vec<_>>>();
+                    values.map(|field_values| self.apply(field_values.into_iter()))
+                } else {
+                    None
+                }
+            }),
+            _ => None,
+        }
     }
 }
 impl fmt::Display for StructPrototype {

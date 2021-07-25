@@ -67,32 +67,43 @@ impl Construct {
                 let properties = args.next();
                 let result = match properties {
                     Some(properties) => match properties.value() {
-                        Term::Struct(properties) => match properties.prototype() {
-                            Some(properties_layout) => {
-                                let keys = properties_layout.keys().iter();
-                                let values = properties.fields().iter().map(Expression::clone);
-                                let has_unresolved_fields = match eager {
-                                    VarArgs::Lazy => false,
-                                    VarArgs::Eager => properties
-                                        .fields()
-                                        .iter()
-                                        .any(|property| property.is_reducible()),
-                                };
-                                if has_unresolved_fields {
-                                    Ok(Expression::new(Term::Application(ApplicationTerm::new(
-                                        constructor,
-                                        keys.map(|key| Expression::new(Term::Value(key.clone())))
-                                            .chain(values)
-                                            .collect(),
-                                    ))))
-                                } else {
-                                    let entries = prototype.apply(keys.zip(values));
-                                    match entries {
-                                        Some(entries) => Ok(Expression::new(Term::Struct(entries))),
-                                        _ => Err(format!("{}", constructor)),
+                        Term::Struct(property_values) => match property_values.prototype() {
+                            Some(property_values_prototype) => match eager {
+                                VarArgs::Lazy => match prototype.parse_struct(&properties) {
+                                    Some(result) => Ok(result),
+                                    None => Err(format!("{}", constructor)),
+                                },
+                                VarArgs::Eager => {
+                                    let mut ordered_properties =
+                                        prototype.keys().iter().map(|key| {
+                                            property_values_prototype.field(key).and_then(
+                                                |field_offset| property_values.get(field_offset),
+                                            )
+                                        });
+                                    let has_missing_fields =
+                                        ordered_properties.by_ref().any(|value| value.is_none());
+                                    if has_missing_fields {
+                                        Err(format!("{}", constructor))
+                                    } else {
+                                        let mut field_values = ordered_properties
+                                            .map(|value| value.unwrap())
+                                            .map(Expression::clone);
+                                        let has_unresolved_fields = field_values
+                                            .by_ref()
+                                            .any(|property| property.is_reducible());
+                                        if has_unresolved_fields {
+                                            Ok(Expression::new(Term::Application(
+                                                ApplicationTerm::new(
+                                                    Expression::clone(&constructor),
+                                                    field_values.collect(),
+                                                ),
+                                            )))
+                                        } else {
+                                            Ok(prototype.apply(field_values.into_iter()))
+                                        }
                                     }
                                 }
-                            }
+                            },
                             _ => Err(format!("{}", constructor)),
                         },
                         _ => Err(format!("{}", constructor)),

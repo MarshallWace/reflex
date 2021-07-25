@@ -40,11 +40,10 @@ impl BuiltinFunction for ResolveDeep {
                                     prototype.clone(),
                                     VarArgs::Eager,
                                 )),
-                                prototype
-                                    .keys()
+                                value
+                                    .fields()
                                     .iter()
-                                    .map(|key| Expression::new(Term::Value(key.clone())))
-                                    .chain(value.fields().iter().map(|field| {
+                                    .map(|field| {
                                         if field.is_atomic() {
                                             Expression::clone(field)
                                         } else {
@@ -57,7 +56,7 @@ impl BuiltinFunction for ResolveDeep {
                                                 ),
                                             ))
                                         }
-                                    }))
+                                    })
                                     .collect(),
                             )))
                         }
