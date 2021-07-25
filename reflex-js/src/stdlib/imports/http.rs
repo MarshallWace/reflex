@@ -154,10 +154,7 @@ fn import_http_fetch() -> Expression {
 }
 
 fn import_http_request() -> Expression {
-    Expression::new(Term::StructConstructor(
-        VarArgs::Eager,
-        http_request_prototype(),
-    ))
+    Expression::new(Term::Constructor(http_request_prototype(), VarArgs::Eager))
 }
 
 fn http_request_prototype() -> StructPrototype {

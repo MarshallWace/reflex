@@ -487,8 +487,6 @@ impl<'a> ExactSizeIterator for DependencyListIntoIter<'a> {
     }
 }
 
-pub type EnumIndex = usize;
-
 #[derive(Hash, Eq, PartialEq, Clone, Debug)]
 pub enum Term {
     Value(ValueTerm),
@@ -499,9 +497,7 @@ pub enum Term {
     Builtin(BuiltinTerm),
     Native(NativeFunction),
     Struct(StructTerm),
-    Enum(EnumTerm),
-    StructConstructor(VarArgs, StructPrototype),
-    EnumConstructor(EnumVariantPrototype),
+    Constructor(StructPrototype, VarArgs),
     Collection(CollectionTerm),
     Signal(SignalTerm),
     SignalHandler(SignalHandlerTerm),
@@ -514,7 +510,6 @@ impl Rewritable for Term {
             Self::Application(term) => term.capture_depth(),
             Self::Recursive(term) => term.capture_depth(),
             Self::Struct(term) => term.capture_depth(),
-            Self::Enum(term) => term.capture_depth(),
             Self::Collection(term) => term.capture_depth(),
             Self::SignalHandler(term) => term.capture_depth(),
             _ => 0,
@@ -527,7 +522,6 @@ impl Rewritable for Term {
             Self::Application(term) => term.dynamic_dependencies(),
             Self::Recursive(term) => term.dynamic_dependencies(),
             Self::Struct(term) => term.dynamic_dependencies(),
-            Self::Enum(term) => term.dynamic_dependencies(),
             Self::Collection(term) => term.dynamic_dependencies(),
             Self::SignalHandler(term) => term.dynamic_dependencies(),
             _ => DependencyList::empty(),
@@ -544,7 +538,6 @@ impl Rewritable for Term {
             Self::Application(term) => term.substitute_static(substitutions, cache),
             Self::Recursive(term) => term.substitute_static(substitutions, cache),
             Self::Struct(term) => term.substitute_static(substitutions, cache),
-            Self::Enum(term) => term.substitute_static(substitutions, cache),
             Self::Collection(term) => term.substitute_static(substitutions, cache),
             Self::SignalHandler(term) => term.substitute_static(substitutions, cache),
             _ => None,
@@ -561,7 +554,6 @@ impl Rewritable for Term {
             Self::Application(term) => term.substitute_dynamic(state, cache),
             Self::Recursive(term) => term.substitute_dynamic(state, cache),
             Self::Struct(term) => term.substitute_dynamic(state, cache),
-            Self::Enum(term) => term.substitute_dynamic(state, cache),
             Self::Collection(term) => term.substitute_dynamic(state, cache),
             Self::SignalHandler(term) => term.substitute_dynamic(state, cache),
             _ => None,
@@ -574,7 +566,6 @@ impl Rewritable for Term {
             Self::Application(term) => term.normalize(cache),
             Self::Recursive(term) => term.normalize(cache),
             Self::Struct(term) => term.normalize(cache),
-            Self::Enum(term) => term.normalize(cache),
             Self::Collection(term) => term.normalize(cache),
             Self::SignalHandler(term) => term.normalize(cache),
             _ => None,
@@ -590,7 +581,6 @@ impl Term {
             Self::Application(_) => false,
             Self::Recursive(_) => false,
             Self::Struct(StructTerm { fields, .. }) if !fields.is_empty() => false,
-            Self::Enum(EnumTerm { args, .. }) if !args.is_empty() => false,
             Self::Collection(collection) if !collection.is_empty() => false,
             Self::SignalHandler(_) => false,
             _ => true,
@@ -633,9 +623,7 @@ impl fmt::Display for Term {
             Self::Builtin(term) => fmt::Display::fmt(term, f),
             Self::Native(term) => fmt::Display::fmt(term, f),
             Self::Struct(term) => fmt::Display::fmt(term, f),
-            Self::Enum(term) => fmt::Display::fmt(term, f),
-            Self::StructConstructor(_, term) => fmt::Display::fmt(term, f),
-            Self::EnumConstructor(term) => fmt::Display::fmt(term, f),
+            Self::Constructor(prototype, _) => fmt::Display::fmt(prototype, f),
             Self::Collection(term) => fmt::Display::fmt(term, f),
             Self::Signal(term) => fmt::Display::fmt(term, f),
             Self::SignalHandler(term) => fmt::Display::fmt(term, f),
@@ -1288,8 +1276,7 @@ pub(crate) fn get_function_arity(target: &Term) -> Option<Arity> {
         Term::Lambda(target) => Some(target.arity),
         Term::Builtin(target) => Some(target.arity()),
         Term::Native(target) => Some(target.arity),
-        Term::StructConstructor(eager, target) => Some(target.arity(eager)),
-        Term::EnumConstructor(target) => Some(Arity::from(0, target.arity, None)),
+        Term::Constructor(target, eager) => Some(target.arity(eager)),
         Term::SignalHandler(_) => Some(Arity::from(1, 0, None)),
         _ => None,
     }
@@ -1303,7 +1290,7 @@ pub(crate) fn apply_function(
         Term::Lambda(target) => Ok(target.apply(args, cache)),
         Term::Builtin(target) => Ok(target.apply(args)),
         Term::Native(target) => Ok(target.apply(args)),
-        Term::StructConstructor(_, target) => {
+        Term::Constructor(target, _) => {
             let num_fields = args.len() / 2;
             let args = args.into_iter().collect::<Vec<_>>();
             let (keys, values) = args.split_at(num_fields);
@@ -1324,7 +1311,6 @@ pub(crate) fn apply_function(
                 None => Err(args),
             }
         }
-        Term::EnumConstructor(target) => Ok(target.apply(args)),
         Term::SignalHandler(_) => Ok(args.into_iter().next().unwrap()),
         _ => Err(args.into_iter().collect::<Vec<_>>()),
     }
@@ -1571,96 +1557,7 @@ impl StructPrototype {
 }
 impl fmt::Display for StructPrototype {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "<constructor:struct:{}>", self.keys.len())
-    }
-}
-
-#[derive(Hash, Eq, PartialEq, Clone, Debug)]
-pub struct EnumTerm {
-    index: EnumIndex,
-    args: Vec<Expression>,
-}
-impl EnumTerm {
-    pub fn new(index: EnumIndex, args: Vec<Expression>) -> Self {
-        Self { index, args }
-    }
-    pub fn index(&self) -> EnumIndex {
-        self.index
-    }
-    pub fn args(&self) -> &[Expression] {
-        &self.args
-    }
-}
-impl Rewritable for EnumTerm {
-    fn capture_depth(&self) -> StackOffset {
-        capture_depth_multiple(&self.args)
-    }
-    fn dynamic_dependencies(&self) -> DependencyList {
-        DependencyList::empty()
-    }
-    fn substitute_static(
-        &self,
-        substitutions: &Substitutions,
-        cache: &mut impl EvaluationCache,
-    ) -> Option<Expression> {
-        substitute_static_multiple(&self.args, substitutions, cache)
-            .map(|args| Expression::new(Term::Enum(Self::new(self.index, args))))
-    }
-    fn substitute_dynamic(
-        &self,
-        state: &DynamicState,
-        cache: &mut impl EvaluationCache,
-    ) -> Option<Expression> {
-        substitute_dynamic_multiple(&self.args, state, cache)
-            .map(|args| Expression::new(Term::Enum(Self::new(self.index, args))))
-    }
-    fn normalize(&self, cache: &mut impl EvaluationCache) -> Option<Expression> {
-        normalize_multiple(&self.args, cache)
-            .map(|args| Expression::normalized(Term::Enum(Self::new(self.index, args))))
-    }
-}
-impl fmt::Display for EnumTerm {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "<enum:{}:{}>",
-            self.index,
-            self.args
-                .iter()
-                .map(|arg| format!("{}", arg))
-                .collect::<Vec<_>>()
-                .join(",")
-        )
-    }
-}
-
-pub type EnumConstructorArity = usize;
-
-#[derive(Hash, Eq, PartialEq, Clone, Debug)]
-pub struct EnumVariantPrototype {
-    index: EnumIndex,
-    arity: EnumConstructorArity,
-}
-impl EnumVariantPrototype {
-    pub fn new(index: EnumIndex, arity: EnumConstructorArity) -> Self {
-        Self { index, arity }
-    }
-    pub fn index(&self) -> EnumIndex {
-        self.index
-    }
-    pub fn arity(&self) -> EnumConstructorArity {
-        self.arity
-    }
-    fn apply(&self, args: impl IntoIterator<Item = Expression> + ExactSizeIterator) -> Expression {
-        Expression::new(Term::Enum(EnumTerm::new(
-            self.index,
-            args.into_iter().collect(),
-        )))
-    }
-}
-impl fmt::Display for EnumVariantPrototype {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "<constructor:enum:{}:{}>", self.index, self.arity)
+        write!(f, "<constructor:{}>", self.keys.len())
     }
 }
 

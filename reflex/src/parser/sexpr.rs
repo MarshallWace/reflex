@@ -1,13 +1,13 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use std::{collections::HashMap, fmt};
+use std::{collections::HashMap, fmt, iter::once};
 
 use crate::{
     cache::{EvaluationCache, SubstitutionCache},
     core::{
-        ApplicationTerm, Arity, EnumTerm, Expression, LambdaTerm, RecursiveTerm, Rewritable,
-        StructTerm, Substitutions, Term, VariableTerm,
+        ApplicationTerm, Arity, Expression, LambdaTerm, RecursiveTerm, Rewritable, StructTerm,
+        Substitutions, Term, VariableTerm,
     },
     stdlib::{
         builtin::BuiltinTerm,
@@ -309,18 +309,29 @@ fn parse_quoted_list<'a>(
     symbol_cache: &mut SymbolCache<'a>,
 ) -> Expression {
     match values.len() {
-        0 => Expression::new(Term::Enum(EnumTerm::new(0, Vec::new()))),
+        0 => create_enum(0, Vec::new()),
         _ => {
             let value = values.iter().next().unwrap();
-            Expression::new(Term::Enum(EnumTerm::new(
+            create_enum(
                 1,
                 vec![
                     parse_quoted_value(value, symbol_cache),
                     parse_quoted_list(&values[1..], symbol_cache),
                 ],
-            )))
+            )
         }
     }
+}
+
+fn create_enum(discriminant: usize, args: impl IntoIterator<Item = Expression>) -> Expression {
+    Expression::new(Term::Struct(StructTerm::new(
+        None,
+        once(Expression::new(Term::Value(ValueTerm::Int(
+            discriminant as i32,
+        ))))
+        .chain(args.into_iter())
+        .collect(),
+    )))
 }
 
 fn parse_lambda_expression<'a>(
@@ -627,8 +638,8 @@ fn parse_binding_definitions<'a, 'b>(
 mod tests {
     use crate::{
         core::{
-            ApplicationTerm, Arity, EnumTerm, Expression, LambdaTerm, RecursiveTerm, StructTerm,
-            Term, VariableTerm,
+            ApplicationTerm, Arity, Expression, LambdaTerm, RecursiveTerm, StructTerm, Term,
+            VariableTerm,
         },
         stdlib::{
             builtin::BuiltinTerm,
@@ -939,23 +950,32 @@ mod tests {
         );
         assert_eq!(
             parse("'()"),
-            Ok(Expression::new(Term::Enum(EnumTerm::new(0, Vec::new())))),
+            Ok(Expression::new(Term::Struct(StructTerm::new(
+                None,
+                vec![Expression::new(Term::Value(ValueTerm::Int(0))),]
+            )))),
         );
         assert_eq!(
             parse("'(3 4 5)"),
-            Ok(Expression::new(Term::Enum(EnumTerm::new(
-                1,
+            Ok(Expression::new(Term::Struct(StructTerm::new(
+                None,
                 vec![
+                    Expression::new(Term::Value(ValueTerm::Int(1))),
                     Expression::new(Term::Value(ValueTerm::Int(3))),
-                    Expression::new(Term::Enum(EnumTerm::new(
-                        1,
+                    Expression::new(Term::Struct(StructTerm::new(
+                        None,
                         vec![
+                            Expression::new(Term::Value(ValueTerm::Int(1))),
                             Expression::new(Term::Value(ValueTerm::Int(4))),
-                            Expression::new(Term::Enum(EnumTerm::new(
-                                1,
+                            Expression::new(Term::Struct(StructTerm::new(
+                                None,
                                 vec![
+                                    Expression::new(Term::Value(ValueTerm::Int(1))),
                                     Expression::new(Term::Value(ValueTerm::Int(5))),
-                                    Expression::new(Term::Enum(EnumTerm::new(0, Vec::new()))),
+                                    Expression::new(Term::Struct(StructTerm::new(
+                                        None,
+                                        vec![Expression::new(Term::Value(ValueTerm::Int(0))),]
+                                    ))),
                                 ],
                             ),)),
                         ],

@@ -36,9 +36,9 @@ impl BuiltinFunction for ResolveDeep {
                     match value.prototype() {
                         Some(prototype) => {
                             Expression::new(Term::Application(ApplicationTerm::new(
-                                Expression::new(Term::StructConstructor(
-                                    VarArgs::Eager,
+                                Expression::new(Term::Constructor(
                                     prototype.clone(),
+                                    VarArgs::Eager,
                                 )),
                                 prototype
                                     .keys()

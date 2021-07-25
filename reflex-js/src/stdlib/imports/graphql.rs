@@ -13,12 +13,12 @@ pub(crate) fn import_graphql() -> Expression {
 }
 
 fn import_graphql_resolver() -> Expression {
-    Expression::new(Term::StructConstructor(
-        VarArgs::Lazy,
+    Expression::new(Term::Constructor(
         StructPrototype::new(vec![
             ValueTerm::String(StringValue::from("query")),
             ValueTerm::String(StringValue::from("mutation")),
             ValueTerm::String(StringValue::from("subscription")),
         ]),
+        VarArgs::Lazy,
     ))
 }

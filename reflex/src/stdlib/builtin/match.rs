@@ -24,24 +24,27 @@ impl BuiltinFunction for Match {
         let mut args = args.into_iter();
         let target = args.next().unwrap();
         let matcher = args.next().unwrap();
-        match (target.value(), matcher.value()) {
-            (Term::Enum(target), Term::Struct(matcher)) => {
-                match matcher.fields().get(target.index()) {
+        let result = match (match_enum(&target), matcher.value()) {
+            (Some((discriminant, args)), Term::Struct(matcher)) => Some({
+                match matcher.fields().get(discriminant) {
                     Some(handler) => Expression::new(Term::Application(ApplicationTerm::new(
                         Expression::clone(handler),
-                        target.args().iter().map(Expression::clone).collect(),
+                        args.into_iter().map(Expression::clone).collect(),
                     ))),
                     None => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                         SignalType::Error,
                         vec![Expression::new(Term::Value(ValueTerm::String(format!(
                             "Unhandled enum index: {} for matcher {}",
-                            target.index(),
-                            matcher
+                            discriminant, matcher
                         ))))],
                     )))),
                 }
-            }
-            _ => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
+            }),
+            _ => None,
+        };
+        match result {
+            Some(result) => result,
+            None => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
                 SignalType::Error,
                 vec![Expression::new(Term::Value(ValueTerm::String(format!(
                     "Invalid pattern match: Expected (<enum>, <struct>), received ({}, {})",
@@ -52,13 +55,29 @@ impl BuiltinFunction for Match {
     }
 }
 
+fn match_enum(target: &Expression) -> Option<(usize, impl IntoIterator<Item = &Expression>)> {
+    match target.value() {
+        Term::Struct(target) if target.prototype().is_none() => {
+            target
+                .get(0)
+                .and_then(|discriminant| match discriminant.value() {
+                    Term::Value(ValueTerm::Int(value)) if *value >= 0 => {
+                        Some((*value as usize, target.fields().iter().skip(1)))
+                    }
+                    _ => None,
+                })
+        }
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::{
         cache::SubstitutionCache,
         core::{
-            ApplicationTerm, Arity, DependencyList, DynamicState, EnumTerm, EvaluationResult,
-            Expression, LambdaTerm, Signal, SignalTerm, StructTerm, Term, VariableTerm,
+            ApplicationTerm, Arity, DependencyList, DynamicState, EvaluationResult, Expression,
+            LambdaTerm, Signal, SignalTerm, StructTerm, Term, VariableTerm,
         },
         stdlib::builtin::BuiltinTerm,
         stdlib::signal::SignalType,
@@ -72,9 +91,10 @@ mod tests {
         let expression = Expression::new(Term::Application(ApplicationTerm::new(
             Expression::new(Term::Builtin(BuiltinTerm::Match)),
             vec![
-                Expression::new(Term::Enum(EnumTerm::new(
-                    1,
+                Expression::new(Term::Struct(StructTerm::new(
+                    None,
                     vec![
+                        Expression::new(Term::Value(ValueTerm::Int(1))),
                         Expression::new(Term::Value(ValueTerm::Int(3))),
                         Expression::new(Term::Value(ValueTerm::Int(4))),
                         Expression::new(Term::Value(ValueTerm::Int(5))),

@@ -63,7 +63,7 @@ impl Construct {
         let mut args = args.into_iter();
         let constructor = args.next().unwrap();
         match constructor.value() {
-            Term::StructConstructor(eager, prototype) => {
+            Term::Constructor(prototype, eager) => {
                 let properties = args.next();
                 let result = match properties {
                     Some(properties) => match properties.value() {
