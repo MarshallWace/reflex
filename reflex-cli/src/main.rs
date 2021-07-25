@@ -11,7 +11,7 @@ use std::{
 };
 
 use reflex::{
-    cache::GenerationalGc,
+    cache::SubstitutionCache,
     core::{DynamicState, Expression},
 };
 use reflex_cli::parse_cli_args;
@@ -60,7 +60,7 @@ pub async fn main() {
             Ok(input_path) => match input_path {
                 None => {
                     let mut state = DynamicState::new();
-                    let mut cache = GenerationalGc::new();
+                    let mut cache = SubstitutionCache::new();
                     repl::run(parser, &mut state, &mut cache)
                         .or_else(|error| Err(format!("{}", error)))
                 }
@@ -71,7 +71,7 @@ pub async fn main() {
                         Ok(expression) => {
                             let mut stdout = io::stdout();
                             let state = DynamicState::new();
-                            let mut cache = GenerationalGc::new();
+                            let mut cache = SubstitutionCache::new();
                             let (output, dependencies) =
                                 repl::eval(Expression::clone(&expression), &state, &mut cache);
                             if dependencies.is_empty() {

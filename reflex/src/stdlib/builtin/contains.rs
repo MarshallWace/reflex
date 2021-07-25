@@ -4,10 +4,7 @@
 use crate::{
     core::{Arity, Expression, Signal, SignalTerm, Term},
     stdlib::{
-        builtin::BuiltinFunction,
-        collection::CollectionTerm,
-        signal::SignalType,
-        value::ValueTerm,
+        builtin::BuiltinFunction, collection::CollectionTerm, signal::SignalType, value::ValueTerm,
     },
 };
 
@@ -58,23 +55,21 @@ impl BuiltinFunction for Contains {
 #[cfg(test)]
 mod tests {
     use crate::{
-        cache::GenerationalGc,
+        cache::SubstitutionCache,
         core::{
             ApplicationTerm, DependencyList, DynamicState, EvaluationResult, Expression,
             StructPrototype, StructTerm, Term,
         },
         stdlib::{
             builtin::BuiltinTerm,
-            collection::{
-                hashmap::HashMapTerm, hashset::HashSetTerm, CollectionTerm,
-            },
+            collection::{hashmap::HashMapTerm, hashset::HashSetTerm, CollectionTerm},
             value::{StringValue, ValueTerm},
         },
     };
 
     #[test]
     fn struct_contains() {
-        let mut cache = GenerationalGc::new();
+        let mut cache = SubstitutionCache::new();
         let state = DynamicState::new();
         let expression = Expression::new(Term::Application(ApplicationTerm::new(
             Expression::new(Term::Builtin(BuiltinTerm::Contains)),
@@ -132,7 +127,7 @@ mod tests {
 
     #[test]
     fn hashmap_contains() {
-        let mut cache = GenerationalGc::new();
+        let mut cache = SubstitutionCache::new();
         let state = DynamicState::new();
         let expression = Expression::new(Term::Application(ApplicationTerm::new(
             Expression::new(Term::Builtin(BuiltinTerm::Contains)),
@@ -210,7 +205,7 @@ mod tests {
 
     #[test]
     fn hashset_contains() {
-        let mut cache = GenerationalGc::new();
+        let mut cache = SubstitutionCache::new();
         let state = DynamicState::new();
         let expression = Expression::new(Term::Application(ApplicationTerm::new(
             Expression::new(Term::Builtin(BuiltinTerm::Contains)),

@@ -72,7 +72,7 @@ impl BuiltinFunction for Reduce {
 #[cfg(test)]
 mod tests {
     use crate::{
-        cache::GenerationalGc,
+        cache::SubstitutionCache,
         core::{
             ApplicationTerm, Arity, DependencyList, DynamicState, EvaluationResult, Expression,
             LambdaTerm, Term, VariableTerm,
@@ -86,7 +86,7 @@ mod tests {
 
     #[test]
     fn reduce_expressions() {
-        let mut cache = GenerationalGc::new();
+        let mut cache = SubstitutionCache::new();
         let state = DynamicState::new();
         let expression = Expression::new(Term::Application(ApplicationTerm::new(
             Expression::new(Term::Builtin(BuiltinTerm::Reduce)),

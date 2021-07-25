@@ -13,7 +13,7 @@ use std::{
 use crate::graphql_service;
 use hyper::{server::conn::AddrStream, service::make_service_fn, Server};
 use reflex::{
-    cache::GenerationalGc,
+    cache::SubstitutionCache,
     core::{Expression, Signal},
 };
 use reflex_cli::parse_cli_args;
@@ -80,7 +80,7 @@ pub async fn cli(
                     } else {
                         create_store(signal_handler)
                     };
-                    let root = root.optimize(&mut GenerationalGc::new()).unwrap_or(root);
+                    let root = root.optimize(&mut SubstitutionCache::new()).unwrap_or(root);
                     let server = create_server(store, root, &address);
                     println!(
                         "Listening for incoming HTTP requests on port {}",
@@ -117,7 +117,7 @@ where
     let result_buffer_size = 1024;
     Runtime::new(
         signal_handler,
-        GenerationalGc::new(),
+        SubstitutionCache::new(),
         command_buffer_size,
         result_buffer_size,
     )

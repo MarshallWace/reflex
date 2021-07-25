@@ -45,7 +45,7 @@ impl BuiltinFunction for Effect {
 #[cfg(test)]
 mod tests {
     use crate::{
-        cache::GenerationalGc,
+        cache::SubstitutionCache,
         core::{
             ApplicationTerm, DependencyList, DynamicState, EvaluationResult, Expression, Signal,
             SignalTerm, Term,
@@ -59,7 +59,7 @@ mod tests {
 
     #[test]
     fn effect_expressions() {
-        let mut cache = GenerationalGc::new();
+        let mut cache = SubstitutionCache::new();
         let mut state = DynamicState::new();
         let expression = Expression::new(Term::Application(ApplicationTerm::new(
             Expression::new(Term::Builtin(BuiltinTerm::Effect)),

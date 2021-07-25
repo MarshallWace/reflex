@@ -167,7 +167,7 @@ impl BuiltinFunction for CollectHashSet {
 #[cfg(test)]
 mod tests {
     use crate::{
-        cache::GenerationalGc,
+        cache::SubstitutionCache,
         core::{ApplicationTerm, DependencyList, DynamicState, EvaluationResult, Expression, Term},
         parser::sexpr::parse,
         stdlib::{
@@ -179,7 +179,7 @@ mod tests {
 
     #[test]
     fn collect_expressions() {
-        let mut cache = GenerationalGc::new();
+        let mut cache = SubstitutionCache::new();
         let state = DynamicState::new();
         let collection = Expression::new(Term::Collection(CollectionTerm::Vector(
             VectorTerm::new(vec![

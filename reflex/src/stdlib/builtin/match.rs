@@ -55,7 +55,7 @@ impl BuiltinFunction for Match {
 #[cfg(test)]
 mod tests {
     use crate::{
-        cache::GenerationalGc,
+        cache::SubstitutionCache,
         core::{
             ApplicationTerm, Arity, DependencyList, DynamicState, EnumTerm, EvaluationResult,
             Expression, LambdaTerm, Signal, SignalTerm, StructTerm, Term, VariableTerm,
@@ -67,7 +67,7 @@ mod tests {
 
     #[test]
     fn match_expressions() {
-        let mut cache = GenerationalGc::new();
+        let mut cache = SubstitutionCache::new();
         let state = DynamicState::new();
         let expression = Expression::new(Term::Application(ApplicationTerm::new(
             Expression::new(Term::Builtin(BuiltinTerm::Match)),

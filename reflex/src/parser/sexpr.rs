@@ -4,7 +4,7 @@
 use std::{collections::HashMap, fmt};
 
 use crate::{
-    cache::{EvaluationCache, GenerationalGc},
+    cache::{EvaluationCache, SubstitutionCache},
     core::{
         ApplicationTerm, Arity, EnumTerm, Expression, LambdaTerm, RecursiveTerm, Rewritable,
         StructTerm, Substitutions, Term, VariableTerm,
@@ -105,7 +105,7 @@ pub fn parse<'a>(input: &'a str) -> ParserResult<'a, Expression> {
     }?;
     let scope = LexicalScope::new();
     let mut symbol_cache = SymbolCache::new();
-    let mut evaluation_cache = GenerationalGc::new();
+    let mut evaluation_cache = SubstitutionCache::new();
     parse_expression(&syntax, &scope, &mut symbol_cache, &mut evaluation_cache)
 }
 

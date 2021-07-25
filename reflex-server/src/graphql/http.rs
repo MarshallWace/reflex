@@ -4,7 +4,7 @@
 use crate::{create_http_response, get_cors_headers};
 use hyper::{header, Body, Request, Response, StatusCode};
 use reflex::{
-    cache::GenerationalGc,
+    cache::SubstitutionCache,
     core::{ApplicationTerm, Expression, Term},
     hash::hash_object,
     serialize::{serialize, SerializedObjectTerm},
@@ -27,7 +27,9 @@ pub(crate) async fn handle_graphql_http_request(
     let response = match parse_graphql_request(req, &root).await {
         Err(response) => Ok(response),
         Ok(query) => {
-            let query = query.optimize(&mut GenerationalGc::new()).unwrap_or(query);
+            let query = query
+                .optimize(&mut SubstitutionCache::new())
+                .unwrap_or(query);
             match store.subscribe(query).await {
                 Err(error) => Err(error),
                 Ok(mut results) => match results.next().await {

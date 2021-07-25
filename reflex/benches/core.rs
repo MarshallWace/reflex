@@ -7,11 +7,8 @@ extern crate test;
 use test::Bencher;
 
 use reflex::{
-    cache::GenerationalGc,
-    core::{
-        ApplicationTerm, Arity, DynamicState, Expression, LambdaTerm, Term,
-        VariableTerm,
-    },
+    cache::SubstitutionCache,
+    core::{ApplicationTerm, Arity, DynamicState, Expression, LambdaTerm, Term, VariableTerm},
     parser::sexpr::parse,
     stdlib::{
         builtin::BuiltinTerm,
@@ -25,7 +22,7 @@ fn nested_expressions(b: &mut Bencher) {
     let state = DynamicState::new();
     let expression = parse("(+ (+ (abs -3) 4) 5)").unwrap();
     b.iter(|| {
-        let mut cache = GenerationalGc::new();
+        let mut cache = SubstitutionCache::new();
         expression.evaluate(&state, &mut cache)
     });
 }
@@ -35,7 +32,7 @@ fn function_application_nullary(b: &mut Bencher) {
     let state = DynamicState::new();
     let expression = parse("((lambda () 3))").unwrap();
     b.iter(|| {
-        let mut cache = GenerationalGc::new();
+        let mut cache = SubstitutionCache::new();
         expression.evaluate(&state, &mut cache)
     });
 }
@@ -45,7 +42,7 @@ fn function_application_unary(b: &mut Bencher) {
     let state = DynamicState::new();
     let expression = parse("((lambda (foo) foo) 3)").unwrap();
     b.iter(|| {
-        let mut cache = GenerationalGc::new();
+        let mut cache = SubstitutionCache::new();
         expression.evaluate(&state, &mut cache)
     });
 }
@@ -55,7 +52,7 @@ fn function_application_binary(b: &mut Bencher) {
     let state = DynamicState::new();
     let expression = parse("((lambda (foo bar) foo) 3 4)").unwrap();
     b.iter(|| {
-        let mut cache = GenerationalGc::new();
+        let mut cache = SubstitutionCache::new();
         expression.evaluate(&state, &mut cache)
     });
 }
@@ -65,7 +62,7 @@ fn function_application_ternary(b: &mut Bencher) {
     let state = DynamicState::new();
     let expression = parse("((lambda (foo bar baz) foo) 3 4 5)").unwrap();
     b.iter(|| {
-        let mut cache = GenerationalGc::new();
+        let mut cache = SubstitutionCache::new();
         expression.evaluate(&state, &mut cache)
     });
 }
@@ -75,7 +72,7 @@ fn function_application_unused_args(b: &mut Bencher) {
     let state = DynamicState::new();
     let expression = parse("((lambda (foo bar baz) 2) 3 4 5)").unwrap();
     b.iter(|| {
-        let mut cache = GenerationalGc::new();
+        let mut cache = SubstitutionCache::new();
         expression.evaluate(&state, &mut cache)
     });
 }
@@ -88,7 +85,7 @@ fn function_application_argument_scope(b: &mut Bencher) {
         )
         .unwrap();
     b.iter(|| {
-        let mut cache = GenerationalGc::new();
+        let mut cache = SubstitutionCache::new();
         expression.evaluate(&state, &mut cache)
     });
 }
@@ -102,14 +99,17 @@ fn deeply_nested_function_application(b: &mut Bencher) {
                 Arity::from(0, 1, None),
                 Expression::new(Term::Application(ApplicationTerm::new(
                     Expression::new(Term::Builtin(BuiltinTerm::Add)),
-                    vec![Expression::new(Term::Variable(VariableTerm::scoped(0))), acc],
+                    vec![
+                        Expression::new(Term::Variable(VariableTerm::scoped(0))),
+                        acc,
+                    ],
                 ))),
             ))),
             vec![Expression::new(Term::Value(ValueTerm::Int(i)))],
         )))
     });
     b.iter(|| {
-        let mut cache = GenerationalGc::new();
+        let mut cache = SubstitutionCache::new();
         expression.evaluate(&state, &mut cache)
     })
 }
@@ -119,7 +119,7 @@ fn function_application_closure(b: &mut Bencher) {
     let state = DynamicState::new();
     let expression = parse("(((lambda (foo) (lambda () foo)) 3))").unwrap();
     b.iter(|| {
-        let mut cache = GenerationalGc::new();
+        let mut cache = SubstitutionCache::new();
         expression.evaluate(&state, &mut cache)
     });
 }
@@ -129,7 +129,7 @@ fn conditional_expressions(b: &mut Bencher) {
     let state = DynamicState::new();
     let expression = parse("(if #t 3 4)").unwrap();
     b.iter(|| {
-        let mut cache = GenerationalGc::new();
+        let mut cache = SubstitutionCache::new();
         expression.evaluate(&state, &mut cache)
     });
 }
@@ -157,7 +157,7 @@ fn list_transforms(b: &mut Bencher) {
         )))],
     )));
     b.iter(|| {
-        let mut cache = GenerationalGc::new();
+        let mut cache = SubstitutionCache::new();
         expression.evaluate(&state, &mut cache)
     });
 }

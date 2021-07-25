@@ -294,7 +294,11 @@ impl Rewritable for Expression {
             Some(result) => result,
             None => {
                 let result = self.value.substitute_static(substitutions, cache);
-                cache.store_static_substitution(self, substitutions, result.as_ref());
+                cache.store_static_substitution(
+                    self,
+                    substitutions,
+                    result.as_ref().map(Expression::clone),
+                );
                 result
             }
         }
@@ -311,7 +315,11 @@ impl Rewritable for Expression {
             Some(result) => result,
             None => {
                 let result = self.value.substitute_dynamic(state, cache);
-                cache.store_dynamic_substitution(self, state, result.as_ref());
+                cache.store_dynamic_substitution(
+                    self,
+                    state,
+                    result.as_ref().map(Expression::clone),
+                );
                 result
             }
         }
@@ -332,7 +340,7 @@ impl Reducible for Expression {
             Some(result) => result,
             None => {
                 let result = self.value.reduce(cache);
-                cache.store_reduction(self, result.as_ref());
+                cache.store_reduction(self, result.as_ref().map(Expression::clone));
                 result
             }
         }
@@ -1890,7 +1898,7 @@ fn transform_expressions(
 #[cfg(test)]
 mod tests {
     use crate::{
-        cache::GenerationalGc,
+        cache::SubstitutionCache,
         core::{Signal, SignalTerm},
         parser::sexpr::parse,
         stdlib::builtin::BuiltinTerm,
@@ -1908,7 +1916,7 @@ mod tests {
     #[test]
     fn value_expressions() {
         let state = DynamicState::new();
-        let mut cache = GenerationalGc::new();
+        let mut cache = SubstitutionCache::new();
         let expression = parse("3").unwrap();
         let result = expression.evaluate(&state, &mut cache);
         assert_eq!(
@@ -1922,7 +1930,7 @@ mod tests {
 
     #[test]
     fn lambda_optimizations() {
-        let mut cache = GenerationalGc::new();
+        let mut cache = SubstitutionCache::new();
         let expression = parse("(lambda (foo) foo)").unwrap();
         let result = expression.value.normalize(&mut cache);
         assert_eq!(expression.capture_depth(), 0);
@@ -1942,7 +1950,7 @@ mod tests {
     #[test]
     fn lambda_application_expressions() {
         let state = DynamicState::new();
-        let mut cache = GenerationalGc::new();
+        let mut cache = SubstitutionCache::new();
         let expression = parse("((lambda (foo) foo) 3)").unwrap();
         let result = expression.evaluate(&state, &mut cache);
         assert_eq!(
@@ -1977,7 +1985,7 @@ mod tests {
     #[test]
     fn invalid_function_applications() {
         let state = DynamicState::new();
-        let mut cache = GenerationalGc::new();
+        let mut cache = SubstitutionCache::new();
         let expression = parse("((lambda (foo) foo))").unwrap();
         let result = expression.evaluate(&state, &mut cache);
         assert_eq!(
@@ -2025,7 +2033,7 @@ mod tests {
     #[test]
     fn builtin_expressions() {
         let state = DynamicState::new();
-        let mut cache = GenerationalGc::new();
+        let mut cache = SubstitutionCache::new();
         let expression = parse("+").unwrap();
         let result = expression.evaluate(&state, &mut cache);
         assert_eq!(
@@ -2040,7 +2048,7 @@ mod tests {
     #[test]
     fn builtin_application_expressions() {
         let state = DynamicState::new();
-        let mut cache = GenerationalGc::new();
+        let mut cache = SubstitutionCache::new();
         let expression = parse("(+ 1 2)").unwrap();
         let result = expression.evaluate(&state, &mut cache);
         assert_eq!(
@@ -2055,7 +2063,7 @@ mod tests {
     #[test]
     fn signal_short_circuiting() {
         let state = DynamicState::new();
-        let mut cache = GenerationalGc::new();
+        let mut cache = SubstitutionCache::new();
         let expression = parse("((/ 3 0) 4 5)").unwrap();
         let result = expression.evaluate(&state, &mut cache);
         assert_eq!(
@@ -2153,7 +2161,7 @@ mod tests {
     #[test]
     fn let_expressions() {
         let state = DynamicState::new();
-        let mut cache = GenerationalGc::new();
+        let mut cache = SubstitutionCache::new();
         let expression = parse("(let () 3)").unwrap();
         let result = expression.evaluate(&state, &mut cache);
         assert_eq!(
@@ -2204,7 +2212,7 @@ mod tests {
     #[test]
     fn letrec_expressions() {
         let state = DynamicState::new();
-        let mut cache = GenerationalGc::new();
+        let mut cache = SubstitutionCache::new();
         let expression = parse("(letrec () 3)").unwrap();
         let result = expression.evaluate(&state, &mut cache);
         assert_eq!(
@@ -2362,7 +2370,7 @@ mod tests {
         let add3 = NativeFunction::new(1, Arity::from(3, 0, None), add3);
 
         let state = DynamicState::new();
-        let mut cache = GenerationalGc::new();
+        let mut cache = SubstitutionCache::new();
         let expression = Expression::new(Term::Application(ApplicationTerm::new(
             Expression::new(Term::Native(constant)),
             vec![],
@@ -2398,7 +2406,7 @@ mod tests {
         let expression =
             parse("((lambda (foo) ((lambda (bar) (foo 3)) #f)) (lambda (foo) #t))").unwrap();
         assert_eq!(
-            expression.optimize(&mut GenerationalGc::new()),
+            expression.optimize(&mut SubstitutionCache::new()),
             Some(Expression::new(Term::Value(ValueTerm::Boolean(true))))
         );
 
@@ -2412,7 +2420,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            expression.optimize(&mut GenerationalGc::new()),
+            expression.optimize(&mut SubstitutionCache::new()),
             Some(Expression::new(Term::Value(ValueTerm::Int(6))))
         );
     }

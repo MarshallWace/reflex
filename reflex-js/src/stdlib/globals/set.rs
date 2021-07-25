@@ -99,7 +99,7 @@ impl DynamicSetConstructor {
 mod tests {
     use crate::{parse, stdlib::builtin_globals, Env};
     use reflex::{
-        cache::GenerationalGc,
+        cache::SubstitutionCache,
         core::{DependencyList, DynamicState, EvaluationResult, Expression, Term},
         stdlib::{
             collection::{hashset::HashSetTerm, vector::VectorTerm, CollectionTerm},
@@ -110,7 +110,7 @@ mod tests {
     #[test]
     fn set_constructor() {
         let env = Env::new().with_globals(builtin_globals());
-        let mut cache = GenerationalGc::new();
+        let mut cache = SubstitutionCache::new();
         let state = DynamicState::new();
         let expression = parse("new Set([])", &env).unwrap();
         let result = expression.evaluate(&state, &mut cache);
@@ -158,7 +158,7 @@ mod tests {
     #[test]
     fn set_constructor_values() {
         let env = Env::new().with_globals(builtin_globals());
-        let mut cache = GenerationalGc::new();
+        let mut cache = SubstitutionCache::new();
         let state = DynamicState::new();
         let expression = parse("new Set([]).values()", &env).unwrap();
         let result = expression.evaluate(&state, &mut cache);

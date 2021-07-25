@@ -148,7 +148,7 @@ impl DynamicMapConstructor {
 mod tests {
     use crate::{parse, stdlib::builtin_globals, Env};
     use reflex::{
-        cache::GenerationalGc,
+        cache::SubstitutionCache,
         core::{DependencyList, DynamicState, EvaluationResult, Expression, StructTerm, Term},
         stdlib::{
             collection::{hashmap::HashMapTerm, vector::VectorTerm, CollectionTerm},
@@ -159,7 +159,7 @@ mod tests {
     #[test]
     fn map_constructor() {
         let env = Env::new().with_globals(builtin_globals());
-        let mut cache = GenerationalGc::new();
+        let mut cache = SubstitutionCache::new();
         let state = DynamicState::new();
         let expression = parse("new Map([])", &env).unwrap();
         let result = expression.evaluate(&state, &mut cache);
@@ -241,7 +241,7 @@ mod tests {
     #[test]
     fn map_constructor_entries() {
         let env = Env::new().with_globals(builtin_globals());
-        let mut cache = GenerationalGc::new();
+        let mut cache = SubstitutionCache::new();
         let state = DynamicState::new();
         let expression = parse("new Map([]).entries()", &env).unwrap();
         let result = expression.evaluate(&state, &mut cache);
@@ -345,7 +345,7 @@ mod tests {
     #[test]
     fn map_constructor_keys() {
         let env = Env::new().with_globals(builtin_globals());
-        let mut cache = GenerationalGc::new();
+        let mut cache = SubstitutionCache::new();
         let state = DynamicState::new();
         let expression = parse("new Map([]).keys()", &env).unwrap();
         let result = expression.evaluate(&state, &mut cache);
@@ -401,7 +401,7 @@ mod tests {
     #[test]
     fn map_constructor_values() {
         let env = Env::new().with_globals(builtin_globals());
-        let mut cache = GenerationalGc::new();
+        let mut cache = SubstitutionCache::new();
         let state = DynamicState::new();
         let expression = parse("new Map([]).values()", &env).unwrap();
         let result = expression.evaluate(&state, &mut cache);

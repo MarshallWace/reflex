@@ -558,7 +558,7 @@ fn create_struct(fields: impl IntoIterator<Item = (String, Expression)>) -> Expr
 #[cfg(test)]
 mod tests {
     use reflex::{
-        cache::GenerationalGc,
+        cache::SubstitutionCache,
         core::{
             ApplicationTerm, Arity, DependencyList, DynamicState, EvaluationResult, Expression,
             LambdaTerm, StackOffset, StructPrototype, StructTerm, Term, VariableTerm,
@@ -868,7 +868,7 @@ mod tests {
 
     fn apply_query(query: Expression, root: Expression) -> EvaluationResult {
         Expression::new(Term::Application(ApplicationTerm::new(query, vec![root])))
-            .evaluate(&DynamicState::new(), &mut GenerationalGc::new())
+            .evaluate(&DynamicState::new(), &mut SubstitutionCache::new())
     }
 
     fn create_struct<'a>(fields: impl IntoIterator<Item = (&'a str, Expression)>) -> Expression {

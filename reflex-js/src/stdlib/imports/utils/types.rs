@@ -222,7 +222,7 @@ mod tests {
 
     use crate::{parse_module, static_module_loader, stdlib::builtin_imports, Env};
     use reflex::{
-        cache::GenerationalGc,
+        cache::SubstitutionCache,
         core::{
             ApplicationTerm, DependencyList, DynamicState, EnumTerm, EnumVariantPrototype,
             EvaluationResult, Expression, StructPrototype, StructTerm, Term, VarArgs,
@@ -252,7 +252,7 @@ mod tests {
             &loader,
         )
         .unwrap();
-        let result = expression.evaluate(&DynamicState::new(), &mut GenerationalGc::new());
+        let result = expression.evaluate(&DynamicState::new(), &mut SubstitutionCache::new());
         assert_eq!(
             result,
             EvaluationResult::new(
@@ -282,7 +282,7 @@ mod tests {
             &loader,
         )
         .unwrap();
-        let result = expression.evaluate(&DynamicState::new(), &mut GenerationalGc::new());
+        let result = expression.evaluate(&DynamicState::new(), &mut SubstitutionCache::new());
         assert_eq!(
             result,
             EvaluationResult::new(
@@ -316,7 +316,7 @@ mod tests {
             &loader,
         )
         .unwrap();
-        let result = expression.evaluate(&DynamicState::new(), &mut GenerationalGc::new());
+        let result = expression.evaluate(&DynamicState::new(), &mut SubstitutionCache::new());
         assert_eq!(
             result,
             EvaluationResult::new(
@@ -350,7 +350,7 @@ mod tests {
             &loader,
         )
         .unwrap();
-        let result = expression.evaluate(&DynamicState::new(), &mut GenerationalGc::new());
+        let result = expression.evaluate(&DynamicState::new(), &mut SubstitutionCache::new());
         assert_eq!(
             result,
             EvaluationResult::new(
@@ -402,7 +402,7 @@ mod tests {
             &loader,
         )
         .unwrap();
-        let result = expression.evaluate(&DynamicState::new(), &mut GenerationalGc::new());
+        let result = expression.evaluate(&DynamicState::new(), &mut SubstitutionCache::new());
         assert_eq!(
             result,
             EvaluationResult::new(
@@ -431,7 +431,7 @@ mod tests {
             &loader,
         )
         .unwrap();
-        let result = expression.evaluate(&DynamicState::new(), &mut GenerationalGc::new());
+        let result = expression.evaluate(&DynamicState::new(), &mut SubstitutionCache::new());
         assert_eq!(
             result,
             EvaluationResult::new(
@@ -464,7 +464,7 @@ mod tests {
             &loader,
         )
         .unwrap();
-        let result = expression.evaluate(&DynamicState::new(), &mut GenerationalGc::new());
+        let result = expression.evaluate(&DynamicState::new(), &mut SubstitutionCache::new());
         assert_eq!(
             result,
             EvaluationResult::new(
@@ -486,7 +486,7 @@ mod tests {
             &loader,
         )
         .unwrap();
-        let result = expression.evaluate(&DynamicState::new(), &mut GenerationalGc::new());
+        let result = expression.evaluate(&DynamicState::new(), &mut SubstitutionCache::new());
         assert_eq!(
             result,
             EvaluationResult::new(
@@ -516,7 +516,7 @@ mod tests {
             &loader,
         )
         .unwrap();
-        let result = expression.evaluate(&DynamicState::new(), &mut GenerationalGc::new());
+        let result = expression.evaluate(&DynamicState::new(), &mut SubstitutionCache::new());
         assert_eq!(
             result,
             EvaluationResult::new(
@@ -552,7 +552,7 @@ mod tests {
             &loader,
         )
         .unwrap();
-        let result = expression.evaluate(&DynamicState::new(), &mut GenerationalGc::new());
+        let result = expression.evaluate(&DynamicState::new(), &mut SubstitutionCache::new());
         assert_eq!(
             result,
             EvaluationResult::new(
@@ -575,7 +575,7 @@ mod tests {
             &loader,
         )
         .unwrap();
-        let result = expression.evaluate(&DynamicState::new(), &mut GenerationalGc::new());
+        let result = expression.evaluate(&DynamicState::new(), &mut SubstitutionCache::new());
         assert_eq!(
             result,
             EvaluationResult::new(
@@ -598,7 +598,7 @@ mod tests {
             &loader,
         )
         .unwrap();
-        let result = expression.evaluate(&DynamicState::new(), &mut GenerationalGc::new());
+        let result = expression.evaluate(&DynamicState::new(), &mut SubstitutionCache::new());
         assert_eq!(
             result,
             EvaluationResult::new(
@@ -624,7 +624,7 @@ mod tests {
             &loader,
         )
         .unwrap();
-        let result = expression.evaluate(&DynamicState::new(), &mut GenerationalGc::new());
+        let result = expression.evaluate(&DynamicState::new(), &mut SubstitutionCache::new());
         assert_eq!(
             result,
             EvaluationResult::new(

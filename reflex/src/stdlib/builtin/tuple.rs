@@ -22,7 +22,7 @@ impl BuiltinFunction for Tuple {
 #[cfg(test)]
 mod tests {
     use crate::{
-        cache::GenerationalGc,
+        cache::SubstitutionCache,
         core::{
             ApplicationTerm, DependencyList, DynamicState, EvaluationResult, Expression,
             StructTerm, Term,
@@ -33,7 +33,7 @@ mod tests {
 
     #[test]
     fn tuple_expressions() {
-        let mut cache = GenerationalGc::new();
+        let mut cache = SubstitutionCache::new();
         let state = DynamicState::new();
         let expression = Expression::new(Term::Application(ApplicationTerm::new(
             Expression::new(Term::Builtin(BuiltinTerm::Tuple)),

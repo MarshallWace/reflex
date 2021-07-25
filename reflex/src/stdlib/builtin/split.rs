@@ -51,7 +51,7 @@ impl BuiltinFunction for Split {
 #[cfg(test)]
 mod tests {
     use crate::{
-        cache::GenerationalGc,
+        cache::SubstitutionCache,
         core::{ApplicationTerm, DependencyList, DynamicState, EvaluationResult, Expression, Term},
         stdlib::{
             builtin::BuiltinTerm,
@@ -79,7 +79,7 @@ mod tests {
 
     #[test]
     fn split_expressions() {
-        let mut cache = GenerationalGc::new();
+        let mut cache = SubstitutionCache::new();
         let state = DynamicState::new();
         let expression = create_split_expression("\"\"", " ");
         let result = resolve_deep(expression).evaluate(&state, &mut cache);
