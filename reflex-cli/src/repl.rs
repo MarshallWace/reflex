@@ -4,17 +4,21 @@
 use std::io::{self, Write};
 
 use reflex::{
-    cache::EvaluationCache,
-    core::{DependencyList, DynamicState, Expression, SignalTerm, Term},
-    stdlib::{signal::SignalType, value::ValueTerm},
+    core::{
+        DependencyList, DynamicState, Evaluate, EvaluationCache, EvaluationResult, Expression,
+        ExpressionFactory, HeapAllocator, Reducible, Rewritable, Signal, SignalType, StringValue,
+    },
+    lang::ValueTerm,
 };
 
-pub(crate) type ReplParser = Box<dyn Fn(&str) -> Result<Expression, String>>;
+pub(crate) type ReplParser<T> = Box<dyn Fn(&str) -> Result<T, String>>;
 
-pub(crate) fn run(
-    parser: ReplParser,
-    state: &mut DynamicState,
-    cache: &mut impl EvaluationCache,
+pub(crate) fn run<T: Expression + Rewritable<T> + Reducible<T> + Evaluate<T>>(
+    parser: ReplParser<T>,
+    state: &mut DynamicState<T>,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+    cache: &mut impl EvaluationCache<T>,
 ) -> io::Result<()> {
     let stdin = io::stdin();
     let mut stdout = io::stdout();
@@ -36,7 +40,7 @@ pub(crate) fn run(
 
         match parser(&input) {
             Ok(expression) => {
-                let (output, _) = eval(expression, state, cache);
+                let (output, _) = eval(&expression, state, factory, allocator, cache);
                 writeln!(stdout, "{}", output)
             }
             Err(error) => writeln!(stderr, "Syntax error: {}", error),
@@ -45,67 +49,77 @@ pub(crate) fn run(
     Ok(())
 }
 
-pub(crate) fn eval(
-    expression: Expression,
-    state: &DynamicState,
-    cache: &mut impl EvaluationCache,
+pub(crate) fn eval<T: Expression + Evaluate<T>>(
+    expression: &T,
+    state: &DynamicState<T>,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+    cache: &mut impl EvaluationCache<T>,
 ) -> (String, DependencyList) {
-    let (result, dependencies) = expression.evaluate(state, cache).into_parts();
-    let output = match result.value() {
-        Term::Signal(signal) => format_signal_output(signal),
-        value => format!("{}", value),
+    let (result, dependencies) = expression
+        .evaluate(state, factory, allocator, cache)
+        .unwrap_or_else(|| EvaluationResult::new(expression.clone(), DependencyList::empty()))
+        .into_parts();
+    let output = if let Some(result) = factory.match_signal_term(&result) {
+        result
+            .signals()
+            .iter()
+            .map(|signal| format_signal_output(signal, factory))
+            .collect::<Vec<_>>()
+            .join("\n")
+    } else {
+        format!("{}", result)
     };
     (output, dependencies)
 }
 
-fn format_signal_output(signal: &SignalTerm) -> String {
-    signal
-        .signals()
-        .into_iter()
-        .map(|signal| match signal.signal_type() {
-            SignalType::Error => {
-                let (message, args) = {
-                    let args = signal.args();
-                    match args.get(0).map(|arg| arg.value()) {
-                        Some(Term::Value(ValueTerm::String(message))) => {
-                            (Some(message.clone()), Some(&args[1..]))
-                        }
-                        _ => (None, Some(&args[..])),
-                    }
-                };
-                format!(
-                    "Error: {}",
-                    match message {
-                        Some(message) => match args {
-                            None => format!("{}", message),
-                            Some(args) => format!(
-                                "{} {}",
-                                message,
-                                args.iter()
-                                    .map(|arg| format!("{}", arg))
-                                    .collect::<Vec<_>>()
-                                    .join(" ")
-                            ),
-                        },
-                        None => String::from("<unknown>"),
-                    }
-                )
-            }
-            SignalType::Custom(signal_type) => format!(
-                "<{}>{}",
-                signal_type,
-                format!(
-                    " {}",
-                    signal
-                        .args()
-                        .iter()
-                        .map(|arg| format!("{}", arg))
-                        .collect::<Vec<_>>()
-                        .join(" ")
-                )
-            ),
-            SignalType::Pending => String::from("<pending>"),
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
+fn format_signal_output<T: Expression>(
+    signal: &Signal<T>,
+    factory: &impl ExpressionFactory<T>,
+) -> String {
+    match signal.signal_type() {
+        SignalType::Error => {
+            let (message, args) = {
+                let args = signal.args();
+                match args.get(0).map(|arg| match factory.match_value_term(arg) {
+                    Some(ValueTerm::String(message)) => Some(String::from(message.as_str())),
+                    _ => None,
+                }) {
+                    Some(message) => (message, Some(&args[1..])),
+                    _ => (None, Some(&args[..])),
+                }
+            };
+            format!(
+                "Error: {}",
+                match message {
+                    Some(message) => match args {
+                        None => format!("{}", message),
+                        Some(args) => format!(
+                            "{} {}",
+                            message,
+                            args.iter()
+                                .map(|arg| format!("{}", arg))
+                                .collect::<Vec<_>>()
+                                .join(" ")
+                        ),
+                    },
+                    None => String::from("<unknown>"),
+                }
+            )
+        }
+        SignalType::Custom(signal_type) => format!(
+            "<{}>{}",
+            signal_type,
+            format!(
+                " {}",
+                signal
+                    .args()
+                    .iter()
+                    .map(|arg| format!("{}", arg))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            )
+        ),
+        SignalType::Pending => String::from("<pending>"),
+    }
 }

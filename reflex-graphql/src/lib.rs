@@ -7,17 +7,11 @@ use either::Either;
 use graphql_parser::{parse_query, query::*};
 use reflex::{
     core::{
-        ApplicationTerm, Arity, Expression, LambdaTerm, NativeFunction, Signal, SignalTerm,
-        StackOffset, StructPrototype, StructTerm, Term, VariableTerm,
+        Arity, Expression, ExpressionFactory, ExpressionList, HeapAllocator, NativeAllocator,
+        SignalType, VarArgs,
     },
     hash::{hash_object, HashId},
-    serialize::{SerializedListTerm, SerializedObjectTerm, SerializedTerm},
-    stdlib::{
-        builtin::BuiltinTerm,
-        collection::{vector::VectorTerm, CollectionTerm},
-        signal::SignalType,
-        value::{StringValue, ValueTerm},
-    },
+    lang::{create_struct, BuiltinTerm, NativeFunction, ValueTerm},
 };
 
 mod loader;
@@ -27,44 +21,75 @@ pub use operation::{deserialize_graphql_operation, GraphQlOperationPayload};
 
 pub mod subscriptions;
 
-type QueryVariables<'a> = HashMap<&'a str, Expression>;
+#[allow(type_alias_bounds)]
+type QueryVariables<'a, T: Expression> = HashMap<&'a str, T>;
 type QueryFragments<'a> = HashMap<&'a str, &'a FragmentDefinition<'a, &'a str>>;
 
-pub fn create_introspection_query_response() -> Expression {
-    Expression::new(Term::Signal(SignalTerm::new(Signal::new(
+pub fn graphql_plugins<T: Expression>() -> impl IntoIterator<Item = NativeFunction<T>> {
+    vec![dynamic_query_branch(), flatten_deep()]
+}
+
+pub fn create_introspection_query_response<T: Expression>(
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> T {
+    factory.create_signal_term(allocator.create_signal_list(once(allocator.create_signal(
         SignalType::Error,
-        vec![Expression::new(Term::Value(ValueTerm::String(
-            StringValue::from("Introspection query not yet implemented"),
-        )))],
+        allocator.create_unit_list(factory.create_value_term(ValueTerm::String(
+            allocator.create_string(String::from("Introspection query not yet implemented")),
+        ))),
     ))))
 }
 
-pub fn wrap_graphql_success_response(value: SerializedTerm) -> SerializedTerm {
-    SerializedTerm::Object(SerializedObjectTerm::new(once((
-        String::from("data"),
-        value,
-    ))))
+pub fn wrap_graphql_success_response<T: Expression>(
+    value: T,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> T {
+    create_struct(once((String::from("data"), value)), factory, allocator)
 }
 
-pub fn wrap_graphql_error_response(errors: Vec<String>) -> SerializedTerm {
-    SerializedTerm::Object(SerializedObjectTerm::new(once((
-        String::from("errors"),
-        SerializedTerm::List(SerializedListTerm::new(errors.into_iter().map(|error| {
-            SerializedTerm::Object(SerializedObjectTerm::new(once((
-                String::from("message"),
-                SerializedTerm::Value(ValueTerm::String(error)),
-            ))))
-        }))),
-    ))))
+pub fn wrap_graphql_error_response<T: Expression>(
+    errors: impl IntoIterator<Item = T, IntoIter = impl ExactSizeIterator<Item = T>>,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> T {
+    create_struct(
+        once((
+            String::from("errors"),
+            factory.create_vector_term(allocator.create_list(errors)),
+        )),
+        factory,
+        allocator,
+    )
 }
 
 const DEFAULT_OPERATION_TYPE: &str = "query";
 
-pub fn parse<'v>(
+pub fn parse_graphql_operation<'a, T: Expression + 'a>(
+    operation: &GraphQlOperationPayload,
+    root: &T,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> Result<T, String> {
+    let variables = operation
+        .variables()
+        .into_iter()
+        .map(|(key, value)| {
+            reflex_json::hydrate(value.clone(), factory, allocator).map(|value| (key, value))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let query = parse(operation.query(), variables, factory, allocator)?;
+    Ok(factory.create_application_term(query, allocator.create_unit_list(root.clone())))
+}
+
+pub fn parse<'vars, T: Expression>(
     source: &str,
-    variables: impl IntoIterator<Item = (&'v str, Expression)>,
-) -> Result<Expression, String> {
-    let variables = &variables.into_iter().collect::<QueryVariables>();
+    variables: impl IntoIterator<Item = (&'vars str, T)>,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> Result<T, String> {
+    let variables = &variables.into_iter().collect::<QueryVariables<T>>();
     match parse_query::<&str>(source) {
         Ok(document) => {
             let fragments = document
@@ -84,8 +109,10 @@ pub fn parse<'v>(
                         &Vec::new(),
                         variables,
                         &fragments,
+                        factory,
+                        allocator,
                     ),
-                    _ => parse_operation(operation, variables, &fragments),
+                    _ => parse_operation(operation, variables, &fragments, factory, allocator),
                 },
             }
         }
@@ -111,101 +138,121 @@ fn get_root_operation<'src, 'a>(
     }
 }
 
-fn parse_operation<'src>(
+fn parse_operation<'src, T: Expression>(
     operation: &OperationDefinition<'src, &'src str>,
-    variables: &QueryVariables,
+    variables: &QueryVariables<T>,
     fragments: &QueryFragments,
-) -> Result<Expression, String> {
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> Result<T, String> {
     match operation {
         OperationDefinition::Query(operation) => {
-            parse_query_operation(operation, variables, fragments)
+            parse_query_operation(operation, variables, fragments, factory, allocator)
         }
         OperationDefinition::Mutation(operation) => {
-            parse_mutation_operation(operation, variables, fragments)
+            parse_mutation_operation(operation, variables, fragments, factory, allocator)
         }
         OperationDefinition::Subscription(operation) => {
-            parse_subscription_operation(operation, variables, fragments)
+            parse_subscription_operation(operation, variables, fragments, factory, allocator)
         }
         OperationDefinition::SelectionSet(selection) => {
-            parse_selection_set(selection, variables, fragments)
+            parse_selection_set(selection, variables, fragments, factory, allocator)
         }
     }
 }
 
-fn parse_query_operation<'src>(
+fn parse_query_operation<'src, T: Expression>(
     operation: &Query<'src, &'src str>,
-    variables: &QueryVariables,
+    variables: &QueryVariables<T>,
     fragments: &QueryFragments,
-) -> Result<Expression, String> {
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> Result<T, String> {
     parse_root_operation(
         "query",
         &operation.selection_set,
         &operation.variable_definitions,
         variables,
         fragments,
+        factory,
+        allocator,
     )
 }
 
-fn parse_mutation_operation<'src>(
+fn parse_mutation_operation<'src, T: Expression>(
     operation: &Mutation<'src, &'src str>,
-    variables: &QueryVariables,
+    variables: &QueryVariables<T>,
     fragments: &QueryFragments,
-) -> Result<Expression, String> {
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> Result<T, String> {
     parse_root_operation(
         "mutation",
         &operation.selection_set,
         &operation.variable_definitions,
         variables,
         fragments,
+        factory,
+        allocator,
     )
 }
 
-fn parse_subscription_operation<'src>(
+fn parse_subscription_operation<'src, T: Expression>(
     operation: &Subscription<'src, &'src str>,
-    variables: &QueryVariables,
+    variables: &QueryVariables<T>,
     fragments: &QueryFragments,
-) -> Result<Expression, String> {
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> Result<T, String> {
     parse_root_operation(
         "subscription",
         &operation.selection_set,
         &operation.variable_definitions,
         variables,
         fragments,
+        factory,
+        allocator,
     )
 }
 
-fn parse_root_operation<'src>(
+fn parse_root_operation<'src, T: Expression>(
     operation_type: &str,
     selection_set: &SelectionSet<'src, &'src str>,
     variable_definitions: &[VariableDefinition<'src, &'src str>],
-    variables: &QueryVariables,
+    variables: &QueryVariables<T>,
     fragments: &QueryFragments,
-) -> Result<Expression, String> {
-    let variables = parse_operation_variables(variable_definitions, variables)?;
-    let query = parse_selection_set(selection_set, &variables, fragments)?;
-    Ok(create_lambda(
-        Arity::from(1, 0, None),
-        create_function_application(
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> Result<T, String> {
+    let variables = parse_operation_variables(variable_definitions, variables, factory, allocator)?;
+    let query = parse_selection_set(selection_set, &variables, fragments, factory, allocator)?;
+    Ok(factory.create_lambda_term(
+        1,
+        factory.create_application_term(
             query,
-            vec![create_function_application(
-                create_builtin(BuiltinTerm::Get),
-                vec![
-                    create_scoped_variable(0),
-                    create_string(String::from(operation_type)),
-                ],
-            )],
+            allocator.create_unit_list(factory.create_application_term(
+                factory.create_builtin_term(BuiltinTerm::Get),
+                allocator.create_pair(
+                    factory.create_static_variable_term(0),
+                    factory.create_value_term(ValueTerm::String(
+                        allocator.create_string(operation_type.into()),
+                    )),
+                ),
+            )),
         ),
     ))
 }
 
-fn parse_operation_variables<'src>(
+fn parse_operation_variables<'src, T: Expression>(
     variable_definitions: &[VariableDefinition<'src, &'src str>],
-    variables: &QueryVariables,
-) -> Result<QueryVariables<'src>, String> {
+    variables: &QueryVariables<T>,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> Result<QueryVariables<'src, T>, String> {
     variable_definitions
         .iter()
         .map(|definition| {
-            let value = variables.get(definition.name).map(Expression::clone);
+            let value = variables.get(definition.name).cloned();
             let value = match value {
                 Some(value) => Some(value),
                 None => match &definition.default_value {
@@ -213,82 +260,99 @@ fn parse_operation_variables<'src>(
                         value,
                         &QueryVariables::new(),
                         &QueryFragments::new(),
+                        factory,
+                        allocator,
                     )?),
                     None => None,
                 },
             };
             Ok((
                 definition.name,
-                validate_variable(value, definition.name, &definition.var_type)?,
+                validate_variable(value, definition.name, &definition.var_type, factory)?,
             ))
         })
-        .collect::<Result<QueryVariables, _>>()
+        .collect::<Result<QueryVariables<T>, _>>()
 }
 
-fn validate_variable<'src>(
-    value: Option<Expression>,
+fn validate_variable<'src, T: Expression>(
+    value: Option<T>,
     name: &'src str,
     var_type: &Type<'src, &'src str>,
-) -> Result<Expression, String> {
+    factory: &impl ExpressionFactory<T>,
+) -> Result<T, String> {
     match var_type {
         Type::NonNullType(_) => {
             value.ok_or_else(|| format!("Missing required query variable: {}", name))
         }
         // TODO: Validate query variable types
         // TODO: Differentiate between missing optional variables and null values
-        _ => Ok(value.unwrap_or_else(|| Expression::new(Term::Value(ValueTerm::Null)))),
+        _ => Ok(value.unwrap_or_else(|| factory.create_value_term(ValueTerm::Null))),
     }
 }
 
-fn parse_selection_set<'src>(
+fn parse_selection_set<'src, T: Expression>(
     selection_set: &SelectionSet<'src, &'src str>,
-    variables: &QueryVariables,
+    variables: &QueryVariables<T>,
     fragments: &QueryFragments,
-) -> Result<Expression, String> {
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> Result<T, String> {
     if selection_set.items.is_empty() {
-        parse_leaf()
+        parse_leaf(factory)
     } else {
-        let fields = parse_selection_set_fields(selection_set, variables, fragments)?;
-        Ok(create_query_branch(create_lambda(
-            Arity::from(1, 0, None),
-            Expression::new(Term::Application(ApplicationTerm::new(
-                Expression::new(Term::Builtin(BuiltinTerm::CollectStruct)),
-                fields
-                    .into_iter()
-                    .flat_map(|(key, query)| {
-                        once(Expression::new(Term::Value(ValueTerm::String(key)))).chain(once(
-                            create_function_application(query, vec![create_scoped_variable(0)]),
-                        ))
-                    })
-                    .collect::<Vec<_>>(),
-            ))),
-        )))
+        let fields =
+            parse_selection_set_fields(selection_set, variables, fragments, factory, allocator)?;
+        let (keys, values): (Vec<_>, Vec<_>) = fields.into_iter().unzip();
+        Ok(create_query_branch(
+            factory.create_lambda_term(
+                1,
+                factory.create_application_term(
+                    factory.create_constructor_term(
+                        allocator.create_struct_prototype(keys),
+                        VarArgs::Eager,
+                    ),
+                    allocator.create_list(values.into_iter().map(|query| {
+                        factory.create_application_term(
+                            query,
+                            allocator.create_unit_list(factory.create_static_variable_term(0)),
+                        )
+                    })),
+                ),
+            ),
+            factory,
+            allocator,
+        ))
     }
 }
 
-fn parse_leaf() -> Result<Expression, String> {
-    Ok(flatten_deep())
+fn parse_leaf<T: Expression>(factory: &impl ExpressionFactory<T>) -> Result<T, String> {
+    Ok(factory.create_native_function_term(flatten_deep()))
 }
 
-fn parse_selection_set_fields<'src>(
+fn parse_selection_set_fields<'src, T: Expression>(
     selection_set: &SelectionSet<'src, &'src str>,
-    variables: &QueryVariables,
+    variables: &QueryVariables<T>,
     fragments: &QueryFragments,
-) -> Result<Vec<(String, Expression)>, String> {
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> Result<Vec<(String, T)>, String> {
     selection_set
         .items
         .iter()
         .flat_map(|field| match field {
-            Selection::Field(field) => match parse_field(field, variables, fragments) {
-                Ok(result) => {
-                    let key = field.alias.unwrap_or(field.name);
-                    Either::Left(once(Ok((String::from(key), result))))
+            Selection::Field(field) => {
+                match parse_field(field, variables, fragments, factory, allocator) {
+                    Ok(result) => {
+                        let key = field.alias.unwrap_or(field.name);
+                        Either::Left(once(Ok((String::from(key), result))))
+                    }
+                    Err(error) => Either::Left(once(Err(error))),
                 }
-                Err(error) => Either::Left(once(Err(error))),
-            },
+            }
             Selection::FragmentSpread(fragment) => match fragments.get(fragment.fragment_name) {
                 Some(fragment) => {
-                    let fields = parse_fragment_fields(fragment, variables, fragments);
+                    let fields =
+                        parse_fragment_fields(fragment, variables, fragments, factory, allocator);
                     Either::Right(fields.into_iter())
                 }
                 None => Either::Left(once(Err(format!(
@@ -303,22 +367,32 @@ fn parse_selection_set_fields<'src>(
         .collect::<Result<Vec<_>, _>>()
 }
 
-fn parse_fragment_fields<'src>(
+fn parse_fragment_fields<'src, T: Expression>(
     fragment: &FragmentDefinition<'src, &'src str>,
-    variables: &QueryVariables,
+    variables: &QueryVariables<T>,
     fragments: &QueryFragments,
-) -> impl IntoIterator<Item = Result<(String, Expression), String>> {
-    match parse_selection_set_fields(&fragment.selection_set, variables, fragments) {
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> impl IntoIterator<Item = Result<(String, T), String>> {
+    match parse_selection_set_fields(
+        &fragment.selection_set,
+        variables,
+        fragments,
+        factory,
+        allocator,
+    ) {
         Err(error) => Either::Left(once(Err(error))),
         Ok(fields) => Either::Right(fields.into_iter().map(Ok)),
     }
 }
 
-fn parse_field<'src>(
+fn parse_field<'src, T: Expression>(
     field: &Field<'src, &'src str>,
-    variables: &QueryVariables,
+    variables: &QueryVariables<T>,
     fragments: &QueryFragments,
-) -> Result<Expression, String> {
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> Result<T, String> {
     let field_args = if field.arguments.is_empty() {
         None
     } else {
@@ -326,268 +400,282 @@ fn parse_field<'src>(
             &field.arguments,
             variables,
             fragments,
+            factory,
+            allocator,
         )?)
     };
-    let body = parse_selection_set(&field.selection_set, variables, fragments)?;
-    Ok(create_lambda(
-        Arity::from(1, 0, None),
-        create_function_application(
+    let body = parse_selection_set(
+        &field.selection_set,
+        variables,
+        fragments,
+        factory,
+        allocator,
+    )?;
+    Ok(factory.create_lambda_term(
+        1,
+        factory.create_application_term(
             body,
-            vec![{
-                let field = create_function_application(
-                    create_builtin(BuiltinTerm::Get),
-                    vec![
-                        create_scoped_variable(0),
-                        create_string(String::from(field.name)),
-                    ],
+            allocator.create_unit_list({
+                let field = factory.create_application_term(
+                    factory.create_builtin_term(BuiltinTerm::Get),
+                    allocator.create_pair(
+                        factory.create_static_variable_term(0),
+                        factory.create_value_term(ValueTerm::String(
+                            allocator.create_string(field.name.into()),
+                        )),
+                    ),
                 );
                 match field_args {
                     None => field,
-                    Some(field_args) => create_function_application(field, field_args),
+                    Some(field_args) => factory.create_application_term(field, field_args),
                 }
-            }],
+            }),
         ),
     ))
 }
 
-fn parse_field_arguments<'src>(
+fn parse_field_arguments<'src, T: Expression>(
     args: &Vec<(&'src str, Value<'src, &'src str>)>,
-    variables: &QueryVariables,
+    variables: &QueryVariables<T>,
     fragments: &QueryFragments,
-) -> Result<Vec<Expression>, String> {
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> Result<ExpressionList<T>, String> {
     let arg_fields = args
         .iter()
         .map(
-            |(key, value)| match parse_value(value, variables, fragments) {
+            |(key, value)| match parse_value(value, variables, fragments, factory, allocator) {
                 Ok(value) => Ok((String::from(*key), value)),
                 Err(error) => Err(error),
             },
         )
         .collect::<Result<Vec<_>, _>>()?;
-    let arg = create_struct(arg_fields);
-    Ok(vec![arg])
+    let arg = create_struct(arg_fields, factory, allocator);
+    Ok(allocator.create_unit_list(arg))
 }
 
-fn parse_value<'src>(
+fn parse_value<'src, T: Expression>(
     value: &Value<'src, &'src str>,
-    variables: &QueryVariables,
+    variables: &QueryVariables<T>,
     fragments: &QueryFragments,
-) -> Result<Expression, String> {
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> Result<T, String> {
     match value {
         Value::Variable(name) => match variables.get(*name) {
-            Some(value) => Ok(Expression::clone(value)),
+            Some(value) => Ok(value.clone()),
             None => Err(format!("Undeclared query variable: {}", name)),
         },
-        Value::Int(value) => Ok(Expression::new(Term::Value(ValueTerm::Int(
+        Value::Int(value) => Ok(factory.create_value_term(ValueTerm::Int(
             value
                 .as_i64()
                 .ok_or_else(|| format!("Invalid integer argument: {:?}", value))?
                 as i32,
-        )))),
-        Value::Float(value) => Ok(Expression::new(Term::Value(ValueTerm::Float(*value)))),
-        Value::String(value) => Ok(Expression::new(Term::Value(ValueTerm::String(
-            StringValue::from(value),
-        )))),
-        Value::Boolean(value) => Ok(Expression::new(Term::Value(ValueTerm::Boolean(*value)))),
-        Value::Null => Ok(Expression::new(Term::Value(ValueTerm::Null))),
-        Value::Enum(value) => Ok(Expression::new(Term::Value(ValueTerm::String(
-            StringValue::from(*value),
-        )))),
+        ))),
+        Value::Float(value) => Ok(factory.create_value_term(ValueTerm::Float(*value))),
+        Value::String(value) => {
+            Ok(factory.create_value_term(ValueTerm::String(allocator.create_string(value.into()))))
+        }
+        Value::Boolean(value) => Ok(factory.create_value_term(ValueTerm::Boolean(*value))),
+        Value::Null => Ok(factory.create_value_term(ValueTerm::Null)),
+        Value::Enum(value) => {
+            Ok(factory
+                .create_value_term(ValueTerm::String(allocator.create_string((*value).into()))))
+        }
         Value::List(value) => {
             let values = value
                 .iter()
-                .map(|item| parse_value(item, variables, fragments))
+                .map(|item| parse_value(item, variables, fragments, factory, allocator))
                 .collect::<Result<Vec<_>, _>>()?;
-            Ok(Expression::new(Term::Collection(CollectionTerm::Vector(
-                VectorTerm::new(values),
-            ))))
+            Ok(factory.create_vector_term(allocator.create_list(values)))
         }
         Value::Object(value) => {
-            let fields = value
+            let entries = value
                 .iter()
-                .map(
-                    |(key, value)| match parse_value(value, variables, fragments) {
-                        Ok(value) => Ok((StringValue::from(*key), value)),
+                .map(|(key, value)| {
+                    match parse_value(value, variables, fragments, factory, allocator) {
+                        Ok(value) => Ok((String::from(*key), value)),
                         Err(error) => Err(error),
-                    },
-                )
+                    }
+                })
                 .collect::<Result<Vec<_>, _>>()?;
-            Ok(create_struct(fields))
+            Ok(create_struct(entries, factory, allocator))
         }
     }
 }
 
-fn create_query_branch(shape: Expression) -> Expression {
-    create_lambda(
-        Arity::from(1, 0, None),
-        create_function_application(
-            dynamic_query_branch(),
-            vec![create_scoped_variable(0), shape],
+fn create_query_branch<T: Expression>(
+    shape: T,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> T {
+    factory.create_lambda_term(
+        1,
+        factory.create_application_term(
+            factory.create_native_function_term(dynamic_query_branch()),
+            allocator.create_pair(factory.create_static_variable_term(0), shape),
         ),
     )
 }
 
-fn flatten_deep() -> Expression {
-    Expression::new(Term::Native(NativeFunction::new(
-        FlattenDeep::hash(),
+fn flatten_deep<T: Expression>() -> NativeFunction<T> {
+    NativeFunction::new(
+        FlattenDeep::uid(),
+        FlattenDeep::name(),
         FlattenDeep::arity(),
         FlattenDeep::apply,
-    )))
+    )
 }
 struct FlattenDeep {}
 impl FlattenDeep {
-    fn hash() -> HashId {
+    fn uid() -> HashId {
         hash_object(&TypeId::of::<Self>())
+    }
+    fn name() -> Option<&'static str> {
+        Some("FlattenDeep")
     }
     fn arity() -> Arity {
         Arity::from(1, 0, None)
     }
-    fn apply(args: Vec<Expression>) -> Expression {
-        if args.len() != 1 {
-            return Expression::new(Term::Signal(SignalTerm::new(Signal::new(
-                SignalType::Error,
-                vec![Expression::new(Term::Value(ValueTerm::String(
-                    StringValue::from(format!("Expected 1 argument, received {}", args.len())),
-                )))],
-            ))));
-        }
+    fn apply<T: Expression>(
+        args: ExpressionList<T>,
+        factory: &dyn ExpressionFactory<T>,
+        allocator: &dyn NativeAllocator<T>,
+    ) -> Result<T, String> {
         let mut args = args.into_iter();
+        if args.len() != 1 {
+            return Err(format!("Expected 1 argument, received {}", args.len()));
+        }
         let target = args.next().unwrap();
-        match target.value() {
-            Term::Value(ValueTerm::Null) => target,
-            Term::Collection(CollectionTerm::Vector(collection)) => {
-                Expression::new(Term::Application(ApplicationTerm::new(
-                    Expression::new(Term::Builtin(BuiltinTerm::CollectVector)),
-                    collection
-                        .iterate()
-                        .into_iter()
+        if let Some(ValueTerm::Null) = factory.match_value_term(&target) {
+            Ok(target)
+        } else if let Some(list) = factory.match_vector_term(&target) {
+            Ok(factory.create_application_term(
+                factory.create_builtin_term(BuiltinTerm::CollectVector),
+                allocator.create_list(
+                    list.items()
+                        .iter()
                         .map(|item| {
-                            Expression::new(Term::Application(ApplicationTerm::new(
-                                flatten_deep(),
-                                vec![item],
-                            )))
+                            factory.create_application_term(
+                                factory.create_native_function_term(flatten_deep()),
+                                allocator.create_unit_list(item.clone()),
+                            )
                         })
                         .collect(),
-                )))
-            }
-            _ => target,
+                ),
+            ))
+        } else {
+            Ok(target)
         }
     }
 }
 
-fn dynamic_query_branch() -> Expression {
-    Expression::new(Term::Native(NativeFunction::new(
-        DynamicQueryBranch::hash(),
+fn dynamic_query_branch<T: Expression>() -> NativeFunction<T> {
+    NativeFunction::new(
+        DynamicQueryBranch::uid(),
+        DynamicQueryBranch::name(),
         DynamicQueryBranch::arity(),
         DynamicQueryBranch::apply,
-    )))
+    )
 }
 struct DynamicQueryBranch {}
 impl DynamicQueryBranch {
-    fn hash() -> HashId {
+    fn uid() -> HashId {
         hash_object(&TypeId::of::<Self>())
+    }
+    fn name() -> Option<&'static str> {
+        Some("DynamicQueryBranch")
     }
     fn arity() -> Arity {
         Arity::from(2, 0, None)
     }
-    fn apply(args: Vec<Expression>) -> Expression {
-        if args.len() != 2 {
-            return Expression::new(Term::Signal(SignalTerm::new(Signal::new(
-                SignalType::Error,
-                vec![Expression::new(Term::Value(ValueTerm::String(
-                    StringValue::from(format!("Expected 2 arguments, received {}", args.len())),
-                )))],
-            ))));
-        }
+    fn apply<T: Expression>(
+        args: ExpressionList<T>,
+        factory: &dyn ExpressionFactory<T>,
+        allocator: &dyn NativeAllocator<T>,
+    ) -> Result<T, String> {
         let mut args = args.into_iter();
+        if args.len() != 2 {
+            return Err(format!("Expected 2 arguments, received {}", args.len()));
+        }
         let target = args.next().unwrap();
         let shape = args.next().unwrap();
-        match target.value() {
-            Term::Value(ValueTerm::Null) => target,
-            Term::Collection(CollectionTerm::Vector(collection)) => {
-                Expression::new(Term::Application(ApplicationTerm::new(
-                    Expression::new(Term::Builtin(BuiltinTerm::CollectVector)),
-                    collection
-                        .iterate()
-                        .into_iter()
+        if let Some(ValueTerm::Null) = factory.match_value_term(&target) {
+            Ok(target)
+        } else if let Some(list) = factory.match_vector_term(&target) {
+            Ok(factory.create_application_term(
+                factory.create_builtin_term(BuiltinTerm::CollectVector),
+                allocator.create_list(
+                    list.items()
+                        .iter()
                         .map(|item| {
-                            Expression::new(Term::Application(ApplicationTerm::new(
-                                dynamic_query_branch(),
-                                vec![item, Expression::clone(&shape)],
-                            )))
+                            factory.create_application_term(
+                                factory.create_native_function_term(dynamic_query_branch()),
+                                allocator.create_pair(item.clone(), shape.clone()),
+                            )
                         })
                         .collect(),
-                )))
-            }
-            _ => Expression::new(Term::Application(ApplicationTerm::new(shape, vec![target]))),
+                ),
+            ))
+        } else {
+            Ok(factory.create_application_term(shape, allocator.create_unit_list(target)))
         }
     }
-}
-
-fn create_function_application(target: Expression, args: Vec<Expression>) -> Expression {
-    Expression::new(Term::Application(ApplicationTerm::new(target, args)))
-}
-
-fn create_lambda(arity: Arity, body: Expression) -> Expression {
-    Expression::new(Term::Lambda(LambdaTerm::new(arity, body)))
-}
-
-fn create_scoped_variable(offset: StackOffset) -> Expression {
-    Expression::new(Term::Variable(VariableTerm::scoped(offset)))
-}
-
-fn create_builtin(target: BuiltinTerm) -> Expression {
-    Expression::new(Term::Builtin(target))
-}
-
-fn create_string(value: String) -> Expression {
-    Expression::new(Term::Value(ValueTerm::String(value)))
-}
-
-fn create_struct(fields: impl IntoIterator<Item = (String, Expression)>) -> Expression {
-    let (keys, values) = fields
-        .into_iter()
-        .map(|(key, value)| (ValueTerm::String(key), value))
-        .unzip();
-    Expression::new(Term::Struct(StructTerm::new(
-        Some(StructPrototype::new(keys)),
-        values,
-    )))
 }
 
 #[cfg(test)]
 mod tests {
     use reflex::{
+        allocator::DefaultAllocator,
         cache::SubstitutionCache,
         core::{
-            ApplicationTerm, Arity, DependencyList, DynamicState, EvaluationResult, Expression,
-            LambdaTerm, StackOffset, StructPrototype, StructTerm, Term, VariableTerm,
+            evaluate, DependencyList, DynamicState, Evaluate, EvaluationResult, Expression,
+            ExpressionFactory, HeapAllocator, Reducible, Rewritable,
         },
-        stdlib::{
-            builtin::BuiltinTerm,
-            collection::{vector::VectorTerm, CollectionTerm},
-            value::ValueTerm,
-        },
+        lang::{create_struct, BuiltinTerm, TermFactory, ValueTerm},
     };
-
-    use crate::create_function_application;
 
     use super::parse;
 
     #[test]
     fn leaf_queries() {
-        let root = create_struct(vec![
-            (
-                "query",
-                create_struct(vec![
-                    ("first", create_integer(3)),
-                    ("second", create_integer(4)),
-                    ("third", create_integer(5)),
-                ]),
-            ),
-            ("mutation", create_null()),
-            ("subscription", create_null()),
-        ]);
+        let factory = TermFactory::default();
+        let allocator = DefaultAllocator::default();
+        let root = create_struct(
+            vec![
+                (
+                    String::from("query"),
+                    create_struct(
+                        vec![
+                            (
+                                String::from("first"),
+                                factory.create_value_term(ValueTerm::Int(3)),
+                            ),
+                            (
+                                String::from("second"),
+                                factory.create_value_term(ValueTerm::Int(4)),
+                            ),
+                            (
+                                String::from("third"),
+                                factory.create_value_term(ValueTerm::Int(5)),
+                            ),
+                        ],
+                        &factory,
+                        &allocator,
+                    ),
+                ),
+                (
+                    String::from("mutation"),
+                    factory.create_value_term(ValueTerm::Null),
+                ),
+                (
+                    String::from("subscription"),
+                    factory.create_value_term(ValueTerm::Null),
+                ),
+            ],
+            &factory,
+            &allocator,
+        );
         let variables = Vec::new();
         let query = parse(
             "
@@ -597,16 +685,28 @@ mod tests {
                 }
             ",
             variables,
+            &factory,
+            &allocator,
         )
         .unwrap();
-        let result = apply_query(query, root);
+        let result = apply_query(query, root, &factory, &allocator);
         assert_eq!(
             result,
             EvaluationResult::new(
-                create_struct(vec![
-                    ("second", create_integer(4)),
-                    ("third", create_integer(5)),
-                ]),
+                create_struct(
+                    vec![
+                        (
+                            String::from("second"),
+                            factory.create_value_term(ValueTerm::Int(4))
+                        ),
+                        (
+                            String::from("third"),
+                            factory.create_value_term(ValueTerm::Int(5))
+                        ),
+                    ],
+                    &factory,
+                    &allocator
+                ),
                 DependencyList::empty()
             )
         );
@@ -614,42 +714,67 @@ mod tests {
 
     #[test]
     fn computed_leaf_queries() {
-        let root = create_struct(vec![
-            (
-                "query",
-                create_function_application(
-                    create_lambda(
-                        Arity::from(0, 1, None),
-                        create_struct(vec![
-                            (
-                                "first",
-                                create_function_application(
-                                    create_builtin(BuiltinTerm::Add),
-                                    vec![create_integer(3), create_scoped_variable(0)],
-                                ),
+        let factory = TermFactory::default();
+        let allocator = DefaultAllocator::default();
+        let root = create_struct(
+            vec![
+                (
+                    String::from("query"),
+                    factory.create_application_term(
+                        factory.create_lambda_term(
+                            1,
+                            create_struct(
+                                vec![
+                                    (
+                                        String::from("first"),
+                                        factory.create_application_term(
+                                            factory.create_builtin_term(BuiltinTerm::Add),
+                                            allocator.create_pair(
+                                                factory.create_value_term(ValueTerm::Int(3)),
+                                                factory.create_static_variable_term(0),
+                                            ),
+                                        ),
+                                    ),
+                                    (
+                                        String::from("second"),
+                                        factory.create_application_term(
+                                            factory.create_builtin_term(BuiltinTerm::Add),
+                                            allocator.create_pair(
+                                                factory.create_value_term(ValueTerm::Int(4)),
+                                                factory.create_static_variable_term(0),
+                                            ),
+                                        ),
+                                    ),
+                                    (
+                                        String::from("third"),
+                                        factory.create_application_term(
+                                            factory.create_builtin_term(BuiltinTerm::Add),
+                                            allocator.create_pair(
+                                                factory.create_value_term(ValueTerm::Int(5)),
+                                                factory.create_static_variable_term(0),
+                                            ),
+                                        ),
+                                    ),
+                                ],
+                                &factory,
+                                &allocator,
                             ),
-                            (
-                                "second",
-                                create_function_application(
-                                    create_builtin(BuiltinTerm::Add),
-                                    vec![create_integer(4), create_scoped_variable(0)],
-                                ),
-                            ),
-                            (
-                                "third",
-                                create_function_application(
-                                    create_builtin(BuiltinTerm::Add),
-                                    vec![create_integer(5), create_scoped_variable(0)],
-                                ),
-                            ),
-                        ]),
+                        ),
+                        allocator.create_unit_list(factory.create_value_term(ValueTerm::Int(10))),
                     ),
-                    vec![create_integer(10)],
                 ),
-            ),
-            ("mutation", create_null()),
-            ("subscription", create_null()),
-        ]);
+                (
+                    String::from("mutation"),
+                    factory.create_value_term(ValueTerm::Null),
+                ),
+                (
+                    String::from("subscription"),
+                    factory.create_value_term(ValueTerm::Null),
+                ),
+            ],
+            &factory,
+            &allocator,
+        );
         let variables = Vec::new();
         let query = parse(
             "
@@ -659,16 +784,28 @@ mod tests {
                 }
             ",
             variables,
+            &factory,
+            &allocator,
         )
         .unwrap();
-        let result = apply_query(query, root);
+        let result = apply_query(query, root, &factory, &allocator);
         assert_eq!(
             result,
             EvaluationResult::new(
-                create_struct(vec![
-                    ("second", create_integer(4 + 10)),
-                    ("third", create_integer(5 + 10)),
-                ]),
+                create_struct(
+                    vec![
+                        (
+                            String::from("second"),
+                            factory.create_value_term(ValueTerm::Int(4 + 10))
+                        ),
+                        (
+                            String::from("third"),
+                            factory.create_value_term(ValueTerm::Int(5 + 10))
+                        ),
+                    ],
+                    &factory,
+                    &allocator
+                ),
                 DependencyList::empty()
             )
         );
@@ -676,25 +813,47 @@ mod tests {
 
     #[test]
     fn list_leaf_queries() {
-        let root = create_struct(vec![
-            (
-                "query",
-                create_struct(vec![
-                    ("foo", create_null()),
-                    (
-                        "items",
-                        create_vector(vec![
-                            create_integer(3),
-                            create_integer(4),
-                            create_integer(5),
-                        ]),
+        let factory = TermFactory::default();
+        let allocator = DefaultAllocator::default();
+        let root = create_struct(
+            vec![
+                (
+                    String::from("query"),
+                    create_struct(
+                        vec![
+                            (
+                                String::from("foo"),
+                                factory.create_value_term(ValueTerm::Null),
+                            ),
+                            (
+                                String::from("items"),
+                                factory.create_vector_term(allocator.create_list(vec![
+                                    factory.create_value_term(ValueTerm::Int(3)),
+                                    factory.create_value_term(ValueTerm::Int(4)),
+                                    factory.create_value_term(ValueTerm::Int(5)),
+                                ])),
+                            ),
+                            (
+                                String::from("bar"),
+                                factory.create_value_term(ValueTerm::Null),
+                            ),
+                        ],
+                        &factory,
+                        &allocator,
                     ),
-                    ("bar", create_null()),
-                ]),
-            ),
-            ("mutation", create_null()),
-            ("subscription", create_null()),
-        ]);
+                ),
+                (
+                    String::from("mutation"),
+                    factory.create_value_term(ValueTerm::Null),
+                ),
+                (
+                    String::from("subscription"),
+                    factory.create_value_term(ValueTerm::Null),
+                ),
+            ],
+            &factory,
+            &allocator,
+        );
         let variables = Vec::new();
         let query = parse(
             "
@@ -703,94 +862,122 @@ mod tests {
                 }
             ",
             variables,
+            &factory,
+            &allocator,
         )
         .unwrap();
-        let result = apply_query(query, root);
+        let result = apply_query(query, root, &factory, &allocator);
         assert_eq!(
             result,
             EvaluationResult::new(
-                create_struct(vec![(
-                    "items",
-                    create_vector(vec![
-                        create_integer(3),
-                        create_integer(4),
-                        create_integer(5)
-                    ])
-                ),]),
+                create_struct(
+                    vec![(
+                        String::from("items"),
+                        factory.create_vector_term(allocator.create_list(vec![
+                            factory.create_value_term(ValueTerm::Int(3)),
+                            factory.create_value_term(ValueTerm::Int(4)),
+                            factory.create_value_term(ValueTerm::Int(5))
+                        ]))
+                    ),],
+                    &factory,
+                    &allocator,
+                ),
                 DependencyList::empty()
-            )
+            ),
         );
     }
 
     #[test]
     fn deeply_nested_list_leaf_queries() {
-        let root = create_struct(vec![
-            (
-                "query",
-                create_struct(vec![
-                    ("foo", create_null()),
-                    (
-                        "items",
-                        create_vector(vec![
-                            create_vector(vec![
-                                create_vector(vec![
-                                    create_float(1.1),
-                                    create_float(1.2),
-                                    create_float(1.3),
-                                ]),
-                                create_vector(vec![
-                                    create_float(1.4),
-                                    create_float(1.5),
-                                    create_float(1.6),
-                                ]),
-                                create_vector(vec![
-                                    create_float(1.7),
-                                    create_float(1.8),
-                                    create_float(1.9),
-                                ]),
-                            ]),
-                            create_vector(vec![
-                                create_vector(vec![
-                                    create_float(2.1),
-                                    create_float(2.2),
-                                    create_float(2.3),
-                                ]),
-                                create_vector(vec![
-                                    create_float(2.4),
-                                    create_float(2.5),
-                                    create_float(2.6),
-                                ]),
-                                create_vector(vec![
-                                    create_float(2.7),
-                                    create_float(2.8),
-                                    create_float(2.9),
-                                ]),
-                            ]),
-                            create_vector(vec![
-                                create_vector(vec![
-                                    create_float(3.1),
-                                    create_float(3.2),
-                                    create_float(3.3),
-                                ]),
-                                create_vector(vec![
-                                    create_float(3.4),
-                                    create_float(3.5),
-                                    create_float(3.6),
-                                ]),
-                                create_vector(vec![
-                                    create_float(3.7),
-                                    create_float(3.8),
-                                    create_float(3.9),
-                                ]),
-                            ]),
-                        ]),
+        let factory = TermFactory::default();
+        let allocator = DefaultAllocator::default();
+        let root = create_struct(
+            vec![
+                (
+                    String::from("query"),
+                    create_struct(
+                        vec![
+                            (
+                                String::from("foo"),
+                                factory.create_value_term(ValueTerm::Null),
+                            ),
+                            (
+                                String::from("items"),
+                                factory.create_vector_term(allocator.create_list(vec![
+                                    factory.create_vector_term(allocator.create_list(vec![
+                                        factory.create_vector_term(allocator.create_list(vec![
+                                            factory.create_value_term(ValueTerm::Float(1.1)),
+                                            factory.create_value_term(ValueTerm::Float(1.2)),
+                                            factory.create_value_term(ValueTerm::Float(1.3)),
+                                        ])),
+                                        factory.create_vector_term(allocator.create_list(vec![
+                                            factory.create_value_term(ValueTerm::Float(1.4)),
+                                            factory.create_value_term(ValueTerm::Float(1.5)),
+                                            factory.create_value_term(ValueTerm::Float(1.6)),
+                                        ])),
+                                        factory.create_vector_term(allocator.create_list(vec![
+                                            factory.create_value_term(ValueTerm::Float(1.7)),
+                                            factory.create_value_term(ValueTerm::Float(1.8)),
+                                            factory.create_value_term(ValueTerm::Float(1.9)),
+                                        ])),
+                                    ])),
+                                    factory.create_vector_term(allocator.create_list(vec![
+                                        factory.create_vector_term(allocator.create_list(vec![
+                                            factory.create_value_term(ValueTerm::Float(2.1)),
+                                            factory.create_value_term(ValueTerm::Float(2.2)),
+                                            factory.create_value_term(ValueTerm::Float(2.3)),
+                                        ])),
+                                        factory.create_vector_term(allocator.create_list(vec![
+                                            factory.create_value_term(ValueTerm::Float(2.4)),
+                                            factory.create_value_term(ValueTerm::Float(2.5)),
+                                            factory.create_value_term(ValueTerm::Float(2.6)),
+                                        ])),
+                                        factory.create_vector_term(allocator.create_list(vec![
+                                            factory.create_value_term(ValueTerm::Float(2.7)),
+                                            factory.create_value_term(ValueTerm::Float(2.8)),
+                                            factory.create_value_term(ValueTerm::Float(2.9)),
+                                        ])),
+                                    ])),
+                                    factory.create_vector_term(allocator.create_list(vec![
+                                        factory.create_vector_term(allocator.create_list(vec![
+                                            factory.create_value_term(ValueTerm::Float(3.1)),
+                                            factory.create_value_term(ValueTerm::Float(3.2)),
+                                            factory.create_value_term(ValueTerm::Float(3.3)),
+                                        ])),
+                                        factory.create_vector_term(allocator.create_list(vec![
+                                            factory.create_value_term(ValueTerm::Float(3.4)),
+                                            factory.create_value_term(ValueTerm::Float(3.5)),
+                                            factory.create_value_term(ValueTerm::Float(3.6)),
+                                        ])),
+                                        factory.create_vector_term(allocator.create_list(vec![
+                                            factory.create_value_term(ValueTerm::Float(3.7)),
+                                            factory.create_value_term(ValueTerm::Float(3.8)),
+                                            factory.create_value_term(ValueTerm::Float(3.9)),
+                                        ])),
+                                    ])),
+                                ])),
+                            ),
+                            (
+                                String::from("bar"),
+                                factory.create_value_term(ValueTerm::Null),
+                            ),
+                        ],
+                        &factory,
+                        &allocator,
                     ),
-                    ("bar", create_null()),
-                ]),
-            ),
-            ("mutation", create_null()),
-            ("subscription", create_null()),
-        ]);
+                ),
+                (
+                    String::from("mutation"),
+                    factory.create_value_term(ValueTerm::Null),
+                ),
+                (
+                    String::from("subscription"),
+                    factory.create_value_term(ValueTerm::Null),
+                ),
+            ],
+            &factory,
+            &allocator,
+        );
         let variables = Vec::new();
         let query = parse(
             "
@@ -799,116 +986,92 @@ mod tests {
                 }
             ",
             variables,
+            &factory,
+            &allocator,
         )
         .unwrap();
-        let result = apply_query(query, root);
+        let result = apply_query(query, root, &factory, &allocator);
         assert_eq!(
             result,
             EvaluationResult::new(
-                create_struct(vec![(
-                    "items",
-                    create_vector(vec![
-                        create_vector(vec![
-                            create_vector(vec![
-                                create_float(1.1),
-                                create_float(1.2),
-                                create_float(1.3),
-                            ]),
-                            create_vector(vec![
-                                create_float(1.4),
-                                create_float(1.5),
-                                create_float(1.6),
-                            ]),
-                            create_vector(vec![
-                                create_float(1.7),
-                                create_float(1.8),
-                                create_float(1.9),
-                            ]),
-                        ]),
-                        create_vector(vec![
-                            create_vector(vec![
-                                create_float(2.1),
-                                create_float(2.2),
-                                create_float(2.3),
-                            ]),
-                            create_vector(vec![
-                                create_float(2.4),
-                                create_float(2.5),
-                                create_float(2.6),
-                            ]),
-                            create_vector(vec![
-                                create_float(2.7),
-                                create_float(2.8),
-                                create_float(2.9),
-                            ]),
-                        ]),
-                        create_vector(vec![
-                            create_vector(vec![
-                                create_float(3.1),
-                                create_float(3.2),
-                                create_float(3.3),
-                            ]),
-                            create_vector(vec![
-                                create_float(3.4),
-                                create_float(3.5),
-                                create_float(3.6),
-                            ]),
-                            create_vector(vec![
-                                create_float(3.7),
-                                create_float(3.8),
-                                create_float(3.9),
-                            ]),
-                        ]),
-                    ]),
-                ),]),
+                create_struct(
+                    vec![(
+                        String::from("items"),
+                        factory.create_vector_term(allocator.create_list(vec![
+                            factory.create_vector_term(allocator.create_list(vec![
+                                factory.create_vector_term(allocator.create_list(vec![
+                                    factory.create_value_term(ValueTerm::Float(1.1)),
+                                    factory.create_value_term(ValueTerm::Float(1.2)),
+                                    factory.create_value_term(ValueTerm::Float(1.3)),
+                                ])),
+                                factory.create_vector_term(allocator.create_list(vec![
+                                    factory.create_value_term(ValueTerm::Float(1.4)),
+                                    factory.create_value_term(ValueTerm::Float(1.5)),
+                                    factory.create_value_term(ValueTerm::Float(1.6)),
+                                ])),
+                                factory.create_vector_term(allocator.create_list(vec![
+                                    factory.create_value_term(ValueTerm::Float(1.7)),
+                                    factory.create_value_term(ValueTerm::Float(1.8)),
+                                    factory.create_value_term(ValueTerm::Float(1.9)),
+                                ])),
+                            ])),
+                            factory.create_vector_term(allocator.create_list(vec![
+                                factory.create_vector_term(allocator.create_list(vec![
+                                    factory.create_value_term(ValueTerm::Float(2.1)),
+                                    factory.create_value_term(ValueTerm::Float(2.2)),
+                                    factory.create_value_term(ValueTerm::Float(2.3)),
+                                ])),
+                                factory.create_vector_term(allocator.create_list(vec![
+                                    factory.create_value_term(ValueTerm::Float(2.4)),
+                                    factory.create_value_term(ValueTerm::Float(2.5)),
+                                    factory.create_value_term(ValueTerm::Float(2.6)),
+                                ])),
+                                factory.create_vector_term(allocator.create_list(vec![
+                                    factory.create_value_term(ValueTerm::Float(2.7)),
+                                    factory.create_value_term(ValueTerm::Float(2.8)),
+                                    factory.create_value_term(ValueTerm::Float(2.9)),
+                                ])),
+                            ])),
+                            factory.create_vector_term(allocator.create_list(vec![
+                                factory.create_vector_term(allocator.create_list(vec![
+                                    factory.create_value_term(ValueTerm::Float(3.1)),
+                                    factory.create_value_term(ValueTerm::Float(3.2)),
+                                    factory.create_value_term(ValueTerm::Float(3.3)),
+                                ])),
+                                factory.create_vector_term(allocator.create_list(vec![
+                                    factory.create_value_term(ValueTerm::Float(3.4)),
+                                    factory.create_value_term(ValueTerm::Float(3.5)),
+                                    factory.create_value_term(ValueTerm::Float(3.6)),
+                                ])),
+                                factory.create_vector_term(allocator.create_list(vec![
+                                    factory.create_value_term(ValueTerm::Float(3.7)),
+                                    factory.create_value_term(ValueTerm::Float(3.8)),
+                                    factory.create_value_term(ValueTerm::Float(3.9)),
+                                ])),
+                            ])),
+                        ])),
+                    )],
+                    &factory,
+                    &allocator,
+                ),
                 DependencyList::empty()
             )
         );
     }
 
-    fn apply_query(query: Expression, root: Expression) -> EvaluationResult {
-        Expression::new(Term::Application(ApplicationTerm::new(query, vec![root])))
-            .evaluate(&DynamicState::new(), &mut SubstitutionCache::new())
-    }
-
-    fn create_struct<'a>(fields: impl IntoIterator<Item = (&'a str, Expression)>) -> Expression {
-        let (keys, values) = fields
-            .into_iter()
-            .map(|(key, value)| (ValueTerm::String(String::from(key)), value))
-            .unzip();
-        Expression::new(Term::Struct(StructTerm::new(
-            Some(StructPrototype::new(keys)),
-            values,
-        )))
-    }
-
-    fn create_vector(items: impl IntoIterator<Item = Expression>) -> Expression {
-        Expression::new(Term::Collection(CollectionTerm::Vector(VectorTerm::new(
-            items,
-        ))))
-    }
-
-    fn create_builtin(target: BuiltinTerm) -> Expression {
-        Expression::new(Term::Builtin(target))
-    }
-
-    fn create_integer(value: i32) -> Expression {
-        Expression::new(Term::Value(ValueTerm::Int(value)))
-    }
-
-    fn create_float(value: f64) -> Expression {
-        Expression::new(Term::Value(ValueTerm::Float(value)))
-    }
-
-    fn create_null() -> Expression {
-        Expression::new(Term::Value(ValueTerm::Null))
-    }
-
-    fn create_lambda(arity: Arity, body: Expression) -> Expression {
-        Expression::new(Term::Lambda(LambdaTerm::new(arity, body)))
-    }
-
-    fn create_scoped_variable(offset: StackOffset) -> Expression {
-        Expression::new(Term::Variable(VariableTerm::scoped(offset)))
+    fn apply_query<T: Expression + Rewritable<T> + Reducible<T> + Evaluate<T>>(
+        query: T,
+        root: T,
+        factory: &impl ExpressionFactory<T>,
+        allocator: &impl HeapAllocator<T>,
+    ) -> EvaluationResult<T> {
+        let expression = factory.create_application_term(query, allocator.create_unit_list(root));
+        evaluate(
+            &expression,
+            &DynamicState::new(),
+            factory,
+            allocator,
+            &mut SubstitutionCache::new(),
+        )
     }
 }

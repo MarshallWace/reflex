@@ -4,261 +4,194 @@
 use std::iter::FromIterator;
 
 use reflex::{
-    core::Expression,
-    serialize::{SerializedListTerm, SerializedObjectTerm, SerializedTerm},
-    stdlib::value::ValueTerm,
+    core::{Expression, ExpressionFactory, HeapAllocator},
+    lang::ValueTerm,
 };
 use serde_json::{Map, Value};
 
-pub fn parse(value: &str) -> Result<Expression, String> {
-    match serde_json::from_str::<Value>(value) {
-        Err(error) => Err(format!("JSON deserialization failed: {}", error)),
-        Ok(value) => deserialize(&value).map(|result| result.deserialize()),
-    }
+pub use serde_json::{Map as JsonMap, Value as JsonValue};
+
+pub fn json_object(properties: impl IntoIterator<Item = (String, JsonValue)>) -> JsonValue {
+    JsonValue::Object(JsonMap::from_iter(properties))
+}
+pub fn json_array(items: impl IntoIterator<Item = JsonValue>) -> JsonValue {
+    JsonValue::Array(items.into_iter().collect())
 }
 
-pub fn serialized(value: &str) -> Result<SerializedTerm, String> {
-    match serde_json::from_str::<Value>(value) {
-        Err(error) => Err(format!("JSON parse failed: {}", error)),
-        Ok(value) => parse_value(value),
-    }
+pub fn parse<T: Expression>(
+    value: &str,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> Result<T, String> {
+    deserialize(value).and_then(|value| hydrate(value, factory, allocator))
 }
 
-pub fn stringify(value: SerializedTerm) -> Result<String, String> {
-    match sanitize_term(value) {
-        Err(error) => Err(error),
-        Ok(value) => match serde_json::to_string(&value) {
-            Err(error) => Err(format!("JSON serialization failed: {}", error)),
-            Ok(value) => Ok(value),
-        },
-    }
+pub fn stringify<T: Expression>(value: &T) -> Result<String, String> {
+    serde_json::to_string(value).map_err(|err| format!("JSON serialization failed: {}", err))
 }
 
-pub fn sanitize_term(term: SerializedTerm) -> Result<serde_json::Value, String> {
-    match term {
-        SerializedTerm::Value(value) => sanitize_value(value),
-        SerializedTerm::Object(value) => sanitize_object(value),
-        SerializedTerm::List(value) => sanitize_list(value),
-    }
+pub fn deserialize(value: &str) -> Result<JsonValue, String> {
+    serde_json::from_str(value).map_err(|err| format!("JSON deserialization failed: {}", err))
 }
 
-fn sanitize_value(value: ValueTerm) -> Result<serde_json::Value, String> {
+pub fn sanitize<T: Expression>(value: &T) -> Result<JsonValue, String> {
+    serde_json::to_value(value).map_err(|err| format!("JSON sanitization failed: {}", err))
+}
+
+pub fn hydrate<T: Expression>(
+    value: Value,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> Result<T, String> {
     match value {
-        ValueTerm::Hash(_) | ValueTerm::Symbol(_) => {
-            Err(format!("Unable to format value: {}", value))
+        Value::Null => Ok(factory.create_value_term(ValueTerm::Null)),
+        Value::Bool(value) => Ok(factory.create_value_term(ValueTerm::Boolean(value))),
+        Value::String(value) => {
+            Ok(factory.create_value_term(ValueTerm::String(allocator.create_string(value))))
         }
-        ValueTerm::Null => Ok(serde_json::Value::Null),
-        ValueTerm::Boolean(value) => Ok(serde_json::Value::Bool(value)),
-        ValueTerm::Int(value) => Ok(serde_json::Value::Number(value.into())),
-        ValueTerm::Float(value) => sanitize_float(value),
-        ValueTerm::String(value) => Ok(serde_json::Value::String(value)),
-    }
-}
-
-fn sanitize_float(value: f64) -> Result<serde_json::Value, String> {
-    match serde_json::Number::from_f64(value) {
-        Some(value) => Ok(serde_json::Value::Number(value)),
-        None => Err(format!("Unable to format value: {}", value)),
-    }
-}
-
-fn sanitize_object(value: SerializedObjectTerm) -> Result<serde_json::Value, String> {
-    let properties = value
-        .into_entries()
-        .into_iter()
-        .map(|(key, value)| match sanitize_term(value) {
-            Ok(value) => Ok((key, value)),
-            Err(error) => Err(error),
-        })
-        .collect::<Result<Vec<_>, String>>()?;
-    Ok(serde_json::Value::Object(serde_json::Map::from_iter(
-        properties,
-    )))
-}
-
-fn sanitize_list(value: SerializedListTerm) -> Result<serde_json::Value, String> {
-    let items = value
-        .into_items()
-        .into_iter()
-        .map(sanitize_term)
-        .collect::<Result<Vec<_>, String>>()?;
-    Ok(serde_json::Value::Array(items))
-}
-
-pub fn deserialize(value: &Value) -> Result<SerializedTerm, String> {
-    match value {
-        Value::Null => Ok(SerializedTerm::Value(ValueTerm::Null)),
-        Value::Bool(value) => Ok(SerializedTerm::Value(ValueTerm::Boolean(*value))),
-        Value::String(value) => Ok(SerializedTerm::Value(ValueTerm::String(value.clone()))),
         Value::Number(value) => match value.as_i64() {
-            Some(value) => Ok(SerializedTerm::Value(ValueTerm::Int(value as i32))),
+            Some(value) => Ok(factory.create_value_term(ValueTerm::Int(value as i32))),
             None => match value.as_f64() {
-                Some(value) => Ok(SerializedTerm::Value(ValueTerm::Float(value))),
+                Some(value) => Ok(factory.create_value_term(ValueTerm::Float(value))),
                 None => Err(format!(
                     "JSON deserialization encountered invalid number: {}",
                     value
                 )),
             },
         },
-        Value::Array(value) => deserialize_array(value),
-        Value::Object(value) => deserialize_object(value),
+        Value::Array(value) => hydrate_array(value, factory, allocator),
+        Value::Object(value) => hydrate_object(value, factory, allocator),
     }
 }
 
-fn deserialize_array(value: &Vec<Value>) -> Result<SerializedTerm, String> {
+fn hydrate_array<T: Expression>(
+    value: Vec<Value>,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> Result<T, String> {
     let items = value
         .into_iter()
-        .map(deserialize)
+        .map(|item| hydrate(item, factory, allocator))
         .collect::<Result<Vec<_>, _>>()?;
-    Ok(SerializedTerm::List(SerializedListTerm::new(items)))
+    Ok(factory.create_vector_term(allocator.create_list(items)))
 }
 
-fn deserialize_object(value: &Map<String, Value>) -> Result<SerializedTerm, String> {
+fn hydrate_object<T: Expression>(
+    value: Map<String, Value>,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> Result<T, String> {
     let entries = value
         .into_iter()
-        .map(|(key, value)| match deserialize(value) {
-            Ok(value) => Ok((String::from(key), value)),
-            Err(error) => Err(error),
-        })
+        .map(|(key, value)| hydrate(value, factory, allocator).map(|value| (key, value)))
         .collect::<Result<Vec<_>, _>>()?;
-    Ok(SerializedTerm::Object(SerializedObjectTerm::new(entries)))
-}
-
-fn parse_value(value: Value) -> Result<SerializedTerm, String> {
-    match value {
-        Value::Null => Ok(SerializedTerm::null()),
-        Value::Bool(value) => Ok(SerializedTerm::boolean(value)),
-        Value::String(value) => Ok(SerializedTerm::string(value)),
-        Value::Number(value) => match value.as_f64() {
-            Some(value) => Ok(SerializedTerm::float(value)),
-            None => Err(format!(
-                "JSON deserialization encountered invalid number: {}",
-                value
-            )),
-        },
-        Value::Array(value) => parse_array(value),
-        Value::Object(value) => parse_object(value),
-    }
-}
-
-fn parse_array(value: Vec<Value>) -> Result<SerializedTerm, String> {
-    let items = value
-        .into_iter()
-        .map(parse_value)
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok(SerializedTerm::list(items))
-}
-
-fn parse_object(value: Map<String, Value>) -> Result<SerializedTerm, String> {
-    let entries = value
-        .into_iter()
-        .map(|(key, value)| match parse_value(value) {
-            Ok(value) => Ok((key, value)),
-            Err(error) => Err(error),
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok(SerializedTerm::object(entries))
+    let (keys, values): (Vec<_>, Vec<_>) = entries.into_iter().unzip();
+    Ok(factory.create_struct_term(
+        allocator.create_struct_prototype(keys),
+        allocator.create_list(values),
+    ))
 }
 
 #[cfg(test)]
 mod tests {
+    use std::iter::empty;
+
     use reflex::{
-        core::{Expression, Term},
-        serialize::{SerializedListTerm, SerializedObjectTerm, SerializedTerm},
-        stdlib::value::{StringValue, ValueTerm},
+        allocator::DefaultAllocator,
+        core::{ExpressionFactory, HeapAllocator},
+        lang::{create_struct, TermFactory, ValueTerm},
     };
 
     use super::{parse, stringify};
 
     #[test]
     fn stringify_primitives() {
+        let factory = TermFactory::default();
         assert_eq!(
-            stringify(SerializedTerm::Value(ValueTerm::Symbol(3))),
-            Err(String::from("Unable to format value: <symbol:3>")),
+            stringify(&factory.create_value_term(ValueTerm::Symbol(3))),
+            Err(String::from(
+                "JSON serialization failed: Unable to serialize term: <symbol:3>"
+            )),
         );
         assert_eq!(
-            stringify(SerializedTerm::Value(ValueTerm::Null)),
+            stringify(&factory.create_value_term(ValueTerm::Null)),
             Ok(String::from("null")),
         );
         assert_eq!(
-            stringify(SerializedTerm::Value(ValueTerm::Boolean(false))),
+            stringify(&factory.create_value_term(ValueTerm::Boolean(false))),
             Ok(String::from("false")),
         );
         assert_eq!(
-            stringify(SerializedTerm::Value(ValueTerm::Boolean(true))),
+            stringify(&factory.create_value_term(ValueTerm::Boolean(true))),
             Ok(String::from("true")),
         );
         assert_eq!(
-            stringify(SerializedTerm::Value(ValueTerm::Int(3))),
+            stringify(&factory.create_value_term(ValueTerm::Int(3))),
             Ok(String::from("3")),
         );
         assert_eq!(
-            stringify(SerializedTerm::Value(ValueTerm::Int(0))),
+            stringify(&factory.create_value_term(ValueTerm::Int(0))),
             Ok(String::from("0")),
         );
         assert_eq!(
-            stringify(SerializedTerm::Value(ValueTerm::Int(-0))),
+            stringify(&factory.create_value_term(ValueTerm::Int(-0))),
             Ok(String::from("0")),
         );
         assert_eq!(
-            stringify(SerializedTerm::Value(ValueTerm::Int(-3))),
+            stringify(&factory.create_value_term(ValueTerm::Int(-3))),
             Ok(String::from("-3")),
         );
         assert_eq!(
-            stringify(SerializedTerm::Value(ValueTerm::Float(3.142))),
+            stringify(&factory.create_value_term(ValueTerm::Float(3.142))),
             Ok(String::from("3.142")),
         );
         assert_eq!(
-            stringify(SerializedTerm::Value(ValueTerm::Float(3.0))),
+            stringify(&factory.create_value_term(ValueTerm::Float(3.0))),
             Ok(String::from("3.0")),
         );
         assert_eq!(
-            stringify(SerializedTerm::Value(ValueTerm::Float(0.0))),
+            stringify(&factory.create_value_term(ValueTerm::Float(0.0))),
             Ok(String::from("0.0")),
         );
         assert_eq!(
-            stringify(SerializedTerm::Value(ValueTerm::Float(-0.0))),
+            stringify(&factory.create_value_term(ValueTerm::Float(-0.0))),
             Ok(String::from("-0.0")),
         );
         assert_eq!(
-            stringify(SerializedTerm::Value(ValueTerm::Float(-3.0))),
+            stringify(&factory.create_value_term(ValueTerm::Float(-3.0))),
             Ok(String::from("-3.0")),
         );
         assert_eq!(
-            stringify(SerializedTerm::Value(ValueTerm::Float(-3.142))),
+            stringify(&factory.create_value_term(ValueTerm::Float(-3.142))),
             Ok(String::from("-3.142")),
         );
         assert_eq!(
-            stringify(SerializedTerm::Value(ValueTerm::String(StringValue::from(
-                ""
-            )))),
+            stringify(&factory.create_value_term(ValueTerm::String(String::from("")))),
             Ok(String::from("\"\"")),
         );
         assert_eq!(
-            stringify(SerializedTerm::Value(ValueTerm::String(StringValue::from(
-                "foo"
-            )))),
+            stringify(&factory.create_value_term(ValueTerm::String(String::from("foo")))),
             Ok(String::from("\"foo\"")),
         );
         assert_eq!(
-            stringify(SerializedTerm::Value(ValueTerm::String(StringValue::from(
-                "\"\'\n\r"
-            )))),
+            stringify(&factory.create_value_term(ValueTerm::String(String::from("\"\'\n\r")))),
             Ok(String::from("\"\\\"\'\\n\\r\"")),
         );
     }
 
     #[test]
     fn stringify_lists() {
+        let factory = TermFactory::default();
+        let allocator = DefaultAllocator::default();
         assert_eq!(
-            stringify(SerializedTerm::List(SerializedListTerm::new(Vec::new()))),
+            stringify(&factory.create_vector_term(allocator.create_empty_list())),
             Ok(String::from("[]"))
         );
         assert_eq!(
-            stringify(SerializedTerm::List(SerializedListTerm::new(vec![
-                SerializedTerm::value(ValueTerm::Int(3)),
-                SerializedTerm::value(ValueTerm::Int(4)),
-                SerializedTerm::value(ValueTerm::Int(5)),
+            stringify(&factory.create_vector_term(allocator.create_list(vec![
+                factory.create_value_term(ValueTerm::Int(3)),
+                factory.create_value_term(ValueTerm::Int(4)),
+                factory.create_value_term(ValueTerm::Int(5)),
             ]))),
             Ok(String::from("[3,4,5]")),
         );
@@ -266,79 +199,89 @@ mod tests {
 
     #[test]
     fn stringify_objects() {
+        let factory = TermFactory::default();
+        let allocator = DefaultAllocator::default();
         assert_eq!(
-            stringify(SerializedTerm::Object(
-                SerializedObjectTerm::new(Vec::new())
-            )),
+            stringify(&create_struct(empty(), &factory, &allocator)),
             Ok(String::from("{}"))
         );
         assert_eq!(
-            stringify(SerializedTerm::Object(SerializedObjectTerm::new(vec![
-                (
-                    String::from("first"),
-                    SerializedTerm::value(ValueTerm::Int(3)),
-                ),
-                (
-                    String::from("second"),
-                    SerializedTerm::value(ValueTerm::Int(4)),
-                ),
-                (
-                    String::from("third"),
-                    SerializedTerm::value(ValueTerm::Int(5)),
-                )
-            ]))),
+            stringify(&create_struct(
+                vec![
+                    (
+                        String::from("first"),
+                        factory.create_value_term(ValueTerm::Int(3)),
+                    ),
+                    (
+                        String::from("second"),
+                        factory.create_value_term(ValueTerm::Int(4)),
+                    ),
+                    (
+                        String::from("third"),
+                        factory.create_value_term(ValueTerm::Int(5)),
+                    )
+                ],
+                &factory,
+                &allocator
+            )),
             Ok(String::from("{\"first\":3,\"second\":4,\"third\":5}")),
         );
         assert_eq!(
-            stringify(SerializedTerm::Object(SerializedObjectTerm::new(vec![(
-                String::from("\"\'\n\r"),
-                SerializedTerm::value(ValueTerm::Int(3)),
-            ),]))),
+            stringify(&create_struct(
+                vec![(
+                    String::from("\"\'\n\r"),
+                    factory.create_value_term(ValueTerm::Int(3)),
+                )],
+                &factory,
+                &allocator,
+            )),
             Ok(String::from("{\"\\\"\'\\n\\r\":3}")),
         );
     }
 
     #[test]
     fn parse_numbers() {
+        let factory = TermFactory::default();
+        let allocator = DefaultAllocator::default();
         assert_eq!(
-            parse("3"),
-            Ok(Expression::new(Term::Value(ValueTerm::Int(3)))),
+            parse("3", &factory, &allocator),
+            Ok(factory.create_value_term(ValueTerm::Int(3))),
         );
         assert_eq!(
-            parse("0"),
-            Ok(Expression::new(Term::Value(ValueTerm::Int(0)))),
+            parse("0", &factory, &allocator),
+            Ok(factory.create_value_term(ValueTerm::Int(0))),
         );
         assert_eq!(
-            parse("-0"),
-            Ok(Expression::new(Term::Value(ValueTerm::Int(0)))),
+            parse("-0", &factory, &allocator),
+            Ok(factory.create_value_term(ValueTerm::Int(0))),
         );
         assert_eq!(
-            parse("-3"),
-            Ok(Expression::new(Term::Value(ValueTerm::Int(-3)))),
+            parse("-3", &factory, &allocator),
+            Ok(factory.create_value_term(ValueTerm::Int(-3))),
         );
         assert_eq!(
-            parse("3.142"),
-            Ok(Expression::new(Term::Value(ValueTerm::Float(3.142)))),
+            parse("3.142", &factory, &allocator),
+            Ok(factory.create_value_term(ValueTerm::Float(3.142))),
         );
         assert_eq!(
-            parse("3.0"),
-            Ok(Expression::new(Term::Value(ValueTerm::Float(3.0)))),
+            parse("3.0", &factory, &allocator),
+            Ok(factory.create_value_term(ValueTerm::Float(3.0))),
         );
         assert_eq!(
-            parse("0.0"),
-            Ok(Expression::new(Term::Value(ValueTerm::Float(0.0)))),
+            parse("0.0", &factory, &allocator),
+            Ok(factory.create_value_term(ValueTerm::Float(0.0))),
         );
         assert_eq!(
-            parse("-0.0"),
-            Ok(Expression::new(Term::Value(ValueTerm::Float(-0.0)))),
+            parse("-0.0", &factory, &allocator),
+            Ok(factory.create_value_term(ValueTerm::Float(-0.0))),
         );
         assert_eq!(
-            parse("-3.0"),
-            Ok(Expression::new(Term::Value(ValueTerm::Float(-3.0)))),
+            parse("-3.0", &factory, &allocator),
+            Ok(factory.create_value_term(ValueTerm::Float(-3.0))),
         );
         assert_eq!(
-            parse("-3.142"),
-            Ok(Expression::new(Term::Value(ValueTerm::Float(-3.142)))),
+            parse("-3.142", &factory, &allocator),
+            Ok(factory.create_value_term(ValueTerm::Float(-3.142))),
         );
     }
 }

@@ -5,113 +5,151 @@ use std::any::TypeId;
 
 use reflex::{
     core::{
-        ApplicationTerm, Arity, Expression, NativeFunction, Signal, SignalTerm, StructPrototype,
-        StructTerm, Term,
+        Arity, Expression, ExpressionFactory, ExpressionList, HeapAllocator, NativeAllocator,
+        StringValue,
     },
     hash::{hash_object, HashId},
-    stdlib::{
-        builtin::BuiltinTerm, collection::CollectionTerm, signal::SignalType, value::ValueTerm,
-    },
+    lang::{create_struct, BuiltinTerm, NativeFunction, ValueTerm},
 };
 
-use super::create_struct;
-
-pub fn global_object() -> Expression {
-    create_struct(vec![(String::from("fromEntries"), from_entries())])
+pub fn global_object<T: Expression>(
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> T {
+    create_struct(
+        vec![(
+            String::from("fromEntries"),
+            factory.create_native_function_term(from_entries()),
+        )],
+        factory,
+        allocator,
+    )
 }
 
-fn from_entries() -> Expression {
-    Expression::new(Term::Native(NativeFunction::new(
-        FromEntries::hash(),
+pub fn from_entries<T: Expression>() -> NativeFunction<T> {
+    NativeFunction::new(
+        FromEntries::uid(),
+        FromEntries::name(),
         FromEntries::arity(),
         FromEntries::apply,
-    )))
+    )
 }
 struct FromEntries {}
 impl FromEntries {
-    fn hash() -> HashId {
+    fn uid() -> HashId {
         hash_object(&TypeId::of::<Self>())
+    }
+    fn name() -> Option<&'static str> {
+        Some("FromEntries")
     }
     fn arity() -> Arity {
         Arity::from(1, 0, None)
     }
-    fn apply(args: Vec<Expression>) -> Expression {
+    fn apply<T: Expression>(
+        args: ExpressionList<T>,
+        factory: &dyn ExpressionFactory<T>,
+        allocator: &dyn NativeAllocator<T>,
+    ) -> Result<T, String> {
         let mut args = args.into_iter();
         let target = args.next().unwrap();
-        let result = match target.value() {
-            Term::Struct(entries) if entries.prototype().is_some() => Ok(target),
-            Term::Collection(entries) => match entries {
-                CollectionTerm::Vector(entries) => {
-                    let keys = entries
-                        .items()
-                        .iter()
-                        .map(|entry| get_indexed_field(entry, 0))
-                        .collect::<Vec<_>>();
-                    let values = entries
-                        .items()
-                        .iter()
-                        .map(|entry| get_indexed_field(entry, 1))
-                        .collect::<Vec<_>>();
-                    Ok(match get_static_list_items(keys.iter()) {
-                        Some(keys) => Expression::new(Term::Struct(StructTerm::new(
-                            Some(StructPrototype::new(keys.into_iter().cloned().collect())),
-                            values,
-                        ))),
-                        None => Expression::new(Term::Application(ApplicationTerm::new(
-                            Expression::new(Term::Builtin(BuiltinTerm::Struct)),
-                            vec![
-                                Expression::new(Term::Application(ApplicationTerm::new(
-                                    Expression::new(Term::Builtin(BuiltinTerm::CollectTuple)),
-                                    keys,
-                                ))),
-                                Expression::new(Term::Struct(StructTerm::new(None, values))),
-                            ],
-                        ))),
-                    })
+        if let Some(_) = factory.match_struct_term(&target) {
+            Ok(target)
+        } else if let Some(entries) = factory.match_vector_term(&target) {
+            let entries = entries
+                .items()
+                .iter()
+                .map(|entry| {
+                    match get_indexed_field(entry, 0, &factory, &allocator).and_then(|key| {
+                        get_indexed_field(entry, 1, &factory, &allocator).map(|value| (key, value))
+                    }) {
+                        Some((key, value)) => Ok((key, value)),
+                        None => Err(format!(
+                            "Object.fromEntries(): Expected [key, value] pair, received {}",
+                            entry,
+                        )),
+                    }
+                })
+                .collect::<Result<Vec<_>, _>>();
+            match entries {
+                Err(error) => Err(error),
+                Ok(entries) => {
+                    let (keys, values): (Vec<_>, Vec<_>) = entries.into_iter().unzip();
+                    match get_static_prototype_keys(keys.iter(), &factory) {
+                        Err(error) => Err(error),
+                        Ok(Some(keys)) => {
+                            let prototype = allocator.create_struct_prototype(
+                                keys.into_iter()
+                                    .map(|key| String::from(key.as_str()))
+                                    .collect(),
+                            );
+                            Ok(
+                                factory
+                                    .create_struct_term(prototype, allocator.create_list(values)),
+                            )
+                        }
+                        Ok(None) => Ok(factory.create_application_term(
+                            factory.create_builtin_term(BuiltinTerm::Struct),
+                            allocator.create_pair(
+                                factory.create_application_term(
+                                    factory.create_builtin_term(BuiltinTerm::CollectVector),
+                                    allocator.create_list(keys),
+                                ),
+                                factory.create_vector_term(allocator.create_list(values)),
+                            ),
+                        )),
+                    }
                 }
-                _ => Err(format!("{}", entries)),
-            },
-            _ => Err(format!("{}", target)),
-        };
-        match result {
-            Ok(result) => result,
-            Err(error) => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
-                SignalType::Error,
-                vec![Expression::new(Term::Value(ValueTerm::String(format!(
-                    "Expected list, received {}",
-                    error
-                ))))],
-            )))),
+            }
+        } else {
+            Err(format!(
+                "Object.fromEntries(): Expected list of [key, value] pairs, received {}",
+                target
+            ))
         }
     }
 }
 
-fn get_static_list_items<'a>(
-    items: impl IntoIterator<Item = &'a Expression>,
-) -> Option<Vec<&'a ValueTerm>> {
+fn get_indexed_field<T: Expression>(
+    target: &T,
+    index: usize,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> Option<T> {
+    if let Some(target) = factory.match_tuple_term(target) {
+        target.get(index).cloned()
+    } else if let Some(target) = factory.match_vector_term(target) {
+        target.items().get(index).cloned()
+    } else if target.is_static() {
+        None
+    } else {
+        Some(factory.create_application_term(
+            factory.create_builtin_term(BuiltinTerm::Get),
+            allocator.create_pair(
+                target.clone(),
+                factory.create_value_term(ValueTerm::Int(index as i32)),
+            ),
+        ))
+    }
+}
+
+fn get_static_prototype_keys<'a, T: Expression + 'a>(
+    items: impl IntoIterator<Item = &'a T>,
+    factory: &impl ExpressionFactory<T>,
+) -> Result<Option<Vec<&'a T::String>>, String> {
     items
         .into_iter()
-        .map(|item| match item.value() {
-            Term::Value(value) => Some(value),
-            _ => None,
+        .map(|item| match factory.match_value_term(item) {
+            Some(ValueTerm::String(value)) => Ok(Some(value)),
+            _ => {
+                if !item.is_static() {
+                    Ok(None)
+                } else {
+                    Err(format!(
+                        "Invalid object key: Expected String, received {}",
+                        item
+                    ))
+                }
+            }
         })
-        .collect::<Option<Vec<_>>>()
-}
-
-fn get_indexed_field(target: &Expression, index: usize) -> Expression {
-    match target.value() {
-        Term::Struct(target) if target.prototype().is_none() && target.fields().len() > index => {
-            Expression::clone(target.get(index).unwrap())
-        }
-        Term::Collection(CollectionTerm::Vector(target)) if target.len() > index => {
-            Expression::clone(target.get(index).unwrap())
-        }
-        _ => Expression::new(Term::Application(ApplicationTerm::new(
-            Expression::new(Term::Builtin(BuiltinTerm::Get)),
-            vec![
-                Expression::clone(target),
-                Expression::new(Term::Value(ValueTerm::Int(index as i32))),
-            ],
-        ))),
-    }
+        .collect::<Result<Option<Vec<_>>, _>>()
 }

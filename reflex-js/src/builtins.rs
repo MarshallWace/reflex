@@ -4,264 +4,363 @@
 use std::{any::TypeId, iter::once};
 
 use reflex::{
-    core::{ApplicationTerm, Arity, Expression, NativeFunction, Signal, SignalTerm, Term, VarArgs},
-    hash::{hash_object, HashId},
-    stdlib::{
-        builtin::BuiltinTerm,
-        collection::CollectionTerm,
-        signal::SignalType,
-        value::{StringValue, ValueTerm},
+    core::{
+        Arity, Expression, ExpressionFactory, ExpressionList, NativeAllocator, StringValue, VarArgs,
     },
+    hash::{hash_object, HashId},
+    lang::{BuiltinTerm, NativeFunction, ValueTerm},
 };
 
-pub fn throw() -> Expression {
-    Expression::new(Term::Native(NativeFunction::new(
-        Throw::hash(),
-        Throw::arity(),
-        Throw::apply,
-    )))
+use crate::stdlib::{
+    globals::{
+        json::{json_parse, json_stringify},
+        map::map_constructor,
+        object::from_entries,
+        set::set_constructor,
+        string::encode_uri_component,
+    },
+    imports::{struct_type_factory, to_request},
+};
+
+pub fn builtin_plugins<T: Expression>() -> impl IntoIterator<Item = NativeFunction<T>> {
+    vec![
+        construct(),
+        dispatch(),
+        encode_uri_component(),
+        from_entries(),
+        json_parse(),
+        json_stringify(),
+        map_constructor(),
+        set_constructor(),
+        struct_type_factory(),
+        throw(),
+        to_request(),
+        to_string(),
+    ]
+}
+
+pub fn throw<T: Expression>() -> NativeFunction<T> {
+    NativeFunction::new(Throw::uid(), Throw::name(), Throw::arity(), Throw::apply)
 }
 struct Throw {}
 impl Throw {
-    fn hash() -> HashId {
+    fn uid() -> HashId {
         hash_object(&TypeId::of::<Self>())
+    }
+    fn name() -> Option<&'static str> {
+        Some("Throw")
     }
     fn arity() -> Arity {
         Arity::from(1, 0, None)
     }
-    fn apply(args: Vec<Expression>) -> Expression {
+    fn apply<T: Expression>(
+        args: ExpressionList<T>,
+        factory: &dyn ExpressionFactory<T>,
+        _allocator: &dyn NativeAllocator<T>,
+    ) -> Result<T, String> {
         let mut args = args.into_iter();
         let message = args.next().unwrap();
-        let message = match message.value() {
-            Term::Value(message) => format_value(message),
+        let message = match factory.match_value_term(&message) {
+            Some(message) => format_value(message),
             _ => String::from("Unknown error"),
         };
-        Expression::new(Term::Signal(SignalTerm::new(Signal::new(
-            SignalType::Error,
-            vec![Expression::new(Term::Value(ValueTerm::String(message)))],
-        ))))
+        Err(message)
     }
 }
 
-pub fn construct() -> Expression {
-    Expression::new(Term::Native(NativeFunction::new(
-        Construct::hash(),
+pub fn construct<T: Expression>() -> NativeFunction<T> {
+    NativeFunction::new(
+        Construct::uid(),
+        Construct::name(),
         Construct::arity(),
         Construct::apply,
-    )))
+    )
 }
-
 struct Construct {}
 impl Construct {
-    fn hash() -> HashId {
+    fn uid() -> HashId {
         hash_object(&TypeId::of::<Self>())
+    }
+    fn name() -> Option<&'static str> {
+        Some("Construct")
     }
     fn arity() -> Arity {
         Arity::from(1, 0, Some(VarArgs::Lazy))
     }
-    fn apply(args: Vec<Expression>) -> Expression {
+    fn apply<T: Expression>(
+        args: ExpressionList<T>,
+        factory: &dyn ExpressionFactory<T>,
+        allocator: &dyn NativeAllocator<T>,
+    ) -> Result<T, String> {
         let mut args = args.into_iter();
-        let constructor = args.next().unwrap();
-        match constructor.value() {
-            Term::Constructor(prototype, eager) => {
-                let properties = args.next();
-                let result = match properties {
-                    Some(properties) => match properties.value() {
-                        Term::Struct(property_values) => match property_values.prototype() {
-                            Some(property_values_prototype) => match eager {
-                                VarArgs::Lazy => match prototype.parse_struct(&properties) {
-                                    Some(result) => Ok(result),
-                                    None => Err(format!("{}", constructor)),
-                                },
-                                VarArgs::Eager => {
-                                    let mut ordered_properties =
-                                        prototype.keys().iter().map(|key| {
-                                            property_values_prototype.field(key).and_then(
-                                                |field_offset| property_values.get(field_offset),
-                                            )
-                                        });
-                                    let has_missing_fields =
-                                        ordered_properties.by_ref().any(|value| value.is_none());
-                                    if has_missing_fields {
-                                        Err(format!("{}", constructor))
+        let target = args.next().unwrap();
+        if let Some(constructor) = factory.match_constructor_term(&target) {
+            let prototype = constructor.prototype();
+            let eager = constructor.eager();
+            let properties = args.next();
+            match properties {
+                None => Err(format!("Invalid constructor call: {}", constructor)),
+                Some(properties) => {
+                    let result = match factory.match_struct_term(&properties) {
+                        Some(property_values) => match eager {
+                            VarArgs::Lazy => {
+                                match prototype.parse_struct(&properties, &factory, &allocator) {
+                                    Some(result) => Some(result),
+                                    None => None,
+                                }
+                            }
+                            VarArgs::Eager => {
+                                let mut ordered_properties =
+                                    prototype.keys().iter().map(|key| property_values.get(key));
+                                let has_missing_fields =
+                                    ordered_properties.by_ref().any(|value| value.is_none());
+                                if has_missing_fields {
+                                    None
+                                } else {
+                                    let mut field_values =
+                                        ordered_properties.map(|value| value.unwrap()).cloned();
+                                    let has_unresolved_fields =
+                                        field_values.by_ref().any(|property| !property.is_static());
+                                    if has_unresolved_fields {
+                                        Some(factory.create_application_term(
+                                            target.clone(),
+                                            allocator.create_list(args.collect()),
+                                        ))
                                     } else {
-                                        let mut field_values = ordered_properties
-                                            .map(|value| value.unwrap())
-                                            .map(Expression::clone);
-                                        let has_unresolved_fields = field_values
-                                            .by_ref()
-                                            .any(|property| property.is_reducible());
-                                        if has_unresolved_fields {
-                                            Ok(Expression::new(Term::Application(
-                                                ApplicationTerm::new(
-                                                    Expression::clone(&constructor),
-                                                    field_values.collect(),
-                                                ),
-                                            )))
-                                        } else {
-                                            Ok(prototype.apply(field_values.into_iter()))
-                                        }
+                                        Some(factory.create_struct_term(
+                                            allocator.clone_struct_prototype(prototype),
+                                            allocator.create_list(field_values.collect()),
+                                        ))
                                     }
                                 }
-                            },
-                            _ => Err(format!("{}", constructor)),
+                            }
                         },
-                        _ => Err(format!("{}", constructor)),
-                    },
-                    _ => Err(format!("{}", constructor)),
-                };
-                match result {
-                    Ok(result) => result,
-                    Err(error) => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
-                        SignalType::Error,
-                        vec![Expression::new(Term::Value(ValueTerm::String(format!(
-                            "Invalid constructor call: {}",
-                            error,
-                        ))))],
-                    )))),
+                        _ => None,
+                    };
+                    match result {
+                        Some(result) => Ok(result),
+                        None => Err(format!(
+                            "Invalid constructor call: {} {}",
+                            constructor, properties
+                        )),
+                    }
                 }
             }
-            _ => Expression::new(Term::Application(ApplicationTerm::new(
-                constructor,
-                args.collect(),
-            ))),
+        } else {
+            Ok(factory.create_application_term(target, allocator.create_list(args.collect())))
         }
     }
 }
 
-pub fn dispatch() -> Expression {
-    Expression::new(Term::Native(NativeFunction::new(
-        Dispatch::hash(),
+pub fn dispatch<T: Expression>() -> NativeFunction<T> {
+    NativeFunction::new(
+        Dispatch::uid(),
+        Dispatch::name(),
         Dispatch::arity(),
         Dispatch::apply,
-    )))
+    )
 }
 struct Dispatch {}
 impl Dispatch {
-    fn hash() -> HashId {
+    fn uid() -> HashId {
         hash_object(&TypeId::of::<Self>())
+    }
+    fn name() -> Option<&'static str> {
+        Some("Dispatch")
     }
     fn arity() -> Arity {
         Arity::from(2, 1, Some(VarArgs::Lazy))
     }
-    fn apply(args: Vec<Expression>) -> Expression {
+    fn apply<T: Expression>(
+        args: ExpressionList<T>,
+        factory: &dyn ExpressionFactory<T>,
+        allocator: &dyn NativeAllocator<T>,
+    ) -> Result<T, String> {
         let mut args = args.into_iter();
         let target = args.next().unwrap();
         let method_name = args.next().unwrap();
         let fallback = args.next().unwrap();
-        let builtin_method = match method_name.value() {
-            Term::Value(ValueTerm::String(method_name)) => {
-                get_builtin_field(Some(target.value()), method_name)
+        let builtin_method = match factory.match_value_term(&method_name) {
+            Some(ValueTerm::String(method_name)) => {
+                get_builtin_field(Some(&target), method_name.as_str(), &factory)
             }
             _ => None,
         };
         match builtin_method {
-            Some(method) => Expression::new(Term::Application(ApplicationTerm::new(
-                Expression::new(method),
-                once(target).chain(args).collect(),
-            ))),
-            None => fallback,
+            Some(method) => Ok(factory.create_application_term(
+                method,
+                allocator.create_list(once(target).chain(args).collect()),
+            )),
+            None => Ok(fallback),
         }
     }
 }
 
-pub fn to_string() -> Expression {
-    Expression::new(Term::Native(NativeFunction::new(
-        ToString::hash(),
+pub fn to_string<T: Expression>() -> NativeFunction<T> {
+    NativeFunction::new(
+        ToString::uid(),
+        ToString::name(),
         ToString::arity(),
         ToString::apply,
-    )))
+    )
 }
 struct ToString {}
 impl ToString {
+    fn uid() -> HashId {
+        hash_object(&TypeId::of::<Self>())
+    }
+    fn name() -> Option<&'static str> {
+        Some("ToString")
+    }
     fn arity() -> Arity {
         Arity::from(1, 0, None)
     }
-    fn hash() -> HashId {
-        hash_object(&TypeId::of::<Self>())
-    }
-    fn apply(args: Vec<Expression>) -> Expression {
-        if args.len() != 1 {
-            return Expression::new(Term::Signal(SignalTerm::new(Signal::new(
-                SignalType::Error,
-                vec![Expression::new(Term::Value(ValueTerm::String(format!(
-                    "Expected 1 argument, received {}",
-                    args.len(),
-                ))))],
-            ))));
-        }
+    fn apply<T: Expression>(
+        args: ExpressionList<T>,
+        factory: &dyn ExpressionFactory<T>,
+        allocator: &dyn NativeAllocator<T>,
+    ) -> Result<T, String> {
         let mut args = args.into_iter();
+        if args.len() != 1 {
+            return Err(format!("Expected 1 argument, received {}", args.len(),));
+        }
         let operand = args.next().unwrap();
-        match operand.value() {
-            Term::Value(ValueTerm::String(_)) => operand,
-            Term::Value(value) => Expression::new(Term::Value(ValueTerm::String(String::from(
-                format_value(value),
-            )))),
-            _ => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
-                SignalType::Error,
-                vec![Expression::new(Term::Value(ValueTerm::String(format!(
-                    "Expected printable value, received {}",
-                    operand,
-                ))))],
-            )))),
+        match factory.match_value_term(&operand) {
+            Some(ValueTerm::String(_)) => Ok(operand),
+            Some(value) => Ok(factory.create_value_term(ValueTerm::String(
+                allocator.create_string(format_value(value)),
+            ))),
+            _ => Err(format!("Expected printable value, received {}", operand)),
         }
     }
 }
 
-pub(crate) fn get_builtin_field<'src>(target: Option<&Term>, method: &str) -> Option<Term> {
-    None.or_else(|| match target {
-        None | Some(Term::Value(ValueTerm::String(_))) => match method {
-            "split" => Some(Term::Builtin(BuiltinTerm::Split)),
-            _ => None,
-        },
-        _ => None,
+pub(crate) fn get_builtin_field<T: Expression>(
+    target: Option<&T>,
+    method: &str,
+    factory: &impl ExpressionFactory<T>,
+) -> Option<T> {
+    None.or_else(|| {
+        if target.is_none()
+            || target
+                .map(|target| match_string_value_term(target, factory))
+                .is_some()
+        {
+            get_builtin_string_field(method, factory)
+        } else {
+            None
+        }
     })
-    .or_else(|| match target {
-        None | Some(Term::Collection(CollectionTerm::Vector(_))) => match method {
-            "entries" => Some(Term::Builtin(BuiltinTerm::Entries)),
-            "filter" => Some(Term::Builtin(BuiltinTerm::Filter)),
-            "keys" => Some(Term::Builtin(BuiltinTerm::Keys)),
-            "map" => Some(Term::Builtin(BuiltinTerm::Map)),
-            "push" => Some(Term::Builtin(BuiltinTerm::Push)),
-            "reduce" => Some(Term::Builtin(BuiltinTerm::Reduce)),
-            "slice" => Some(Term::Builtin(BuiltinTerm::Slice)),
-            "unshift" => Some(Term::Builtin(BuiltinTerm::PushFront)),
-            "values" => Some(Term::Builtin(BuiltinTerm::Values)),
-            _ => None,
-        },
-        _ => None,
+    .or_else(|| {
+        if target.is_none()
+            || target
+                .map(|target| factory.match_vector_term(target))
+                .is_some()
+        {
+            get_builtin_vector_field(method, factory)
+        } else {
+            None
+        }
     })
-    .or_else(|| match target {
-        None | Some(Term::Collection(CollectionTerm::HashMap(_))) => match method {
-            "entries" => Some(Term::Builtin(BuiltinTerm::Entries)),
-            "get" => Some(Term::Builtin(BuiltinTerm::Get)),
-            "has" => Some(Term::Builtin(BuiltinTerm::Contains)),
-            "keys" => Some(Term::Builtin(BuiltinTerm::Keys)),
-            "set" => Some(Term::Builtin(BuiltinTerm::Insert)),
-            "values" => Some(Term::Builtin(BuiltinTerm::Values)),
-            _ => None,
-        },
-        _ => None,
+    .or_else(|| {
+        if target.is_none()
+            || target
+                .map(|target| factory.match_hashmap_term(target))
+                .is_some()
+        {
+            get_builtin_hashmap_field(method, factory)
+        } else {
+            None
+        }
     })
-    .or_else(|| match target {
-        None | Some(Term::Collection(CollectionTerm::HashSet(_))) => match method {
-            "add" => Some(Term::Builtin(BuiltinTerm::Push)),
-            "entries" => Some(Term::Builtin(BuiltinTerm::Entries)),
-            "has" => Some(Term::Builtin(BuiltinTerm::Contains)),
-            "values" => Some(Term::Builtin(BuiltinTerm::Values)),
-            _ => None,
-        },
-        _ => None,
+    .or_else(|| {
+        if target.is_none()
+            || target
+                .map(|target| factory.match_hashset_term(target))
+                .is_some()
+        {
+            get_builtin_hashset_field(method, factory)
+        } else {
+            None
+        }
     })
 }
 
-pub fn format_value(value: &ValueTerm) -> String {
+fn get_builtin_string_field<T: Expression>(
+    method: &str,
+    factory: &impl ExpressionFactory<T>,
+) -> Option<T> {
+    match method {
+        "split" => Some(factory.create_builtin_term(BuiltinTerm::Split)),
+        _ => None,
+    }
+}
+
+fn get_builtin_vector_field<T: Expression>(
+    method: &str,
+    factory: &impl ExpressionFactory<T>,
+) -> Option<T> {
+    match method {
+        "entries" => Some(factory.create_builtin_term(BuiltinTerm::Entries)),
+        "filter" => Some(factory.create_builtin_term(BuiltinTerm::Filter)),
+        "keys" => Some(factory.create_builtin_term(BuiltinTerm::Keys)),
+        "map" => Some(factory.create_builtin_term(BuiltinTerm::Map)),
+        "push" => Some(factory.create_builtin_term(BuiltinTerm::Push)),
+        "reduce" => Some(factory.create_builtin_term(BuiltinTerm::Reduce)),
+        "slice" => Some(factory.create_builtin_term(BuiltinTerm::Slice)),
+        "unshift" => Some(factory.create_builtin_term(BuiltinTerm::PushFront)),
+        "values" => Some(factory.create_builtin_term(BuiltinTerm::Values)),
+        _ => None,
+    }
+}
+
+fn get_builtin_hashmap_field<T: Expression>(
+    method: &str,
+    factory: &impl ExpressionFactory<T>,
+) -> Option<T> {
+    match method {
+        "entries" => Some(factory.create_builtin_term(BuiltinTerm::Entries)),
+        "get" => Some(factory.create_builtin_term(BuiltinTerm::Get)),
+        "has" => Some(factory.create_builtin_term(BuiltinTerm::Contains)),
+        "keys" => Some(factory.create_builtin_term(BuiltinTerm::Keys)),
+        "set" => Some(factory.create_builtin_term(BuiltinTerm::Insert)),
+        "values" => Some(factory.create_builtin_term(BuiltinTerm::Values)),
+        _ => None,
+    }
+}
+
+fn get_builtin_hashset_field<T: Expression>(
+    method: &str,
+    factory: &impl ExpressionFactory<T>,
+) -> Option<T> {
+    match method {
+        "add" => Some(factory.create_builtin_term(BuiltinTerm::Push)),
+        "entries" => Some(factory.create_builtin_term(BuiltinTerm::Entries)),
+        "has" => Some(factory.create_builtin_term(BuiltinTerm::Contains)),
+        "values" => Some(factory.create_builtin_term(BuiltinTerm::Values)),
+        _ => None,
+    }
+}
+
+pub fn format_value<TString: StringValue>(value: &ValueTerm<TString>) -> String {
     match value {
         ValueTerm::Hash(_) | ValueTerm::Symbol(_) => format!("{}", value),
         ValueTerm::Null => String::from("null"),
         ValueTerm::Boolean(value) => format!("{}", value),
         ValueTerm::Int(value) => format!("{}", value),
         ValueTerm::Float(value) => format!("{}", value),
-        ValueTerm::String(value) => StringValue::from(value),
+        ValueTerm::String(value) => String::from(value.as_str()),
     }
+}
+
+fn match_string_value_term<'a, T: Expression>(
+    target: &'a T,
+    factory: &impl ExpressionFactory<T>,
+) -> Option<&'a T::String> {
+    factory
+        .match_value_term(target)
+        .and_then(|target| match target {
+            ValueTerm::String(value) => Some(value),
+            _ => None,
+        })
 }

@@ -1,124 +1,147 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use std::{fs, path::Path};
+use std::{
+    fs,
+    iter::{empty, once},
+    path::Path,
+};
 
 use graphql_parser::schema::Document;
 use reflex::{
-    core::{
-        ApplicationTerm, Arity, Expression, LambdaTerm, StructPrototype, StructTerm, Term,
-        VariableTerm,
-    },
-    stdlib::{
-        builtin::BuiltinTerm,
-        value::{StringValue, ValueTerm},
-    },
+    core::{Expression, ExpressionFactory, HeapAllocator},
+    lang::{create_struct, BuiltinTerm, ValueTerm},
 };
 
-pub fn graphql_loader(import_path: &str, module_path: &Path) -> Option<Result<Expression, String>> {
-    if !import_path.ends_with(".graphql") {
-        return None;
+pub fn graphql_loader<T: Expression>(
+    factory: &(impl ExpressionFactory<T> + Clone + 'static),
+    allocator: &(impl HeapAllocator<T> + Clone + 'static),
+) -> impl Fn(&str, &Path) -> Option<Result<T, String>> {
+    let factory = factory.clone();
+    let allocator = allocator.clone();
+    move |import_path: &str, module_path: &Path| {
+        if !import_path.ends_with(".graphql") {
+            return None;
+        }
+        let schema_path = module_path
+            .parent()
+            .map(|parent| parent.join(import_path))
+            .unwrap_or_else(|| Path::new(import_path).to_path_buf());
+        Some(load_graphql_module(&schema_path, &factory, &allocator))
     }
-    let schema_path = module_path
-        .parent()
-        .map(|parent| parent.join(import_path))
-        .unwrap_or_else(|| Path::new(import_path).to_path_buf());
-    Some(load_graphql_module(&schema_path))
 }
 
-fn load_graphql_module(path: &Path) -> Result<Expression, String> {
+fn load_graphql_module<T: Expression>(
+    path: &Path,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> Result<T, String> {
     let source = match fs::read_to_string(path) {
         Ok(source) => Ok(source),
         Err(error) => Err(format!("{}", error)),
     }?;
     match graphql_parser::parse_schema(&source) {
-        Ok(schema) => Ok(create_graphql_module(&schema)),
+        Ok(schema) => Ok(create_graphql_module(&schema, factory, allocator)),
         Err(error) => Err(format!("{}", error)),
     }
 }
 
-fn create_graphql_module<'a: 'src, 'src>(schema: &'a Document<&'src str>) -> Expression {
-    create_default_export(create_graphql_client_constructor(schema))
-}
-
-fn create_graphql_client_constructor<'a: 'src, 'src>(
+fn create_graphql_module<'a: 'src, 'src, T: Expression>(
     schema: &'a Document<&'src str>,
-) -> Expression {
-    Expression::new(Term::Lambda(LambdaTerm::new(
-        Arity::from(0, 1, None),
-        Expression::new(Term::Application(ApplicationTerm::new(
-            create_graphql_client_instance(schema),
-            vec![get_struct_field(
-                Expression::new(Term::Variable(VariableTerm::scoped(0))),
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> T {
+    create_default_export(
+        create_graphql_client_constructor(schema, factory, allocator),
+        factory,
+        allocator,
+    )
+}
+
+fn create_graphql_client_constructor<'a: 'src, 'src, T: Expression>(
+    schema: &'a Document<&'src str>,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> T {
+    factory.create_lambda_term(
+        1,
+        factory.create_application_term(
+            create_graphql_client_instance(schema, factory, allocator),
+            allocator.create_unit_list(get_struct_field(
+                factory.create_static_variable_term(0),
                 String::from("url"),
+                factory,
+                allocator,
+            )),
+        ),
+    )
+}
+
+fn create_graphql_client_instance<'a: 'src, 'src, T: Expression>(
+    _schema: &'a Document<&'src str>,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> T {
+    factory.create_lambda_term(
+        1,
+        create_struct(
+            vec![(
+                String::from("execute"),
+                factory.create_lambda_term(
+                    1,
+                    factory.create_application_term(
+                        factory.create_builtin_term(BuiltinTerm::Effect),
+                        allocator.create_list(vec![
+                            factory.create_value_term(ValueTerm::String(
+                                allocator.create_string(String::from("reflex::graphql::execute")),
+                            )),
+                            factory.create_static_variable_term(1),
+                            get_struct_field(
+                                factory.create_static_variable_term(0),
+                                String::from("query"),
+                                factory,
+                                allocator,
+                            ),
+                            factory.create_value_term(ValueTerm::Null),
+                            factory.create_application_term(
+                                factory.create_builtin_term(BuiltinTerm::ResolveDeep),
+                                allocator.create_list([get_struct_field(
+                                    factory.create_static_variable_term(0),
+                                    String::from("variables"),
+                                    factory,
+                                    allocator,
+                                )]),
+                            ),
+                            create_struct(empty(), factory, allocator),
+                        ]),
+                    ),
+                ),
             )],
-        ))),
-    )))
+            factory,
+            allocator,
+        ),
+    )
 }
 
-fn create_graphql_client_instance<'a: 'src, 'src>(_schema: &'a Document<&'src str>) -> Expression {
-    Expression::new(Term::Lambda(LambdaTerm::new(
-        Arity::from(0, 1, None),
-        create_struct(vec![(
-            String::from("execute"),
-            Expression::new(Term::Lambda(LambdaTerm::new(
-                Arity::from(0, 1, None),
-                Expression::new(Term::Application(ApplicationTerm::new(
-                    Expression::new(Term::Builtin(BuiltinTerm::Effect)),
-                    vec![
-                        Expression::new(Term::Value(ValueTerm::String(StringValue::from(
-                            "reflex::graphql::execute",
-                        )))),
-                        Expression::new(Term::Variable(VariableTerm::scoped(1))),
-                        get_struct_field(
-                            Expression::new(Term::Variable(VariableTerm::scoped(0))),
-                            String::from("query"),
-                        ),
-                        Expression::new(Term::Value(ValueTerm::Null)),
-                        Expression::new(Term::Application(ApplicationTerm::new(
-                            Expression::new(Term::Builtin(BuiltinTerm::ResolveDeep)),
-                            vec![get_struct_field(
-                                Expression::new(Term::Variable(VariableTerm::scoped(0))),
-                                String::from("variables"),
-                            )],
-                        ))),
-                        Expression::new(Term::Struct(StructTerm::new(
-                            Some(StructPrototype::new(Vec::new())),
-                            Vec::new(),
-                        ))),
-                    ],
-                ))),
-            ))),
-        )]),
-    )))
+fn create_default_export<T: Expression>(
+    value: T,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> T {
+    create_struct(once((String::from("default"), value)), factory, allocator)
 }
 
-fn create_default_export(value: Expression) -> Expression {
-    Expression::new(Term::Struct(StructTerm::new(
-        Some(StructPrototype::new(vec![ValueTerm::String(
-            StringValue::from("default"),
-        )])),
-        vec![value],
-    )))
-}
-
-fn get_struct_field(target: Expression, field: String) -> Expression {
-    Expression::new(Term::Application(ApplicationTerm::new(
-        Expression::new(Term::Builtin(BuiltinTerm::Get)),
-        vec![
+fn get_struct_field<T: Expression>(
+    target: T,
+    field: String,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> T {
+    factory.create_application_term(
+        factory.create_builtin_term(BuiltinTerm::Get),
+        allocator.create_pair(
             target,
-            Expression::new(Term::Value(ValueTerm::String(StringValue::from(field)))),
-        ],
-    )))
-}
-
-fn create_struct(fields: impl IntoIterator<Item = (String, Expression)>) -> Expression {
-    let (keys, values) = fields
-        .into_iter()
-        .map(|(key, value)| (ValueTerm::String(key), value))
-        .unzip();
-    Expression::new(Term::Struct(StructTerm::new(
-        Some(StructPrototype::new(keys)),
-        values,
-    )))
+            factory.create_value_term(ValueTerm::String(allocator.create_string(field))),
+        ),
+    )
 }

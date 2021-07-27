@@ -13,8 +13,12 @@ use hyper::{
     Body, Method, Request, Response, StatusCode,
 };
 
-use reflex::core::Expression;
-use reflex_runtime::Runtime;
+use reflex::{
+    compiler::{Compile, CompilerOptions},
+    core::{Applicable, Reducible, Rewritable, StringValue},
+    interpreter::Execute,
+};
+use reflex_runtime::{AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator, Runtime};
 
 pub mod cli;
 
@@ -24,30 +28,64 @@ mod graphql {
     pub(crate) mod websocket;
 }
 
-pub fn graphql_service(
-    store: Arc<Runtime>,
-    root: Expression,
+pub fn graphql_service<
+    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T> + Execute<T>,
+>(
+    store: Arc<Runtime<T>>,
+    factory: &impl AsyncExpressionFactory<T>,
+    allocator: &impl AsyncHeapAllocator<T>,
+    compiler_options: CompilerOptions,
 ) -> impl Service<
     Request<Body>,
     Response = Response<Body>,
     Error = Infallible,
     Future = impl Future<Output = Result<Response<Body>, Infallible>> + Send + Sync,
-> {
-    service_fn(move |req| {
-        let store = Arc::clone(&store);
-        let root = Expression::clone(&root);
-        async move {
-            match req.method() {
-                &Method::GET => {
-                    if req.headers().contains_key(header::UPGRADE) {
-                        handle_graphql_upgrade_request(req, store, root).await
-                    } else {
-                        handle_playground_http_request(req).await
+>
+where
+    T::String: StringValue + Send + Sync,
+{
+    service_fn({
+        let factory = factory.clone();
+        let allocator = allocator.clone();
+        move |req| {
+            let store = Arc::clone(&store);
+            let factory = factory.clone();
+            let allocator = allocator.clone();
+            let root = factory.create_application_term(
+                factory.create_static_variable_term(0),
+                allocator.create_empty_list(),
+            );
+            async move {
+                match req.method() {
+                    &Method::POST => {
+                        handle_graphql_http_request(
+                            req,
+                            store,
+                            &root,
+                            &factory,
+                            &allocator,
+                            compiler_options,
+                        )
+                        .await
                     }
+                    &Method::GET => {
+                        if req.headers().contains_key(header::UPGRADE) {
+                            handle_graphql_upgrade_request(
+                                req,
+                                store,
+                                &root,
+                                &factory,
+                                &allocator,
+                                compiler_options,
+                            )
+                            .await
+                        } else {
+                            handle_playground_http_request(req).await
+                        }
+                    }
+                    &Method::OPTIONS => handle_cors_preflight_request(req),
+                    _ => Ok(method_not_allowed()),
                 }
-                &Method::OPTIONS => handle_cors_preflight_request(req),
-                &Method::POST => handle_graphql_http_request(req, store, root).await,
-                _ => Ok(method_not_allowed()),
             }
         }
     })
@@ -61,13 +99,23 @@ fn handle_cors_preflight_request(req: Request<Body>) -> Result<Response<Body>, I
     ))
 }
 
-async fn handle_graphql_upgrade_request(
+async fn handle_graphql_upgrade_request<
+    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T> + Execute<T>,
+>(
     req: Request<Body>,
-    store: Arc<Runtime>,
-    root: Expression,
-) -> Result<Response<Body>, Infallible> {
+    store: Arc<Runtime<T>>,
+    root: &T,
+    factory: &impl AsyncExpressionFactory<T>,
+    allocator: &impl AsyncHeapAllocator<T>,
+    compiler_options: CompilerOptions,
+) -> Result<Response<Body>, Infallible>
+where
+    T::String: StringValue + Send + Sync,
+{
     Ok(if hyper_tungstenite::is_upgrade_request(&req) {
-        match handle_graphql_ws_request(req, store, root).await {
+        match handle_graphql_ws_request(req, store, root, factory, allocator, compiler_options)
+            .await
+        {
             Ok(response) => response,
             Err(_) => create_invalid_websocket_upgrade_response(),
         }

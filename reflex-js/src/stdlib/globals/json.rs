@@ -5,178 +5,112 @@ use std::any::TypeId;
 
 use reflex::{
     core::{
-        ApplicationTerm, Arity, Expression, LambdaTerm, NativeFunction, Signal, SignalTerm,
-        StructTerm, Term, VariableTerm,
+        Arity, Expression, ExpressionFactory, ExpressionList, HeapAllocator, NativeAllocator,
+        StringValue,
     },
     hash::{hash_object, HashId},
-    stdlib::{
-        builtin::BuiltinTerm,
-        collection::{vector::VectorTerm, CollectionTerm},
-        signal::SignalType,
-        value::{StringValue, ValueTerm},
-    },
+    lang::{create_struct, BuiltinTerm, NativeFunction, ValueTerm},
 };
-use reflex_json::parse;
 
-use crate::stdlib::globals::create_struct;
-
-pub fn global_json() -> Expression {
-    create_struct(vec![
-        (String::from("parse"), global_json_parse()),
-        (String::from("stringify"), global_json_stringify()),
-    ])
+pub fn global_json<T: Expression>(
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> T {
+    create_struct(
+        vec![
+            (
+                String::from("parse"),
+                factory.create_native_function_term(json_parse()),
+            ),
+            (
+                String::from("stringify"),
+                factory.create_lambda_term(
+                    1,
+                    factory.create_application_term(
+                        factory.create_native_function_term(json_stringify()),
+                        allocator.create_unit_list(factory.create_application_term(
+                            factory.create_builtin_term(BuiltinTerm::ResolveDeep),
+                            allocator.create_unit_list(factory.create_static_variable_term(0)),
+                        )),
+                    ),
+                ),
+            ),
+        ],
+        factory,
+        allocator,
+    )
 }
 
-pub fn global_json_parse() -> Expression {
-    Expression::new(Term::Native(NativeFunction::new(
-        JsonParse::hash(),
+pub fn json_parse<T: Expression>() -> NativeFunction<T> {
+    NativeFunction::new(
+        JsonParse::uid(),
+        JsonParse::name(),
         JsonParse::arity(),
         JsonParse::apply,
-    )))
+    )
 }
 struct JsonParse {}
 impl JsonParse {
-    fn hash() -> HashId {
+    fn uid() -> HashId {
         hash_object(&TypeId::of::<Self>())
+    }
+    fn name() -> Option<&'static str> {
+        Some("JsonParse")
     }
     fn arity() -> Arity {
         Arity::from(1, 0, None)
     }
-    fn apply(args: Vec<Expression>) -> Expression {
+    fn apply<T: Expression>(
+        args: ExpressionList<T>,
+        factory: &dyn ExpressionFactory<T>,
+        allocator: &dyn NativeAllocator<T>,
+    ) -> Result<T, String> {
         let mut args = args.into_iter();
         let source = args.next().unwrap();
-        let result = match source.value() {
-            Term::Value(ValueTerm::String(value)) => parse(value),
+        match factory.match_value_term(&source) {
+            Some(ValueTerm::String(source)) => {
+                reflex_json::parse(source.as_str(), &factory, &allocator)
+                    .map_err(|error| format!("JSON deserialization failed: {}", error))
+            }
             _ => Err(format!(
                 "Invalid JSON.parse() call: expected string argument, received {}",
                 source
             )),
-        };
-        match result {
-            Ok(result) => result,
-            Err(error) => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
-                SignalType::Error,
-                vec![Expression::new(Term::Value(ValueTerm::String(error)))],
-            )))),
         }
     }
 }
 
-pub fn global_json_stringify() -> Expression {
-    Expression::new(Term::Lambda(LambdaTerm::new(
-        Arity::from(0, 1, None),
-        Expression::new(Term::Application(ApplicationTerm::new(
-            Expression::new(Term::Native(NativeFunction::new(
-                JsonStringify::hash(),
-                JsonStringify::arity(),
-                JsonStringify::apply,
-            ))),
-            vec![Expression::new(Term::Application(ApplicationTerm::new(
-                Expression::new(Term::Builtin(BuiltinTerm::ResolveDeep)),
-                vec![Expression::new(Term::Variable(VariableTerm::scoped(0)))],
-            )))],
-        ))),
-    )))
+pub fn json_stringify<T: Expression>() -> NativeFunction<T> {
+    NativeFunction::new(
+        JsonStringify::uid(),
+        JsonStringify::name(),
+        JsonStringify::arity(),
+        JsonStringify::apply,
+    )
 }
 struct JsonStringify {}
 impl JsonStringify {
-    fn hash() -> HashId {
+    fn uid() -> HashId {
         hash_object(&TypeId::of::<Self>())
+    }
+    fn name() -> Option<&'static str> {
+        Some("JsonStringify")
     }
     fn arity() -> Arity {
         Arity::from(1, 0, None)
     }
-    fn apply(args: Vec<Expression>) -> Expression {
+    fn apply<T: Expression>(
+        args: ExpressionList<T>,
+        factory: &dyn ExpressionFactory<T>,
+        allocator: &dyn NativeAllocator<T>,
+    ) -> Result<T, String> {
         let mut args = args.into_iter();
         let source = args.next().unwrap();
-        match json_stringify(source.value()) {
+        match reflex_json::stringify(&source) {
             Ok(result) => {
-                Expression::new(Term::Value(ValueTerm::String(StringValue::from(result))))
+                Ok(factory.create_value_term(ValueTerm::String(allocator.create_string(result))))
             }
-            Err(error) => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
-                SignalType::Error,
-                vec![Expression::new(Term::Value(ValueTerm::String(format!(
-                    "Invalid JSON.stringify() call: unable to serialize {}",
-                    error
-                ))))],
-            )))),
+            Err(error) => Err(format!("JSON serialization failed: {}", error)),
         }
     }
-}
-
-pub fn json_stringify(term: &Term) -> Result<String, &Term> {
-    match term {
-        Term::Value(value) => stringify_value_term(term, value),
-        Term::Struct(value) => stringify_struct_term(term, value),
-        Term::Collection(value) => match value {
-            CollectionTerm::Vector(value) => stringify_vector_term(term, value),
-            _ => Err(term),
-        },
-        _ => Err(term),
-    }
-}
-
-fn stringify_value_term<'a>(input: &'a Term, value: &'a ValueTerm) -> Result<String, &'a Term> {
-    match value {
-        ValueTerm::Hash(_) | ValueTerm::Symbol(_) => Err(input),
-        ValueTerm::Null => Ok(String::from("null")),
-        ValueTerm::Boolean(value) => Ok(String::from(if *value { "true" } else { "false" })),
-        ValueTerm::Int(value) => Ok(format!("{}", value)),
-        ValueTerm::Float(value) => Ok(format!("{}", value)),
-        ValueTerm::String(value) => Ok(json_stringify_string(value)),
-    }
-}
-
-pub fn json_stringify_string(value: &str) -> String {
-    let mut result = String::with_capacity(value.len() + 2);
-    result.push('"');
-    for current in value.chars() {
-        let escape_char = match current {
-            '\\' | '"' | '\'' => Some(current),
-            '\n' | '\u{2028}' | '\u{2029}' => Some('n'),
-            '\r' => Some('r'),
-            _ => None,
-        };
-        match escape_char {
-            Some(escaped) => {
-                result.push('\\');
-                result.push(escaped);
-            }
-            None => {
-                result.push(current);
-            }
-        }
-    }
-    result.push('"');
-    result
-}
-
-fn stringify_struct_term<'a>(input: &'a Term, value: &'a StructTerm) -> Result<String, &'a Term> {
-    match value.prototype() {
-        None => Err(input),
-        Some(prototype) => {
-            let fields = prototype
-                .keys()
-                .iter()
-                .zip(value.fields())
-                .map(|(key, value)| match key {
-                    ValueTerm::String(key) => {
-                        let value = json_stringify(value.value())?;
-                        Ok(format!("{}:{}", json_stringify_string(&key), value))
-                    }
-                    _ => Err(input),
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-            Ok(format!("{{{}}}", fields.join(",")))
-        }
-    }
-}
-
-fn stringify_vector_term<'a>(_input: &'a Term, value: &'a VectorTerm) -> Result<String, &'a Term> {
-    let items = value
-        .items()
-        .iter()
-        .map(|item| json_stringify(item.value()))
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok(format!("[{}]", items.join(",")))
 }

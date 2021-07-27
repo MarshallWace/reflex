@@ -4,93 +4,65 @@
 use std::any::TypeId;
 
 use reflex::{
-    core::{ApplicationTerm, Arity, Expression, NativeFunction, Signal, SignalTerm, Term},
+    core::{Arity, Expression, ExpressionFactory, ExpressionList, NativeAllocator, VarArgs},
     hash::{hash_object, HashId},
-    stdlib::{
-        builtin::BuiltinTerm,
-        collection::{hashset::HashSetTerm, CollectionTerm},
-        signal::SignalType,
-        value::{StringValue, ValueTerm},
-    },
+    lang::{deduplicate_hashset_entries, BuiltinTerm, NativeFunction},
 };
 
-pub fn global_set() -> Expression {
-    Expression::new(Term::Native(NativeFunction::new(
-        SetConstructor::hash(),
+pub fn global_set<T: Expression>(factory: &impl ExpressionFactory<T>) -> T {
+    factory.create_native_function_term(set_constructor())
+}
+
+pub fn set_constructor<T: Expression>() -> NativeFunction<T> {
+    NativeFunction::new(
+        SetConstructor::uid(),
+        SetConstructor::name(),
         SetConstructor::arity(),
         SetConstructor::apply,
-    )))
+    )
 }
 struct SetConstructor {}
 impl SetConstructor {
-    fn hash() -> HashId {
+    fn uid() -> HashId {
         hash_object(&TypeId::of::<Self>())
     }
-    fn arity() -> Arity {
-        Arity::from(1, 0, None)
+    fn name() -> Option<&'static str> {
+        Some("SetConstructor")
     }
-    fn apply(args: Vec<Expression>) -> Expression {
+    fn arity() -> Arity {
+        Arity::from(0, 0, Some(VarArgs::Eager))
+    }
+    fn apply<T: Expression>(
+        args: ExpressionList<T>,
+        factory: &dyn ExpressionFactory<T>,
+        allocator: &dyn NativeAllocator<T>,
+    ) -> Result<T, String> {
         let mut args = args.into_iter();
-        let values = args.next().unwrap();
-        let values = match values.value() {
-            Term::Collection(CollectionTerm::Vector(values)) => Ok(values),
-            _ => Err(format!("Invalid Set constructor: {}", values)),
-        };
-        match values {
-            Ok(values) => {
-                let values = values.iterate().into_iter().collect::<Vec<_>>();
+        if args.len() == 0 {
+            Ok(factory.create_hashset_term(allocator.create_empty_list()))
+        } else {
+            let values = args.next().unwrap();
+            if let Some(values) = factory.match_vector_term(&values) {
+                let values = values.items().iter().cloned().collect::<Vec<_>>();
                 let has_dynamic_values = values.iter().any(|value| !value.is_static());
-                match has_dynamic_values {
-                    false => HashSetTerm::collect(values),
-                    true => Expression::new(Term::Application(ApplicationTerm::new(
-                        dynamic_set_constructor(),
-                        vec![Expression::new(Term::Application(ApplicationTerm::new(
-                            Expression::new(Term::Builtin(BuiltinTerm::CollectTuple)),
-                            values,
-                        )))],
-                    ))),
+                if has_dynamic_values {
+                    Ok(factory.create_application_term(
+                        factory.create_builtin_term(BuiltinTerm::CollectHashSet),
+                        allocator.create_list(values),
+                    ))
+                } else {
+                    let values = match deduplicate_hashset_entries(&values) {
+                        Some(values) => values,
+                        _ => values,
+                    };
+                    Ok(factory.create_hashset_term(allocator.create_list(values)))
                 }
+            } else {
+                Err(format!(
+                    "Invalid Set constructor: Expected array of values, received {}",
+                    values,
+                ))
             }
-            Err(error) => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
-                SignalType::Error,
-                vec![Expression::new(Term::Value(ValueTerm::String(error)))],
-            )))),
-        }
-    }
-}
-
-fn dynamic_set_constructor() -> Expression {
-    Expression::new(Term::Native(NativeFunction::new(
-        DynamicSetConstructor::hash(),
-        DynamicSetConstructor::arity(),
-        DynamicSetConstructor::apply,
-    )))
-}
-struct DynamicSetConstructor {}
-impl DynamicSetConstructor {
-    fn hash() -> HashId {
-        hash_object(&TypeId::of::<Self>())
-    }
-    fn arity() -> Arity {
-        Arity::from(1, 0, None)
-    }
-    fn apply(args: Vec<Expression>) -> Expression {
-        let mut args = args.into_iter();
-        let values = args.next().unwrap();
-        let values = match values.value() {
-            Term::Struct(values) if values.prototype().is_none() => Some(values.fields()),
-            _ => None,
-        };
-        match values {
-            Some(values) => Expression::new(Term::Collection(CollectionTerm::HashSet(
-                HashSetTerm::new(values.iter().map(Expression::clone)),
-            ))),
-            _ => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
-                SignalType::Error,
-                vec![Expression::new(Term::Value(ValueTerm::String(
-                    StringValue::from("Invalid Set constructor values"),
-                )))],
-            )))),
         }
     }
 }
@@ -99,57 +71,78 @@ impl DynamicSetConstructor {
 mod tests {
     use crate::{parse, stdlib::builtin_globals, Env};
     use reflex::{
+        allocator::DefaultAllocator,
         cache::SubstitutionCache,
-        core::{DependencyList, DynamicState, EvaluationResult, Expression, Term},
-        stdlib::{
-            collection::{hashset::HashSetTerm, vector::VectorTerm, CollectionTerm},
-            value::{StringValue, ValueTerm},
+        core::{
+            evaluate, DependencyList, DynamicState, EvaluationResult, ExpressionFactory,
+            HeapAllocator,
         },
+        lang::{TermFactory, ValueTerm},
     };
 
     #[test]
     fn set_constructor() {
-        let env = Env::new().with_globals(builtin_globals());
+        let factory = TermFactory::default();
+        let allocator = DefaultAllocator::default();
+        let env = Env::new().with_globals(builtin_globals(&factory, &allocator));
         let mut cache = SubstitutionCache::new();
         let state = DynamicState::new();
-        let expression = parse("new Set([])", &env).unwrap();
-        let result = expression.evaluate(&state, &mut cache);
+        let expression = parse("new Set([])", &env, &factory, &allocator).unwrap();
+        let result = evaluate(&expression, &state, &factory, &allocator, &mut cache);
         assert_eq!(
             result,
             EvaluationResult::new(
-                Expression::new(Term::Collection(CollectionTerm::HashSet(HashSetTerm::new(
-                    vec![],
-                )))),
+                factory.create_hashset_term(allocator.create_empty_list()),
                 DependencyList::empty(),
             )
         );
-        let expression = parse("new Set(['one', 'two', 'three'])", &env).unwrap();
-        let result = expression.evaluate(&state, &mut cache);
+        let expression = parse(
+            "new Set(['one', 'two', 'three'])",
+            &env,
+            &factory,
+            &allocator,
+        )
+        .unwrap();
+        let result = evaluate(&expression, &state, &factory, &allocator, &mut cache);
         assert_eq!(
             result,
             EvaluationResult::new(
-                Expression::new(Term::Collection(CollectionTerm::HashSet(HashSetTerm::new(
-                    vec![
-                        Expression::new(Term::Value(ValueTerm::String(StringValue::from("one")))),
-                        Expression::new(Term::Value(ValueTerm::String(StringValue::from("two")))),
-                        Expression::new(Term::Value(ValueTerm::String(StringValue::from("three")))),
-                    ],
-                )))),
+                factory.create_hashset_term(allocator.create_list(vec![
+                    factory.create_value_term(ValueTerm::String(
+                        allocator.create_string(String::from("one"))
+                    )),
+                    factory.create_value_term(ValueTerm::String(
+                        allocator.create_string(String::from("two"))
+                    )),
+                    factory.create_value_term(ValueTerm::String(
+                        allocator.create_string(String::from("three"))
+                    )),
+                ])),
                 DependencyList::empty(),
             )
         );
-        let expression = parse("new Set(['one', 'two', 'three', 'two'])", &env).unwrap();
-        let result = expression.evaluate(&state, &mut cache);
+        let expression = parse(
+            "new Set(['one', 'two', 'three', 'two'])",
+            &env,
+            &factory,
+            &allocator,
+        )
+        .unwrap();
+        let result = evaluate(&expression, &state, &factory, &allocator, &mut cache);
         assert_eq!(
             result,
             EvaluationResult::new(
-                Expression::new(Term::Collection(CollectionTerm::HashSet(HashSetTerm::new(
-                    vec![
-                        Expression::new(Term::Value(ValueTerm::String(StringValue::from("one")))),
-                        Expression::new(Term::Value(ValueTerm::String(StringValue::from("two")))),
-                        Expression::new(Term::Value(ValueTerm::String(StringValue::from("three")))),
-                    ],
-                )))),
+                factory.create_hashset_term(allocator.create_list(vec![
+                    factory.create_value_term(ValueTerm::String(
+                        allocator.create_string(String::from("one"))
+                    )),
+                    factory.create_value_term(ValueTerm::String(
+                        allocator.create_string(String::from("two"))
+                    )),
+                    factory.create_value_term(ValueTerm::String(
+                        allocator.create_string(String::from("three"))
+                    )),
+                ])),
                 DependencyList::empty(),
             )
         );
@@ -157,47 +150,165 @@ mod tests {
 
     #[test]
     fn set_constructor_values() {
-        let env = Env::new().with_globals(builtin_globals());
+        let factory = TermFactory::default();
+        let allocator = DefaultAllocator::default();
+        let env = Env::new().with_globals(builtin_globals(&factory, &allocator));
         let mut cache = SubstitutionCache::new();
         let state = DynamicState::new();
-        let expression = parse("new Set([]).values()", &env).unwrap();
-        let result = expression.evaluate(&state, &mut cache);
+        let expression = parse("new Set([]).values()", &env, &factory, &allocator).unwrap();
+        let result = evaluate(&expression, &state, &factory, &allocator, &mut cache);
         assert_eq!(
             result,
             EvaluationResult::new(
-                Expression::new(Term::Collection(CollectionTerm::Vector(VectorTerm::new(
-                    vec![],
-                )))),
+                factory.create_vector_term(allocator.create_empty_list()),
                 DependencyList::empty(),
             )
         );
-        let expression = parse("new Set(['one', 'two', 'three']).values()", &env).unwrap();
-        let result = expression.evaluate(&state, &mut cache);
+        let expression = parse(
+            "new Set(['one', 'two', 'three']).values()",
+            &env,
+            &factory,
+            &allocator,
+        )
+        .unwrap();
+        let result = evaluate(&expression, &state, &factory, &allocator, &mut cache);
         assert_eq!(
             result,
             EvaluationResult::new(
-                Expression::new(Term::Collection(CollectionTerm::Vector(VectorTerm::new(
-                    vec![
-                        Expression::new(Term::Value(ValueTerm::String(StringValue::from("one")))),
-                        Expression::new(Term::Value(ValueTerm::String(StringValue::from("two")))),
-                        Expression::new(Term::Value(ValueTerm::String(StringValue::from("three")))),
-                    ],
-                )))),
+                factory.create_vector_term(allocator.create_list(vec![
+                    factory.create_value_term(ValueTerm::String(
+                        allocator.create_string(String::from("one"))
+                    )),
+                    factory.create_value_term(ValueTerm::String(
+                        allocator.create_string(String::from("two"))
+                    )),
+                    factory.create_value_term(ValueTerm::String(
+                        allocator.create_string(String::from("three"))
+                    )),
+                ])),
                 DependencyList::empty(),
             )
         );
-        let expression = parse("new Set(['one', 'two', 'three', 'two']).values()", &env).unwrap();
-        let result = expression.evaluate(&state, &mut cache);
+        let expression = parse(
+            "new Set(['one', 'two', 'three', 'two']).values()",
+            &env,
+            &factory,
+            &allocator,
+        )
+        .unwrap();
+        let result = evaluate(&expression, &state, &factory, &allocator, &mut cache);
         assert_eq!(
             result,
             EvaluationResult::new(
-                Expression::new(Term::Collection(CollectionTerm::Vector(VectorTerm::new(
-                    vec![
-                        Expression::new(Term::Value(ValueTerm::String(StringValue::from("one")))),
-                        Expression::new(Term::Value(ValueTerm::String(StringValue::from("two")))),
-                        Expression::new(Term::Value(ValueTerm::String(StringValue::from("three")))),
-                    ],
-                )))),
+                factory.create_vector_term(allocator.create_list(vec![
+                    factory.create_value_term(ValueTerm::String(
+                        allocator.create_string(String::from("one"))
+                    )),
+                    factory.create_value_term(ValueTerm::String(
+                        allocator.create_string(String::from("two"))
+                    )),
+                    factory.create_value_term(ValueTerm::String(
+                        allocator.create_string(String::from("three"))
+                    )),
+                ])),
+                DependencyList::empty(),
+            )
+        );
+    }
+
+    #[test]
+    fn set_constructor_entries() {
+        let factory = TermFactory::default();
+        let allocator = DefaultAllocator::default();
+        let env = Env::new().with_globals(builtin_globals(&factory, &allocator));
+        let mut cache = SubstitutionCache::new();
+        let state = DynamicState::new();
+        let expression = parse("new Set([]).entries()", &env, &factory, &allocator).unwrap();
+        let result = evaluate(&expression, &state, &factory, &allocator, &mut cache);
+        assert_eq!(
+            result,
+            EvaluationResult::new(
+                factory.create_vector_term(allocator.create_empty_list()),
+                DependencyList::empty(),
+            )
+        );
+        let expression = parse(
+            "new Set(['one', 'two', 'three']).entries()",
+            &env,
+            &factory,
+            &allocator,
+        )
+        .unwrap();
+        let result = evaluate(&expression, &state, &factory, &allocator, &mut cache);
+        assert_eq!(
+            result,
+            EvaluationResult::new(
+                factory.create_vector_term(allocator.create_list(vec![
+                    factory.create_tuple_term(allocator.create_pair(
+                        factory.create_value_term(ValueTerm::String(
+                            allocator.create_string(String::from("one"))
+                        )),
+                        factory.create_value_term(ValueTerm::String(
+                            allocator.create_string(String::from("one"))
+                        )),
+                    )),
+                    factory.create_tuple_term(allocator.create_pair(
+                        factory.create_value_term(ValueTerm::String(
+                            allocator.create_string(String::from("two"))
+                        )),
+                        factory.create_value_term(ValueTerm::String(
+                            allocator.create_string(String::from("two"))
+                        )),
+                    )),
+                    factory.create_tuple_term(allocator.create_pair(
+                        factory.create_value_term(ValueTerm::String(
+                            allocator.create_string(String::from("three"))
+                        )),
+                        factory.create_value_term(ValueTerm::String(
+                            allocator.create_string(String::from("three"))
+                        )),
+                    )),
+                ])),
+                DependencyList::empty(),
+            )
+        );
+        let expression = parse(
+            "new Set(['one', 'two', 'three', 'two']).entries()",
+            &env,
+            &factory,
+            &allocator,
+        )
+        .unwrap();
+        let result = evaluate(&expression, &state, &factory, &allocator, &mut cache);
+        assert_eq!(
+            result,
+            EvaluationResult::new(
+                factory.create_vector_term(allocator.create_list(vec![
+                    factory.create_tuple_term(allocator.create_pair(
+                        factory.create_value_term(ValueTerm::String(
+                            allocator.create_string(String::from("one"))
+                        )),
+                        factory.create_value_term(ValueTerm::String(
+                            allocator.create_string(String::from("one"))
+                        )),
+                    )),
+                    factory.create_tuple_term(allocator.create_pair(
+                        factory.create_value_term(ValueTerm::String(
+                            allocator.create_string(String::from("two"))
+                        )),
+                        factory.create_value_term(ValueTerm::String(
+                            allocator.create_string(String::from("two"))
+                        )),
+                    )),
+                    factory.create_tuple_term(allocator.create_pair(
+                        factory.create_value_term(ValueTerm::String(
+                            allocator.create_string(String::from("three"))
+                        )),
+                        factory.create_value_term(ValueTerm::String(
+                            allocator.create_string(String::from("three"))
+                        )),
+                    )),
+                ])),
                 DependencyList::empty(),
             )
         );

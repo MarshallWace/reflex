@@ -1,36 +1,49 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use std::{
-    collections::{BTreeSet, HashMap},
-    num::NonZeroUsize,
-};
+use std::{collections::{BTreeSet, HashMap}, iter::once, num::NonZeroUsize, time::Instant};
 
 use crate::{StateUpdate, StateUpdateType};
 use itertools::{Either, Itertools};
-use reflex::{
-    cache::EvaluationCache,
-    core::{DependencyList, DynamicState, Expression, Signal, StateToken, Term},
-    hash::{hash_object, HashId},
-};
+use reflex::{compiler::{InstructionPointer, NativeFunctionRegistry, Program}, core::{
+        Applicable, DependencyList, DynamicState, EvaluationResult, Expression, ExpressionFactory,
+        HeapAllocator, Reducible, Rewritable, Signal, SignalType, StateToken,
+    }, hash::{hash_object, HashId}, interpreter::{execute, Execute, InterpreterCache, InterpreterOptions}, lang::ValueTerm};
 
 pub type SubscriptionToken = usize;
 
-type SignalCache = HashMap<StateToken, Result<Expression, HandlerError>>;
+#[allow(type_alias_bounds)]
+type SignalCache<T: Expression> = HashMap<StateToken, Result<T, HandlerError>>;
 type HandlerError = Option<String>;
 
-pub struct Store<T: EvaluationCache> {
-    state: DynamicState,
-    cache: T,
-    signal_cache: SignalCache,
-    subscriptions: Vec<Subscription>,
+pub struct Store<
+    T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Execute<T>,
+    TCache: InterpreterCache<T>,
+> {
+    state: DynamicState<T>,
+    plugins: NativeFunctionRegistry<T>,
+    interpreter_options: InterpreterOptions,
+    cache: TCache,
+    signal_cache: SignalCache<T>,
+    subscriptions: Vec<Subscription<T>>,
     subscription_counter: usize,
     pending_updates: Option<UpdateBatch>,
 }
-impl<T: EvaluationCache> Store<T> {
-    pub fn new(cache: T, state: Option<DynamicState>) -> Self {
+impl<
+        T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Execute<T>,
+        TCache: InterpreterCache<T>,
+    > Store<T, TCache>
+{
+    pub fn new(
+        cache: TCache,
+        state: Option<DynamicState<T>>,
+        plugins: NativeFunctionRegistry<T>,
+        interpreter_options: InterpreterOptions,
+    ) -> Self {
         Self {
             state: state.unwrap_or_else(|| DynamicState::new()),
+            plugins,
+            interpreter_options,
             cache,
             signal_cache: SignalCache::new(),
             subscriptions: Vec::new(),
@@ -38,10 +51,10 @@ impl<T: EvaluationCache> Store<T> {
             pending_updates: None,
         }
     }
-    pub fn subscribe(&mut self, expression: Expression) -> SubscriptionToken {
+    pub fn subscribe(&mut self, target: Program, entry_point: InstructionPointer) -> SubscriptionToken {
         self.subscription_counter += 1;
         let subscription_id = self.subscription_counter;
-        let subscription = Subscription::new(subscription_id, expression);
+        let subscription = Subscription::new(subscription_id, target, entry_point);
         self.subscriptions.push(subscription);
         subscription_id
     }
@@ -55,7 +68,7 @@ impl<T: EvaluationCache> Store<T> {
             })
             .unwrap_or(false)
     }
-    pub fn update(&mut self, updates: impl IntoIterator<Item = StateUpdate>) {
+    pub fn update(&mut self, updates: impl IntoIterator<Item = StateUpdate<T>>) {
         let updates = updates
             .into_iter()
             .filter_map(|update| {
@@ -87,9 +100,11 @@ impl<T: EvaluationCache> Store<T> {
     pub fn flush<THandler>(
         &mut self,
         signal_handler: THandler,
-    ) -> impl IntoIterator<Item = (SubscriptionToken, Result<Expression, Vec<String>>)> + '_
+        factory: &impl ExpressionFactory<T>,
+        allocator: &impl HeapAllocator<T>,
+    ) -> impl IntoIterator<Item = (SubscriptionToken, Result<T, Vec<String>>)> + '_
     where
-        THandler: Fn(&[&Signal]) -> Vec<Result<Expression, HandlerError>> + Sync + Send,
+        THandler: Fn(&[&Signal<T>]) -> Vec<Result<T, HandlerError>>,
     {
         let tasks = self
             .subscriptions
@@ -97,10 +112,16 @@ impl<T: EvaluationCache> Store<T> {
             .map(FlushTask::new)
             .collect::<Vec<_>>();
         let updates = self.pending_updates.take();
+        println!("[Store] Flushing...");
+        let start_time = Instant::now();
         let results = flush_recursive(
             tasks,
             signal_handler,
             &mut self.state,
+            factory,
+            allocator,
+            &self.plugins,
+            &self.interpreter_options,
             &mut self.cache,
             &mut self.signal_cache,
             match updates {
@@ -108,6 +129,7 @@ impl<T: EvaluationCache> Store<T> {
                 None => Vec::new(),
             },
         );
+        println!("[Store] Flush completed in {:?}", start_time.elapsed());
         self.subscriptions
             .iter()
             .map(|subscription| subscription.id)
@@ -121,25 +143,31 @@ impl<T: EvaluationCache> Store<T> {
 
 type UpdateSet = BTreeSet<StateToken>;
 
-struct Subscription {
+struct Subscription<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Execute<T>> {
     id: SubscriptionToken,
-    expression: Expression,
-    result: Option<(HashId, Expression, DependencyList)>,
+    target: Program,
+    entry_point: InstructionPointer,
+    result: Option<(HashId, T, DependencyList)>,
 }
-impl Subscription {
-    fn new(id: SubscriptionToken, expression: Expression) -> Self {
+impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Execute<T>> Subscription<T> {
+    fn new(id: SubscriptionToken, target: Program, entry_point: InstructionPointer) -> Self {
         Self {
             id,
-            expression,
+            target,
+            entry_point,
             result: None,
         }
     }
     fn execute(
         &mut self,
-        state: &DynamicState,
+        state: &DynamicState<T>,
         updates: Option<&UpdateSet>,
-        cache: &mut impl EvaluationCache,
-    ) -> Option<Expression> {
+        factory: &impl ExpressionFactory<T>,
+        allocator: &impl HeapAllocator<T>,
+        plugins: &NativeFunctionRegistry<T>,
+        interpreter_options: &InterpreterOptions,
+        cache: &mut impl InterpreterCache<T>,
+    ) -> Option<T> {
         let state_hash = hash_object(&state);
         let is_unchanged = match updates {
             Some(updates) => match &self.result {
@@ -153,15 +181,26 @@ impl Subscription {
         if is_unchanged {
             return None;
         }
-        let result = self.expression.evaluate(state, cache);
+        let result = execute(
+            &self.target,
+            self.entry_point,
+            state,
+            factory,
+            allocator,
+            plugins,
+            interpreter_options,
+            cache,
+        )
+        .unwrap_or_else(|error| {
+            EvaluationResult::new(
+                create_error_signal(error, factory, allocator),
+                DependencyList::empty(),
+            )
+        });
         let (result, dependencies) = result.into_parts();
         let updated_result = match &self.result {
-            Some((_, previous_result, _))
-                if (hash_object(&result) == hash_object(previous_result)) =>
-            {
-                None
-            }
-            _ => Some(Expression::clone(&result)),
+            Some((_, previous_result, _)) if (result.id() == previous_result.id()) => None,
+            _ => Some(result.clone()),
         };
         self.result = Some((state_hash, result, dependencies));
         updated_result
@@ -182,13 +221,15 @@ fn combine_updates<'a>(updates: impl IntoIterator<Item = &'a UpdateSet>) -> Opti
     }
 }
 
-struct FlushTask<'a> {
-    subscription: &'a mut Subscription,
-    result: Option<Result<Expression, Vec<String>>>,
+struct FlushTask<'a, T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Execute<T>> {
+    subscription: &'a mut Subscription<T>,
+    result: Option<Result<T, Vec<String>>>,
     latest_update_batch: Option<NonZeroUsize>,
 }
-impl<'a> FlushTask<'a> {
-    fn new(subscription: &'a mut Subscription) -> Self {
+impl<'a, T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Execute<T>>
+    FlushTask<'a, T>
+{
+    fn new(subscription: &'a mut Subscription<T>) -> Self {
         Self {
             subscription,
             result: None,
@@ -241,16 +282,24 @@ impl UpdateBatch {
     }
 }
 
-fn flush_recursive<'a, THandler>(
-    mut tasks: Vec<FlushTask<'a>>,
+fn flush_recursive<
+    'a,
+    T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Execute<T>,
+    THandler,
+>(
+    mut tasks: Vec<FlushTask<'a, T>>,
     signal_handler: THandler,
-    state: &mut DynamicState,
-    cache: &mut impl EvaluationCache,
-    signal_cache: &mut SignalCache,
+    state: &mut DynamicState<T>,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+    plugins: &NativeFunctionRegistry<T>,
+    interpreter_options: &InterpreterOptions,
+    cache: &mut impl InterpreterCache<T>,
+    signal_cache: &mut SignalCache<T>,
     mut update_batches: Vec<UpdateBatch>,
-) -> Vec<Option<Result<Expression, Vec<String>>>>
+) -> Vec<Option<Result<T, Vec<String>>>>
 where
-    THandler: Fn(&[&Signal]) -> Vec<Result<Expression, HandlerError>>,
+    THandler: Fn(&[&Signal<T>]) -> Vec<Result<T, HandlerError>>,
 {
     let current_batch_index = NonZeroUsize::new(update_batches.len());
     for task in tasks.iter_mut() {
@@ -268,18 +317,24 @@ where
                 .map(|batch| batch.combined.as_ref().unwrap_or(&batch.current))
         });
         task.latest_update_batch = current_batch_index;
-        let signal_results = match task.subscription.execute(state, combined_updates, cache) {
+        let signal_results = match task.subscription.execute(
+            state,
+            combined_updates,
+            factory,
+            allocator,
+            plugins,
+            interpreter_options,
+            cache,
+        ) {
             None => None,
-            Some(result) => match result.value() {
-                Term::Signal(term) => {
-                    let (existing_signals, added_signals): (Vec<_>, Vec<&Signal>) =
-                        term.signals().into_iter().partition_map(|signal| {
+            Some(result) => match factory.match_signal_term(&result) {
+                Some(result) => {
+                    let (existing_signals, added_signals): (Vec<_>, Vec<&Signal<T>>) =
+                        result.signals().into_iter().partition_map(|signal| {
                             let signal_id = signal.id();
                             match signal_cache.get(&signal_id) {
-                                Some(result) => match result {
-                                    Ok(result) => {
-                                        Either::Left((signal_id, Ok(Expression::clone(result))))
-                                    }
+                                Some(existing) => match existing {
+                                    Ok(result) => Either::Left((signal_id, Ok(result.clone()))),
                                     Err(error) => Either::Left((signal_id, Err(error.clone()))),
                                 },
                                 None => Either::Right(signal),
@@ -328,6 +383,10 @@ where
                     tasks,
                     signal_handler,
                     state,
+                    factory,
+                    allocator,
+                    plugins,
+                    interpreter_options,
                     cache,
                     signal_cache,
                     update_batches,
@@ -337,4 +396,17 @@ where
         }
     }
     tasks.into_iter().map(|task| task.result).collect()
+}
+
+fn create_error_signal<T: Expression>(
+    message: String,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> T {
+    factory.create_signal_term(allocator.create_signal_list(once(allocator.create_signal(
+        SignalType::Error,
+        allocator.create_unit_list(
+            factory.create_value_term(ValueTerm::String(allocator.create_string(message))),
+        ),
+    ))))
 }

@@ -12,43 +12,67 @@ use hyper_tungstenite::{
     WebSocketStream,
 };
 use reflex::{
-    cache::SubstitutionCache,
-    core::{ApplicationTerm, Expression, Term},
-    serialize::{serialize, SerializedListTerm, SerializedObjectTerm, SerializedTerm},
-    stdlib::value::ValueTerm,
+    compiler::{Compile, Compiler, CompilerMode, CompilerOptions, Instruction, InstructionPointer},
+    core::{Applicable, Reducible, Rewritable, StringValue},
+    interpreter::Execute,
 };
 use reflex_graphql::{
-    parse,
+    parse_graphql_operation,
     subscriptions::{
         deserialize_graphql_client_message, GraphQlSubscriptionClientMessage,
         GraphQlSubscriptionServerMessage, GraphQlSubscriptionStartMessage, SubscriptionId,
     },
-    wrap_graphql_error_response, wrap_graphql_success_response,
 };
-use reflex_runtime::Runtime;
+use reflex_json::{json_array, json_object, sanitize, JsonMap, JsonValue};
+use reflex_runtime::{AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator, Runtime};
 use std::{
     collections::HashMap,
+    iter::once,
     sync::{Arc, Mutex},
 };
 use tokio::sync::mpsc;
 
-pub(crate) async fn handle_graphql_ws_request(
+pub(crate) async fn handle_graphql_ws_request<
+    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T> + Execute<T>,
+>(
     req: Request<Body>,
-    store: Arc<Runtime>,
-    root: Expression,
-) -> Result<Response<Body>, ProtocolError> {
+    store: Arc<Runtime<T>>,
+    root: &T,
+    factory: &impl AsyncExpressionFactory<T>,
+    allocator: &impl AsyncHeapAllocator<T>,
+    compiler_options: CompilerOptions,
+) -> Result<Response<Body>, ProtocolError>
+where
+    T::String: StringValue + Send + Sync,
+{
     let (mut response, websocket) = hyper_tungstenite::upgrade(req, None)?;
-    tokio::spawn(async move {
-        match websocket.await {
-            Err(error) => {
-                eprintln!("Websocket connection error: {}", error);
-            }
-            Ok(websocket) => match handle_websocket_connection(websocket, store, root).await {
-                Ok(_) => {}
+    tokio::spawn({
+        let root = root.clone();
+        let factory = factory.clone();
+        let allocator = allocator.clone();
+        async move {
+            match websocket.await {
                 Err(error) => {
-                    eprintln!("Websocket error: {}", error);
+                    eprintln!("Websocket connection error: {}", error);
                 }
-            },
+                Ok(websocket) => {
+                    match handle_websocket_connection(
+                        websocket,
+                        store,
+                        &root,
+                        &factory,
+                        &allocator,
+                        &compiler_options,
+                    )
+                    .await
+                    {
+                        Ok(_) => {}
+                        Err(error) => {
+                            eprintln!("Websocket error: {}", error);
+                        }
+                    }
+                }
+            }
         }
     });
     response.headers_mut().insert(
@@ -58,11 +82,19 @@ pub(crate) async fn handle_graphql_ws_request(
     Ok(response)
 }
 
-async fn handle_websocket_connection(
+async fn handle_websocket_connection<
+    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T> + Execute<T>,
+>(
     websocket: WebSocketStream<Upgraded>,
-    store: Arc<Runtime>,
-    root: Expression,
-) -> Result<(), Box<dyn std::error::Error>> {
+    store: Arc<Runtime<T>>,
+    root: &T,
+    factory: &impl AsyncExpressionFactory<T>,
+    allocator: &impl AsyncHeapAllocator<T>,
+    compiler_options: &CompilerOptions,
+) -> Result<(), Box<dyn std::error::Error>>
+where
+    T::String: StringValue + Send + Sync,
+{
     let output_buffer_size = 32;
     let (messages_tx, mut messages_rx) =
         mpsc::channel::<GraphQlSubscriptionServerMessage>(output_buffer_size);
@@ -71,9 +103,12 @@ async fn handle_websocket_connection(
     let (mut websocket_output, mut websocket_input) = websocket.split();
     let output = tokio::spawn(async move {
         while let Some(message) = messages_rx.recv().await {
-            match message.serialize() {
+            match message.into_serialized() {
                 Err(error) => {
-                    match GraphQlSubscriptionServerMessage::ConnectionError(error).serialize() {
+                    let response = GraphQlSubscriptionServerMessage::ConnectionError(
+                        create_json_error_object(error),
+                    );
+                    match response.into_serialized() {
                         Ok(message) => {
                             let _ = websocket_output.send(Message::Text(message)).await;
                         }
@@ -86,6 +121,9 @@ async fn handle_websocket_connection(
             }
         }
     });
+    let root = root.clone();
+    let factory = factory.clone();
+    let allocator = allocator.clone();
     while let Some(message) = websocket_input.next().await {
         let messages_tx = messages_tx.clone();
         let message = match message? {
@@ -109,74 +147,112 @@ async fn handle_websocket_connection(
                         .contains_key(subscription_id)
                     {
                         let _ = messages_tx
-                            .send(GraphQlSubscriptionServerMessage::ConnectionError(format!(
-                                "Subscription ID already exists: {}",
-                                subscription_id
-                            )))
+                            .send(GraphQlSubscriptionServerMessage::ConnectionError(
+                                create_json_error_object(format!(
+                                    "Subscription ID already exists: {}",
+                                    subscription_id
+                                )),
+                            ))
                             .await;
                     } else {
-                        let variables = message
-                            .variables()
-                            .entries()
-                            .iter()
-                            .map(|(key, value)| (key.as_str(), value.deserialize()));
-                        match parse(message.query(), variables) {
+                        match parse_graphql_operation(message.payload(), &root, &factory, &allocator)
+                        {
                             Err(error) => {
                                 let _ = messages_tx
                                     .send(GraphQlSubscriptionServerMessage::Error(
                                         subscription_id.clone(),
-                                        format!("Invalid query: {}", error),
+                                        create_json_error_object(format!(
+                                            "Invalid query: {}",
+                                            error
+                                        )),
                                     ))
                                     .await;
                             }
                             Ok(query) => {
-                                let query = Expression::new(Term::Application(
-                                    ApplicationTerm::new(query, vec![Expression::clone(&root)]),
-                                ));
-                                let query = query
-                                    .optimize(&mut SubstitutionCache::new())
-                                    .unwrap_or(query);
-                                match store.subscribe(query).await {
+                                let mut prelude = store.program().clone();
+                                prelude.push(Instruction::PushFunction {
+                                    target: InstructionPointer::default(),
+                                });
+                                match Compiler::new(*compiler_options, Some(prelude)).compile(
+                                    &query,
+                                    CompilerMode::Program,
+                                    &factory,
+                                    &allocator,
+                                ) {
                                     Err(error) => {
                                         let _ = messages_tx
                                             .send(GraphQlSubscriptionServerMessage::Error(
                                                 subscription_id.clone(),
-                                                format!("Subscription error: {}", error),
+                                                create_json_error_object(format!(
+                                                    "Compilation error: {}",
+                                                    error
+                                                )),
                                             ))
                                             .await;
                                     }
-                                    Ok(subscription) => {
-                                        let store_id = subscription.id();
-                                        subscriptions
-                                            .get_mut()
-                                            .unwrap()
-                                            .insert(subscription_id.clone(), store_id);
-                                        let results = subscription.into_stream().map(|result| {
-                                            result.and_then(|result| {
-                                                match serialize(result.value()) {
-                                                    Ok(result) => Ok(result),
-                                                    Err(error) => Err(vec![error]),
-                                                }
-                                            })
-                                        });
-                                        let mut results = if is_diff_subscription(&message) {
-                                            create_diff_stream(results).left_stream()
-                                        } else {
-                                            results
-                                                .map(|result| result.map(|value| (value, false)))
-                                                .right_stream()
-                                        };
-                                        // TODO: Dispose subscription threads
-                                        tokio::spawn(async move {
-                                            while let Some(result) = results.next().await {
+                                    Ok(compiled) => {
+                                        // TODO: Error if runtime expression depends on unrecognized native functions
+                                        let (program, _) = compiled.into_parts();
+                                        match store
+                                            .subscribe(
+                                                program,
+                                                InstructionPointer::new(store.program().len()),
+                                                &factory,
+                                                &allocator,
+                                            )
+                                            .await
+                                        {
+                                            Err(error) => {
                                                 let _ = messages_tx
-                                                    .send(format_subscription_result_message(
-                                                        message.subscription_id(),
-                                                        result,
+                                                    .send(GraphQlSubscriptionServerMessage::Error(
+                                                        subscription_id.clone(),
+                                                        create_json_error_object(format!(
+                                                            "Subscription error: {}",
+                                                            error
+                                                        )),
                                                     ))
                                                     .await;
                                             }
-                                        });
+                                            Ok(subscription) => {
+                                                let store_id = subscription.id();
+                                                subscriptions
+                                                    .get_mut()
+                                                    .unwrap()
+                                                    .insert(subscription_id.clone(), store_id);
+                                                let results =
+                                                    subscription.into_stream().map(|result| {
+                                                        result.and_then(|result| {
+                                                            match sanitize(&result) {
+                                                                Ok(result) => Ok(result),
+                                                                Err(error) => Err(vec![error]),
+                                                            }
+                                                        })
+                                                    });
+                                                let mut results = if is_diff_subscription(&message)
+                                                {
+                                                    create_diff_stream(results).left_stream()
+                                                } else {
+                                                    results
+                                                        .map(|result| {
+                                                            result.map(|value| (value, false))
+                                                        })
+                                                        .right_stream()
+                                                };
+                                                // TODO: Dispose subscription threads
+                                                tokio::spawn(async move {
+                                                    while let Some(result) = results.next().await {
+                                                        let _ = messages_tx
+                                                            .send(
+                                                                format_subscription_result_message(
+                                                                    message.subscription_id(),
+                                                                    result,
+                                                                ),
+                                                            )
+                                                            .await;
+                                                    }
+                                                });
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -188,10 +264,12 @@ async fn handle_websocket_connection(
                     match subscriptions.get_mut().unwrap().remove(subscription_id) {
                         None => {
                             let _ = messages_tx
-                                .send(GraphQlSubscriptionServerMessage::ConnectionError(format!(
-                                    "Subscription ID not found: {}",
-                                    subscription_id
-                                )))
+                                .send(GraphQlSubscriptionServerMessage::ConnectionError(
+                                    create_json_error_object(format!(
+                                        "Subscription ID not found: {}",
+                                        subscription_id
+                                    )),
+                                ))
                                 .await;
                         }
                         Some(store_id) => match store.unsubscribe(store_id).await {
@@ -205,10 +283,10 @@ async fn handle_websocket_connection(
                                 } else {
                                     let _ = messages_tx
                                         .send(GraphQlSubscriptionServerMessage::ConnectionError(
-                                            format!(
+                                            create_json_error_object(format!(
                                                 "Subscription ID already unsubscribed: {}",
                                                 subscription_id
-                                            ),
+                                            )),
                                         ))
                                         .await;
                                 }
@@ -220,7 +298,10 @@ async fn handle_websocket_connection(
                                     .insert(subscription_id.clone(), store_id);
                                 let _ = messages_tx
                                     .send(GraphQlSubscriptionServerMessage::ConnectionError(
-                                        format!("Unsubscribe error: {}", error),
+                                        create_json_error_object(format!(
+                                            "Unsubscribe error: {}",
+                                            error
+                                        )),
                                     ))
                                     .await;
                             }
@@ -240,7 +321,7 @@ async fn handle_websocket_connection(
             },
             Err(error) => {
                 let _ = messages_tx.send(GraphQlSubscriptionServerMessage::ConnectionError(
-                    format!("Invalid message: {}", error),
+                    create_json_error_object(format!("Invalid message: {}", error)),
                 ));
             }
             Ok(None) => {}
@@ -251,30 +332,19 @@ async fn handle_websocket_connection(
 }
 
 fn is_diff_subscription(message: &GraphQlSubscriptionStartMessage) -> bool {
-    find_serialized_object_property(message.extensions(), "diff")
+    message
+        .payload()
+        .extension("diff")
         .map(|value| match value {
-            SerializedTerm::Value(ValueTerm::Boolean(value)) => *value == true,
+            JsonValue::Bool(value) => *value,
             _ => false,
         })
         .unwrap_or(false)
 }
 
-fn find_serialized_object_property<'a>(
-    value: &'a SerializedObjectTerm,
-    key: &str,
-) -> Option<&'a SerializedTerm> {
-    value.entries().iter().find_map(|(existing_key, value)| {
-        if key == existing_key {
-            Some(value)
-        } else {
-            None
-        }
-    })
-}
-
 fn create_diff_stream(
-    results: impl Stream<Item = Result<SerializedTerm, Vec<String>>>,
-) -> impl Stream<Item = Result<(SerializedTerm, bool), Vec<String>>> {
+    results: impl Stream<Item = Result<JsonValue, Vec<String>>>,
+) -> impl Stream<Item = Result<(JsonValue, bool), Vec<String>>> {
     results
         .scan(None, |previous, value| {
             let result = match (&previous, &value) {
@@ -300,82 +370,79 @@ fn create_diff_stream(
         })
 }
 
-fn diff_results(previous: &SerializedTerm, current: &SerializedTerm) -> Option<SerializedTerm> {
+fn diff_results(previous: &JsonValue, current: &JsonValue) -> Option<JsonValue> {
     if current == previous {
         return None;
     }
     match previous {
-        SerializedTerm::Value(_) => Some(current.clone()),
-        SerializedTerm::Object(previous) => match current {
-            SerializedTerm::Object(current) => diff_objects(previous, current),
+        JsonValue::Object(previous) => match current {
+            JsonValue::Object(current) => diff_objects(previous, current),
             _ => Some(current.clone()),
         },
-        SerializedTerm::List(previous) => match current {
-            SerializedTerm::List(current) => diff_lists(previous, current),
+        JsonValue::Array(previous) => match current {
+            JsonValue::Array(current) => diff_lists(previous, current),
             _ => Some(current.clone()),
         },
+        _ => Some(current.clone()),
     }
 }
 
 fn diff_objects(
-    previous: &SerializedObjectTerm,
-    current: &SerializedObjectTerm,
-) -> Option<SerializedTerm> {
-    let previous_entries = previous
-        .entries()
-        .iter()
-        .map(|(key, value)| (key, value))
-        .collect::<HashMap<_, _>>();
-    let updates =
-        SerializedObjectTerm::new(current.entries().iter().filter_map(|(key, current_value)| {
-            previous_entries.get(key).and_then(|previous_value| {
-                diff_results(previous_value, current_value).map(|value| (key.clone(), value))
-            })
-        }));
-    if updates.entries().is_empty() {
+    previous: &JsonMap<String, JsonValue>,
+    current: &JsonMap<String, JsonValue>,
+) -> Option<JsonValue> {
+    let previous_entries = previous.iter().collect::<HashMap<_, _>>();
+    let updates = json_object(current.iter().filter_map(|(key, current_value)| {
+        previous_entries.get(key).and_then(|previous_value| {
+            diff_results(previous_value, current_value).map(|value| (key.clone(), value))
+        })
+    }));
+    if is_empty_json_object(&updates) {
         None
     } else {
-        Some(SerializedTerm::Object(updates))
+        Some(updates)
     }
 }
 
-fn diff_lists(
-    previous: &SerializedListTerm,
-    current: &SerializedListTerm,
-) -> Option<SerializedTerm> {
+fn diff_lists(previous: &Vec<JsonValue>, current: &Vec<JsonValue>) -> Option<JsonValue> {
     let updates = current
-        .items()
         .iter()
-        .zip(previous.items().iter())
+        .zip(previous.iter())
         .map(|(current, previous)| diff_results(previous, current))
         .chain(
             current
-                .items()
                 .iter()
-                .skip(previous.items().len())
+                .skip(previous.len())
                 .map(|item| Some(item.clone())),
         )
         .collect::<Vec<_>>();
-    let updates = SerializedObjectTerm::new(
+    let updates = json_object(
         updates
             .into_iter()
             .enumerate()
             .filter_map(|(index, item)| item.map(|value| (index.to_string(), value))),
     );
-    if updates.entries().is_empty() {
+    if is_empty_json_object(&updates) {
         None
     } else {
-        Some(SerializedTerm::Object(updates))
+        Some(updates)
+    }
+}
+
+fn is_empty_json_object(value: &JsonValue) -> bool {
+    match value {
+        JsonValue::Object(value) => value.is_empty(),
+        _ => false,
     }
 }
 
 fn format_subscription_result_message(
     subscription_id: &SubscriptionId,
-    result: Result<(SerializedTerm, bool), Vec<String>>,
+    result: Result<(JsonValue, bool), Vec<String>>,
 ) -> GraphQlSubscriptionServerMessage {
     match result {
         Ok((data, is_diff)) => {
-            let payload = wrap_graphql_success_response(data);
+            let payload = create_graphql_json_success_response(data);
             if is_diff {
                 GraphQlSubscriptionServerMessage::Patch(subscription_id.clone(), payload)
             } else {
@@ -383,8 +450,23 @@ fn format_subscription_result_message(
             }
         }
         Err(errors) => {
-            let payload = wrap_graphql_error_response(errors);
+            let payload = create_graphql_json_error_response(errors);
             GraphQlSubscriptionServerMessage::Data(subscription_id.clone(), payload)
         }
     }
+}
+
+fn create_graphql_json_success_response(value: JsonValue) -> JsonValue {
+    json_object(once((String::from("data"), value)))
+}
+
+fn create_graphql_json_error_response(errors: impl IntoIterator<Item = String>) -> JsonValue {
+    json_object(once((
+        String::from("errors"),
+        json_array(errors.into_iter().map(create_json_error_object)),
+    )))
+}
+
+fn create_json_error_object(message: String) -> JsonValue {
+    json_object(once((String::from("message"), JsonValue::String(message))))
 }

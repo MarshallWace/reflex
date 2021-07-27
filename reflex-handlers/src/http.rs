@@ -1,109 +1,129 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+use std::iter::once;
+
 use reflex::{
-    core::{Expression, Signal, SignalTerm, StateToken, StructTerm, Term},
-    stdlib::{signal::SignalType, value::ValueTerm},
+    core::{
+        Expression, ExpressionFactory, ExpressionList, Signal, SignalType, StateToken, StringValue,
+    },
+    lang::ValueTerm,
 };
-use reflex_runtime::{RuntimeEffect, SignalHandlerResult, SignalHelpers, StateUpdate};
+use reflex_runtime::{
+    AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator, RuntimeEffect,
+    SignalHandlerResult, SignalHelpers, StateUpdate,
+};
 
 use crate::{utils::fetch, SignalResult};
 
-pub fn http_fetch_handler(
-    signal_type: &str,
-    signals: &[&Signal],
-    _helpers: &SignalHelpers,
-) -> SignalHandlerResult {
-    if signal_type != "reflex::http::fetch" {
-        return None;
+pub fn http_fetch_handler<T: AsyncExpression>(
+    factory: &impl AsyncExpressionFactory<T>,
+    allocator: &impl AsyncHeapAllocator<T>,
+) -> impl Fn(&str, &[&Signal<T>], &SignalHelpers<T>) -> SignalHandlerResult<T> {
+    let factory = factory.clone();
+    let allocator = allocator.clone();
+    move |signal_type: &str, signals: &[&Signal<T>], _helpers: &SignalHelpers<T>| {
+        if signal_type != "reflex::http::fetch" {
+            return None;
+        }
+        Some(
+            signals
+                .iter()
+                .map(|signal| {
+                    handle_http_fetch_signal(signal.id(), signal.args(), &factory, &allocator)
+                })
+                .collect(),
+        )
     }
-    Some(
-        signals
-            .iter()
-            .map(|signal| handle_http_fetch_signal(signal.id(), signal.args()))
-            .collect(),
-    )
 }
 
-fn handle_http_fetch_signal(
+fn handle_http_fetch_signal<T: AsyncExpression>(
     signal_id: StateToken,
-    args: &[Expression],
-) -> Result<SignalResult, String> {
+    args: &ExpressionList<T>,
+    factory: &impl AsyncExpressionFactory<T>,
+    allocator: &impl AsyncHeapAllocator<T>,
+) -> Result<SignalResult<T>, String> {
+    let mut args = args.into_iter();
     if args.len() != 4 {
         return Err(format!(
             "Invalid fetch signal: Expected 4 arguments, received {}",
             args.len()
         ));
     }
-    let mut args = args.into_iter();
-    let url = parse_string_arg(args.next().unwrap());
-    let method = parse_string_arg(args.next().unwrap());
-    let headers = parse_key_values_arg(args.next().unwrap());
-    let body = parse_optional_string_arg(args.next().unwrap());
+    let url = parse_string_arg(args.next().unwrap(), factory);
+    let method = parse_string_arg(args.next().unwrap(), factory);
+    let headers = parse_key_values_arg(args.next().unwrap(), factory);
+    let body = parse_optional_string_arg(args.next().unwrap(), factory);
     match (method, url, headers, body) {
         (Some(method), Some(url), Some(headers), Some(body)) => Ok((
-            Expression::new(Term::Signal(SignalTerm::new(Signal::new(
-                SignalType::Pending,
-                Vec::new(),
-            )))),
-            Some(RuntimeEffect::deferred(async move {
-                let value = match fetch(method, url, headers, body).await {
-                    Ok((status, data)) => Expression::new(Term::Struct(StructTerm::new(
-                        None,
-                        vec![
-                            Expression::new(Term::Value(ValueTerm::Int(status as i32))),
-                            Expression::new(Term::Value(ValueTerm::String(data))),
-                        ],
-                    ))),
-                    Err(error) => Expression::new(Term::Signal(SignalTerm::new(Signal::new(
-                        SignalType::Error,
-                        vec![Expression::new(Term::Value(ValueTerm::String(error)))],
-                    )))),
-                };
-                StateUpdate::value(signal_id, value)
+            factory.create_signal_term(allocator.create_signal_list(once(
+                allocator.create_signal(SignalType::Pending, allocator.create_empty_list()),
+            ))),
+            Some(RuntimeEffect::deferred({
+                let factory = factory.clone();
+                let allocator = allocator.clone();
+                async move {
+                    let value = match fetch(method, url, headers, body).await {
+                        Ok((status, data)) => factory.create_tuple_term(allocator.create_pair(
+                            factory.create_value_term(ValueTerm::Int(status as i32)),
+                            factory.create_value_term(ValueTerm::String(
+                                allocator.create_string(data),
+                            )),
+                        )),
+                        Err(error) => factory.create_signal_term(allocator.create_signal_list(
+                            once(allocator.create_signal(
+                                SignalType::Error,
+                                allocator.create_unit_list(factory.create_value_term(
+                                    ValueTerm::String(allocator.create_string(error)),
+                                )),
+                            )),
+                        )),
+                    };
+                    StateUpdate::value(signal_id, value)
+                }
             })),
         )),
         _ => Err(String::from("Invalid fetch signal arguments")),
     }
 }
 
-fn parse_string_arg(value: &Expression) -> Option<String> {
-    match value.value() {
-        Term::Value(value) => match value {
-            ValueTerm::String(value) => Some(value.clone()),
-            _ => None,
-        },
+fn parse_string_arg<T: Expression>(
+    value: &T,
+    factory: &impl ExpressionFactory<T>,
+) -> Option<String> {
+    match factory.match_value_term(value) {
+        Some(ValueTerm::String(value)) => Some(String::from(value.as_str())),
         _ => None,
     }
 }
 
-fn parse_optional_string_arg(value: &Expression) -> Option<Option<String>> {
-    match value.value() {
-        Term::Value(value) => match value {
-            ValueTerm::String(value) => Some(Some(value.clone())),
-            ValueTerm::Null => Some(None),
-            _ => None,
-        },
+fn parse_optional_string_arg<T: Expression>(
+    value: &T,
+    factory: &impl ExpressionFactory<T>,
+) -> Option<Option<String>> {
+    match factory.match_value_term(value) {
+        Some(ValueTerm::String(value)) => Some(Some(String::from(value.as_str()))),
+        Some(ValueTerm::Null) => Some(None),
         _ => None,
     }
 }
 
-fn parse_key_values_arg(value: &Expression) -> Option<Vec<(String, String)>> {
-    match value.value() {
-        Term::Struct(value) => value.prototype().and_then(|prototype| {
-            prototype
-                .keys()
-                .iter()
-                .zip(value.fields().iter())
-                .map(|(key, value)| match (key, value.value()) {
-                    (ValueTerm::String(key), Term::Value(value)) => match value {
-                        ValueTerm::String(value) => Some((key.clone(), value.clone())),
-                        _ => None,
-                    },
-                    _ => None,
-                })
-                .collect::<Option<Vec<_>>>()
-        }),
-        _ => None,
+fn parse_key_values_arg<T: Expression>(
+    value: &T,
+    factory: &impl ExpressionFactory<T>,
+) -> Option<Vec<(String, String)>> {
+    if let Some(value) = factory.match_struct_term(value) {
+        value
+            .entries()
+            .into_iter()
+            .map(|(key, value)| match factory.match_value_term(value) {
+                Some(ValueTerm::String(value)) => {
+                    Some((String::from(key.as_str()), String::from(value.as_str())))
+                }
+                _ => None,
+            })
+            .collect::<Option<Vec<_>>>()
+    } else {
+        None
     }
 }

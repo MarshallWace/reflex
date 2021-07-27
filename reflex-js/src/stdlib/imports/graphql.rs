@@ -2,23 +2,34 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use reflex::{
-    core::{Expression, StructPrototype, Term, VarArgs},
-    stdlib::value::{StringValue, ValueTerm},
+    core::{Expression, ExpressionFactory, HeapAllocator, VarArgs},
+    lang::create_struct,
 };
 
-use crate::stdlib::imports::create_struct;
-
-pub(crate) fn import_graphql() -> Expression {
-    create_struct(vec![("Resolver", import_graphql_resolver())])
+pub fn import_graphql<T: Expression>(
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> T {
+    create_struct(
+        vec![(
+            String::from("Resolver"),
+            import_graphql_resolver(factory, allocator),
+        )],
+        factory,
+        allocator,
+    )
 }
 
-fn import_graphql_resolver() -> Expression {
-    Expression::new(Term::Constructor(
-        StructPrototype::new(vec![
-            ValueTerm::String(StringValue::from("query")),
-            ValueTerm::String(StringValue::from("mutation")),
-            ValueTerm::String(StringValue::from("subscription")),
+fn import_graphql_resolver<T: Expression>(
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> T {
+    factory.create_constructor_term(
+        allocator.create_struct_prototype(vec![
+            String::from("query"),
+            String::from("mutation"),
+            String::from("subscription"),
         ]),
         VarArgs::Lazy,
-    ))
+    )
 }

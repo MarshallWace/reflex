@@ -16,16 +16,20 @@ use crate::{
     Env,
 };
 use reflex::{
-    core::{Expression, StructPrototype, StructTerm, Term},
-    stdlib::value::{StringValue, ValueTerm},
+    core::{Expression, ExpressionFactory, HeapAllocator},
+    lang::ValueTerm,
 };
 
-pub fn create_module_loader(
-    env: Env,
-    custom_loader: Option<impl Fn(&str, &Path) -> Option<Result<Expression, String>> + 'static>,
-) -> impl Fn(&str, &Path) -> Option<Result<Expression, String>> {
+pub fn create_module_loader<T: Expression + 'static>(
+    env: Env<T>,
+    custom_loader: Option<impl Fn(&str, &Path) -> Option<Result<T, String>> + 'static>,
+    factory: &(impl ExpressionFactory<T> + Clone + 'static),
+    allocator: &(impl HeapAllocator<T> + Clone + 'static),
+) -> impl Fn(&str, &Path) -> Option<Result<T, String>> {
+    let factory = factory.clone();
+    let allocator = allocator.clone();
     recursive_module_loader(move |loader| {
-        let js_loader = create_js_loader(env, loader);
+        let js_loader = create_js_loader(env, loader, &factory, &allocator);
         move |import_path: &str, module_path: &Path| match js_loader(import_path, module_path) {
             Some(result) => Some(result),
             None => match custom_loader
@@ -39,10 +43,10 @@ pub fn create_module_loader(
     })
 }
 
-pub fn error_module_loader(
+pub fn error_module_loader<T: Expression>(
     import_path: &str,
     module_path: &Path,
-) -> Option<Result<Expression, String>> {
+) -> Option<Result<T, String>> {
     Some(Err(
         match get_module_path_metadata(import_path, module_path) {
             Ok(Some(metadata)) => match metadata.is_dir() {
@@ -55,21 +59,21 @@ pub fn error_module_loader(
     ))
 }
 
-fn recursive_module_loader<TResult>(
-    factory: impl FnOnce(Box<dyn Fn(&str, &Path) -> Option<Result<Expression, String>>>) -> TResult,
-) -> impl Fn(&str, &Path) -> Option<Result<Expression, String>>
+fn recursive_module_loader<T: Expression + 'static, TResult>(
+    create_loader: impl FnOnce(Box<dyn Fn(&str, &Path) -> Option<Result<T, String>>>) -> TResult,
+) -> impl Fn(&str, &Path) -> Option<Result<T, String>>
 where
-    TResult: Fn(&str, &Path) -> Option<Result<Expression, String>> + 'static,
+    TResult: Fn(&str, &Path) -> Option<Result<T, String>> + 'static,
 {
-    fn placeholder_loader(_: &str, _: &Path) -> Option<Result<Expression, String>> {
+    fn placeholder_loader<T: Expression>(_: &str, _: &Path) -> Option<Result<T, String>> {
         Some(Err(String::from("Module loader not yet initialized")))
     }
 
     let loader = Rc::new(RefCell::<
-        Box<dyn Fn(&str, &Path) -> Option<Result<Expression, String>> + 'static>,
+        Box<dyn Fn(&str, &Path) -> Option<Result<T, String>> + 'static>,
     >::new(Box::new(placeholder_loader)));
     let inner_loader = loader.clone();
-    let result = factory(Box::new(move |import_path, module_path| {
+    let result = create_loader(Box::new(move |import_path, module_path| {
         let load = inner_loader.borrow();
         load(import_path, module_path)
     }));
@@ -77,33 +81,37 @@ where
     move |import_path, module_path| (loader.borrow())(import_path, module_path)
 }
 
-pub fn static_module_loader<'a>(
-    modules: impl IntoIterator<Item = (&'a str, Expression)>,
-) -> impl Fn(&str, &Path) -> Option<Result<Expression, String>> {
+pub fn static_module_loader<'a, T: Expression>(
+    modules: impl IntoIterator<Item = (&'a str, T)>,
+) -> impl Fn(&str, &Path) -> Option<Result<T, String>> {
     let modules = modules
         .into_iter()
         .map(|(key, value)| (String::from(key), value))
         .collect::<HashMap<_, _>>();
     move |import_path: &str, _: &Path| match modules.get(import_path) {
-        Some(value) => Some(Ok(Expression::clone(value))),
+        Some(value) => Some(Ok(value.clone())),
         None => None,
     }
 }
 
-pub fn compose_module_loaders(
-    head: impl Fn(&str, &Path) -> Option<Result<Expression, String>> + 'static,
-    tail: impl Fn(&str, &Path) -> Option<Result<Expression, String>> + 'static,
-) -> impl Fn(&str, &Path) -> Option<Result<Expression, String>> {
+pub fn compose_module_loaders<T: Expression>(
+    head: impl Fn(&str, &Path) -> Option<Result<T, String>> + 'static,
+    tail: impl Fn(&str, &Path) -> Option<Result<T, String>> + 'static,
+) -> impl Fn(&str, &Path) -> Option<Result<T, String>> {
     move |import_path: &str, module_path: &Path| match head(import_path, module_path) {
         Some(result) => Some(result),
         None => tail(import_path, module_path),
     }
 }
 
-pub fn create_js_loader(
-    env: Env,
-    module_loader: impl Fn(&str, &Path) -> Option<Result<Expression, String>>,
-) -> impl Fn(&str, &Path) -> Option<Result<Expression, String>> {
+pub fn create_js_loader<T: Expression + 'static>(
+    env: Env<T>,
+    module_loader: impl Fn(&str, &Path) -> Option<Result<T, String>>,
+    factory: &(impl ExpressionFactory<T> + Clone),
+    allocator: &(impl HeapAllocator<T> + Clone),
+) -> impl Fn(&str, &Path) -> Option<Result<T, String>> {
+    let factory = factory.clone();
+    let allocator = allocator.clone();
     move |import_path: &str, module_path: &Path| {
         if !import_path.ends_with(".js") {
             return None;
@@ -111,8 +119,15 @@ pub fn create_js_loader(
         let target_path = get_module_filesystem_path(import_path, module_path);
         Some(match fs::read_to_string(&target_path) {
             Err(error) => Err(format!("{}", error)),
-            Ok(source) => parse_module(&source, &env, &target_path, &module_loader)
-                .map(create_default_module_export),
+            Ok(source) => parse_module(
+                &source,
+                &env,
+                &target_path,
+                &module_loader,
+                &factory,
+                &allocator,
+            )
+            .map(|result| create_default_module_export(result, &factory, &allocator)),
         })
     }
 }
@@ -124,24 +139,38 @@ pub fn get_module_filesystem_path(import_path: &str, module_path: &Path) -> Path
         .unwrap_or_else(|| Path::new(import_path).to_path_buf())
 }
 
-pub fn create_js_env(env_vars: impl IntoIterator<Item = (String, String)>) -> Env {
-    Env::new().with_globals(builtin_globals()).with_global(
-        "process",
-        global_process(
-            env_vars
-                .into_iter()
-                .map(|(key, value)| (key, Expression::new(Term::Value(ValueTerm::String(value))))),
-        ),
-    )
+pub fn create_js_env<T: Expression>(
+    env_vars: impl IntoIterator<Item = (String, String)>,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> Env<T> {
+    Env::new()
+        .with_globals(builtin_globals(factory, allocator))
+        .with_global(
+            "process",
+            global_process(
+                env_vars.into_iter().map(|(key, value)| {
+                    (
+                        key,
+                        factory
+                            .create_value_term(ValueTerm::String(allocator.create_string(value))),
+                    )
+                }),
+                factory,
+                allocator,
+            ),
+        )
 }
 
-fn create_default_module_export(value: Expression) -> Expression {
-    Expression::new(Term::Struct(StructTerm::new(
-        Some(StructPrototype::new(vec![ValueTerm::String(
-            StringValue::from("default"),
-        )])),
-        vec![value],
-    )))
+fn create_default_module_export<T: Expression>(
+    value: T,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> T {
+    factory.create_struct_term(
+        allocator.create_struct_prototype(vec![String::from("default")]),
+        allocator.create_unit_list(value),
+    )
 }
 
 fn get_module_path_metadata(

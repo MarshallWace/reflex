@@ -1,21 +1,15 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use std::iter::{empty, FromIterator};
+use std::{collections::HashMap, iter::FromIterator};
 
-use reflex::{
-    serialize::{SerializedObjectTerm, SerializedTerm},
-    stdlib::value::ValueTerm,
-};
-use reflex_json::{deserialize, sanitize_term};
+use reflex_json::{deserialize, JsonMap, JsonValue};
 
 pub fn deserialize_graphql_operation(data: &str) -> Result<GraphQlOperationPayload, String> {
-    match serde_json::from_str::<serde_json::value::Value>(data) {
-        Err(error) => Err(format!("{}", error)),
+    match deserialize(data) {
+        Err(error) => Err(error),
         Ok(value) => match value {
-            serde_json::value::Value::Object(payload) => {
-                deserialize_graphql_operation_payload(&payload)
-            }
+            JsonValue::Object(payload) => parse_graphql_operation_payload(&payload),
             _ => Err(String::from("Invalid request payload")),
         },
     }
@@ -25,21 +19,27 @@ pub fn deserialize_graphql_operation(data: &str) -> Result<GraphQlOperationPaylo
 pub struct GraphQlOperationPayload {
     query: String,
     operation_name: Option<String>,
-    variables: SerializedObjectTerm,
-    extensions: SerializedObjectTerm,
+    variables: HashMap<String, JsonValue>,
+    extensions: HashMap<String, JsonValue>,
 }
 impl GraphQlOperationPayload {
     pub fn new(
         query: String,
         operation_name: Option<String>,
-        variables: SerializedObjectTerm,
-        extensions: SerializedObjectTerm,
+        variables: Option<impl IntoIterator<Item = (String, JsonValue)>>,
+        extensions: Option<impl IntoIterator<Item = (String, JsonValue)>>,
     ) -> Self {
         Self {
             query,
             operation_name,
-            variables,
-            extensions,
+            variables: match variables {
+                Some(variables) => variables.into_iter().collect(),
+                None => HashMap::new(),
+            },
+            extensions: match extensions {
+                Some(extensions) => extensions.into_iter().collect(),
+                None => HashMap::new(),
+            },
         }
     }
     pub fn query(&self) -> &str {
@@ -50,73 +50,80 @@ impl GraphQlOperationPayload {
             .as_ref()
             .map(|operation| operation.as_str())
     }
-    pub fn variables(&self) -> &SerializedObjectTerm {
-        &self.variables
+    pub fn variable(&self, name: &str) -> Option<&JsonValue> {
+        self.variables.get(name)
     }
-    pub fn extensions(&self) -> &SerializedObjectTerm {
-        &self.extensions
+    pub fn extension(&self, name: &str) -> Option<&JsonValue> {
+        self.extensions.get(name)
     }
-    pub(crate) fn serialize(&self) -> Result<serde_json::Value, String> {
-        let variables = sanitize_term(SerializedTerm::Object(self.variables.clone()))?;
-        Ok(serde_json::Value::Object(serde_json::Map::from_iter(vec![
-            (
-                String::from("query"),
-                serde_json::Value::String(self.query.clone()),
-            ),
+    pub fn variables(&self) -> impl IntoIterator<Item = (&str, &JsonValue)> {
+        self.variables
+            .iter()
+            .map(|(key, value)| (key.as_str(), value))
+    }
+    pub fn extensions(&self) -> impl IntoIterator<Item = (&str, &JsonValue)> {
+        self.extensions
+            .iter()
+            .map(|(key, value)| (key.as_str(), value))
+    }
+    pub fn into_json(self) -> JsonValue {
+        JsonValue::Object(JsonMap::from_iter(vec![
+            (String::from("query"), JsonValue::String(self.query)),
             (
                 String::from("operationName"),
-                match &self.operation_name {
-                    Some(operation_name) => serde_json::Value::String(operation_name.clone()),
-                    None => serde_json::Value::Null,
+                match self.operation_name {
+                    Some(operation_name) => JsonValue::String(operation_name),
+                    None => JsonValue::Null,
                 },
             ),
-            (String::from("variables"), variables),
-        ])))
-    }
-    pub fn stringify(&self) -> Result<String, String> {
-        match self.serialize() {
-            Err(error) => Err(error),
-            Ok(result) => Ok(result.to_string()),
-        }
+            (
+                String::from("variables"),
+                JsonValue::Object(JsonMap::from_iter(self.variables)),
+            ),
+            (
+                String::from("extensions"),
+                JsonValue::Object(JsonMap::from_iter(self.extensions)),
+            ),
+        ]))
     }
 }
 
-pub(crate) fn deserialize_graphql_operation_payload(
-    payload: &serde_json::value::Map<String, serde_json::value::Value>,
+pub(crate) fn parse_graphql_operation_payload(
+    payload: &JsonMap<String, JsonValue>,
 ) -> Result<GraphQlOperationPayload, String> {
     let query = match payload.get("query") {
         None => Err(String::from("Missing query")),
         Some(value) => match value {
-            serde_json::value::Value::String(value) => Ok(String::from(value)),
+            JsonValue::String(value) => Ok(String::from(value)),
             _ => Err(String::from("Invalid query")),
         },
     }?;
     let operation_name = match payload.get("operationName") {
         None => Ok(None),
         Some(value) => match value {
-            serde_json::value::Value::String(value) => Ok(Some(String::from(value))),
-            serde_json::value::Value::Null => Ok(None),
+            JsonValue::String(value) => Ok(Some(String::from(value))),
+            JsonValue::Null => Ok(None),
             _ => Err(String::from("Invalid operation name")),
         },
     }?;
     let variables = match payload.get("variables") {
         None => Ok(None),
-        Some(variables) => match deserialize(variables)? {
-            SerializedTerm::Value(ValueTerm::Null) => Ok(None),
-            SerializedTerm::Object(variables) => Ok(Some(variables)),
-            _ => Err(String::from("Invalid variables")),
-        },
-    }?
-    .unwrap_or_else(|| SerializedObjectTerm::new(empty()));
+        Some(JsonValue::Object(variables)) => Ok(Some(
+            variables
+                .iter()
+                .map(|(key, value)| (key.clone(), value.clone())),
+        )),
+        _ => Err(String::from("Invalid variables")),
+    }?;
     let extensions = match payload.get("extensions") {
         None => Ok(None),
-        Some(extensions) => match deserialize(extensions)? {
-            SerializedTerm::Value(ValueTerm::Null) => Ok(None),
-            SerializedTerm::Object(extensions) => Ok(Some(extensions)),
-            _ => Err(String::from("Invalid extensions")),
-        },
-    }?
-    .unwrap_or_else(|| SerializedObjectTerm::new(empty()));
+        Some(JsonValue::Object(extensions)) => Ok(Some(
+            extensions
+                .iter()
+                .map(|(key, value)| (key.clone(), value.clone())),
+        )),
+        _ => Err(String::from("Invalid extensions")),
+    }?;
     Ok(GraphQlOperationPayload::new(
         String::from(query),
         operation_name,

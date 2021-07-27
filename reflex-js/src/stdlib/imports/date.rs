@@ -2,35 +2,39 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use reflex::{
-    core::{ApplicationTerm, Arity, Expression, LambdaTerm, Term, VariableTerm},
-    stdlib::{
-        builtin::BuiltinTerm,
-        value::{StringValue, ValueTerm},
-    },
+    core::{Expression, ExpressionFactory, HeapAllocator},
+    lang::{create_struct, BuiltinTerm, ValueTerm},
 };
 
-use crate::stdlib::imports::create_struct;
-
-pub(crate) fn import_date() -> Expression {
-    create_struct(vec![(
-        "timestamp",
-        Expression::new(Term::Lambda(LambdaTerm::new(
-            Arity::from(0, 1, None),
-            Expression::new(Term::Application(ApplicationTerm::new(
-                Expression::new(Term::Builtin(BuiltinTerm::Effect)),
-                vec![
-                    Expression::new(Term::Value(ValueTerm::String(StringValue::from(
-                        "reflex::date::timestamp",
-                    )))),
-                    Expression::new(Term::Application(ApplicationTerm::new(
-                        Expression::new(Term::Builtin(BuiltinTerm::Get)),
-                        vec![
-                            Expression::new(Term::Variable(VariableTerm::scoped(0))),
-                            Expression::new(Term::Value(ValueTerm::String(StringValue::from("interval")))),
-                        ]
-                    )))
-                ],
-            ))),
-        ))),
-    )])
+pub fn import_date<T: Expression>(
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> T {
+    create_struct(
+        vec![(
+            String::from("timestamp"),
+            factory.create_lambda_term(
+                1,
+                factory.create_application_term(
+                    factory.create_builtin_term(BuiltinTerm::Effect),
+                    allocator.create_pair(
+                        factory.create_value_term(ValueTerm::String(
+                            allocator.create_string(String::from("reflex::date::timestamp")),
+                        )),
+                        factory.create_application_term(
+                            factory.create_builtin_term(BuiltinTerm::Get),
+                            allocator.create_pair(
+                                factory.create_static_variable_term(0),
+                                factory.create_value_term(ValueTerm::String(
+                                    allocator.create_string(String::from("interval")),
+                                )),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        )],
+        factory,
+        allocator,
+    )
 }

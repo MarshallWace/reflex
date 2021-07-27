@@ -1,11 +1,13 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+use std::iter::once;
+
 use futures_util::{
     sink::{Sink, SinkExt},
     StreamExt,
 };
-use reflex::serialize::SerializedTerm;
+use reflex_json::{json_object, JsonValue};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio_stream::Stream;
 
@@ -44,13 +46,13 @@ pub(crate) async fn subscribe_websocket_operation<T>(
     socket: T,
     subscription_id: SubscriptionId,
     operation: GraphQlOperationPayload,
-) -> Result<impl Stream<Item = Result<SerializedTerm, String>>, String>
+) -> Result<impl Stream<Item = Result<JsonValue, Vec<JsonValue>>>, String>
 where
     T: Stream<Item = Result<Message, Error>> + Sink<Message, Error = Error>,
 {
     let (mut write, read) = socket.split();
     let message = GraphQlSubscriptionClientMessage::start(subscription_id.clone(), operation);
-    match message.serialize() {
+    match message.into_serialized() {
         Err(error) => Err(format!("GraphQL serialization failed: {}", error)),
         Ok(message) => match write.send(Message::Text(message)).await {
             Err(error) => Err(format!(
@@ -59,7 +61,7 @@ where
             )),
             Ok(_) => Ok(read.filter_map(move |message| {
                 let result = match message {
-                    Err(error) => Err(format!("{}", error)),
+                    Err(error) => Err(vec![create_json_error_object(format!("{}", error))]),
                     Ok(message) => {
                         let message = match message {
                             Message::Text(message) => Ok(Some(message)),
@@ -71,19 +73,25 @@ where
                             Message::Close(_) | Message::Ping(_) | Message::Pong(_) => Ok(None),
                         };
                         match message {
-                            Err(error) => Err(error),
+                            Err(error) => Err(vec![create_json_error_object(error)]),
                             Ok(None) => Ok(None),
                             Ok(Some(message)) => {
                                 match deserialize_graphql_server_message(&message) {
-                                    Err(error) => Err(error),
+                                    Err(error) => Err(vec![create_json_error_object(error)]),
                                     Ok(message) => match message {
                                         GraphQlSubscriptionServerMessage::ConnectionError(
                                             error,
-                                        ) => Err(error),
+                                        ) => Err(match error {
+                                            JsonValue::Array(errors) => errors,
+                                            _ => vec![error],
+                                        }),
                                         GraphQlSubscriptionServerMessage::Error(id, error)
                                             if id == subscription_id =>
                                         {
-                                            Err(error)
+                                            Err(match error {
+                                                JsonValue::Array(errors) => errors,
+                                                _ => vec![error],
+                                            })
                                         }
                                         GraphQlSubscriptionServerMessage::Data(id, result)
                                             if id == subscription_id =>
@@ -107,4 +115,8 @@ where
             })),
         },
     }
+}
+
+pub(crate) fn create_json_error_object(message: String) -> JsonValue {
+    json_object(once((String::from("message"), JsonValue::String(message))))
 }

@@ -1,18 +1,15 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use std::{borrow::Cow, iter::once, path::Path};
+use std::{
+    borrow::Cow,
+    iter::{empty, once},
+    path::Path,
+};
 
 use reflex::{
-    core::{
-        ApplicationTerm, Arity, Expression, LambdaTerm, StructPrototype, StructTerm, Term,
-        VariableTerm,
-    },
-    stdlib::{
-        builtin::BuiltinTerm,
-        collection::{vector::VectorTerm, CollectionTerm},
-        value::{StringValue, ValueTerm},
-    },
+    core::{Expression, ExpressionFactory, HeapAllocator, StringValue},
+    lang::{as_integer, BuiltinTerm, ValueTerm},
 };
 use resast::prelude::*;
 use ressa::Builder;
@@ -25,7 +22,7 @@ use crate::{
 pub type ParserResult<T> = Result<T, ParserError>;
 pub type ParserError = String;
 
-type ScopeBindings<'src> = Vec<(&'src str, Expression)>;
+type ScopeBindings<'src, T> = Vec<(&'src str, T)>;
 
 fn err<T: std::fmt::Debug>(message: &str, node: T) -> String {
     format!("{}: {:?}", message, node)
@@ -82,19 +79,26 @@ impl<'src> LexicalScope<'src> {
     }
 }
 
-pub fn parse<'src>(input: &'src str, env: &Env) -> ParserResult<Expression> {
+pub fn parse<'src, T: Expression>(
+    input: &'src str,
+    env: &Env<T>,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> ParserResult<T> {
     let program = parse_ast(input)?;
-    parse_script_contents(program.into_iter(), env)
+    parse_script_contents(program.into_iter(), env, factory, allocator)
 }
 
-pub fn parse_module<'src>(
+pub fn parse_module<'src, T: Expression>(
     input: &'src str,
-    env: &Env,
+    env: &Env<T>,
     path: &Path,
-    loader: &impl Fn(&str, &Path) -> Option<Result<Expression, String>>,
-) -> ParserResult<Expression> {
+    loader: &impl Fn(&str, &Path) -> Option<Result<T, String>>,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> ParserResult<T> {
     let program = parse_ast(input)?;
-    parse_module_contents(program.into_iter(), env, path, loader)
+    parse_module_contents(program.into_iter(), env, path, loader, factory, allocator)
 }
 
 fn parse_ast(input: &str) -> ParserResult<Vec<ProgramPart>> {
@@ -106,10 +110,12 @@ fn parse_ast(input: &str) -> ParserResult<Vec<ProgramPart>> {
         .or_else(|error| Err(format!("Parse error: {}", error)))
 }
 
-fn parse_script_contents<'src>(
+fn parse_script_contents<'src, T: Expression>(
     program: impl IntoIterator<Item = ProgramPart<'src>> + ExactSizeIterator,
-    env: &Env,
-) -> ParserResult<Expression> {
+    env: &Env<T>,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> ParserResult<T> {
     let body = program
         .into_iter()
         .map(|node| match node {
@@ -120,18 +126,20 @@ fn parse_script_contents<'src>(
             _ => node,
         })
         .collect::<Vec<_>>();
-    match parse_block(&body, &LexicalScope::new(), &env)? {
+    match parse_block(&body, &LexicalScope::new(), &env, factory, allocator)? {
         None => Err(String::from("No expression to evaluate")),
         Some(expression) => Ok(expression),
     }
 }
 
-fn parse_module_contents<'src>(
+fn parse_module_contents<'src, T: Expression>(
     program: impl IntoIterator<Item = ProgramPart<'src>> + ExactSizeIterator,
-    env: &Env,
+    env: &Env<T>,
     path: &Path,
-    loader: &impl Fn(&str, &Path) -> Option<Result<Expression, String>>,
-) -> ParserResult<Expression> {
+    loader: &impl Fn(&str, &Path) -> Option<Result<T, String>>,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> ParserResult<T> {
     let num_statements = program.len();
     let (body, import_bindings) = program.into_iter().fold(
         Ok((Vec::with_capacity(num_statements), Vec::new())),
@@ -140,7 +148,8 @@ fn parse_module_contents<'src>(
             match node {
                 ProgramPart::Decl(node) => match node {
                     Decl::Import(node) => {
-                        let bindings = parse_module_import(&node, path, loader)?;
+                        let bindings =
+                            parse_module_import(&node, path, loader, factory, allocator)?;
                         import_bindings.extend(bindings);
                         Ok((body, import_bindings))
                     }
@@ -178,21 +187,23 @@ fn parse_module_contents<'src>(
     )?;
     let (import_keys, import_initializers): (Vec<_>, Vec<_>) = import_bindings.into_iter().unzip();
     let scope = LexicalScope::from(import_keys.into_iter().map(Some));
-    match parse_block(&body, &scope, &env)? {
+    match parse_block(&body, &scope, &env, factory, allocator)? {
         None => Err(String::from("Missing default module export")),
         Some(expression) => Ok(if import_initializers.is_empty() {
             expression
         } else {
-            create_declaration_block(import_initializers, expression)
+            create_declaration_block(import_initializers, expression, factory, allocator)
         }),
     }
 }
 
-fn parse_module_import<'src>(
+fn parse_module_import<'src, T: Expression>(
     node: &ModImport<'src>,
     path: &Path,
-    loader: &impl Fn(&str, &Path) -> Option<Result<Expression, String>>,
-) -> ParserResult<Vec<(&'src str, Expression)>> {
+    loader: &impl Fn(&str, &Path) -> Option<Result<T, String>>,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> ParserResult<Vec<(&'src str, T)>> {
     let module_path = match &node.source {
         Lit::String(node) => Ok(parse_string(node)),
         _ => Err(err_unimplemented(node)),
@@ -213,18 +224,19 @@ fn parse_module_import<'src>(
             let binding = match specifier {
                 ImportSpecifier::Default(node) => {
                     let identifier = parse_identifier(node)?;
-                    let value = get_static_field(Expression::clone(&module), "default");
+                    let value = get_static_field(module.clone(), "default", factory, allocator);
                     (identifier, value)
                 }
                 ImportSpecifier::Namespace(node) => {
                     let identifier = parse_identifier(node)?;
-                    let value = Expression::clone(&module);
+                    let value = module.clone();
                     (identifier, value)
                 }
                 ImportSpecifier::Normal(node) => {
                     let imported_field = parse_identifier(&node.imported)?;
                     let identifier = parse_identifier(&node.local)?;
-                    let value = get_static_field(Expression::clone(&module), imported_field);
+                    let value =
+                        get_static_field(module.clone(), imported_field, factory, allocator);
                     (identifier, value)
                 }
             };
@@ -233,20 +245,24 @@ fn parse_module_import<'src>(
         })
 }
 
-fn parse_block<'src: 'temp, 'temp>(
+fn parse_block<'src: 'temp, 'temp, T: Expression>(
     body: impl IntoIterator<Item = &'temp ProgramPart<'src>>,
     scope: &LexicalScope,
-    env: &Env,
-) -> ParserResult<Option<Expression>> {
-    parse_block_statements(body, None, scope, env)
+    env: &Env<T>,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> ParserResult<Option<T>> {
+    parse_block_statements(body, None, scope, env, factory, allocator)
 }
 
-fn parse_block_statements<'src: 'temp, 'temp>(
+fn parse_block_statements<'src: 'temp, 'temp, T: Expression>(
     remaining: impl IntoIterator<Item = &'temp ProgramPart<'src>>,
-    result: Option<Expression>,
+    result: Option<T>,
     scope: &LexicalScope,
-    env: &Env,
-) -> ParserResult<Option<Expression>> {
+    env: &Env<T>,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> ParserResult<Option<T>> {
     let mut remaining = remaining.into_iter();
     let node = remaining.next();
     match node {
@@ -258,24 +274,39 @@ fn parse_block_statements<'src: 'temp, 'temp>(
             match node {
                 ProgramPart::Dir(node) => {
                     let value = Expr::Lit(node.expr.clone());
-                    let expression = parse_expression(&value, &scope, env)?;
+                    let expression = parse_expression(&value, &scope, env, factory, allocator)?;
                     let result = Some(expression);
-                    parse_block_statements(remaining, result, scope, env)
+                    parse_block_statements(remaining, result, scope, env, factory, allocator)
                 }
                 ProgramPart::Decl(node) => match node {
                     Decl::Var(kind, declarators) => match kind {
                         VarKind::Const => {
-                            let bindings = parse_variable_declarators(declarators, &scope, env)?;
+                            let bindings = parse_variable_declarators(
+                                declarators,
+                                &scope,
+                                env,
+                                factory,
+                                allocator,
+                            )?;
                             let (keys, initializers): (Vec<_>, Vec<_>) =
                                 bindings.into_iter().unzip();
                             let child_scope = scope.create_child(keys.into_iter().map(Some));
-                            let body =
-                                parse_block_statements(remaining, result, &child_scope, env)?;
+                            let body = parse_block_statements(
+                                remaining,
+                                result,
+                                &child_scope,
+                                env,
+                                factory,
+                                allocator,
+                            )?;
                             match body {
                                 None => Ok(None),
-                                Some(body) => {
-                                    Ok(Some(create_declaration_block(initializers, body)))
-                                }
+                                Some(body) => Ok(Some(create_declaration_block(
+                                    initializers,
+                                    body,
+                                    factory,
+                                    allocator,
+                                ))),
                             }
                         }
                         _ => Err(err_unimplemented(node)),
@@ -287,37 +318,53 @@ fn parse_block_statements<'src: 'temp, 'temp>(
                     Stmt::Return(node) => match node {
                         None => Err(err("Missing return value", node)),
                         Some(node) => {
-                            let expression = parse_expression(node, &scope, env)?;
+                            let expression =
+                                parse_expression(node, &scope, env, factory, allocator)?;
                             let result = Some(expression);
-                            parse_block_statements(remaining, result, scope, env)
+                            parse_block_statements(
+                                remaining, result, scope, env, factory, allocator,
+                            )
                         }
                     },
                     Stmt::Throw(node) => {
-                        let expression = parse_throw_statement(node, &scope, env)?;
+                        let expression =
+                            parse_throw_statement(node, &scope, env, factory, allocator)?;
                         let result = Some(expression);
-                        parse_block_statements(remaining, result, scope, env)
+                        parse_block_statements(remaining, result, scope, env, factory, allocator)
                     }
                     Stmt::If(node) => {
-                        let condition = parse_expression(&node.test, scope, env)?;
-                        let consequent = parse_if_branch(&node.consequent, scope, env)?;
+                        let condition =
+                            parse_expression(&node.test, scope, env, factory, allocator)?;
+                        let consequent =
+                            parse_if_branch(&node.consequent, scope, env, factory, allocator)?;
                         match &node.alternate {
                             Some(node) => {
-                                let alternate = parse_if_branch(&node, scope, env)?;
-                                let expression =
-                                    create_if_expression(condition, consequent, alternate);
+                                let alternate =
+                                    parse_if_branch(&node, scope, env, factory, allocator)?;
+                                let expression = create_if_expression(
+                                    condition, consequent, alternate, factory, allocator,
+                                );
                                 let result = Some(expression);
-                                parse_block_statements(remaining, result, scope, env)
+                                parse_block_statements(
+                                    remaining, result, scope, env, factory, allocator,
+                                )
                             }
                             None => {
-                                let alternate = parse_branch(&statement, remaining, scope, env)?;
-                                let result = create_if_expression(condition, consequent, alternate);
+                                let alternate = parse_branch(
+                                    &statement, remaining, scope, env, factory, allocator,
+                                )?;
+                                let result = create_if_expression(
+                                    condition, consequent, alternate, factory, allocator,
+                                );
                                 Ok(Some(result))
                             }
                         }
                     }
                     Stmt::Try(_) => Err(err_unimplemented(statement)),
                     Stmt::Switch(_) => Err(err_unimplemented(statement)),
-                    Stmt::Empty => parse_block_statements(remaining, result, scope, env),
+                    Stmt::Empty => {
+                        parse_block_statements(remaining, result, scope, env, factory, allocator)
+                    }
                     _ => Err(err_unimplemented(statement)),
                 },
             }
@@ -325,37 +372,43 @@ fn parse_block_statements<'src: 'temp, 'temp>(
     }
 }
 
-fn create_declaration_block(initializers: Vec<Expression>, body: Expression) -> Expression {
-    Expression::new(Term::Application(ApplicationTerm::new(
-        Expression::new(Term::Lambda(LambdaTerm::new(
-            Arity::from(0, initializers.len(), None),
-            body,
-        ))),
-        initializers.into_iter().collect(),
-    )))
+fn create_declaration_block<T: Expression>(
+    initializers: Vec<T>,
+    body: T,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> T {
+    factory.create_application_term(
+        factory.create_lambda_term(initializers.len(), body),
+        allocator.create_list(initializers),
+    )
 }
 
-fn parse_variable_declarators<'src>(
+fn parse_variable_declarators<'src, T: Expression>(
     declarators: &[VarDecl<'src>],
     scope: &LexicalScope,
-    env: &Env,
-) -> ParserResult<ScopeBindings<'src>> {
+    env: &Env<T>,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> ParserResult<ScopeBindings<'src, T>> {
     declarators.iter().fold(Ok(Vec::new()), |results, node| {
         let mut results = results?;
-        let bindings = parse_variable_declarator(node, &scope, env)?;
+        let bindings = parse_variable_declarator(node, &scope, env, factory, allocator)?;
         results.extend(bindings);
         Ok(results)
     })
 }
 
-fn parse_variable_declarator<'src>(
+fn parse_variable_declarator<'src, T: Expression>(
     node: &VarDecl<'src>,
     scope: &LexicalScope,
-    env: &Env,
-) -> ParserResult<ScopeBindings<'src>> {
+    env: &Env<T>,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> ParserResult<ScopeBindings<'src, T>> {
     let VarDecl { id, init } = node;
     let value = match init {
-        Some(expression) => parse_expression(expression, scope, env),
+        Some(expression) => parse_expression(expression, scope, env, factory, allocator),
         None => Err(err("Missing variable initializer", node)),
     }?;
     match id {
@@ -365,25 +418,29 @@ fn parse_variable_declarator<'src>(
             Ok(bindings)
         }
         Pat::Obj(properties) => {
-            let bindings = parse_object_destructuring_pattern_bindings(properties, scope, env)?;
+            let bindings = parse_object_destructuring_pattern_bindings(
+                properties, scope, env, factory, allocator,
+            )?;
             Ok(bindings
                 .into_iter()
                 .map(|(identifier, field_name)| {
                     (
                         identifier,
-                        get_dynamic_field(Expression::clone(&value), field_name),
+                        get_dynamic_field(value.clone(), field_name, factory, allocator),
                     )
                 })
                 .collect())
         }
         Pat::Array(accessors) => {
-            let bindings = parse_array_destructuring_pattern_bindings(accessors, scope, env)?;
+            let bindings = parse_array_destructuring_pattern_bindings(
+                accessors, scope, env, factory, allocator,
+            )?;
             Ok(bindings
                 .into_iter()
                 .map(|(identifier, index)| {
                     (
                         identifier,
-                        get_indexed_field(Expression::clone(&value), index),
+                        get_indexed_field(value.clone(), index, factory, allocator),
                     )
                 })
                 .collect())
@@ -393,11 +450,13 @@ fn parse_variable_declarator<'src>(
     }
 }
 
-fn parse_object_destructuring_pattern_bindings<'src>(
+fn parse_object_destructuring_pattern_bindings<'src, T: Expression>(
     properties: &[ObjPatPart<'src>],
     scope: &LexicalScope,
-    env: &Env,
-) -> ParserResult<impl IntoIterator<Item = (&'src str, Expression)>> {
+    env: &Env<T>,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> ParserResult<impl IntoIterator<Item = (&'src str, T)>> {
     properties
         .iter()
         .map(|property| match property {
@@ -406,8 +465,9 @@ fn parse_object_destructuring_pattern_bindings<'src>(
                     Err(err_unimplemented(node))
                 } else {
                     let identifier = parse_destructuring_pattern_property_identifier(node)?;
-                    let field_name =
-                        parse_destructuring_pattern_property_field_name(node, scope, env)?;
+                    let field_name = parse_destructuring_pattern_property_field_name(
+                        node, scope, env, factory, allocator,
+                    )?;
                     Ok((identifier, field_name))
                 }
             }
@@ -416,27 +476,28 @@ fn parse_object_destructuring_pattern_bindings<'src>(
         .collect::<ParserResult<Vec<_>>>()
 }
 
-fn parse_destructuring_pattern_property_field_name<'src>(
+fn parse_destructuring_pattern_property_field_name<'src, T: Expression>(
     node: &Prop<'src>,
     scope: &LexicalScope,
-    env: &Env,
-) -> ParserResult<Expression> {
+    env: &Env<T>,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> ParserResult<T> {
     match &node.key {
         PropKey::Lit(key) => match key {
             Lit::String(key) => {
                 let field_name = parse_string(key);
-                Ok(Expression::new(Term::Value(ValueTerm::String(
-                    StringValue::from(field_name),
-                ))))
+                Ok(factory
+                    .create_value_term(ValueTerm::String(allocator.create_string(field_name))))
             }
-            _ => parse_literal(key, scope, env),
+            _ => parse_literal(key, scope, env, factory, allocator),
         },
         PropKey::Pat(node) => match node {
             Pat::Ident(node) => {
                 let field_name = parse_identifier(node)?;
-                Ok(Expression::new(Term::Value(ValueTerm::String(
-                    StringValue::from(field_name),
-                ))))
+                Ok(factory.create_value_term(ValueTerm::String(
+                    allocator.create_string(String::from(field_name)),
+                )))
             }
             Pat::Obj(node) => Err(err_unimplemented(node)),
             Pat::Array(node) => Err(err_unimplemented(node)),
@@ -469,10 +530,12 @@ fn parse_destructuring_pattern_property_identifier<'src>(
     }
 }
 
-fn parse_array_destructuring_pattern_bindings<'src>(
+fn parse_array_destructuring_pattern_bindings<'src, T: Expression>(
     accessors: &[Option<ArrayPatPart<'src>>],
     _scope: &LexicalScope,
-    _env: &Env,
+    _env: &Env<T>,
+    _factory: &impl ExpressionFactory<T>,
+    _allocator: &impl HeapAllocator<T>,
 ) -> ParserResult<impl IntoIterator<Item = (&'src str, usize)>> {
     accessors
         .iter()
@@ -502,11 +565,13 @@ fn parse_identifier<'src>(node: &Ident<'src>) -> ParserResult<&'src str> {
     }
 }
 
-fn parse_throw_statement<'src>(
+fn parse_throw_statement<'src, T: Expression>(
     value: &Expr<'src>,
     scope: &LexicalScope,
-    env: &Env,
-) -> ParserResult<Expression> {
+    env: &Env<T>,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> ParserResult<T> {
     match value {
         Expr::New(constructor) => match &*constructor.callee {
             Expr::Ident(node) => match parse_identifier(&node)? {
@@ -517,13 +582,13 @@ fn parse_throw_statement<'src>(
                         let message = constructor
                             .arguments
                             .iter()
-                            .map(|arg| parse_expression(arg, scope, env))
+                            .map(|arg| parse_expression(arg, scope, env, factory, allocator))
                             .next()
                             .unwrap()?;
-                        Ok(Expression::new(Term::Application(ApplicationTerm::new(
-                            throw(),
-                            vec![message],
-                        ))))
+                        Ok(factory.create_application_term(
+                            factory.create_native_function_term(throw()),
+                            allocator.create_unit_list(message),
+                        ))
                     }
                 }
                 _ => Err(err_unimplemented(node)),
@@ -534,67 +599,86 @@ fn parse_throw_statement<'src>(
     }
 }
 
-fn parse_if_branch<'src>(
+fn parse_if_branch<'src, T: Expression>(
     node: &Stmt<'src>,
     scope: &LexicalScope,
-    env: &Env,
-) -> ParserResult<Expression> {
+    env: &Env<T>,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> ParserResult<T> {
     match node {
         Stmt::Block(block) => {
             let BlockStmt(body) = block;
-            parse_branch(node, body, scope, env)
+            parse_branch(node, body, scope, env, factory, allocator)
         }
-        _ => parse_branch(node, &vec![ProgramPart::Stmt(node.clone())], scope, env),
+        _ => parse_branch(
+            node,
+            &vec![ProgramPart::Stmt(node.clone())],
+            scope,
+            env,
+            factory,
+            allocator,
+        ),
     }
 }
 
-fn parse_branch<'src: 'temp, 'temp>(
+fn parse_branch<'src: 'temp, 'temp, T: Expression>(
     node: &Stmt<'src>,
     body: impl IntoIterator<Item = &'temp ProgramPart<'src>>,
     scope: &LexicalScope,
-    env: &Env,
-) -> ParserResult<Expression> {
-    let expression = parse_block(body, scope, env)?;
+    env: &Env<T>,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> ParserResult<T> {
+    let expression = parse_block(body, scope, env, factory, allocator)?;
     match expression {
         None => Err(err("Unterminated branch", node)),
         Some(expression) => Ok(expression),
     }
 }
 
-fn parse_expression<'src>(
+fn parse_expression<'src, T: Expression>(
     node: &Expr<'src>,
     scope: &LexicalScope,
-    env: &Env,
-) -> ParserResult<Expression> {
+    env: &Env<T>,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> ParserResult<T> {
     match node {
-        Expr::Ident(node) => parse_variable_reference(node, scope, env),
-        Expr::Lit(node) => parse_literal(node, scope, env),
-        Expr::TaggedTemplate(node) => parse_tagged_template(node, scope, env),
-        Expr::Unary(node) => parse_unary_expression(node, scope, env),
-        Expr::Binary(node) => parse_binary_expression(node, scope, env),
-        Expr::Logical(node) => parse_logical_expression(node, scope, env),
-        Expr::Conditional(node) => parse_conditional_expression(node, scope, env),
-        Expr::ArrowFunc(node) => parse_arrow_function_expression(node, scope, env),
-        Expr::Member(node) => parse_member_expression(node, scope, env),
-        Expr::Call(node) => parse_call_expression(node, scope, env),
-        Expr::New(node) => parse_constructor_expression(node, scope, env),
-        Expr::Obj(node) => parse_object_literal(node, scope, env),
-        Expr::Array(node) => parse_array_literal(node, scope, env),
+        Expr::Ident(node) => parse_variable_reference(node, scope, env, factory),
+        Expr::Lit(node) => parse_literal(node, scope, env, factory, allocator),
+        Expr::TaggedTemplate(node) => parse_tagged_template(node, scope, env, factory, allocator),
+        Expr::Unary(node) => parse_unary_expression(node, scope, env, factory, allocator),
+        Expr::Binary(node) => parse_binary_expression(node, scope, env, factory, allocator),
+        Expr::Logical(node) => parse_logical_expression(node, scope, env, factory, allocator),
+        Expr::Conditional(node) => {
+            parse_conditional_expression(node, scope, env, factory, allocator)
+        }
+        Expr::ArrowFunc(node) => {
+            parse_arrow_function_expression(node, scope, env, factory, allocator)
+        }
+        Expr::Member(node) => parse_member_expression(node, scope, env, factory, allocator),
+        Expr::Call(node) => parse_call_expression(node, scope, env, factory, allocator),
+        Expr::New(node) => parse_constructor_expression(node, scope, env, factory, allocator),
+        Expr::Obj(node) => parse_object_literal(node, scope, env, factory, allocator),
+        Expr::Array(node) => parse_array_literal(node, scope, env, factory, allocator),
         _ => Err(err_unimplemented(node)),
     }
 }
 
-fn parse_expressions<'src: 'temp, 'temp>(
+fn parse_expressions<'src: 'temp, 'temp, T: Expression>(
     expressions: impl IntoIterator<Item = &'temp Expr<'src>> + ExactSizeIterator,
     scope: &LexicalScope,
-    env: &Env,
-) -> ParserResult<Vec<Expression>> {
+    env: &Env<T>,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> ParserResult<Vec<T>> {
     let num_expressions = expressions.len();
     expressions
         .into_iter()
         .fold(Ok(Vec::with_capacity(num_expressions)), |results, node| {
             let mut args = results?;
-            match parse_expression(node, scope, env) {
+            match parse_expression(node, scope, env, factory, allocator) {
                 Ok(arg) => {
                     args.push(arg);
                     Ok(args)
@@ -604,17 +688,16 @@ fn parse_expressions<'src: 'temp, 'temp>(
         })
 }
 
-fn parse_variable_reference<'src>(
+fn parse_variable_reference<'src, T: Expression>(
     node: &Ident<'src>,
     scope: &LexicalScope,
-    env: &Env,
-) -> ParserResult<Expression> {
+    env: &Env<T>,
+    factory: &impl ExpressionFactory<T>,
+) -> ParserResult<T> {
     let name = parse_identifier(node)?;
     let offset = scope.get(name);
     match offset {
-        Some(offset) => Ok(Expression::new(Term::Variable(VariableTerm::scoped(
-            offset,
-        )))),
+        Some(offset) => Ok(factory.create_static_variable_term(offset)),
         None => match env.global(name) {
             Some(value) => Ok(value),
             None => Err(err(&format!("Invalid reference: '{}'", name), node)),
@@ -622,32 +705,40 @@ fn parse_variable_reference<'src>(
     }
 }
 
-fn parse_literal<'src>(
+fn parse_literal<'src, T: Expression>(
     node: &Lit<'src>,
     scope: &LexicalScope,
-    env: &Env,
-) -> ParserResult<Expression> {
+    env: &Env<T>,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> ParserResult<T> {
     match node {
-        Lit::Null => parse_null_literal(),
-        Lit::Boolean(node) => parse_boolean_literal(node),
-        Lit::Number(node) => parse_number_literal(node),
-        Lit::String(node) => parse_string_literal(node),
-        Lit::Template(node) => parse_template_literal(node, scope, env),
+        Lit::Null => parse_null_literal(factory),
+        Lit::Boolean(node) => parse_boolean_literal(node, factory),
+        Lit::Number(node) => parse_number_literal(node, factory),
+        Lit::String(node) => parse_string_literal(node, factory, allocator),
+        Lit::Template(node) => parse_template_literal(node, scope, env, factory, allocator),
         Lit::RegEx(_) => Err(err_unimplemented(node)),
     }
 }
 
-fn parse_null_literal() -> ParserResult<Expression> {
-    Ok(Expression::new(Term::Value(ValueTerm::Null)))
+fn parse_null_literal<T: Expression>(factory: &impl ExpressionFactory<T>) -> ParserResult<T> {
+    Ok(factory.create_value_term(ValueTerm::Null))
 }
 
-fn parse_boolean_literal(node: &bool) -> ParserResult<Expression> {
-    Ok(Expression::new(Term::Value(ValueTerm::Boolean(*node))))
+fn parse_boolean_literal<T: Expression>(
+    node: &bool,
+    factory: &impl ExpressionFactory<T>,
+) -> ParserResult<T> {
+    Ok(factory.create_value_term(ValueTerm::Boolean(*node)))
 }
 
-fn parse_number_literal(node: &Cow<str>) -> ParserResult<Expression> {
+fn parse_number_literal<T: Expression>(
+    node: &Cow<str>,
+    factory: &impl ExpressionFactory<T>,
+) -> ParserResult<T> {
     match parse_number(node) {
-        Ok(value) => Ok(Expression::new(Term::Value(ValueTerm::Float(value)))),
+        Ok(value) => Ok(factory.create_value_term(ValueTerm::Float(value))),
         Err(error) => Err(error),
     }
 }
@@ -659,11 +750,13 @@ fn parse_number(node: &Cow<str>) -> ParserResult<f64> {
     }
 }
 
-fn parse_string_literal(node: &StringLit) -> ParserResult<Expression> {
+fn parse_string_literal<T: Expression>(
+    node: &StringLit,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> ParserResult<T> {
     let value = parse_string(node);
-    Ok(Expression::new(Term::Value(ValueTerm::String(
-        StringValue::from(value),
-    ))))
+    Ok(factory.create_value_term(ValueTerm::String(allocator.create_string(value))))
 }
 
 fn parse_string(node: &StringLit) -> String {
@@ -694,28 +787,31 @@ fn parse_escaped_string(value: &str) -> String {
         .0
 }
 
-fn parse_template_literal<'src>(
+fn parse_template_literal<'src, T: Expression>(
     node: &TemplateLit<'src>,
     scope: &LexicalScope,
-    env: &Env,
-) -> ParserResult<Expression> {
+    env: &Env<T>,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> ParserResult<T> {
     let args = node
         .quasis
         .iter()
         .map(|quasi| match parse_template_element(quasi)? {
             "" => Ok(None),
-            value => Ok(Some(Expression::new(Term::Value(ValueTerm::String(
-                StringValue::from(value),
-            ))))),
+            value => Ok(Some(factory.create_value_term(ValueTerm::String(
+                allocator.create_string(value.into()),
+            )))),
         })
         .zip(
             node.expressions
                 .iter()
                 .map(|expression| {
-                    let value = parse_expression(expression, scope, env)?;
-                    Ok(Some(Expression::new(Term::Application(
-                        ApplicationTerm::new(to_string(), vec![value]),
-                    ))))
+                    let value = parse_expression(expression, scope, env, factory, allocator)?;
+                    Ok(Some(factory.create_application_term(
+                        factory.create_native_function_term(to_string()),
+                        allocator.create_unit_list(value),
+                    )))
                 })
                 .chain(once(Ok(None))),
         )
@@ -727,12 +823,14 @@ fn parse_template_literal<'src>(
         })
         .collect::<ParserResult<Vec<_>>>()?;
     Ok(match args.len() {
-        0 => Expression::new(Term::Value(ValueTerm::String(StringValue::from("")))),
+        0 => {
+            factory.create_value_term(ValueTerm::String(allocator.create_string(String::from(""))))
+        }
         1 => args.into_iter().next().unwrap(),
-        _ => Expression::new(Term::Application(ApplicationTerm::new(
-            Expression::new(Term::Builtin(BuiltinTerm::Concat)),
-            args,
-        ))),
+        _ => factory.create_application_term(
+            factory.create_builtin_term(BuiltinTerm::Concat),
+            allocator.create_list(args),
+        ),
     })
 }
 
@@ -743,22 +841,26 @@ fn parse_template_element<'src>(node: &TemplateElement<'src>) -> ParserResult<&'
     }
 }
 
-fn parse_tagged_template<'src>(
+fn parse_tagged_template<'src, T: Expression>(
     node: &TaggedTemplateExpr<'src>,
     scope: &LexicalScope,
-    env: &Env,
-) -> ParserResult<Expression> {
-    parse_template_literal(&node.quasi, scope, env)
+    env: &Env<T>,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> ParserResult<T> {
+    parse_template_literal(&node.quasi, scope, env, factory, allocator)
 }
 
-fn parse_object_literal<'src>(
+fn parse_object_literal<'src, T: Expression>(
     node: &ObjExpr<'src>,
     scope: &LexicalScope,
-    env: &Env,
-) -> ParserResult<Expression> {
-    enum ObjectLiteralFields {
-        Properties(Vec<(ValueTerm, Expression)>),
-        Spread(Expression),
+    env: &Env<T>,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> ParserResult<T> {
+    enum ObjectLiteralFields<T> {
+        Properties(Vec<(String, T)>),
+        Spread(T),
     }
     let elements = node
         .iter()
@@ -769,21 +871,42 @@ fn parse_object_literal<'src>(
                     PropKind::Init => {
                         let key = match &prop.key {
                             PropKey::Lit(key) => match key {
-                                Lit::Null => Ok(ValueTerm::Null),
-                                Lit::Boolean(value) => Ok(ValueTerm::Boolean(*value)),
-                                Lit::String(key) => Ok(ValueTerm::String(parse_string(key))),
-                                Lit::Number(key) => Ok(ValueTerm::Float(parse_number(key)?)),
+                                Lit::String(key) => Ok(parse_string(key)),
+                                Lit::Null => Ok(String::from("null")),
+                                Lit::Boolean(value) => Ok(format!("{}", value)),
+                                Lit::Number(key) => {
+                                    let key = parse_number(key)?;
+                                    match as_integer(key) {
+                                        Some(key) => Ok(format!("{}", key)),
+                                        _ => Ok(format!("{}", key)),
+                                    }
+                                }
                                 _ => Err(err_unimplemented(key)),
                             },
                             PropKey::Expr(key) => match key {
                                 Expr::Ident(key) if !prop.computed => {
                                     let field_name = parse_identifier(key)?;
-                                    Ok(ValueTerm::String(StringValue::from(field_name)))
+                                    Ok(String::from(field_name))
                                 }
                                 _ => {
-                                    let dynamic_key = parse_expression(key, scope, env)?;
-                                    match dynamic_key.value() {
-                                        Term::Value(value) => Ok(value.clone()),
+                                    let dynamic_key =
+                                        parse_expression(key, scope, env, factory, allocator)?;
+                                    match factory.match_value_term(&dynamic_key) {
+                                        Some(ValueTerm::String(value)) => {
+                                            Ok(String::from(value.as_str()))
+                                        }
+                                        Some(ValueTerm::Null) => Ok(format!("{}", dynamic_key)),
+                                        Some(ValueTerm::Boolean(_)) => {
+                                            Ok(format!("{}", dynamic_key))
+                                        }
+                                        Some(ValueTerm::Int(_)) => Ok(format!("{}", dynamic_key)),
+                                        Some(ValueTerm::Float(value)) => {
+                                            Ok(if let Some(value) = as_integer(*value) {
+                                                format!("{}", value)
+                                            } else {
+                                                format!("{}", dynamic_key)
+                                            })
+                                        }
                                         _ => Err(err_unimplemented(dynamic_key)),
                                     }
                                 }
@@ -791,18 +914,20 @@ fn parse_object_literal<'src>(
                             PropKey::Pat(key) => match key {
                                 Pat::Ident(key) if !prop.computed => {
                                     let field_name = parse_identifier(key)?;
-                                    Ok(ValueTerm::String(StringValue::from(field_name)))
+                                    Ok(String::from(field_name))
                                 }
                                 _ => Err(err_unimplemented(node)),
                             },
                         }?;
                         let value = match &prop.value {
-                            PropValue::Expr(node) => parse_expression(node, scope, env),
+                            PropValue::Expr(node) => {
+                                parse_expression(node, scope, env, factory, allocator)
+                            }
                             PropValue::None => match prop.short_hand {
                                 true => match &prop.key {
                                     PropKey::Pat(node) => match node {
                                         Pat::Ident(node) => {
-                                            parse_variable_reference(&node, scope, env)
+                                            parse_variable_reference(&node, scope, env, factory)
                                         }
                                         _ => Err(err_unimplemented(node)),
                                     },
@@ -831,7 +956,7 @@ fn parse_object_literal<'src>(
                     PropKind::Set => Err(err_unimplemented(prop)),
                 },
                 ObjProp::Spread(Expr::Spread(node)) => {
-                    let value = parse_expression(node, scope, env)?;
+                    let value = parse_expression(node, scope, env, factory, allocator)?;
                     elements.push(ObjectLiteralFields::Spread(value));
                     Ok(elements)
                 }
@@ -842,36 +967,38 @@ fn parse_object_literal<'src>(
         ObjectLiteralFields::Spread(value) => value,
         ObjectLiteralFields::Properties(properties) => {
             let (keys, values): (Vec<_>, Vec<_>) = properties.into_iter().unzip();
-            Expression::new(Term::Struct(StructTerm::new(
-                Some(StructPrototype::new(keys)),
-                values,
-            )))
+            factory.create_struct_term(
+                allocator.create_struct_prototype(keys),
+                allocator.create_list(values),
+            )
         }
     });
     Ok(if field_sets.len() >= 2 {
-        Expression::new(Term::Application(ApplicationTerm::new(
-            Expression::new(Term::Builtin(BuiltinTerm::Merge)),
-            field_sets.collect(),
-        )))
+        factory.create_application_term(
+            factory.create_builtin_term(BuiltinTerm::Merge),
+            allocator.create_list(field_sets),
+        )
     } else {
         match field_sets.into_iter().next() {
             Some(value) => value,
-            None => Expression::new(Term::Struct(StructTerm::new(
-                Some(StructPrototype::new(Vec::new())),
-                Vec::new(),
-            ))),
+            None => factory.create_struct_term(
+                allocator.create_struct_prototype(empty()),
+                allocator.create_empty_list(),
+            ),
         }
     })
 }
 
-fn parse_array_literal<'src>(
+fn parse_array_literal<'src, T: Expression>(
     node: &ArrayExpr<'src>,
     scope: &LexicalScope,
-    env: &Env,
-) -> ParserResult<Expression> {
-    enum ArrayLiteralFields {
-        Items(Vec<Expression>),
-        Spread(Expression),
+    env: &Env<T>,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> ParserResult<T> {
+    enum ArrayLiteralFields<T> {
+        Items(Vec<T>),
+        Spread(T),
     }
     let elements = node
         .iter()
@@ -881,11 +1008,11 @@ fn parse_array_literal<'src>(
                 None => Err(err("Missing array item", node)),
                 Some(node) => match node {
                     Expr::Spread(node) => {
-                        let value = parse_expression(node, scope, env)?;
+                        let value = parse_expression(node, scope, env, factory, allocator)?;
                         elements.push(ArrayLiteralFields::Spread(value));
                         Ok(elements)
                     }
-                    _ => match parse_expression(node, scope, env) {
+                    _ => match parse_expression(node, scope, env, factory, allocator) {
                         Err(error) => Err(error),
                         Ok(value) => {
                             if let Some(ArrayLiteralFields::Items(_)) = elements.last() {
@@ -912,24 +1039,20 @@ fn parse_array_literal<'src>(
             (ArrayLiteralFields::Spread(target), ArrayLiteralFields::Items(items))
                 if items.len() == 1 =>
             {
-                return Ok(Expression::new(Term::Application(ApplicationTerm::new(
-                    Expression::new(Term::Builtin(BuiltinTerm::Push)),
-                    vec![
-                        Expression::clone(target),
-                        items.into_iter().next().map(Expression::clone).unwrap(),
-                    ],
-                ))))
+                return Ok(factory.create_application_term(
+                    factory.create_builtin_term(BuiltinTerm::Push),
+                    allocator
+                        .create_pair(target.clone(), items.into_iter().next().cloned().unwrap()),
+                ))
             }
             (ArrayLiteralFields::Items(items), ArrayLiteralFields::Spread(target))
                 if items.len() == 1 =>
             {
-                return Ok(Expression::new(Term::Application(ApplicationTerm::new(
-                    Expression::new(Term::Builtin(BuiltinTerm::PushFront)),
-                    vec![
-                        Expression::clone(target),
-                        items.into_iter().next().map(Expression::clone).unwrap(),
-                    ],
-                ))))
+                return Ok(factory.create_application_term(
+                    factory.create_builtin_term(BuiltinTerm::PushFront),
+                    allocator
+                        .create_pair(target.clone(), items.into_iter().next().cloned().unwrap()),
+                ))
             }
             _ => {}
         }
@@ -937,327 +1060,381 @@ fn parse_array_literal<'src>(
 
     let item_sets = elements.into_iter().map(|properties| match properties {
         ArrayLiteralFields::Spread(value) => value,
-        ArrayLiteralFields::Items(items) => Expression::new(Term::Collection(
-            CollectionTerm::Vector(VectorTerm::new(items)),
-        )),
+        ArrayLiteralFields::Items(items) => {
+            factory.create_vector_term(allocator.create_list(items))
+        }
     });
     Ok(if item_sets.len() >= 2 {
-        Expression::new(Term::Application(ApplicationTerm::new(
-            Expression::new(Term::Builtin(BuiltinTerm::Append)),
-            item_sets.collect(),
-        )))
+        factory.create_application_term(
+            factory.create_builtin_term(BuiltinTerm::Append),
+            allocator.create_list(item_sets),
+        )
     } else {
         match item_sets.into_iter().next() {
             Some(value) => value,
-            None => Expression::new(Term::Collection(CollectionTerm::Vector(VectorTerm::new(
-                Vec::new(),
-            )))),
+            None => factory.create_vector_term(allocator.create_empty_list()),
         }
     })
 }
 
-fn parse_unary_expression<'src>(
+fn parse_unary_expression<'src, T: Expression>(
     node: &UnaryExpr<'src>,
     scope: &LexicalScope,
-    env: &Env,
-) -> ParserResult<Expression> {
+    env: &Env<T>,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> ParserResult<T> {
     match node.operator {
-        UnaryOp::Minus => parse_unary_minus_expression(node, scope, env),
-        UnaryOp::Plus => parse_unary_plus_expression(node, scope, env),
-        UnaryOp::Not => parse_unary_not_expression(node, scope, env),
+        UnaryOp::Minus => parse_unary_minus_expression(node, scope, env, factory, allocator),
+        UnaryOp::Plus => parse_unary_plus_expression(node, scope, env, factory, allocator),
+        UnaryOp::Not => parse_unary_not_expression(node, scope, env, factory, allocator),
         _ => Err(err_unimplemented(node)),
     }
 }
 
-fn parse_binary_expression<'src>(
+fn parse_binary_expression<'src, T: Expression>(
     node: &BinaryExpr<'src>,
     scope: &LexicalScope,
-    env: &Env,
-) -> ParserResult<Expression> {
+    env: &Env<T>,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> ParserResult<T> {
     match node.operator {
-        BinaryOp::Plus => parse_binary_add_expression(node, scope, env),
-        BinaryOp::Minus => parse_binary_subtract_expression(node, scope, env),
-        BinaryOp::Times => parse_binary_multiply_expression(node, scope, env),
-        BinaryOp::Over => parse_binary_divide_expression(node, scope, env),
-        BinaryOp::Mod => parse_binary_remainder_expression(node, scope, env),
-        BinaryOp::PowerOf => parse_binary_pow_expression(node, scope, env),
-        BinaryOp::LessThan => parse_binary_lt_expression(node, scope, env),
-        BinaryOp::GreaterThan => parse_binary_gt_expression(node, scope, env),
-        BinaryOp::LessThanEqual => parse_binary_lte_expression(node, scope, env),
-        BinaryOp::GreaterThanEqual => parse_binary_gte_expression(node, scope, env),
-        BinaryOp::Equal => parse_binary_equal_expression(node, scope, env),
-        BinaryOp::StrictEqual => parse_binary_equal_expression(node, scope, env),
-        BinaryOp::NotEqual => parse_binary_not_equal_expression(node, scope, env),
-        BinaryOp::StrictNotEqual => parse_binary_not_equal_expression(node, scope, env),
-        _ => Err(err_unimplemented(node)),
-    }
-}
-
-fn parse_logical_expression<'src>(
-    node: &LogicalExpr<'src>,
-    scope: &LexicalScope,
-    env: &Env,
-) -> ParserResult<Expression> {
-    match node.operator {
-        LogicalOp::And => parse_logical_and_expression(node, scope, env),
-        LogicalOp::Or => parse_logical_or_expression(node, scope, env),
-    }
-}
-
-fn parse_unary_minus_expression<'src>(
-    node: &UnaryExpr<'src>,
-    scope: &LexicalScope,
-    env: &Env,
-) -> ParserResult<Expression> {
-    let operand = parse_expression(&node.argument, scope, env)?;
-    Ok(match operand.value() {
-        Term::Value(ValueTerm::Int(value)) => Expression::new(Term::Value(ValueTerm::Int(-*value))),
-        Term::Value(ValueTerm::Float(value)) => {
-            Expression::new(Term::Value(ValueTerm::Float(-*value)))
+        BinaryOp::Plus => parse_binary_add_expression(node, scope, env, factory, allocator),
+        BinaryOp::Minus => parse_binary_subtract_expression(node, scope, env, factory, allocator),
+        BinaryOp::Times => parse_binary_multiply_expression(node, scope, env, factory, allocator),
+        BinaryOp::Over => parse_binary_divide_expression(node, scope, env, factory, allocator),
+        BinaryOp::Mod => parse_binary_remainder_expression(node, scope, env, factory, allocator),
+        BinaryOp::PowerOf => parse_binary_pow_expression(node, scope, env, factory, allocator),
+        BinaryOp::LessThan => parse_binary_lt_expression(node, scope, env, factory, allocator),
+        BinaryOp::GreaterThan => parse_binary_gt_expression(node, scope, env, factory, allocator),
+        BinaryOp::LessThanEqual => {
+            parse_binary_lte_expression(node, scope, env, factory, allocator)
         }
-        _ => Expression::new(Term::Application(ApplicationTerm::new(
-            Expression::new(Term::Builtin(BuiltinTerm::Subtract)),
-            vec![Expression::new(Term::Value(ValueTerm::Float(0.0))), operand],
-        ))),
+        BinaryOp::GreaterThanEqual => {
+            parse_binary_gte_expression(node, scope, env, factory, allocator)
+        }
+        BinaryOp::Equal => parse_binary_equal_expression(node, scope, env, factory, allocator),
+        BinaryOp::StrictEqual => {
+            parse_binary_equal_expression(node, scope, env, factory, allocator)
+        }
+        BinaryOp::NotEqual => {
+            parse_binary_not_equal_expression(node, scope, env, factory, allocator)
+        }
+        BinaryOp::StrictNotEqual => {
+            parse_binary_not_equal_expression(node, scope, env, factory, allocator)
+        }
+        _ => Err(err_unimplemented(node)),
+    }
+}
+
+fn parse_logical_expression<'src, T: Expression>(
+    node: &LogicalExpr<'src>,
+    scope: &LexicalScope,
+    env: &Env<T>,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> ParserResult<T> {
+    match node.operator {
+        LogicalOp::And => parse_logical_and_expression(node, scope, env, factory, allocator),
+        LogicalOp::Or => parse_logical_or_expression(node, scope, env, factory, allocator),
+    }
+}
+
+fn parse_unary_minus_expression<'src, T: Expression>(
+    node: &UnaryExpr<'src>,
+    scope: &LexicalScope,
+    env: &Env<T>,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> ParserResult<T> {
+    let operand = parse_expression(&node.argument, scope, env, factory, allocator)?;
+    Ok(match factory.match_value_term(&operand) {
+        Some(ValueTerm::Int(value)) => factory.create_value_term(ValueTerm::Int(-*value)),
+        Some(ValueTerm::Float(value)) => factory.create_value_term(ValueTerm::Float(-*value)),
+        _ => factory.create_application_term(
+            factory.create_builtin_term(BuiltinTerm::Subtract),
+            allocator.create_pair(factory.create_value_term(ValueTerm::Float(0.0)), operand),
+        ),
     })
 }
 
-fn parse_unary_plus_expression<'src>(
+fn parse_unary_plus_expression<'src, T: Expression>(
     node: &UnaryExpr<'src>,
     scope: &LexicalScope,
-    env: &Env,
-) -> ParserResult<Expression> {
-    let operand = parse_expression(&node.argument, scope, env)?;
-    Ok(match operand.value() {
-        Term::Value(ValueTerm::Int(_)) => operand,
-        Term::Value(ValueTerm::Float(_)) => operand,
-        _ => Expression::new(Term::Application(ApplicationTerm::new(
-            Expression::new(Term::Builtin(BuiltinTerm::Add)),
-            vec![Expression::new(Term::Value(ValueTerm::Float(0.0))), operand],
-        ))),
+    env: &Env<T>,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> ParserResult<T> {
+    let operand = parse_expression(&node.argument, scope, env, factory, allocator)?;
+    Ok(match factory.match_value_term(&operand) {
+        Some(ValueTerm::Int(_)) => operand,
+        Some(ValueTerm::Float(_)) => operand,
+        _ => factory.create_application_term(
+            factory.create_builtin_term(BuiltinTerm::Add),
+            allocator.create_pair(factory.create_value_term(ValueTerm::Float(0.0)), operand),
+        ),
     })
 }
 
-fn parse_unary_not_expression<'src>(
+fn parse_unary_not_expression<'src, T: Expression>(
     node: &UnaryExpr<'src>,
     scope: &LexicalScope,
-    env: &Env,
-) -> ParserResult<Expression> {
-    let operand = parse_expression(&node.argument, scope, env)?;
-    Ok(Expression::new(Term::Application(ApplicationTerm::new(
-        Expression::new(Term::Builtin(BuiltinTerm::Not)),
-        vec![operand],
-    ))))
+    env: &Env<T>,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> ParserResult<T> {
+    let operand = parse_expression(&node.argument, scope, env, factory, allocator)?;
+    Ok(factory.create_application_term(
+        factory.create_builtin_term(BuiltinTerm::Not),
+        allocator.create_unit_list(operand),
+    ))
 }
 
-fn parse_binary_add_expression<'src>(
+fn parse_binary_add_expression<'src, T: Expression>(
     node: &BinaryExpr<'src>,
     scope: &LexicalScope,
-    env: &Env,
-) -> ParserResult<Expression> {
-    let left = parse_expression(&node.left, scope, env)?;
-    let right = parse_expression(&node.right, scope, env)?;
-    Ok(Expression::new(Term::Application(ApplicationTerm::new(
-        Expression::new(Term::Builtin(BuiltinTerm::Add)),
-        vec![left, right],
-    ))))
+    env: &Env<T>,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> ParserResult<T> {
+    let left = parse_expression(&node.left, scope, env, factory, allocator)?;
+    let right = parse_expression(&node.right, scope, env, factory, allocator)?;
+    Ok(factory.create_application_term(
+        factory.create_builtin_term(BuiltinTerm::Add),
+        allocator.create_pair(left, right),
+    ))
 }
 
-fn parse_binary_subtract_expression<'src>(
+fn parse_binary_subtract_expression<'src, T: Expression>(
     node: &BinaryExpr<'src>,
     scope: &LexicalScope,
-    env: &Env,
-) -> ParserResult<Expression> {
-    let left = parse_expression(&node.left, scope, env)?;
-    let right = parse_expression(&node.right, scope, env)?;
-    Ok(Expression::new(Term::Application(ApplicationTerm::new(
-        Expression::new(Term::Builtin(BuiltinTerm::Subtract)),
-        vec![left, right],
-    ))))
+    env: &Env<T>,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> ParserResult<T> {
+    let left = parse_expression(&node.left, scope, env, factory, allocator)?;
+    let right = parse_expression(&node.right, scope, env, factory, allocator)?;
+    Ok(factory.create_application_term(
+        factory.create_builtin_term(BuiltinTerm::Subtract),
+        allocator.create_pair(left, right),
+    ))
 }
 
-fn parse_binary_multiply_expression<'src>(
+fn parse_binary_multiply_expression<'src, T: Expression>(
     node: &BinaryExpr<'src>,
     scope: &LexicalScope,
-    env: &Env,
-) -> ParserResult<Expression> {
-    let left = parse_expression(&node.left, scope, env)?;
-    let right = parse_expression(&node.right, scope, env)?;
-    Ok(Expression::new(Term::Application(ApplicationTerm::new(
-        Expression::new(Term::Builtin(BuiltinTerm::Multiply)),
-        vec![left, right],
-    ))))
+    env: &Env<T>,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> ParserResult<T> {
+    let left = parse_expression(&node.left, scope, env, factory, allocator)?;
+    let right = parse_expression(&node.right, scope, env, factory, allocator)?;
+    Ok(factory.create_application_term(
+        factory.create_builtin_term(BuiltinTerm::Multiply),
+        allocator.create_pair(left, right),
+    ))
 }
 
-fn parse_binary_divide_expression<'src>(
+fn parse_binary_divide_expression<'src, T: Expression>(
     node: &BinaryExpr<'src>,
     scope: &LexicalScope,
-    env: &Env,
-) -> ParserResult<Expression> {
-    let left = parse_expression(&node.left, scope, env)?;
-    let right = parse_expression(&node.right, scope, env)?;
-    Ok(Expression::new(Term::Application(ApplicationTerm::new(
-        Expression::new(Term::Builtin(BuiltinTerm::Divide)),
-        vec![left, right],
-    ))))
+    env: &Env<T>,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> ParserResult<T> {
+    let left = parse_expression(&node.left, scope, env, factory, allocator)?;
+    let right = parse_expression(&node.right, scope, env, factory, allocator)?;
+    Ok(factory.create_application_term(
+        factory.create_builtin_term(BuiltinTerm::Divide),
+        allocator.create_pair(left, right),
+    ))
 }
 
-fn parse_binary_remainder_expression<'src>(
+fn parse_binary_remainder_expression<'src, T: Expression>(
     node: &BinaryExpr<'src>,
     scope: &LexicalScope,
-    env: &Env,
-) -> ParserResult<Expression> {
-    let left = parse_expression(&node.left, scope, env)?;
-    let right = parse_expression(&node.right, scope, env)?;
-    Ok(Expression::new(Term::Application(ApplicationTerm::new(
-        Expression::new(Term::Builtin(BuiltinTerm::Remainder)),
-        vec![left, right],
-    ))))
+    env: &Env<T>,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> ParserResult<T> {
+    let left = parse_expression(&node.left, scope, env, factory, allocator)?;
+    let right = parse_expression(&node.right, scope, env, factory, allocator)?;
+    Ok(factory.create_application_term(
+        factory.create_builtin_term(BuiltinTerm::Remainder),
+        allocator.create_pair(left, right),
+    ))
 }
 
-fn parse_binary_pow_expression<'src>(
+fn parse_binary_pow_expression<'src, T: Expression>(
     node: &BinaryExpr<'src>,
     scope: &LexicalScope,
-    env: &Env,
-) -> ParserResult<Expression> {
-    let left = parse_expression(&node.left, scope, env)?;
-    let right = parse_expression(&node.right, scope, env)?;
-    Ok(Expression::new(Term::Application(ApplicationTerm::new(
-        Expression::new(Term::Builtin(BuiltinTerm::Pow)),
-        vec![left, right],
-    ))))
+    env: &Env<T>,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> ParserResult<T> {
+    let left = parse_expression(&node.left, scope, env, factory, allocator)?;
+    let right = parse_expression(&node.right, scope, env, factory, allocator)?;
+    Ok(factory.create_application_term(
+        factory.create_builtin_term(BuiltinTerm::Pow),
+        allocator.create_pair(left, right),
+    ))
 }
 
-fn parse_binary_lt_expression<'src>(
+fn parse_binary_lt_expression<'src, T: Expression>(
     node: &BinaryExpr<'src>,
     scope: &LexicalScope,
-    env: &Env,
-) -> ParserResult<Expression> {
-    let left = parse_expression(&node.left, scope, env)?;
-    let right = parse_expression(&node.right, scope, env)?;
-    Ok(Expression::new(Term::Application(ApplicationTerm::new(
-        Expression::new(Term::Builtin(BuiltinTerm::Lt)),
-        vec![left, right],
-    ))))
+    env: &Env<T>,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> ParserResult<T> {
+    let left = parse_expression(&node.left, scope, env, factory, allocator)?;
+    let right = parse_expression(&node.right, scope, env, factory, allocator)?;
+    Ok(factory.create_application_term(
+        factory.create_builtin_term(BuiltinTerm::Lt),
+        allocator.create_pair(left, right),
+    ))
 }
 
-fn parse_binary_gt_expression<'src>(
+fn parse_binary_gt_expression<'src, T: Expression>(
     node: &BinaryExpr<'src>,
     scope: &LexicalScope,
-    env: &Env,
-) -> ParserResult<Expression> {
-    let left = parse_expression(&node.left, scope, env)?;
-    let right = parse_expression(&node.right, scope, env)?;
-    Ok(Expression::new(Term::Application(ApplicationTerm::new(
-        Expression::new(Term::Builtin(BuiltinTerm::Gt)),
-        vec![left, right],
-    ))))
+    env: &Env<T>,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> ParserResult<T> {
+    let left = parse_expression(&node.left, scope, env, factory, allocator)?;
+    let right = parse_expression(&node.right, scope, env, factory, allocator)?;
+    Ok(factory.create_application_term(
+        factory.create_builtin_term(BuiltinTerm::Gt),
+        allocator.create_pair(left, right),
+    ))
 }
 
-fn parse_binary_lte_expression<'src>(
+fn parse_binary_lte_expression<'src, T: Expression>(
     node: &BinaryExpr<'src>,
     scope: &LexicalScope,
-    env: &Env,
-) -> ParserResult<Expression> {
-    let left = parse_expression(&node.left, scope, env)?;
-    let right = parse_expression(&node.right, scope, env)?;
-    Ok(Expression::new(Term::Application(ApplicationTerm::new(
-        Expression::new(Term::Builtin(BuiltinTerm::Lte)),
-        vec![left, right],
-    ))))
+    env: &Env<T>,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> ParserResult<T> {
+    let left = parse_expression(&node.left, scope, env, factory, allocator)?;
+    let right = parse_expression(&node.right, scope, env, factory, allocator)?;
+    Ok(factory.create_application_term(
+        factory.create_builtin_term(BuiltinTerm::Lte),
+        allocator.create_pair(left, right),
+    ))
 }
 
-fn parse_binary_gte_expression<'src>(
+fn parse_binary_gte_expression<'src, T: Expression>(
     node: &BinaryExpr<'src>,
     scope: &LexicalScope,
-    env: &Env,
-) -> ParserResult<Expression> {
-    let left = parse_expression(&node.left, scope, env)?;
-    let right = parse_expression(&node.right, scope, env)?;
-    Ok(Expression::new(Term::Application(ApplicationTerm::new(
-        Expression::new(Term::Builtin(BuiltinTerm::Gte)),
-        vec![left, right],
-    ))))
+    env: &Env<T>,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> ParserResult<T> {
+    let left = parse_expression(&node.left, scope, env, factory, allocator)?;
+    let right = parse_expression(&node.right, scope, env, factory, allocator)?;
+    Ok(factory.create_application_term(
+        factory.create_builtin_term(BuiltinTerm::Gte),
+        allocator.create_pair(left, right),
+    ))
 }
 
-fn parse_binary_equal_expression<'src>(
+fn parse_binary_equal_expression<'src, T: Expression>(
     node: &BinaryExpr<'src>,
     scope: &LexicalScope,
-    env: &Env,
-) -> ParserResult<Expression> {
-    let left = parse_expression(&node.left, scope, env)?;
-    let right = parse_expression(&node.right, scope, env)?;
-    Ok(Expression::new(Term::Application(ApplicationTerm::new(
-        Expression::new(Term::Builtin(BuiltinTerm::Eq)),
-        vec![left, right],
-    ))))
+    env: &Env<T>,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> ParserResult<T> {
+    let left = parse_expression(&node.left, scope, env, factory, allocator)?;
+    let right = parse_expression(&node.right, scope, env, factory, allocator)?;
+    Ok(factory.create_application_term(
+        factory.create_builtin_term(BuiltinTerm::Eq),
+        allocator.create_pair(left, right),
+    ))
 }
 
-fn parse_binary_not_equal_expression<'src>(
+fn parse_binary_not_equal_expression<'src, T: Expression>(
     node: &BinaryExpr<'src>,
     scope: &LexicalScope,
-    env: &Env,
-) -> ParserResult<Expression> {
-    let expression = parse_binary_equal_expression(node, scope, env)?;
-    Ok(Expression::new(Term::Application(ApplicationTerm::new(
-        Expression::new(Term::Builtin(BuiltinTerm::Not)),
-        vec![expression],
-    ))))
+    env: &Env<T>,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> ParserResult<T> {
+    let expression = parse_binary_equal_expression(node, scope, env, factory, allocator)?;
+    Ok(factory.create_application_term(
+        factory.create_builtin_term(BuiltinTerm::Not),
+        allocator.create_unit_list(expression),
+    ))
 }
 
-fn parse_logical_and_expression<'src>(
+fn parse_logical_and_expression<'src, T: Expression>(
     node: &LogicalExpr<'src>,
     scope: &LexicalScope,
-    env: &Env,
-) -> ParserResult<Expression> {
-    let left = parse_expression(&node.left, scope, env)?;
-    let right = parse_expression(&node.right, scope, env)?;
-    Ok(Expression::new(Term::Application(ApplicationTerm::new(
-        Expression::new(Term::Builtin(BuiltinTerm::And)),
-        vec![left, right],
-    ))))
+    env: &Env<T>,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> ParserResult<T> {
+    let left = parse_expression(&node.left, scope, env, factory, allocator)?;
+    let right = parse_expression(&node.right, scope, env, factory, allocator)?;
+    Ok(factory.create_application_term(
+        factory.create_builtin_term(BuiltinTerm::And),
+        allocator.create_pair(left, right),
+    ))
 }
 
-fn parse_logical_or_expression<'src>(
+fn parse_logical_or_expression<'src, T: Expression>(
     node: &LogicalExpr<'src>,
     scope: &LexicalScope,
-    env: &Env,
-) -> ParserResult<Expression> {
-    let left = parse_expression(&node.left, scope, env)?;
-    let right = parse_expression(&node.right, scope, env)?;
-    Ok(Expression::new(Term::Application(ApplicationTerm::new(
-        Expression::new(Term::Builtin(BuiltinTerm::Or)),
-        vec![left, right],
-    ))))
+    env: &Env<T>,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> ParserResult<T> {
+    let left = parse_expression(&node.left, scope, env, factory, allocator)?;
+    let right = parse_expression(&node.right, scope, env, factory, allocator)?;
+    Ok(factory.create_application_term(
+        factory.create_builtin_term(BuiltinTerm::Or),
+        allocator.create_pair(left, right),
+    ))
 }
 
-fn parse_conditional_expression<'src>(
+fn parse_conditional_expression<'src, T: Expression>(
     node: &ConditionalExpr<'src>,
     scope: &LexicalScope,
-    env: &Env,
-) -> ParserResult<Expression> {
-    let condition = parse_expression(&node.test, scope, env)?;
-    let consequent = parse_expression(&node.consequent, scope, env)?;
-    let alternate = parse_expression(&node.alternate, scope, env)?;
-    Ok(create_if_expression(condition, consequent, alternate))
+    env: &Env<T>,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> ParserResult<T> {
+    let condition = parse_expression(&node.test, scope, env, factory, allocator)?;
+    let consequent = parse_expression(&node.consequent, scope, env, factory, allocator)?;
+    let alternate = parse_expression(&node.alternate, scope, env, factory, allocator)?;
+    Ok(create_if_expression(
+        condition, consequent, alternate, factory, allocator,
+    ))
 }
 
-fn create_if_expression(
-    condition: Expression,
-    consequent: Expression,
-    alternate: Expression,
-) -> Expression {
-    Expression::new(Term::Application(ApplicationTerm::new(
-        Expression::new(Term::Builtin(BuiltinTerm::If)),
-        vec![condition, consequent, alternate],
-    )))
+fn create_if_expression<T: Expression>(
+    condition: T,
+    consequent: T,
+    alternate: T,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> T {
+    factory.create_application_term(
+        factory.create_builtin_term(BuiltinTerm::If),
+        allocator.create_triple(condition, consequent, alternate),
+    )
 }
 
-fn parse_arrow_function_expression<'src>(
+fn parse_arrow_function_expression<'src, T: Expression>(
     node: &ArrowFuncExpr<'src>,
     scope: &LexicalScope,
-    env: &Env,
-) -> ParserResult<Expression> {
+    env: &Env<T>,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> ParserResult<T> {
     if node.generator || node.is_async {
         Err(err_unimplemented(node))
     } else {
@@ -1275,7 +1452,7 @@ fn parse_arrow_function_expression<'src>(
                         Pat::Obj(properties) => {
                             arg_names.push(None);
                             let bindings = parse_object_destructuring_pattern_bindings(
-                                properties, scope, env,
+                                properties, scope, env, factory, allocator,
                             )?;
                             destructuring_assignments.extend(bindings.into_iter().map(
                                 |(identifier, field_name)| (identifier, (arg_index, field_name)),
@@ -1284,17 +1461,16 @@ fn parse_arrow_function_expression<'src>(
                         }
                         Pat::Array(accessors) => {
                             arg_names.push(None);
-                            let bindings =
-                                parse_array_destructuring_pattern_bindings(accessors, scope, env)?;
+                            let bindings = parse_array_destructuring_pattern_bindings(
+                                accessors, scope, env, factory, allocator,
+                            )?;
                             destructuring_assignments.extend(bindings.into_iter().map(
                                 |(identifier, index)| {
                                     (
                                         identifier,
                                         (
                                             arg_index,
-                                            Expression::new(Term::Value(ValueTerm::Int(
-                                                index as i32,
-                                            ))),
+                                            factory.create_value_term(ValueTerm::Int(index as i32)),
                                         ),
                                     )
                                 },
@@ -1321,10 +1497,10 @@ fn parse_arrow_function_expression<'src>(
             .into_iter()
             .map(|(arg_index, accessor)| {
                 get_dynamic_field(
-                    Expression::new(Term::Variable(VariableTerm::scoped(
-                        num_args - arg_index - 1,
-                    ))),
+                    factory.create_static_variable_term(num_args - arg_index - 1),
                     accessor,
+                    factory,
+                    allocator,
                 )
             })
             .collect::<Vec<_>>();
@@ -1337,45 +1513,44 @@ fn parse_arrow_function_expression<'src>(
         let body = match &node.body {
             ArrowFuncBody::Expr(node) => {
                 let body = &vec![ProgramPart::Stmt(Stmt::Return(Some(*node.clone())))];
-                parse_block(body, child_scope, env)
+                parse_block(body, child_scope, env, factory, allocator)
             }
             ArrowFuncBody::FuncBody(node) => {
                 let FuncBody(body) = node;
-                parse_block(body, child_scope, env)
+                parse_block(body, child_scope, env, factory, allocator)
             }
         }?;
         match body {
             None => Err(err("Missing function return statement", node)),
-            Some(body) => Ok(Expression::new(Term::Lambda(LambdaTerm::new(
-                Arity::from(0, num_args, None),
+            Some(body) => Ok(factory.create_lambda_term(
+                num_args,
                 if destructuring_initializers.is_empty() {
                     body
                 } else {
-                    Expression::new(Term::Application(ApplicationTerm::new(
-                        Expression::new(Term::Lambda(LambdaTerm::new(
-                            Arity::from(0, destructuring_initializers.len(), None),
-                            body,
-                        ))),
-                        destructuring_initializers,
-                    )))
+                    factory.create_application_term(
+                        factory.create_lambda_term(destructuring_initializers.len(), body),
+                        allocator.create_list(destructuring_initializers),
+                    )
                 },
-            )))),
+            )),
         }
     }
 }
 
-fn parse_member_expression<'src>(
+fn parse_member_expression<'src, T: Expression>(
     node: &MemberExpr<'src>,
     scope: &LexicalScope,
-    env: &Env,
-) -> ParserResult<Expression> {
-    let target = parse_expression(&node.object, scope, env)?;
+    env: &Env<T>,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> ParserResult<T> {
+    let target = parse_expression(&node.object, scope, env, factory, allocator)?;
     let field_name = parse_static_member_field_name(node)?;
     match field_name {
-        Some(field_name) => Ok(get_static_field(target, &field_name)),
+        Some(field_name) => Ok(get_static_field(target, &field_name, factory, allocator)),
         None => {
-            let field = parse_expression(&node.property, scope, env)?;
-            Ok(get_dynamic_field(target, field))
+            let field = parse_expression(&node.property, scope, env, factory, allocator)?;
+            Ok(get_dynamic_field(target, field, factory, allocator))
         }
     }
 }
@@ -1391,30 +1566,49 @@ fn parse_static_member_field_name(node: &MemberExpr) -> ParserResult<Option<Stri
     })
 }
 
-fn get_static_field(target: Expression, field: &str) -> Expression {
-    let field = Expression::new(Term::Value(ValueTerm::String(StringValue::from(field))));
-    get_dynamic_field(target, field)
+fn get_static_field<T: Expression>(
+    target: T,
+    field: &str,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> T {
+    let field = factory.create_value_term(ValueTerm::String(allocator.create_string(field.into())));
+    get_dynamic_field(target, field, factory, allocator)
 }
 
-fn get_dynamic_field(target: Expression, field: Expression) -> Expression {
-    Expression::new(Term::Application(ApplicationTerm::new(
-        Expression::new(Term::Builtin(BuiltinTerm::Get)),
-        vec![target, field],
-    )))
-}
-
-fn get_indexed_field(target: Expression, index: usize) -> Expression {
-    get_dynamic_field(
-        target,
-        Expression::new(Term::Value(ValueTerm::Int(index as i32))),
+fn get_dynamic_field<T: Expression>(
+    target: T,
+    field: T,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> T {
+    factory.create_application_term(
+        factory.create_builtin_term(BuiltinTerm::Get),
+        allocator.create_pair(target, field),
     )
 }
 
-fn parse_call_expression<'src>(
+fn get_indexed_field<T: Expression>(
+    target: T,
+    index: usize,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> T {
+    get_dynamic_field(
+        target,
+        factory.create_value_term(ValueTerm::Int(index as i32)),
+        factory,
+        allocator,
+    )
+}
+
+fn parse_call_expression<'src, T: Expression>(
     node: &CallExpr<'src>,
     scope: &LexicalScope,
-    env: &Env,
-) -> ParserResult<Expression> {
+    env: &Env<T>,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> ParserResult<T> {
     let static_dispatch = match &*node.callee {
         Expr::Member(callee) => {
             let method_name = parse_static_member_field_name(callee)?;
@@ -1425,6 +1619,8 @@ fn parse_call_expression<'src>(
                     node.arguments.iter(),
                     scope,
                     env,
+                    factory,
+                    allocator,
                 )?),
                 None => None,
             }
@@ -1434,84 +1630,99 @@ fn parse_call_expression<'src>(
     match static_dispatch {
         Some(expression) => Ok(expression),
         None => {
-            let callee = parse_expression(&node.callee, scope, env)?;
-            parse_function_application_expression(callee, node.arguments.iter(), scope, env)
+            let callee = parse_expression(&node.callee, scope, env, factory, allocator)?;
+            parse_function_application_expression(
+                callee,
+                node.arguments.iter(),
+                scope,
+                env,
+                factory,
+                allocator,
+            )
         }
     }
 }
 
-fn parse_static_method_call_expression<'src: 'temp, 'temp>(
+fn parse_static_method_call_expression<'src: 'temp, 'temp, T: Expression>(
     target: &Expr<'src>,
     method_name: &'src str,
     args: impl IntoIterator<Item = &'temp Expr<'src>> + ExactSizeIterator,
     scope: &LexicalScope,
-    env: &Env,
-) -> ParserResult<Expression> {
-    let target = parse_expression(target, scope, env)?;
-    let is_potential_builtin_method = get_builtin_field(None, method_name).is_some();
+    env: &Env<T>,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> ParserResult<T> {
+    let target = parse_expression(target, scope, env, factory, allocator)?;
+    let is_potential_builtin_method = get_builtin_field(None, method_name, factory).is_some();
     if is_potential_builtin_method {
-        let method = Expression::new(Term::Value(ValueTerm::String(StringValue::from(
-            method_name,
-        ))));
+        let method = factory.create_value_term(ValueTerm::String(
+            allocator.create_string(method_name.into()),
+        ));
         let num_args = args.len();
         let args = args.into_iter().collect::<Vec<_>>();
-        let method_args = parse_expressions(args.iter().cloned(), scope, env)?;
+        let method_args = parse_expressions(args.iter().cloned(), scope, env, factory, allocator)?;
         let dynamic_fallback = parse_function_application_expression(
-            get_static_field(Expression::clone(&target), method_name),
+            get_static_field(target.clone(), method_name, factory, allocator),
             args.iter().cloned(),
             scope,
             env,
+            factory,
+            allocator,
         )?;
         let mut combined_args = Vec::with_capacity(3 + num_args);
         combined_args.push(target);
         combined_args.push(method);
         combined_args.push(dynamic_fallback);
         combined_args.extend(method_args);
-        Ok(Expression::new(Term::Application(ApplicationTerm::new(
-            dispatch(),
-            combined_args,
-        ))))
+        Ok(factory.create_application_term(
+            factory.create_native_function_term(dispatch()),
+            allocator.create_list(combined_args),
+        ))
     } else {
         parse_function_application_expression(
-            get_static_field(Expression::clone(&target), method_name),
+            get_static_field(target.clone(), method_name, factory, allocator),
             args,
             scope,
             env,
+            factory,
+            allocator,
         )
     }
 }
 
-fn parse_function_application_expression<'src: 'temp, 'temp>(
-    target: Expression,
+fn parse_function_application_expression<'src: 'temp, 'temp, T: Expression>(
+    target: T,
     args: impl IntoIterator<Item = &'temp Expr<'src>> + ExactSizeIterator,
     scope: &LexicalScope,
-    env: &Env,
-) -> ParserResult<Expression> {
-    let args = parse_expressions(args, scope, env)?;
-    Ok(Expression::new(Term::Application(ApplicationTerm::new(
-        target, args,
-    ))))
+    env: &Env<T>,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> ParserResult<T> {
+    let args = parse_expressions(args, scope, env, factory, allocator)?;
+    Ok(factory.create_application_term(target, allocator.create_list(args)))
 }
 
-fn parse_constructor_expression<'src>(
+fn parse_constructor_expression<'src, T: Expression>(
     node: &NewExpr<'src>,
     scope: &LexicalScope,
-    env: &Env,
-) -> ParserResult<Expression> {
-    let target = parse_expression(&node.callee, scope, env);
+    env: &Env<T>,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> ParserResult<T> {
+    let target = parse_expression(&node.callee, scope, env, factory, allocator);
     let args = node
         .arguments
         .iter()
-        .map(|arg| parse_expression(arg, scope, env));
-    Ok(Expression::new(Term::Application(ApplicationTerm::new(
-        construct(),
-        once(target).chain(args).collect::<ParserResult<Vec<_>>>()?,
-    ))))
+        .map(|arg| parse_expression(arg, scope, env, factory, allocator));
+    Ok(factory.create_application_term(
+        factory.create_native_function_term(construct()),
+        allocator.create_list(once(target).chain(args).collect::<ParserResult<Vec<_>>>()?),
+    ))
 }
 
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
+    use std::{iter::empty, path::Path};
 
     use super::{parse, parse_module};
     use crate::{
@@ -1521,552 +1732,686 @@ mod tests {
         Env,
     };
     use reflex::{
+        allocator::DefaultAllocator,
         cache::SubstitutionCache,
+        compiler::{Compiler, CompilerMode, CompilerOptions, InstructionPointer},
         core::{
-            ApplicationTerm, Arity, DependencyList, DynamicState, EvaluationResult, Expression,
-            LambdaTerm, StructPrototype, StructTerm, Term, VariableTerm,
+            evaluate, DependencyList, DynamicState, EvaluationResult, ExpressionFactory,
+            HeapAllocator,
         },
-        stdlib::{
-            builtin::BuiltinTerm,
-            collection::{vector::VectorTerm, CollectionTerm},
-            value::{StringValue, ValueTerm},
-        },
+        interpreter::{execute, DefaultInterpreterCache, InterpreterOptions},
+        lang::{BuiltinTerm, TermFactory, ValueTerm},
     };
 
     #[test]
     fn null_literals() {
+        let factory = TermFactory::default();
+        let allocator = DefaultAllocator::default();
         let env = Env::new();
         assert_eq!(
-            parse("null", &env),
-            Ok(Expression::new(Term::Value(ValueTerm::Null))),
+            parse("null", &env, &factory, &allocator),
+            Ok(factory.create_value_term(ValueTerm::Null)),
         );
     }
 
     #[test]
     fn boolean_literals() {
+        let factory = TermFactory::default();
+        let allocator = DefaultAllocator::default();
         let env = Env::new();
         assert_eq!(
-            parse("true", &env),
-            Ok(Expression::new(Term::Value(ValueTerm::Boolean(true)))),
+            parse("true", &env, &factory, &allocator),
+            Ok(factory.create_value_term(ValueTerm::Boolean(true))),
         );
         assert_eq!(
-            parse("false", &env),
-            Ok(Expression::new(Term::Value(ValueTerm::Boolean(false)))),
+            parse("false", &env, &factory, &allocator),
+            Ok(factory.create_value_term(ValueTerm::Boolean(false))),
         );
     }
 
     #[test]
     fn string_literals() {
+        let factory = TermFactory::default();
+        let allocator = DefaultAllocator::default();
         let env = Env::new();
         assert_eq!(
-            parse("''", &env),
-            Ok(Expression::new(Term::Value(ValueTerm::String(
-                String::from("")
-            )))),
+            parse("''", &env, &factory, &allocator),
+            Ok(factory
+                .create_value_term(ValueTerm::String(allocator.create_string(String::from(""))))),
         );
         assert_eq!(
-            parse("\"\"", &env),
-            Ok(Expression::new(Term::Value(ValueTerm::String(
-                String::from("")
-            )))),
+            parse("\"\"", &env, &factory, &allocator),
+            Ok(factory
+                .create_value_term(ValueTerm::String(allocator.create_string(String::from(""))))),
         );
         assert_eq!(
-            parse("'foo'", &env),
-            Ok(Expression::new(Term::Value(ValueTerm::String(
-                String::from("foo")
-            )))),
+            parse("'foo'", &env, &factory, &allocator),
+            Ok(factory.create_value_term(ValueTerm::String(
+                allocator.create_string(String::from("foo"))
+            ))),
         );
         assert_eq!(
-            parse("\"foo\"", &env),
-            Ok(Expression::new(Term::Value(ValueTerm::String(
-                String::from("foo")
-            )))),
+            parse("\"foo\"", &env, &factory, &allocator),
+            Ok(factory.create_value_term(ValueTerm::String(
+                allocator.create_string(String::from("foo"))
+            ))),
         );
         assert_eq!(
-            parse("'\"'", &env),
-            Ok(Expression::new(Term::Value(ValueTerm::String(
-                String::from("\"")
-            )))),
+            parse("'\"'", &env, &factory, &allocator),
+            Ok(factory.create_value_term(ValueTerm::String(
+                allocator.create_string(String::from("\""))
+            ))),
         );
         assert_eq!(
-            parse("'\\\"'", &env),
-            Ok(Expression::new(Term::Value(ValueTerm::String(
-                String::from("\"")
-            )))),
+            parse("'\\\"'", &env, &factory, &allocator),
+            Ok(factory.create_value_term(ValueTerm::String(
+                allocator.create_string(String::from("\""))
+            ))),
         );
         assert_eq!(
-            parse("\"\\\"\"", &env),
-            Ok(Expression::new(Term::Value(ValueTerm::String(
-                String::from("\"")
-            )))),
+            parse("\"\\\"\"", &env, &factory, &allocator),
+            Ok(factory.create_value_term(ValueTerm::String(
+                allocator.create_string(String::from("\""))
+            ))),
         );
     }
 
     #[test]
     fn numeric_literals() {
+        let factory = TermFactory::default();
+        let allocator = DefaultAllocator::default();
         let env = Env::new();
         assert_eq!(
-            parse("0", &env),
-            Ok(Expression::new(Term::Value(ValueTerm::Float(0.0)))),
+            parse("0", &env, &factory, &allocator),
+            Ok(factory.create_value_term(ValueTerm::Float(0.0))),
         );
         assert_eq!(
-            parse("3", &env),
-            Ok(Expression::new(Term::Value(ValueTerm::Float(3.0)))),
+            parse("3", &env, &factory, &allocator),
+            Ok(factory.create_value_term(ValueTerm::Float(3.0))),
         );
         assert_eq!(
-            parse("0.0", &env),
-            Ok(Expression::new(Term::Value(ValueTerm::Float(0.0)))),
+            parse("0.0", &env, &factory, &allocator),
+            Ok(factory.create_value_term(ValueTerm::Float(0.0))),
         );
         assert_eq!(
-            parse("3.142", &env),
-            Ok(Expression::new(Term::Value(ValueTerm::Float(3.142)))),
+            parse("3.142", &env, &factory, &allocator),
+            Ok(factory.create_value_term(ValueTerm::Float(3.142))),
         );
         assert_eq!(
-            parse("0.000", &env),
-            Ok(Expression::new(Term::Value(ValueTerm::Float(0.0)))),
+            parse("0.000", &env, &factory, &allocator),
+            Ok(factory.create_value_term(ValueTerm::Float(0.0))),
         );
         assert_eq!(
-            parse("-0", &env),
-            Ok(Expression::new(Term::Value(ValueTerm::Float(-0.0)))),
+            parse("-0", &env, &factory, &allocator),
+            Ok(factory.create_value_term(ValueTerm::Float(-0.0))),
         );
         assert_eq!(
-            parse("-3", &env),
-            Ok(Expression::new(Term::Value(ValueTerm::Float(-3.0)))),
+            parse("-3", &env, &factory, &allocator),
+            Ok(factory.create_value_term(ValueTerm::Float(-3.0))),
         );
         assert_eq!(
-            parse("-0.0", &env),
-            Ok(Expression::new(Term::Value(ValueTerm::Float(-0.0)))),
+            parse("-0.0", &env, &factory, &allocator),
+            Ok(factory.create_value_term(ValueTerm::Float(-0.0))),
         );
         assert_eq!(
-            parse("-3.142", &env),
-            Ok(Expression::new(Term::Value(ValueTerm::Float(-3.142)))),
+            parse("-3.142", &env, &factory, &allocator),
+            Ok(factory.create_value_term(ValueTerm::Float(-3.142))),
         );
         assert_eq!(
-            parse("+0", &env),
-            Ok(Expression::new(Term::Value(ValueTerm::Float(0.0)))),
+            parse("+0", &env, &factory, &allocator),
+            Ok(factory.create_value_term(ValueTerm::Float(0.0))),
         );
         assert_eq!(
-            parse("+3", &env),
-            Ok(Expression::new(Term::Value(ValueTerm::Float(3.0)))),
+            parse("+3", &env, &factory, &allocator),
+            Ok(factory.create_value_term(ValueTerm::Float(3.0))),
         );
         assert_eq!(
-            parse("+0.0", &env),
-            Ok(Expression::new(Term::Value(ValueTerm::Float(0.0)))),
+            parse("+0.0", &env, &factory, &allocator),
+            Ok(factory.create_value_term(ValueTerm::Float(0.0))),
         );
         assert_eq!(
-            parse("+3.142", &env),
-            Ok(Expression::new(Term::Value(ValueTerm::Float(3.142)))),
+            parse("+3.142", &env, &factory, &allocator),
+            Ok(factory.create_value_term(ValueTerm::Float(3.142))),
         );
     }
 
     #[test]
     fn template_literals() {
+        let factory = TermFactory::default();
+        let allocator = DefaultAllocator::default();
         let env = Env::new();
         assert_eq!(
-            parse("``", &env),
-            Ok(Expression::new(Term::Value(ValueTerm::String(
-                StringValue::from("")
-            )))),
+            parse("``", &env, &factory, &allocator),
+            Ok(factory
+                .create_value_term(ValueTerm::String(allocator.create_string(String::from(""))))),
         );
         assert_eq!(
-            parse("`foo`", &env),
-            Ok(Expression::new(Term::Value(ValueTerm::String(
-                StringValue::from("foo")
-            )))),
+            parse("`foo`", &env, &factory, &allocator),
+            Ok(factory.create_value_term(ValueTerm::String(
+                allocator.create_string(String::from("foo"))
+            ))),
         );
         assert_eq!(
-            parse("`\"`", &env),
-            Ok(Expression::new(Term::Value(ValueTerm::String(
-                StringValue::from("\"")
-            )))),
+            parse("`\"`", &env, &factory, &allocator),
+            Ok(factory.create_value_term(ValueTerm::String(
+                allocator.create_string(String::from("\""))
+            ))),
         );
         assert_eq!(
-            parse("`\\\"`", &env),
-            Ok(Expression::new(Term::Value(ValueTerm::String(
-                StringValue::from("\\\"")
-            )))),
+            parse("`\\\"`", &env, &factory, &allocator),
+            Ok(factory.create_value_term(ValueTerm::String(
+                allocator.create_string(String::from("\\\""))
+            ))),
         );
         assert_eq!(
-            parse("`${'foo'}`", &env),
-            Ok(Expression::new(Term::Application(ApplicationTerm::new(
-                to_string(),
-                vec![Expression::new(Term::Value(ValueTerm::String(
-                    StringValue::from("foo")
-                )))],
-            ),))),
+            parse("`${'foo'}`", &env, &factory, &allocator),
+            Ok(factory.create_application_term(
+                factory.create_native_function_term(to_string()),
+                allocator.create_list(allocator.create_unit_list(factory.create_value_term(
+                    ValueTerm::String(allocator.create_string(String::from("foo")))
+                ))),
+            )),
         );
         assert_eq!(
-            parse("`foo${'bar'}`", &env),
-            Ok(Expression::new(Term::Application(ApplicationTerm::new(
-                Expression::new(Term::Builtin(BuiltinTerm::Concat)),
-                vec![
-                    Expression::new(Term::Value(ValueTerm::String(StringValue::from("foo")))),
-                    Expression::new(Term::Application(ApplicationTerm::new(
-                        to_string(),
-                        vec![Expression::new(Term::Value(ValueTerm::String(
-                            StringValue::from("bar")
-                        )))],
-                    ))),
-                ],
-            )))),
+            parse("`foo${'bar'}`", &env, &factory, &allocator),
+            Ok(factory.create_application_term(
+                factory.create_builtin_term(BuiltinTerm::Concat),
+                allocator.create_list(vec![
+                    factory.create_value_term(ValueTerm::String(
+                        allocator.create_string(String::from("foo"))
+                    )),
+                    factory.create_application_term(
+                        factory.create_native_function_term(to_string()),
+                        allocator.create_unit_list(factory.create_value_term(ValueTerm::String(
+                            allocator.create_string(String::from("bar"))
+                        ))),
+                    ),
+                ]),
+            )),
         );
         assert_eq!(
-            parse("`${'foo'}bar`", &env),
-            Ok(Expression::new(Term::Application(ApplicationTerm::new(
-                Expression::new(Term::Builtin(BuiltinTerm::Concat)),
-                vec![
-                    Expression::new(Term::Application(ApplicationTerm::new(
-                        to_string(),
-                        vec![Expression::new(Term::Value(ValueTerm::String(
-                            StringValue::from("foo")
-                        )))],
-                    ))),
-                    Expression::new(Term::Value(ValueTerm::String(StringValue::from("bar")))),
-                ],
-            )))),
+            parse("`${'foo'}bar`", &env, &factory, &allocator),
+            Ok(factory.create_application_term(
+                factory.create_builtin_term(BuiltinTerm::Concat),
+                allocator.create_list(vec![
+                    factory.create_application_term(
+                        factory.create_native_function_term(to_string()),
+                        allocator.create_unit_list(factory.create_value_term(ValueTerm::String(
+                            allocator.create_string(String::from("foo"))
+                        ))),
+                    ),
+                    factory.create_value_term(ValueTerm::String(
+                        allocator.create_string(String::from("bar"))
+                    )),
+                ]),
+            )),
         );
         assert_eq!(
-            parse("`${'foo'}${'bar'}`", &env),
-            Ok(Expression::new(Term::Application(ApplicationTerm::new(
-                Expression::new(Term::Builtin(BuiltinTerm::Concat)),
-                vec![
-                    Expression::new(Term::Application(ApplicationTerm::new(
-                        to_string(),
-                        vec![Expression::new(Term::Value(ValueTerm::String(
-                            StringValue::from("foo")
-                        )))],
-                    ))),
-                    Expression::new(Term::Application(ApplicationTerm::new(
-                        to_string(),
-                        vec![Expression::new(Term::Value(ValueTerm::String(
-                            StringValue::from("bar")
-                        )))],
-                    ))),
-                ],
-            )))),
+            parse("`${'foo'}${'bar'}`", &env, &factory, &allocator),
+            Ok(factory.create_application_term(
+                factory.create_builtin_term(BuiltinTerm::Concat),
+                allocator.create_list(vec![
+                    factory.create_application_term(
+                        factory.create_native_function_term(to_string()),
+                        allocator.create_unit_list(factory.create_value_term(ValueTerm::String(
+                            allocator.create_string(String::from("foo"))
+                        ))),
+                    ),
+                    factory.create_application_term(
+                        factory.create_native_function_term(to_string()),
+                        allocator.create_unit_list(factory.create_value_term(ValueTerm::String(
+                            allocator.create_string(String::from("bar"))
+                        ))),
+                    ),
+                ]),
+            )),
         );
         assert_eq!(
-            parse("`foo${'bar'}baz`", &env),
-            Ok(Expression::new(Term::Application(ApplicationTerm::new(
-                Expression::new(Term::Builtin(BuiltinTerm::Concat)),
-                vec![
-                    Expression::new(Term::Value(ValueTerm::String(StringValue::from("foo")))),
-                    Expression::new(Term::Application(ApplicationTerm::new(
-                        to_string(),
-                        vec![Expression::new(Term::Value(ValueTerm::String(
-                            StringValue::from("bar")
-                        )))],
-                    ))),
-                    Expression::new(Term::Value(ValueTerm::String(StringValue::from("baz")))),
-                ],
-            )))),
+            parse("`foo${'bar'}baz`", &env, &factory, &allocator),
+            Ok(factory.create_application_term(
+                factory.create_builtin_term(BuiltinTerm::Concat),
+                allocator.create_list(vec![
+                    factory.create_value_term(ValueTerm::String(
+                        allocator.create_string(String::from("foo"))
+                    )),
+                    factory.create_application_term(
+                        factory.create_native_function_term(to_string()),
+                        allocator.create_unit_list(factory.create_value_term(ValueTerm::String(
+                            allocator.create_string(String::from("bar"))
+                        ))),
+                    ),
+                    factory.create_value_term(ValueTerm::String(
+                        allocator.create_string(String::from("baz"))
+                    )),
+                ]),
+            )),
         );
         assert_eq!(
-            parse("`${'foo'}bar${'baz'}`", &env),
-            Ok(Expression::new(Term::Application(ApplicationTerm::new(
-                Expression::new(Term::Builtin(BuiltinTerm::Concat)),
-                vec![
-                    Expression::new(Term::Application(ApplicationTerm::new(
-                        to_string(),
-                        vec![Expression::new(Term::Value(ValueTerm::String(
-                            StringValue::from("foo")
-                        )))],
-                    ))),
-                    Expression::new(Term::Value(ValueTerm::String(StringValue::from("bar")))),
-                    Expression::new(Term::Application(ApplicationTerm::new(
-                        to_string(),
-                        vec![Expression::new(Term::Value(ValueTerm::String(
-                            StringValue::from("baz")
-                        )))],
-                    ))),
-                ],
-            )))),
+            parse("`${'foo'}bar${'baz'}`", &env, &factory, &allocator),
+            Ok(factory.create_application_term(
+                factory.create_builtin_term(BuiltinTerm::Concat),
+                allocator.create_list(vec![
+                    factory.create_application_term(
+                        factory.create_native_function_term(to_string()),
+                        allocator.create_unit_list(factory.create_value_term(ValueTerm::String(
+                            allocator.create_string(String::from("foo"))
+                        ))),
+                    ),
+                    factory.create_value_term(ValueTerm::String(
+                        allocator.create_string(String::from("bar"))
+                    )),
+                    factory.create_application_term(
+                        factory.create_native_function_term(to_string()),
+                        allocator.create_unit_list(factory.create_value_term(ValueTerm::String(
+                            allocator.create_string(String::from("baz"))
+                        ))),
+                    ),
+                ]),
+            )),
         );
         assert_eq!(
-            parse("`${'foo'}${'bar'}${'baz'}`", &env),
-            Ok(Expression::new(Term::Application(ApplicationTerm::new(
-                Expression::new(Term::Builtin(BuiltinTerm::Concat)),
-                vec![
-                    Expression::new(Term::Application(ApplicationTerm::new(
-                        to_string(),
-                        vec![Expression::new(Term::Value(ValueTerm::String(
-                            StringValue::from("foo")
-                        )))],
-                    ))),
-                    Expression::new(Term::Application(ApplicationTerm::new(
-                        to_string(),
-                        vec![Expression::new(Term::Value(ValueTerm::String(
-                            StringValue::from("bar")
-                        )))],
-                    ))),
-                    Expression::new(Term::Application(ApplicationTerm::new(
-                        to_string(),
-                        vec![Expression::new(Term::Value(ValueTerm::String(
-                            StringValue::from("baz")
-                        )))],
-                    ))),
-                ],
-            )))),
+            parse("`${'foo'}${'bar'}${'baz'}`", &env, &factory, &allocator),
+            Ok(factory.create_application_term(
+                factory.create_builtin_term(BuiltinTerm::Concat),
+                allocator.create_list(vec![
+                    factory.create_application_term(
+                        factory.create_native_function_term(to_string()),
+                        allocator.create_unit_list(factory.create_value_term(ValueTerm::String(
+                            allocator.create_string(String::from("foo"))
+                        ))),
+                    ),
+                    factory.create_application_term(
+                        factory.create_native_function_term(to_string()),
+                        allocator.create_unit_list(factory.create_value_term(ValueTerm::String(
+                            allocator.create_string(String::from("bar"))
+                        ))),
+                    ),
+                    factory.create_application_term(
+                        factory.create_native_function_term(to_string()),
+                        allocator.create_unit_list(factory.create_value_term(ValueTerm::String(
+                            allocator.create_string(String::from("baz"))
+                        ))),
+                    ),
+                ]),
+            )),
         );
         assert_eq!(
-            parse("`foo${'one'}bar${'two'}baz${'three'}`", &env,),
-            Ok(Expression::new(Term::Application(ApplicationTerm::new(
-                Expression::new(Term::Builtin(BuiltinTerm::Concat)),
-                vec![
-                    Expression::new(Term::Value(ValueTerm::String(StringValue::from("foo")))),
-                    Expression::new(Term::Application(ApplicationTerm::new(
-                        to_string(),
-                        vec![Expression::new(Term::Value(ValueTerm::String(
-                            StringValue::from("one")
-                        )))],
-                    ))),
-                    Expression::new(Term::Value(ValueTerm::String(StringValue::from("bar")))),
-                    Expression::new(Term::Application(ApplicationTerm::new(
-                        to_string(),
-                        vec![Expression::new(Term::Value(ValueTerm::String(
-                            StringValue::from("two")
-                        )))],
-                    ))),
-                    Expression::new(Term::Value(ValueTerm::String(StringValue::from("baz")))),
-                    Expression::new(Term::Application(ApplicationTerm::new(
-                        to_string(),
-                        vec![Expression::new(Term::Value(ValueTerm::String(
-                            StringValue::from("three")
-                        )))],
-                    ))),
-                ],
-            ))))
+            parse(
+                "`foo${'one'}bar${'two'}baz${'three'}`",
+                &env,
+                &factory,
+                &allocator
+            ),
+            Ok(factory.create_application_term(
+                factory.create_builtin_term(BuiltinTerm::Concat),
+                allocator.create_list(vec![
+                    factory.create_value_term(ValueTerm::String(
+                        allocator.create_string(String::from("foo"))
+                    )),
+                    factory.create_application_term(
+                        factory.create_native_function_term(to_string()),
+                        allocator.create_unit_list(factory.create_value_term(ValueTerm::String(
+                            allocator.create_string(String::from("one"))
+                        ))),
+                    ),
+                    factory.create_value_term(ValueTerm::String(
+                        allocator.create_string(String::from("bar"))
+                    )),
+                    factory.create_application_term(
+                        factory.create_native_function_term(to_string()),
+                        allocator.create_unit_list(factory.create_value_term(ValueTerm::String(
+                            allocator.create_string(String::from("two"))
+                        ))),
+                    ),
+                    factory.create_value_term(ValueTerm::String(
+                        allocator.create_string(String::from("baz"))
+                    )),
+                    factory.create_application_term(
+                        factory.create_native_function_term(to_string()),
+                        allocator.create_unit_list(factory.create_value_term(ValueTerm::String(
+                            allocator.create_string(String::from("three"))
+                        ))),
+                    ),
+                ]),
+            ))
         )
     }
 
     #[test]
     fn object_literals() {
+        let factory = TermFactory::default();
+        let allocator = DefaultAllocator::default();
         let env = Env::new();
         assert_eq!(
-            parse("({})", &env),
-            Ok(Expression::new(Term::Struct(StructTerm::new(
-                Some(StructPrototype::new(vec![])),
-                vec![],
-            )))),
+            parse("({})", &env, &factory, &allocator),
+            Ok(factory.create_struct_term(
+                allocator.create_struct_prototype(empty()),
+                allocator.create_empty_list(),
+            )),
         );
         assert_eq!(
-            parse("({ foo: 3, bar: 4, baz: 5 })", &env),
-            Ok(Expression::new(Term::Struct(StructTerm::new(
-                Some(StructPrototype::new(vec![
-                    ValueTerm::String(StringValue::from("foo")),
-                    ValueTerm::String(StringValue::from("bar")),
-                    ValueTerm::String(StringValue::from("baz")),
-                ])),
-                vec![
-                    Expression::new(Term::Value(ValueTerm::Float(3.0))),
-                    Expression::new(Term::Value(ValueTerm::Float(4.0))),
-                    Expression::new(Term::Value(ValueTerm::Float(5.0))),
-                ],
-            )))),
+            parse("({ foo: 3, bar: 4, baz: 5 })", &env, &factory, &allocator),
+            Ok(factory.create_struct_term(
+                allocator.create_struct_prototype(vec![
+                    allocator.create_string(String::from("foo")),
+                    allocator.create_string(String::from("bar")),
+                    allocator.create_string(String::from("baz")),
+                ]),
+                allocator.create_list(vec![
+                    factory.create_value_term(ValueTerm::Float(3.0)),
+                    factory.create_value_term(ValueTerm::Float(4.0)),
+                    factory.create_value_term(ValueTerm::Float(5.0)),
+                ]),
+            )),
         );
         assert_eq!(
-            parse("({ foo: 3, \"bar\": 4, baz: 5 })", &env,),
-            Ok(Expression::new(Term::Struct(StructTerm::new(
-                Some(StructPrototype::new(vec![
-                    ValueTerm::String(StringValue::from("foo")),
-                    ValueTerm::String(StringValue::from("bar")),
-                    ValueTerm::String(StringValue::from("baz")),
-                ])),
-                vec![
-                    Expression::new(Term::Value(ValueTerm::Float(3.0))),
-                    Expression::new(Term::Value(ValueTerm::Float(4.0))),
-                    Expression::new(Term::Value(ValueTerm::Float(5.0))),
-                ],
-            )))),
+            parse(
+                "({ foo: 3, \"bar\": 4, baz: 5 })",
+                &env,
+                &factory,
+                &allocator
+            ),
+            Ok(factory.create_struct_term(
+                allocator.create_struct_prototype(vec![
+                    allocator.create_string(String::from("foo")),
+                    allocator.create_string(String::from("bar")),
+                    allocator.create_string(String::from("baz")),
+                ]),
+                allocator.create_list(vec![
+                    factory.create_value_term(ValueTerm::Float(3.0)),
+                    factory.create_value_term(ValueTerm::Float(4.0)),
+                    factory.create_value_term(ValueTerm::Float(5.0)),
+                ]),
+            )),
         );
         assert_eq!(
-            parse("({ foo: 3, [\"bar\"]: 4, baz: 5 })", &env,),
-            Ok(Expression::new(Term::Struct(StructTerm::new(
-                Some(StructPrototype::new(vec![
-                    ValueTerm::String(StringValue::from("foo")),
-                    ValueTerm::String(StringValue::from("bar")),
-                    ValueTerm::String(StringValue::from("baz")),
-                ])),
-                vec![
-                    Expression::new(Term::Value(ValueTerm::Float(3.0))),
-                    Expression::new(Term::Value(ValueTerm::Float(4.0))),
-                    Expression::new(Term::Value(ValueTerm::Float(5.0))),
-                ],
-            )))),
+            parse(
+                "({ foo: 3, [\"bar\"]: 4, baz: 5 })",
+                &env,
+                &factory,
+                &allocator
+            ),
+            Ok(factory.create_struct_term(
+                allocator.create_struct_prototype(vec![
+                    allocator.create_string(String::from("foo")),
+                    allocator.create_string(String::from("bar")),
+                    allocator.create_string(String::from("baz")),
+                ]),
+                allocator.create_list(vec![
+                    factory.create_value_term(ValueTerm::Float(3.0)),
+                    factory.create_value_term(ValueTerm::Float(4.0)),
+                    factory.create_value_term(ValueTerm::Float(5.0)),
+                ]),
+            )),
         );
         assert_eq!(
-            parse("({ 3: \"foo\", 4: \"bar\", 5: \"baz\" })", &env,),
-            Ok(Expression::new(Term::Struct(StructTerm::new(
-                Some(StructPrototype::new(vec![
-                    ValueTerm::Float(3.0),
-                    ValueTerm::Float(4.0),
-                    ValueTerm::Float(5.0),
-                ])),
-                vec![
-                    Expression::new(Term::Value(ValueTerm::String(StringValue::from("foo")))),
-                    Expression::new(Term::Value(ValueTerm::String(StringValue::from("bar")))),
-                    Expression::new(Term::Value(ValueTerm::String(StringValue::from("baz")))),
-                ],
-            )))),
+            parse(
+                "({ 3: \"foo\", 4: \"bar\", 5: \"baz\" })",
+                &env,
+                &factory,
+                &allocator
+            ),
+            Ok(factory.create_struct_term(
+                allocator.create_struct_prototype(vec![
+                    allocator.create_string(String::from("3")),
+                    allocator.create_string(String::from("4")),
+                    allocator.create_string(String::from("5")),
+                ]),
+                allocator.create_list(vec![
+                    factory.create_value_term(ValueTerm::String(
+                        allocator.create_string(String::from("foo"))
+                    )),
+                    factory.create_value_term(ValueTerm::String(
+                        allocator.create_string(String::from("bar"))
+                    )),
+                    factory.create_value_term(ValueTerm::String(
+                        allocator.create_string(String::from("baz"))
+                    )),
+                ]),
+            )),
         );
         assert_eq!(
-            parse("({ 3: \"foo\", [4]: \"bar\", 5: \"baz\" })", &env,),
-            Ok(Expression::new(Term::Struct(StructTerm::new(
-                Some(StructPrototype::new(vec![
-                    ValueTerm::Float(3.0),
-                    ValueTerm::Float(4.0),
-                    ValueTerm::Float(5.0),
-                ])),
-                vec![
-                    Expression::new(Term::Value(ValueTerm::String(StringValue::from("foo")))),
-                    Expression::new(Term::Value(ValueTerm::String(StringValue::from("bar")))),
-                    Expression::new(Term::Value(ValueTerm::String(StringValue::from("baz")))),
-                ],
-            )))),
+            parse(
+                "({ 3: \"foo\", [4]: \"bar\", 5: \"baz\" })",
+                &env,
+                &factory,
+                &allocator
+            ),
+            Ok(factory.create_struct_term(
+                allocator.create_struct_prototype(vec![
+                    allocator.create_string(String::from("3")),
+                    allocator.create_string(String::from("4")),
+                    allocator.create_string(String::from("5")),
+                ]),
+                allocator.create_list(vec![
+                    factory.create_value_term(ValueTerm::String(
+                        allocator.create_string(String::from("foo"))
+                    )),
+                    factory.create_value_term(ValueTerm::String(
+                        allocator.create_string(String::from("bar"))
+                    )),
+                    factory.create_value_term(ValueTerm::String(
+                        allocator.create_string(String::from("baz"))
+                    )),
+                ]),
+            )),
         );
         assert_eq!(
-            parse("({ 3: \"foo\", \"4\": \"bar\", 5: \"baz\" })", &env,),
-            Ok(Expression::new(Term::Struct(StructTerm::new(
-                Some(StructPrototype::new(vec![
-                    ValueTerm::Float(3.0),
-                    ValueTerm::String(StringValue::from("4")),
-                    ValueTerm::Float(5.0),
-                ])),
-                vec![
-                    Expression::new(Term::Value(ValueTerm::String(StringValue::from("foo")))),
-                    Expression::new(Term::Value(ValueTerm::String(StringValue::from("bar")))),
-                    Expression::new(Term::Value(ValueTerm::String(StringValue::from("baz")))),
-                ],
-            )))),
+            parse(
+                "({ 3: \"foo\", \"4\": \"bar\", 5: \"baz\" })",
+                &env,
+                &factory,
+                &allocator
+            ),
+            Ok(factory.create_struct_term(
+                allocator.create_struct_prototype(vec![
+                    allocator.create_string(String::from("3")),
+                    allocator.create_string(String::from("4")),
+                    allocator.create_string(String::from("5")),
+                ]),
+                allocator.create_list(vec![
+                    factory.create_value_term(ValueTerm::String(
+                        allocator.create_string(String::from("foo"))
+                    )),
+                    factory.create_value_term(ValueTerm::String(
+                        allocator.create_string(String::from("bar"))
+                    )),
+                    factory.create_value_term(ValueTerm::String(
+                        allocator.create_string(String::from("baz"))
+                    )),
+                ]),
+            )),
         );
         assert_eq!(
-            parse("({ 3: \"foo\", [\"4\"]: \"bar\", 5: \"baz\" })", &env,),
-            Ok(Expression::new(Term::Struct(StructTerm::new(
-                Some(StructPrototype::new(vec![
-                    ValueTerm::Float(3.0),
-                    ValueTerm::String(StringValue::from("4")),
-                    ValueTerm::Float(5.0),
-                ])),
-                vec![
-                    Expression::new(Term::Value(ValueTerm::String(StringValue::from("foo")))),
-                    Expression::new(Term::Value(ValueTerm::String(StringValue::from("bar")))),
-                    Expression::new(Term::Value(ValueTerm::String(StringValue::from("baz")))),
-                ],
-            )))),
+            parse(
+                "({ 3: \"foo\", [\"4\"]: \"bar\", 5: \"baz\" })",
+                &env,
+                &factory,
+                &allocator
+            ),
+            Ok(factory.create_struct_term(
+                allocator.create_struct_prototype(vec![
+                    allocator.create_string(String::from("3")),
+                    allocator.create_string(String::from("4")),
+                    allocator.create_string(String::from("5")),
+                ]),
+                allocator.create_list(vec![
+                    factory.create_value_term(ValueTerm::String(
+                        allocator.create_string(String::from("foo"))
+                    )),
+                    factory.create_value_term(ValueTerm::String(
+                        allocator.create_string(String::from("bar"))
+                    )),
+                    factory.create_value_term(ValueTerm::String(
+                        allocator.create_string(String::from("baz"))
+                    )),
+                ]),
+            )),
+        );
+        assert_eq!(
+            parse(
+                "({ 1.1: \"foo\", [1.2]: \"bar\", 1.3: \"baz\" })",
+                &env,
+                &factory,
+                &allocator
+            ),
+            Ok(factory.create_struct_term(
+                allocator.create_struct_prototype(vec![
+                    allocator.create_string(String::from("1.1")),
+                    allocator.create_string(String::from("1.2")),
+                    allocator.create_string(String::from("1.3")),
+                ]),
+                allocator.create_list(vec![
+                    factory.create_value_term(ValueTerm::String(
+                        allocator.create_string(String::from("foo"))
+                    )),
+                    factory.create_value_term(ValueTerm::String(
+                        allocator.create_string(String::from("bar"))
+                    )),
+                    factory.create_value_term(ValueTerm::String(
+                        allocator.create_string(String::from("baz"))
+                    )),
+                ]),
+            )),
         );
     }
 
     #[test]
     fn object_spread() {
+        let factory = TermFactory::default();
+        let allocator = DefaultAllocator::default();
+        let env = Env::new();
         let expression = parse(
             "({ ...({}), ...({ first: 1, second: 2 }), third: 3, fourth: 4, ...({ fifth: 5 }), first: 6, third: 7 })",
-            &Env::new(),
+            &env,
+            &factory,
+            &allocator,
         )
         .unwrap();
-        let query = Expression::new(Term::Application(ApplicationTerm::new(
-            Expression::new(Term::Builtin(BuiltinTerm::CollectVector)),
-            vec![
-                Expression::new(Term::Application(ApplicationTerm::new(
-                    Expression::new(Term::Builtin(BuiltinTerm::Get)),
-                    vec![
-                        Expression::clone(&expression),
-                        Expression::new(Term::Value(ValueTerm::String(StringValue::from("first")))),
-                    ],
-                ))),
-                Expression::new(Term::Application(ApplicationTerm::new(
-                    Expression::new(Term::Builtin(BuiltinTerm::Get)),
-                    vec![
-                        Expression::clone(&expression),
-                        Expression::new(Term::Value(ValueTerm::String(StringValue::from(
-                            "second",
-                        )))),
-                    ],
-                ))),
-                Expression::new(Term::Application(ApplicationTerm::new(
-                    Expression::new(Term::Builtin(BuiltinTerm::Get)),
-                    vec![
-                        Expression::clone(&expression),
-                        Expression::new(Term::Value(ValueTerm::String(StringValue::from("third")))),
-                    ],
-                ))),
-                Expression::new(Term::Application(ApplicationTerm::new(
-                    Expression::new(Term::Builtin(BuiltinTerm::Get)),
-                    vec![
-                        Expression::clone(&expression),
-                        Expression::new(Term::Value(ValueTerm::String(StringValue::from(
-                            "fourth",
-                        )))),
-                    ],
-                ))),
-                Expression::new(Term::Application(ApplicationTerm::new(
-                    Expression::new(Term::Builtin(BuiltinTerm::Get)),
-                    vec![
-                        Expression::clone(&expression),
-                        Expression::new(Term::Value(ValueTerm::String(StringValue::from("fifth")))),
-                    ],
-                ))),
-            ],
-        )));
-        let result = query.evaluate(&DynamicState::new(), &mut SubstitutionCache::new());
+        let query = factory.create_application_term(
+            factory.create_builtin_term(BuiltinTerm::CollectVector),
+            allocator.create_list(vec![
+                factory.create_application_term(
+                    factory.create_builtin_term(BuiltinTerm::Get),
+                    allocator.create_pair(
+                        expression.clone(),
+                        factory.create_value_term(ValueTerm::String(
+                            allocator.create_string(String::from("first")),
+                        )),
+                    ),
+                ),
+                factory.create_application_term(
+                    factory.create_builtin_term(BuiltinTerm::Get),
+                    allocator.create_pair(
+                        expression.clone(),
+                        factory.create_value_term(ValueTerm::String(
+                            allocator.create_string(String::from("second")),
+                        )),
+                    ),
+                ),
+                factory.create_application_term(
+                    factory.create_builtin_term(BuiltinTerm::Get),
+                    allocator.create_pair(
+                        expression.clone(),
+                        factory.create_value_term(ValueTerm::String(
+                            allocator.create_string(String::from("third")),
+                        )),
+                    ),
+                ),
+                factory.create_application_term(
+                    factory.create_builtin_term(BuiltinTerm::Get),
+                    allocator.create_pair(
+                        expression.clone(),
+                        factory.create_value_term(ValueTerm::String(
+                            allocator.create_string(String::from("fourth")),
+                        )),
+                    ),
+                ),
+                factory.create_application_term(
+                    factory.create_builtin_term(BuiltinTerm::Get),
+                    allocator.create_pair(
+                        expression.clone(),
+                        factory.create_value_term(ValueTerm::String(
+                            allocator.create_string(String::from("fifth")),
+                        )),
+                    ),
+                ),
+            ]),
+        );
+        let result = evaluate(
+            &query,
+            &DynamicState::new(),
+            &factory,
+            &allocator,
+            &mut SubstitutionCache::new(),
+        );
         assert_eq!(
             result,
             EvaluationResult::new(
-                Expression::new(Term::Collection(CollectionTerm::Vector(VectorTerm::new(
-                    vec![
-                        Expression::new(Term::Value(ValueTerm::Float(6.0))),
-                        Expression::new(Term::Value(ValueTerm::Float(2.0))),
-                        Expression::new(Term::Value(ValueTerm::Float(7.0))),
-                        Expression::new(Term::Value(ValueTerm::Float(4.0))),
-                        Expression::new(Term::Value(ValueTerm::Float(5.0))),
-                    ]
-                )))),
+                factory.create_vector_term(allocator.create_list(allocator.create_list(vec![
+                    factory.create_value_term(ValueTerm::Float(6.0)),
+                    factory.create_value_term(ValueTerm::Float(2.0)),
+                    factory.create_value_term(ValueTerm::Float(7.0)),
+                    factory.create_value_term(ValueTerm::Float(4.0)),
+                    factory.create_value_term(ValueTerm::Float(5.0)),
+                ]))),
                 DependencyList::empty(),
             ),
         );
         let expression = parse(
             "const foo = { first: 1, second: 2 }; ({ ...foo, third: 3 })",
-            &Env::new(),
+            &env,
+            &factory,
+            &allocator,
         )
         .unwrap();
-        let query = Expression::new(Term::Application(ApplicationTerm::new(
-            Expression::new(Term::Builtin(BuiltinTerm::CollectVector)),
-            vec![
-                Expression::new(Term::Application(ApplicationTerm::new(
-                    Expression::new(Term::Builtin(BuiltinTerm::Get)),
-                    vec![
-                        Expression::clone(&expression),
-                        Expression::new(Term::Value(ValueTerm::String(StringValue::from("first")))),
-                    ],
-                ))),
-                Expression::new(Term::Application(ApplicationTerm::new(
-                    Expression::new(Term::Builtin(BuiltinTerm::Get)),
-                    vec![
-                        Expression::clone(&expression),
-                        Expression::new(Term::Value(ValueTerm::String(StringValue::from(
-                            "second",
-                        )))),
-                    ],
-                ))),
-                Expression::new(Term::Application(ApplicationTerm::new(
-                    Expression::new(Term::Builtin(BuiltinTerm::Get)),
-                    vec![
-                        Expression::clone(&expression),
-                        Expression::new(Term::Value(ValueTerm::String(StringValue::from("third")))),
-                    ],
-                ))),
-            ],
-        )));
-        let result = query.evaluate(&DynamicState::new(), &mut SubstitutionCache::new());
+        let query = factory.create_application_term(
+            factory.create_builtin_term(BuiltinTerm::CollectVector),
+            allocator.create_list(vec![
+                factory.create_application_term(
+                    factory.create_builtin_term(BuiltinTerm::Get),
+                    allocator.create_pair(
+                        expression.clone(),
+                        factory.create_value_term(ValueTerm::String(
+                            allocator.create_string(String::from("first")),
+                        )),
+                    ),
+                ),
+                factory.create_application_term(
+                    factory.create_builtin_term(BuiltinTerm::Get),
+                    allocator.create_pair(
+                        expression.clone(),
+                        factory.create_value_term(ValueTerm::String(
+                            allocator.create_string(String::from("second")),
+                        )),
+                    ),
+                ),
+                factory.create_application_term(
+                    factory.create_builtin_term(BuiltinTerm::Get),
+                    allocator.create_pair(
+                        expression.clone(),
+                        factory.create_value_term(ValueTerm::String(
+                            allocator.create_string(String::from("third")),
+                        )),
+                    ),
+                ),
+            ]),
+        );
+        let result = evaluate(
+            &query,
+            &DynamicState::new(),
+            &factory,
+            &allocator,
+            &mut SubstitutionCache::new(),
+        );
         assert_eq!(
             result,
             EvaluationResult::new(
-                Expression::new(Term::Collection(CollectionTerm::Vector(VectorTerm::new(
-                    vec![
-                        Expression::new(Term::Value(ValueTerm::Float(1.0))),
-                        Expression::new(Term::Value(ValueTerm::Float(2.0))),
-                        Expression::new(Term::Value(ValueTerm::Float(3.0))),
-                    ]
-                )))),
+                factory.create_vector_term(allocator.create_list(vec![
+                    factory.create_value_term(ValueTerm::Float(1.0)),
+                    factory.create_value_term(ValueTerm::Float(2.0)),
+                    factory.create_value_term(ValueTerm::Float(3.0)),
+                ])),
                 DependencyList::empty(),
             ),
         );
@@ -2074,34 +2419,46 @@ mod tests {
 
     #[test]
     fn array_literals() {
+        let factory = TermFactory::default();
+        let allocator = DefaultAllocator::default();
         let env = Env::new();
         assert_eq!(
-            parse("[]", &env),
-            Ok(Expression::new(Term::Collection(CollectionTerm::Vector(
-                VectorTerm::new(vec![]),
-            )))),
+            parse("[]", &env, &factory, &allocator),
+            Ok(factory.create_vector_term(allocator.create_empty_list())),
         );
         assert_eq!(
-            parse("[3, 4, 5]", &env),
-            Ok(Expression::new(Term::Collection(CollectionTerm::Vector(
-                VectorTerm::new(vec![
-                    Expression::new(Term::Value(ValueTerm::Float(3.0))),
-                    Expression::new(Term::Value(ValueTerm::Float(4.0))),
-                    Expression::new(Term::Value(ValueTerm::Float(5.0))),
-                ]),
-            )))),
+            parse("[3, 4, 5]", &env, &factory, &allocator),
+            Ok(factory.create_vector_term(allocator.create_list(vec![
+                factory.create_value_term(ValueTerm::Float(3.0)),
+                factory.create_value_term(ValueTerm::Float(4.0)),
+                factory.create_value_term(ValueTerm::Float(5.0)),
+            ]))),
         );
     }
 
     #[test]
     fn array_access() {
+        let factory = TermFactory::default();
+        let allocator = DefaultAllocator::default();
         let env = Env::new();
-        let expression = parse("const items = [3, 4, 5]; items[1]", &env).unwrap();
-        let result = expression.evaluate(&DynamicState::new(), &mut SubstitutionCache::new());
+        let expression = parse(
+            "const items = [3, 4, 5]; items[1]",
+            &env,
+            &factory,
+            &allocator,
+        )
+        .unwrap();
+        let result = evaluate(
+            &expression,
+            &DynamicState::new(),
+            &factory,
+            &allocator,
+            &mut SubstitutionCache::new(),
+        );
         assert_eq!(
             result,
             EvaluationResult::new(
-                Expression::new(Term::Value(ValueTerm::Float(4.0))),
+                factory.create_value_term(ValueTerm::Float(4.0)),
                 DependencyList::empty(),
             )
         );
@@ -2109,78 +2466,96 @@ mod tests {
 
     #[test]
     fn array_spread() {
+        let factory = TermFactory::default();
+        let allocator = DefaultAllocator::default();
         let env = Env::new();
         assert_eq!(
-            parse("[...[3, 4, 5], 6]", &env),
-            Ok(Expression::new(Term::Application(ApplicationTerm::new(
-                Expression::new(Term::Builtin(BuiltinTerm::Push)),
-                vec![
-                    Expression::new(Term::Collection(CollectionTerm::Vector(VectorTerm::new(
-                        vec![
-                            Expression::new(Term::Value(ValueTerm::Float(3.0))),
-                            Expression::new(Term::Value(ValueTerm::Float(4.0))),
-                            Expression::new(Term::Value(ValueTerm::Float(5.0))),
-                        ]
-                    )))),
-                    Expression::new(Term::Value(ValueTerm::Float(6.0))),
-                ],
-            ))))
+            parse("[...[3, 4, 5], 6]", &env, &factory, &allocator),
+            Ok(factory.create_application_term(
+                factory.create_builtin_term(BuiltinTerm::Push),
+                allocator.create_pair(
+                    factory.create_vector_term(allocator.create_list(vec![
+                        factory.create_value_term(ValueTerm::Float(3.0)),
+                        factory.create_value_term(ValueTerm::Float(4.0)),
+                        factory.create_value_term(ValueTerm::Float(5.0)),
+                    ])),
+                    factory.create_value_term(ValueTerm::Float(6.0)),
+                ),
+            ))
         );
         assert_eq!(
-            parse("[3, ...[4, 5, 6]]", &env),
-            Ok(Expression::new(Term::Application(ApplicationTerm::new(
-                Expression::new(Term::Builtin(BuiltinTerm::PushFront)),
-                vec![
-                    Expression::new(Term::Collection(CollectionTerm::Vector(VectorTerm::new(
-                        vec![
-                            Expression::new(Term::Value(ValueTerm::Float(4.0))),
-                            Expression::new(Term::Value(ValueTerm::Float(5.0))),
-                            Expression::new(Term::Value(ValueTerm::Float(6.0))),
-                        ]
-                    )))),
-                    Expression::new(Term::Value(ValueTerm::Float(3.0))),
-                ],
-            ))))
+            parse("[3, ...[4, 5, 6]]", &env, &factory, &allocator),
+            Ok(factory.create_application_term(
+                factory.create_builtin_term(BuiltinTerm::PushFront),
+                allocator.create_pair(
+                    factory.create_vector_term(allocator.create_list(vec![
+                        factory.create_value_term(ValueTerm::Float(4.0)),
+                        factory.create_value_term(ValueTerm::Float(5.0)),
+                        factory.create_value_term(ValueTerm::Float(6.0)),
+                    ])),
+                    factory.create_value_term(ValueTerm::Float(3.0)),
+                ),
+            ))
         );
-        let expression = parse("[ ...[], ...[1, 2], 3, 4, ...[5], 6, 7 ]", &env).unwrap();
-        let query = Expression::new(Term::Application(ApplicationTerm::new(
-            Expression::new(Term::Builtin(BuiltinTerm::Collect)),
-            vec![expression],
-        )));
-        let result = query.evaluate(&DynamicState::new(), &mut SubstitutionCache::new());
+        let expression = parse(
+            "[ ...[], ...[1, 2], 3, 4, ...[5], 6, 7 ]",
+            &env,
+            &factory,
+            &allocator,
+        )
+        .unwrap();
+        let query = factory.create_application_term(
+            factory.create_builtin_term(BuiltinTerm::Collect),
+            allocator.create_unit_list(expression),
+        );
+        let result = evaluate(
+            &query,
+            &DynamicState::new(),
+            &factory,
+            &allocator,
+            &mut SubstitutionCache::new(),
+        );
         assert_eq!(
             result,
             EvaluationResult::new(
-                Expression::new(Term::Collection(CollectionTerm::Vector(VectorTerm::new(
-                    vec![
-                        Expression::new(Term::Value(ValueTerm::Float(1.0))),
-                        Expression::new(Term::Value(ValueTerm::Float(2.0))),
-                        Expression::new(Term::Value(ValueTerm::Float(3.0))),
-                        Expression::new(Term::Value(ValueTerm::Float(4.0))),
-                        Expression::new(Term::Value(ValueTerm::Float(5.0))),
-                        Expression::new(Term::Value(ValueTerm::Float(6.0))),
-                        Expression::new(Term::Value(ValueTerm::Float(7.0))),
-                    ]
-                )))),
+                factory.create_vector_term(allocator.create_list(vec![
+                    factory.create_value_term(ValueTerm::Float(1.0)),
+                    factory.create_value_term(ValueTerm::Float(2.0)),
+                    factory.create_value_term(ValueTerm::Float(3.0)),
+                    factory.create_value_term(ValueTerm::Float(4.0)),
+                    factory.create_value_term(ValueTerm::Float(5.0)),
+                    factory.create_value_term(ValueTerm::Float(6.0)),
+                    factory.create_value_term(ValueTerm::Float(7.0)),
+                ])),
                 DependencyList::empty(),
             ),
         );
-        let expression = parse("const foo = [1, 2]; [...foo, 3]", &env).unwrap();
-        let query = Expression::new(Term::Application(ApplicationTerm::new(
-            Expression::new(Term::Builtin(BuiltinTerm::Collect)),
-            vec![expression],
-        )));
-        let result = query.evaluate(&DynamicState::new(), &mut SubstitutionCache::new());
+        let expression = parse(
+            "const foo = [1, 2]; [...foo, 3]",
+            &env,
+            &factory,
+            &allocator,
+        )
+        .unwrap();
+        let query = factory.create_application_term(
+            factory.create_builtin_term(BuiltinTerm::Collect),
+            allocator.create_unit_list(expression),
+        );
+        let result = evaluate(
+            &query,
+            &DynamicState::new(),
+            &factory,
+            &allocator,
+            &mut SubstitutionCache::new(),
+        );
         assert_eq!(
             result,
             EvaluationResult::new(
-                Expression::new(Term::Collection(CollectionTerm::Vector(VectorTerm::new(
-                    vec![
-                        Expression::new(Term::Value(ValueTerm::Float(1.0))),
-                        Expression::new(Term::Value(ValueTerm::Float(2.0))),
-                        Expression::new(Term::Value(ValueTerm::Float(3.0))),
-                    ]
-                )))),
+                factory.create_vector_term(allocator.create_list(vec![
+                    factory.create_value_term(ValueTerm::Float(1.0)),
+                    factory.create_value_term(ValueTerm::Float(2.0)),
+                    factory.create_value_term(ValueTerm::Float(3.0)),
+                ])),
                 DependencyList::empty(),
             ),
         );
@@ -2188,576 +2563,592 @@ mod tests {
 
     #[test]
     fn array_methods() {
+        let factory = TermFactory::default();
+        let allocator = DefaultAllocator::default();
         let env = Env::new();
         assert_eq!(
-            parse("[3, 4, 5].map((value) => value * 2)", &env,),
-            Ok(Expression::new(Term::Application(ApplicationTerm::new(
-                dispatch(),
-                vec![
-                    Expression::new(Term::Collection(CollectionTerm::Vector(VectorTerm::new(
-                        vec![
-                            Expression::new(Term::Value(ValueTerm::Float(3.0))),
-                            Expression::new(Term::Value(ValueTerm::Float(4.0))),
-                            Expression::new(Term::Value(ValueTerm::Float(5.0))),
-                        ],
-                    )))),
-                    Expression::new(Term::Value(ValueTerm::String(StringValue::from("map")))),
-                    Expression::new(Term::Application(ApplicationTerm::new(
-                        Expression::new(Term::Application(ApplicationTerm::new(
-                            Expression::new(Term::Builtin(BuiltinTerm::Get)),
-                            vec![
-                                Expression::new(Term::Collection(CollectionTerm::Vector(
-                                    VectorTerm::new(vec![
-                                        Expression::new(Term::Value(ValueTerm::Float(3.0))),
-                                        Expression::new(Term::Value(ValueTerm::Float(4.0))),
-                                        Expression::new(Term::Value(ValueTerm::Float(5.0))),
-                                    ]),
-                                ))),
-                                Expression::new(Term::Value(ValueTerm::String(StringValue::from(
-                                    "map"
-                                )))),
-                            ],
-                        ))),
-                        vec![Expression::new(Term::Lambda(LambdaTerm::new(
-                            Arity::from(0, 1, None),
-                            Expression::new(Term::Application(ApplicationTerm::new(
-                                Expression::new(Term::Builtin(BuiltinTerm::Multiply)),
-                                vec![
-                                    Expression::new(Term::Variable(VariableTerm::scoped(0))),
-                                    Expression::new(Term::Value(ValueTerm::Float(2.0))),
-                                ],
-                            ))),
-                        ))),],
-                    ))),
-                    Expression::new(Term::Lambda(LambdaTerm::new(
-                        Arity::from(0, 1, None),
-                        Expression::new(Term::Application(ApplicationTerm::new(
-                            Expression::new(Term::Builtin(BuiltinTerm::Multiply)),
-                            vec![
-                                Expression::new(Term::Variable(VariableTerm::scoped(0))),
-                                Expression::new(Term::Value(ValueTerm::Float(2.0))),
-                            ],
-                        ))),
-                    ))),
-                ],
-            )))),
+            parse(
+                "[3, 4, 5].map((value) => value * 2)",
+                &env,
+                &factory,
+                &allocator
+            ),
+            Ok(factory.create_application_term(
+                factory.create_native_function_term(dispatch()),
+                allocator.create_list(vec![
+                    factory.create_vector_term(allocator.create_list(vec![
+                        factory.create_value_term(ValueTerm::Float(3.0)),
+                        factory.create_value_term(ValueTerm::Float(4.0)),
+                        factory.create_value_term(ValueTerm::Float(5.0)),
+                    ])),
+                    factory.create_value_term(ValueTerm::String(
+                        allocator.create_string(String::from("map"))
+                    )),
+                    factory.create_application_term(
+                        factory.create_application_term(
+                            factory.create_builtin_term(BuiltinTerm::Get),
+                            allocator.create_pair(
+                                factory.create_vector_term(allocator.create_list(vec![
+                                    factory.create_value_term(ValueTerm::Float(3.0)),
+                                    factory.create_value_term(ValueTerm::Float(4.0)),
+                                    factory.create_value_term(ValueTerm::Float(5.0)),
+                                ])),
+                                factory.create_value_term(ValueTerm::String(
+                                    allocator.create_string(String::from("map"))
+                                )),
+                            ),
+                        ),
+                        allocator.create_unit_list(factory.create_lambda_term(
+                            1,
+                            factory.create_application_term(
+                                factory.create_builtin_term(BuiltinTerm::Multiply),
+                                allocator.create_pair(
+                                    factory.create_static_variable_term(0),
+                                    factory.create_value_term(ValueTerm::Float(2.0)),
+                                ),
+                            ),
+                        ),),
+                    ),
+                    factory.create_lambda_term(
+                        1,
+                        factory.create_application_term(
+                            factory.create_builtin_term(BuiltinTerm::Multiply),
+                            allocator.create_pair(
+                                factory.create_static_variable_term(0),
+                                factory.create_value_term(ValueTerm::Float(2.0)),
+                            ),
+                        ),
+                    ),
+                ]),
+            )),
         );
     }
 
     #[test]
     fn parenthesized_expressions() {
+        let factory = TermFactory::default();
+        let allocator = DefaultAllocator::default();
         let env = Env::new();
         assert_eq!(
-            parse("(3)", &env),
-            Ok(Expression::new(Term::Value(ValueTerm::Float(3.0)))),
+            parse("(3)", &env, &factory, &allocator),
+            Ok(factory.create_value_term(ValueTerm::Float(3.0))),
         );
         assert_eq!(
-            parse("(((3)))", &env),
-            Ok(Expression::new(Term::Value(ValueTerm::Float(3.0)))),
+            parse("(((3)))", &env, &factory, &allocator),
+            Ok(factory.create_value_term(ValueTerm::Float(3.0))),
         );
     }
 
     #[test]
     fn modules() {
+        let factory = TermFactory::default();
+        let allocator = DefaultAllocator::default();
         let env = Env::new();
         let loader = static_module_loader(Vec::new());
         let path = Path::new("./foo.js");
         assert_eq!(
-            parse_module("export default 3;", &env, &path, &loader),
-            Ok(Expression::new(Term::Value(ValueTerm::Float(3.0)))),
+            parse_module(
+                "export default 3;",
+                &env,
+                &path,
+                &loader,
+                &factory,
+                &allocator
+            ),
+            Ok(factory.create_value_term(ValueTerm::Float(3.0))),
         );
     }
 
     #[test]
     fn variable_declarations() {
+        let factory = TermFactory::default();
+        let allocator = DefaultAllocator::default();
         let env = Env::new();
         assert_eq!(
-            parse("const foo = 3; foo;", &env),
-            Ok(Expression::new(Term::Application(ApplicationTerm::new(
-                Expression::new(Term::Lambda(LambdaTerm::new(
-                    Arity::from(0, 1, None),
-                    Expression::new(Term::Variable(VariableTerm::scoped(0))),
-                ))),
-                vec![Expression::new(Term::Value(ValueTerm::Float(3.0)))],
-            )))),
+            parse("const foo = 3; foo;", &env, &factory, &allocator),
+            Ok(factory.create_application_term(
+                factory.create_lambda_term(1, factory.create_static_variable_term(0)),
+                allocator.create_unit_list(factory.create_value_term(ValueTerm::Float(3.0))),
+            )),
         );
     }
 
     #[test]
     fn variable_declaration_object_destructuring() {
+        let factory = TermFactory::default();
+        let allocator = DefaultAllocator::default();
         let env = Env::new();
         assert_eq!(
-            parse("const {} = { foo: 3, bar: 4, baz: 5 }; true;", &env,),
-            Ok(Expression::new(Term::Application(ApplicationTerm::new(
-                Expression::new(Term::Lambda(LambdaTerm::new(
-                    Arity::from(0, 0, None),
-                    Expression::new(Term::Value(ValueTerm::Boolean(true))),
-                ))),
-                vec![],
-            )))),
+            parse(
+                "const {} = { foo: 3, bar: 4, baz: 5 }; true;",
+                &env,
+                &factory,
+                &allocator
+            ),
+            Ok(factory.create_application_term(
+                factory.create_lambda_term(0, factory.create_value_term(ValueTerm::Boolean(true))),
+                allocator.create_empty_list(),
+            )),
         );
         assert_eq!(
             parse(
                 "const { bar, foo } = { foo: 3, bar: 4, baz: 5 }; foo;",
                 &env,
+                &factory,
+                &allocator,
             ),
-            Ok(Expression::new(Term::Application(ApplicationTerm::new(
-                Expression::new(Term::Lambda(LambdaTerm::new(
-                    Arity::from(0, 2, None),
-                    Expression::new(Term::Variable(VariableTerm::scoped(0))),
-                ))),
-                vec![
-                    Expression::new(Term::Application(ApplicationTerm::new(
-                        Expression::new(Term::Builtin(BuiltinTerm::Get)),
-                        vec![
-                            Expression::new(Term::Struct(StructTerm::new(
-                                Some(StructPrototype::new(vec![
-                                    ValueTerm::String(StringValue::from("foo")),
-                                    ValueTerm::String(StringValue::from("bar")),
-                                    ValueTerm::String(StringValue::from("baz")),
-                                ])),
-                                vec![
-                                    Expression::new(Term::Value(ValueTerm::Float(3.0))),
-                                    Expression::new(Term::Value(ValueTerm::Float(4.0))),
-                                    Expression::new(Term::Value(ValueTerm::Float(5.0))),
-                                ],
-                            ))),
-                            Expression::new(Term::Value(ValueTerm::String(StringValue::from(
-                                "bar"
-                            )))),
-                        ],
-                    ))),
-                    Expression::new(Term::Application(ApplicationTerm::new(
-                        Expression::new(Term::Builtin(BuiltinTerm::Get)),
-                        vec![
-                            Expression::new(Term::Struct(StructTerm::new(
-                                Some(StructPrototype::new(vec![
-                                    ValueTerm::String(StringValue::from("foo")),
-                                    ValueTerm::String(StringValue::from("bar")),
-                                    ValueTerm::String(StringValue::from("baz")),
-                                ])),
-                                vec![
-                                    Expression::new(Term::Value(ValueTerm::Float(3.0))),
-                                    Expression::new(Term::Value(ValueTerm::Float(4.0))),
-                                    Expression::new(Term::Value(ValueTerm::Float(5.0))),
-                                ],
-                            ))),
-                            Expression::new(Term::Value(ValueTerm::String(StringValue::from(
-                                "foo"
-                            )))),
-                        ],
-                    ))),
-                ],
-            )))),
+            Ok(factory.create_application_term(
+                factory.create_lambda_term(2, factory.create_static_variable_term(0)),
+                allocator.create_list(vec![
+                    factory.create_application_term(
+                        factory.create_builtin_term(BuiltinTerm::Get),
+                        allocator.create_pair(
+                            factory.create_struct_term(
+                                allocator.create_struct_prototype(vec![
+                                    allocator.create_string(String::from("foo")),
+                                    allocator.create_string(String::from("bar")),
+                                    allocator.create_string(String::from("baz")),
+                                ]),
+                                allocator.create_list(vec![
+                                    factory.create_value_term(ValueTerm::Float(3.0)),
+                                    factory.create_value_term(ValueTerm::Float(4.0)),
+                                    factory.create_value_term(ValueTerm::Float(5.0)),
+                                ]),
+                            ),
+                            factory.create_value_term(ValueTerm::String(
+                                allocator.create_string(String::from("bar"))
+                            )),
+                        ),
+                    ),
+                    factory.create_application_term(
+                        factory.create_builtin_term(BuiltinTerm::Get),
+                        allocator.create_pair(
+                            factory.create_struct_term(
+                                allocator.create_struct_prototype(vec![
+                                    allocator.create_string(String::from("foo")),
+                                    allocator.create_string(String::from("bar")),
+                                    allocator.create_string(String::from("baz")),
+                                ]),
+                                allocator.create_list(vec![
+                                    factory.create_value_term(ValueTerm::Float(3.0)),
+                                    factory.create_value_term(ValueTerm::Float(4.0)),
+                                    factory.create_value_term(ValueTerm::Float(5.0)),
+                                ]),
+                            ),
+                            factory.create_value_term(ValueTerm::String(
+                                allocator.create_string(String::from("foo"))
+                            )),
+                        ),
+                    ),
+                ]),
+            )),
         );
         assert_eq!(
             parse(
                 "const { bar, foo } = { foo: 3, bar: 4, baz: 5 }; bar;",
                 &env,
+                &factory,
+                &allocator,
             ),
-            Ok(Expression::new(Term::Application(ApplicationTerm::new(
-                Expression::new(Term::Lambda(LambdaTerm::new(
-                    Arity::from(0, 2, None),
-                    Expression::new(Term::Variable(VariableTerm::scoped(1))),
-                ))),
-                vec![
-                    Expression::new(Term::Application(ApplicationTerm::new(
-                        Expression::new(Term::Builtin(BuiltinTerm::Get)),
-                        vec![
-                            Expression::new(Term::Struct(StructTerm::new(
-                                Some(StructPrototype::new(vec![
-                                    ValueTerm::String(StringValue::from("foo")),
-                                    ValueTerm::String(StringValue::from("bar")),
-                                    ValueTerm::String(StringValue::from("baz")),
-                                ])),
-                                vec![
-                                    Expression::new(Term::Value(ValueTerm::Float(3.0))),
-                                    Expression::new(Term::Value(ValueTerm::Float(4.0))),
-                                    Expression::new(Term::Value(ValueTerm::Float(5.0))),
-                                ],
-                            ))),
-                            Expression::new(Term::Value(ValueTerm::String(StringValue::from(
-                                "bar"
-                            )))),
-                        ],
-                    ))),
-                    Expression::new(Term::Application(ApplicationTerm::new(
-                        Expression::new(Term::Builtin(BuiltinTerm::Get)),
-                        vec![
-                            Expression::new(Term::Struct(StructTerm::new(
-                                Some(StructPrototype::new(vec![
-                                    ValueTerm::String(StringValue::from("foo")),
-                                    ValueTerm::String(StringValue::from("bar")),
-                                    ValueTerm::String(StringValue::from("baz")),
-                                ])),
-                                vec![
-                                    Expression::new(Term::Value(ValueTerm::Float(3.0))),
-                                    Expression::new(Term::Value(ValueTerm::Float(4.0))),
-                                    Expression::new(Term::Value(ValueTerm::Float(5.0))),
-                                ],
-                            ))),
-                            Expression::new(Term::Value(ValueTerm::String(StringValue::from(
-                                "foo"
-                            )))),
-                        ],
-                    ))),
-                ],
-            )))),
+            Ok(factory.create_application_term(
+                factory.create_lambda_term(2, factory.create_static_variable_term(1)),
+                allocator.create_list(vec![
+                    factory.create_application_term(
+                        factory.create_builtin_term(BuiltinTerm::Get),
+                        allocator.create_pair(
+                            factory.create_struct_term(
+                                allocator.create_struct_prototype(vec![
+                                    allocator.create_string(String::from("foo")),
+                                    allocator.create_string(String::from("bar")),
+                                    allocator.create_string(String::from("baz")),
+                                ]),
+                                allocator.create_list(vec![
+                                    factory.create_value_term(ValueTerm::Float(3.0)),
+                                    factory.create_value_term(ValueTerm::Float(4.0)),
+                                    factory.create_value_term(ValueTerm::Float(5.0)),
+                                ]),
+                            ),
+                            factory.create_value_term(ValueTerm::String(
+                                allocator.create_string(String::from("bar"))
+                            )),
+                        ),
+                    ),
+                    factory.create_application_term(
+                        factory.create_builtin_term(BuiltinTerm::Get),
+                        allocator.create_pair(
+                            factory.create_struct_term(
+                                allocator.create_struct_prototype(vec![
+                                    allocator.create_string(String::from("foo")),
+                                    allocator.create_string(String::from("bar")),
+                                    allocator.create_string(String::from("baz")),
+                                ]),
+                                allocator.create_list(vec![
+                                    factory.create_value_term(ValueTerm::Float(3.0)),
+                                    factory.create_value_term(ValueTerm::Float(4.0)),
+                                    factory.create_value_term(ValueTerm::Float(5.0)),
+                                ]),
+                            ),
+                            factory.create_value_term(ValueTerm::String(
+                                allocator.create_string(String::from("foo"))
+                            )),
+                        ),
+                    ),
+                ]),
+            )),
         );
         assert_eq!(
             parse(
                 "const { bar: qux, foo } = { foo: 3, bar: 4, baz: 5 }; qux;",
                 &env,
+                &factory,
+                &allocator,
             ),
-            Ok(Expression::new(Term::Application(ApplicationTerm::new(
-                Expression::new(Term::Lambda(LambdaTerm::new(
-                    Arity::from(0, 2, None),
-                    Expression::new(Term::Variable(VariableTerm::scoped(1))),
-                ))),
-                vec![
-                    Expression::new(Term::Application(ApplicationTerm::new(
-                        Expression::new(Term::Builtin(BuiltinTerm::Get)),
-                        vec![
-                            Expression::new(Term::Struct(StructTerm::new(
-                                Some(StructPrototype::new(vec![
-                                    ValueTerm::String(StringValue::from("foo")),
-                                    ValueTerm::String(StringValue::from("bar")),
-                                    ValueTerm::String(StringValue::from("baz")),
-                                ])),
-                                vec![
-                                    Expression::new(Term::Value(ValueTerm::Float(3.0))),
-                                    Expression::new(Term::Value(ValueTerm::Float(4.0))),
-                                    Expression::new(Term::Value(ValueTerm::Float(5.0))),
-                                ],
-                            ))),
-                            Expression::new(Term::Value(ValueTerm::String(StringValue::from(
-                                "bar"
-                            )))),
-                        ],
-                    ))),
-                    Expression::new(Term::Application(ApplicationTerm::new(
-                        Expression::new(Term::Builtin(BuiltinTerm::Get)),
-                        vec![
-                            Expression::new(Term::Struct(StructTerm::new(
-                                Some(StructPrototype::new(vec![
-                                    ValueTerm::String(StringValue::from("foo")),
-                                    ValueTerm::String(StringValue::from("bar")),
-                                    ValueTerm::String(StringValue::from("baz")),
-                                ])),
-                                vec![
-                                    Expression::new(Term::Value(ValueTerm::Float(3.0))),
-                                    Expression::new(Term::Value(ValueTerm::Float(4.0))),
-                                    Expression::new(Term::Value(ValueTerm::Float(5.0))),
-                                ],
-                            ))),
-                            Expression::new(Term::Value(ValueTerm::String(StringValue::from(
-                                "foo"
-                            )))),
-                        ],
-                    ))),
-                ],
-            )))),
+            Ok(factory.create_application_term(
+                factory.create_lambda_term(2, factory.create_static_variable_term(1)),
+                allocator.create_list(vec![
+                    factory.create_application_term(
+                        factory.create_builtin_term(BuiltinTerm::Get),
+                        allocator.create_pair(
+                            factory.create_struct_term(
+                                allocator.create_struct_prototype(vec![
+                                    allocator.create_string(String::from("foo")),
+                                    allocator.create_string(String::from("bar")),
+                                    allocator.create_string(String::from("baz")),
+                                ]),
+                                allocator.create_list(vec![
+                                    factory.create_value_term(ValueTerm::Float(3.0)),
+                                    factory.create_value_term(ValueTerm::Float(4.0)),
+                                    factory.create_value_term(ValueTerm::Float(5.0)),
+                                ]),
+                            ),
+                            factory.create_value_term(ValueTerm::String(
+                                allocator.create_string(String::from("bar"))
+                            )),
+                        ),
+                    ),
+                    factory.create_application_term(
+                        factory.create_builtin_term(BuiltinTerm::Get),
+                        allocator.create_pair(
+                            factory.create_struct_term(
+                                allocator.create_struct_prototype(vec![
+                                    allocator.create_string(String::from("foo")),
+                                    allocator.create_string(String::from("bar")),
+                                    allocator.create_string(String::from("baz")),
+                                ]),
+                                allocator.create_list(vec![
+                                    factory.create_value_term(ValueTerm::Float(3.0)),
+                                    factory.create_value_term(ValueTerm::Float(4.0)),
+                                    factory.create_value_term(ValueTerm::Float(5.0)),
+                                ]),
+                            ),
+                            factory.create_value_term(ValueTerm::String(
+                                allocator.create_string(String::from("foo"))
+                            )),
+                        ),
+                    ),
+                ]),
+            )),
         );
         assert_eq!(
             parse(
                 "const { bar: foo, foo: bar } = { foo: 3, bar: 4, baz: 5 }; foo;",
                 &env,
+                &factory,
+                &allocator,
             ),
-            Ok(Expression::new(Term::Application(ApplicationTerm::new(
-                Expression::new(Term::Lambda(LambdaTerm::new(
-                    Arity::from(0, 2, None),
-                    Expression::new(Term::Variable(VariableTerm::scoped(1))),
-                ))),
-                vec![
-                    Expression::new(Term::Application(ApplicationTerm::new(
-                        Expression::new(Term::Builtin(BuiltinTerm::Get)),
-                        vec![
-                            Expression::new(Term::Struct(StructTerm::new(
-                                Some(StructPrototype::new(vec![
-                                    ValueTerm::String(StringValue::from("foo")),
-                                    ValueTerm::String(StringValue::from("bar")),
-                                    ValueTerm::String(StringValue::from("baz")),
-                                ])),
-                                vec![
-                                    Expression::new(Term::Value(ValueTerm::Float(3.0))),
-                                    Expression::new(Term::Value(ValueTerm::Float(4.0))),
-                                    Expression::new(Term::Value(ValueTerm::Float(5.0))),
-                                ],
-                            ))),
-                            Expression::new(Term::Value(ValueTerm::String(StringValue::from(
-                                "bar"
-                            )))),
-                        ],
-                    ))),
-                    Expression::new(Term::Application(ApplicationTerm::new(
-                        Expression::new(Term::Builtin(BuiltinTerm::Get)),
-                        vec![
-                            Expression::new(Term::Struct(StructTerm::new(
-                                Some(StructPrototype::new(vec![
-                                    ValueTerm::String(StringValue::from("foo")),
-                                    ValueTerm::String(StringValue::from("bar")),
-                                    ValueTerm::String(StringValue::from("baz")),
-                                ])),
-                                vec![
-                                    Expression::new(Term::Value(ValueTerm::Float(3.0))),
-                                    Expression::new(Term::Value(ValueTerm::Float(4.0))),
-                                    Expression::new(Term::Value(ValueTerm::Float(5.0))),
-                                ],
-                            ))),
-                            Expression::new(Term::Value(ValueTerm::String(StringValue::from(
-                                "foo"
-                            )))),
-                        ],
-                    ))),
-                ],
-            )))),
+            Ok(factory.create_application_term(
+                factory.create_lambda_term(2, factory.create_static_variable_term(1)),
+                allocator.create_list(vec![
+                    factory.create_application_term(
+                        factory.create_builtin_term(BuiltinTerm::Get),
+                        allocator.create_pair(
+                            factory.create_struct_term(
+                                allocator.create_struct_prototype(vec![
+                                    allocator.create_string(String::from("foo")),
+                                    allocator.create_string(String::from("bar")),
+                                    allocator.create_string(String::from("baz")),
+                                ]),
+                                allocator.create_list(vec![
+                                    factory.create_value_term(ValueTerm::Float(3.0)),
+                                    factory.create_value_term(ValueTerm::Float(4.0)),
+                                    factory.create_value_term(ValueTerm::Float(5.0)),
+                                ]),
+                            ),
+                            factory.create_value_term(ValueTerm::String(
+                                allocator.create_string(String::from("bar"))
+                            )),
+                        ),
+                    ),
+                    factory.create_application_term(
+                        factory.create_builtin_term(BuiltinTerm::Get),
+                        allocator.create_pair(
+                            factory.create_struct_term(
+                                allocator.create_struct_prototype(vec![
+                                    allocator.create_string(String::from("foo")),
+                                    allocator.create_string(String::from("bar")),
+                                    allocator.create_string(String::from("baz")),
+                                ]),
+                                allocator.create_list(vec![
+                                    factory.create_value_term(ValueTerm::Float(3.0)),
+                                    factory.create_value_term(ValueTerm::Float(4.0)),
+                                    factory.create_value_term(ValueTerm::Float(5.0)),
+                                ]),
+                            ),
+                            factory.create_value_term(ValueTerm::String(
+                                allocator.create_string(String::from("foo"))
+                            )),
+                        ),
+                    ),
+                ]),
+            )),
         );
         assert_eq!(
             parse(
                 "const { one, two } = { one: { a: 1, b: 2 }, two: { c: 3, d: 4 }}; const { a, b } = one; const { c, d } = two; a;",
                 &env,
+                &factory,
+                &allocator,
             ),
-            Ok(Expression::new(Term::Application(ApplicationTerm::new(
-                Expression::new(Term::Lambda(LambdaTerm::new(
-                    Arity::from(0, 2, None),
-                    Expression::new(Term::Application(ApplicationTerm::new(
-                        Expression::new(Term::Lambda(LambdaTerm::new(
-                            Arity::from(0, 2, None),
-                            Expression::new(Term::Application(ApplicationTerm::new(
-                                Expression::new(Term::Lambda(LambdaTerm::new(
-                                    Arity::from(0, 2, None),
-                                    Expression::new(Term::Variable(VariableTerm::scoped(3))),
-                                ))),
-                                vec![
-                                    Expression::new(Term::Application(ApplicationTerm::new(
-                                        Expression::new(Term::Builtin(BuiltinTerm::Get)),
-                                        vec![
-                                            Expression::new(Term::Variable(VariableTerm::scoped(2))),
-                                            Expression::new(Term::Value(ValueTerm::String(StringValue::from("c")))),
-                                        ],
-                                    ))),
-                                    Expression::new(Term::Application(ApplicationTerm::new(
-                                        Expression::new(Term::Builtin(BuiltinTerm::Get)),
-                                        vec![
-                                            Expression::new(Term::Variable(VariableTerm::scoped(2))),
-                                            Expression::new(Term::Value(ValueTerm::String(StringValue::from("d")))),
-                                        ],
-                                    ))),
-                                ],
-                            ))),
-                        ))),
-                        vec![
-                            Expression::new(Term::Application(ApplicationTerm::new(
-                                Expression::new(Term::Builtin(BuiltinTerm::Get)),
-                                vec![
-                                    Expression::new(Term::Variable(VariableTerm::scoped(1))),
-                                    Expression::new(Term::Value(ValueTerm::String(StringValue::from("a")))),
-                                ],
-                            ))),
-                            Expression::new(Term::Application(ApplicationTerm::new(
-                                Expression::new(Term::Builtin(BuiltinTerm::Get)),
-                                vec![
-                                    Expression::new(Term::Variable(VariableTerm::scoped(1))),
-                                    Expression::new(Term::Value(ValueTerm::String(StringValue::from("b")))),
-                                ],
-                            ))),
-                        ],
-                    ))),
-                ))),
-                vec![
-                    Expression::new(Term::Application(ApplicationTerm::new(
-                        Expression::new(Term::Builtin(BuiltinTerm::Get)),
-                        vec![
-                            Expression::new(Term::Struct(StructTerm::new(
-                                Some(StructPrototype::new(vec![
-                                    ValueTerm::String(StringValue::from("one")),
-                                    ValueTerm::String(StringValue::from("two")),
-                                ])),
-                                vec![
-                                    Expression::new(Term::Struct(StructTerm::new(
-                                        Some(StructPrototype::new(vec![
-                                            ValueTerm::String(StringValue::from("a")),
-                                            ValueTerm::String(StringValue::from("b")),
-                                        ])),
-                                        vec![
-                                            Expression::new(Term::Value(ValueTerm::Float(1.0))),
-                                            Expression::new(Term::Value(ValueTerm::Float(2.0))),
-                                        ],
-                                    ))),
-                                    Expression::new(Term::Struct(StructTerm::new(
-                                        Some(StructPrototype::new(vec![
-                                            ValueTerm::String(StringValue::from("c")),
-                                            ValueTerm::String(StringValue::from("d")),
-                                        ])),
-                                        vec![
-                                            Expression::new(Term::Value(ValueTerm::Float(3.0))),
-                                            Expression::new(Term::Value(ValueTerm::Float(4.0))),
-                                        ],
-                                    ))),
-                                ],
-                            ))),
-                            Expression::new(Term::Value(ValueTerm::String(StringValue::from(
+            Ok(factory.create_application_term(
+                factory.create_lambda_term(
+                    2,
+                    factory.create_application_term(
+                        factory.create_lambda_term(
+                            2,
+                            factory.create_application_term(
+                                factory.create_lambda_term(
+                                    2,
+                                    factory.create_static_variable_term(3),
+                                ),
+                                allocator.create_list(vec![
+                                    factory.create_application_term(
+                                        factory.create_builtin_term(BuiltinTerm::Get),
+                                        allocator.create_pair(
+                                            factory.create_static_variable_term(2),
+                                            factory.create_value_term(ValueTerm::String(allocator.create_string(String::from("c")))),
+                                        ),
+                                    ),
+                                    factory.create_application_term(
+                                        factory.create_builtin_term(BuiltinTerm::Get),
+                                        allocator.create_pair(
+                                            factory.create_static_variable_term(2),
+                                            factory.create_value_term(ValueTerm::String(allocator.create_string(String::from("d")))),
+                                        ),
+                                    ),
+                                ]),
+                            ),
+                        ),
+                        allocator.create_list(vec![
+                            factory.create_application_term(
+                                factory.create_builtin_term(BuiltinTerm::Get),
+                                allocator.create_pair(
+                                    factory.create_static_variable_term(1),
+                                    factory.create_value_term(ValueTerm::String(allocator.create_string(String::from("a")))),
+                                ),
+                            ),
+                            factory.create_application_term(
+                                factory.create_builtin_term(BuiltinTerm::Get),
+                                allocator.create_pair(
+                                    factory.create_static_variable_term(1),
+                                    factory.create_value_term(ValueTerm::String(allocator.create_string(String::from("b")))),
+                                ),
+                            ),
+                        ]),
+                    ),
+                ),
+                allocator.create_list(vec![
+                    factory.create_application_term(
+                        factory.create_builtin_term(BuiltinTerm::Get),
+                        allocator.create_pair(
+                            factory.create_struct_term(
+                                allocator.create_struct_prototype(vec![
+                                    allocator.create_string(String::from("one")),
+                                    allocator.create_string(String::from("two")),
+                                ]),
+                                allocator.create_list(vec![
+                                    factory.create_struct_term(
+                                        allocator.create_struct_prototype(vec![
+                                            allocator.create_string(String::from("a")),
+                                            allocator.create_string(String::from("b")),
+                                        ]),
+                                        allocator.create_list(vec![
+                                            factory.create_value_term(ValueTerm::Float(1.0)),
+                                            factory.create_value_term(ValueTerm::Float(2.0)),
+                                        ]),
+                                    ),
+                                    factory.create_struct_term(
+                                        allocator.create_struct_prototype(vec![
+                                            allocator.create_string(String::from("c")),
+                                            allocator.create_string(String::from("d")),
+                                        ]),
+                                        allocator.create_list(vec![
+                                            factory.create_value_term(ValueTerm::Float(3.0)),
+                                            factory.create_value_term(ValueTerm::Float(4.0)),
+                                        ]),
+                                    ),
+                                ]),
+                            ),
+                            factory.create_value_term(ValueTerm::String(allocator.create_string(String::from(
                                 "one"
                             )))),
-                        ],
-                    ))),
-                    Expression::new(Term::Application(ApplicationTerm::new(
-                        Expression::new(Term::Builtin(BuiltinTerm::Get)),
-                        vec![
-                            Expression::new(Term::Struct(StructTerm::new(
-                                Some(StructPrototype::new(vec![
-                                    ValueTerm::String(StringValue::from("one")),
-                                    ValueTerm::String(StringValue::from("two")),
-                                ])),
-                                vec![
-                                    Expression::new(Term::Struct(StructTerm::new(
-                                        Some(StructPrototype::new(vec![
-                                            ValueTerm::String(StringValue::from("a")),
-                                            ValueTerm::String(StringValue::from("b")),
-                                        ])),
-                                        vec![
-                                            Expression::new(Term::Value(ValueTerm::Float(1.0))),
-                                            Expression::new(Term::Value(ValueTerm::Float(2.0))),
-                                        ],
-                                    ))),
-                                    Expression::new(Term::Struct(StructTerm::new(
-                                        Some(StructPrototype::new(vec![
-                                            ValueTerm::String(StringValue::from("c")),
-                                            ValueTerm::String(StringValue::from("d")),
-                                        ])),
-                                        vec![
-                                            Expression::new(Term::Value(ValueTerm::Float(3.0))),
-                                            Expression::new(Term::Value(ValueTerm::Float(4.0))),
-                                        ],
-                                    ))),
-                                ],
-                            ))),
-                            Expression::new(Term::Value(ValueTerm::String(StringValue::from(
+                        ),
+                    ),
+                    factory.create_application_term(
+                        factory.create_builtin_term(BuiltinTerm::Get),
+                        allocator.create_pair(
+                            factory.create_struct_term(
+                                allocator.create_struct_prototype(vec![
+                                    allocator.create_string(String::from("one")),
+                                    allocator.create_string(String::from("two")),
+                                ]),
+                                allocator.create_list(vec![
+                                    factory.create_struct_term(
+                                        allocator.create_struct_prototype(vec![
+                                            allocator.create_string(String::from("a")),
+                                            allocator.create_string(String::from("b")),
+                                        ]),
+                                        allocator.create_list(vec![
+                                            factory.create_value_term(ValueTerm::Float(1.0)),
+                                            factory.create_value_term(ValueTerm::Float(2.0)),
+                                        ]),
+                                    ),
+                                    factory.create_struct_term(
+                                        allocator.create_struct_prototype(vec![
+                                            allocator.create_string(String::from("c")),
+                                            allocator.create_string(String::from("d")),
+                                        ]),
+                                        allocator.create_list(vec![
+                                            factory.create_value_term(ValueTerm::Float(3.0)),
+                                            factory.create_value_term(ValueTerm::Float(4.0)),
+                                        ]),
+                                    ),
+                                ]),
+                            ),
+                            factory.create_value_term(ValueTerm::String(allocator.create_string(String::from(
                                 "two"
                             )))),
-                        ],
-                    ))),
-                ],
-            )))),
+                        ),
+                    ),
+                ]),
+            )),
         );
         assert_eq!(
-            parse("((input) => { const { foo, bar } = input; return bar; })({ foo: false, bar: true });", &env),
-            Ok(Expression::new(Term::Application(ApplicationTerm::new(
-                Expression::new(Term::Lambda(LambdaTerm::new(
-                    Arity::from(0, 1, None),
-                    Expression::new(Term::Application(ApplicationTerm::new(
-                        Expression::new(Term::Lambda(LambdaTerm::new(
-                            Arity::from(0, 2, None),
-                            Expression::new(Term::Variable(VariableTerm::scoped(0))),
-                        ))),
-                        vec![
-                            Expression::new(Term::Application(ApplicationTerm::new(
-                                Expression::new(Term::Builtin(BuiltinTerm::Get)),
-                                vec![
-                                    Expression::new(Term::Variable(VariableTerm::scoped(0))),
-                                    Expression::new(Term::Value(ValueTerm::String(StringValue::from("foo")))),
-                                ],
-                            ))),
-                            Expression::new(Term::Application(ApplicationTerm::new(
-                                Expression::new(Term::Builtin(BuiltinTerm::Get)),
-                                vec![
-                                    Expression::new(Term::Variable(VariableTerm::scoped(0))),
-                                    Expression::new(Term::Value(ValueTerm::String(StringValue::from("bar")))),
-                                ],
-                            ))),
-                        ],
-                    ))),
-                ))),
-                vec![Expression::new(Term::Struct(StructTerm::new(
-                    Some(StructPrototype::new(vec![
-                        ValueTerm::String(StringValue::from("foo")),
-                        ValueTerm::String(StringValue::from("bar")),
-                    ])),
-                    vec![
-                        Expression::new(Term::Value(ValueTerm::Boolean(false))),
-                        Expression::new(Term::Value(ValueTerm::Boolean(true))),
-                    ],
-                )))],
-            )))),
+            parse("((input) => { const { foo, bar } = input; return bar; })({ foo: false, bar: true });", &env, &factory, &allocator),
+            Ok(factory.create_application_term(
+                factory.create_lambda_term(
+                    1,
+                    factory.create_application_term(
+                        factory.create_lambda_term(
+                            2,
+                            factory.create_static_variable_term(0),
+                        ),
+                        allocator.create_list(vec![
+                            factory.create_application_term(
+                                factory.create_builtin_term(BuiltinTerm::Get),
+                                allocator.create_pair(
+                                    factory.create_static_variable_term(0),
+                                    factory.create_value_term(ValueTerm::String(allocator.create_string(String::from("foo")))),
+                                ),
+                            ),
+                            factory.create_application_term(
+                                factory.create_builtin_term(BuiltinTerm::Get),
+                                allocator.create_pair(
+                                    factory.create_static_variable_term(0),
+                                    factory.create_value_term(ValueTerm::String(allocator.create_string(String::from("bar")))),
+                                ),
+                            ),
+                        ]),
+                    ),
+                ),
+                allocator.create_unit_list(factory.create_struct_term(
+                    allocator.create_struct_prototype(vec![
+                        allocator.create_string(String::from("foo")),
+                        allocator.create_string(String::from("bar")),
+                    ]),
+                    allocator.create_list(vec![
+                        factory.create_value_term(ValueTerm::Boolean(false)),
+                        factory.create_value_term(ValueTerm::Boolean(true)),
+                    ]),
+                )),
+            )),
         );
     }
 
     #[test]
     fn variable_declaration_array_destructuring() {
+        let factory = TermFactory::default();
+        let allocator = DefaultAllocator::default();
         let env = Env::new();
         assert_eq!(
-            parse("const [] = [3, 4, 5]; true;", &env,),
-            Ok(Expression::new(Term::Application(ApplicationTerm::new(
-                Expression::new(Term::Lambda(LambdaTerm::new(
-                    Arity::from(0, 0, None),
-                    Expression::new(Term::Value(ValueTerm::Boolean(true))),
-                ))),
-                vec![],
-            )))),
+            parse("const [] = [3, 4, 5]; true;", &env, &factory, &allocator),
+            Ok(factory.create_application_term(
+                factory.create_lambda_term(0, factory.create_value_term(ValueTerm::Boolean(true))),
+                allocator.create_empty_list(),
+            )),
         );
         assert_eq!(
-            parse("const [foo, bar] = [3, 4, 5]; foo;", &env,),
-            Ok(Expression::new(Term::Application(ApplicationTerm::new(
-                Expression::new(Term::Lambda(LambdaTerm::new(
-                    Arity::from(0, 2, None),
-                    Expression::new(Term::Variable(VariableTerm::scoped(1))),
-                ))),
-                vec![
-                    Expression::new(Term::Application(ApplicationTerm::new(
-                        Expression::new(Term::Builtin(BuiltinTerm::Get)),
-                        vec![
-                            Expression::new(Term::Collection(CollectionTerm::Vector(
-                                VectorTerm::new(vec![
-                                    Expression::new(Term::Value(ValueTerm::Float(3.0))),
-                                    Expression::new(Term::Value(ValueTerm::Float(4.0))),
-                                    Expression::new(Term::Value(ValueTerm::Float(5.0))),
-                                ]),
-                            ))),
-                            Expression::new(Term::Value(ValueTerm::Int(0))),
-                        ],
-                    ))),
-                    Expression::new(Term::Application(ApplicationTerm::new(
-                        Expression::new(Term::Builtin(BuiltinTerm::Get)),
-                        vec![
-                            Expression::new(Term::Collection(CollectionTerm::Vector(
-                                VectorTerm::new(vec![
-                                    Expression::new(Term::Value(ValueTerm::Float(3.0))),
-                                    Expression::new(Term::Value(ValueTerm::Float(4.0))),
-                                    Expression::new(Term::Value(ValueTerm::Float(5.0))),
-                                ]),
-                            ))),
-                            Expression::new(Term::Value(ValueTerm::Int(1))),
-                        ],
-                    ))),
-                ],
-            )))),
+            parse(
+                "const [foo, bar] = [3, 4, 5]; foo;",
+                &env,
+                &factory,
+                &allocator
+            ),
+            Ok(factory.create_application_term(
+                factory.create_lambda_term(2, factory.create_static_variable_term(1)),
+                allocator.create_list(vec![
+                    factory.create_application_term(
+                        factory.create_builtin_term(BuiltinTerm::Get),
+                        allocator.create_pair(
+                            factory.create_vector_term(allocator.create_list(vec![
+                                factory.create_value_term(ValueTerm::Float(3.0)),
+                                factory.create_value_term(ValueTerm::Float(4.0)),
+                                factory.create_value_term(ValueTerm::Float(5.0)),
+                            ])),
+                            factory.create_value_term(ValueTerm::Int(0)),
+                        ),
+                    ),
+                    factory.create_application_term(
+                        factory.create_builtin_term(BuiltinTerm::Get),
+                        allocator.create_pair(
+                            factory.create_vector_term(allocator.create_list(vec![
+                                factory.create_value_term(ValueTerm::Float(3.0)),
+                                factory.create_value_term(ValueTerm::Float(4.0)),
+                                factory.create_value_term(ValueTerm::Float(5.0)),
+                            ])),
+                            factory.create_value_term(ValueTerm::Int(1)),
+                        ),
+                    ),
+                ]),
+            )),
         );
         assert_eq!(
-            parse("const [, , foo] = [3, 4, 5]; foo;", &env,),
-            Ok(Expression::new(Term::Application(ApplicationTerm::new(
-                Expression::new(Term::Lambda(LambdaTerm::new(
-                    Arity::from(0, 1, None),
-                    Expression::new(Term::Variable(VariableTerm::scoped(0))),
-                ))),
-                vec![Expression::new(Term::Application(ApplicationTerm::new(
-                    Expression::new(Term::Builtin(BuiltinTerm::Get)),
-                    vec![
-                        Expression::new(Term::Collection(CollectionTerm::Vector(VectorTerm::new(
-                            vec![
-                                Expression::new(Term::Value(ValueTerm::Float(3.0))),
-                                Expression::new(Term::Value(ValueTerm::Float(4.0))),
-                                Expression::new(Term::Value(ValueTerm::Float(5.0))),
-                            ]
-                        ),))),
-                        Expression::new(Term::Value(ValueTerm::Int(2))),
-                    ],
-                )))],
-            )))),
+            parse(
+                "const [, , foo] = [3, 4, 5]; foo;",
+                &env,
+                &factory,
+                &allocator
+            ),
+            Ok(factory.create_application_term(
+                factory.create_lambda_term(1, factory.create_static_variable_term(0)),
+                allocator.create_unit_list(factory.create_application_term(
+                    factory.create_builtin_term(BuiltinTerm::Get),
+                    allocator.create_pair(
+                        factory.create_vector_term(allocator.create_list(vec![
+                            factory.create_value_term(ValueTerm::Float(3.0)),
+                            factory.create_value_term(ValueTerm::Float(4.0)),
+                            factory.create_value_term(ValueTerm::Float(5.0)),
+                        ])),
+                        factory.create_value_term(ValueTerm::Int(2)),
+                    ),
+                )),
+            )),
         );
     }
 
     #[test]
     fn variable_scoping() {
+        let factory = TermFactory::default();
+        let allocator = DefaultAllocator::default();
         let env = Env::new();
         let expression = parse(
             "
@@ -2768,13 +3159,21 @@ mod tests {
               })(3);
             ",
             &env,
+            &factory,
+            &allocator,
         )
         .unwrap();
-        let result = expression.evaluate(&DynamicState::new(), &mut SubstitutionCache::new());
+        let result = evaluate(
+            &expression,
+            &DynamicState::new(),
+            &factory,
+            &allocator,
+            &mut SubstitutionCache::new(),
+        );
         assert_eq!(
             result,
             EvaluationResult::new(
-                Expression::new(Term::Value(ValueTerm::Float(3.0 * 2.0))),
+                factory.create_value_term(ValueTerm::Float(3.0 * 2.0)),
                 DependencyList::empty(),
             ),
         );
@@ -2787,13 +3186,21 @@ mod tests {
               })(3);
             ",
             &env,
+            &factory,
+            &allocator,
         )
         .unwrap();
-        let result = expression.evaluate(&DynamicState::new(), &mut SubstitutionCache::new());
+        let result = evaluate(
+            &expression,
+            &DynamicState::new(),
+            &factory,
+            &allocator,
+            &mut SubstitutionCache::new(),
+        );
         assert_eq!(
             result,
             EvaluationResult::new(
-                Expression::new(Term::Value(ValueTerm::Float(3.0 * 2.0))),
+                factory.create_value_term(ValueTerm::Float(3.0 * 2.0)),
                 DependencyList::empty(),
             ),
         );
@@ -2801,6 +3208,8 @@ mod tests {
 
     #[test]
     fn variable_dependencies() {
+        let factory = TermFactory::default();
+        let allocator = DefaultAllocator::default();
         let env = Env::new();
         let expression = parse(
             "
@@ -2810,13 +3219,21 @@ mod tests {
             baz;
         ",
             &env,
+            &factory,
+            &allocator,
         )
         .unwrap();
-        let result = expression.evaluate(&DynamicState::new(), &mut SubstitutionCache::new());
+        let result = evaluate(
+            &expression,
+            &DynamicState::new(),
+            &factory,
+            &allocator,
+            &mut SubstitutionCache::new(),
+        );
         assert_eq!(
             result,
             EvaluationResult::new(
-                Expression::new(Term::Value(ValueTerm::Float(3.0))),
+                factory.create_value_term(ValueTerm::Float(3.0)),
                 DependencyList::empty(),
             ),
         );
@@ -2828,13 +3245,21 @@ mod tests {
             baz(3);
         ",
             &env,
+            &factory,
+            &allocator,
         )
         .unwrap();
-        let result = expression.evaluate(&DynamicState::new(), &mut SubstitutionCache::new());
+        let result = evaluate(
+            &expression,
+            &DynamicState::new(),
+            &factory,
+            &allocator,
+            &mut SubstitutionCache::new(),
+        );
         assert_eq!(
             result,
             EvaluationResult::new(
-                Expression::new(Term::Value(ValueTerm::Float(3.0))),
+                factory.create_value_term(ValueTerm::Float(3.0)),
                 DependencyList::empty(),
             ),
         );
@@ -2842,872 +3267,878 @@ mod tests {
 
     #[test]
     fn not_expressions() {
+        let factory = TermFactory::default();
+        let allocator = DefaultAllocator::default();
         let env = Env::new();
         assert_eq!(
-            parse("!true", &env),
-            Ok(Expression::new(Term::Application(ApplicationTerm::new(
-                Expression::new(Term::Builtin(BuiltinTerm::Not)),
-                vec![Expression::new(Term::Value(ValueTerm::Boolean(true)))],
-            )))),
+            parse("!true", &env, &factory, &allocator),
+            Ok(factory.create_application_term(
+                factory.create_builtin_term(BuiltinTerm::Not),
+                allocator.create_unit_list(factory.create_value_term(ValueTerm::Boolean(true))),
+            )),
         );
         assert_eq!(
-            parse("!false", &env),
-            Ok(Expression::new(Term::Application(ApplicationTerm::new(
-                Expression::new(Term::Builtin(BuiltinTerm::Not)),
-                vec![Expression::new(Term::Value(ValueTerm::Boolean(false)))],
-            )))),
+            parse("!false", &env, &factory, &allocator),
+            Ok(factory.create_application_term(
+                factory.create_builtin_term(BuiltinTerm::Not),
+                allocator.create_unit_list(factory.create_value_term(ValueTerm::Boolean(false))),
+            )),
         );
         assert_eq!(
-            parse("!3", &env),
-            Ok(Expression::new(Term::Application(ApplicationTerm::new(
-                Expression::new(Term::Builtin(BuiltinTerm::Not)),
-                vec![Expression::new(Term::Value(ValueTerm::Float(3.0)))],
-            )))),
+            parse("!3", &env, &factory, &allocator),
+            Ok(factory.create_application_term(
+                factory.create_builtin_term(BuiltinTerm::Not),
+                allocator.create_unit_list(factory.create_value_term(ValueTerm::Float(3.0))),
+            )),
         );
     }
 
     #[test]
     fn arithmetic_expressions() {
+        let factory = TermFactory::default();
+        let allocator = DefaultAllocator::default();
         let env = Env::new();
         assert_eq!(
-            parse("3 + 4", &env),
-            Ok(Expression::new(Term::Application(ApplicationTerm::new(
-                Expression::new(Term::Builtin(BuiltinTerm::Add)),
-                vec![
-                    Expression::new(Term::Value(ValueTerm::Float(3.0))),
-                    Expression::new(Term::Value(ValueTerm::Float(4.0))),
-                ],
-            )))),
+            parse("3 + 4", &env, &factory, &allocator),
+            Ok(factory.create_application_term(
+                factory.create_builtin_term(BuiltinTerm::Add),
+                allocator.create_pair(
+                    factory.create_value_term(ValueTerm::Float(3.0)),
+                    factory.create_value_term(ValueTerm::Float(4.0)),
+                ),
+            )),
         );
         assert_eq!(
-            parse("3 - 4", &env),
-            Ok(Expression::new(Term::Application(ApplicationTerm::new(
-                Expression::new(Term::Builtin(BuiltinTerm::Subtract)),
-                vec![
-                    Expression::new(Term::Value(ValueTerm::Float(3.0))),
-                    Expression::new(Term::Value(ValueTerm::Float(4.0))),
-                ],
-            )))),
+            parse("3 - 4", &env, &factory, &allocator),
+            Ok(factory.create_application_term(
+                factory.create_builtin_term(BuiltinTerm::Subtract),
+                allocator.create_pair(
+                    factory.create_value_term(ValueTerm::Float(3.0)),
+                    factory.create_value_term(ValueTerm::Float(4.0)),
+                ),
+            )),
         );
         assert_eq!(
-            parse("3 * 4", &env),
-            Ok(Expression::new(Term::Application(ApplicationTerm::new(
-                Expression::new(Term::Builtin(BuiltinTerm::Multiply)),
-                vec![
-                    Expression::new(Term::Value(ValueTerm::Float(3.0))),
-                    Expression::new(Term::Value(ValueTerm::Float(4.0))),
-                ],
-            )))),
+            parse("3 * 4", &env, &factory, &allocator),
+            Ok(factory.create_application_term(
+                factory.create_builtin_term(BuiltinTerm::Multiply),
+                allocator.create_pair(
+                    factory.create_value_term(ValueTerm::Float(3.0)),
+                    factory.create_value_term(ValueTerm::Float(4.0)),
+                ),
+            )),
         );
         assert_eq!(
-            parse("3 / 4", &env),
-            Ok(Expression::new(Term::Application(ApplicationTerm::new(
-                Expression::new(Term::Builtin(BuiltinTerm::Divide)),
-                vec![
-                    Expression::new(Term::Value(ValueTerm::Float(3.0))),
-                    Expression::new(Term::Value(ValueTerm::Float(4.0))),
-                ],
-            )))),
+            parse("3 / 4", &env, &factory, &allocator),
+            Ok(factory.create_application_term(
+                factory.create_builtin_term(BuiltinTerm::Divide),
+                allocator.create_pair(
+                    factory.create_value_term(ValueTerm::Float(3.0)),
+                    factory.create_value_term(ValueTerm::Float(4.0)),
+                ),
+            )),
         );
         assert_eq!(
-            parse("3 % 4", &env),
-            Ok(Expression::new(Term::Application(ApplicationTerm::new(
-                Expression::new(Term::Builtin(BuiltinTerm::Remainder)),
-                vec![
-                    Expression::new(Term::Value(ValueTerm::Float(3.0))),
-                    Expression::new(Term::Value(ValueTerm::Float(4.0))),
-                ],
-            )))),
+            parse("3 % 4", &env, &factory, &allocator),
+            Ok(factory.create_application_term(
+                factory.create_builtin_term(BuiltinTerm::Remainder),
+                allocator.create_pair(
+                    factory.create_value_term(ValueTerm::Float(3.0)),
+                    factory.create_value_term(ValueTerm::Float(4.0)),
+                ),
+            )),
         );
         assert_eq!(
-            parse("3 ** 4", &env),
-            Ok(Expression::new(Term::Application(ApplicationTerm::new(
-                Expression::new(Term::Builtin(BuiltinTerm::Pow)),
-                vec![
-                    Expression::new(Term::Value(ValueTerm::Float(3.0))),
-                    Expression::new(Term::Value(ValueTerm::Float(4.0))),
-                ],
-            )))),
+            parse("3 ** 4", &env, &factory, &allocator),
+            Ok(factory.create_application_term(
+                factory.create_builtin_term(BuiltinTerm::Pow),
+                allocator.create_pair(
+                    factory.create_value_term(ValueTerm::Float(3.0)),
+                    factory.create_value_term(ValueTerm::Float(4.0)),
+                ),
+            )),
         );
         assert_eq!(
-            parse("3 < 4", &env),
-            Ok(Expression::new(Term::Application(ApplicationTerm::new(
-                Expression::new(Term::Builtin(BuiltinTerm::Lt)),
-                vec![
-                    Expression::new(Term::Value(ValueTerm::Float(3.0))),
-                    Expression::new(Term::Value(ValueTerm::Float(4.0))),
-                ],
-            )))),
+            parse("3 < 4", &env, &factory, &allocator),
+            Ok(factory.create_application_term(
+                factory.create_builtin_term(BuiltinTerm::Lt),
+                allocator.create_pair(
+                    factory.create_value_term(ValueTerm::Float(3.0)),
+                    factory.create_value_term(ValueTerm::Float(4.0)),
+                ),
+            )),
         );
         assert_eq!(
-            parse("3 <= 4", &env),
-            Ok(Expression::new(Term::Application(ApplicationTerm::new(
-                Expression::new(Term::Builtin(BuiltinTerm::Lte)),
-                vec![
-                    Expression::new(Term::Value(ValueTerm::Float(3.0))),
-                    Expression::new(Term::Value(ValueTerm::Float(4.0))),
-                ],
-            )))),
+            parse("3 <= 4", &env, &factory, &allocator),
+            Ok(factory.create_application_term(
+                factory.create_builtin_term(BuiltinTerm::Lte),
+                allocator.create_pair(
+                    factory.create_value_term(ValueTerm::Float(3.0)),
+                    factory.create_value_term(ValueTerm::Float(4.0)),
+                ),
+            )),
         );
         assert_eq!(
-            parse("3 > 4", &env),
-            Ok(Expression::new(Term::Application(ApplicationTerm::new(
-                Expression::new(Term::Builtin(BuiltinTerm::Gt)),
-                vec![
-                    Expression::new(Term::Value(ValueTerm::Float(3.0))),
-                    Expression::new(Term::Value(ValueTerm::Float(4.0))),
-                ],
-            )))),
+            parse("3 > 4", &env, &factory, &allocator),
+            Ok(factory.create_application_term(
+                factory.create_builtin_term(BuiltinTerm::Gt),
+                allocator.create_pair(
+                    factory.create_value_term(ValueTerm::Float(3.0)),
+                    factory.create_value_term(ValueTerm::Float(4.0)),
+                ),
+            )),
         );
         assert_eq!(
-            parse("3 >= 4", &env),
-            Ok(Expression::new(Term::Application(ApplicationTerm::new(
-                Expression::new(Term::Builtin(BuiltinTerm::Gte)),
-                vec![
-                    Expression::new(Term::Value(ValueTerm::Float(3.0))),
-                    Expression::new(Term::Value(ValueTerm::Float(4.0))),
-                ],
-            )))),
+            parse("3 >= 4", &env, &factory, &allocator),
+            Ok(factory.create_application_term(
+                factory.create_builtin_term(BuiltinTerm::Gte),
+                allocator.create_pair(
+                    factory.create_value_term(ValueTerm::Float(3.0)),
+                    factory.create_value_term(ValueTerm::Float(4.0)),
+                ),
+            )),
         );
     }
 
     #[test]
     fn equality_expression() {
+        let factory = TermFactory::default();
+        let allocator = DefaultAllocator::default();
         let env = Env::new();
         assert_eq!(
-            parse("true === false", &env),
-            Ok(Expression::new(Term::Application(ApplicationTerm::new(
-                Expression::new(Term::Builtin(BuiltinTerm::Eq)),
-                vec![
-                    Expression::new(Term::Value(ValueTerm::Boolean(true))),
-                    Expression::new(Term::Value(ValueTerm::Boolean(false))),
-                ],
-            )))),
+            parse("true === false", &env, &factory, &allocator),
+            Ok(factory.create_application_term(
+                factory.create_builtin_term(BuiltinTerm::Eq),
+                allocator.create_pair(
+                    factory.create_value_term(ValueTerm::Boolean(true)),
+                    factory.create_value_term(ValueTerm::Boolean(false)),
+                ),
+            )),
         );
         assert_eq!(
-            parse("true !== false", &env),
-            Ok(Expression::new(Term::Application(ApplicationTerm::new(
-                Expression::new(Term::Builtin(BuiltinTerm::Not)),
-                vec![Expression::new(Term::Application(ApplicationTerm::new(
-                    Expression::new(Term::Builtin(BuiltinTerm::Eq)),
-                    vec![
-                        Expression::new(Term::Value(ValueTerm::Boolean(true))),
-                        Expression::new(Term::Value(ValueTerm::Boolean(false))),
-                    ],
-                )))],
-            )))),
+            parse("true !== false", &env, &factory, &allocator),
+            Ok(factory.create_application_term(
+                factory.create_builtin_term(BuiltinTerm::Not),
+                allocator.create_unit_list(factory.create_application_term(
+                    factory.create_builtin_term(BuiltinTerm::Eq),
+                    allocator.create_pair(
+                        factory.create_value_term(ValueTerm::Boolean(true)),
+                        factory.create_value_term(ValueTerm::Boolean(false)),
+                    ),
+                )),
+            )),
         );
     }
 
     #[test]
     fn logical_expression() {
+        let factory = TermFactory::default();
+        let allocator = DefaultAllocator::default();
         let env = Env::new();
         assert_eq!(
-            parse("true && false", &env),
-            Ok(Expression::new(Term::Application(ApplicationTerm::new(
-                Expression::new(Term::Builtin(BuiltinTerm::And)),
-                vec![
-                    Expression::new(Term::Value(ValueTerm::Boolean(true))),
-                    Expression::new(Term::Value(ValueTerm::Boolean(false))),
-                ],
-            )))),
+            parse("true && false", &env, &factory, &allocator),
+            Ok(factory.create_application_term(
+                factory.create_builtin_term(BuiltinTerm::And),
+                allocator.create_pair(
+                    factory.create_value_term(ValueTerm::Boolean(true)),
+                    factory.create_value_term(ValueTerm::Boolean(false)),
+                ),
+            )),
         );
         assert_eq!(
-            parse("true || false", &env),
-            Ok(Expression::new(Term::Application(ApplicationTerm::new(
-                Expression::new(Term::Builtin(BuiltinTerm::Or)),
-                vec![
-                    Expression::new(Term::Value(ValueTerm::Boolean(true))),
-                    Expression::new(Term::Value(ValueTerm::Boolean(false))),
-                ],
-            )))),
+            parse("true || false", &env, &factory, &allocator),
+            Ok(factory.create_application_term(
+                factory.create_builtin_term(BuiltinTerm::Or),
+                allocator.create_pair(
+                    factory.create_value_term(ValueTerm::Boolean(true)),
+                    factory.create_value_term(ValueTerm::Boolean(false)),
+                ),
+            )),
         );
     }
 
     #[test]
     fn conditional_expression() {
+        let factory = TermFactory::default();
+        let allocator = DefaultAllocator::default();
         let env = Env::new();
         assert_eq!(
-            parse("true ? 3 : 4", &env),
-            Ok(Expression::new(Term::Application(ApplicationTerm::new(
-                Expression::new(Term::Builtin(BuiltinTerm::If)),
-                vec![
-                    Expression::new(Term::Value(ValueTerm::Boolean(true))),
-                    Expression::new(Term::Value(ValueTerm::Float(3.0))),
-                    Expression::new(Term::Value(ValueTerm::Float(4.0))),
-                ],
-            )))),
+            parse("true ? 3 : 4", &env, &factory, &allocator),
+            Ok(factory.create_application_term(
+                factory.create_builtin_term(BuiltinTerm::If),
+                allocator.create_triple(
+                    factory.create_value_term(ValueTerm::Boolean(true)),
+                    factory.create_value_term(ValueTerm::Float(3.0)),
+                    factory.create_value_term(ValueTerm::Float(4.0)),
+                ),
+            )),
         );
     }
 
     #[test]
     fn if_statements() {
+        let factory = TermFactory::default();
+        let allocator = DefaultAllocator::default();
         let env = Env::new();
         assert_eq!(
             parse(
                 "(() => { if (true) { return 3; } else { return 4; }})()",
                 &env,
+                &factory,
+                &allocator,
             ),
-            Ok(Expression::new(Term::Application(ApplicationTerm::new(
-                Expression::new(Term::Lambda(LambdaTerm::new(
-                    Arity::from(0, 0, None),
-                    Expression::new(Term::Application(ApplicationTerm::new(
-                        Expression::new(Term::Builtin(BuiltinTerm::If)),
-                        vec![
-                            Expression::new(Term::Value(ValueTerm::Boolean(true))),
-                            Expression::new(Term::Value(ValueTerm::Float(3.0))),
-                            Expression::new(Term::Value(ValueTerm::Float(4.0))),
-                        ]
-                    )))
-                ))),
-                vec![],
-            ))))
+            Ok(factory.create_application_term(
+                factory.create_lambda_term(
+                    0,
+                    factory.create_application_term(
+                        factory.create_builtin_term(BuiltinTerm::If),
+                        allocator.create_triple(
+                            factory.create_value_term(ValueTerm::Boolean(true)),
+                            factory.create_value_term(ValueTerm::Float(3.0)),
+                            factory.create_value_term(ValueTerm::Float(4.0)),
+                        )
+                    )
+                ),
+                allocator.create_empty_list(),
+            ))
         );
         assert_eq!(
-            parse("(() => { if (true) { throw new Error(\"foo\"); } else { throw new Error(\"bar\"); }})()", &env),
-            Ok(Expression::new(Term::Application(ApplicationTerm::new(
-                Expression::new(Term::Lambda(LambdaTerm::new(
-                    Arity::from(0, 0, None),
-                    Expression::new(Term::Application(ApplicationTerm::new(
-                        Expression::new(Term::Builtin(BuiltinTerm::If)),
-                        vec![
-                            Expression::new(Term::Value(ValueTerm::Boolean(true))),
-                            Expression::new(Term::Application(ApplicationTerm::new(
-                                throw(),
-                                vec![
-                                    Expression::new(Term::Value(ValueTerm::String(String::from("foo")))),
-                                ],
-                            ))),
-                            Expression::new(Term::Application(ApplicationTerm::new(
-                                throw(),
-                                vec![
-                                    Expression::new(Term::Value(ValueTerm::String(String::from("bar")))),
-                                ],
-                            ))),
-                        ],
-                    )))
-                ))),
-                vec![],
-            ))))
+            parse("(() => { if (true) { throw new Error(\"foo\"); } else { throw new Error(\"bar\"); }})()", &env, &factory, &allocator),
+            Ok(factory.create_application_term(
+                factory.create_lambda_term(
+                    0,
+                    factory.create_application_term(
+                        factory.create_builtin_term(BuiltinTerm::If),
+                        allocator.create_triple(
+                            factory.create_value_term(ValueTerm::Boolean(true)),
+                            factory.create_application_term(
+                                factory.create_native_function_term(throw()),
+                                allocator.create_unit_list(
+                                    factory.create_value_term(ValueTerm::String(allocator.create_string(String::from("foo")))),
+                                ),
+                            ),
+                            factory.create_application_term(
+                                factory.create_native_function_term(throw()),
+                                allocator.create_unit_list(
+                                    factory.create_value_term(ValueTerm::String(allocator.create_string(String::from("bar")))),
+                                ),
+                            ),
+                        ),
+                    )
+                ),
+                allocator.create_empty_list(),
+            ))
         );
         assert_eq!(
-            parse("(() => { if (true) { const foo = 3; const bar = 4; return foo + bar; } else { const foo = 4; const bar = 3; return foo + bar; }})()", &env),
-            Ok(Expression::new(Term::Application(ApplicationTerm::new(
-                Expression::new(Term::Lambda(LambdaTerm::new(
-                    Arity::from(0, 0, None),
-                    Expression::new(Term::Application(ApplicationTerm::new(
-                        Expression::new(Term::Builtin(BuiltinTerm::If)),
-                        vec![
-                            Expression::new(Term::Value(ValueTerm::Boolean(true))),
-                            Expression::new(Term::Application(ApplicationTerm::new(
-                                Expression::new(Term::Lambda(LambdaTerm::new(
-                                    Arity::from(0, 1, None),
-                                    Expression::new(Term::Application(ApplicationTerm::new(
-                                        Expression::new(Term::Lambda(LambdaTerm::new(
-                                            Arity::from(0, 1, None),
-                                            Expression::new(Term::Application(ApplicationTerm::new(
-                                                Expression::new(Term::Builtin(BuiltinTerm::Add)),
-                                                vec![
-                                                    Expression::new(Term::Variable(VariableTerm::scoped(1))),
-                                                    Expression::new(Term::Variable(VariableTerm::scoped(0))),
-                                                ]
-                                            ))),
-                                        ))),
-                                        vec![
-                                            Expression::new(Term::Value(ValueTerm::Float(4.0))),
-                                        ],
-                                    ))),
-                                ))),
-                                vec![
-                                    Expression::new(Term::Value(ValueTerm::Float(3.0))),
-                                ],
-                            ))),
-                            Expression::new(Term::Application(ApplicationTerm::new(
-                                Expression::new(Term::Lambda(LambdaTerm::new(
-                                    Arity::from(0, 1, None),
-                                    Expression::new(Term::Application(ApplicationTerm::new(
-                                        Expression::new(Term::Lambda(LambdaTerm::new(
-                                            Arity::from(0, 1, None),
-                                            Expression::new(Term::Application(ApplicationTerm::new(
-                                                Expression::new(Term::Builtin(BuiltinTerm::Add)),
-                                                vec![
-                                                    Expression::new(Term::Variable(VariableTerm::scoped(1))),
-                                                    Expression::new(Term::Variable(VariableTerm::scoped(0))),
-                                                ]
-                                            ))),
-                                        ))),
-                                        vec![
-                                            Expression::new(Term::Value(ValueTerm::Float(3.0))),
-                                        ],
-                                    ))),
-                                ))),
-                                vec![
-                                    Expression::new(Term::Value(ValueTerm::Float(4.0))),
-                                ],
-                            ))),
-                        ]
-                    )))
-                ))),
-                vec![],
-            ))))
+            parse("(() => { if (true) { const foo = 3; const bar = 4; return foo + bar; } else { const foo = 4; const bar = 3; return foo + bar; }})()", &env, &factory, &allocator),
+            Ok(factory.create_application_term(
+                factory.create_lambda_term(
+                    0,
+                    factory.create_application_term(
+                        factory.create_builtin_term(BuiltinTerm::If),
+                        allocator.create_triple(
+                            factory.create_value_term(ValueTerm::Boolean(true)),
+                            factory.create_application_term(
+                                factory.create_lambda_term(
+                                    1,
+                                    factory.create_application_term(
+                                        factory.create_lambda_term(
+                                            1,
+                                            factory.create_application_term(
+                                                factory.create_builtin_term(BuiltinTerm::Add),
+                                                allocator.create_pair(
+                                                    factory.create_static_variable_term(1),
+                                                    factory.create_static_variable_term(0),
+                                                )
+                                            ),
+                                        ),
+                                        allocator.create_list(vec![
+                                            factory.create_value_term(ValueTerm::Float(4.0)),
+                                        ]),
+                                    ),
+                                ),
+                                allocator.create_list(vec![
+                                    factory.create_value_term(ValueTerm::Float(3.0)),
+                                ]),
+                            ),
+                            factory.create_application_term(
+                                factory.create_lambda_term(
+                                    1,
+                                    factory.create_application_term(
+                                        factory.create_lambda_term(
+                                            1,
+                                            factory.create_application_term(
+                                                factory.create_builtin_term(BuiltinTerm::Add),
+                                                allocator.create_pair(
+                                                    factory.create_static_variable_term(1),
+                                                    factory.create_static_variable_term(0),
+                                                )
+                                            ),
+                                        ),
+                                        allocator.create_list(vec![
+                                            factory.create_value_term(ValueTerm::Float(3.0)),
+                                        ]),
+                                    ),
+                                ),
+                                allocator.create_list(vec![
+                                    factory.create_value_term(ValueTerm::Float(4.0)),
+                                ]),
+                            ),
+                        )
+                    )
+                ),
+                allocator.create_empty_list(),
+            ))
         );
         assert_eq!(
-            parse("(() => { if (true) { const foo = 3; const bar = 4; return foo + bar; } const foo = 4; const bar = 3; return foo + bar; })()", &env),
-            Ok(Expression::new(Term::Application(ApplicationTerm::new(
-                Expression::new(Term::Lambda(LambdaTerm::new(
-                    Arity::from(0, 0, None),
-                    Expression::new(Term::Application(ApplicationTerm::new(
-                        Expression::new(Term::Builtin(BuiltinTerm::If)),
-                        vec![
-                            Expression::new(Term::Value(ValueTerm::Boolean(true))),
-                            Expression::new(Term::Application(ApplicationTerm::new(
-                                Expression::new(Term::Lambda(LambdaTerm::new(
-                                    Arity::from(0, 1, None),
-                                    Expression::new(Term::Application(ApplicationTerm::new(
-                                        Expression::new(Term::Lambda(LambdaTerm::new(
-                                            Arity::from(0, 1, None),
-                                            Expression::new(Term::Application(ApplicationTerm::new(
-                                                Expression::new(Term::Builtin(BuiltinTerm::Add)),
-                                                vec![
-                                                    Expression::new(Term::Variable(VariableTerm::scoped(1))),
-                                                    Expression::new(Term::Variable(VariableTerm::scoped(0))),
-                                                ]
-                                            ))),
-                                        ))),
-                                        vec![
-                                            Expression::new(Term::Value(ValueTerm::Float(4.0))),
-                                        ],
-                                    ))),
-                                ))),
-                                vec![
-                                    Expression::new(Term::Value(ValueTerm::Float(3.0))),
-                                ],
-                            ))),
-                            Expression::new(Term::Application(ApplicationTerm::new(
-                                Expression::new(Term::Lambda(LambdaTerm::new(
-                                    Arity::from(0, 1, None),
-                                    Expression::new(Term::Application(ApplicationTerm::new(
-                                        Expression::new(Term::Lambda(LambdaTerm::new(
-                                            Arity::from(0, 1, None),
-                                            Expression::new(Term::Application(ApplicationTerm::new(
-                                                Expression::new(Term::Builtin(BuiltinTerm::Add)),
-                                                vec![
-                                                    Expression::new(Term::Variable(VariableTerm::scoped(1))),
-                                                    Expression::new(Term::Variable(VariableTerm::scoped(0))),
-                                                ]
-                                            ))),
-                                        ))),
-                                        vec![
-                                            Expression::new(Term::Value(ValueTerm::Float(3.0))),
-                                        ],
-                                    ))),
-                                ))),
-                                vec![
-                                    Expression::new(Term::Value(ValueTerm::Float(4.0))),
-                                ],
-                            ))),
-                        ]
-                    )))
-                ))),
-                vec![],
-            ))))
+            parse("(() => { if (true) { const foo = 3; const bar = 4; return foo + bar; } const foo = 4; const bar = 3; return foo + bar; })()", &env, &factory, &allocator),
+            Ok(factory.create_application_term(
+                factory.create_lambda_term(
+                    0,
+                    factory.create_application_term(
+                        factory.create_builtin_term(BuiltinTerm::If),
+                        allocator.create_triple(
+                            factory.create_value_term(ValueTerm::Boolean(true)),
+                            factory.create_application_term(
+                                factory.create_lambda_term(
+                                    1,
+                                    factory.create_application_term(
+                                        factory.create_lambda_term(
+                                            1,
+                                            factory.create_application_term(
+                                                factory.create_builtin_term(BuiltinTerm::Add),
+                                                allocator.create_pair(
+                                                    factory.create_static_variable_term(1),
+                                                    factory.create_static_variable_term(0),
+                                                )
+                                            ),
+                                        ),
+                                        allocator.create_list(vec![
+                                            factory.create_value_term(ValueTerm::Float(4.0)),
+                                        ]),
+                                    ),
+                                ),
+                                allocator.create_list(vec![
+                                    factory.create_value_term(ValueTerm::Float(3.0)),
+                                ]),
+                            ),
+                            factory.create_application_term(
+                                factory.create_lambda_term(
+                                    1,
+                                    factory.create_application_term(
+                                        factory.create_lambda_term(
+                                            1,
+                                            factory.create_application_term(
+                                                factory.create_builtin_term(BuiltinTerm::Add),
+                                                allocator.create_pair(
+                                                    factory.create_static_variable_term(1),
+                                                    factory.create_static_variable_term(0),
+                                                )
+                                            ),
+                                        ),
+                                        allocator.create_list(vec![
+                                            factory.create_value_term(ValueTerm::Float(3.0)),
+                                        ]),
+                                    ),
+                                ),
+                                allocator.create_list(vec![
+                                    factory.create_value_term(ValueTerm::Float(4.0)),
+                                ]),
+                            ),
+                        )
+                    )
+                ),
+                allocator.create_empty_list(),
+            ))
         );
         assert_eq!(
-            parse("(() => { if (true) throw new Error(\"foo\"); const foo = 3; const bar = 4; return foo + bar; })()", &env),
-            Ok(Expression::new(Term::Application(ApplicationTerm::new(
-                Expression::new(Term::Lambda(LambdaTerm::new(
-                    Arity::from(0, 0, None),
-                    Expression::new(Term::Application(ApplicationTerm::new(
-                        Expression::new(Term::Builtin(BuiltinTerm::If)),
-                        vec![
-                            Expression::new(Term::Value(ValueTerm::Boolean(true))),
-                            Expression::new(Term::Application(ApplicationTerm::new(
-                                throw(),
-                                vec![
-                                    Expression::new(Term::Value(ValueTerm::String(String::from("foo")))),
-                                ],
-                            ))),
-                            Expression::new(Term::Application(ApplicationTerm::new(
-                                Expression::new(Term::Lambda(LambdaTerm::new(
-                                    Arity::from(0, 1, None),
-                                    Expression::new(Term::Application(ApplicationTerm::new(
-                                        Expression::new(Term::Lambda(LambdaTerm::new(
-                                            Arity::from(0, 1, None),
-                                            Expression::new(Term::Application(ApplicationTerm::new(
-                                                Expression::new(Term::Builtin(BuiltinTerm::Add)),
-                                                vec![
-                                                    Expression::new(Term::Variable(VariableTerm::scoped(1))),
-                                                    Expression::new(Term::Variable(VariableTerm::scoped(0))),
-                                                ]
-                                            ))),
-                                        ))),
-                                        vec![
-                                            Expression::new(Term::Value(ValueTerm::Float(4.0))),
-                                        ],
-                                    ))),
-                                ))),
-                                vec![
-                                    Expression::new(Term::Value(ValueTerm::Float(3.0))),
-                                ],
-                            ))),
-                        ]
-                    )))
-                ))),
-                vec![],
-            ))))
+            parse("(() => { if (true) throw new Error(\"foo\"); const foo = 3; const bar = 4; return foo + bar; })()", &env, &factory, &allocator),
+            Ok(factory.create_application_term(
+                factory.create_lambda_term(
+                    0,
+                    factory.create_application_term(
+                        factory.create_builtin_term(BuiltinTerm::If),
+                        allocator.create_triple(
+                            factory.create_value_term(ValueTerm::Boolean(true)),
+                            factory.create_application_term(
+                                factory.create_native_function_term(throw()),
+                                allocator.create_unit_list(
+                                    factory.create_value_term(ValueTerm::String(allocator.create_string(String::from("foo")))),
+                                ),
+                            ),
+                            factory.create_application_term(
+                                factory.create_lambda_term(
+                                    1,
+                                    factory.create_application_term(
+                                        factory.create_lambda_term(
+                                            1,
+                                            factory.create_application_term(
+                                                factory.create_builtin_term(BuiltinTerm::Add),
+                                                allocator.create_pair(
+                                                    factory.create_static_variable_term(1),
+                                                    factory.create_static_variable_term(0),
+                                                )
+                                            ),
+                                        ),
+                                        allocator.create_list(vec![
+                                            factory.create_value_term(ValueTerm::Float(4.0)),
+                                        ]),
+                                    ),
+                                ),
+                                allocator.create_list(vec![
+                                    factory.create_value_term(ValueTerm::Float(3.0)),
+                                ]),
+                            ),
+                        )
+                    )
+                ),
+                allocator.create_empty_list(),
+            ))
         );
     }
 
     #[test]
     fn throw_statements() {
+        let factory = TermFactory::default();
+        let allocator = DefaultAllocator::default();
         let env = Env::new();
         assert_eq!(
-            parse("throw new Error(\"foo\")", &env),
-            Ok(Expression::new(Term::Application(ApplicationTerm::new(
-                throw(),
-                vec![Expression::new(Term::Value(ValueTerm::String(
-                    StringValue::from("foo")
-                )))],
-            )))),
+            parse("throw new Error(\"foo\")", &env, &factory, &allocator),
+            Ok(factory.create_application_term(
+                factory.create_native_function_term(throw()),
+                allocator.create_unit_list(factory.create_value_term(ValueTerm::String(
+                    allocator.create_string(String::from("foo"))
+                ))),
+            )),
         );
         assert_eq!(
-            parse("throw new Error(`foo${'bar'}`)", &env,),
-            Ok(Expression::new(Term::Application(ApplicationTerm::new(
-                throw(),
-                vec![Expression::new(Term::Application(ApplicationTerm::new(
-                    Expression::new(Term::Builtin(BuiltinTerm::Concat)),
-                    vec![
-                        Expression::new(Term::Value(ValueTerm::String(StringValue::from("foo")))),
-                        Expression::new(Term::Application(ApplicationTerm::new(
-                            to_string(),
-                            vec![Expression::new(Term::Value(ValueTerm::String(
-                                StringValue::from("bar")
-                            )))],
-                        ))),
-                    ],
-                )))],
-            )))),
+            parse("throw new Error(`foo${'bar'}`)", &env, &factory, &allocator),
+            Ok(factory.create_application_term(
+                factory.create_native_function_term(throw()),
+                allocator.create_unit_list(factory.create_application_term(
+                    factory.create_builtin_term(BuiltinTerm::Concat),
+                    allocator.create_pair(
+                        factory.create_value_term(ValueTerm::String(
+                            allocator.create_string(String::from("foo"))
+                        )),
+                        factory.create_application_term(
+                            factory.create_native_function_term(to_string()),
+                            allocator.create_unit_list(factory.create_value_term(
+                                ValueTerm::String(allocator.create_string(String::from("bar")))
+                            )),
+                        ),
+                    ),
+                )),
+            )),
         );
     }
 
     #[test]
     fn arrow_function_expressions() {
+        let factory = TermFactory::default();
+        let allocator = DefaultAllocator::default();
         let env = Env::new();
         assert_eq!(
-            parse("() => 3", &env),
-            Ok(Expression::new(Term::Lambda(LambdaTerm::new(
-                Arity::from(0, 0, None),
-                Expression::new(Term::Value(ValueTerm::Float(3.0))),
-            )))),
+            parse("() => 3", &env, &factory, &allocator),
+            Ok(factory.create_lambda_term(0, factory.create_value_term(ValueTerm::Float(3.0)))),
         );
         assert_eq!(
-            parse("(foo) => 3", &env),
-            Ok(Expression::new(Term::Lambda(LambdaTerm::new(
-                Arity::from(0, 1, None),
-                Expression::new(Term::Value(ValueTerm::Float(3.0))),
-            )))),
+            parse("(foo) => 3", &env, &factory, &allocator),
+            Ok(factory.create_lambda_term(1, factory.create_value_term(ValueTerm::Float(3.0)))),
         );
         assert_eq!(
-            parse("(foo) => foo", &env),
-            Ok(Expression::new(Term::Lambda(LambdaTerm::new(
-                Arity::from(0, 1, None),
-                Expression::new(Term::Variable(VariableTerm::scoped(0))),
-            )))),
+            parse("(foo) => foo", &env, &factory, &allocator),
+            Ok(factory.create_lambda_term(1, factory.create_static_variable_term(0))),
         );
         assert_eq!(
-            parse("(foo) => foo + foo", &env),
-            Ok(Expression::new(Term::Lambda(LambdaTerm::new(
-                Arity::from(0, 1, None),
-                Expression::new(Term::Application(ApplicationTerm::new(
-                    Expression::new(Term::Builtin(BuiltinTerm::Add)),
-                    vec![
-                        Expression::new(Term::Variable(VariableTerm::scoped(0))),
-                        Expression::new(Term::Variable(VariableTerm::scoped(0))),
-                    ],
-                ))),
-            )))),
+            parse("(foo) => foo + foo", &env, &factory, &allocator),
+            Ok(factory.create_lambda_term(
+                1,
+                factory.create_application_term(
+                    factory.create_builtin_term(BuiltinTerm::Add),
+                    allocator.create_pair(
+                        factory.create_static_variable_term(0),
+                        factory.create_static_variable_term(0),
+                    ),
+                ),
+            )),
         );
         assert_eq!(
-            parse("(foo, bar, baz) => foo + bar", &env),
-            Ok(Expression::new(Term::Lambda(LambdaTerm::new(
-                Arity::from(0, 3, None),
-                Expression::new(Term::Application(ApplicationTerm::new(
-                    Expression::new(Term::Builtin(BuiltinTerm::Add)),
-                    vec![
-                        Expression::new(Term::Variable(VariableTerm::scoped(2))),
-                        Expression::new(Term::Variable(VariableTerm::scoped(1))),
-                    ],
-                ))),
-            )))),
+            parse("(foo, bar, baz) => foo + bar", &env, &factory, &allocator),
+            Ok(factory.create_lambda_term(
+                3,
+                factory.create_application_term(
+                    factory.create_builtin_term(BuiltinTerm::Add),
+                    allocator.create_pair(
+                        factory.create_static_variable_term(2),
+                        factory.create_static_variable_term(1),
+                    ),
+                ),
+            )),
         );
         assert_eq!(
-            parse("(foo) => (bar) => (baz) => foo + bar", &env,),
-            Ok(Expression::new(Term::Lambda(LambdaTerm::new(
-                Arity::from(0, 1, None),
-                Expression::new(Term::Lambda(LambdaTerm::new(
-                    Arity::from(0, 1, None),
-                    Expression::new(Term::Lambda(LambdaTerm::new(
-                        Arity::from(0, 1, None),
-                        Expression::new(Term::Application(ApplicationTerm::new(
-                            Expression::new(Term::Builtin(BuiltinTerm::Add)),
-                            vec![
-                                Expression::new(Term::Variable(VariableTerm::scoped(2))),
-                                Expression::new(Term::Variable(VariableTerm::scoped(1))),
-                            ],
-                        ))),
-                    ))),
-                ))),
-            )))),
+            parse(
+                "(foo) => (bar) => (baz) => foo + bar",
+                &env,
+                &factory,
+                &allocator
+            ),
+            Ok(factory.create_lambda_term(
+                1,
+                factory.create_lambda_term(
+                    1,
+                    factory.create_lambda_term(
+                        1,
+                        factory.create_application_term(
+                            factory.create_builtin_term(BuiltinTerm::Add),
+                            allocator.create_pair(
+                                factory.create_static_variable_term(2),
+                                factory.create_static_variable_term(1),
+                            ),
+                        ),
+                    ),
+                ),
+            )),
         );
     }
 
     #[test]
     fn arrow_function_object_destructuring() {
+        let factory = TermFactory::default();
+        let allocator = DefaultAllocator::default();
         let env = Env::new();
         assert_eq!(
-            parse("({}) => 3", &env),
-            Ok(Expression::new(Term::Lambda(LambdaTerm::new(
-                Arity::from(0, 1, None),
-                Expression::new(Term::Value(ValueTerm::Float(3.0))),
-            )))),
+            parse("({}) => 3", &env, &factory, &allocator),
+            Ok(factory.create_lambda_term(1, factory.create_value_term(ValueTerm::Float(3.0)))),
         );
         assert_eq!(
-            parse("({ foo }) => foo", &env),
-            Ok(Expression::new(Term::Lambda(LambdaTerm::new(
-                Arity::from(0, 1, None),
-                Expression::new(Term::Application(ApplicationTerm::new(
-                    Expression::new(Term::Lambda(LambdaTerm::new(
-                        Arity::from(0, 1, None),
-                        Expression::new(Term::Variable(VariableTerm::scoped(0))),
-                    ))),
-                    vec![Expression::new(Term::Application(ApplicationTerm::new(
-                        Expression::new(Term::Builtin(BuiltinTerm::Get)),
-                        vec![
-                            Expression::new(Term::Variable(VariableTerm::scoped(0))),
-                            Expression::new(Term::Value(ValueTerm::String(StringValue::from(
-                                "foo"
-                            )))),
-                        ],
-                    ))),],
-                ))),
-            )))),
+            parse("({ foo }) => foo", &env, &factory, &allocator),
+            Ok(factory.create_lambda_term(
+                1,
+                factory.create_application_term(
+                    factory.create_lambda_term(1, factory.create_static_variable_term(0)),
+                    allocator.create_unit_list(factory.create_application_term(
+                        factory.create_builtin_term(BuiltinTerm::Get),
+                        allocator.create_pair(
+                            factory.create_static_variable_term(0),
+                            factory.create_value_term(ValueTerm::String(
+                                allocator.create_string(String::from("foo"))
+                            )),
+                        ),
+                    ),),
+                ),
+            )),
         );
         assert_eq!(
-            parse("({ foo, bar }) => foo + bar", &env),
-            Ok(Expression::new(Term::Lambda(LambdaTerm::new(
-                Arity::from(0, 1, None),
-                Expression::new(Term::Application(ApplicationTerm::new(
-                    Expression::new(Term::Lambda(LambdaTerm::new(
-                        Arity::from(0, 2, None),
-                        Expression::new(Term::Application(ApplicationTerm::new(
-                            Expression::new(Term::Builtin(BuiltinTerm::Add)),
-                            vec![
-                                Expression::new(Term::Variable(VariableTerm::scoped(1))),
-                                Expression::new(Term::Variable(VariableTerm::scoped(0))),
-                            ],
-                        ))),
-                    ))),
-                    vec![
-                        Expression::new(Term::Application(ApplicationTerm::new(
-                            Expression::new(Term::Builtin(BuiltinTerm::Get)),
-                            vec![
-                                Expression::new(Term::Variable(VariableTerm::scoped(0))),
-                                Expression::new(Term::Value(ValueTerm::String(StringValue::from(
-                                    "foo"
-                                )))),
-                            ],
-                        ))),
-                        Expression::new(Term::Application(ApplicationTerm::new(
-                            Expression::new(Term::Builtin(BuiltinTerm::Get)),
-                            vec![
-                                Expression::new(Term::Variable(VariableTerm::scoped(0))),
-                                Expression::new(Term::Value(ValueTerm::String(StringValue::from(
-                                    "bar"
-                                )))),
-                            ],
-                        ))),
-                    ],
-                ))),
-            )))),
+            parse("({ foo, bar }) => foo + bar", &env, &factory, &allocator),
+            Ok(factory.create_lambda_term(
+                1,
+                factory.create_application_term(
+                    factory.create_lambda_term(
+                        2,
+                        factory.create_application_term(
+                            factory.create_builtin_term(BuiltinTerm::Add),
+                            allocator.create_pair(
+                                factory.create_static_variable_term(1),
+                                factory.create_static_variable_term(0),
+                            ),
+                        ),
+                    ),
+                    allocator.create_list(vec![
+                        factory.create_application_term(
+                            factory.create_builtin_term(BuiltinTerm::Get),
+                            allocator.create_pair(
+                                factory.create_static_variable_term(0),
+                                factory.create_value_term(ValueTerm::String(
+                                    allocator.create_string(String::from("foo"))
+                                )),
+                            ),
+                        ),
+                        factory.create_application_term(
+                            factory.create_builtin_term(BuiltinTerm::Get),
+                            allocator.create_pair(
+                                factory.create_static_variable_term(0),
+                                factory.create_value_term(ValueTerm::String(
+                                    allocator.create_string(String::from("bar"))
+                                )),
+                            ),
+                        ),
+                    ]),
+                ),
+            )),
         );
         assert_eq!(
             parse(
                 "(first, { foo, bar }, second, third) => ((first + foo) + bar) + third",
                 &env,
+                &factory,
+                &allocator,
             ),
-            Ok(Expression::new(Term::Lambda(LambdaTerm::new(
-                Arity::from(0, 4, None),
-                Expression::new(Term::Application(ApplicationTerm::new(
-                    Expression::new(Term::Lambda(LambdaTerm::new(
-                        Arity::from(0, 2, None),
-                        Expression::new(Term::Application(ApplicationTerm::new(
-                            Expression::new(Term::Builtin(BuiltinTerm::Add)),
-                            vec![
-                                Expression::new(Term::Application(ApplicationTerm::new(
-                                    Expression::new(Term::Builtin(BuiltinTerm::Add)),
-                                    vec![
-                                        Expression::new(Term::Application(ApplicationTerm::new(
-                                            Expression::new(Term::Builtin(BuiltinTerm::Add)),
-                                            vec![
-                                                Expression::new(Term::Variable(
-                                                    VariableTerm::scoped(5)
-                                                )),
-                                                Expression::new(Term::Variable(
-                                                    VariableTerm::scoped(1)
-                                                )),
-                                            ],
-                                        ))),
-                                        Expression::new(Term::Variable(VariableTerm::scoped(0))),
-                                    ],
-                                ))),
-                                Expression::new(Term::Variable(VariableTerm::scoped(2))),
-                            ],
-                        ))),
-                    ))),
-                    vec![
-                        Expression::new(Term::Application(ApplicationTerm::new(
-                            Expression::new(Term::Builtin(BuiltinTerm::Get)),
-                            vec![
-                                Expression::new(Term::Variable(VariableTerm::scoped(2))),
-                                Expression::new(Term::Value(ValueTerm::String(StringValue::from(
-                                    "foo"
-                                )))),
-                            ],
-                        ))),
-                        Expression::new(Term::Application(ApplicationTerm::new(
-                            Expression::new(Term::Builtin(BuiltinTerm::Get)),
-                            vec![
-                                Expression::new(Term::Variable(VariableTerm::scoped(2))),
-                                Expression::new(Term::Value(ValueTerm::String(StringValue::from(
-                                    "bar"
-                                )))),
-                            ],
-                        ))),
-                    ],
-                ))),
-            )))),
+            Ok(factory.create_lambda_term(
+                4,
+                factory.create_application_term(
+                    factory.create_lambda_term(
+                        2,
+                        factory.create_application_term(
+                            factory.create_builtin_term(BuiltinTerm::Add),
+                            allocator.create_pair(
+                                factory.create_application_term(
+                                    factory.create_builtin_term(BuiltinTerm::Add),
+                                    allocator.create_pair(
+                                        factory.create_application_term(
+                                            factory.create_builtin_term(BuiltinTerm::Add),
+                                            allocator.create_pair(
+                                                factory.create_static_variable_term(5),
+                                                factory.create_static_variable_term(1),
+                                            ),
+                                        ),
+                                        factory.create_static_variable_term(0),
+                                    ),
+                                ),
+                                factory.create_static_variable_term(2),
+                            ),
+                        ),
+                    ),
+                    allocator.create_list(vec![
+                        factory.create_application_term(
+                            factory.create_builtin_term(BuiltinTerm::Get),
+                            allocator.create_pair(
+                                factory.create_static_variable_term(2),
+                                factory.create_value_term(ValueTerm::String(
+                                    allocator.create_string(String::from("foo"))
+                                )),
+                            ),
+                        ),
+                        factory.create_application_term(
+                            factory.create_builtin_term(BuiltinTerm::Get),
+                            allocator.create_pair(
+                                factory.create_static_variable_term(2),
+                                factory.create_value_term(ValueTerm::String(
+                                    allocator.create_string(String::from("bar"))
+                                )),
+                            ),
+                        ),
+                    ]),
+                ),
+            )),
         );
     }
 
     #[test]
     fn arrow_function_array_destructuring() {
+        let factory = TermFactory::default();
+        let allocator = DefaultAllocator::default();
         let env = Env::new();
         assert_eq!(
-            parse("([]) => 3", &env),
-            Ok(Expression::new(Term::Lambda(LambdaTerm::new(
-                Arity::from(0, 1, None),
-                Expression::new(Term::Value(ValueTerm::Float(3.0))),
-            )))),
+            parse("([]) => 3", &env, &factory, &allocator),
+            Ok(factory.create_lambda_term(1, factory.create_value_term(ValueTerm::Float(3.0)))),
         );
         assert_eq!(
-            parse("([foo]) => foo", &env),
-            Ok(Expression::new(Term::Lambda(LambdaTerm::new(
-                Arity::from(0, 1, None),
-                Expression::new(Term::Application(ApplicationTerm::new(
-                    Expression::new(Term::Lambda(LambdaTerm::new(
-                        Arity::from(0, 1, None),
-                        Expression::new(Term::Variable(VariableTerm::scoped(0))),
-                    ))),
-                    vec![Expression::new(Term::Application(ApplicationTerm::new(
-                        Expression::new(Term::Builtin(BuiltinTerm::Get)),
-                        vec![
-                            Expression::new(Term::Variable(VariableTerm::scoped(0))),
-                            Expression::new(Term::Value(ValueTerm::Int(0))),
-                        ],
-                    ))),],
-                ))),
-            )))),
+            parse("([foo]) => foo", &env, &factory, &allocator),
+            Ok(factory.create_lambda_term(
+                1,
+                factory.create_application_term(
+                    factory.create_lambda_term(1, factory.create_static_variable_term(0)),
+                    allocator.create_unit_list(factory.create_application_term(
+                        factory.create_builtin_term(BuiltinTerm::Get),
+                        allocator.create_pair(
+                            factory.create_static_variable_term(0),
+                            factory.create_value_term(ValueTerm::Int(0)),
+                        ),
+                    ),),
+                ),
+            )),
         );
         assert_eq!(
-            parse("([foo, bar]) => foo + bar", &env),
-            Ok(Expression::new(Term::Lambda(LambdaTerm::new(
-                Arity::from(0, 1, None),
-                Expression::new(Term::Application(ApplicationTerm::new(
-                    Expression::new(Term::Lambda(LambdaTerm::new(
-                        Arity::from(0, 2, None),
-                        Expression::new(Term::Application(ApplicationTerm::new(
-                            Expression::new(Term::Builtin(BuiltinTerm::Add)),
-                            vec![
-                                Expression::new(Term::Variable(VariableTerm::scoped(1))),
-                                Expression::new(Term::Variable(VariableTerm::scoped(0))),
-                            ],
-                        ))),
-                    ))),
-                    vec![
-                        Expression::new(Term::Application(ApplicationTerm::new(
-                            Expression::new(Term::Builtin(BuiltinTerm::Get)),
-                            vec![
-                                Expression::new(Term::Variable(VariableTerm::scoped(0))),
-                                Expression::new(Term::Value(ValueTerm::Int(0))),
-                            ],
-                        ))),
-                        Expression::new(Term::Application(ApplicationTerm::new(
-                            Expression::new(Term::Builtin(BuiltinTerm::Get)),
-                            vec![
-                                Expression::new(Term::Variable(VariableTerm::scoped(0))),
-                                Expression::new(Term::Value(ValueTerm::Int(1))),
-                            ],
-                        ))),
-                    ],
-                ))),
-            )))),
+            parse("([foo, bar]) => foo + bar", &env, &factory, &allocator),
+            Ok(factory.create_lambda_term(
+                1,
+                factory.create_application_term(
+                    factory.create_lambda_term(
+                        2,
+                        factory.create_application_term(
+                            factory.create_builtin_term(BuiltinTerm::Add),
+                            allocator.create_pair(
+                                factory.create_static_variable_term(1),
+                                factory.create_static_variable_term(0),
+                            ),
+                        ),
+                    ),
+                    allocator.create_list(vec![
+                        factory.create_application_term(
+                            factory.create_builtin_term(BuiltinTerm::Get),
+                            allocator.create_pair(
+                                factory.create_static_variable_term(0),
+                                factory.create_value_term(ValueTerm::Int(0)),
+                            ),
+                        ),
+                        factory.create_application_term(
+                            factory.create_builtin_term(BuiltinTerm::Get),
+                            allocator.create_pair(
+                                factory.create_static_variable_term(0),
+                                factory.create_value_term(ValueTerm::Int(1)),
+                            ),
+                        ),
+                    ]),
+                ),
+            )),
         );
         assert_eq!(
-            parse("([, , foo]) => foo", &env),
-            Ok(Expression::new(Term::Lambda(LambdaTerm::new(
-                Arity::from(0, 1, None),
-                Expression::new(Term::Application(ApplicationTerm::new(
-                    Expression::new(Term::Lambda(LambdaTerm::new(
-                        Arity::from(0, 1, None),
-                        Expression::new(Term::Variable(VariableTerm::scoped(0))),
-                    ))),
-                    vec![Expression::new(Term::Application(ApplicationTerm::new(
-                        Expression::new(Term::Builtin(BuiltinTerm::Get)),
-                        vec![
-                            Expression::new(Term::Variable(VariableTerm::scoped(0))),
-                            Expression::new(Term::Value(ValueTerm::Int(2))),
-                        ],
-                    )))],
-                ))),
-            )))),
+            parse("([, , foo]) => foo", &env, &factory, &allocator),
+            Ok(factory.create_lambda_term(
+                1,
+                factory.create_application_term(
+                    factory.create_lambda_term(1, factory.create_static_variable_term(0)),
+                    allocator.create_unit_list(factory.create_application_term(
+                        factory.create_builtin_term(BuiltinTerm::Get),
+                        allocator.create_pair(
+                            factory.create_static_variable_term(0),
+                            factory.create_value_term(ValueTerm::Int(2)),
+                        ),
+                    )),
+                ),
+            )),
         );
         assert_eq!(
             parse(
                 "(first, [foo, bar], second, third) => ((first + foo) + bar) + third",
                 &env,
+                &factory,
+                &allocator,
             ),
-            Ok(Expression::new(Term::Lambda(LambdaTerm::new(
-                Arity::from(0, 4, None),
-                Expression::new(Term::Application(ApplicationTerm::new(
-                    Expression::new(Term::Lambda(LambdaTerm::new(
-                        Arity::from(0, 2, None),
-                        Expression::new(Term::Application(ApplicationTerm::new(
-                            Expression::new(Term::Builtin(BuiltinTerm::Add)),
-                            vec![
-                                Expression::new(Term::Application(ApplicationTerm::new(
-                                    Expression::new(Term::Builtin(BuiltinTerm::Add)),
-                                    vec![
-                                        Expression::new(Term::Application(ApplicationTerm::new(
-                                            Expression::new(Term::Builtin(BuiltinTerm::Add)),
-                                            vec![
-                                                Expression::new(Term::Variable(
-                                                    VariableTerm::scoped(5)
-                                                )),
-                                                Expression::new(Term::Variable(
-                                                    VariableTerm::scoped(1)
-                                                )),
-                                            ],
-                                        ))),
-                                        Expression::new(Term::Variable(VariableTerm::scoped(0))),
-                                    ],
-                                ))),
-                                Expression::new(Term::Variable(VariableTerm::scoped(2))),
-                            ],
-                        ))),
-                    ))),
-                    vec![
-                        Expression::new(Term::Application(ApplicationTerm::new(
-                            Expression::new(Term::Builtin(BuiltinTerm::Get)),
-                            vec![
-                                Expression::new(Term::Variable(VariableTerm::scoped(2))),
-                                Expression::new(Term::Value(ValueTerm::Int(0))),
-                            ],
-                        ))),
-                        Expression::new(Term::Application(ApplicationTerm::new(
-                            Expression::new(Term::Builtin(BuiltinTerm::Get)),
-                            vec![
-                                Expression::new(Term::Variable(VariableTerm::scoped(2))),
-                                Expression::new(Term::Value(ValueTerm::Int(1))),
-                            ],
-                        ))),
-                    ],
-                ))),
-            )))),
+            Ok(factory.create_lambda_term(
+                4,
+                factory.create_application_term(
+                    factory.create_lambda_term(
+                        2,
+                        factory.create_application_term(
+                            factory.create_builtin_term(BuiltinTerm::Add),
+                            allocator.create_pair(
+                                factory.create_application_term(
+                                    factory.create_builtin_term(BuiltinTerm::Add),
+                                    allocator.create_pair(
+                                        factory.create_application_term(
+                                            factory.create_builtin_term(BuiltinTerm::Add),
+                                            allocator.create_pair(
+                                                factory.create_static_variable_term(5),
+                                                factory.create_static_variable_term(1),
+                                            ),
+                                        ),
+                                        factory.create_static_variable_term(0),
+                                    ),
+                                ),
+                                factory.create_static_variable_term(2),
+                            ),
+                        ),
+                    ),
+                    allocator.create_list(vec![
+                        factory.create_application_term(
+                            factory.create_builtin_term(BuiltinTerm::Get),
+                            allocator.create_pair(
+                                factory.create_static_variable_term(2),
+                                factory.create_value_term(ValueTerm::Int(0)),
+                            ),
+                        ),
+                        factory.create_application_term(
+                            factory.create_builtin_term(BuiltinTerm::Get),
+                            allocator.create_pair(
+                                factory.create_static_variable_term(2),
+                                factory.create_value_term(ValueTerm::Int(1)),
+                            ),
+                        ),
+                    ]),
+                ),
+            )),
         );
     }
 
     #[test]
     fn function_application_expressions() {
+        let factory = TermFactory::default();
+        let allocator = DefaultAllocator::default();
         let env = Env::new();
         assert_eq!(
-            parse("(() => 3)()", &env),
-            Ok(Expression::new(Term::Application(ApplicationTerm::new(
-                Expression::new(Term::Lambda(LambdaTerm::new(
-                    Arity::from(0, 0, None),
-                    Expression::new(Term::Value(ValueTerm::Float(3.0))),
-                ))),
-                vec![],
-            )))),
+            parse("(() => 3)()", &env, &factory, &allocator),
+            Ok(factory.create_application_term(
+                factory.create_lambda_term(0, factory.create_value_term(ValueTerm::Float(3.0))),
+                allocator.create_empty_list(),
+            )),
         );
         assert_eq!(
-            parse("((foo) => foo)(3)", &env),
-            Ok(Expression::new(Term::Application(ApplicationTerm::new(
-                Expression::new(Term::Lambda(LambdaTerm::new(
-                    Arity::from(0, 1, None),
-                    Expression::new(Term::Variable(VariableTerm::scoped(0))),
-                ))),
-                vec![Expression::new(Term::Value(ValueTerm::Float(3.0))),],
-            )))),
+            parse("((foo) => foo)(3)", &env, &factory, &allocator),
+            Ok(factory.create_application_term(
+                factory.create_lambda_term(1, factory.create_static_variable_term(0)),
+                allocator.create_unit_list(factory.create_value_term(ValueTerm::Float(3.0)),),
+            )),
         );
         assert_eq!(
-            parse("((foo, bar, baz) => foo + bar)(3, 4, 5)", &env,),
-            Ok(Expression::new(Term::Application(ApplicationTerm::new(
-                Expression::new(Term::Lambda(LambdaTerm::new(
-                    Arity::from(0, 3, None),
-                    Expression::new(Term::Application(ApplicationTerm::new(
-                        Expression::new(Term::Builtin(BuiltinTerm::Add)),
-                        vec![
-                            Expression::new(Term::Variable(VariableTerm::scoped(2))),
-                            Expression::new(Term::Variable(VariableTerm::scoped(1))),
-                        ],
-                    ))),
-                ))),
-                vec![
-                    Expression::new(Term::Value(ValueTerm::Float(3.0))),
-                    Expression::new(Term::Value(ValueTerm::Float(4.0))),
-                    Expression::new(Term::Value(ValueTerm::Float(5.0))),
-                ],
-            )))),
+            parse(
+                "((foo, bar, baz) => foo + bar)(3, 4, 5)",
+                &env,
+                &factory,
+                &allocator
+            ),
+            Ok(factory.create_application_term(
+                factory.create_lambda_term(
+                    3,
+                    factory.create_application_term(
+                        factory.create_builtin_term(BuiltinTerm::Add),
+                        allocator.create_pair(
+                            factory.create_static_variable_term(2),
+                            factory.create_static_variable_term(1),
+                        ),
+                    ),
+                ),
+                allocator.create_list(vec![
+                    factory.create_value_term(ValueTerm::Float(3.0)),
+                    factory.create_value_term(ValueTerm::Float(4.0)),
+                    factory.create_value_term(ValueTerm::Float(5.0)),
+                ]),
+            )),
         );
         assert_eq!(
-            parse("((foo) => (bar) => (baz) => foo + bar)(3)(4)(5)", &env,),
-            Ok(Expression::new(Term::Application(ApplicationTerm::new(
-                Expression::new(Term::Application(ApplicationTerm::new(
-                    Expression::new(Term::Application(ApplicationTerm::new(
-                        Expression::new(Term::Lambda(LambdaTerm::new(
-                            Arity::from(0, 1, None),
-                            Expression::new(Term::Lambda(LambdaTerm::new(
-                                Arity::from(0, 1, None),
-                                Expression::new(Term::Lambda(LambdaTerm::new(
-                                    Arity::from(0, 1, None),
-                                    Expression::new(Term::Application(ApplicationTerm::new(
-                                        Expression::new(Term::Builtin(BuiltinTerm::Add)),
-                                        vec![
-                                            Expression::new(Term::Variable(VariableTerm::scoped(
-                                                2
-                                            ))),
-                                            Expression::new(Term::Variable(VariableTerm::scoped(
-                                                1
-                                            ))),
-                                        ],
-                                    ))),
-                                ))),
-                            ))),
-                        ))),
-                        vec![Expression::new(Term::Value(ValueTerm::Float(3.0)))],
-                    ))),
-                    vec![Expression::new(Term::Value(ValueTerm::Float(4.0)))],
-                ))),
-                vec![Expression::new(Term::Value(ValueTerm::Float(5.0)))],
-            )))),
+            parse(
+                "((foo) => (bar) => (baz) => foo + bar)(3)(4)(5)",
+                &env,
+                &factory,
+                &allocator
+            ),
+            Ok(factory.create_application_term(
+                factory.create_application_term(
+                    factory.create_application_term(
+                        factory.create_lambda_term(
+                            1,
+                            factory.create_lambda_term(
+                                1,
+                                factory.create_lambda_term(
+                                    1,
+                                    factory.create_application_term(
+                                        factory.create_builtin_term(BuiltinTerm::Add),
+                                        allocator.create_pair(
+                                            factory.create_static_variable_term(2),
+                                            factory.create_static_variable_term(1),
+                                        ),
+                                    ),
+                                ),
+                            ),
+                        ),
+                        allocator
+                            .create_unit_list(factory.create_value_term(ValueTerm::Float(3.0))),
+                    ),
+                    allocator.create_unit_list(factory.create_value_term(ValueTerm::Float(4.0))),
+                ),
+                allocator.create_unit_list(factory.create_value_term(ValueTerm::Float(5.0))),
+            )),
         );
     }
 
     #[test]
     fn recursive_expressions() {
+        let factory = TermFactory::default();
+        let allocator = DefaultAllocator::default();
         let env = Env::new();
         let path = Path::new("./foo.js");
-        let loader = static_module_loader(builtin_imports());
+        let loader = static_module_loader(builtin_imports(&factory, &allocator));
         let expression = parse_module(
             "
             import { graph } from 'reflex::utils';
@@ -3716,13 +4147,21 @@ mod tests {
             &env,
             &path,
             &loader,
+            &factory,
+            &allocator,
         )
         .unwrap();
-        let result = expression.evaluate(&DynamicState::new(), &mut SubstitutionCache::new());
+        let result = evaluate(
+            &expression,
+            &DynamicState::new(),
+            &factory,
+            &allocator,
+            &mut SubstitutionCache::new(),
+        );
         assert_eq!(
             result,
             EvaluationResult::new(
-                Expression::new(Term::Value(ValueTerm::Float(3.0))),
+                factory.create_value_term(ValueTerm::Float(3.0)),
                 DependencyList::empty(),
             ),
         );
@@ -3738,13 +4177,21 @@ mod tests {
             &env,
             &path,
             &loader,
+            &factory,
+            &allocator,
         )
         .unwrap();
-        let result = expression.evaluate(&DynamicState::new(), &mut SubstitutionCache::new());
+        let result = evaluate(
+            &expression,
+            &DynamicState::new(),
+            &factory,
+            &allocator,
+            &mut SubstitutionCache::new(),
+        );
         assert_eq!(
             result,
             EvaluationResult::new(
-                Expression::new(Term::Value(ValueTerm::Float(3.0))),
+                factory.create_value_term(ValueTerm::Float(3.0)),
                 DependencyList::empty(),
             ),
         );
@@ -3752,10 +4199,12 @@ mod tests {
 
     #[test]
     fn import_scoping() {
+        let factory = TermFactory::default();
+        let allocator = DefaultAllocator::default();
         let env = Env::new();
         let path = Path::new("./foo.js");
         let loader =
-            static_module_loader(vec![("foo", Expression::new(Term::Value(ValueTerm::Null)))]);
+            static_module_loader(vec![("foo", factory.create_value_term(ValueTerm::Null))]);
         let expression = parse_module(
             "
             import Foo from 'foo';
@@ -3766,15 +4215,91 @@ mod tests {
             &env,
             &path,
             &loader,
+            &factory,
+            &allocator,
         )
         .unwrap();
-        let result = expression.evaluate(&DynamicState::new(), &mut SubstitutionCache::new());
+        let result = evaluate(
+            &expression,
+            &DynamicState::new(),
+            &factory,
+            &allocator,
+            &mut SubstitutionCache::new(),
+        );
         assert_eq!(
             result,
             EvaluationResult::new(
-                Expression::new(Term::Value(ValueTerm::Float(3.0))),
+                factory.create_value_term(ValueTerm::Float(3.0)),
                 DependencyList::empty(),
             )
+        );
+    }
+
+    #[test]
+    fn js_interpreted() {
+        let factory = TermFactory::default();
+        let allocator = DefaultAllocator::default();
+        let env = Env::new();
+        let input = "
+            const fullName = (first, last) => `${first} ${last}`;
+            const greet = (user) => `Hello, ${fullName(user.first, user.last)}!`;
+            greet({ first: 'John', last: 'Doe' })";
+        let expression = parse(input, &env, &factory, &allocator).unwrap();
+        let state = DynamicState::new();
+        let mut cache = SubstitutionCache::new();
+        let result = evaluate(&expression, &state, &factory, &allocator, &mut cache);
+        assert_eq!(
+            result,
+            EvaluationResult::new(
+                factory.create_value_term(ValueTerm::String(
+                    allocator.create_string(String::from("Hello, John Doe!"))
+                )),
+                DependencyList::empty(),
+            ),
+        );
+    }
+
+    #[test]
+    fn js_compiled() {
+        let factory = TermFactory::default();
+        let allocator = DefaultAllocator::default();
+        let env = Env::new();
+        let input = "
+            const fullName = (first, last) => `${first} ${last}`;
+            const greet = (user) => `Hello, ${fullName(user.first, user.last)}!`;
+            greet({ first: 'John', last: 'Doe' })";
+        let expression = parse(input, &env, &factory, &allocator).unwrap();
+        let compiled = Compiler::new(
+            CompilerOptions {
+                debug: false,
+                hoist_free_variables: true,
+                normalize: false,
+            },
+            None,
+        )
+        .compile(&expression, CompilerMode::Program, &factory, &allocator)
+        .unwrap();
+        let state = DynamicState::new();
+        let mut cache = DefaultInterpreterCache::default();
+        let options = InterpreterOptions::default();
+        let result = execute(
+            compiled.program(),
+            InstructionPointer::default(),
+            &state,
+            &factory,
+            &allocator,
+            compiled.plugins(),
+            &options,
+            &mut cache,
+        );
+        assert_eq!(
+            result,
+            Ok(EvaluationResult::new(
+                factory.create_value_term(ValueTerm::String(
+                    allocator.create_string(String::from("Hello, John Doe!"))
+                )),
+                DependencyList::empty(),
+            )),
         );
     }
 }

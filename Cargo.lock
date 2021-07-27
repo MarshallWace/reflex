@@ -840,7 +840,9 @@ dependencies = [
 name = "reflex"
 version = "0.1.0"
 dependencies = [
+ "fnv",
  "im",
+ "serde",
 ]
 
 [[package]]
@@ -862,7 +864,6 @@ dependencies = [
  "graphql-parser",
  "reflex",
  "reflex-json",
- "serde_json",
 ]
 
 [[package]]
@@ -926,7 +927,6 @@ dependencies = [
  "reflex-js",
  "reflex-json",
  "reflex-runtime",
- "serde_json",
  "tokio",
 ]
 

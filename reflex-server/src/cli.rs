@@ -13,13 +13,19 @@ use std::{
 use crate::graphql_service;
 use hyper::{server::conn::AddrStream, service::make_service_fn, Server};
 use reflex::{
-    cache::SubstitutionCache,
-    core::{Expression, Signal},
+    compiler::{Compile, Compiler, CompilerMode, CompilerOptions, NativeFunctionRegistry},
+    core::{
+        Applicable, Expression, ExpressionFactory, HeapAllocator, Reducible, Rewritable, Signal,
+        StringValue,
+    },
+    interpreter::{Execute, InterpreterOptions},
 };
 use reflex_cli::parse_cli_args;
 use reflex_handlers::debug_signal_handler;
 use reflex_js::{create_js_env, parse_module};
-use reflex_runtime::{Runtime, SignalHelpers};
+use reflex_runtime::{
+    AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator, Runtime, SignalHelpers,
+};
 
 pub use reflex;
 pub use reflex_handlers::builtin_signal_handler;
@@ -31,22 +37,43 @@ pub use reflex_runtime::{SignalHandlerResult, SignalResult};
 struct CliArgs {
     entry_point: String,
     port: u16,
-    debug: bool,
+    debug_signals: bool,
+    debug_compiler: bool,
+    debug_interpreter: bool,
 }
 
-pub async fn cli(
-    signal_handler: impl Fn(&str, &[&Signal], &SignalHelpers) -> SignalHandlerResult
+pub async fn cli<
+    T: AsyncExpression
+        + Expression<String = String>
+        + Rewritable<T>
+        + Reducible<T>
+        + Applicable<T>
+        + Compile<T>
+        + Execute<T>
+        + 'static,
+>(
+    signal_handler: impl Fn(&str, &[&Signal<T>], &SignalHelpers<T>) -> SignalHandlerResult<T>
         + Send
         + Sync
         + 'static,
-    custom_loader: Option<impl Fn(&str, &Path) -> Option<Result<Expression, String>> + 'static>,
-) -> Result<(), String> {
+    custom_loader: Option<impl Fn(&str, &Path) -> Option<Result<T, String>> + 'static>,
+    factory: &impl AsyncExpressionFactory<T>,
+    allocator: &impl AsyncHeapAllocator<T>,
+    plugins: NativeFunctionRegistry<T>,
+    compiler_options: Option<CompilerOptions>,
+    interpreter_options: Option<InterpreterOptions>,
+) -> Result<(), String>
+where
+    T::String: StringValue + Send + Sync,
+{
     let config = match parse_command_line_args() {
         Err(error) => Err(error),
         Ok(CliArgs {
             entry_point,
             port,
-            debug,
+            debug_signals,
+            debug_compiler,
+            debug_interpreter,
         }) => {
             let entry_point = match PathBuf::from_str(&entry_point) {
                 Err(_) => Err(format!("Invalid entry point module path: {}", entry_point)),
@@ -58,30 +85,59 @@ pub async fn cli(
                     env::vars(),
                     entry_point,
                     SocketAddr::from(([0, 0, 0, 0], port)),
-                    debug,
+                    debug_signals,
+                    debug_compiler,
+                    debug_interpreter,
                 )),
             }
         }
     };
     match config {
         Err(error) => Err(format!("Unable to start server: {}", error)),
-        Ok((env_vars, entry_point, address, debug)) => {
+        Ok((env_vars, entry_point, address, debug_signals, debug_compiler, debug_interpreter)) => {
             let (root_module_path, root_module_source) = entry_point;
             match create_graph_root(
                 &root_module_path,
                 &root_module_source,
                 env_vars,
                 custom_loader,
+                factory,
+                allocator,
             ) {
                 Err(error) => Err(format!("Failed to load entry point module: {}", error)),
                 Ok(root) => {
-                    let store = if debug {
-                        create_store(debug_signal_handler(signal_handler))
+                    let compiler_options = compiler_options.unwrap_or_else(|| CompilerOptions {
+                        debug: debug_compiler,
+                        ..CompilerOptions::default()
+                    });
+                    let interpreter_options =
+                        interpreter_options.unwrap_or_else(|| InterpreterOptions {
+                            debug: debug_interpreter,
+                            ..InterpreterOptions::default()
+                        });
+                    let store = if debug_signals {
+                        create_store(
+                            root,
+                            debug_signal_handler(signal_handler),
+                            factory,
+                            allocator,
+                            plugins,
+                            compiler_options,
+                            interpreter_options,
+                        )
                     } else {
-                        create_store(signal_handler)
-                    };
-                    let root = root.optimize(&mut SubstitutionCache::new()).unwrap_or(root);
-                    let server = create_server(store, root, &address);
+                        create_store(
+                            root,
+                            signal_handler,
+                            factory,
+                            allocator,
+                            plugins,
+                            compiler_options,
+                            interpreter_options,
+                        )
+                    }?;
+                    let server =
+                        create_server(store, factory, allocator, compiler_options, &address);
                     println!(
                         "Listening for incoming HTTP requests on port {}",
                         &address.port()
@@ -97,41 +153,85 @@ pub async fn cli(
     }
 }
 
-fn create_graph_root(
+fn create_graph_root<T: Expression + 'static>(
     root_module_path: &Path,
     root_module_source: &str,
     env_args: impl IntoIterator<Item = (String, String)>,
-    custom_loader: Option<impl Fn(&str, &Path) -> Option<Result<Expression, String>> + 'static>,
-) -> Result<Expression, String> {
-    let env = create_js_env(env_args);
-    let module_loader = create_module_loader(env.clone(), custom_loader);
-    parse_module(root_module_source, &env, root_module_path, &module_loader)
-}
-
-fn create_store<THandler>(signal_handler: THandler) -> Runtime
-where
-    THandler: Fn(&str, &[&Signal], &SignalHelpers) -> SignalHandlerResult + Send + Sync + 'static,
-{
-    // TODO: Establish sensible defaults for channel buffer sizes
-    let command_buffer_size = 1024;
-    let result_buffer_size = 1024;
-    Runtime::new(
-        signal_handler,
-        SubstitutionCache::new(),
-        command_buffer_size,
-        result_buffer_size,
+    custom_loader: Option<impl Fn(&str, &Path) -> Option<Result<T, String>> + 'static>,
+    factory: &(impl ExpressionFactory<T> + Clone + 'static),
+    allocator: &(impl HeapAllocator<T> + Clone + 'static),
+) -> Result<T, String> {
+    let env = create_js_env(env_args, factory, allocator);
+    let module_loader = create_module_loader(env.clone(), custom_loader, factory, allocator);
+    parse_module(
+        root_module_source,
+        &env,
+        root_module_path,
+        &module_loader,
+        factory,
+        allocator,
     )
 }
 
-async fn create_server(
-    store: Runtime,
-    root: Expression,
+fn create_store<
+    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T> + Execute<T>,
+    THandler,
+>(
+    root: T,
+    signal_handler: THandler,
+    factory: &impl AsyncExpressionFactory<T>,
+    allocator: &impl AsyncHeapAllocator<T>,
+    plugins: NativeFunctionRegistry<T>,
+    compiler_options: CompilerOptions,
+    interpreter_options: InterpreterOptions,
+) -> Result<Runtime<T>, String>
+where
+    T::String: StringValue + Send + Sync,
+    THandler: Fn(&str, &[&Signal<T>], &SignalHelpers<T>) -> SignalHandlerResult<T>
+        + Send
+        + Sync
+        + 'static,
+{
+    let compiled_root = Compiler::new(compiler_options, None).compile(
+        &root,
+        CompilerMode::Thunk,
+        factory,
+        allocator,
+    )?;
+    // TODO: Error if graph root depends on unrecognized native functions
+    let (program, _) = compiled_root.into_parts();
+    // TODO: Establish sensible defaults for channel buffer sizes
+    let command_buffer_size = 1024;
+    let result_buffer_size = 1024;
+    Ok(Runtime::new(
+        program,
+        signal_handler,
+        factory,
+        allocator,
+        plugins,
+        compiler_options,
+        interpreter_options,
+        command_buffer_size,
+        result_buffer_size,
+    ))
+}
+
+async fn create_server<
+    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T> + Execute<T>,
+>(
+    store: Runtime<T>,
+    factory: &impl AsyncExpressionFactory<T>,
+    allocator: &impl AsyncHeapAllocator<T>,
+    compiler_options: CompilerOptions,
     address: &SocketAddr,
-) -> Result<(), String> {
+) -> Result<(), String>
+where
+    T::String: StringValue + Send + Sync,
+{
     let store = Arc::new(store);
     let server = Server::bind(&address).serve(make_service_fn(|_socket: &AddrStream| {
         let store = Arc::clone(&store);
-        let service = graphql_service(store, Expression::clone(&root));
+        let service = graphql_service(store, factory, allocator, compiler_options);
         async { Ok::<_, Infallible>(service) }
     }));
     match server.await {
@@ -150,7 +250,9 @@ fn parse_command_line_args() -> Result<CliArgs, String> {
         None => Err(String::from("Missing --port argument")),
         Some(Err(value)) => Err(format!("Invalid --port argument: {}", value)),
     }?;
-    let debug = args.get("debug").is_some();
+    let debug_signals = args.get("debug").is_some();
+    let debug_compiler = args.get("bytecode").is_some();
+    let debug_interpreter = args.get("vm").is_some();
     let mut args = args.into_iter();
     let entry_point = args.next();
     match entry_point {
@@ -162,7 +264,9 @@ fn parse_command_line_args() -> Result<CliArgs, String> {
                 Ok(CliArgs {
                     port,
                     entry_point,
-                    debug,
+                    debug_signals,
+                    debug_compiler,
+                    debug_interpreter,
                 })
             }
         }

@@ -3,18 +3,26 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use futures::FutureExt;
 use reflex::{
-    cache::EvaluationCache,
-    core::{Expression, Signal, SignalTerm, StateToken, Term, VariableTerm},
+    compiler::{
+        Compile, Compiler, CompilerMode, CompilerOptions, Instruction, InstructionPointer,
+        NativeFunctionRegistry, Program,
+    },
+    core::{
+        Applicable, Expression, ExpressionFactory, ExpressionList, HeapAllocator, Reducible,
+        Rewritable, Signal, SignalType, StateToken, StringValue,
+    },
     hash::{hash_object, HashId},
-    stdlib::{signal::SignalType, value::ValueTerm},
+    interpreter::{DefaultInterpreterCache, Execute, InterpreterCache, InterpreterOptions},
+    lang::ValueTerm,
 };
 use std::{
     any::TypeId,
     collections::{hash_map::Entry, HashMap},
+    convert::identity,
     future::Future,
     iter::once,
     pin::Pin,
-    sync::Mutex,
+    sync::{Arc, Mutex},
     task::{Context, Poll},
 };
 use tokio::{
@@ -27,81 +35,146 @@ pub use tokio_stream::{Stream, StreamExt};
 mod store;
 use store::{Store, SubscriptionToken};
 
-pub type SubscriptionResult = Result<Expression, Vec<String>>;
-pub type SignalResult = (Expression, Option<RuntimeEffect>);
-pub type SignalHandlerResult = Option<Vec<Result<SignalResult, String>>>;
+pub type SubscriptionResult<T> = Result<T, Vec<String>>;
+pub type SignalResult<T> = (T, Option<RuntimeEffect<T>>);
+pub type SignalHandlerResult<T> = Option<Vec<Result<SignalResult<T>, String>>>;
 
-#[derive(Clone)]
-pub struct SignalHelpers {
-    commands: CommandChannel,
+pub trait AsyncExpression: Expression + Send + Sync + Unpin + 'static {}
+impl<T> AsyncExpression for T
+where
+    T: Expression + Send + Sync + Unpin + 'static,
+    T::String: StringValue + Send + Sync,
+{
 }
-impl SignalHelpers {
-    fn new(commands: CommandChannel) -> Self {
-        Self { commands }
+pub trait AsyncExpressionFactory<T: AsyncExpression>:
+    ExpressionFactory<T> + Send + Sync + Clone + 'static
+{
+}
+impl<T, E: AsyncExpression> AsyncExpressionFactory<E> for T
+where
+    T: ExpressionFactory<E> + Send + Sync + Clone + 'static,
+    E::String: StringValue + Send + Sync,
+{
+}
+pub trait AsyncHeapAllocator<T: AsyncExpression>:
+    HeapAllocator<T> + Send + Sync + Clone + 'static
+{
+}
+impl<T, E: AsyncExpression> AsyncHeapAllocator<E> for T
+where
+    T: HeapAllocator<E> + Send + Sync + Clone + 'static,
+    E::String: StringValue + Send + Sync,
+{
+}
+#[derive(Clone)]
+pub struct SignalHelpers<T: AsyncExpression + Compile<T>>
+where
+    T::String: StringValue + Send + Sync,
+{
+    program: Arc<Program>,
+    commands: CommandChannel<T>,
+    compiler_options: CompilerOptions,
+}
+impl<T: AsyncExpression + Rewritable<T> + Reducible<T> + Compile<T>> SignalHelpers<T>
+where
+    T::String: StringValue + Send + Sync,
+{
+    fn new(
+        program: Arc<Program>,
+        commands: CommandChannel<T>,
+        compiler_options: CompilerOptions,
+    ) -> Self {
+        Self {
+            program,
+            commands,
+            compiler_options,
+        }
+    }
+    pub fn program(&self) -> &Program {
+        &self.program
     }
     pub fn watch_expression(
         self,
-        expression: Expression,
-    ) -> impl Stream<Item = Expression> + Send + Sync + 'static {
-        let (results_tx, results_rx) = watch::channel(None);
-        // TODO: Unsubscribe signal handler watch expressions
-        tokio::spawn(async move {
-            match create_subscription(expression, &self.commands).await {
-                Err(error) => {
-                    results_tx
-                        .send(Some(Expression::new(Term::Signal(SignalTerm::new(
-                            Signal::new(
-                                SignalType::Error,
-                                vec![Expression::new(Term::Value(ValueTerm::String(error)))],
-                            ),
-                        )))))
-                        .unwrap();
-                }
-                Ok(mut subscription) => {
-                    while let Some(result) = subscription.next().await {
-                        let value = match result {
-                            Ok(value) => value,
-                            Err(errors) => Expression::new(Term::Signal(SignalTerm::from(
-                                errors.into_iter().map(|error| {
-                                    Signal::new(
-                                        SignalType::Error,
-                                        vec![Expression::new(Term::Value(ValueTerm::String(
-                                            error,
-                                        )))],
-                                    )
-                                }),
-                            ))),
-                        };
-                        results_tx.send(Some(value)).unwrap();
-                    }
-                }
-            }
-        });
-        Box::pin(WatchStream::new(results_rx).filter_map(|value| value))
+        expression: T,
+        factory: &impl AsyncExpressionFactory<T>,
+        allocator: &impl AsyncHeapAllocator<T>,
+    ) -> Result<impl Stream<Item = SubscriptionResult<T>> + Send + 'static, String> {
+        let entry_point = InstructionPointer::new(self.program.len());
+        let prelude = (*self.program).clone();
+        Compiler::new(self.compiler_options, Some(prelude))
+            .compile(&expression, CompilerMode::Program, factory, allocator)
+            .map(|compiled| {
+                // TODO: Error if runtime expression depends on unrecognized native functions
+                let (program, _) = compiled.into_parts();
+                self.watch_compiled_expression(program, entry_point, factory, allocator)
+            })
     }
     pub fn watch_state(
         self,
         state_token: StateToken,
-    ) -> impl Stream<Item = Expression> + Send + Sync + 'static {
-        self.watch_expression(Expression::new(Term::Variable(VariableTerm::dynamic(
-            state_token,
-            Void::create(),
-        ))))
-        .filter(|value| !Void::is(value))
+        factory: &(impl ExpressionFactory<T> + Send + Sync + Clone + 'static),
+        allocator: &(impl HeapAllocator<T> + Send + Sync + Clone + 'static),
+    ) -> impl Stream<Item = SubscriptionResult<T>> + Send + 'static {
+        let program = Program::new(vec![
+            Instruction::PushHash { value: Void::uid() },
+            Instruction::PushDynamic { state_token },
+            Instruction::Evaluate,
+            Instruction::End,
+        ]);
+        self.watch_compiled_expression(program, InstructionPointer::default(), factory, allocator)
+            .filter({
+                let factory = factory.clone();
+                move |value| match value {
+                    Ok(value) if Void::is(value, &factory) => false,
+                    _ => true,
+                }
+            })
+    }
+    fn watch_compiled_expression(
+        self,
+        program: Program,
+        entry_point: InstructionPointer,
+        factory: &impl AsyncExpressionFactory<T>,
+        allocator: &impl AsyncHeapAllocator<T>,
+    ) -> impl Stream<Item = SubscriptionResult<T>> + Send + 'static {
+        let (results_tx, results_rx) = watch::channel::<Option<Result<T, Vec<String>>>>(None);
+        // TODO: Unsubscribe signal handler watch expressions
+        tokio::spawn({
+            let factory = factory.clone();
+            let allocator = allocator.clone();
+            async move {
+                match create_subscription(
+                    program,
+                    entry_point,
+                    &self.commands,
+                    &factory,
+                    &allocator,
+                )
+                .await
+                {
+                    Err(error) => {
+                        results_tx.send(Some(Err(vec![error]))).unwrap();
+                    }
+                    Ok(mut subscription) => {
+                        while let Some(result) = subscription.next().await {
+                            results_tx.send(Some(result)).unwrap();
+                        }
+                    }
+                }
+            }
+        });
+        WatchStream::new(results_rx).filter_map(identity)
     }
 }
 
 struct Void {}
 impl Void {
-    fn hash() -> HashId {
+    fn uid() -> HashId {
         hash_object(&TypeId::of::<Self>())
     }
-    fn create() -> Expression {
-        Expression::new(Term::Value(ValueTerm::Hash(Self::hash())))
-    }
-    fn is(value: &Expression) -> bool {
-        match value.value() {
-            Term::Value(ValueTerm::Hash(hash)) if *hash == Self::hash() => true,
+    fn is<T: Expression>(value: &T, factory: &impl ExpressionFactory<T>) -> bool {
+        match factory.match_value_term(value) {
+            Some(ValueTerm::Hash(hash)) if *hash == Self::uid() => true,
             _ => false,
         }
     }
@@ -138,23 +211,24 @@ impl<TRequest, TResponse, TUpdate> StreamOperation<TRequest, TResponse, TUpdate>
 
 pub type SubscriptionId = usize;
 
-type CommandChannel = mpsc::Sender<Command>;
-type ResultsChannel = broadcast::Sender<(SubscriptionId, SubscriptionResult)>;
+type CommandChannel<T> = mpsc::Sender<Command<T>>;
+type ResultsChannel<T> = broadcast::Sender<(SubscriptionId, SubscriptionResult<T>)>;
 
-type SubscribeCommand = StreamOperation<Expression, SubscriptionId, Option<SubscriptionResult>>;
+type SubscribeCommand<T> =
+    StreamOperation<(Program, InstructionPointer), SubscriptionId, Option<SubscriptionResult<T>>>;
 type UnsubscribeCommand = Operation<SubscriptionId, bool>;
-type UpdateCommand = Operation<Vec<StateUpdate>, ()>;
+type UpdateCommand<T> = Operation<Vec<StateUpdate<T>>, ()>;
 
-pub struct StateUpdate {
+pub struct StateUpdate<T: Expression> {
     state_token: StateToken,
-    update: StateUpdateType,
+    update: StateUpdateType<T>,
 }
-pub enum StateUpdateType {
-    Value(Expression),
-    Patch(Box<dyn Fn(Option<&Expression>) -> Expression + Send + Sync + 'static>),
+pub enum StateUpdateType<T: Expression> {
+    Value(T),
+    Patch(Box<dyn Fn(Option<&T>) -> T + Send + Sync + 'static>),
 }
-impl StateUpdate {
-    pub fn value(state_token: StateToken, value: Expression) -> Self {
+impl<T: Expression> StateUpdate<T> {
+    pub fn value(state_token: StateToken, value: T) -> Self {
         Self {
             state_token,
             update: StateUpdateType::Value(value),
@@ -162,7 +236,7 @@ impl StateUpdate {
     }
     pub fn patch(
         state_token: StateToken,
-        updater: impl Fn(Option<&Expression>) -> Expression + Send + Sync + 'static,
+        updater: impl Fn(Option<&T>) -> T + Send + Sync + 'static,
     ) -> Self {
         Self {
             state_token,
@@ -171,31 +245,32 @@ impl StateUpdate {
     }
 }
 
-pub enum RuntimeEffect {
-    Sync(SyncEffect),
-    Async(AsyncEffect),
-    Stream(StreamEffect),
+pub type SyncEffect<T> = Vec<StateUpdate<T>>;
+pub type AsyncEffect<T> = Pin<Box<dyn Future<Output = Vec<StateUpdate<T>>> + Send + 'static>>;
+pub type StreamEffect<T> = Pin<Box<dyn Stream<Item = Vec<StateUpdate<T>>> + Send + 'static>>;
+
+pub enum RuntimeEffect<T: Expression> {
+    Sync(SyncEffect<T>),
+    Async(AsyncEffect<T>),
+    Stream(StreamEffect<T>),
 }
-pub type SyncEffect = Vec<StateUpdate>;
-pub type AsyncEffect = Pin<Box<dyn Future<Output = Vec<StateUpdate>> + Send + 'static>>;
-pub type StreamEffect = Pin<Box<dyn Stream<Item = Vec<StateUpdate>> + Send + 'static>>;
-impl RuntimeEffect {
-    pub fn assign(state_token: StateToken, value: Expression) -> Self {
+impl<T: Expression> RuntimeEffect<T> {
+    pub fn assign(state_token: StateToken, value: T) -> Self {
         Self::batch_assign(once((state_token, value)))
     }
     pub fn update(
         state_token: StateToken,
-        updater: impl Fn(Option<&Expression>) -> Expression + Send + Sync + 'static,
+        updater: impl Fn(Option<&T>) -> T + Send + Sync + 'static,
     ) -> Self {
         Self::batch_update(once((state_token, updater)))
     }
-    pub fn deferred(update: impl Future<Output = StateUpdate> + Send + 'static) -> Self {
+    pub fn deferred(update: impl Future<Output = StateUpdate<T>> + Send + 'static) -> Self {
         Self::batch_deferred(update.map(|update| vec![update]))
     }
-    pub fn stream(update: impl Stream<Item = StateUpdate> + Send + 'static) -> Self {
+    pub fn stream(update: impl Stream<Item = StateUpdate<T>> + Send + 'static) -> Self {
         Self::batch_stream(update.map(|update| vec![update]))
     }
-    pub fn batch_assign(values: impl IntoIterator<Item = (StateToken, Expression)>) -> Self {
+    pub fn batch_assign(values: impl IntoIterator<Item = (StateToken, T)>) -> Self {
         Self::Sync(
             values
                 .into_iter()
@@ -205,10 +280,7 @@ impl RuntimeEffect {
     }
     pub fn batch_update(
         updates: impl IntoIterator<
-            Item = (
-                StateToken,
-                impl Fn(Option<&Expression>) -> Expression + Send + Sync + 'static,
-            ),
+            Item = (StateToken, impl Fn(Option<&T>) -> T + Send + Sync + 'static),
         >,
     ) -> Self {
         Self::Sync(
@@ -219,42 +291,49 @@ impl RuntimeEffect {
         )
     }
     pub fn batch_deferred(
-        updates: impl Future<Output = Vec<StateUpdate>> + Send + 'static,
+        updates: impl Future<Output = Vec<StateUpdate<T>>> + Send + 'static,
     ) -> Self {
         Self::Async(Box::pin(updates))
     }
-    pub fn batch_stream(updates: impl Stream<Item = Vec<StateUpdate>> + Send + 'static) -> Self {
+    pub fn batch_stream(updates: impl Stream<Item = Vec<StateUpdate<T>>> + Send + 'static) -> Self {
         Self::Stream(Box::pin(updates))
     }
 }
 
-enum Command {
-    Subscribe(SubscribeCommand),
+enum Command<T: Expression> {
+    Subscribe(SubscribeCommand<T>),
     Unsubscribe(UnsubscribeCommand),
-    Update(UpdateCommand),
+    Update(UpdateCommand<T>),
 }
-impl Command {
+impl<T: Expression> Command<T> {
     fn subscribe(
-        expression: Expression,
+        program: Program,
+        entry_point: InstructionPointer,
         response: oneshot::Sender<SubscriptionId>,
-        update: watch::Sender<Option<SubscriptionResult>>,
+        update: watch::Sender<Option<SubscriptionResult<T>>>,
     ) -> Self {
-        Self::Subscribe(StreamOperation::new(expression, response, update))
+        Self::Subscribe(StreamOperation::new(
+            (program, entry_point),
+            response,
+            update,
+        ))
     }
     fn unsubscribe(id: SubscriptionId, response: oneshot::Sender<bool>) -> Self {
         Self::Unsubscribe(Operation::new(id, response))
     }
-    fn update(updates: Vec<StateUpdate>, response: oneshot::Sender<()>) -> Self {
+    fn update(updates: Vec<StateUpdate<T>>, response: oneshot::Sender<()>) -> Self {
         Self::Update(Operation::new(updates, response))
     }
 }
-pub struct StreamSubscription<'a, T: Stream<Item = SubscriptionResult>> {
-    channel: &'a CommandChannel,
+pub struct StreamSubscription<'a, T: Expression, TUpdates: Stream<Item = SubscriptionResult<T>>> {
+    channel: &'a CommandChannel<T>,
     id: SubscriptionId,
-    updates: T,
+    updates: TUpdates,
 }
-impl<'a, T: Stream<Item = SubscriptionResult> + Unpin> StreamSubscription<'a, T> {
-    fn new(channel: &'a CommandChannel, id: SubscriptionId, updates: T) -> Self {
+impl<'a, T: Expression, TUpdates: Stream<Item = SubscriptionResult<T>>>
+    StreamSubscription<'a, T, TUpdates>
+{
+    fn new(channel: &'a CommandChannel<T>, id: SubscriptionId, updates: TUpdates) -> Self {
         Self {
             channel,
             id,
@@ -264,7 +343,7 @@ impl<'a, T: Stream<Item = SubscriptionResult> + Unpin> StreamSubscription<'a, T>
     pub fn id(&self) -> SubscriptionId {
         self.id
     }
-    pub fn into_stream(self) -> T {
+    pub fn into_stream(self) -> TUpdates {
         self.updates
     }
     pub async fn unsubscribe(&self) -> Result<bool, String> {
@@ -280,8 +359,10 @@ impl<'a, T: Stream<Item = SubscriptionResult> + Unpin> StreamSubscription<'a, T>
         }
     }
 }
-impl<'a, T: Stream<Item = SubscriptionResult> + Unpin> Stream for StreamSubscription<'a, T> {
-    type Item = SubscriptionResult;
+impl<'a, T: Expression, TUpdates: Stream<Item = SubscriptionResult<T>> + Unpin> Stream
+    for StreamSubscription<'a, T, TUpdates>
+{
+    type Item = SubscriptionResult<T>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let updates = &mut self.updates;
@@ -290,41 +371,65 @@ impl<'a, T: Stream<Item = SubscriptionResult> + Unpin> Stream for StreamSubscrip
     }
 }
 
-pub struct Runtime {
-    commands: CommandChannel,
-    results: ResultsChannel,
+pub struct Runtime<
+    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T> + Execute<T>,
+> {
+    program: Arc<Program>,
+    commands: CommandChannel<T>,
+    results: ResultsChannel<T>,
 }
-impl Runtime {
-    pub fn new<THandler, TCache: EvaluationCache + Send + Sync + 'static>(
+impl<
+        T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T> + Execute<T>,
+    > Runtime<T>
+where
+    T::String: StringValue + Send + Sync,
+{
+    pub fn new<THandler>(
+        root: Program,
         signal_handler: THandler,
-        evaluation_cache: TCache,
+        factory: &impl AsyncExpressionFactory<T>,
+        allocator: &impl AsyncHeapAllocator<T>,
+        plugins: NativeFunctionRegistry<T>,
+        compiler_options: CompilerOptions,
+        interpreter_options: InterpreterOptions,
         command_buffer_size: usize,
         result_buffer_size: usize,
     ) -> Self
     where
-        THandler:
-            Fn(&str, &[&Signal], &SignalHelpers) -> SignalHandlerResult + Send + Sync + 'static,
+        THandler: Fn(&str, &[&Signal<T>], &SignalHelpers<T>) -> SignalHandlerResult<T>
+            + Send
+            + Sync
+            + 'static,
     {
+        let program = Arc::new(root);
         let (commands, results) = create_store(
+            Arc::clone(&program),
             signal_handler,
-            evaluation_cache,
+            factory,
+            allocator,
+            plugins,
+            interpreter_options,
+            compiler_options,
             command_buffer_size,
             result_buffer_size,
         );
-        Self { commands, results }
+        Self {
+            program,
+            commands,
+            results,
+        }
+    }
+    pub fn program(&self) -> &Program {
+        &self.program
     }
     pub async fn subscribe<'a>(
         &'a self,
-        expression: Expression,
-    ) -> Result<StreamSubscription<'a, impl Stream<Item = SubscriptionResult>>, String> {
-        create_subscription(expression, &self.commands).await
-    }
-    pub async fn start_subscription(
-        &self,
-        expression: Expression,
-    ) -> Result<SubscriptionId, String> {
-        let subscription = self.subscribe(expression).await;
-        subscription.map(|subscription| subscription.id)
+        program: Program,
+        entry_point: InstructionPointer,
+        factory: &(impl ExpressionFactory<T> + Send + Clone + 'static),
+        allocator: &(impl HeapAllocator<T> + Send + Clone + 'static),
+    ) -> Result<StreamSubscription<'a, T, impl Stream<Item = SubscriptionResult<T>>>, String> {
+        create_subscription(program, entry_point, &self.commands, factory, allocator).await
     }
     pub async fn unsubscribe(&self, id: SubscriptionId) -> Result<bool, String> {
         stop_subscription(id, &self.commands).await
@@ -332,35 +437,59 @@ impl Runtime {
     pub fn watch_subscription(
         &self,
         subscription_id: SubscriptionId,
-    ) -> impl Stream<Item = SubscriptionResult> {
-        BroadcastStream::new(self.results.subscribe()).filter_map(move |payload| match payload {
-            Ok((id, result)) if id == subscription_id => match result {
-                Ok(expression) => match filter_pending_signals(expression) {
-                    Some(expression) => Some(Ok(expression)),
-                    None => None,
+        factory: &(impl ExpressionFactory<T> + Send + Clone + 'static),
+        allocator: &(impl HeapAllocator<T> + Send + Clone + 'static),
+    ) -> impl Stream<Item = SubscriptionResult<T>> {
+        BroadcastStream::new(self.results.subscribe()).filter_map({
+            let factory = factory.clone();
+            let allocator = allocator.clone();
+            move |payload| match payload {
+                Ok((id, result)) if id == subscription_id => match result {
+                    Ok(expression) => {
+                        match filter_pending_signals(expression, &factory, &allocator) {
+                            Some(expression) => Some(Ok(expression)),
+                            None => None,
+                        }
+                    }
+                    Err(error) => Some(Err(error)),
                 },
-                Err(error) => Some(Err(error)),
-            },
-            _ => None,
+                _ => None,
+            }
         })
     }
 }
 
-fn create_store<THandler, TCache: EvaluationCache + Send + Sync + 'static>(
+fn create_store<
+    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T> + Execute<T>,
+    THandler,
+>(
+    program: Arc<Program>,
     signal_handler: THandler,
-    cache: TCache,
+    factory: &impl AsyncExpressionFactory<T>,
+    allocator: &impl AsyncHeapAllocator<T>,
+    plugins: NativeFunctionRegistry<T>,
+    interpreter_options: InterpreterOptions,
+    compiler_options: CompilerOptions,
     command_buffer_size: usize,
     result_buffer_size: usize,
-) -> (CommandChannel, ResultsChannel)
+) -> (CommandChannel<T>, ResultsChannel<T>)
 where
-    THandler: Fn(&str, &[&Signal], &SignalHelpers) -> SignalHandlerResult + Send + Sync + 'static,
+    T::String: StringValue + Send + Sync,
+    THandler: Fn(&str, &[&Signal<T>], &SignalHelpers<T>) -> SignalHandlerResult<T>
+        + Send
+        + Sync
+        + 'static,
 {
-    let (messages_tx, mut messages_rx) = mpsc::channel::<Command>(command_buffer_size);
+    let (messages_tx, mut messages_rx) = mpsc::channel::<Command<T>>(command_buffer_size);
     let (results_tx, _) = broadcast::channel(result_buffer_size);
     let results = results_tx.clone();
     let signal_messages = messages_tx.clone();
+    let factory = factory.clone();
+    let allocator = allocator.clone();
+    let signal_helpers = SignalHelpers::new(program, messages_tx.clone(), compiler_options);
     tokio::spawn(async move {
-        let mut store = Mutex::new(Store::new(cache, None));
+        let cache = DefaultInterpreterCache::default();
+        let mut store = Mutex::new(Store::new(cache, None, plugins, interpreter_options));
         while let Some(command) = messages_rx.recv().await {
             let mut next_command = Some(command);
             while let Some(command) = next_command {
@@ -377,10 +506,19 @@ where
                 }
                 next_command = next_queued_item(&mut messages_rx)
             }
-            let updated_results = store
-                .get_mut()
-                .unwrap()
-                .flush(|signals| handle_signals(signals, &signal_messages, &signal_handler));
+            let updated_results = store.get_mut().unwrap().flush(
+                |signals| {
+                    handle_signals(
+                        signals,
+                        &signal_messages,
+                        &signal_handler,
+                        &signal_helpers,
+                        &factory,
+                    )
+                },
+                &factory,
+                &allocator,
+            );
             let updated_results =
                 updated_results
                     .into_iter()
@@ -396,13 +534,18 @@ where
     (messages_tx, results_tx)
 }
 
-fn process_subscribe_command<TCache: EvaluationCache>(
-    command: SubscribeCommand,
-    store: &mut Mutex<Store<TCache>>,
-    results_tx: &ResultsChannel,
-) {
-    let expression = command.payload;
-    let subscription_id = store.get_mut().unwrap().subscribe(expression);
+fn process_subscribe_command<
+    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Execute<T>,
+    TCache: InterpreterCache<T>,
+>(
+    command: SubscribeCommand<T>,
+    store: &mut Mutex<Store<T, TCache>>,
+    results_tx: &ResultsChannel<T>,
+) where
+    T::String: StringValue + Send + Sync,
+{
+    let (program, entry_point) = command.payload;
+    let subscription_id = store.get_mut().unwrap().subscribe(program, entry_point);
     let _ = command.response.send(subscription_id);
 
     let mut results_stream = get_subscription_results_stream(results_tx, subscription_id);
@@ -415,37 +558,55 @@ fn process_subscribe_command<TCache: EvaluationCache>(
     });
 }
 
-fn process_unsubscribe_command<TCache: EvaluationCache>(
+fn process_unsubscribe_command<
+    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Execute<T>,
+    TCache: InterpreterCache<T>,
+>(
     command: UnsubscribeCommand,
-    store: &mut Mutex<Store<TCache>>,
-    _results_tx: &ResultsChannel,
-) {
+    store: &mut Mutex<Store<T, TCache>>,
+    _results_tx: &ResultsChannel<T>,
+) where
+    T::String: StringValue + Send + Sync,
+{
     let id = command.payload;
     let result = store.get_mut().unwrap().unsubscribe(id);
     let _ = command.response.send(result);
 }
 
-fn process_update_command<TCache: EvaluationCache>(
-    command: UpdateCommand,
-    store: &mut Mutex<Store<TCache>>,
-    _results_tx: &ResultsChannel,
-) {
+fn process_update_command<
+    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Execute<T>,
+    TCache: InterpreterCache<T>,
+>(
+    command: UpdateCommand<T>,
+    store: &mut Mutex<Store<T, TCache>>,
+    _results_tx: &ResultsChannel<T>,
+) where
+    T::String: StringValue + Send + Sync,
+{
     let updates = command.payload;
     store.get_mut().unwrap().update(updates);
     let _ = command.response.send(());
 }
 
-async fn create_subscription<'a>(
-    expression: Expression,
-    commands: &'a CommandChannel,
-) -> Result<StreamSubscription<'a, impl Stream<Item = SubscriptionResult>>, String> {
+async fn create_subscription<'a, T: AsyncExpression>(
+    program: Program,
+    entry_point: InstructionPointer,
+    commands: &'a CommandChannel<T>,
+    factory: &(impl ExpressionFactory<T> + Send + Clone + 'static),
+    allocator: &(impl HeapAllocator<T> + Send + Clone + 'static),
+) -> Result<StreamSubscription<'a, T, impl Stream<Item = SubscriptionResult<T>>>, String>
+where
+    T::String: StringValue + Send + Sync,
+{
     let (send, receive) = oneshot::channel();
     let (update_send, update_receive) = watch::channel(None);
     commands
-        .send(Command::subscribe(expression, send, update_send))
+        .send(Command::subscribe(program, entry_point, send, update_send))
         .await
         .ok()
         .unwrap();
+    let factory = factory.clone();
+    let allocator = allocator.clone();
     match receive.await {
         Err(error) => Err(format!("{}", error)),
         Ok(subscription_id) => Ok(StreamSubscription::new(
@@ -453,21 +614,26 @@ async fn create_subscription<'a>(
             subscription_id,
             WatchStream::new(update_receive)
                 .filter_map(|result| result)
-                .filter_map(|result| match result {
-                    Ok(expression) => match filter_pending_signals(expression) {
-                        Some(expression) => Some(Ok(expression)),
-                        None => None,
-                    },
+                .filter_map(move |result| match result {
+                    Ok(expression) => {
+                        match filter_pending_signals(expression, &factory, &allocator) {
+                            Some(expression) => Some(Ok(expression)),
+                            None => None,
+                        }
+                    }
                     Err(error) => Some(Err(error)),
                 }),
         )),
     }
 }
 
-fn get_subscription_results_stream(
-    results_tx: &ResultsChannel,
+fn get_subscription_results_stream<T: AsyncExpression>(
+    results_tx: &ResultsChannel<T>,
     subscription_id: SubscriptionToken,
-) -> impl Stream<Item = Result<Expression, Vec<String>>> {
+) -> impl Stream<Item = SubscriptionResult<T>>
+where
+    T::String: StringValue + Send + Sync,
+{
     // TODO: Investigate per-subscription results channels instead of shared global results channel
     BroadcastStream::new(results_tx.subscribe()).filter_map(move |payload| match payload {
         Ok((id, result)) if id == subscription_id => Some(result),
@@ -475,7 +641,10 @@ fn get_subscription_results_stream(
     })
 }
 
-async fn stop_subscription(id: SubscriptionId, channel: &CommandChannel) -> Result<bool, String> {
+async fn stop_subscription<T: Expression>(
+    id: SubscriptionId,
+    channel: &CommandChannel<T>,
+) -> Result<bool, String> {
     let (send, receive) = oneshot::channel();
     channel
         .send(Command::unsubscribe(id, send))
@@ -488,13 +657,22 @@ async fn stop_subscription(id: SubscriptionId, channel: &CommandChannel) -> Resu
     }
 }
 
-fn handle_signals<THandler>(
-    signals: &[&Signal],
-    commands: &CommandChannel,
+fn handle_signals<
+    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T> + Execute<T>,
+    THandler,
+>(
+    signals: &[&Signal<T>],
+    commands: &CommandChannel<T>,
     signal_handler: &THandler,
-) -> Vec<Result<Expression, Option<String>>>
+    signal_helpers: &SignalHelpers<T>,
+    factory: &impl AsyncExpressionFactory<T>,
+) -> Vec<Result<T, Option<String>>>
 where
-    THandler: Fn(&str, &[&Signal], &SignalHelpers) -> SignalHandlerResult + Send + Sync + 'static,
+    T::String: StringValue + Send + Sync,
+    THandler: Fn(&str, &[&Signal<T>], &SignalHelpers<T>) -> SignalHandlerResult<T>
+        + Send
+        + Sync
+        + 'static,
 {
     let custom_signals = signals
         .iter()
@@ -503,9 +681,9 @@ where
             _ => None,
         });
     let custom_signals_by_type = custom_signals.fold(
-        HashMap::<&String, Vec<&Signal>>::new(),
+        HashMap::<&str, Vec<&Signal<T>>>::new(),
         |mut results, (signal, signal_type)| {
-            match results.entry(signal_type) {
+            match results.entry(signal_type.as_str()) {
                 Entry::Occupied(mut entry) => {
                     entry.get_mut().push(signal);
                 }
@@ -518,7 +696,7 @@ where
     );
     let mut custom_signal_results = HashMap::with_capacity(signals.len());
     for (signal_type, signals) in custom_signals_by_type {
-        let results = signal_handler(signal_type, &signals, &SignalHelpers::new(commands.clone()));
+        let results = signal_handler(signal_type, &signals, signal_helpers);
         if let Some(results) = results {
             let signal_ids = signals.iter().map(|signal| signal.id());
             if results.len() == signals.len() {
@@ -542,7 +720,7 @@ where
     let (results, effects): (Vec<_>, Vec<Option<_>>) = signals
         .into_iter()
         .map(|signal| match signal.signal_type() {
-            SignalType::Error => Err(Some(parse_error_signal_message(signal.args()))),
+            SignalType::Error => Err(Some(parse_error_signal_message(signal.args(), factory))),
             SignalType::Pending => Err(None),
             SignalType::Custom(_) => match custom_signal_results.remove(&signal.id()) {
                 Some(result) => match result {
@@ -564,7 +742,10 @@ where
     results
 }
 
-fn apply_effect(effect: RuntimeEffect, commands: &CommandChannel) {
+fn apply_effect<T: AsyncExpression>(effect: RuntimeEffect<T>, commands: &CommandChannel<T>)
+where
+    T::String: StringValue + Send + Sync,
+{
     let commands = commands.clone();
     match effect {
         RuntimeEffect::Sync(updates) => {
@@ -586,7 +767,7 @@ fn apply_effect(effect: RuntimeEffect, commands: &CommandChannel) {
     }
 }
 
-async fn emit_updates(updates: Vec<StateUpdate>, commands: &CommandChannel) {
+async fn emit_updates<T: Expression>(updates: Vec<StateUpdate<T>>, commands: &CommandChannel<T>) {
     let (send, receive) = oneshot::channel();
     commands
         .send(Command::update(updates, send))
@@ -596,14 +777,14 @@ async fn emit_updates(updates: Vec<StateUpdate>, commands: &CommandChannel) {
     receive.await.unwrap();
 }
 
-fn parse_error_signal_message(args: &[Expression]) -> String {
+fn parse_error_signal_message<T: Expression>(
+    args: &ExpressionList<T>,
+    factory: &impl ExpressionFactory<T>,
+) -> String {
     args.iter()
         .map(|arg| {
-            let message = match arg.value() {
-                Term::Value(arg) => match arg {
-                    ValueTerm::String(message) => Some(String::from(message)),
-                    _ => None,
-                },
+            let message = match factory.match_value_term(arg) {
+                Some(ValueTerm::String(message)) => Some(String::from(message.as_str())),
                 _ => None,
             };
             message.unwrap_or_else(|| format!("{}", arg))
@@ -612,30 +793,36 @@ fn parse_error_signal_message(args: &[Expression]) -> String {
         .join(" ")
 }
 
-fn filter_pending_signals(expression: Expression) -> Option<Expression> {
-    match expression.value() {
-        Term::Signal(signal) if signal.signals().into_iter().any(is_pending_signal) => {
+fn filter_pending_signals<T: Expression>(
+    expression: T,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> Option<T> {
+    match factory.match_signal_term(&expression) {
+        Some(signal) if signal.signals().into_iter().any(is_pending_signal) => {
             let signals = signal
                 .signals()
                 .into_iter()
-                .filter(|signal| !signal.is_type(SignalType::Pending))
-                .map(|signal| signal.clone())
+                .filter(|signal| !signal.is_type(&SignalType::Pending))
+                .map(|signal| allocator.clone_signal(signal))
                 .collect::<Vec<_>>();
             if signals.is_empty() {
                 None
             } else {
-                Some(Expression::new(Term::Signal(SignalTerm::from(signals))))
+                Some(factory.create_signal_term(allocator.create_signal_list(signals)))
             }
         }
         _ => Some(expression),
     }
 }
 
-fn is_pending_signal(signal: &Signal) -> bool {
-    signal.is_type(SignalType::Pending)
+fn is_pending_signal<T: Expression>(signal: &Signal<T>) -> bool {
+    signal.is_type(&SignalType::Pending)
 }
 
-fn strip_pending_results(result: Result<Expression, Vec<String>>) -> Option<SubscriptionResult> {
+fn strip_pending_results<T: Expression>(
+    result: Result<T, Vec<String>>,
+) -> Option<SubscriptionResult<T>> {
     match result {
         Ok(result) => Some(Ok(result)),
         Err(errors) => {
