@@ -249,6 +249,13 @@ impl ExpressionFactory<CachedTerm<SharedTerm>> for TermFactory {
             DynamicVariableTerm::new(state_token, fallback),
         )))
     }
+    fn create_let_term(
+        &self,
+        initializer: CachedTerm<SharedTerm>,
+        body: CachedTerm<SharedTerm>,
+    ) -> CachedTerm<SharedTerm> {
+        self.create_expression(Term::Let(LetTerm::new(initializer, body)))
+    }
     fn create_lambda_term(
         &self,
         num_args: StackOffset,
@@ -369,6 +376,15 @@ impl ExpressionFactory<CachedTerm<SharedTerm>> for TermFactory {
     ) -> Option<&'a DynamicVariableTerm<CachedTerm<SharedTerm>>> {
         match expression.value().value.as_ref() {
             Term::Variable(VariableTerm::Dynamic(term)) => Some(term),
+            _ => None,
+        }
+    }
+    fn match_let_term<'a>(
+        &self,
+        expression: &'a CachedTerm<SharedTerm>,
+    ) -> Option<&'a LetTerm<CachedTerm<SharedTerm>>> {
+        match expression.value().value.as_ref() {
+            Term::Let(term) => Some(term),
             _ => None,
         }
     }

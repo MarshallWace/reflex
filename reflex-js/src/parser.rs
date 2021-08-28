@@ -22,8 +22,6 @@ use crate::{
 pub type ParserResult<T> = Result<T, ParserError>;
 pub type ParserError = String;
 
-type ScopeBindings<'src, T> = Vec<(&'src str, T)>;
-
 fn err<T: std::fmt::Debug>(message: &str, node: T) -> String {
     format!("{}: {:?}", message, node)
 }
@@ -50,6 +48,9 @@ impl<'src> LexicalScope<'src> {
         Self {
             bindings: identifiers.into_iter().collect(),
         }
+    }
+    fn depth(&self) -> usize {
+        self.bindings.len()
     }
     fn create_child(
         &self,
@@ -192,7 +193,7 @@ fn parse_module_contents<'src, T: Expression>(
         Some(expression) => Ok(if import_initializers.is_empty() {
             expression
         } else {
-            create_declaration_block(import_initializers, expression, factory, allocator)
+            create_declaration_block(import_initializers, expression, factory)
         }),
     }
 }
@@ -281,32 +282,22 @@ fn parse_block_statements<'src: 'temp, 'temp, T: Expression>(
                 ProgramPart::Decl(node) => match node {
                     Decl::Var(kind, declarators) => match kind {
                         VarKind::Const => {
-                            let bindings = parse_variable_declarators(
+                            let (initializers, child_scope) = parse_variable_declarators(
                                 declarators,
                                 &scope,
                                 env,
                                 factory,
                                 allocator,
                             )?;
-                            let (keys, initializers): (Vec<_>, Vec<_>) =
-                                bindings.into_iter().unzip();
-                            let child_scope = scope.create_child(keys.into_iter().map(Some));
+                            let body_scope = child_scope.as_ref().unwrap_or(scope);
                             let body = parse_block_statements(
-                                remaining,
-                                result,
-                                &child_scope,
-                                env,
-                                factory,
-                                allocator,
+                                remaining, result, body_scope, env, factory, allocator,
                             )?;
                             match body {
                                 None => Ok(None),
-                                Some(body) => Ok(Some(create_declaration_block(
-                                    initializers,
-                                    body,
-                                    factory,
-                                    allocator,
-                                ))),
+                                Some(body) => {
+                                    Ok(Some(create_declaration_block(initializers, body, factory)))
+                                }
                             }
                         }
                         _ => Err(err_unimplemented(node)),
@@ -373,77 +364,71 @@ fn parse_block_statements<'src: 'temp, 'temp, T: Expression>(
 }
 
 fn create_declaration_block<T: Expression>(
-    initializers: Vec<T>,
+    initializers: impl IntoIterator<Item = T, IntoIter = impl DoubleEndedIterator<Item = T>>,
     body: T,
     factory: &impl ExpressionFactory<T>,
-    allocator: &impl HeapAllocator<T>,
 ) -> T {
-    factory.create_application_term(
-        factory.create_lambda_term(initializers.len(), body),
-        allocator.create_list(initializers),
-    )
+    initializers
+        .into_iter()
+        .rev()
+        .fold(body, |body, initializer| {
+            factory.create_let_term(initializer, body)
+        })
 }
 
 fn parse_variable_declarators<'src, T: Expression>(
     declarators: &[VarDecl<'src>],
-    scope: &LexicalScope,
+    scope: &LexicalScope<'src>,
     env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> ParserResult<ScopeBindings<'src, T>> {
-    declarators.iter().fold(Ok(Vec::new()), |results, node| {
-        let mut results = results?;
-        let bindings = parse_variable_declarator(node, &scope, env, factory, allocator)?;
-        results.extend(bindings);
-        Ok(results)
-    })
+) -> ParserResult<(
+    impl IntoIterator<Item = T, IntoIter = impl DoubleEndedIterator<Item = T>>,
+    Option<LexicalScope<'src>>,
+)> {
+    declarators
+        .iter()
+        .fold(Ok((Vec::new(), None)), |results, node| {
+            let (mut results, existing_scope) = results?;
+            let current_scope = existing_scope.as_ref().unwrap_or(scope);
+            let (initializers, child_scope) =
+                parse_variable_declarator(node, current_scope, env, factory, allocator)?;
+            results.extend(initializers);
+            Ok((results, child_scope.or(existing_scope)))
+        })
 }
 
 fn parse_variable_declarator<'src, T: Expression>(
     node: &VarDecl<'src>,
-    scope: &LexicalScope,
+    scope: &LexicalScope<'src>,
     env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> ParserResult<ScopeBindings<'src, T>> {
+) -> ParserResult<(impl IntoIterator<Item = T>, Option<LexicalScope<'src>>)> {
     let VarDecl { id, init } = node;
-    let value = match init {
-        Some(expression) => parse_expression(expression, scope, env, factory, allocator),
-        None => Err(err("Missing variable initializer", node)),
-    }?;
+    let init = init
+        .as_ref()
+        .ok_or_else(|| err("Missing variable initializer", node))?;
+    let value = parse_expression(init, scope, env, factory, allocator)?;
     match id {
         Pat::Ident(node) => {
             let identifier = parse_identifier(node)?;
-            let bindings = vec![(identifier, value)];
-            Ok(bindings)
+            Ok((
+                vec![value],
+                Some(scope.create_child(once(Some(identifier)))),
+            ))
         }
         Pat::Obj(properties) => {
-            let bindings = parse_object_destructuring_pattern_bindings(
-                properties, scope, env, factory, allocator,
+            let (initializers, child_scope) = parse_object_destructuring_pattern_bindings(
+                value, properties, scope, env, factory, allocator,
             )?;
-            Ok(bindings
-                .into_iter()
-                .map(|(identifier, field_name)| {
-                    (
-                        identifier,
-                        get_dynamic_field(value.clone(), field_name, factory, allocator),
-                    )
-                })
-                .collect())
+            Ok((initializers.into_iter().collect::<Vec<_>>(), child_scope))
         }
         Pat::Array(accessors) => {
-            let bindings = parse_array_destructuring_pattern_bindings(
-                accessors, scope, env, factory, allocator,
+            let (initializers, child_scope) = parse_array_destructuring_pattern_bindings(
+                value, accessors, scope, env, factory, allocator,
             )?;
-            Ok(bindings
-                .into_iter()
-                .map(|(identifier, index)| {
-                    (
-                        identifier,
-                        get_indexed_field(value.clone(), index, factory, allocator),
-                    )
-                })
-                .collect())
+            Ok((initializers.into_iter().collect::<Vec<_>>(), child_scope))
         }
         Pat::RestElement(_) => Err(err_unimplemented(node)),
         Pat::Assign(_) => Err(err_unimplemented(node)),
@@ -451,13 +436,14 @@ fn parse_variable_declarator<'src, T: Expression>(
 }
 
 fn parse_object_destructuring_pattern_bindings<'src, T: Expression>(
+    target: T,
     properties: &[ObjPatPart<'src>],
-    scope: &LexicalScope,
+    scope: &LexicalScope<'src>,
     env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> ParserResult<impl IntoIterator<Item = (&'src str, T)>> {
-    properties
+) -> ParserResult<(Vec<T>, Option<LexicalScope<'src>>)> {
+    let properties = properties
         .iter()
         .map(|property| match property {
             ObjPatPart::Assign(node) => {
@@ -465,15 +451,59 @@ fn parse_object_destructuring_pattern_bindings<'src, T: Expression>(
                     Err(err_unimplemented(node))
                 } else {
                     let identifier = parse_destructuring_pattern_property_identifier(node)?;
-                    let field_name = parse_destructuring_pattern_property_field_name(
-                        node, scope, env, factory, allocator,
-                    )?;
-                    Ok((identifier, field_name))
+                    Ok((identifier, node))
                 }
             }
             ObjPatPart::Rest(node) => Err(err_unimplemented(node)),
         })
-        .collect::<ParserResult<Vec<_>>>()
+        .collect::<Result<Vec<_>, _>>()?;
+    match properties.len() {
+        0 => Ok((Vec::new(), None)),
+        1 => {
+            let (identifier, node) = properties.into_iter().next().unwrap();
+            let field_name = parse_destructuring_pattern_property_field_name(
+                node, scope, env, factory, allocator,
+            )?;
+            let initializer = get_dynamic_field(target, field_name, factory, allocator);
+            Ok((
+                vec![initializer],
+                Some(scope.create_child(once(Some(identifier)))),
+            ))
+        }
+        _ => {
+            let mut initializers = Vec::with_capacity(1 + properties.len());
+            let initializer_scope = scope.create_child(once(None));
+            initializers.push(target.clone());
+            let initializer_depth = initializer_scope.depth();
+            properties
+                .into_iter()
+                .fold(
+                    Ok((initializers, scope.create_child(once(None)))),
+                    |result, property| {
+                        let (mut initializers, existing_scope) = result?;
+                        let (identifier, node) = property;
+                        let field_name = parse_destructuring_pattern_property_field_name(
+                            node,
+                            &existing_scope,
+                            env,
+                            factory,
+                            allocator,
+                        )?;
+                        let scope_offset = existing_scope.depth() - initializer_depth;
+                        let initializer = get_dynamic_field(
+                            factory.create_static_variable_term(scope_offset),
+                            field_name,
+                            factory,
+                            allocator,
+                        );
+                        initializers.push(initializer);
+                        let next_scope = existing_scope.create_child(once(Some(identifier)));
+                        Ok((initializers, next_scope))
+                    },
+                )
+                .map(|(initializers, scope)| (initializers, Some(scope)))
+        }
+    }
 }
 
 fn parse_destructuring_pattern_property_field_name<'src, T: Expression>(
@@ -531,13 +561,14 @@ fn parse_destructuring_pattern_property_identifier<'src>(
 }
 
 fn parse_array_destructuring_pattern_bindings<'src, T: Expression>(
+    target: T,
     accessors: &[Option<ArrayPatPart<'src>>],
-    _scope: &LexicalScope,
+    scope: &LexicalScope<'src>,
     _env: &Env<T>,
-    _factory: &impl ExpressionFactory<T>,
-    _allocator: &impl HeapAllocator<T>,
-) -> ParserResult<impl IntoIterator<Item = (&'src str, usize)>> {
-    accessors
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> ParserResult<(impl IntoIterator<Item = T>, Option<LexicalScope<'src>>)> {
+    let accessors = accessors
         .iter()
         .enumerate()
         .filter_map(|(index, accessor)| match accessor {
@@ -547,15 +578,49 @@ fn parse_array_destructuring_pattern_bindings<'src, T: Expression>(
         .map(|(index, accessor)| match accessor {
             ArrayPatPart::Pat(pattern) => match pattern {
                 Pat::Ident(identifier) => {
-                    let field_name = parse_identifier(identifier)?;
-                    Ok((field_name, index))
+                    let identifier = parse_identifier(identifier)?;
+                    Ok((identifier, index))
                 }
                 Pat::RestElement(_) => Err(err_unimplemented(pattern)),
                 _ => Err(err_unimplemented(pattern)),
             },
             ArrayPatPart::Expr(node) => Err(err_unimplemented(node)),
         })
-        .collect::<ParserResult<Vec<_>>>()
+        .collect::<Result<Vec<_>, _>>()?;
+    match accessors.len() {
+        0 => Ok((Vec::new(), None)),
+        1 => {
+            let (identifier, index) = accessors.into_iter().next().unwrap();
+            let initializer = get_indexed_field(target, index, factory, allocator);
+            Ok((
+                vec![initializer],
+                Some(scope.create_child(once(Some(identifier)))),
+            ))
+        }
+        _ => {
+            let mut initializers = Vec::with_capacity(1 + accessors.len());
+            let initializer_scope = scope.create_child(once(None));
+            initializers.push(target.clone());
+            let initializer_depth = initializer_scope.depth();
+            accessors
+                .into_iter()
+                .fold(Ok((initializers, initializer_scope)), |result, property| {
+                    let (mut initializers, existing_scope) = result?;
+                    let (identifier, index) = property;
+                    let scope_offset = existing_scope.depth() - initializer_depth;
+                    let initializer = get_indexed_field(
+                        factory.create_static_variable_term(scope_offset),
+                        index,
+                        factory,
+                        allocator,
+                    );
+                    initializers.push(initializer);
+                    let next_scope = existing_scope.create_child(once(Some(identifier)));
+                    Ok((initializers, next_scope))
+                })
+                .map(|(initializers, scope)| (initializers, Some(scope)))
+        }
+    }
 }
 
 fn parse_identifier<'src>(node: &Ident<'src>) -> ParserResult<&'src str> {
@@ -1438,44 +1503,62 @@ fn parse_arrow_function_expression<'src, T: Expression>(
     if node.generator || node.is_async {
         Err(err_unimplemented(node))
     } else {
-        let (arg_names, destructuring_assignments) = node.params.iter().enumerate().fold(
-            Ok((Vec::with_capacity(node.params.len()), Vec::new())),
+        let num_args = node.params.len();
+        let arg_names = node
+            .params
+            .iter()
+            .map(|node| match node {
+                FuncArg::Pat(node) => match node {
+                    Pat::Ident(node) => parse_identifier(node).map(Some),
+                    _ => Ok(None),
+                },
+                _ => Ok(None),
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let inner_scope = scope.create_child(arg_names);
+        let inner_depth = inner_scope.depth();
+        let (initializers, body_scope) = node.params.iter().enumerate().fold(
+            Ok((Vec::new(), inner_scope)),
             |result, (arg_index, node)| {
-                let (mut arg_names, mut destructuring_assignments) = result?;
+                let (mut combined_initializers, existing_scope) = result?;
                 match node {
                     FuncArg::Pat(node) => match node {
-                        Pat::Ident(node) => {
-                            let name = parse_identifier(node)?;
-                            arg_names.push(Some(name));
-                            Ok((arg_names, destructuring_assignments))
-                        }
+                        Pat::Ident(_) => Ok((combined_initializers, existing_scope)),
                         Pat::Obj(properties) => {
-                            arg_names.push(None);
-                            let bindings = parse_object_destructuring_pattern_bindings(
-                                properties, scope, env, factory, allocator,
-                            )?;
-                            destructuring_assignments.extend(bindings.into_iter().map(
-                                |(identifier, field_name)| (identifier, (arg_index, field_name)),
-                            ));
-                            Ok((arg_names, destructuring_assignments))
+                            let scope_offset = existing_scope.depth() - inner_depth;
+                            let arg = factory.create_static_variable_term(
+                                num_args - arg_index - 1 + scope_offset,
+                            );
+                            let (initializers, child_scope) =
+                                parse_object_destructuring_pattern_bindings(
+                                    arg,
+                                    properties,
+                                    &existing_scope,
+                                    env,
+                                    factory,
+                                    allocator,
+                                )?;
+                            let next_scope = child_scope.unwrap_or(existing_scope);
+                            combined_initializers.extend(initializers);
+                            Ok((combined_initializers, next_scope))
                         }
                         Pat::Array(accessors) => {
-                            arg_names.push(None);
-                            let bindings = parse_array_destructuring_pattern_bindings(
-                                accessors, scope, env, factory, allocator,
-                            )?;
-                            destructuring_assignments.extend(bindings.into_iter().map(
-                                |(identifier, index)| {
-                                    (
-                                        identifier,
-                                        (
-                                            arg_index,
-                                            factory.create_value_term(ValueTerm::Int(index as i32)),
-                                        ),
-                                    )
-                                },
-                            ));
-                            Ok((arg_names, destructuring_assignments))
+                            let scope_offset = existing_scope.depth() - inner_depth;
+                            let arg = factory.create_static_variable_term(
+                                num_args - arg_index - 1 + scope_offset,
+                            );
+                            let (initializers, child_scope) =
+                                parse_array_destructuring_pattern_bindings(
+                                    arg,
+                                    accessors,
+                                    &existing_scope,
+                                    env,
+                                    factory,
+                                    allocator,
+                                )?;
+                            let next_scope = child_scope.unwrap_or(existing_scope);
+                            combined_initializers.extend(initializers);
+                            Ok((combined_initializers, next_scope))
                         }
                         Pat::RestElement(_) => Err(err_unimplemented(node)),
                         Pat::Assign(_) => Err(err_unimplemented(node)),
@@ -1484,54 +1567,26 @@ fn parse_arrow_function_expression<'src, T: Expression>(
                 }
             },
         )?;
-        let num_args = arg_names.len();
-        let function_scope = if arg_names.is_empty() {
-            None
-        } else {
-            Some(scope.create_child(arg_names.into_iter()))
-        };
-        let function_scope = function_scope.as_ref().unwrap_or(scope);
-        let (destructured_identifiers, destructured_arg_indices): (Vec<_>, Vec<_>) =
-            destructuring_assignments.into_iter().unzip();
-        let destructuring_initializers = destructured_arg_indices
-            .into_iter()
-            .map(|(arg_index, accessor)| {
-                get_dynamic_field(
-                    factory.create_static_variable_term(num_args - arg_index - 1),
-                    accessor,
-                    factory,
-                    allocator,
-                )
-            })
-            .collect::<Vec<_>>();
-        let destructured_scope = if destructured_identifiers.is_empty() {
-            None
-        } else {
-            Some(function_scope.create_child(destructured_identifiers.into_iter().map(Some)))
-        };
-        let child_scope = destructured_scope.as_ref().unwrap_or(function_scope);
         let body = match &node.body {
             ArrowFuncBody::Expr(node) => {
                 let body = &vec![ProgramPart::Stmt(Stmt::Return(Some(*node.clone())))];
-                parse_block(body, child_scope, env, factory, allocator)
+                parse_block(body, &body_scope, env, factory, allocator)
             }
             ArrowFuncBody::FuncBody(node) => {
                 let FuncBody(body) = node;
-                parse_block(body, child_scope, env, factory, allocator)
+                parse_block(body, &body_scope, env, factory, allocator)
             }
         }?;
         match body {
             None => Err(err("Missing function return statement", node)),
             Some(body) => Ok(factory.create_lambda_term(
                 num_args,
-                if destructuring_initializers.is_empty() {
-                    body
-                } else {
-                    factory.create_application_term(
-                        factory.create_lambda_term(destructuring_initializers.len(), body),
-                        allocator.create_list(destructuring_initializers),
-                    )
-                },
+                initializers
+                    .into_iter()
+                    .rev()
+                    .fold(body, |body, initializer| {
+                        factory.create_let_term(initializer, body)
+                    }),
             )),
         }
     }
@@ -2666,9 +2721,39 @@ mod tests {
         let env = Env::new();
         assert_eq!(
             parse("const foo = 3; foo;", &env, &factory, &allocator),
-            Ok(factory.create_application_term(
-                factory.create_lambda_term(1, factory.create_static_variable_term(0)),
-                allocator.create_unit_list(factory.create_value_term(ValueTerm::Float(3.0))),
+            Ok(factory.create_let_term(
+                factory.create_value_term(ValueTerm::Float(3.0)),
+                factory.create_static_variable_term(0),
+            )),
+        );
+        assert_eq!(
+            parse(
+                "const foo = 3; const bar = 4; foo;",
+                &env,
+                &factory,
+                &allocator
+            ),
+            Ok(factory.create_let_term(
+                factory.create_value_term(ValueTerm::Float(3.0)),
+                factory.create_let_term(
+                    factory.create_value_term(ValueTerm::Float(4.0)),
+                    factory.create_static_variable_term(1),
+                ),
+            )),
+        );
+        assert_eq!(
+            parse(
+                "const foo = 3; const bar = 4; bar;",
+                &env,
+                &factory,
+                &allocator
+            ),
+            Ok(factory.create_let_term(
+                factory.create_value_term(ValueTerm::Float(3.0)),
+                factory.create_let_term(
+                    factory.create_value_term(ValueTerm::Float(4.0)),
+                    factory.create_static_variable_term(0),
+                ),
             )),
         );
     }
@@ -2679,15 +2764,47 @@ mod tests {
         let allocator = DefaultAllocator::default();
         let env = Env::new();
         assert_eq!(
+            parse("const {} = {}; true;", &env, &factory, &allocator),
+            Ok(factory.create_value_term(ValueTerm::Boolean(true))),
+        );
+        assert_eq!(
             parse(
                 "const {} = { foo: 3, bar: 4, baz: 5 }; true;",
                 &env,
                 &factory,
                 &allocator
             ),
-            Ok(factory.create_application_term(
-                factory.create_lambda_term(0, factory.create_value_term(ValueTerm::Boolean(true))),
-                allocator.create_empty_list(),
+            Ok(factory.create_value_term(ValueTerm::Boolean(true))),
+        );
+        assert_eq!(
+            parse(
+                "const { foo } = { foo: 3, bar: 4, baz: 5 }; true;",
+                &env,
+                &factory,
+                &allocator
+            ),
+            Ok(factory.create_let_term(
+                factory.create_application_term(
+                    factory.create_builtin_term(BuiltinTerm::Get),
+                    allocator.create_pair(
+                        factory.create_struct_term(
+                            allocator.create_struct_prototype(vec![
+                                allocator.create_string(String::from("foo")),
+                                allocator.create_string(String::from("bar")),
+                                allocator.create_string(String::from("baz")),
+                            ]),
+                            allocator.create_list(vec![
+                                factory.create_value_term(ValueTerm::Float(3.0)),
+                                factory.create_value_term(ValueTerm::Float(4.0)),
+                                factory.create_value_term(ValueTerm::Float(5.0)),
+                            ]),
+                        ),
+                        factory.create_value_term(ValueTerm::String(
+                            allocator.create_string(String::from("foo"))
+                        )),
+                    ),
+                ),
+                factory.create_value_term(ValueTerm::Boolean(true))
             )),
         );
         assert_eq!(
@@ -2697,50 +2814,42 @@ mod tests {
                 &factory,
                 &allocator,
             ),
-            Ok(factory.create_application_term(
-                factory.create_lambda_term(2, factory.create_static_variable_term(0)),
-                allocator.create_list(vec![
+            Ok(factory.create_let_term(
+                factory.create_struct_term(
+                    allocator.create_struct_prototype(vec![
+                        allocator.create_string(String::from("foo")),
+                        allocator.create_string(String::from("bar")),
+                        allocator.create_string(String::from("baz")),
+                    ]),
+                    allocator.create_list(vec![
+                        factory.create_value_term(ValueTerm::Float(3.0)),
+                        factory.create_value_term(ValueTerm::Float(4.0)),
+                        factory.create_value_term(ValueTerm::Float(5.0)),
+                    ]),
+                ),
+                factory.create_let_term(
                     factory.create_application_term(
                         factory.create_builtin_term(BuiltinTerm::Get),
                         allocator.create_pair(
-                            factory.create_struct_term(
-                                allocator.create_struct_prototype(vec![
-                                    allocator.create_string(String::from("foo")),
-                                    allocator.create_string(String::from("bar")),
-                                    allocator.create_string(String::from("baz")),
-                                ]),
-                                allocator.create_list(vec![
-                                    factory.create_value_term(ValueTerm::Float(3.0)),
-                                    factory.create_value_term(ValueTerm::Float(4.0)),
-                                    factory.create_value_term(ValueTerm::Float(5.0)),
-                                ]),
-                            ),
+                            factory.create_static_variable_term(0),
                             factory.create_value_term(ValueTerm::String(
                                 allocator.create_string(String::from("bar"))
                             )),
                         ),
                     ),
-                    factory.create_application_term(
-                        factory.create_builtin_term(BuiltinTerm::Get),
-                        allocator.create_pair(
-                            factory.create_struct_term(
-                                allocator.create_struct_prototype(vec![
-                                    allocator.create_string(String::from("foo")),
-                                    allocator.create_string(String::from("bar")),
-                                    allocator.create_string(String::from("baz")),
-                                ]),
-                                allocator.create_list(vec![
-                                    factory.create_value_term(ValueTerm::Float(3.0)),
-                                    factory.create_value_term(ValueTerm::Float(4.0)),
-                                    factory.create_value_term(ValueTerm::Float(5.0)),
-                                ]),
+                    factory.create_let_term(
+                        factory.create_application_term(
+                            factory.create_builtin_term(BuiltinTerm::Get),
+                            allocator.create_pair(
+                                factory.create_static_variable_term(1),
+                                factory.create_value_term(ValueTerm::String(
+                                    allocator.create_string(String::from("foo"))
+                                )),
                             ),
-                            factory.create_value_term(ValueTerm::String(
-                                allocator.create_string(String::from("foo"))
-                            )),
                         ),
+                        factory.create_static_variable_term(0),
                     ),
-                ]),
+                ),
             )),
         );
         assert_eq!(
@@ -2750,50 +2859,42 @@ mod tests {
                 &factory,
                 &allocator,
             ),
-            Ok(factory.create_application_term(
-                factory.create_lambda_term(2, factory.create_static_variable_term(1)),
-                allocator.create_list(vec![
+            Ok(factory.create_let_term(
+                factory.create_struct_term(
+                    allocator.create_struct_prototype(vec![
+                        allocator.create_string(String::from("foo")),
+                        allocator.create_string(String::from("bar")),
+                        allocator.create_string(String::from("baz")),
+                    ]),
+                    allocator.create_list(vec![
+                        factory.create_value_term(ValueTerm::Float(3.0)),
+                        factory.create_value_term(ValueTerm::Float(4.0)),
+                        factory.create_value_term(ValueTerm::Float(5.0)),
+                    ]),
+                ),
+                factory.create_let_term(
                     factory.create_application_term(
                         factory.create_builtin_term(BuiltinTerm::Get),
                         allocator.create_pair(
-                            factory.create_struct_term(
-                                allocator.create_struct_prototype(vec![
-                                    allocator.create_string(String::from("foo")),
-                                    allocator.create_string(String::from("bar")),
-                                    allocator.create_string(String::from("baz")),
-                                ]),
-                                allocator.create_list(vec![
-                                    factory.create_value_term(ValueTerm::Float(3.0)),
-                                    factory.create_value_term(ValueTerm::Float(4.0)),
-                                    factory.create_value_term(ValueTerm::Float(5.0)),
-                                ]),
-                            ),
+                            factory.create_static_variable_term(0),
                             factory.create_value_term(ValueTerm::String(
                                 allocator.create_string(String::from("bar"))
                             )),
                         ),
                     ),
-                    factory.create_application_term(
-                        factory.create_builtin_term(BuiltinTerm::Get),
-                        allocator.create_pair(
-                            factory.create_struct_term(
-                                allocator.create_struct_prototype(vec![
-                                    allocator.create_string(String::from("foo")),
-                                    allocator.create_string(String::from("bar")),
-                                    allocator.create_string(String::from("baz")),
-                                ]),
-                                allocator.create_list(vec![
-                                    factory.create_value_term(ValueTerm::Float(3.0)),
-                                    factory.create_value_term(ValueTerm::Float(4.0)),
-                                    factory.create_value_term(ValueTerm::Float(5.0)),
-                                ]),
+                    factory.create_let_term(
+                        factory.create_application_term(
+                            factory.create_builtin_term(BuiltinTerm::Get),
+                            allocator.create_pair(
+                                factory.create_static_variable_term(1),
+                                factory.create_value_term(ValueTerm::String(
+                                    allocator.create_string(String::from("foo"))
+                                )),
                             ),
-                            factory.create_value_term(ValueTerm::String(
-                                allocator.create_string(String::from("foo"))
-                            )),
                         ),
+                        factory.create_static_variable_term(1),
                     ),
-                ]),
+                ),
             )),
         );
         assert_eq!(
@@ -2803,50 +2904,42 @@ mod tests {
                 &factory,
                 &allocator,
             ),
-            Ok(factory.create_application_term(
-                factory.create_lambda_term(2, factory.create_static_variable_term(1)),
-                allocator.create_list(vec![
+            Ok(factory.create_let_term(
+                factory.create_struct_term(
+                    allocator.create_struct_prototype(vec![
+                        allocator.create_string(String::from("foo")),
+                        allocator.create_string(String::from("bar")),
+                        allocator.create_string(String::from("baz")),
+                    ]),
+                    allocator.create_list(vec![
+                        factory.create_value_term(ValueTerm::Float(3.0)),
+                        factory.create_value_term(ValueTerm::Float(4.0)),
+                        factory.create_value_term(ValueTerm::Float(5.0)),
+                    ]),
+                ),
+                factory.create_let_term(
                     factory.create_application_term(
                         factory.create_builtin_term(BuiltinTerm::Get),
                         allocator.create_pair(
-                            factory.create_struct_term(
-                                allocator.create_struct_prototype(vec![
-                                    allocator.create_string(String::from("foo")),
-                                    allocator.create_string(String::from("bar")),
-                                    allocator.create_string(String::from("baz")),
-                                ]),
-                                allocator.create_list(vec![
-                                    factory.create_value_term(ValueTerm::Float(3.0)),
-                                    factory.create_value_term(ValueTerm::Float(4.0)),
-                                    factory.create_value_term(ValueTerm::Float(5.0)),
-                                ]),
-                            ),
+                            factory.create_static_variable_term(0),
                             factory.create_value_term(ValueTerm::String(
                                 allocator.create_string(String::from("bar"))
                             )),
                         ),
                     ),
-                    factory.create_application_term(
-                        factory.create_builtin_term(BuiltinTerm::Get),
-                        allocator.create_pair(
-                            factory.create_struct_term(
-                                allocator.create_struct_prototype(vec![
-                                    allocator.create_string(String::from("foo")),
-                                    allocator.create_string(String::from("bar")),
-                                    allocator.create_string(String::from("baz")),
-                                ]),
-                                allocator.create_list(vec![
-                                    factory.create_value_term(ValueTerm::Float(3.0)),
-                                    factory.create_value_term(ValueTerm::Float(4.0)),
-                                    factory.create_value_term(ValueTerm::Float(5.0)),
-                                ]),
+                    factory.create_let_term(
+                        factory.create_application_term(
+                            factory.create_builtin_term(BuiltinTerm::Get),
+                            allocator.create_pair(
+                                factory.create_static_variable_term(1),
+                                factory.create_value_term(ValueTerm::String(
+                                    allocator.create_string(String::from("foo"))
+                                )),
                             ),
-                            factory.create_value_term(ValueTerm::String(
-                                allocator.create_string(String::from("foo"))
-                            )),
                         ),
+                        factory.create_static_variable_term(1),
                     ),
-                ]),
+                ),
             )),
         );
         assert_eq!(
@@ -2856,50 +2949,141 @@ mod tests {
                 &factory,
                 &allocator,
             ),
-            Ok(factory.create_application_term(
-                factory.create_lambda_term(2, factory.create_static_variable_term(1)),
-                allocator.create_list(vec![
+            Ok(factory.create_let_term(
+                factory.create_struct_term(
+                    allocator.create_struct_prototype(vec![
+                        allocator.create_string(String::from("foo")),
+                        allocator.create_string(String::from("bar")),
+                        allocator.create_string(String::from("baz")),
+                    ]),
+                    allocator.create_list(vec![
+                        factory.create_value_term(ValueTerm::Float(3.0)),
+                        factory.create_value_term(ValueTerm::Float(4.0)),
+                        factory.create_value_term(ValueTerm::Float(5.0)),
+                    ]),
+                ),
+                factory.create_let_term(
                     factory.create_application_term(
                         factory.create_builtin_term(BuiltinTerm::Get),
                         allocator.create_pair(
-                            factory.create_struct_term(
-                                allocator.create_struct_prototype(vec![
-                                    allocator.create_string(String::from("foo")),
-                                    allocator.create_string(String::from("bar")),
-                                    allocator.create_string(String::from("baz")),
-                                ]),
-                                allocator.create_list(vec![
-                                    factory.create_value_term(ValueTerm::Float(3.0)),
-                                    factory.create_value_term(ValueTerm::Float(4.0)),
-                                    factory.create_value_term(ValueTerm::Float(5.0)),
-                                ]),
-                            ),
+                            factory.create_static_variable_term(0),
                             factory.create_value_term(ValueTerm::String(
                                 allocator.create_string(String::from("bar"))
                             )),
                         ),
                     ),
-                    factory.create_application_term(
-                        factory.create_builtin_term(BuiltinTerm::Get),
-                        allocator.create_pair(
-                            factory.create_struct_term(
-                                allocator.create_struct_prototype(vec![
-                                    allocator.create_string(String::from("foo")),
-                                    allocator.create_string(String::from("bar")),
-                                    allocator.create_string(String::from("baz")),
-                                ]),
-                                allocator.create_list(vec![
-                                    factory.create_value_term(ValueTerm::Float(3.0)),
-                                    factory.create_value_term(ValueTerm::Float(4.0)),
-                                    factory.create_value_term(ValueTerm::Float(5.0)),
-                                ]),
+                    factory.create_let_term(
+                        factory.create_application_term(
+                            factory.create_builtin_term(BuiltinTerm::Get),
+                            allocator.create_pair(
+                                factory.create_static_variable_term(1),
+                                factory.create_value_term(ValueTerm::String(
+                                    allocator.create_string(String::from("foo"))
+                                )),
                             ),
-                            factory.create_value_term(ValueTerm::String(
-                                allocator.create_string(String::from("foo"))
-                            )),
+                        ),
+                        factory.create_static_variable_term(1),
+                    ),
+                ),
+            )),
+        );
+        assert_eq!(
+            parse(
+                "const foo = { first: 3, second: 4, third: 5 }; const { first, second } = foo; first;",
+                &env,
+                &factory,
+                &allocator
+            ),
+            Ok(factory.create_let_term(
+                factory.create_struct_term(
+                    allocator.create_struct_prototype(vec![
+                        allocator.create_string(String::from("first")),
+                        allocator.create_string(String::from("second")),
+                        allocator.create_string(String::from("third")),
+                    ]),
+                    allocator.create_list(vec![
+                        factory.create_value_term(ValueTerm::Float(3.0)),
+                        factory.create_value_term(ValueTerm::Float(4.0)),
+                        factory.create_value_term(ValueTerm::Float(5.0)),
+                    ]),
+                ),
+                factory.create_let_term(
+                    factory.create_static_variable_term(0),
+                    factory.create_let_term(
+                        factory.create_application_term(
+                            factory.create_builtin_term(BuiltinTerm::Get),
+                            allocator.create_pair(
+                                factory.create_static_variable_term(0),
+                                factory.create_value_term(ValueTerm::String(
+                                    allocator.create_string(String::from("first")),
+                                )),
+                            ),
+                        ),
+                        factory.create_let_term(
+                            factory.create_application_term(
+                                factory.create_builtin_term(BuiltinTerm::Get),
+                                allocator.create_pair(
+                                    factory.create_static_variable_term(1),
+                                    factory.create_value_term(ValueTerm::String(
+                                        allocator.create_string(String::from("second")),
+                                    )),
+                                ),
+                            ),
+                            factory.create_static_variable_term(1),
                         ),
                     ),
-                ]),
+                ),
+            )),
+        );
+        assert_eq!(
+            parse(
+                "const foo = { first: 3, second: 4, third: 5 }; const bar = true; const { first, second } = foo; first;",
+                &env,
+                &factory,
+                &allocator
+            ),
+            Ok(factory.create_let_term(
+                factory.create_struct_term(
+                    allocator.create_struct_prototype(vec![
+                        allocator.create_string(String::from("first")),
+                        allocator.create_string(String::from("second")),
+                        allocator.create_string(String::from("third")),
+                    ]),
+                    allocator.create_list(vec![
+                        factory.create_value_term(ValueTerm::Float(3.0)),
+                        factory.create_value_term(ValueTerm::Float(4.0)),
+                        factory.create_value_term(ValueTerm::Float(5.0)),
+                    ]),
+                ),
+                factory.create_let_term(
+                    factory.create_value_term(ValueTerm::Boolean(true)),
+                    factory.create_let_term(
+                        factory.create_static_variable_term(1),
+                        factory.create_let_term(
+                            factory.create_application_term(
+                                factory.create_builtin_term(BuiltinTerm::Get),
+                                allocator.create_pair(
+                                    factory.create_static_variable_term(0),
+                                    factory.create_value_term(ValueTerm::String(
+                                        allocator.create_string(String::from("first")),
+                                    )),
+                                ),
+                            ),
+                            factory.create_let_term(
+                                factory.create_application_term(
+                                    factory.create_builtin_term(BuiltinTerm::Get),
+                                    allocator.create_pair(
+                                        factory.create_static_variable_term(1),
+                                        factory.create_value_term(ValueTerm::String(
+                                            allocator.create_string(String::from("second")),
+                                        )),
+                                    ),
+                                ),
+                                factory.create_static_variable_term(1),
+                            ),
+                        ),
+                    ),
+                ),
             )),
         );
         assert_eq!(
@@ -2909,127 +3093,100 @@ mod tests {
                 &factory,
                 &allocator,
             ),
-            Ok(factory.create_application_term(
-                factory.create_lambda_term(
-                    2,
-                    factory.create_application_term(
-                        factory.create_lambda_term(
-                            2,
-                            factory.create_application_term(
-                                factory.create_lambda_term(
-                                    2,
-                                    factory.create_static_variable_term(3),
-                                ),
-                                allocator.create_list(vec![
-                                    factory.create_application_term(
-                                        factory.create_builtin_term(BuiltinTerm::Get),
-                                        allocator.create_pair(
-                                            factory.create_static_variable_term(2),
-                                            factory.create_value_term(ValueTerm::String(allocator.create_string(String::from("c")))),
-                                        ),
-                                    ),
-                                    factory.create_application_term(
-                                        factory.create_builtin_term(BuiltinTerm::Get),
-                                        allocator.create_pair(
-                                            factory.create_static_variable_term(2),
-                                            factory.create_value_term(ValueTerm::String(allocator.create_string(String::from("d")))),
-                                        ),
-                                    ),
-                                ]),
-                            ),
+            Ok(factory.create_let_term(
+                factory.create_struct_term(
+                    allocator.create_struct_prototype(vec![
+                        allocator.create_string(String::from("one")),
+                        allocator.create_string(String::from("two")),
+                    ]),
+                    allocator.create_list(vec![
+                        factory.create_struct_term(
+                            allocator.create_struct_prototype(vec![
+                                allocator.create_string(String::from("a")),
+                                allocator.create_string(String::from("b")),
+                            ]),
+                            allocator.create_list(vec![
+                                factory.create_value_term(ValueTerm::Float(1.0)),
+                                factory.create_value_term(ValueTerm::Float(2.0)),
+                            ]),
                         ),
-                        allocator.create_list(vec![
-                            factory.create_application_term(
-                                factory.create_builtin_term(BuiltinTerm::Get),
-                                allocator.create_pair(
-                                    factory.create_static_variable_term(1),
-                                    factory.create_value_term(ValueTerm::String(allocator.create_string(String::from("a")))),
-                                ),
-                            ),
-                            factory.create_application_term(
-                                factory.create_builtin_term(BuiltinTerm::Get),
-                                allocator.create_pair(
-                                    factory.create_static_variable_term(1),
-                                    factory.create_value_term(ValueTerm::String(allocator.create_string(String::from("b")))),
-                                ),
-                            ),
-                        ]),
-                    ),
+                        factory.create_struct_term(
+                            allocator.create_struct_prototype(vec![
+                                allocator.create_string(String::from("c")),
+                                allocator.create_string(String::from("d")),
+                            ]),
+                            allocator.create_list(vec![
+                                factory.create_value_term(ValueTerm::Float(3.0)),
+                                factory.create_value_term(ValueTerm::Float(4.0)),
+                            ]),
+                        ),
+                    ]),
                 ),
-                allocator.create_list(vec![
+                factory.create_let_term(
                     factory.create_application_term(
                         factory.create_builtin_term(BuiltinTerm::Get),
                         allocator.create_pair(
-                            factory.create_struct_term(
-                                allocator.create_struct_prototype(vec![
-                                    allocator.create_string(String::from("one")),
-                                    allocator.create_string(String::from("two")),
-                                ]),
-                                allocator.create_list(vec![
-                                    factory.create_struct_term(
-                                        allocator.create_struct_prototype(vec![
-                                            allocator.create_string(String::from("a")),
-                                            allocator.create_string(String::from("b")),
-                                        ]),
-                                        allocator.create_list(vec![
-                                            factory.create_value_term(ValueTerm::Float(1.0)),
-                                            factory.create_value_term(ValueTerm::Float(2.0)),
-                                        ]),
-                                    ),
-                                    factory.create_struct_term(
-                                        allocator.create_struct_prototype(vec![
-                                            allocator.create_string(String::from("c")),
-                                            allocator.create_string(String::from("d")),
-                                        ]),
-                                        allocator.create_list(vec![
-                                            factory.create_value_term(ValueTerm::Float(3.0)),
-                                            factory.create_value_term(ValueTerm::Float(4.0)),
-                                        ]),
-                                    ),
-                                ]),
-                            ),
+                            factory.create_static_variable_term(0),
                             factory.create_value_term(ValueTerm::String(allocator.create_string(String::from(
                                 "one"
                             )))),
                         ),
                     ),
-                    factory.create_application_term(
-                        factory.create_builtin_term(BuiltinTerm::Get),
-                        allocator.create_pair(
-                            factory.create_struct_term(
-                                allocator.create_struct_prototype(vec![
-                                    allocator.create_string(String::from("one")),
-                                    allocator.create_string(String::from("two")),
-                                ]),
-                                allocator.create_list(vec![
-                                    factory.create_struct_term(
-                                        allocator.create_struct_prototype(vec![
-                                            allocator.create_string(String::from("a")),
-                                            allocator.create_string(String::from("b")),
-                                        ]),
-                                        allocator.create_list(vec![
-                                            factory.create_value_term(ValueTerm::Float(1.0)),
-                                            factory.create_value_term(ValueTerm::Float(2.0)),
-                                        ]),
-                                    ),
-                                    factory.create_struct_term(
-                                        allocator.create_struct_prototype(vec![
-                                            allocator.create_string(String::from("c")),
-                                            allocator.create_string(String::from("d")),
-                                        ]),
-                                        allocator.create_list(vec![
-                                            factory.create_value_term(ValueTerm::Float(3.0)),
-                                            factory.create_value_term(ValueTerm::Float(4.0)),
-                                        ]),
-                                    ),
-                                ]),
+                    factory.create_let_term(
+                        factory.create_application_term(
+                            factory.create_builtin_term(BuiltinTerm::Get),
+                            allocator.create_pair(
+                                factory.create_static_variable_term(1),
+                                factory.create_value_term(ValueTerm::String(allocator.create_string(String::from(
+                                    "two"
+                                )))),
                             ),
-                            factory.create_value_term(ValueTerm::String(allocator.create_string(String::from(
-                                "two"
-                            )))),
+                        ),
+                        factory.create_let_term(
+                            factory.create_static_variable_term(1),
+                            factory.create_let_term(
+                                factory.create_application_term(
+                                    factory.create_builtin_term(BuiltinTerm::Get),
+                                    allocator.create_pair(
+                                        factory.create_static_variable_term(0),
+                                        factory.create_value_term(ValueTerm::String(allocator.create_string(String::from("a")))),
+                                    ),
+                                ),
+                                factory.create_let_term(
+                                    factory.create_application_term(
+                                        factory.create_builtin_term(BuiltinTerm::Get),
+                                        allocator.create_pair(
+                                            factory.create_static_variable_term(1),
+                                            factory.create_value_term(ValueTerm::String(allocator.create_string(String::from("b")))),
+                                        ),
+                                    ),
+                                    factory.create_let_term(
+                                        factory.create_static_variable_term(3),
+                                        factory.create_let_term(
+                                            factory.create_application_term(
+                                                factory.create_builtin_term(BuiltinTerm::Get),
+                                                allocator.create_pair(
+                                                    factory.create_static_variable_term(0),
+                                                    factory.create_value_term(ValueTerm::String(allocator.create_string(String::from("c")))),
+                                                ),
+                                            ),
+                                            factory.create_let_term(
+                                                factory.create_application_term(
+                                                    factory.create_builtin_term(BuiltinTerm::Get),
+                                                    allocator.create_pair(
+                                                        factory.create_static_variable_term(1),
+                                                        factory.create_value_term(ValueTerm::String(allocator.create_string(String::from("d")))),
+                                                    ),
+                                                ),
+                                                factory.create_static_variable_term(4),
+                                            ),
+                                        ),
+                                    ),
+                                ),
+                            ),
                         ),
                     ),
-                ]),
+                ),
             )),
         );
         assert_eq!(
@@ -3037,12 +3194,9 @@ mod tests {
             Ok(factory.create_application_term(
                 factory.create_lambda_term(
                     1,
-                    factory.create_application_term(
-                        factory.create_lambda_term(
-                            2,
-                            factory.create_static_variable_term(0),
-                        ),
-                        allocator.create_list(vec![
+                    factory.create_let_term(
+                        factory.create_static_variable_term(0),
+                        factory.create_let_term(
                             factory.create_application_term(
                                 factory.create_builtin_term(BuiltinTerm::Get),
                                 allocator.create_pair(
@@ -3050,14 +3204,17 @@ mod tests {
                                     factory.create_value_term(ValueTerm::String(allocator.create_string(String::from("foo")))),
                                 ),
                             ),
-                            factory.create_application_term(
-                                factory.create_builtin_term(BuiltinTerm::Get),
-                                allocator.create_pair(
-                                    factory.create_static_variable_term(0),
-                                    factory.create_value_term(ValueTerm::String(allocator.create_string(String::from("bar")))),
+                            factory.create_let_term(
+                                factory.create_application_term(
+                                    factory.create_builtin_term(BuiltinTerm::Get),
+                                    allocator.create_pair(
+                                        factory.create_static_variable_term(1),
+                                        factory.create_value_term(ValueTerm::String(allocator.create_string(String::from("bar")))),
+                                    ),
                                 ),
+                                factory.create_static_variable_term(0),
                             ),
-                        ]),
+                        ),
                     ),
                 ),
                 allocator.create_unit_list(factory.create_struct_term(
@@ -3081,9 +3238,23 @@ mod tests {
         let env = Env::new();
         assert_eq!(
             parse("const [] = [3, 4, 5]; true;", &env, &factory, &allocator),
-            Ok(factory.create_application_term(
-                factory.create_lambda_term(0, factory.create_value_term(ValueTerm::Boolean(true))),
-                allocator.create_empty_list(),
+            Ok(factory.create_value_term(ValueTerm::Boolean(true))),
+        );
+        assert_eq!(
+            parse("const [foo] = [3, 4, 5]; foo;", &env, &factory, &allocator),
+            Ok(factory.create_let_term(
+                factory.create_application_term(
+                    factory.create_builtin_term(BuiltinTerm::Get),
+                    allocator.create_pair(
+                        factory.create_vector_term(allocator.create_list(vec![
+                            factory.create_value_term(ValueTerm::Float(3.0)),
+                            factory.create_value_term(ValueTerm::Float(4.0)),
+                            factory.create_value_term(ValueTerm::Float(5.0)),
+                        ])),
+                        factory.create_value_term(ValueTerm::Int(0)),
+                    ),
+                ),
+                factory.create_static_variable_term(0),
             )),
         );
         assert_eq!(
@@ -3093,9 +3264,99 @@ mod tests {
                 &factory,
                 &allocator
             ),
-            Ok(factory.create_application_term(
-                factory.create_lambda_term(2, factory.create_static_variable_term(1)),
-                allocator.create_list(vec![
+            Ok(factory.create_let_term(
+                factory.create_vector_term(allocator.create_list(vec![
+                    factory.create_value_term(ValueTerm::Float(3.0)),
+                    factory.create_value_term(ValueTerm::Float(4.0)),
+                    factory.create_value_term(ValueTerm::Float(5.0)),
+                ])),
+                factory.create_let_term(
+                    factory.create_application_term(
+                        factory.create_builtin_term(BuiltinTerm::Get),
+                        allocator.create_pair(
+                            factory.create_static_variable_term(0),
+                            factory.create_value_term(ValueTerm::Int(0)),
+                        ),
+                    ),
+                    factory.create_let_term(
+                        factory.create_application_term(
+                            factory.create_builtin_term(BuiltinTerm::Get),
+                            allocator.create_pair(
+                                factory.create_static_variable_term(1),
+                                factory.create_value_term(ValueTerm::Int(1)),
+                            ),
+                        ),
+                        factory.create_static_variable_term(1),
+                    ),
+                ),
+            )),
+        );
+        assert_eq!(
+            parse(
+                "const [, , foo] = [3, 4, 5]; foo;",
+                &env,
+                &factory,
+                &allocator
+            ),
+            Ok(factory.create_let_term(
+                factory.create_application_term(
+                    factory.create_builtin_term(BuiltinTerm::Get),
+                    allocator.create_pair(
+                        factory.create_vector_term(allocator.create_list(vec![
+                            factory.create_value_term(ValueTerm::Float(3.0)),
+                            factory.create_value_term(ValueTerm::Float(4.0)),
+                            factory.create_value_term(ValueTerm::Float(5.0)),
+                        ])),
+                        factory.create_value_term(ValueTerm::Int(2)),
+                    ),
+                ),
+                factory.create_static_variable_term(0),
+            )),
+        );
+        assert_eq!(
+            parse(
+                "const [, foo, bar] = [3, 4, 5]; foo;",
+                &env,
+                &factory,
+                &allocator
+            ),
+            Ok(factory.create_let_term(
+                factory.create_vector_term(allocator.create_list(vec![
+                    factory.create_value_term(ValueTerm::Float(3.0)),
+                    factory.create_value_term(ValueTerm::Float(4.0)),
+                    factory.create_value_term(ValueTerm::Float(5.0)),
+                ])),
+                factory.create_let_term(
+                    factory.create_application_term(
+                        factory.create_builtin_term(BuiltinTerm::Get),
+                        allocator.create_pair(
+                            factory.create_static_variable_term(0),
+                            factory.create_value_term(ValueTerm::Int(1)),
+                        ),
+                    ),
+                    factory.create_let_term(
+                        factory.create_application_term(
+                            factory.create_builtin_term(BuiltinTerm::Get),
+                            allocator.create_pair(
+                                factory.create_static_variable_term(1),
+                                factory.create_value_term(ValueTerm::Int(2)),
+                            ),
+                        ),
+                        factory.create_static_variable_term(1),
+                    ),
+                ),
+            )),
+        );
+        assert_eq!(
+            parse(
+                "const foo = true; const [bar] = [3, 4, 5]; foo;",
+                &env,
+                &factory,
+                &allocator
+            ),
+            Ok(factory.create_let_term(
+                factory.create_value_term(ValueTerm::Boolean(true)),
+                factory.create_let_term(
                     factory.create_application_term(
                         factory.create_builtin_term(BuiltinTerm::Get),
                         allocator.create_pair(
@@ -3107,40 +3368,45 @@ mod tests {
                             factory.create_value_term(ValueTerm::Int(0)),
                         ),
                     ),
-                    factory.create_application_term(
-                        factory.create_builtin_term(BuiltinTerm::Get),
-                        allocator.create_pair(
-                            factory.create_vector_term(allocator.create_list(vec![
-                                factory.create_value_term(ValueTerm::Float(3.0)),
-                                factory.create_value_term(ValueTerm::Float(4.0)),
-                                factory.create_value_term(ValueTerm::Float(5.0)),
-                            ])),
-                            factory.create_value_term(ValueTerm::Int(1)),
-                        ),
-                    ),
-                ]),
+                    factory.create_static_variable_term(1),
+                )
             )),
         );
         assert_eq!(
             parse(
-                "const [, , foo] = [3, 4, 5]; foo;",
+                "const foo = true; const [bar, baz] = [3, 4, 5]; foo;",
                 &env,
                 &factory,
                 &allocator
             ),
-            Ok(factory.create_application_term(
-                factory.create_lambda_term(1, factory.create_static_variable_term(0)),
-                allocator.create_unit_list(factory.create_application_term(
-                    factory.create_builtin_term(BuiltinTerm::Get),
-                    allocator.create_pair(
-                        factory.create_vector_term(allocator.create_list(vec![
-                            factory.create_value_term(ValueTerm::Float(3.0)),
-                            factory.create_value_term(ValueTerm::Float(4.0)),
-                            factory.create_value_term(ValueTerm::Float(5.0)),
-                        ])),
-                        factory.create_value_term(ValueTerm::Int(2)),
-                    ),
-                )),
+            Ok(factory.create_let_term(
+                factory.create_value_term(ValueTerm::Boolean(true)),
+                factory.create_let_term(
+                    factory.create_vector_term(allocator.create_list(vec![
+                        factory.create_value_term(ValueTerm::Float(3.0)),
+                        factory.create_value_term(ValueTerm::Float(4.0)),
+                        factory.create_value_term(ValueTerm::Float(5.0)),
+                    ])),
+                    factory.create_let_term(
+                        factory.create_application_term(
+                            factory.create_builtin_term(BuiltinTerm::Get),
+                            allocator.create_pair(
+                                factory.create_static_variable_term(0),
+                                factory.create_value_term(ValueTerm::Int(0)),
+                            ),
+                        ),
+                        factory.create_let_term(
+                            factory.create_application_term(
+                                factory.create_builtin_term(BuiltinTerm::Get),
+                                allocator.create_pair(
+                                    factory.create_static_variable_term(1),
+                                    factory.create_value_term(ValueTerm::Int(1)),
+                                ),
+                            ),
+                            factory.create_static_variable_term(3),
+                        ),
+                    )
+                )
             )),
         );
     }
@@ -3538,57 +3804,37 @@ mod tests {
                         factory.create_builtin_term(BuiltinTerm::If),
                         allocator.create_triple(
                             factory.create_value_term(ValueTerm::Boolean(true)),
-                            factory.create_application_term(
-                                factory.create_lambda_term(
-                                    1,
-                                    factory.create_application_term(
-                                        factory.create_lambda_term(
-                                            1,
-                                            factory.create_application_term(
-                                                factory.create_builtin_term(BuiltinTerm::Add),
-                                                allocator.create_pair(
-                                                    factory.create_static_variable_term(1),
-                                                    factory.create_static_variable_term(0),
-                                                )
-                                            ),
-                                        ),
-                                        allocator.create_list(vec![
-                                            factory.create_value_term(ValueTerm::Float(4.0)),
-                                        ]),
-                                    ),
-                                ),
-                                allocator.create_list(vec![
-                                    factory.create_value_term(ValueTerm::Float(3.0)),
-                                ]),
-                            ),
-                            factory.create_application_term(
-                                factory.create_lambda_term(
-                                    1,
-                                    factory.create_application_term(
-                                        factory.create_lambda_term(
-                                            1,
-                                            factory.create_application_term(
-                                                factory.create_builtin_term(BuiltinTerm::Add),
-                                                allocator.create_pair(
-                                                    factory.create_static_variable_term(1),
-                                                    factory.create_static_variable_term(0),
-                                                )
-                                            ),
-                                        ),
-                                        allocator.create_list(vec![
-                                            factory.create_value_term(ValueTerm::Float(3.0)),
-                                        ]),
-                                    ),
-                                ),
-                                allocator.create_list(vec![
+                            factory.create_let_term(
+                                factory.create_value_term(ValueTerm::Float(3.0)),
+                                factory.create_let_term(
                                     factory.create_value_term(ValueTerm::Float(4.0)),
-                                ]),
+                                    factory.create_application_term(
+                                        factory.create_builtin_term(BuiltinTerm::Add),
+                                        allocator.create_pair(
+                                            factory.create_static_variable_term(1),
+                                            factory.create_static_variable_term(0),
+                                        ),
+                                    ),
+                                ),
                             ),
-                        )
-                    )
+                            factory.create_let_term(
+                                factory.create_value_term(ValueTerm::Float(4.0)),
+                                factory.create_let_term(
+                                    factory.create_value_term(ValueTerm::Float(3.0)),
+                                    factory.create_application_term(
+                                        factory.create_builtin_term(BuiltinTerm::Add),
+                                        allocator.create_pair(
+                                            factory.create_static_variable_term(1),
+                                            factory.create_static_variable_term(0),
+                                        ),
+                                    ),
+                                ),
+                            ),
+                        ),
+                    ),
                 ),
                 allocator.create_empty_list(),
-            ))
+            )),
         );
         assert_eq!(
             parse("(() => { if (true) { const foo = 3; const bar = 4; return foo + bar; } const foo = 4; const bar = 3; return foo + bar; })()", &env, &factory, &allocator),
@@ -3599,57 +3845,37 @@ mod tests {
                         factory.create_builtin_term(BuiltinTerm::If),
                         allocator.create_triple(
                             factory.create_value_term(ValueTerm::Boolean(true)),
-                            factory.create_application_term(
-                                factory.create_lambda_term(
-                                    1,
-                                    factory.create_application_term(
-                                        factory.create_lambda_term(
-                                            1,
-                                            factory.create_application_term(
-                                                factory.create_builtin_term(BuiltinTerm::Add),
-                                                allocator.create_pair(
-                                                    factory.create_static_variable_term(1),
-                                                    factory.create_static_variable_term(0),
-                                                )
-                                            ),
-                                        ),
-                                        allocator.create_list(vec![
-                                            factory.create_value_term(ValueTerm::Float(4.0)),
-                                        ]),
-                                    ),
-                                ),
-                                allocator.create_list(vec![
-                                    factory.create_value_term(ValueTerm::Float(3.0)),
-                                ]),
-                            ),
-                            factory.create_application_term(
-                                factory.create_lambda_term(
-                                    1,
-                                    factory.create_application_term(
-                                        factory.create_lambda_term(
-                                            1,
-                                            factory.create_application_term(
-                                                factory.create_builtin_term(BuiltinTerm::Add),
-                                                allocator.create_pair(
-                                                    factory.create_static_variable_term(1),
-                                                    factory.create_static_variable_term(0),
-                                                )
-                                            ),
-                                        ),
-                                        allocator.create_list(vec![
-                                            factory.create_value_term(ValueTerm::Float(3.0)),
-                                        ]),
-                                    ),
-                                ),
-                                allocator.create_list(vec![
+                            factory.create_let_term(
+                                factory.create_value_term(ValueTerm::Float(3.0)),
+                                factory.create_let_term(
                                     factory.create_value_term(ValueTerm::Float(4.0)),
-                                ]),
+                                    factory.create_application_term(
+                                        factory.create_builtin_term(BuiltinTerm::Add),
+                                        allocator.create_pair(
+                                            factory.create_static_variable_term(1),
+                                            factory.create_static_variable_term(0),
+                                        ),
+                                    ),
+                                ),
                             ),
-                        )
-                    )
+                            factory.create_let_term(
+                                factory.create_value_term(ValueTerm::Float(4.0)),
+                                factory.create_let_term(
+                                    factory.create_value_term(ValueTerm::Float(3.0)),
+                                    factory.create_application_term(
+                                        factory.create_builtin_term(BuiltinTerm::Add),
+                                        allocator.create_pair(
+                                            factory.create_static_variable_term(1),
+                                            factory.create_static_variable_term(0),
+                                        ),
+                                    ),
+                                ),
+                            ),
+                        ),
+                    ),
                 ),
                 allocator.create_empty_list(),
-            ))
+            )),
         );
         assert_eq!(
             parse("(() => { if (true) throw new Error(\"foo\"); const foo = 3; const bar = 4; return foo + bar; })()", &env, &factory, &allocator),
@@ -3666,34 +3892,24 @@ mod tests {
                                     factory.create_value_term(ValueTerm::String(allocator.create_string(String::from("foo")))),
                                 ),
                             ),
-                            factory.create_application_term(
-                                factory.create_lambda_term(
-                                    1,
+                            factory.create_let_term(
+                                factory.create_value_term(ValueTerm::Float(3.0)),
+                                factory.create_let_term(
+                                    factory.create_value_term(ValueTerm::Float(4.0)),
                                     factory.create_application_term(
-                                        factory.create_lambda_term(
-                                            1,
-                                            factory.create_application_term(
-                                                factory.create_builtin_term(BuiltinTerm::Add),
-                                                allocator.create_pair(
-                                                    factory.create_static_variable_term(1),
-                                                    factory.create_static_variable_term(0),
-                                                )
-                                            ),
+                                        factory.create_builtin_term(BuiltinTerm::Add),
+                                        allocator.create_pair(
+                                            factory.create_static_variable_term(1),
+                                            factory.create_static_variable_term(0),
                                         ),
-                                        allocator.create_list(vec![
-                                            factory.create_value_term(ValueTerm::Float(4.0)),
-                                        ]),
                                     ),
                                 ),
-                                allocator.create_list(vec![
-                                    factory.create_value_term(ValueTerm::Float(3.0)),
-                                ]),
                             ),
-                        )
-                    )
+                        ),
+                    ),
                 ),
                 allocator.create_empty_list(),
-            ))
+            )),
         );
     }
 
@@ -3815,9 +4031,8 @@ mod tests {
             parse("({ foo }) => foo", &env, &factory, &allocator),
             Ok(factory.create_lambda_term(
                 1,
-                factory.create_application_term(
-                    factory.create_lambda_term(1, factory.create_static_variable_term(0)),
-                    allocator.create_unit_list(factory.create_application_term(
+                factory.create_let_term(
+                    factory.create_application_term(
                         factory.create_builtin_term(BuiltinTerm::Get),
                         allocator.create_pair(
                             factory.create_static_variable_term(0),
@@ -3825,7 +4040,8 @@ mod tests {
                                 allocator.create_string(String::from("foo"))
                             )),
                         ),
-                    ),),
+                    ),
+                    factory.create_static_variable_term(0),
                 ),
             )),
         );
@@ -3833,18 +4049,9 @@ mod tests {
             parse("({ foo, bar }) => foo + bar", &env, &factory, &allocator),
             Ok(factory.create_lambda_term(
                 1,
-                factory.create_application_term(
-                    factory.create_lambda_term(
-                        2,
-                        factory.create_application_term(
-                            factory.create_builtin_term(BuiltinTerm::Add),
-                            allocator.create_pair(
-                                factory.create_static_variable_term(1),
-                                factory.create_static_variable_term(0),
-                            ),
-                        ),
-                    ),
-                    allocator.create_list(vec![
+                factory.create_let_term(
+                    factory.create_static_variable_term(0),
+                    factory.create_let_term(
                         factory.create_application_term(
                             factory.create_builtin_term(BuiltinTerm::Get),
                             allocator.create_pair(
@@ -3854,16 +4061,25 @@ mod tests {
                                 )),
                             ),
                         ),
-                        factory.create_application_term(
-                            factory.create_builtin_term(BuiltinTerm::Get),
-                            allocator.create_pair(
-                                factory.create_static_variable_term(0),
-                                factory.create_value_term(ValueTerm::String(
-                                    allocator.create_string(String::from("bar"))
-                                )),
+                        factory.create_let_term(
+                            factory.create_application_term(
+                                factory.create_builtin_term(BuiltinTerm::Get),
+                                allocator.create_pair(
+                                    factory.create_static_variable_term(1),
+                                    factory.create_value_term(ValueTerm::String(
+                                        allocator.create_string(String::from("bar"))
+                                    )),
+                                ),
+                            ),
+                            factory.create_application_term(
+                                factory.create_builtin_term(BuiltinTerm::Add),
+                                allocator.create_pair(
+                                    factory.create_static_variable_term(1),
+                                    factory.create_static_variable_term(0),
+                                ),
                             ),
                         ),
-                    ]),
+                    ),
                 ),
             )),
         );
@@ -3876,49 +4092,49 @@ mod tests {
             ),
             Ok(factory.create_lambda_term(
                 4,
-                factory.create_application_term(
-                    factory.create_lambda_term(
-                        2,
-                        factory.create_application_term(
-                            factory.create_builtin_term(BuiltinTerm::Add),
-                            allocator.create_pair(
-                                factory.create_application_term(
-                                    factory.create_builtin_term(BuiltinTerm::Add),
-                                    allocator.create_pair(
-                                        factory.create_application_term(
-                                            factory.create_builtin_term(BuiltinTerm::Add),
-                                            allocator.create_pair(
-                                                factory.create_static_variable_term(5),
-                                                factory.create_static_variable_term(1),
-                                            ),
-                                        ),
-                                        factory.create_static_variable_term(0),
-                                    ),
-                                ),
-                                factory.create_static_variable_term(2),
-                            ),
-                        ),
-                    ),
-                    allocator.create_list(vec![
+                factory.create_let_term(
+                    factory.create_static_variable_term(2),
+                    factory.create_let_term(
                         factory.create_application_term(
                             factory.create_builtin_term(BuiltinTerm::Get),
                             allocator.create_pair(
-                                factory.create_static_variable_term(2),
+                                factory.create_static_variable_term(0),
                                 factory.create_value_term(ValueTerm::String(
                                     allocator.create_string(String::from("foo"))
                                 )),
                             ),
                         ),
-                        factory.create_application_term(
-                            factory.create_builtin_term(BuiltinTerm::Get),
-                            allocator.create_pair(
-                                factory.create_static_variable_term(2),
-                                factory.create_value_term(ValueTerm::String(
-                                    allocator.create_string(String::from("bar"))
-                                )),
+                        factory.create_let_term(
+                            factory.create_application_term(
+                                factory.create_builtin_term(BuiltinTerm::Get),
+                                allocator.create_pair(
+                                    factory.create_static_variable_term(1),
+                                    factory.create_value_term(ValueTerm::String(
+                                        allocator.create_string(String::from("bar"))
+                                    )),
+                                ),
+                            ),
+                            factory.create_application_term(
+                                factory.create_builtin_term(BuiltinTerm::Add),
+                                allocator.create_pair(
+                                    factory.create_application_term(
+                                        factory.create_builtin_term(BuiltinTerm::Add),
+                                        allocator.create_pair(
+                                            factory.create_application_term(
+                                                factory.create_builtin_term(BuiltinTerm::Add),
+                                                allocator.create_pair(
+                                                    factory.create_static_variable_term(6),
+                                                    factory.create_static_variable_term(1),
+                                                ),
+                                            ),
+                                            factory.create_static_variable_term(0),
+                                        ),
+                                    ),
+                                    factory.create_static_variable_term(3),
+                                ),
                             ),
                         ),
-                    ]),
+                    ),
                 ),
             )),
         );
@@ -3937,15 +4153,15 @@ mod tests {
             parse("([foo]) => foo", &env, &factory, &allocator),
             Ok(factory.create_lambda_term(
                 1,
-                factory.create_application_term(
-                    factory.create_lambda_term(1, factory.create_static_variable_term(0)),
-                    allocator.create_unit_list(factory.create_application_term(
+                factory.create_let_term(
+                    factory.create_application_term(
                         factory.create_builtin_term(BuiltinTerm::Get),
                         allocator.create_pair(
                             factory.create_static_variable_term(0),
                             factory.create_value_term(ValueTerm::Int(0)),
                         ),
-                    ),),
+                    ),
+                    factory.create_static_variable_term(0),
                 ),
             )),
         );
@@ -3953,18 +4169,9 @@ mod tests {
             parse("([foo, bar]) => foo + bar", &env, &factory, &allocator),
             Ok(factory.create_lambda_term(
                 1,
-                factory.create_application_term(
-                    factory.create_lambda_term(
-                        2,
-                        factory.create_application_term(
-                            factory.create_builtin_term(BuiltinTerm::Add),
-                            allocator.create_pair(
-                                factory.create_static_variable_term(1),
-                                factory.create_static_variable_term(0),
-                            ),
-                        ),
-                    ),
-                    allocator.create_list(vec![
+                factory.create_let_term(
+                    factory.create_static_variable_term(0),
+                    factory.create_let_term(
                         factory.create_application_term(
                             factory.create_builtin_term(BuiltinTerm::Get),
                             allocator.create_pair(
@@ -3972,14 +4179,23 @@ mod tests {
                                 factory.create_value_term(ValueTerm::Int(0)),
                             ),
                         ),
-                        factory.create_application_term(
-                            factory.create_builtin_term(BuiltinTerm::Get),
-                            allocator.create_pair(
-                                factory.create_static_variable_term(0),
-                                factory.create_value_term(ValueTerm::Int(1)),
+                        factory.create_let_term(
+                            factory.create_application_term(
+                                factory.create_builtin_term(BuiltinTerm::Get),
+                                allocator.create_pair(
+                                    factory.create_static_variable_term(1),
+                                    factory.create_value_term(ValueTerm::Int(1)),
+                                ),
+                            ),
+                            factory.create_application_term(
+                                factory.create_builtin_term(BuiltinTerm::Add),
+                                allocator.create_pair(
+                                    factory.create_static_variable_term(1),
+                                    factory.create_static_variable_term(0),
+                                ),
                             ),
                         ),
-                    ]),
+                    ),
                 ),
             )),
         );
@@ -3987,15 +4203,43 @@ mod tests {
             parse("([, , foo]) => foo", &env, &factory, &allocator),
             Ok(factory.create_lambda_term(
                 1,
-                factory.create_application_term(
-                    factory.create_lambda_term(1, factory.create_static_variable_term(0)),
-                    allocator.create_unit_list(factory.create_application_term(
+                factory.create_let_term(
+                    factory.create_application_term(
                         factory.create_builtin_term(BuiltinTerm::Get),
                         allocator.create_pair(
                             factory.create_static_variable_term(0),
                             factory.create_value_term(ValueTerm::Int(2)),
                         ),
-                    )),
+                    ),
+                    factory.create_static_variable_term(0),
+                ),
+            )),
+        );
+        assert_eq!(
+            parse("([, foo, bar]) => foo", &env, &factory, &allocator),
+            Ok(factory.create_lambda_term(
+                1,
+                factory.create_let_term(
+                    factory.create_static_variable_term(0),
+                    factory.create_let_term(
+                        factory.create_application_term(
+                            factory.create_builtin_term(BuiltinTerm::Get),
+                            allocator.create_pair(
+                                factory.create_static_variable_term(0),
+                                factory.create_value_term(ValueTerm::Int(1)),
+                            ),
+                        ),
+                        factory.create_let_term(
+                            factory.create_application_term(
+                                factory.create_builtin_term(BuiltinTerm::Get),
+                                allocator.create_pair(
+                                    factory.create_static_variable_term(1),
+                                    factory.create_value_term(ValueTerm::Int(2)),
+                                ),
+                            ),
+                            factory.create_static_variable_term(1),
+                        ),
+                    ),
                 ),
             )),
         );
@@ -4006,47 +4250,48 @@ mod tests {
                 &factory,
                 &allocator,
             ),
+
             Ok(factory.create_lambda_term(
                 4,
-                factory.create_application_term(
-                    factory.create_lambda_term(
-                        2,
-                        factory.create_application_term(
-                            factory.create_builtin_term(BuiltinTerm::Add),
-                            allocator.create_pair(
-                                factory.create_application_term(
-                                    factory.create_builtin_term(BuiltinTerm::Add),
-                                    allocator.create_pair(
-                                        factory.create_application_term(
-                                            factory.create_builtin_term(BuiltinTerm::Add),
-                                            allocator.create_pair(
-                                                factory.create_static_variable_term(5),
-                                                factory.create_static_variable_term(1),
-                                            ),
-                                        ),
-                                        factory.create_static_variable_term(0),
-                                    ),
-                                ),
-                                factory.create_static_variable_term(2),
-                            ),
-                        ),
-                    ),
-                    allocator.create_list(vec![
+                factory.create_let_term(
+                    factory.create_static_variable_term(2),
+                    factory.create_let_term(
                         factory.create_application_term(
                             factory.create_builtin_term(BuiltinTerm::Get),
                             allocator.create_pair(
-                                factory.create_static_variable_term(2),
+                                factory.create_static_variable_term(0),
                                 factory.create_value_term(ValueTerm::Int(0)),
                             ),
                         ),
-                        factory.create_application_term(
-                            factory.create_builtin_term(BuiltinTerm::Get),
-                            allocator.create_pair(
-                                factory.create_static_variable_term(2),
-                                factory.create_value_term(ValueTerm::Int(1)),
+                        factory.create_let_term(
+                            factory.create_application_term(
+                                factory.create_builtin_term(BuiltinTerm::Get),
+                                allocator.create_pair(
+                                    factory.create_static_variable_term(1),
+                                    factory.create_value_term(ValueTerm::Int(1)),
+                                ),
+                            ),
+                            factory.create_application_term(
+                                factory.create_builtin_term(BuiltinTerm::Add),
+                                allocator.create_pair(
+                                    factory.create_application_term(
+                                        factory.create_builtin_term(BuiltinTerm::Add),
+                                        allocator.create_pair(
+                                            factory.create_application_term(
+                                                factory.create_builtin_term(BuiltinTerm::Add),
+                                                allocator.create_pair(
+                                                    factory.create_static_variable_term(6),
+                                                    factory.create_static_variable_term(1),
+                                                ),
+                                            ),
+                                            factory.create_static_variable_term(0),
+                                        ),
+                                    ),
+                                    factory.create_static_variable_term(3),
+                                ),
                             ),
                         ),
-                    ]),
+                    ),
                 ),
             )),
         );

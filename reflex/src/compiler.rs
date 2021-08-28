@@ -377,6 +377,19 @@ impl<T: Expression> NativeFunctionRegistry<T> {
             self.add(function);
         }
     }
+    pub fn union(self, other: NativeFunctionRegistry<T>) -> Self {
+        if self.is_empty() {
+            other
+        } else if other.is_empty() {
+            self
+        } else {
+            let mut combined_values = self.values;
+            combined_values.extend(other.values);
+            Self {
+                values: combined_values,
+            }
+        }
+    }
 }
 impl<T: Expression> FromIterator<NativeFunction<T>> for NativeFunctionRegistry<T> {
     fn from_iter<TIter: IntoIterator<Item = NativeFunction<T>>>(iter: TIter) -> Self {

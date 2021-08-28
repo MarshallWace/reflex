@@ -13,6 +13,8 @@ mod compiled;
 pub use compiled::*;
 mod lambda;
 pub use lambda::*;
+mod r#let;
+pub use r#let::*;
 mod native;
 pub use native::*;
 mod partial;
@@ -309,6 +311,7 @@ impl<T: Expression> serde::Serialize for CachedTerm<T> {
 pub enum Term<T: Expression + Compile<T>> {
     Value(ValueTerm<StringPrimitive>),
     Variable(VariableTerm<T>),
+    Let(LetTerm<T>),
     Lambda(LambdaTerm<T>),
     Application(ApplicationTerm<T>),
     PartialApplication(PartialApplicationTerm<T>),
@@ -328,6 +331,7 @@ impl<T: Expression + Applicable<T> + Compile<T>> GraphNode for Term<T> {
         match self {
             Self::Value(term) => term.capture_depth(),
             Self::Variable(term) => term.capture_depth(),
+            Self::Let(term) => term.capture_depth(),
             Self::Lambda(term) => term.capture_depth(),
             Self::Application(term) => term.capture_depth(),
             Self::PartialApplication(term) => term.capture_depth(),
@@ -347,6 +351,7 @@ impl<T: Expression + Applicable<T> + Compile<T>> GraphNode for Term<T> {
         match self {
             Self::Value(term) => term.free_variables(),
             Self::Variable(term) => term.free_variables(),
+            Self::Let(term) => term.free_variables(),
             Self::Lambda(term) => term.free_variables(),
             Self::Application(term) => term.free_variables(),
             Self::PartialApplication(term) => term.free_variables(),
@@ -366,6 +371,7 @@ impl<T: Expression + Applicable<T> + Compile<T>> GraphNode for Term<T> {
         match self {
             Self::Value(term) => term.dynamic_dependencies(),
             Self::Variable(term) => term.dynamic_dependencies(),
+            Self::Let(term) => term.dynamic_dependencies(),
             Self::Lambda(term) => term.dynamic_dependencies(),
             Self::Application(term) => term.dynamic_dependencies(),
             Self::PartialApplication(term) => term.dynamic_dependencies(),
@@ -385,6 +391,7 @@ impl<T: Expression + Applicable<T> + Compile<T>> GraphNode for Term<T> {
         match self {
             Self::Value(term) => term.is_static(),
             Self::Variable(term) => term.is_static(),
+            Self::Let(term) => term.is_static(),
             Self::Lambda(term) => term.is_static(),
             Self::Application(term) => term.is_static(),
             Self::PartialApplication(term) => term.is_static(),
@@ -404,6 +411,7 @@ impl<T: Expression + Applicable<T> + Compile<T>> GraphNode for Term<T> {
         match self {
             Self::Value(term) => term.is_atomic(),
             Self::Variable(term) => term.is_atomic(),
+            Self::Let(term) => term.is_atomic(),
             Self::Lambda(term) => term.is_atomic(),
             Self::Application(term) => term.is_atomic(),
             Self::PartialApplication(term) => term.is_atomic(),
@@ -426,6 +434,7 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Evaluate<T> 
     fn subexpressions(&self) -> Vec<&T> {
         match self {
             Self::Variable(term) => term.subexpressions(),
+            Self::Let(term) => term.subexpressions(),
             Self::Lambda(term) => term.subexpressions(),
             Self::Application(term) => term.subexpressions(),
             Self::PartialApplication(term) => term.subexpressions(),
@@ -448,6 +457,7 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Evaluate<T> 
             Self::Variable(term) => {
                 term.substitute_static(substitutions, factory, allocator, cache)
             }
+            Self::Let(term) => term.substitute_static(substitutions, factory, allocator, cache),
             Self::Lambda(term) => term.substitute_static(substitutions, factory, allocator, cache),
             Self::Application(term) => {
                 term.substitute_static(substitutions, factory, allocator, cache)
@@ -478,6 +488,7 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Evaluate<T> 
     ) -> Option<T> {
         match self {
             Self::Variable(term) => term.substitute_dynamic(state, factory, allocator, cache),
+            Self::Let(term) => term.substitute_dynamic(state, factory, allocator, cache),
             Self::Lambda(term) => term.substitute_dynamic(state, factory, allocator, cache),
             Self::Application(term) => term.substitute_dynamic(state, factory, allocator, cache),
             Self::PartialApplication(term) => {
@@ -501,6 +512,7 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Evaluate<T> 
     ) -> Option<T> {
         match self {
             Self::Variable(term) => term.normalize(factory, allocator, cache),
+            Self::Let(term) => term.normalize(factory, allocator, cache),
             Self::Lambda(term) => term.normalize(factory, allocator, cache),
             Self::Application(term) => term.normalize(factory, allocator, cache),
             Self::PartialApplication(term) => term.normalize(factory, allocator, cache),
@@ -519,6 +531,7 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Evaluate<T> 
     ) -> Option<T> {
         match self {
             Self::Variable(term) => term.hoist_free_variables(factory, allocator),
+            Self::Let(term) => term.hoist_free_variables(factory, allocator),
             Self::Lambda(term) => term.hoist_free_variables(factory, allocator),
             Self::Application(term) => term.hoist_free_variables(factory, allocator),
             Self::PartialApplication(term) => term.hoist_free_variables(factory, allocator),
@@ -536,6 +549,7 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Evaluate<T> 
 {
     fn is_reducible(&self) -> bool {
         match self {
+            Self::Let(term) => term.is_reducible(),
             Self::Application(term) => term.is_reducible(),
             Self::Recursive(term) => term.is_reducible(),
             _ => false,
@@ -548,6 +562,7 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Evaluate<T> 
         cache: &mut impl EvaluationCache<T>,
     ) -> Option<T> {
         match self {
+            Self::Let(term) => term.reduce(factory, allocator, cache),
             Self::Application(term) => term.reduce(factory, allocator, cache),
             Self::Recursive(term) => term.reduce(factory, allocator, cache),
             _ => None,
@@ -607,6 +622,7 @@ impl<
         match self {
             Self::Value(term) => term.compile(eager, stack_offset, factory, allocator, compiler),
             Self::Variable(term) => term.compile(eager, stack_offset, factory, allocator, compiler),
+            Self::Let(term) => term.compile(eager, stack_offset, factory, allocator, compiler),
             Self::Lambda(term) => term.compile(eager, stack_offset, factory, allocator, compiler),
             Self::Application(term) => {
                 term.compile(eager, stack_offset, factory, allocator, compiler)
@@ -669,6 +685,7 @@ impl<T: Expression + Compile<T>> std::fmt::Display for Term<T> {
         match self {
             Self::Value(term) => std::fmt::Display::fmt(term, f),
             Self::Variable(term) => std::fmt::Display::fmt(term, f),
+            Self::Let(term) => std::fmt::Display::fmt(term, f),
             Self::Lambda(term) => std::fmt::Display::fmt(term, f),
             Self::Application(term) => std::fmt::Display::fmt(term, f),
             Self::PartialApplication(term) => std::fmt::Display::fmt(term, f),
@@ -693,6 +710,7 @@ impl<T: Expression + Compile<T>> serde::Serialize for Term<T> {
         match self {
             Self::Value(term) => serde::Serialize::serialize(term, serializer),
             Self::Variable(term) => serde::Serialize::serialize(term, serializer),
+            Self::Let(term) => serde::Serialize::serialize(term, serializer),
             Self::Lambda(term) => serde::Serialize::serialize(term, serializer),
             Self::Application(term) => serde::Serialize::serialize(term, serializer),
             Self::PartialApplication(term) => serde::Serialize::serialize(term, serializer),

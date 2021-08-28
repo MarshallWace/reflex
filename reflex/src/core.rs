@@ -457,6 +457,7 @@ pub trait ExpressionFactory<T: Expression> {
     fn create_value_term(&self, value: ValueTerm<T::String>) -> T;
     fn create_static_variable_term(&self, offset: StackOffset) -> T;
     fn create_dynamic_variable_term(&self, state_token: StateToken, fallback: T) -> T;
+    fn create_let_term(&self, initializer: T, body: T) -> T;
     fn create_lambda_term(&self, num_args: StackOffset, body: T) -> T;
     fn create_application_term(&self, target: T, args: ExpressionList<T>) -> T;
     fn create_partial_application_term(&self, target: T, args: ExpressionList<T>) -> T;
@@ -489,6 +490,7 @@ pub trait ExpressionFactory<T: Expression> {
         &self,
         expression: &'a T,
     ) -> Option<&'a PartialApplicationTerm<T>>;
+    fn match_let_term<'a>(&self, expression: &'a T) -> Option<&'a LetTerm<T>>;
     fn match_lambda_term<'a>(&self, expression: &'a T) -> Option<&'a LambdaTerm<T>>;
     fn match_builtin_term<'a>(&self, expression: &'a T) -> Option<&'a BuiltinTerm>;
     fn match_native_function_term<'a>(
@@ -547,6 +549,9 @@ impl<'_self, T: Expression> ExpressionFactory<T> for &'_self dyn ExpressionFacto
     }
     fn create_dynamic_variable_term(&self, state_token: StateToken, fallback: T) -> T {
         ExpressionFactory::<T>::create_dynamic_variable_term(*self, state_token, fallback)
+    }
+    fn create_let_term(&self, initializer: T, body: T) -> T {
+        ExpressionFactory::<T>::create_let_term(*self, initializer, body)
     }
     fn create_lambda_term(&self, num_args: StackOffset, body: T) -> T {
         ExpressionFactory::<T>::create_lambda_term(*self, num_args, body)
@@ -619,6 +624,9 @@ impl<'_self, T: Expression> ExpressionFactory<T> for &'_self dyn ExpressionFacto
         expression: &'a T,
     ) -> Option<&'a PartialApplicationTerm<T>> {
         ExpressionFactory::<T>::match_partial_application_term(*self, expression)
+    }
+    fn match_let_term<'a>(&self, expression: &'a T) -> Option<&'a LetTerm<T>> {
+        ExpressionFactory::<T>::match_let_term(*self, expression)
     }
     fn match_lambda_term<'a>(&self, expression: &'a T) -> Option<&'a LambdaTerm<T>> {
         ExpressionFactory::<T>::match_lambda_term(*self, expression)
