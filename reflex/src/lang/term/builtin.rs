@@ -95,6 +95,8 @@ mod reduce;
 pub use reduce::*;
 mod remainder;
 pub use remainder::*;
+mod replace;
+pub use replace::*;
 mod resolve_deep;
 pub use resolve_deep::*;
 mod round;
@@ -162,6 +164,7 @@ pub enum BuiltinTerm {
     PushFront,
     Reduce,
     Remainder,
+    Replace,
     ResolveDeep,
     Round,
     Slice,
@@ -189,9 +192,8 @@ impl GraphNode for BuiltinTerm {
         true
     }
 }
-impl<
-        T: Expression + Applicable<T> + Rewritable<T> + Reducible<T> + Compile<T>,
-    > Applicable<T> for BuiltinTerm
+impl<T: Expression + Applicable<T> + Rewritable<T> + Reducible<T> + Compile<T>> Applicable<T>
+    for BuiltinTerm
 {
     fn arity(&self) -> Option<Arity> {
         match self {
@@ -241,10 +243,11 @@ impl<
             Self::PushFront => Applicable::<T>::arity(&PushFront {}),
             Self::Reduce => Applicable::<T>::arity(&Reduce {}),
             Self::Remainder => Applicable::<T>::arity(&Remainder {}),
+            Self::Replace => Applicable::<T>::arity(&Replace {}),
             Self::ResolveDeep => Applicable::<T>::arity(&ResolveDeep {}),
             Self::Round => Applicable::<T>::arity(&Round {}),
             Self::Slice => Applicable::<T>::arity(&Slice {}),
-            Self::Split => Applicable::<T>::arity(&Split {}),
+            Self::Split => Applicable::<T>::arity(&Replace {}),
             Self::StartsWith => Applicable::<T>::arity(&StartsWith {}),
             Self::Struct => Applicable::<T>::arity(&Struct {}),
             Self::Subtract => Applicable::<T>::arity(&Subtract {}),
@@ -320,12 +323,13 @@ impl<
             Self::Remainder => {
                 Applicable::<T>::apply(&Remainder {}, args, factory, allocator, cache)
             }
+            Self::Replace => Applicable::<T>::apply(&Replace {}, args, factory, allocator, cache),
             Self::ResolveDeep => {
                 Applicable::<T>::apply(&ResolveDeep {}, args, factory, allocator, cache)
             }
             Self::Round => Applicable::<T>::apply(&Round {}, args, factory, allocator, cache),
             Self::Slice => Applicable::<T>::apply(&Slice {}, args, factory, allocator, cache),
-            Self::Split => Applicable::<T>::apply(&Split {}, args, factory, allocator, cache),
+            Self::Split => Applicable::<T>::apply(&Replace {}, args, factory, allocator, cache),
             Self::StartsWith => {
                 Applicable::<T>::apply(&StartsWith {}, args, factory, allocator, cache)
             }
@@ -366,32 +370,33 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>> 
                                     compiler.store_compiled_chunk(
                                         hash,
                                         Program::new(
-                                            once(Instruction::Function { hash, arity: num_args })
-                                                .chain(
-                                                    with_eagerness(0..arity.required(), &arity)
-                                                        .into_iter()
-                                                        .flat_map(|(_, eager)| {
-                                                            once(Instruction::PushStatic {
-                                                                offset: num_args - 1,
-                                                            })
-                                                            .chain(match eager {
-                                                                VarArgs::Eager => {
-                                                                    Some(Instruction::Evaluate)
-                                                                }
-                                                                VarArgs::Lazy => None,
-                                                            })
-                                                        }),
-                                                )
-                                                .chain(once(Instruction::PushBuiltin {
-                                                    target: *self,
-                                                }))
-                                                .chain(once(Instruction::Apply { num_args }))
-                                                .chain(if num_args > 0 {
-                                                    Some(Instruction::Squash { depth: num_args })
-                                                } else {
-                                                    None
-                                                })
-                                                .chain(once(Instruction::Return)),
+                                            once(Instruction::Function {
+                                                hash,
+                                                arity: num_args,
+                                            })
+                                            .chain(
+                                                with_eagerness(0..arity.required(), &arity)
+                                                    .into_iter()
+                                                    .flat_map(|(_, eager)| {
+                                                        once(Instruction::PushStatic {
+                                                            offset: num_args - 1,
+                                                        })
+                                                        .chain(match eager {
+                                                            VarArgs::Eager => {
+                                                                Some(Instruction::Evaluate)
+                                                            }
+                                                            VarArgs::Lazy => None,
+                                                        })
+                                                    }),
+                                            )
+                                            .chain(once(Instruction::PushBuiltin { target: *self }))
+                                            .chain(once(Instruction::Apply { num_args }))
+                                            .chain(if num_args > 0 {
+                                                Some(Instruction::Squash { depth: num_args })
+                                            } else {
+                                                None
+                                            })
+                                            .chain(once(Instruction::Return)),
                                         ),
                                     )
                                 }

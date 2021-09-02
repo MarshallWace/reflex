@@ -291,6 +291,7 @@ fn get_builtin_string_field<T: Expression>(
     factory: &impl ExpressionFactory<T>,
 ) -> Option<T> {
     match method {
+        "replace" => Some(factory.create_builtin_term(BuiltinTerm::Replace)),
         "split" => Some(factory.create_builtin_term(BuiltinTerm::Split)),
         _ => None,
     }
