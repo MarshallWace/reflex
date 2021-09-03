@@ -10,12 +10,12 @@ use std::{
     iter::once,
 };
 
-use futures_util::{stream, StreamExt};
+use futures_util::{future, stream, StreamExt};
 use reflex::{
     compiler::Compile,
     core::{
         Applicable, Expression, ExpressionFactory, HeapAllocator, Reducible, Rewritable, Signal,
-        SignalType, StateToken,
+        SignalId, SignalType, StateToken,
     },
     hash::{hash_object, HashId},
     lang::{BuiltinTerm, ValueTerm},
@@ -56,14 +56,29 @@ where
                 Ok((loader, keys)) => Some((*signal, *loader, *keys)),
             })
             .fold(
-                HashMap::<&T, (HashId, Vec<T>, HashMap<&T, usize>, &Signal<T>)>::new(),
+                HashMap::<
+                    &T,
+                    (
+                        HashId,
+                        Vec<StateToken>,
+                        Vec<T>,
+                        HashMap<&T, usize>,
+                        &Signal<T>,
+                    ),
+                >::new(),
                 |mut results, (signal, loader, keys)| {
                     match results.entry(loader) {
                         Entry::Occupied(mut entry) => {
-                            let (_, existing_keys, loader_key_lookup, last_signal) =
-                                entry.get_mut();
+                            let (
+                                _,
+                                existing_signals,
+                                existing_keys,
+                                loader_key_lookup,
+                                last_signal,
+                            ) = entry.get_mut();
                             let num_existing_keys = existing_keys.len();
                             existing_keys.extend(keys.iter().cloned());
+                            existing_signals.push(signal.id());
                             loader_key_lookup.extend(
                                 keys.iter()
                                     .enumerate()
@@ -74,6 +89,7 @@ where
                         Entry::Vacant(entry) => {
                             entry.insert((
                                 0,
+                                vec![signal.id()],
                                 keys.iter().cloned().collect(),
                                 keys.iter()
                                     .enumerate()
@@ -87,7 +103,7 @@ where
                 },
             );
         for (loader, entry) in keys_by_loader.iter_mut() {
-            let (_, keys, _, _) = entry;
+            let (_, _, keys, _, _) = entry;
             entry.0 = get_loader_cache_key(*loader, keys)
         }
         Some(
@@ -97,7 +113,7 @@ where
                     Err(error) => Err(error),
                     Ok((loader, keys)) => match keys_by_loader.get(loader) {
                         None => Err(format!("Unhandled signal: {}", signal)),
-                        Some((cache_key, _, loader_key_lookup, last_signal)) => {
+                        Some((cache_key, _, _, loader_key_lookup, last_signal)) => {
                             let cache = factory.create_dynamic_variable_term(
                                 *cache_key,
                                 create_pending(&factory, &allocator),
@@ -115,7 +131,7 @@ where
                                 }),
                             ));
                             let effect = if signal == *last_signal {
-                                let (cache_key, loader_keys, _, _) =
+                                let (cache_key, signal_ids, loader_keys, _, _) =
                                     keys_by_loader.remove(loader).unwrap();
                                 let loader = loader.clone();
                                 println!(
@@ -125,10 +141,12 @@ where
                                 );
                                 let factory = factory.clone();
                                 let allocator = allocator.clone();
-                                Some(RuntimeEffect::stream(Box::pin(
+                                let dispose = future::ready(());
+                                Some(RuntimeEffect::stream(
                                     load_batch(
                                         &loader,
                                         &loader_keys,
+                                        signal_ids,
                                         helpers,
                                         &factory,
                                         &allocator,
@@ -154,7 +172,8 @@ where
                                                 .create_vector_term(allocator.create_list(results)),
                                         )
                                     }),
-                                )))
+                                    dispose,
+                                ))
                             } else {
                                 None
                             };
@@ -174,6 +193,7 @@ fn get_loader_cache_key<T: Expression>(loader: &T, keys: &[T]) -> StateToken {
 fn load_batch<T: AsyncExpression + Rewritable<T> + Reducible<T> + Compile<T>>(
     loader: &T,
     keys: &[T],
+    signal_ids: impl IntoIterator<Item = SignalId>,
     helpers: &SignalHelpers<T>,
     factory: &impl AsyncExpressionFactory<T>,
     allocator: &impl AsyncHeapAllocator<T>,
@@ -190,7 +210,7 @@ where
     );
     match helpers
         .clone()
-        .watch_expression(expression, factory, allocator)
+        .watch_expression(expression, signal_ids, factory, allocator)
     {
         Err(error) => stream::iter(once(Err(vec![error]))).left_stream(),
         Ok(results) => results

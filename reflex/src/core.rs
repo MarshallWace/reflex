@@ -270,6 +270,9 @@ impl<T: Hash> DynamicState<T> {
     pub fn get(&self, key: StateToken) -> Option<&T> {
         self.values.get(&key)
     }
+    pub fn remove(&mut self, key: &StateToken) -> Option<T> {
+        self.values.remove(key)
+    }
     pub fn set(&mut self, key: StateToken, value: T) {
         let value_hash = hash_object(&value);
         let previous = self.values.insert(key, value);
@@ -793,6 +796,8 @@ pub enum VarArgs {
     Lazy,
 }
 
+pub type SignalId = HashId;
+
 #[derive(Eq, PartialEq, Debug)]
 pub struct Signal<T: Expression> {
     hash: HashId,
@@ -815,7 +820,7 @@ impl<T: Expression> Signal<T> {
             args,
         }
     }
-    pub fn id(&self) -> StateToken {
+    pub fn id(&self) -> SignalId {
         self.hash
     }
     pub fn signal_type(&self) -> &SignalType {

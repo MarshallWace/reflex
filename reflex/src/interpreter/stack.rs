@@ -34,14 +34,17 @@ struct StackEntry {
     #[allow(dead_code)]
     target_address: InstructionPointer,
     resume_address: InstructionPointer,
-    parent_dependencies: DependencyList,
+    parent_state_dependencies: DependencyList,
+    parent_subexpressions: Vec<HashId>,
 }
 
 pub struct CallStack<'a> {
     debug: bool,
+    hash: HashId,
     program: &'a Program,
     program_counter: InstructionPointer,
     state_dependencies: DependencyList,
+    subexpressions: Vec<HashId>,
     call_stack: Vec<StackEntry>,
     subroutines: Vec<Subroutine>,
 }
@@ -54,12 +57,17 @@ impl<'a> CallStack<'a> {
     ) -> Self {
         Self {
             debug,
+            hash: hash_program_root(program, &entry_point),
             program,
             program_counter: entry_point,
             call_stack: create_stack(call_stack_size),
             state_dependencies: DependencyList::empty(),
+            subexpressions: Vec::new(),
             subroutines: Vec::new(),
         }
+    }
+    pub fn hash(&self) -> HashId {
+        self.hash
     }
     pub fn program(&self) -> &'a Program {
         self.program
@@ -79,13 +87,16 @@ impl<'a> CallStack<'a> {
         target_address: InstructionPointer,
         resume_address: InstructionPointer,
     ) {
-        let parent_dependencies = self.replace_state_dependencies(DependencyList::empty());
+        self.subexpressions.push(hash);
+        let parent_state_dependencies = self.replace_state_dependencies(DependencyList::empty());
+        let parent_subexpressions = self.replace_subexpressions(Vec::new());
         self.call_stack.push(StackEntry {
             hash,
             subroutine: false,
             target_address,
             resume_address,
-            parent_dependencies,
+            parent_state_dependencies,
+            parent_subexpressions,
         });
         self.program_counter = target_address;
     }
@@ -95,6 +106,7 @@ impl<'a> CallStack<'a> {
         instructions: Program,
         resume_address: InstructionPointer,
     ) -> InstructionPointer {
+        self.subexpressions.push(hash);
         let subroutine_address = match self.subroutines.last() {
             Some(subroutine) => subroutine.end_address(),
             None => InstructionPointer::new(self.program.len()),
@@ -110,27 +122,32 @@ impl<'a> CallStack<'a> {
                 self.subroutines.last().unwrap().instructions
             );
         }
-        let parent_dependencies = self.replace_state_dependencies(DependencyList::empty());
+        let parent_state_dependencies = self.replace_state_dependencies(DependencyList::empty());
+        let parent_subexpressions = self.replace_subexpressions(Vec::new());
         self.call_stack.push(StackEntry {
             hash,
             subroutine: true,
             target_address: subroutine_address,
             resume_address,
-            parent_dependencies,
+            parent_state_dependencies,
+            parent_subexpressions,
         });
         self.program_counter = subroutine_address;
         subroutine_address
     }
-    pub(crate) fn pop_call_stack(&mut self) -> Option<(HashId, DependencyList)> {
+    pub(crate) fn pop_call_stack(&mut self) -> Option<(HashId, DependencyList, Vec<HashId>)> {
         match self.call_stack.pop() {
             Some(entry) => {
                 if entry.subroutine {
                     self.subroutines.pop();
                 }
                 self.program_counter = entry.resume_address;
-                let child_dependencies = self.replace_state_dependencies(entry.parent_dependencies);
-                self.state_dependencies.extend(child_dependencies.iter());
-                Some((entry.hash, child_dependencies))
+                let child_state_dependencies =
+                    self.replace_state_dependencies(entry.parent_state_dependencies);
+                let child_subexpressions = self.replace_subexpressions(entry.parent_subexpressions);
+                self.state_dependencies
+                    .extend(child_state_dependencies.iter());
+                Some((entry.hash, child_state_dependencies, child_subexpressions))
             }
             None => None,
         }
@@ -144,11 +161,11 @@ impl<'a> CallStack<'a> {
     ) {
         self.state_dependencies.extend(state_tokens);
     }
-    pub fn get_state_dependencies(&self) -> &DependencyList {
-        &self.state_dependencies
+    pub(crate) fn add_subexpression(&mut self, hash: HashId) {
+        self.subexpressions.push(hash);
     }
-    pub(crate) fn into_state_dependencies(self) -> DependencyList {
-        self.state_dependencies
+    pub(crate) fn into_parts(self) -> (HashId, DependencyList, Vec<HashId>) {
+        (self.hash, self.state_dependencies, self.subexpressions)
     }
     pub fn lookup_instruction(&'a self, address: InstructionPointer) -> Option<&'a Instruction> {
         if address.get() < self.program.len() {
@@ -167,8 +184,11 @@ impl<'a> CallStack<'a> {
             }
         }
     }
-    fn replace_state_dependencies(&mut self, dependencies: DependencyList) -> DependencyList {
-        std::mem::replace(&mut self.state_dependencies, dependencies)
+    fn replace_state_dependencies(&mut self, value: DependencyList) -> DependencyList {
+        std::mem::replace(&mut self.state_dependencies, value)
+    }
+    fn replace_subexpressions(&mut self, value: Vec<HashId>) -> Vec<HashId> {
+        std::mem::replace(&mut self.subexpressions, value)
     }
 }
 
@@ -229,6 +249,13 @@ impl<T: Expression> VariableStack<T> {
         }
         hasher.finish()
     }
+}
+
+fn hash_program_root(program: &Program, entry_point: &InstructionPointer) -> HashId {
+    let mut hasher = DefaultHasher::new();
+    program.hash(&mut hasher);
+    entry_point.hash(&mut hasher);
+    hasher.finish()
 }
 
 fn create_stack<T>(capacity: Option<usize>) -> Vec<T> {

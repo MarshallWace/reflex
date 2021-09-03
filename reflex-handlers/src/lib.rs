@@ -6,7 +6,6 @@ pub mod graphql;
 pub mod http;
 pub mod loader;
 
-use graphql::graphql_execute_handler;
 use reflex::{
     compiler::Compile,
     core::{Applicable, Reducible, Rewritable, Signal, StringValue},
@@ -18,11 +17,8 @@ use reflex_runtime::{
 
 pub(crate) mod utils {
     mod fetch;
-    mod graphql;
     pub(crate) use fetch::fetch;
-    pub(crate) use graphql::{
-        create_json_error_object, create_websocket_connection, subscribe_websocket_operation,
-    };
+    pub(crate) mod graphql;
 }
 
 pub fn builtin_signal_handler<
@@ -40,7 +36,7 @@ where
             loader::load_signal_handler(factory, allocator),
             compose_signal_handlers(
                 http::http_fetch_handler(factory, allocator),
-                graphql_execute_handler(factory, allocator),
+                graphql::create_graphql_signal_handler(factory, allocator),
             ),
         ),
     )
@@ -85,9 +81,12 @@ where
         );
         for signal in signals.iter() {
             let args = signal.args();
-            if !args.is_empty() {
+            if args.is_empty() {
+                eprintln!("  {}", signal.id(),);
+            } else {
                 eprintln!(
-                    "  {}",
+                    "  {}: {}",
+                    signal.id(),
                     args.iter()
                         .map(|arg| format!("{}", arg))
                         .collect::<Vec<_>>()

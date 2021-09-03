@@ -5,8 +5,8 @@ use hyper::{Body, Request, Uri};
 use hyper_tls::HttpsConnector;
 
 pub(crate) async fn fetch(
-    method: String,
-    url: String,
+    method: &str,
+    url: &str,
     headers: impl IntoIterator<Item = (String, String)>,
     body: Option<String>,
 ) -> Result<(u16, String), String> {

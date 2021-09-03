@@ -109,9 +109,8 @@ pub async fn main() {
                                     &mut interpreter_cache,
                                 ) {
                                     Err(error) => Err(error),
-                                    Ok(result) => {
+                                    Ok((result, _cache_key)) => {
                                         let (output, dependencies) = result.into_parts();
-
                                         if dependencies.is_empty() {
                                             writeln!(stdout, "{}", output)
                                                 .or_else(|error| Err(format!("{}", error)))

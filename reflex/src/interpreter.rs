@@ -15,7 +15,7 @@ use crate::{
         Applicable, DependencyList, DynamicState, EvaluationCache, EvaluationResult, Expression,
         ExpressionFactory, HeapAllocator, Reducible, Rewritable, SignalType,
     },
-    hash::combine_hashes,
+    hash::HashId,
     lang::{get_short_circuit_signal, CompiledFunctionTerm, ValueTerm},
 };
 
@@ -73,10 +73,11 @@ pub fn execute<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Ex
     plugins: &NativeFunctionRegistry<T>,
     options: &InterpreterOptions,
     cache: &mut impl InterpreterCache<T>,
-) -> Result<EvaluationResult<T>, String> {
+) -> Result<(EvaluationResult<T>, HashId), String> {
     let mut context = VariableStack::new(options.variable_stack_size);
     let mut evaluation_cache = SubstitutionCache::new();
     let call_stack = CallStack::new(program, entry_point, options.call_stack_size, options.debug);
+    let cache_key = call_stack.hash();
     evaluate_program_loop(
         state,
         &mut context,
@@ -88,6 +89,7 @@ pub fn execute<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Ex
         &mut evaluation_cache,
         options.debug,
     )
+    .map(|result| (result, cache_key))
 }
 
 fn evaluate_program_loop<
@@ -324,69 +326,45 @@ fn evaluate_program_loop<
                                     Some(arity) => {
                                         let args =
                                             allocator.create_list(stack.pop_multiple(num_args));
-                                        let hash = combine_hashes(&target, &args);
-                                        let result = if let Some(result) =
-                                            cache.retrieve_result(hash, None)
-                                        {
-                                            Ok(result.result().clone())
-                                        } else {
-                                            let result = match get_short_circuit_signal(
-                                                args.as_slice(),
-                                                &arity,
+                                        let result = match get_short_circuit_signal(
+                                            args.as_slice(),
+                                            &arity,
+                                            factory,
+                                            allocator,
+                                        ) {
+                                            Some(signal) => {
+                                                if let Some(_) =
+                                                    factory.match_signal_transformer_term(&target)
+                                                {
+                                                    match target.apply(
+                                                        vec![signal],
+                                                        factory,
+                                                        allocator,
+                                                        evaluation_cache,
+                                                    ) {
+                                                        Ok(result) => result,
+                                                        Err(error) => create_error_signal(
+                                                            error, factory, allocator,
+                                                        ),
+                                                    }
+                                                } else {
+                                                    signal
+                                                }
+                                            }
+                                            None => match target.apply(
+                                                args,
                                                 factory,
                                                 allocator,
+                                                evaluation_cache,
                                             ) {
-                                                Some(signal) => {
-                                                    if let Some(_) = factory
-                                                        .match_signal_transformer_term(&target)
-                                                    {
-                                                        match target.apply(
-                                                            vec![signal],
-                                                            factory,
-                                                            allocator,
-                                                            evaluation_cache,
-                                                        ) {
-                                                            Ok(result) => result,
-                                                            Err(error) => create_error_signal(
-                                                                error, factory, allocator,
-                                                            ),
-                                                        }
-                                                    } else {
-                                                        signal
-                                                    }
+                                                Ok(result) => result,
+                                                Err(error) => {
+                                                    create_error_signal(error, factory, allocator)
                                                 }
-                                                None => match target.apply(
-                                                    args,
-                                                    factory,
-                                                    allocator,
-                                                    evaluation_cache,
-                                                ) {
-                                                    Ok(result) => result,
-                                                    Err(error) => create_error_signal(
-                                                        error, factory, allocator,
-                                                    ),
-                                                },
-                                            };
-                                            cache.store_result(
-                                                hash,
-                                                state,
-                                                EvaluationResult::new(
-                                                    result.clone(),
-                                                    DependencyList::empty(),
-                                                ),
-                                            );
-                                            Ok(result)
+                                            },
                                         };
-                                        match result {
-                                            Err(error) => Err(error),
-                                            Ok(result) => {
-                                                stack.push(result);
-                                                Ok((
-                                                    ExecutionResult::Advance,
-                                                    DependencyList::empty(),
-                                                ))
-                                            }
-                                        }
+                                        stack.push(result);
+                                        Ok((ExecutionResult::Advance, DependencyList::empty()))
                                     }
                                 }
                             }
@@ -606,7 +584,8 @@ fn evaluate_program_loop<
                             })
                         {
                             let hash = stack.generate_function_call_hash(target_hash, num_args);
-                            if let Some(cached_result) = cache.retrieve_result(hash, Some(state)) {
+                            if let Some(cached_result) = cache.retrieve_result(hash, state) {
+                                call_stack.add_subexpression(hash);
                                 call_stack
                                     .add_state_dependencies(cached_result.dependencies().iter());
                                 stack.pop_multiple(num_args);
@@ -628,7 +607,8 @@ fn evaluate_program_loop<
                         resume_address,
                     } => {
                         let hash = stack.generate_function_call_hash(&subroutine, num_args);
-                        if let Some(cached_result) = cache.retrieve_result(hash, Some(state)) {
+                        if let Some(cached_result) = cache.retrieve_result(hash, state) {
+                            call_stack.add_subexpression(hash);
                             call_stack.add_state_dependencies(cached_result.dependencies().iter());
                             stack.pop_multiple(num_args);
                             stack.push(cached_result.result().clone());
@@ -638,12 +618,13 @@ fn evaluate_program_loop<
                         }
                     }
                     ExecutionResult::Return => match call_stack.pop_call_stack() {
-                        Some((hash, dependencies)) => match stack.peek() {
+                        Some((hash, dependencies, subexpressions)) => match stack.peek() {
                             Some(result) => {
                                 cache.store_result(
                                     hash,
                                     state,
                                     EvaluationResult::new(result.clone(), dependencies),
+                                    subexpressions,
                                 );
                             }
                             None => return Err(String::from(
@@ -654,9 +635,11 @@ fn evaluate_program_loop<
                     },
                     ExecutionResult::End => {
                         match stack.pop() {
-                            Some(result) => {
-                                let dependencies = call_stack.into_state_dependencies();
-                                return Ok(EvaluationResult::new(result, dependencies));
+                            Some(value) => {
+                                let (hash, dependencies, subexpressions) = call_stack.into_parts();
+                                let result = EvaluationResult::new(value, dependencies);
+                                cache.store_result(hash, state, result.clone(), subexpressions);
+                                return Ok(result);
                             }
                             None => return Err(String::from("Program did not return a result")),
                         };
@@ -741,7 +724,7 @@ mod tests {
             .compile(&expression, CompilerMode::Program, &factory, &allocator)
             .unwrap();
         let mut state = DynamicState::new();
-        let result = execute(
+        let (result, _) = execute(
             compiled.program(),
             InstructionPointer::default(),
             &state,
@@ -750,19 +733,20 @@ mod tests {
             compiled.plugins(),
             &InterpreterOptions::default(),
             &mut cache,
-        );
+        )
+        .unwrap();
         assert_eq!(
             result,
-            Ok(EvaluationResult::new(
+            EvaluationResult::new(
                 factory.create_signal_term(allocator.create_signal_list(once(
                     allocator.create_signal(SignalType::Pending, allocator.create_empty_list()),
                 ))),
                 DependencyList::of(state_token),
-            )),
+            ),
         );
 
         state.set(state_token, factory.create_value_term(ValueTerm::Int(4)));
-        let result = execute(
+        let (result, _) = execute(
             compiled.program(),
             InstructionPointer::default(),
             &state,
@@ -771,13 +755,14 @@ mod tests {
             compiled.plugins(),
             &InterpreterOptions::default(),
             &mut cache,
-        );
+        )
+        .unwrap();
         assert_eq!(
             result,
-            Ok(EvaluationResult::new(
+            EvaluationResult::new(
                 factory.create_value_term(ValueTerm::Int(3 + 4)),
                 DependencyList::of(state_token),
-            )),
+            ),
         );
     }
 
@@ -792,7 +777,7 @@ mod tests {
             Instruction::End,
         ]);
         let state = DynamicState::new();
-        let result = execute(
+        let (result, _) = execute(
             &program,
             InstructionPointer::default(),
             &state,
@@ -839,7 +824,7 @@ mod tests {
             Instruction::End,
         ]);
         let state = DynamicState::new();
-        let result = execute(
+        let (result, _) = execute(
             &program,
             InstructionPointer::default(),
             &state,
@@ -875,7 +860,7 @@ mod tests {
             Instruction::End,
         ]);
         let state = DynamicState::new();
-        let result = execute(
+        let (result, _) = execute(
             &program,
             InstructionPointer::default(),
             &state,
@@ -909,7 +894,7 @@ mod tests {
             Instruction::End,
         ]);
         let state = DynamicState::new();
-        let result = execute(
+        let (result, _) = execute(
             &program,
             InstructionPointer::default(),
             &state,
@@ -943,7 +928,7 @@ mod tests {
             Instruction::End,
         ]);
         let state = DynamicState::new();
-        let result = execute(
+        let (result, _) = execute(
             &program,
             InstructionPointer::default(),
             &state,
@@ -984,7 +969,7 @@ mod tests {
             Instruction::End,
         ]);
         let state = DynamicState::new();
-        let result = execute(
+        let (result, _) = execute(
             &program,
             InstructionPointer::default(),
             &state,

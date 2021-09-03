@@ -9,7 +9,7 @@ use reflex::{
     },
     core::{
         Applicable, Expression, ExpressionFactory, ExpressionList, HeapAllocator, Reducible,
-        Rewritable, Signal, SignalType, StateToken, StringValue,
+        Rewritable, Signal, SignalId, SignalType, StateToken, StringValue,
     },
     hash::{hash_object, HashId},
     interpreter::{DefaultInterpreterCache, Execute, InterpreterCache, InterpreterOptions},
@@ -96,9 +96,11 @@ where
     pub fn watch_expression(
         self,
         expression: T,
+        initiators: impl IntoIterator<Item = SignalId>,
         factory: &impl AsyncExpressionFactory<T>,
         allocator: &impl AsyncHeapAllocator<T>,
     ) -> Result<impl Stream<Item = SubscriptionResult<T>> + Send + 'static, String> {
+        let initiators = initiators.into_iter().collect::<Vec<_>>();
         let entry_point = InstructionPointer::new(self.program.len());
         let prelude = (*self.program).clone();
         Compiler::new(self.compiler_options, Some(prelude))
@@ -106,34 +108,43 @@ where
             .map(|compiled| {
                 // TODO: Error if runtime expression depends on unrecognized native functions
                 let (program, _) = compiled.into_parts();
-                self.watch_compiled_expression(program, entry_point, factory, allocator)
+                self.watch_compiled_expression(program, entry_point, initiators, factory, allocator)
             })
     }
     pub fn watch_state(
         self,
         state_token: StateToken,
+        initiators: impl IntoIterator<Item = SignalId>,
         factory: &(impl ExpressionFactory<T> + Send + Sync + Clone + 'static),
         allocator: &(impl HeapAllocator<T> + Send + Sync + Clone + 'static),
     ) -> impl Stream<Item = SubscriptionResult<T>> + Send + 'static {
+        let initiators = initiators.into_iter().collect::<Vec<_>>();
         let program = Program::new(vec![
             Instruction::PushHash { value: Void::uid() },
             Instruction::PushDynamic { state_token },
             Instruction::Evaluate,
             Instruction::End,
         ]);
-        self.watch_compiled_expression(program, InstructionPointer::default(), factory, allocator)
-            .filter({
-                let factory = factory.clone();
-                move |value| match value {
-                    Ok(value) if Void::is(value, &factory) => false,
-                    _ => true,
-                }
-            })
+        self.watch_compiled_expression(
+            program,
+            InstructionPointer::default(),
+            initiators,
+            factory,
+            allocator,
+        )
+        .filter({
+            let factory = factory.clone();
+            move |value| match value {
+                Ok(value) if Void::is(value, &factory) => false,
+                _ => true,
+            }
+        })
     }
     fn watch_compiled_expression(
         self,
         program: Program,
         entry_point: InstructionPointer,
+        initiators: Vec<SignalId>,
         factory: &impl AsyncExpressionFactory<T>,
         allocator: &impl AsyncHeapAllocator<T>,
     ) -> impl Stream<Item = SubscriptionResult<T>> + Send + 'static {
@@ -146,6 +157,7 @@ where
                 match create_subscription(
                     program,
                     entry_point,
+                    Some(initiators),
                     &self.commands,
                     &factory,
                     &allocator,
@@ -214,8 +226,11 @@ pub type SubscriptionId = usize;
 type CommandChannel<T> = mpsc::Sender<Command<T>>;
 type ResultsChannel<T> = broadcast::Sender<(SubscriptionId, SubscriptionResult<T>)>;
 
-type SubscribeCommand<T> =
-    StreamOperation<(Program, InstructionPointer), SubscriptionId, Option<SubscriptionResult<T>>>;
+type SubscribeCommand<T> = StreamOperation<
+    (Program, InstructionPointer, Option<Vec<SignalId>>),
+    SubscriptionId,
+    Option<SubscriptionResult<T>>,
+>;
 type UnsubscribeCommand = Operation<SubscriptionId, bool>;
 type UpdateCommand<T> = Operation<Vec<StateUpdate<T>>, ()>;
 
@@ -246,8 +261,15 @@ impl<T: Expression> StateUpdate<T> {
 }
 
 pub type SyncEffect<T> = Vec<StateUpdate<T>>;
-pub type AsyncEffect<T> = Pin<Box<dyn Future<Output = Vec<StateUpdate<T>>> + Send + 'static>>;
-pub type StreamEffect<T> = Pin<Box<dyn Stream<Item = Vec<StateUpdate<T>>> + Send + 'static>>;
+pub type AsyncEffect<T> = (
+    Pin<Box<dyn Future<Output = Vec<StateUpdate<T>>> + Send + 'static>>,
+    DisposeCallback,
+);
+pub type StreamEffect<T> = (
+    Pin<Box<dyn Stream<Item = Vec<StateUpdate<T>>> + Send + 'static>>,
+    DisposeCallback,
+);
+pub type DisposeCallback = Pin<Box<dyn Future<Output = ()> + Send + 'static>>;
 
 pub enum RuntimeEffect<T: Expression> {
     Sync(SyncEffect<T>),
@@ -264,11 +286,17 @@ impl<T: Expression> RuntimeEffect<T> {
     ) -> Self {
         Self::batch_update(once((state_token, updater)))
     }
-    pub fn deferred(update: impl Future<Output = StateUpdate<T>> + Send + 'static) -> Self {
-        Self::batch_deferred(update.map(|update| vec![update]))
+    pub fn deferred(
+        update: impl Future<Output = StateUpdate<T>> + Send + 'static,
+        dispose: impl Future<Output = ()> + Send + 'static,
+    ) -> Self {
+        Self::batch_deferred(update.map(|update| vec![update]), dispose)
     }
-    pub fn stream(update: impl Stream<Item = StateUpdate<T>> + Send + 'static) -> Self {
-        Self::batch_stream(update.map(|update| vec![update]))
+    pub fn stream(
+        update: impl Stream<Item = StateUpdate<T>> + Send + 'static,
+        dispose: impl Future<Output = ()> + Send + 'static,
+    ) -> Self {
+        Self::batch_stream(update.map(|update| vec![update]), dispose)
     }
     pub fn batch_assign(values: impl IntoIterator<Item = (StateToken, T)>) -> Self {
         Self::Sync(
@@ -292,11 +320,15 @@ impl<T: Expression> RuntimeEffect<T> {
     }
     pub fn batch_deferred(
         updates: impl Future<Output = Vec<StateUpdate<T>>> + Send + 'static,
+        dispose: impl Future<Output = ()> + Send + 'static,
     ) -> Self {
-        Self::Async(Box::pin(updates))
+        Self::Async((Box::pin(updates), Box::pin(dispose)))
     }
-    pub fn batch_stream(updates: impl Stream<Item = Vec<StateUpdate<T>>> + Send + 'static) -> Self {
-        Self::Stream(Box::pin(updates))
+    pub fn batch_stream(
+        updates: impl Stream<Item = Vec<StateUpdate<T>>> + Send + 'static,
+        dispose: impl Future<Output = ()> + Send + 'static,
+    ) -> Self {
+        Self::Stream((Box::pin(updates), Box::pin(dispose)))
     }
 }
 
@@ -309,11 +341,12 @@ impl<T: Expression> Command<T> {
     fn subscribe(
         program: Program,
         entry_point: InstructionPointer,
+        initiators: Option<Vec<SignalId>>,
         response: oneshot::Sender<SubscriptionId>,
         update: watch::Sender<Option<SubscriptionResult<T>>>,
     ) -> Self {
         Self::Subscribe(StreamOperation::new(
-            (program, entry_point),
+            (program, entry_point, initiators),
             response,
             update,
         ))
@@ -429,7 +462,15 @@ where
         factory: &(impl ExpressionFactory<T> + Send + Clone + 'static),
         allocator: &(impl HeapAllocator<T> + Send + Clone + 'static),
     ) -> Result<StreamSubscription<'a, T, impl Stream<Item = SubscriptionResult<T>>>, String> {
-        create_subscription(program, entry_point, &self.commands, factory, allocator).await
+        create_subscription(
+            program,
+            entry_point,
+            None,
+            &self.commands,
+            factory,
+            allocator,
+        )
+        .await
     }
     pub async fn unsubscribe(&self, id: SubscriptionId) -> Result<bool, String> {
         stop_subscription(id, &self.commands).await
@@ -459,6 +500,71 @@ where
     }
 }
 
+struct SharedKeyValueStore<K: Eq + std::hash::Hash, V> {
+    commands: mpsc::Sender<SharedKeyValueStoreCommand<K, V>>,
+}
+impl<K: Eq + std::hash::Hash, V> Clone for SharedKeyValueStore<K, V> {
+    fn clone(&self) -> Self {
+        Self {
+            commands: self.commands.clone(),
+        }
+    }
+}
+enum SharedKeyValueStoreCommand<K, V> {
+    Insert(Operation<(K, V), Option<V>>),
+    Remove(Operation<K, Option<V>>),
+}
+impl<K: Eq + std::hash::Hash + Send + 'static, V: Send + 'static> SharedKeyValueStore<K, V> {
+    fn new() -> Self {
+        let (commands_tx, mut commands_rx) =
+            mpsc::channel::<SharedKeyValueStoreCommand<K, V>>(1024);
+        tokio::spawn(async move {
+            let mut cache = Mutex::new(HashMap::<K, V>::new());
+            while let Some(command) = commands_rx.recv().await {
+                match command {
+                    SharedKeyValueStoreCommand::Insert(command) => {
+                        let (key, value) = command.payload;
+                        let existing_value = cache.get_mut().unwrap().insert(key, value);
+                        let _ = command.response.send(existing_value);
+                    }
+                    SharedKeyValueStoreCommand::Remove(command) => {
+                        let key = command.payload;
+                        let value = cache.get_mut().unwrap().remove(&key);
+                        let _ = command.response.send(value);
+                    }
+                }
+            }
+        });
+        Self {
+            commands: commands_tx,
+        }
+    }
+    async fn insert(&self, key: K, value: V) -> Result<Option<V>, String> {
+        let (response_tx, response_rx) = oneshot::channel();
+        let _ = self
+            .commands
+            .send(SharedKeyValueStoreCommand::Insert(Operation::new(
+                (key, value),
+                response_tx,
+            )))
+            .await
+            .map_err(|error| format!("{}", error))?;
+        response_rx.await.map_err(|error| format!("{}", error))
+    }
+    async fn remove(&self, key: K) -> Result<Option<V>, String> {
+        let (response_tx, response_rx) = oneshot::channel();
+        let _ = self
+            .commands
+            .send(SharedKeyValueStoreCommand::Remove(Operation::new(
+                key,
+                response_tx,
+            )))
+            .await
+            .map_err(|error| format!("{}", error))?;
+        response_rx.await.map_err(|error| format!("{}", error))
+    }
+}
+
 fn create_store<
     T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T> + Execute<T>,
     THandler,
@@ -480,58 +586,122 @@ where
         + Sync
         + 'static,
 {
-    let (messages_tx, mut messages_rx) = mpsc::channel::<Command<T>>(command_buffer_size);
+    let (commands_tx, mut commands_rx) = mpsc::channel::<Command<T>>(command_buffer_size);
     let (results_tx, _) = broadcast::channel(result_buffer_size);
-    let results = results_tx.clone();
-    let signal_messages = messages_tx.clone();
-    let factory = factory.clone();
-    let allocator = allocator.clone();
-    let signal_helpers = SignalHelpers::new(program, messages_tx.clone(), compiler_options);
-    tokio::spawn(async move {
-        let cache = DefaultInterpreterCache::default();
-        let mut store = Mutex::new(Store::new(cache, None, plugins, interpreter_options));
-        while let Some(command) = messages_rx.recv().await {
-            let mut next_command = Some(command);
-            while let Some(command) = next_command {
-                match command {
-                    Command::Subscribe(command) => {
-                        process_subscribe_command(command, &mut store, &results)
+    tokio::spawn({
+        let signal_helpers = SignalHelpers::new(program, commands_tx.clone(), compiler_options);
+        let dispose_cache = SharedKeyValueStore::<SignalId, DisposeCallback>::new();
+        let results = results_tx.clone();
+        let commands_tx = commands_tx.clone();
+        let factory = factory.clone();
+        let allocator = allocator.clone();
+        async move {
+            let cache = DefaultInterpreterCache::default();
+            let mut store = Mutex::new(Store::new(cache, None, plugins, interpreter_options));
+            while let Some(command) = commands_rx.recv().await {
+                let mut next_command = Some(command);
+                while let Some(command) = next_command {
+                    match command {
+                        Command::Subscribe(command) => {
+                            process_subscribe_command(command, &mut store, &results)
+                        }
+                        Command::Unsubscribe(command) => {
+                            process_unsubscribe_command(command, &mut store, &results)
+                        }
+                        Command::Update(command) => {
+                            process_update_command(command, &mut store, &results)
+                        }
                     }
-                    Command::Unsubscribe(command) => {
-                        process_unsubscribe_command(command, &mut store, &results)
-                    }
-                    Command::Update(command) => {
-                        process_update_command(command, &mut store, &results)
-                    }
+                    next_command = next_queued_item(&mut commands_rx);
                 }
-                next_command = next_queued_item(&mut messages_rx)
-            }
-            let updated_results = store.get_mut().unwrap().flush(
-                |signals| {
-                    handle_signals(
-                        signals,
-                        &signal_messages,
-                        &signal_handler,
-                        &signal_helpers,
-                        &factory,
-                    )
+                let updated_results = store.get_mut().unwrap().flush(
+                {
+                    |signals| {
+                        let signal_results = handle_signals(
+                            signals,
+                            &commands_tx,
+                            &signal_handler,
+                            &signal_helpers,
+                            &factory,
+                        );
+                        let (results, disposables): (Vec<_>, Vec<_>) = signals
+                            .iter()
+                            .map(|signal| signal.id())
+                            .zip(signal_results.into_iter())
+                            .map(|(signal_id, result)| match result {
+                                Ok((result, dispose)) => {
+                                    (Ok(result), dispose.map(|dispose| (signal_id, dispose)))
+                                }
+                                Err(error) => (Err(error), None),
+                            })
+                            .unzip();
+                        let disposables = disposables.into_iter().filter_map(identity);
+                        for (signal_id, dispose) in disposables {
+                            tokio::spawn({
+                                let dispose_cache = dispose_cache.clone();
+                                async move { dispose_cache.insert(signal_id, dispose).await }
+                            });
+                        }
+                        results
+                    }
                 },
                 &factory,
                 &allocator,
-            );
-            let updated_results =
-                updated_results
-                    .into_iter()
-                    .filter_map(|(id, result)| match strip_pending_results(result) {
-                        None => None,
-                        Some(result) => Some((id, result)),
-                    });
-            for update in updated_results {
-                results.send(update).unwrap();
+            )
+                .into_iter()
+                .filter_map(|(id, result)| match strip_pending_results(result) {
+                    None => None,
+                    Some(result) => Some((id, result)),
+                });
+                for update in updated_results {
+                    let _ = results.send(update);
+                }
+                let disposed_signal_ids = gc(&mut store);
+                if !disposed_signal_ids.is_empty() {
+                    println!(
+                        "[Runtime] Disposing {} inactive signals",
+                        disposed_signal_ids.len()
+                    );
+                    for signal_id in disposed_signal_ids {
+                        tokio::spawn({
+                            let dispose_cache = dispose_cache.clone();
+                            async move {
+                                if let Some(dispose) =
+                                    dispose_cache.remove(signal_id).await.unwrap()
+                                {
+                                    let _ = dispose.await;
+                                }
+                            }
+                        });
+                    }
+                }
             }
         }
     });
-    (messages_tx, results_tx)
+    (commands_tx, results_tx)
+}
+
+fn gc<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Execute<T>>(
+    store: &mut Mutex<Store<T, DefaultInterpreterCache<T>>>,
+) -> Vec<SignalId> {
+    let mut combined_signal_ids = Vec::new();
+    loop {
+        let (disposed_signal_ids, disposed_subscriptions): (Vec<_>, Vec<_>) =
+            store.get_mut().unwrap().gc();
+        combined_signal_ids.extend(disposed_signal_ids);
+        if disposed_subscriptions.is_empty() {
+            break;
+        }
+        println!(
+            "[Runtime] Disposing {} inactive subscriptions",
+            disposed_subscriptions.len()
+        );
+        let store = store.get_mut().unwrap();
+        for subscription_id in disposed_subscriptions {
+            store.unsubscribe(subscription_id);
+        }
+    }
+    combined_signal_ids
 }
 
 fn process_subscribe_command<
@@ -544,8 +714,11 @@ fn process_subscribe_command<
 ) where
     T::String: StringValue + Send + Sync,
 {
-    let (program, entry_point) = command.payload;
-    let subscription_id = store.get_mut().unwrap().subscribe(program, entry_point);
+    let (program, entry_point, initiators) = command.payload;
+    let subscription_id = store
+        .get_mut()
+        .unwrap()
+        .subscribe(program, entry_point, initiators);
     let _ = command.response.send(subscription_id);
 
     let mut results_stream = get_subscription_results_stream(results_tx, subscription_id);
@@ -591,6 +764,7 @@ fn process_update_command<
 async fn create_subscription<'a, T: AsyncExpression>(
     program: Program,
     entry_point: InstructionPointer,
+    initiators: Option<Vec<SignalId>>,
     commands: &'a CommandChannel<T>,
     factory: &(impl ExpressionFactory<T> + Send + Clone + 'static),
     allocator: &(impl HeapAllocator<T> + Send + Clone + 'static),
@@ -600,11 +774,8 @@ where
 {
     let (send, receive) = oneshot::channel();
     let (update_send, update_receive) = watch::channel(None);
-    commands
-        .send(Command::subscribe(program, entry_point, send, update_send))
-        .await
-        .ok()
-        .unwrap();
+    let command = Command::subscribe(program, entry_point, initiators, send, update_send);
+    commands.send(command).await.ok().unwrap();
     let factory = factory.clone();
     let allocator = allocator.clone();
     match receive.await {
@@ -666,7 +837,7 @@ fn handle_signals<
     signal_handler: &THandler,
     signal_helpers: &SignalHelpers<T>,
     factory: &impl AsyncExpressionFactory<T>,
-) -> Vec<Result<T, Option<String>>>
+) -> Vec<Result<(T, Option<DisposeCallback>), Option<String>>>
 where
     T::String: StringValue + Send + Sync,
     THandler: Fn(&str, &[&Signal<T>], &SignalHelpers<T>) -> SignalHandlerResult<T>
@@ -717,32 +888,36 @@ where
         }
     }
 
-    let (results, effects): (Vec<_>, Vec<Option<_>>) = signals
+    signals
         .into_iter()
-        .map(|signal| match signal.signal_type() {
-            SignalType::Error => Err(Some(parse_error_signal_message(signal.args(), factory))),
-            SignalType::Pending => Err(None),
-            SignalType::Custom(_) => match custom_signal_results.remove(&signal.id()) {
-                Some(result) => match result {
-                    Ok(result) => Ok(result),
-                    Err(error) => Err(Some(error)),
+        .map({
+            let factory = factory.clone();
+            let commands = commands.clone();
+            move |signal| match signal.signal_type() {
+                SignalType::Error => Err(Some(parse_error_signal_message(signal.args(), &factory))),
+                SignalType::Pending => Err(None),
+                SignalType::Custom(_) => match custom_signal_results.remove(&signal.id()) {
+                    Some(result) => match result {
+                        Ok((result, effect)) => {
+                            let dispose = match effect {
+                                Some(effect) => apply_effect(effect, &commands),
+                                _ => None,
+                            };
+                            Ok((result, dispose))
+                        }
+                        Err(error) => Err(Some(error)),
+                    },
+                    None => Err(Some(format!("Unhandled signal: {}", signal))),
                 },
-                None => Err(Some(format!("Unhandled signal: {}", signal))),
-            },
+            }
         })
-        .map(|result| match result {
-            Err(error) => (Err(error), None),
-            Ok((result, effect)) => (Ok(result), effect),
-        })
-        .unzip();
-
-    for effect in effects.into_iter().filter_map(|effect| effect) {
-        apply_effect(effect, commands)
-    }
-    results
+        .collect()
 }
 
-fn apply_effect<T: AsyncExpression>(effect: RuntimeEffect<T>, commands: &CommandChannel<T>)
+fn apply_effect<T: AsyncExpression>(
+    effect: RuntimeEffect<T>,
+    commands: &CommandChannel<T>,
+) -> Option<DisposeCallback>
 where
     T::String: StringValue + Send + Sync,
 {
@@ -750,19 +925,22 @@ where
     match effect {
         RuntimeEffect::Sync(updates) => {
             tokio::spawn(async move { emit_updates(updates, &commands).await });
+            None
         }
-        RuntimeEffect::Async(effect) => {
+        RuntimeEffect::Async((effect, dispose)) => {
             tokio::spawn(async move {
                 let updates = effect.await;
                 emit_updates(updates, &commands).await
             });
+            Some(dispose)
         }
-        RuntimeEffect::Stream(mut effect) => {
+        RuntimeEffect::Stream((mut effect, dispose)) => {
             tokio::spawn(async move {
                 while let Some(updates) = effect.next().await {
                     emit_updates(updates, &commands).await
                 }
             });
+            Some(dispose)
         }
     }
 }

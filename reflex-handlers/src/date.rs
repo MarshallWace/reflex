@@ -3,6 +3,7 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use futures_util::future;
 use reflex::{
     core::{Expression, ExpressionFactory, ExpressionList, Signal, StateToken},
     lang::ValueTerm,
@@ -57,19 +58,21 @@ fn handle_date_timestamp_signal<T: AsyncExpression>(
             let first_update = Instant::now()
                 .checked_add(period)
                 .unwrap_or_else(|| Instant::now());
+            let dispose = future::ready(());
             Ok((
                 factory.create_value_term(ValueTerm::Float(get_current_time())),
-                Some(RuntimeEffect::stream({
-                    let factory = factory.clone();
-                    Box::pin(IntervalStream::new(interval_at(first_update, period)).map(
-                        move |_| {
+                Some(RuntimeEffect::stream(
+                    {
+                        let factory = factory.clone();
+                        IntervalStream::new(interval_at(first_update, period)).map(move |_| {
                             StateUpdate::value(
                                 signal_id,
                                 factory.create_value_term(ValueTerm::Float(get_current_time())),
                             )
-                        },
-                    ))
-                })),
+                        })
+                    },
+                    dispose,
+                )),
             ))
         }
         _ => Err(String::from("Invalid timestamp signal arguments")),

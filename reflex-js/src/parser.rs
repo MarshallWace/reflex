@@ -4250,7 +4250,6 @@ mod tests {
                 &factory,
                 &allocator,
             ),
-
             Ok(factory.create_lambda_term(
                 4,
                 factory.create_let_term(
@@ -4527,7 +4526,7 @@ mod tests {
         let state = DynamicState::new();
         let mut cache = DefaultInterpreterCache::default();
         let options = InterpreterOptions::default();
-        let result = execute(
+        let (result, _) = execute(
             compiled.program(),
             InstructionPointer::default(),
             &state,
@@ -4536,15 +4535,16 @@ mod tests {
             compiled.plugins(),
             &options,
             &mut cache,
-        );
+        )
+        .unwrap();
         assert_eq!(
             result,
-            Ok(EvaluationResult::new(
+            EvaluationResult::new(
                 factory.create_value_term(ValueTerm::String(
                     allocator.create_string(String::from("Hello, John Doe!"))
                 )),
                 DependencyList::empty(),
-            )),
+            ),
         );
     }
 }

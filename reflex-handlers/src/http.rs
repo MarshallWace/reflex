@@ -3,6 +3,7 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use std::iter::once;
 
+use futures_util::future;
 use reflex::{
     core::{
         Expression, ExpressionFactory, ExpressionList, Signal, SignalType, StateToken, StringValue,
@@ -59,29 +60,37 @@ fn handle_http_fetch_signal<T: AsyncExpression>(
             factory.create_signal_term(allocator.create_signal_list(once(
                 allocator.create_signal(SignalType::Pending, allocator.create_empty_list()),
             ))),
-            Some(RuntimeEffect::deferred({
-                let factory = factory.clone();
-                let allocator = allocator.clone();
-                async move {
-                    let value = match fetch(method, url, headers, body).await {
-                        Ok((status, data)) => factory.create_tuple_term(allocator.create_pair(
-                            factory.create_value_term(ValueTerm::Int(status as i32)),
-                            factory.create_value_term(ValueTerm::String(
-                                allocator.create_string(data),
-                            )),
-                        )),
-                        Err(error) => factory.create_signal_term(allocator.create_signal_list(
-                            once(allocator.create_signal(
-                                SignalType::Error,
-                                allocator.create_unit_list(factory.create_value_term(
-                                    ValueTerm::String(allocator.create_string(error)),
-                                )),
-                            )),
-                        )),
-                    };
-                    StateUpdate::value(signal_id, value)
-                }
-            })),
+            Some({
+                let dispose = future::ready(());
+                RuntimeEffect::deferred(
+                    {
+                        let factory = factory.clone();
+                        let allocator = allocator.clone();
+                        async move {
+                            let value = match fetch(&method, &url, headers, body).await {
+                                Ok((status, data)) => {
+                                    factory.create_tuple_term(allocator.create_pair(
+                                        factory.create_value_term(ValueTerm::Int(status as i32)),
+                                        factory.create_value_term(ValueTerm::String(
+                                            allocator.create_string(data),
+                                        )),
+                                    ))
+                                }
+                                Err(error) => factory.create_signal_term(
+                                    allocator.create_signal_list(once(allocator.create_signal(
+                                        SignalType::Error,
+                                        allocator.create_unit_list(factory.create_value_term(
+                                            ValueTerm::String(allocator.create_string(error)),
+                                        )),
+                                    ))),
+                                ),
+                            };
+                            StateUpdate::value(signal_id, value)
+                        }
+                    },
+                    dispose,
+                )
+            }),
         )),
         _ => Err(String::from("Invalid fetch signal arguments")),
     }

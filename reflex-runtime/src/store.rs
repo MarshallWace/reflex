@@ -1,19 +1,24 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use std::{collections::{BTreeSet, HashMap}, iter::once, num::NonZeroUsize, time::Instant};
+use std::{collections::BTreeSet, iter::once, num::NonZeroUsize, time::Instant};
 
 use crate::{StateUpdate, StateUpdateType};
 use itertools::{Either, Itertools};
-use reflex::{compiler::{InstructionPointer, NativeFunctionRegistry, Program}, core::{
+use reflex::{
+    compiler::{InstructionPointer, NativeFunctionRegistry, Program},
+    core::{
         Applicable, DependencyList, DynamicState, EvaluationResult, Expression, ExpressionFactory,
-        HeapAllocator, Reducible, Rewritable, Signal, SignalType, StateToken,
-    }, hash::{hash_object, HashId}, interpreter::{execute, Execute, InterpreterCache, InterpreterOptions}, lang::ValueTerm};
+        HeapAllocator, Reducible, Rewritable, Signal, SignalId, SignalType, StateToken,
+    },
+    hash::{hash_object, HashId},
+    interpreter::{execute, Execute, InterpreterCache, InterpreterOptions},
+    lang::ValueTerm,
+    DependencyCache,
+};
 
 pub type SubscriptionToken = usize;
 
-#[allow(type_alias_bounds)]
-type SignalCache<T: Expression> = HashMap<StateToken, Result<T, HandlerError>>;
 type HandlerError = Option<String>;
 
 pub struct Store<
@@ -24,7 +29,7 @@ pub struct Store<
     plugins: NativeFunctionRegistry<T>,
     interpreter_options: InterpreterOptions,
     cache: TCache,
-    signal_cache: SignalCache<T>,
+    signal_cache: RuntimeCache<T>,
     subscriptions: Vec<Subscription<T>>,
     subscription_counter: usize,
     pending_updates: Option<UpdateBatch>,
@@ -45,25 +50,44 @@ impl<
             plugins,
             interpreter_options,
             cache,
-            signal_cache: SignalCache::new(),
+            signal_cache: RuntimeCache::default(),
             subscriptions: Vec::new(),
             subscription_counter: 0,
             pending_updates: None,
         }
     }
-    pub fn subscribe(&mut self, target: Program, entry_point: InstructionPointer) -> SubscriptionToken {
+    pub fn subscribe(
+        &mut self,
+        target: Program,
+        entry_point: InstructionPointer,
+        initiators: Option<Vec<SignalId>>,
+    ) -> SubscriptionToken {
         self.subscription_counter += 1;
         let subscription_id = self.subscription_counter;
-        let subscription = Subscription::new(subscription_id, target, entry_point);
+        println!("[Store] Subscribe #{}", subscription_id);
+        let is_root = initiators.is_none();
+        let subscription = Subscription::new(subscription_id, target, entry_point, is_root);
         self.subscriptions.push(subscription);
+        self.signal_cache
+            .register_subscription(subscription_id, initiators.unwrap_or(Vec::new()));
+        if is_root {
+            self.signal_cache.retain_subscription(subscription_id);
+        }
         subscription_id
     }
     pub fn unsubscribe(&mut self, subscription_id: SubscriptionToken) -> bool {
+        println!("[Store] Unsubscribe #{}", subscription_id);
         self.subscriptions
             .iter()
             .position(|subscription| subscription.id == subscription_id)
             .map(|index| {
-                self.subscriptions.remove(index);
+                let subscription = self.subscriptions.remove(index);
+                if subscription.is_root {
+                    self.signal_cache.release_subscription(subscription_id);
+                }
+                if let Some(cache_key) = subscription.result.and_then(|result| result.cache_key) {
+                    self.cache.release(cache_key);
+                }
                 true
             })
             .unwrap_or(false)
@@ -112,7 +136,7 @@ impl<
             .map(FlushTask::new)
             .collect::<Vec<_>>();
         let updates = self.pending_updates.take();
-        println!("[Store] Flushing...");
+        println!("[Store] Flushing {} roots...", tasks.len());
         let start_time = Instant::now();
         let results = flush_recursive(
             tasks,
@@ -136,25 +160,72 @@ impl<
             .zip(results)
             .filter_map(|(subscription_id, result)| match result {
                 None => None,
-                Some(result) => Some((subscription_id, result)),
+                Some(result) => {
+                    println!("[Store] Update #{}", subscription_id);
+                    Some((subscription_id, result))
+                }
             })
+    }
+    pub fn gc(&mut self) -> (Vec<SignalId>, Vec<SubscriptionToken>) {
+        let start_time = Instant::now();
+        println!("[Store] GC started");
+        {
+            print!("[Store] Purging cache entries...");
+            let start_time = Instant::now();
+            let metrics = self.cache.gc();
+            println!("{:?} ({})", start_time.elapsed(), metrics);
+        };
+        let (disposed_signals, disposed_subscriptions) = {
+            print!("[Store] Computing inactive signals...");
+            let start_time = Instant::now();
+            let (disposed_signals, disposed_subscriptions) = self.signal_cache.gc();
+            println!("{:?}", start_time.elapsed());
+            if !disposed_signals.is_empty() {
+                print!("[Store] Removing cached signal results...");
+                let start_time = Instant::now();
+                for signal_id in disposed_signals.iter() {
+                    self.state.remove(signal_id);
+                }
+                println!("{:?}", start_time.elapsed());
+            }
+            (disposed_signals, disposed_subscriptions)
+        };
+        println!("[Store] GC completed in {:?}", start_time.elapsed());
+        (disposed_signals, disposed_subscriptions)
     }
 }
 
 type UpdateSet = BTreeSet<StateToken>;
 
-struct Subscription<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Execute<T>> {
+struct Subscription<T: Expression> {
     id: SubscriptionToken,
     target: Program,
     entry_point: InstructionPointer,
-    result: Option<(HashId, T, DependencyList)>,
+    is_root: bool,
+    result: Option<SubscriptionResult<T>>,
+}
+struct SubscriptionResult<T: Expression> {
+    result: EvaluationResult<T>,
+    cache_key: Option<HashId>,
+    state_hash: HashId,
+}
+impl<T: Expression> SubscriptionResult<T> {
+    fn result(&self) -> &EvaluationResult<T> {
+        &self.result
+    }
 }
 impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Execute<T>> Subscription<T> {
-    fn new(id: SubscriptionToken, target: Program, entry_point: InstructionPointer) -> Self {
+    fn new(
+        id: SubscriptionToken,
+        target: Program,
+        entry_point: InstructionPointer,
+        is_root: bool,
+    ) -> Self {
         Self {
             id,
             target,
             entry_point,
+            is_root,
             result: None,
         }
     }
@@ -167,21 +238,22 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Execute<T>> 
         plugins: &NativeFunctionRegistry<T>,
         interpreter_options: &InterpreterOptions,
         cache: &mut impl InterpreterCache<T>,
-    ) -> Option<T> {
+    ) -> (Option<T>, Option<&DependencyList>) {
         let state_hash = hash_object(&state);
         let is_unchanged = match updates {
             Some(updates) => match &self.result {
-                Some((previous_state_hash, _, dependencies)) => {
-                    *previous_state_hash == state_hash || !dependencies.contains(updates)
+                Some(result) => {
+                    result.state_hash == state_hash
+                        || !result.result.dependencies().contains(updates)
                 }
                 _ => false,
             },
             _ => false,
         };
         if is_unchanged {
-            return None;
+            return (None, None);
         }
-        let result = execute(
+        let (result, cache_key) = execute(
             &self.target,
             self.entry_point,
             state,
@@ -191,19 +263,38 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Execute<T>> 
             interpreter_options,
             cache,
         )
+        .map(|(result, cache_key)| (result, Some(cache_key)))
         .unwrap_or_else(|error| {
-            EvaluationResult::new(
+            let result = EvaluationResult::new(
                 create_error_signal(error, factory, allocator),
                 DependencyList::empty(),
-            )
+            );
+            let cache_key = None;
+            (result, cache_key)
         });
-        let (result, dependencies) = result.into_parts();
-        let updated_result = match &self.result {
-            Some((_, previous_result, _)) if (result.id() == previous_result.id()) => None,
-            _ => Some(result.clone()),
+        let previous_result = &self.result;
+        let previous_cache_key = previous_result.as_ref().and_then(|result| result.cache_key);
+        let updated_value = match previous_result {
+            Some(previous) if previous.result.result().id() == result.result().id() => None,
+            _ => Some(result.result().clone()),
         };
-        self.result = Some((state_hash, result, dependencies));
-        updated_result
+        self.result = Some(SubscriptionResult {
+            result,
+            cache_key,
+            state_hash,
+        });
+        if let Some(cache_key) = cache_key {
+            cache.retain(cache_key);
+        }
+        if let Some(previous_cache_key) = previous_cache_key {
+            cache.release(previous_cache_key);
+        }
+        (
+            updated_value,
+            self.result
+                .as_ref()
+                .map(|result| result.result().dependencies()),
+        )
     }
 }
 
@@ -295,7 +386,7 @@ fn flush_recursive<
     plugins: &NativeFunctionRegistry<T>,
     interpreter_options: &InterpreterOptions,
     cache: &mut impl InterpreterCache<T>,
-    signal_cache: &mut SignalCache<T>,
+    signal_cache: &mut RuntimeCache<T>,
     mut update_batches: Vec<UpdateBatch>,
 ) -> Vec<Option<Result<T, Vec<String>>>>
 where
@@ -317,7 +408,8 @@ where
                 .map(|batch| batch.combined.as_ref().unwrap_or(&batch.current))
         });
         task.latest_update_batch = current_batch_index;
-        let signal_results = match task.subscription.execute(
+        let subscription_id = task.subscription.id;
+        let (result, dependencies) = task.subscription.execute(
             state,
             combined_updates,
             factory,
@@ -325,31 +417,29 @@ where
             plugins,
             interpreter_options,
             cache,
-        ) {
+        );
+        let updated_result = match result {
             None => None,
-            Some(result) => match factory.match_signal_term(&result) {
-                Some(result) => {
-                    let (existing_signals, added_signals): (Vec<_>, Vec<&Signal<T>>) =
-                        result.signals().into_iter().partition_map(|signal| {
+            Some(value) => match factory.match_signal_term(&value) {
+                Some(value) => {
+                    let (existing_signal_results, added_signals): (Vec<_>, Vec<&Signal<T>>) =
+                        value.signals().into_iter().partition_map(|signal| {
                             let signal_id = signal.id();
-                            match signal_cache.get(&signal_id) {
-                                Some(existing) => match existing {
-                                    Ok(result) => Either::Left((signal_id, Ok(result.clone()))),
-                                    Err(error) => Either::Left((signal_id, Err(error.clone()))),
-                                },
+                            match signal_cache.retrieve_signal_result(signal_id) {
+                                Some(existing) => Either::Left((signal_id, existing.clone())),
                                 None => Either::Right(signal),
                             }
                         });
-                    let signal_results = added_signals
+                    let added_signal_results = added_signals
                         .iter()
                         .map(|signal| signal.id())
-                        .zip(signal_handler(added_signals.as_slice()))
+                        .zip(signal_handler(added_signals.as_slice()));
+                    let combined_signal_results = added_signal_results
+                        .chain(existing_signal_results)
                         .inspect(|(signal_id, result)| {
-                            signal_cache.insert(*signal_id, result.clone());
+                            signal_cache.register_signal(*signal_id, result.clone());
                         });
-                    let (updates, errors): (Vec<_>, Vec<_>) = existing_signals
-                        .into_iter()
-                        .chain(signal_results)
+                    let (updates, errors): (Vec<_>, Vec<_>) = combined_signal_results
                         .map(|(id, result)| match result {
                             Ok(result) => Ok((id, result)),
                             Err(error) => Err(error),
@@ -358,41 +448,45 @@ where
                     let errors = errors.into_iter().flatten().collect::<Vec<String>>();
                     Some(Err((updates, errors)))
                 }
-                _ => Some(Ok(result)),
+                _ => Some(Ok(value)),
             },
         };
-        match signal_results {
-            Some(Ok(result)) => {
-                task.result = Some(Ok(result));
-            }
-            Some(Err((updates, errors))) => {
-                if !errors.is_empty() {
-                    task.result = Some(Err(errors));
+        if let Some(dependencies) = dependencies {
+            signal_cache.update_subscription_dependencies(subscription_id, dependencies);
+        }
+        if let Some(result) = updated_result {
+            match result {
+                Ok(result) => {
+                    task.result = Some(Ok(result));
                 }
-                update_batches.push({
-                    let keys = updates.iter().map(|(key, _)| *key);
-                    match update_batches.last() {
-                        Some(batch) => batch.append(keys),
-                        None => UpdateBatch::from(keys),
+                Err((updates, errors)) => {
+                    if !errors.is_empty() {
+                        task.result = Some(Err(errors));
                     }
-                });
-                for (key, value) in updates {
-                    state.set(key, value);
+                    update_batches.push({
+                        let keys = updates.iter().map(|(key, _)| *key);
+                        match update_batches.last() {
+                            Some(batch) => batch.append(keys),
+                            None => UpdateBatch::from(keys),
+                        }
+                    });
+                    for (key, value) in updates {
+                        state.set(key, value);
+                    }
+                    return flush_recursive(
+                        tasks,
+                        signal_handler,
+                        state,
+                        factory,
+                        allocator,
+                        plugins,
+                        interpreter_options,
+                        cache,
+                        signal_cache,
+                        update_batches,
+                    );
                 }
-                return flush_recursive(
-                    tasks,
-                    signal_handler,
-                    state,
-                    factory,
-                    allocator,
-                    plugins,
-                    interpreter_options,
-                    cache,
-                    signal_cache,
-                    update_batches,
-                );
             }
-            _ => {}
         }
     }
     tasks.into_iter().map(|task| task.result).collect()
@@ -409,4 +503,98 @@ fn create_error_signal<T: Expression>(
             factory.create_value_term(ValueTerm::String(allocator.create_string(message))),
         ),
     ))))
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+enum RuntimeCacheKey {
+    Signal(SignalId),
+    Subscription(SubscriptionToken),
+}
+
+enum RuntimeCacheEntry<T: Expression> {
+    Signal(Result<T, HandlerError>),
+    Subscription(HashId),
+}
+struct RuntimeCache<T: Expression> {
+    cache: DependencyCache<RuntimeCacheKey, RuntimeCacheEntry<T>>,
+}
+impl<T: Expression> Default for RuntimeCache<T> {
+    fn default() -> Self {
+        Self {
+            cache: DependencyCache::default(),
+        }
+    }
+}
+impl<T: Expression> RuntimeCache<T> {
+    fn register_subscription(
+        &mut self,
+        subscription_id: SubscriptionToken,
+        initiators: impl IntoIterator<Item = SignalId>,
+    ) {
+        let key = RuntimeCacheKey::Subscription(subscription_id);
+        let value = RuntimeCacheEntry::Subscription(0);
+        self.cache.set(key, value, None);
+        for signal_id in initiators {
+            self.cache
+                .add_child(&RuntimeCacheKey::Signal(signal_id), &key);
+        }
+    }
+    fn update_subscription_dependencies(
+        &mut self,
+        subscription_id: SubscriptionToken,
+        dependencies: &DependencyList,
+    ) -> bool {
+        let key = RuntimeCacheKey::Subscription(subscription_id);
+        let dependencies_hash = hash_object(dependencies);
+        match self
+            .cache
+            .replace_value(&key, RuntimeCacheEntry::Subscription(dependencies_hash))
+        {
+            Some(RuntimeCacheEntry::Subscription(previous_dependencies_hash))
+                if previous_dependencies_hash != dependencies_hash =>
+            {
+                self.cache.replace_children(
+                    &key,
+                    dependencies
+                        .iter()
+                        .map(|signal_id| RuntimeCacheKey::Signal(signal_id))
+                        .filter(|key| self.cache.contains_key(key))
+                        .collect(),
+                )
+            }
+            _ => false,
+        }
+    }
+    fn retain_subscription(&mut self, subscription_id: SubscriptionToken) {
+        let key = RuntimeCacheKey::Subscription(subscription_id);
+        self.cache.retain(once(&key));
+    }
+    fn release_subscription(&mut self, subscription_id: SubscriptionToken) {
+        let key = RuntimeCacheKey::Subscription(subscription_id);
+        self.cache.release(once(&key));
+    }
+    fn register_signal(&mut self, signal_id: SignalId, result: Result<T, HandlerError>) {
+        self.cache.set(
+            RuntimeCacheKey::Signal(signal_id),
+            RuntimeCacheEntry::Signal(result),
+            None,
+        )
+    }
+    fn retrieve_signal_result(&self, signal_id: SignalId) -> Option<&Result<T, HandlerError>> {
+        self.cache
+            .get(&RuntimeCacheKey::Signal(signal_id))
+            .and_then(|entry| match entry {
+                RuntimeCacheEntry::Signal(result) => Some(result),
+                _ => None,
+            })
+    }
+    fn gc(&mut self) -> (Vec<SignalId>, Vec<SubscriptionToken>) {
+        self.cache
+            .gc::<Vec<_>>()
+            .into_iter()
+            .partition_map(|(key, _)| match key {
+                RuntimeCacheKey::Signal(signal_id) => Either::Left(signal_id),
+                RuntimeCacheKey::Subscription(subscription_id) => Either::Right(subscription_id),
+            })
+    }
 }
