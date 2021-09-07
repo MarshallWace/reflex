@@ -36,7 +36,7 @@ pub trait GraphNode {
     fn dynamic_dependencies(&self) -> DependencyList;
     /** Weak head normal form - outer term is fully evaluated, sub-expressions may contain dynamic values */
     fn is_static(&self) -> bool;
-    /** Term is fully evaluated and contains no sub-expressions */
+    /** Term is fully evaluated and contains no dynamic sub-expressions */
     fn is_atomic(&self) -> bool;
 }
 
@@ -188,7 +188,7 @@ impl<T: Expression> GraphNode for ExpressionList<T> {
         true
     }
     fn is_atomic(&self) -> bool {
-        self.items.is_empty()
+        self.items.iter().all(|item| item.is_atomic())
     }
 }
 

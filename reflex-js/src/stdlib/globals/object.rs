@@ -88,7 +88,7 @@ impl FromEntries {
                             )
                         }
                         Ok(None) => Ok(factory.create_application_term(
-                            factory.create_builtin_term(BuiltinTerm::Struct),
+                            factory.create_builtin_term(BuiltinTerm::ConstructStruct),
                             allocator.create_pair(
                                 factory.create_application_term(
                                     factory.create_builtin_term(BuiltinTerm::CollectVector),

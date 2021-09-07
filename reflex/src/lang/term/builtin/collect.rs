@@ -104,6 +104,27 @@ impl<T: Expression> Applicable<T> for CollectVector {
     }
 }
 
+pub struct CollectHashSet {}
+impl<T: Expression> Applicable<T> for CollectHashSet {
+    fn arity(&self) -> Option<Arity> {
+        Some(Arity::from(0, 0, Some(VarArgs::Eager)))
+    }
+    fn apply(
+        &self,
+        args: impl IntoIterator<Item = T, IntoIter = impl ExactSizeIterator<Item = T>>,
+        factory: &impl ExpressionFactory<T>,
+        allocator: &impl HeapAllocator<T>,
+        _cache: &mut impl EvaluationCache<T>,
+    ) -> Result<T, String> {
+        let values = args.into_iter().collect::<Vec<_>>();
+        let deduplicated_values = match deduplicate_hashset_entries(&values) {
+            Some(values) => values,
+            None => values,
+        };
+        Ok(factory.create_hashset_term(allocator.create_list(deduplicated_values)))
+    }
+}
+
 pub struct CollectHashMap {}
 impl<T: Expression> Applicable<T> for CollectHashMap {
     fn arity(&self) -> Option<Arity> {
@@ -167,27 +188,6 @@ impl<T: Expression> Applicable<T> for CollectHashMap {
             None => (keys, values),
         };
         Ok(factory.create_hashmap_term(allocator.create_list(keys), allocator.create_list(values)))
-    }
-}
-
-pub struct CollectHashSet {}
-impl<T: Expression> Applicable<T> for CollectHashSet {
-    fn arity(&self) -> Option<Arity> {
-        Some(Arity::from(0, 0, Some(VarArgs::Eager)))
-    }
-    fn apply(
-        &self,
-        args: impl IntoIterator<Item = T, IntoIter = impl ExactSizeIterator<Item = T>>,
-        factory: &impl ExpressionFactory<T>,
-        allocator: &impl HeapAllocator<T>,
-        _cache: &mut impl EvaluationCache<T>,
-    ) -> Result<T, String> {
-        let values = args.into_iter().collect::<Vec<_>>();
-        let deduplicated_values = match deduplicate_hashset_entries(&values) {
-            Some(values) => values,
-            None => values,
-        };
-        Ok(factory.create_hashset_term(allocator.create_list(deduplicated_values)))
     }
 }
 

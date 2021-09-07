@@ -70,7 +70,7 @@ impl MapConstructor {
                         let has_dynamic_keys = keys.iter().any(|key| !key.is_static());
                         if has_dynamic_keys {
                             Ok(factory.create_application_term(
-                                factory.create_builtin_term(BuiltinTerm::HashMap),
+                                factory.create_builtin_term(BuiltinTerm::ConstructHashMap),
                                 allocator.create_pair(
                                     factory.create_application_term(
                                         factory.create_builtin_term(BuiltinTerm::CollectVector),

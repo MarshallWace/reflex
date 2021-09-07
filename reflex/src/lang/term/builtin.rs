@@ -33,6 +33,8 @@ mod concat;
 pub use concat::*;
 mod cons;
 pub use cons::*;
+mod construct;
+pub use construct::*;
 mod contains;
 pub use contains::*;
 mod divide;
@@ -59,8 +61,6 @@ mod gte;
 pub use gte::*;
 mod r#if;
 pub use r#if::*;
-mod hashmap;
-pub use hashmap::*;
 mod insert;
 pub use insert::*;
 mod keys;
@@ -97,22 +97,22 @@ mod remainder;
 pub use remainder::*;
 mod replace;
 pub use replace::*;
+mod resolve;
+pub use resolve::*;
 mod resolve_deep;
 pub use resolve_deep::*;
 mod round;
 pub use round::*;
+mod sequence;
+pub use sequence::*;
 mod slice;
 pub use slice::*;
 mod split;
 pub use split::*;
 mod starts_with;
 pub use starts_with::*;
-mod r#struct;
-pub use r#struct::*;
 mod subtract;
 pub use subtract::*;
-mod tuple;
-pub use tuple::*;
 mod values;
 pub use values::*;
 
@@ -131,6 +131,11 @@ pub enum BuiltinTerm {
     CollectHashSet,
     CollectTuple,
     CollectVector,
+    ConstructHashMap,
+    ConstructHashSet,
+    ConstructStruct,
+    ConstructTuple,
+    ConstructVector,
     Concat,
     Cons,
     Contains,
@@ -145,7 +150,6 @@ pub enum BuiltinTerm {
     Get,
     Gt,
     Gte,
-    HashMap,
     If,
     Insert,
     Keys,
@@ -166,13 +170,17 @@ pub enum BuiltinTerm {
     Remainder,
     Replace,
     ResolveDeep,
+    ResolveHashMap,
+    ResolveHashSet,
+    ResolveStruct,
+    ResolveTuple,
+    ResolveVector,
     Round,
+    Sequence,
     Slice,
     Split,
     StartsWith,
-    Struct,
     Subtract,
-    Tuple,
     Values,
 }
 impl GraphNode for BuiltinTerm {
@@ -210,6 +218,11 @@ impl<T: Expression + Applicable<T> + Rewritable<T> + Reducible<T> + Compile<T>> 
             Self::CollectHashSet => Applicable::<T>::arity(&CollectHashSet {}),
             Self::CollectTuple => Applicable::<T>::arity(&CollectTuple {}),
             Self::CollectVector => Applicable::<T>::arity(&CollectVector {}),
+            Self::ConstructHashMap => Applicable::<T>::arity(&ConstructHashMap {}),
+            Self::ConstructHashSet => Applicable::<T>::arity(&ConstructHashSet {}),
+            Self::ConstructStruct => Applicable::<T>::arity(&ConstructStruct {}),
+            Self::ConstructTuple => Applicable::<T>::arity(&ConstructTuple {}),
+            Self::ConstructVector => Applicable::<T>::arity(&ConstructVector {}),
             Self::Concat => Applicable::<T>::arity(&Concat {}),
             Self::Cons => Applicable::<T>::arity(&Cons {}),
             Self::Contains => Applicable::<T>::arity(&Contains {}),
@@ -224,7 +237,6 @@ impl<T: Expression + Applicable<T> + Rewritable<T> + Reducible<T> + Compile<T>> 
             Self::Get => Applicable::<T>::arity(&Get {}),
             Self::Gt => Applicable::<T>::arity(&Gt {}),
             Self::Gte => Applicable::<T>::arity(&Gte {}),
-            Self::HashMap => Applicable::<T>::arity(&HashMap {}),
             Self::If => Applicable::<T>::arity(&If {}),
             Self::Insert => Applicable::<T>::arity(&Insert {}),
             Self::Keys => Applicable::<T>::arity(&Keys {}),
@@ -245,13 +257,17 @@ impl<T: Expression + Applicable<T> + Rewritable<T> + Reducible<T> + Compile<T>> 
             Self::Remainder => Applicable::<T>::arity(&Remainder {}),
             Self::Replace => Applicable::<T>::arity(&Replace {}),
             Self::ResolveDeep => Applicable::<T>::arity(&ResolveDeep {}),
+            Self::ResolveHashMap => Applicable::<T>::arity(&ResolveHashMap {}),
+            Self::ResolveHashSet => Applicable::<T>::arity(&ResolveHashSet {}),
+            Self::ResolveStruct => Applicable::<T>::arity(&ResolveStruct {}),
+            Self::ResolveTuple => Applicable::<T>::arity(&ResolveTuple {}),
+            Self::ResolveVector => Applicable::<T>::arity(&ResolveVector {}),
             Self::Round => Applicable::<T>::arity(&Round {}),
+            Self::Sequence => Applicable::<T>::arity(&Sequence {}),
             Self::Slice => Applicable::<T>::arity(&Slice {}),
-            Self::Split => Applicable::<T>::arity(&Replace {}),
+            Self::Split => Applicable::<T>::arity(&Split {}),
             Self::StartsWith => Applicable::<T>::arity(&StartsWith {}),
-            Self::Struct => Applicable::<T>::arity(&Struct {}),
             Self::Subtract => Applicable::<T>::arity(&Subtract {}),
-            Self::Tuple => Applicable::<T>::arity(&Tuple {}),
             Self::Values => Applicable::<T>::arity(&Values {}),
         }
     }
@@ -286,6 +302,21 @@ impl<T: Expression + Applicable<T> + Rewritable<T> + Reducible<T> + Compile<T>> 
             Self::CollectVector => {
                 Applicable::<T>::apply(&CollectVector {}, args, factory, allocator, cache)
             }
+            Self::ConstructHashMap => {
+                Applicable::<T>::apply(&ConstructHashMap {}, args, factory, allocator, cache)
+            }
+            Self::ConstructHashSet => {
+                Applicable::<T>::apply(&ConstructHashSet {}, args, factory, allocator, cache)
+            }
+            Self::ConstructStruct => {
+                Applicable::<T>::apply(&ConstructStruct {}, args, factory, allocator, cache)
+            }
+            Self::ConstructTuple => {
+                Applicable::<T>::apply(&ConstructTuple {}, args, factory, allocator, cache)
+            }
+            Self::ConstructVector => {
+                Applicable::<T>::apply(&ConstructVector {}, args, factory, allocator, cache)
+            }
             Self::Concat => Applicable::<T>::apply(&Concat {}, args, factory, allocator, cache),
             Self::Cons => Applicable::<T>::apply(&Cons {}, args, factory, allocator, cache),
             Self::Contains => Applicable::<T>::apply(&Contains {}, args, factory, allocator, cache),
@@ -300,7 +331,6 @@ impl<T: Expression + Applicable<T> + Rewritable<T> + Reducible<T> + Compile<T>> 
             Self::Get => Applicable::<T>::apply(&Get {}, args, factory, allocator, cache),
             Self::Gt => Applicable::<T>::apply(&Gt {}, args, factory, allocator, cache),
             Self::Gte => Applicable::<T>::apply(&Gte {}, args, factory, allocator, cache),
-            Self::HashMap => Applicable::<T>::apply(&HashMap {}, args, factory, allocator, cache),
             Self::If => Applicable::<T>::apply(&If {}, args, factory, allocator, cache),
             Self::Insert => Applicable::<T>::apply(&Insert {}, args, factory, allocator, cache),
             Self::Keys => Applicable::<T>::apply(&Keys {}, args, factory, allocator, cache),
@@ -327,15 +357,29 @@ impl<T: Expression + Applicable<T> + Rewritable<T> + Reducible<T> + Compile<T>> 
             Self::ResolveDeep => {
                 Applicable::<T>::apply(&ResolveDeep {}, args, factory, allocator, cache)
             }
+            Self::ResolveHashMap => {
+                Applicable::<T>::apply(&ResolveHashMap {}, args, factory, allocator, cache)
+            }
+            Self::ResolveHashSet => {
+                Applicable::<T>::apply(&ResolveHashSet {}, args, factory, allocator, cache)
+            }
+            Self::ResolveStruct => {
+                Applicable::<T>::apply(&ResolveStruct {}, args, factory, allocator, cache)
+            }
+            Self::ResolveTuple => {
+                Applicable::<T>::apply(&ResolveTuple {}, args, factory, allocator, cache)
+            }
+            Self::ResolveVector => {
+                Applicable::<T>::apply(&ResolveVector {}, args, factory, allocator, cache)
+            }
             Self::Round => Applicable::<T>::apply(&Round {}, args, factory, allocator, cache),
+            Self::Sequence => Applicable::<T>::apply(&Sequence {}, args, factory, allocator, cache),
             Self::Slice => Applicable::<T>::apply(&Slice {}, args, factory, allocator, cache),
-            Self::Split => Applicable::<T>::apply(&Replace {}, args, factory, allocator, cache),
+            Self::Split => Applicable::<T>::apply(&Split {}, args, factory, allocator, cache),
             Self::StartsWith => {
                 Applicable::<T>::apply(&StartsWith {}, args, factory, allocator, cache)
             }
-            Self::Struct => Applicable::<T>::apply(&Struct {}, args, factory, allocator, cache),
             Self::Subtract => Applicable::<T>::apply(&Subtract {}, args, factory, allocator, cache),
-            Self::Tuple => Applicable::<T>::apply(&Tuple {}, args, factory, allocator, cache),
             Self::Values => Applicable::<T>::apply(&Values {}, args, factory, allocator, cache),
         }
         .map_err(|err| format!("{}: {}", self, err))

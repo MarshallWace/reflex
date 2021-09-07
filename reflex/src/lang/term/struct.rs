@@ -53,7 +53,7 @@ impl<T: Expression> GraphNode for StructTerm<T> {
         true
     }
     fn is_atomic(&self) -> bool {
-        self.fields.is_empty()
+        self.fields.is_atomic()
     }
 }
 impl<T: Expression + Rewritable<T>> Rewritable<T> for StructTerm<T> {

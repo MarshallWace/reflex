@@ -2,13 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use crate::core::{
-    Applicable, Arity, EvaluationCache, Expression, ExpressionFactory, HeapAllocator, VarArgs,
+    Applicable, Arity, EvaluationCache, Expression, ExpressionFactory, HeapAllocator,
 };
 
-pub struct Tuple {}
-impl<T: Expression> Applicable<T> for Tuple {
+pub struct Sequence {}
+impl<T: Expression> Applicable<T> for Sequence {
     fn arity(&self) -> Option<Arity> {
-        Some(Arity::from(0, 0, Some(VarArgs::Lazy)))
+        Some(Arity::from(2, 0, None))
     }
     fn apply(
         &self,
@@ -17,6 +17,12 @@ impl<T: Expression> Applicable<T> for Tuple {
         allocator: &impl HeapAllocator<T>,
         _cache: &mut impl EvaluationCache<T>,
     ) -> Result<T, String> {
-        Ok(factory.create_tuple_term(allocator.create_list(args)))
+        let mut args = args.into_iter();
+        if args.len() != 2 {
+            return Err(format!("Expected 2 arguments, received {}", args.len()));
+        }
+        let value = args.next().unwrap();
+        let callback = args.next().unwrap();
+        Ok(factory.create_application_term(callback, allocator.create_unit_list(value)))
     }
 }

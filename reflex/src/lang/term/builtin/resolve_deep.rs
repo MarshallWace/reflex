@@ -29,7 +29,7 @@ impl<T: Expression> Applicable<T> for ResolveDeep {
         }
         let target = args.next().unwrap();
         if let Some(value) = factory.match_tuple_term(&target) {
-            if value.fields().iter().all(GraphNode::is_atomic) {
+            if value.is_atomic() {
                 Ok(target)
             } else {
                 Ok(factory.create_application_term(
@@ -47,7 +47,7 @@ impl<T: Expression> Applicable<T> for ResolveDeep {
                 ))
             }
         } else if let Some(value) = factory.match_struct_term(&target) {
-            if value.fields().iter().all(GraphNode::is_atomic) {
+            if value.is_atomic() {
                 Ok(target)
             } else {
                 Ok(factory.create_application_term(
@@ -68,7 +68,7 @@ impl<T: Expression> Applicable<T> for ResolveDeep {
                 ))
             }
         } else if let Some(value) = factory.match_vector_term(&target) {
-            if value.items().iter().all(GraphNode::is_atomic) {
+            if value.is_atomic() {
                 Ok(target)
             } else {
                 Ok(factory.create_application_term(
@@ -85,9 +85,69 @@ impl<T: Expression> Applicable<T> for ResolveDeep {
                     })),
                 ))
             }
+        } else if let Some(value) = factory.match_hashset_term(&target) {
+            if value.is_atomic() {
+                Ok(target)
+            } else {
+                Ok(factory.create_application_term(
+                    factory.create_builtin_term(BuiltinTerm::CollectHashSet),
+                    allocator.create_list(value.values().iter().map(|item| {
+                        if item.is_atomic() {
+                            item.clone()
+                        } else {
+                            factory.create_application_term(
+                                factory.create_builtin_term(BuiltinTerm::ResolveDeep),
+                                allocator.create_list(once(item.clone())),
+                            )
+                        }
+                    })),
+                ))
+            }
+        } else if let Some(value) = factory.match_hashmap_term(&target) {
+            if value.is_atomic() {
+                Ok(target)
+            } else {
+                Ok(factory.create_application_term(
+                    factory.create_builtin_term(BuiltinTerm::ConstructHashMap),
+                    allocator.create_pair(
+                        if value.keys().is_atomic() {
+                            factory.create_vector_term(allocator.clone_list(value.keys()))
+                        } else {
+                            factory.create_application_term(
+                                factory.create_builtin_term(BuiltinTerm::CollectVector),
+                                allocator.create_list(value.keys().iter().map(|item| {
+                                    if item.is_atomic() {
+                                        item.clone()
+                                    } else {
+                                        factory.create_application_term(
+                                            factory.create_builtin_term(BuiltinTerm::ResolveDeep),
+                                            allocator.create_list(once(item.clone())),
+                                        )
+                                    }
+                                })),
+                            )
+                        },
+                        if value.values().is_atomic() {
+                            factory.create_vector_term(allocator.clone_list(value.values()))
+                        } else {
+                            factory.create_application_term(
+                                factory.create_builtin_term(BuiltinTerm::CollectVector),
+                                allocator.create_list(value.values().iter().map(|item| {
+                                    if item.is_atomic() {
+                                        item.clone()
+                                    } else {
+                                        factory.create_application_term(
+                                            factory.create_builtin_term(BuiltinTerm::ResolveDeep),
+                                            allocator.create_list(once(item.clone())),
+                                        )
+                                    }
+                                })),
+                            )
+                        },
+                    ),
+                ))
+            }
         } else {
-            // TODO: Flatten HashMap collection type
-            // TODO: Flatten HashSet collection type
             Ok(target)
         }
     }
