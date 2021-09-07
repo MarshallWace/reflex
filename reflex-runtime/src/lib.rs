@@ -165,11 +165,11 @@ where
                 .await
                 {
                     Err(error) => {
-                        results_tx.send(Some(Err(vec![error]))).unwrap();
+                        let _ = results_tx.send(Some(Err(vec![error])));
                     }
                     Ok(mut subscription) => {
                         while let Some(result) = subscription.next().await {
-                            results_tx.send(Some(result)).unwrap();
+                            let _ = results_tx.send(Some(result));
                         }
                     }
                 }
@@ -381,11 +381,7 @@ impl<'a, T: Expression, TUpdates: Stream<Item = SubscriptionResult<T>>>
     }
     pub async fn unsubscribe(&self) -> Result<bool, String> {
         let (send, receive) = oneshot::channel();
-        self.channel
-            .send(Command::unsubscribe(self.id, send))
-            .await
-            .ok()
-            .unwrap();
+        let _ = self.channel.send(Command::unsubscribe(self.id, send)).await;
         match receive.await {
             Err(error) => Err(format!("{}", error)),
             Ok(result) => Ok(result),
@@ -775,7 +771,7 @@ where
     let (send, receive) = oneshot::channel();
     let (update_send, update_receive) = watch::channel(None);
     let command = Command::subscribe(program, entry_point, initiators, send, update_send);
-    commands.send(command).await.ok().unwrap();
+    let _ = commands.send(command).await;
     let factory = factory.clone();
     let allocator = allocator.clone();
     match receive.await {
@@ -817,11 +813,7 @@ async fn stop_subscription<T: Expression>(
     channel: &CommandChannel<T>,
 ) -> Result<bool, String> {
     let (send, receive) = oneshot::channel();
-    channel
-        .send(Command::unsubscribe(id, send))
-        .await
-        .ok()
-        .unwrap();
+    let _ = channel.send(Command::unsubscribe(id, send)).await;
     match receive.await {
         Err(error) => Err(format!("{}", error)),
         Ok(response) => Ok(response),
@@ -947,12 +939,8 @@ where
 
 async fn emit_updates<T: Expression>(updates: Vec<StateUpdate<T>>, commands: &CommandChannel<T>) {
     let (send, receive) = oneshot::channel();
-    commands
-        .send(Command::update(updates, send))
-        .await
-        .ok()
-        .unwrap();
-    receive.await.unwrap();
+    let _ = commands.send(Command::update(updates, send)).await;
+    let _ = receive.await;
 }
 
 fn parse_error_signal_message<T: Expression>(
