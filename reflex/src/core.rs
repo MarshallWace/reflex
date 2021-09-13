@@ -140,6 +140,9 @@ impl<T: Expression> ExpressionList<T> {
     pub fn as_slice(&self) -> &[T] {
         self.items.as_slice()
     }
+    pub fn into_values(self) -> Vec<T> {
+        self.items
+    }
 }
 impl<T: Expression, I: std::slice::SliceIndex<[T]>> std::ops::Index<I> for ExpressionList<T> {
     type Output = I::Output;
@@ -472,10 +475,11 @@ pub trait ExpressionFactory<T: Expression> {
         hash: HashId,
         address: InstructionPointer,
         num_args: StackOffset,
+        variadic: bool,
     ) -> T;
     fn create_tuple_term(&self, fields: ExpressionList<T>) -> T;
     fn create_struct_term(&self, prototype: StructPrototype, fields: ExpressionList<T>) -> T;
-    fn create_constructor_term(&self, prototype: StructPrototype, eager: VarArgs) -> T;
+    fn create_constructor_term(&self, prototype: StructPrototype) -> T;
     fn create_vector_term(&self, items: ExpressionList<T>) -> T;
     fn create_hashmap_term(&self, keys: ExpressionList<T>, values: ExpressionList<T>) -> T;
     fn create_hashset_term(&self, values: ExpressionList<T>) -> T;
@@ -488,13 +492,14 @@ pub trait ExpressionFactory<T: Expression> {
         &self,
         expression: &'a T,
     ) -> Option<&'a DynamicVariableTerm<T>>;
+    fn match_let_term<'a>(&self, expression: &'a T) -> Option<&'a LetTerm<T>>;
+    fn match_lambda_term<'a>(&self, expression: &'a T) -> Option<&'a LambdaTerm<T>>;
     fn match_application_term<'a>(&self, expression: &'a T) -> Option<&'a ApplicationTerm<T>>;
     fn match_partial_application_term<'a>(
         &self,
         expression: &'a T,
     ) -> Option<&'a PartialApplicationTerm<T>>;
-    fn match_let_term<'a>(&self, expression: &'a T) -> Option<&'a LetTerm<T>>;
-    fn match_lambda_term<'a>(&self, expression: &'a T) -> Option<&'a LambdaTerm<T>>;
+    fn match_recursive_term<'a>(&self, expression: &'a T) -> Option<&'a RecursiveTerm<T>>;
     fn match_builtin_term<'a>(&self, expression: &'a T) -> Option<&'a BuiltinTerm>;
     fn match_native_function_term<'a>(
         &self,
@@ -579,8 +584,9 @@ impl<'_self, T: Expression> ExpressionFactory<T> for &'_self dyn ExpressionFacto
         hash: HashId,
         address: InstructionPointer,
         num_args: StackOffset,
+        variadic: bool,
     ) -> T {
-        ExpressionFactory::<T>::create_compiled_function_term(*self, hash, address, num_args)
+        ExpressionFactory::<T>::create_compiled_function_term(*self, hash, address, num_args, variadic)
     }
     fn create_tuple_term(&self, fields: ExpressionList<T>) -> T {
         ExpressionFactory::<T>::create_tuple_term(*self, fields)
@@ -588,8 +594,8 @@ impl<'_self, T: Expression> ExpressionFactory<T> for &'_self dyn ExpressionFacto
     fn create_struct_term(&self, prototype: StructPrototype, fields: ExpressionList<T>) -> T {
         ExpressionFactory::<T>::create_struct_term(*self, prototype, fields)
     }
-    fn create_constructor_term(&self, prototype: StructPrototype, eager: VarArgs) -> T {
-        ExpressionFactory::<T>::create_constructor_term(*self, prototype, eager)
+    fn create_constructor_term(&self, prototype: StructPrototype) -> T {
+        ExpressionFactory::<T>::create_constructor_term(*self, prototype)
     }
     fn create_vector_term(&self, items: ExpressionList<T>) -> T {
         ExpressionFactory::<T>::create_vector_term(*self, items)
@@ -619,6 +625,12 @@ impl<'_self, T: Expression> ExpressionFactory<T> for &'_self dyn ExpressionFacto
     ) -> Option<&'a DynamicVariableTerm<T>> {
         ExpressionFactory::<T>::match_dynamic_variable_term(*self, expression)
     }
+    fn match_let_term<'a>(&self, expression: &'a T) -> Option<&'a LetTerm<T>> {
+        ExpressionFactory::<T>::match_let_term(*self, expression)
+    }
+    fn match_lambda_term<'a>(&self, expression: &'a T) -> Option<&'a LambdaTerm<T>> {
+        ExpressionFactory::<T>::match_lambda_term(*self, expression)
+    }
     fn match_application_term<'a>(&self, expression: &'a T) -> Option<&'a ApplicationTerm<T>> {
         ExpressionFactory::<T>::match_application_term(*self, expression)
     }
@@ -628,11 +640,8 @@ impl<'_self, T: Expression> ExpressionFactory<T> for &'_self dyn ExpressionFacto
     ) -> Option<&'a PartialApplicationTerm<T>> {
         ExpressionFactory::<T>::match_partial_application_term(*self, expression)
     }
-    fn match_let_term<'a>(&self, expression: &'a T) -> Option<&'a LetTerm<T>> {
-        ExpressionFactory::<T>::match_let_term(*self, expression)
-    }
-    fn match_lambda_term<'a>(&self, expression: &'a T) -> Option<&'a LambdaTerm<T>> {
-        ExpressionFactory::<T>::match_lambda_term(*self, expression)
+    fn match_recursive_term<'a>(&self, expression: &'a T) -> Option<&'a RecursiveTerm<T>> {
+        ExpressionFactory::<T>::match_recursive_term(*self, expression)
     }
     fn match_builtin_term<'a>(&self, expression: &'a T) -> Option<&'a BuiltinTerm> {
         ExpressionFactory::<T>::match_builtin_term(*self, expression)
@@ -979,13 +988,34 @@ impl<'a, T: Expression + Rewritable<T>> Substitutions<'a, T> {
     }
 }
 
-#[derive(Hash, Eq, PartialEq, Clone, Debug)]
+#[derive(Default, Hash, Eq, PartialEq, Clone, Debug)]
 pub struct DependencyList {
     state_tokens: Option<OrdSet<StateToken>>,
 }
+impl Extend<StateToken> for DependencyList {
+    fn extend<T: IntoIterator<Item = StateToken>>(&mut self, state_tokens: T) {
+        if let Some(existing) = &mut self.state_tokens {
+            for state_token in state_tokens {
+                existing.insert(state_token);
+            }
+        } else {
+            let state_tokens = OrdSet::from_iter(state_tokens);
+            if !state_tokens.is_empty() {
+                self.state_tokens = Some(state_tokens);
+            }
+        }
+    }
+}
+impl Extend<DependencyList> for DependencyList {
+    fn extend<T: IntoIterator<Item = DependencyList>>(&mut self, values: T) {
+        for values in values {
+            self.extend(values)
+        }
+    }
+}
 impl DependencyList {
     pub fn empty() -> Self {
-        Self { state_tokens: None }
+        Self::default()
     }
     pub fn of(state_token: StateToken) -> Self {
         Self {
@@ -1011,7 +1041,13 @@ impl DependencyList {
     pub fn is_empty(&self) -> bool {
         self.state_tokens.is_none()
     }
-    pub fn contains(&self, entries: &BTreeSet<StateToken>) -> bool {
+    pub fn contains(&self, state_token: StateToken) -> bool {
+        match &self.state_tokens {
+            None => false,
+            Some(dependencies) => dependencies.contains(&state_token),
+        }
+    }
+    pub fn intersects(&self, entries: &BTreeSet<StateToken>) -> bool {
         match &self.state_tokens {
             None => false,
             Some(dependencies) => dependencies
@@ -1024,18 +1060,6 @@ impl DependencyList {
             state_tokens.insert(state_token);
         } else {
             self.state_tokens = Some(OrdSet::unit(state_token));
-        }
-    }
-    pub fn extend(&mut self, state_tokens: impl IntoIterator<Item = StateToken>) {
-        if let Some(existing) = &mut self.state_tokens {
-            for state_token in state_tokens {
-                existing.insert(state_token);
-            }
-        } else {
-            let state_tokens = OrdSet::from_iter(state_tokens);
-            if !state_tokens.is_empty() {
-                self.state_tokens = Some(state_tokens);
-            }
         }
     }
     pub fn union(self, other: Self) -> Self {
@@ -1056,11 +1080,52 @@ impl DependencyList {
         }
     }
 }
+impl IntoIterator for DependencyList {
+    type Item = StateToken;
+    type IntoIter = ConsumingDependencyListIterator;
+    fn into_iter(self) -> Self::IntoIter {
+        match self.state_tokens {
+            Some(dependencies) => {
+                let remaining = dependencies.len();
+                ConsumingDependencyListIterator::Some(dependencies.into_iter(), remaining)
+            }
+            None => ConsumingDependencyListIterator::None,
+        }
+    }
+}
 impl<'a> IntoIterator for &'a DependencyList {
     type Item = StateToken;
     type IntoIter = DependencyListIterator<'a>;
     fn into_iter(self) -> Self::IntoIter {
         self.iter()
+    }
+}
+pub enum ConsumingDependencyListIterator {
+    Some(im::ordset::ConsumingIter<StateToken>, usize),
+    None,
+}
+impl Iterator for ConsumingDependencyListIterator {
+    type Item = StateToken;
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            Self::Some(iter, remaining) => iter.next().map(|result| {
+                *remaining -= 1;
+                result
+            }),
+            Self::None => None,
+        }
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let len = ExactSizeIterator::len(self);
+        (len, Some(len))
+    }
+}
+impl ExactSizeIterator for ConsumingDependencyListIterator {
+    fn len(&self) -> usize {
+        match self {
+            Self::Some(_, remaining) => *remaining,
+            Self::None => 0,
+        }
     }
 }
 pub enum DependencyListIterator<'a> {

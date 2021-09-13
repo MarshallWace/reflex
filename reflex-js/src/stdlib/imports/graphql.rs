@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use reflex::{
-    core::{Expression, ExpressionFactory, HeapAllocator, VarArgs},
+    core::{Expression, ExpressionFactory, HeapAllocator},
     lang::create_struct,
 };
 
@@ -24,12 +24,9 @@ fn import_graphql_resolver<T: Expression>(
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
 ) -> T {
-    factory.create_constructor_term(
-        allocator.create_struct_prototype(vec![
-            String::from("query"),
-            String::from("mutation"),
-            String::from("subscription"),
-        ]),
-        VarArgs::Lazy,
-    )
+    factory.create_constructor_term(allocator.create_struct_prototype(vec![
+        String::from("query"),
+        String::from("mutation"),
+        String::from("subscription"),
+    ]))
 }

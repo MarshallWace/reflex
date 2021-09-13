@@ -49,7 +49,7 @@ impl<T: Expression> GraphNode for SignalTerm<T> {
 impl<T: Expression + Rewritable<T> + Reducible<T> + Compile<T>> Compile<T> for SignalTerm<T> {
     fn compile(
         &self,
-        eager: VarArgs,
+        _eager: VarArgs,
         stack_offset: StackOffset,
         factory: &impl ExpressionFactory<T>,
         allocator: &impl HeapAllocator<T>,
@@ -59,14 +59,7 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Compile<T>> Compile<T> for S
             Ok((Program::new(empty()), NativeFunctionRegistry::default())),
             |results, (index, signal)| {
                 let (mut program, mut native_functions) = results?;
-                match compile_signal(
-                    signal,
-                    eager,
-                    stack_offset + index,
-                    factory,
-                    allocator,
-                    compiler,
-                ) {
+                match compile_signal(signal, stack_offset + index, factory, allocator, compiler) {
                     Err(error) => Err(error),
                     Ok((compiled_signal, signal_native_functions)) => {
                         program.extend(compiled_signal);
@@ -105,7 +98,6 @@ impl<T: Expression> serde::Serialize for SignalTerm<T> {
 
 fn compile_signal<T: Expression + Compile<T>>(
     signal: &Signal<T>,
-    eager: VarArgs,
     stack_offset: StackOffset,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
@@ -113,7 +105,7 @@ fn compile_signal<T: Expression + Compile<T>>(
 ) -> Result<(Program, NativeFunctionRegistry<T>), String> {
     let (compiled_args, native_functions) = compile_expressions(
         signal.args().iter(),
-        eager,
+        VarArgs::Lazy,
         stack_offset,
         factory,
         allocator,

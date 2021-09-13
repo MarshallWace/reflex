@@ -26,17 +26,14 @@ impl<T: Expression> Applicable<T> for If {
         let consequent = args.next().unwrap();
         let alternate = args.next().unwrap();
         if is_truthy(&condition, factory) {
-            Ok(consequent.clone())
+            Ok(consequent)
         } else {
-            Ok(alternate.clone())
+            Ok(alternate)
         }
     }
 }
 
-pub fn is_truthy<T: Expression>(
-    value: &T,
-    factory: &impl ExpressionFactory<T>,
-) -> bool {
+pub fn is_truthy<T: Expression>(value: &T, factory: &impl ExpressionFactory<T>) -> bool {
     match factory.match_value_term(value) {
         Some(ValueTerm::Boolean(value)) => *value,
         Some(ValueTerm::Null) => false,

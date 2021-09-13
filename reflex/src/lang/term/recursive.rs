@@ -6,10 +6,9 @@ use std::{collections::HashSet, iter::once};
 use crate::{
     compiler::{Compile, Compiler, Instruction, NativeFunctionRegistry, Program},
     core::{
-        Applicable, DependencyList, DynamicState, EvaluationCache, Expression, ExpressionFactory,
-        GraphNode, HeapAllocator, Reducible, Rewritable, StackOffset, Substitutions, VarArgs,
+        DependencyList, DynamicState, EvaluationCache, Expression, ExpressionFactory, GraphNode,
+        HeapAllocator, Reducible, Rewritable, StackOffset, Substitutions, VarArgs,
     },
-    interpreter::{CallStack, Execute, ExecutionResult, VariableStack},
 };
 
 #[derive(Hash, Eq, PartialEq, Debug)]
@@ -19,6 +18,9 @@ pub struct RecursiveTerm<T: Expression> {
 impl<T: Expression> RecursiveTerm<T> {
     pub fn new(factory: T) -> Self {
         Self { factory }
+    }
+    pub fn factory(&self) -> &T {
+        &self.factory
     }
 }
 impl<T: Expression> GraphNode for RecursiveTerm<T> {
@@ -117,29 +119,9 @@ impl<T: Expression + Compile<T>> Compile<T> for RecursiveTerm<T> {
             self.factory
                 .compile(eager, stack_offset, factory, allocator, compiler)?;
         let mut result = compiled_factory;
-        result.push(Instruction::PushStatic { offset: 1 });
+        result.push(Instruction::PushStatic { offset: 0 });
         result.push(Instruction::Apply { num_args: 1 });
         Ok((result, native_functions))
-    }
-}
-impl<T: Expression + Applicable<T>> Execute<T> for RecursiveTerm<T> {
-    fn is_executable(&self) -> bool {
-        true
-    }
-    fn execute(
-        &self,
-        _state: &DynamicState<T>,
-        stack: &mut VariableStack<T>,
-        _call_stack: &CallStack,
-        factory: &impl ExpressionFactory<T>,
-        allocator: &impl HeapAllocator<T>,
-    ) -> Result<(ExecutionResult, DependencyList), String> {
-        let target = self.factory.clone();
-        let args = allocator.create_list(once(target));
-        let expression = factory
-            .create_application_term(factory.create_recursive_term(self.factory.clone()), args);
-        stack.push(expression);
-        Ok((ExecutionResult::Repeat, DependencyList::empty()))
     }
 }
 impl<T: Expression> std::fmt::Display for RecursiveTerm<T> {

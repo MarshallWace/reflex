@@ -14,7 +14,7 @@ use crate::{
 pub struct Append {}
 impl<T: Expression> Applicable<T> for Append {
     fn arity(&self) -> Option<Arity> {
-        Some(Arity::from(2, 0, Some(VarArgs::Eager)))
+        Some(Arity::from(1, 0, Some(VarArgs::Eager)))
     }
     fn apply(
         &self,
@@ -24,9 +24,9 @@ impl<T: Expression> Applicable<T> for Append {
         _cache: &mut impl EvaluationCache<T>,
     ) -> Result<T, String> {
         let mut args = args.into_iter();
-        if args.len() < 2 {
+        if args.len() < 1 {
             return Err(format!(
-                "Expected 2 or more arguments, received {}",
+                "Expected 1 or more arguments, received {}",
                 args.len()
             ));
         }

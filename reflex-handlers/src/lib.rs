@@ -9,6 +9,7 @@ pub mod loader;
 use reflex::{
     compiler::Compile,
     core::{Applicable, Reducible, Rewritable, Signal, StringValue},
+    lang::WithCompiledBuiltins,
 };
 use reflex_runtime::{
     AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator, SignalHandlerResult,
@@ -24,7 +25,7 @@ pub(crate) mod utils {
 pub fn builtin_signal_handler<
     T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
 >(
-    factory: &impl AsyncExpressionFactory<T>,
+    factory: &(impl AsyncExpressionFactory<T> + WithCompiledBuiltins),
     allocator: &impl AsyncHeapAllocator<T>,
 ) -> impl Fn(&str, &[&Signal<T>], &SignalHelpers<T>) -> SignalHandlerResult<T> + Send + Sync + 'static
 where

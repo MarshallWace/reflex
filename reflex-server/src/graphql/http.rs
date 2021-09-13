@@ -10,7 +10,6 @@ use reflex::{
         StringValue,
     },
     hash::hash_object,
-    interpreter::Execute,
     lang::{create_struct, ValueTerm},
 };
 use reflex_graphql::{
@@ -29,7 +28,7 @@ use std::{
 };
 
 pub(crate) async fn handle_graphql_http_request<
-    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T> + Execute<T>,
+    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
 >(
     req: Request<Body>,
     store: Arc<Runtime<T>>,
@@ -52,14 +51,16 @@ where
             });
             match Compiler::new(compiler_options, Some(prelude)).compile(
                 &query,
-                CompilerMode::Program,
+                CompilerMode::Expression,
+                false,
+                empty(),
                 factory,
                 allocator,
             ) {
                 Err(error) => Err(error),
                 Ok(compiled) => {
                     // TODO: Error if runtime expression depends on unrecognized native functions
-                    let (program, _) = compiled.into_parts();
+                    let (program, _, _) = compiled.into_parts();
                     let entry_point = InstructionPointer::new(store.program().len());
                     match store
                         .subscribe(program, entry_point, factory, allocator)

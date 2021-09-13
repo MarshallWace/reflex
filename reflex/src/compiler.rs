@@ -10,12 +10,16 @@ use std::{
 use crate::{
     cache::SubstitutionCache,
     core::{
-        Expression, ExpressionFactory, HeapAllocator, Reducible, Rewritable, SignalType,
-        StackOffset, StateToken, StructPrototype, VarArgs,
+        Applicable, Expression, ExpressionFactory, HeapAllocator, Reducible, Rewritable,
+        SignalType, StackOffset, StateToken, StructPrototype, VarArgs,
     },
     hash::{combine_hashes, hash_object, HashId},
-    lang::{BuiltinTerm, FloatValue, IntValue, NativeFunction, NativeFunctionId, SymbolId},
+    lang::{
+        compile_builtin_function, compile_native_function, BuiltinTerm, FloatValue, IntValue,
+        NativeFunction, NativeFunctionId, SymbolId,
+    },
 };
+use strum::IntoEnumIterator;
 
 pub trait Compile<T: Expression + Compile<T>> {
     fn compile(
@@ -116,6 +120,9 @@ pub enum Instruction {
     PushNative {
         target: NativeFunctionId,
     },
+    PushConstructor {
+        prototype: StructPrototype,
+    },
     PushSignal {
         signal_type: SignalType,
         num_args: usize,
@@ -129,7 +136,6 @@ pub enum Instruction {
     Move {
         offset: StackOffset,
     },
-    Evaluate,
     Jump {
         target: InstructionPointer,
     },
@@ -142,9 +148,11 @@ pub enum Instruction {
     Function {
         hash: HashId,
         arity: usize,
+        variadic: bool,
     },
     Return,
-    End,
+    Evaluate,
+    EvaluateArgList,
     ConstructApplication {
         num_args: usize,
     },
@@ -153,10 +161,6 @@ pub enum Instruction {
     },
     ConstructTuple {
         size: usize,
-    },
-    ConstructStruct {
-        prototype: StructPrototype,
-        eager: bool,
     },
     ConstructVector {
         size: usize,
@@ -222,6 +226,10 @@ impl std::hash::Hash for Instruction {
                 state.write_u8(11);
                 target.hash(state);
             }
+            Self::PushConstructor { prototype } => {
+                state.write_u8(11);
+                prototype.hash(state);
+            }
             Self::PushSignal {
                 signal_type,
                 num_args,
@@ -242,30 +250,35 @@ impl std::hash::Hash for Instruction {
                 state.write_u8(15);
                 offset.hash(state);
             }
-            Self::Evaluate => {
-                state.write_u8(16);
-            }
             Self::Jump { target } => {
-                state.write_u8(17);
+                state.write_u8(16);
                 target.hash(state);
             }
             Self::Call { target } => {
-                state.write_u8(18);
+                state.write_u8(17);
                 target.hash(state);
             }
             Self::Apply { num_args } => {
-                state.write_u8(19);
+                state.write_u8(18);
                 num_args.hash(state);
             }
-            Self::Function { hash, arity } => {
-                state.write_u8(20);
+            Self::Function {
+                hash,
+                arity,
+                variadic,
+            } => {
+                state.write_u8(19);
                 hash.hash(state);
                 arity.hash(state);
+                variadic.hash(state);
             }
             Self::Return => {
+                state.write_u8(20);
+            }
+            Self::Evaluate => {
                 state.write_u8(21);
             }
-            Self::End => {
+            Self::EvaluateArgList => {
                 state.write_u8(22);
             }
             Self::ConstructApplication { num_args } => {
@@ -279,11 +292,6 @@ impl std::hash::Hash for Instruction {
             Self::ConstructTuple { size } => {
                 state.write_u8(25);
                 size.hash(state);
-            }
-            Self::ConstructStruct { prototype, eager } => {
-                state.write_u8(26);
-                prototype.hash(state);
-                eager.hash(state);
             }
             Self::ConstructVector { size } => {
                 state.write_u8(27);
@@ -342,7 +350,7 @@ impl std::fmt::Debug for InstructionPointer {
 
 #[derive(PartialEq, Debug)]
 pub struct NativeFunctionRegistry<T: Expression> {
-    values: HashMap<NativeFunctionId, NativeFunction<T>>,
+    values: HashMap<NativeFunctionId, (NativeFunction<T>, InstructionPointer)>,
 }
 impl<T: Expression> Default for NativeFunctionRegistry<T> {
     fn default() -> Self {
@@ -352,13 +360,14 @@ impl<T: Expression> Default for NativeFunctionRegistry<T> {
     }
 }
 impl<T: Expression> NativeFunctionRegistry<T> {
-    pub fn from(function: NativeFunction<T>) -> Self {
+    pub fn from(entry: (NativeFunction<T>, InstructionPointer)) -> Self {
+        let (target, address) = entry;
         Self {
-            values: HashMap::from_iter(once((function.uid(), function))),
+            values: HashMap::from_iter(once((target.uid(), (target, address)))),
         }
     }
     pub fn get(&self, uid: NativeFunctionId) -> Option<&NativeFunction<T>> {
-        self.values.get(&uid)
+        self.values.get(&uid).map(|(target, _)| target)
     }
     pub fn len(&self) -> usize {
         self.values.len()
@@ -366,15 +375,18 @@ impl<T: Expression> NativeFunctionRegistry<T> {
     pub fn is_empty(&self) -> bool {
         self.values.is_empty()
     }
-    pub fn iter(&self) -> impl IntoIterator<Item = &NativeFunction<T>> {
+    pub fn iter(&self) -> impl Iterator<Item = &(NativeFunction<T>, InstructionPointer)> {
         self.values.values()
     }
-    pub fn add(&mut self, function: NativeFunction<T>) {
-        self.values.insert(function.uid(), function);
+    pub fn add(&mut self, target: NativeFunction<T>, address: InstructionPointer) {
+        self.values.insert(target.uid(), (target, address));
     }
-    pub fn extend(&mut self, functions: impl IntoIterator<Item = NativeFunction<T>>) {
-        for function in functions.into_iter() {
-            self.add(function);
+    pub fn extend(
+        &mut self,
+        entries: impl IntoIterator<Item = (NativeFunction<T>, InstructionPointer)>,
+    ) {
+        for (target, address) in entries.into_iter() {
+            self.add(target, address);
         }
     }
     pub fn union(self, other: NativeFunctionRegistry<T>) -> Self {
@@ -391,18 +403,22 @@ impl<T: Expression> NativeFunctionRegistry<T> {
         }
     }
 }
-impl<T: Expression> FromIterator<NativeFunction<T>> for NativeFunctionRegistry<T> {
-    fn from_iter<TIter: IntoIterator<Item = NativeFunction<T>>>(iter: TIter) -> Self {
+impl<T: Expression> FromIterator<(NativeFunction<T>, InstructionPointer)>
+    for NativeFunctionRegistry<T>
+{
+    fn from_iter<TIter: IntoIterator<Item = (NativeFunction<T>, InstructionPointer)>>(
+        iter: TIter,
+    ) -> Self {
         Self {
             values: iter
                 .into_iter()
-                .map(|function| (function.uid(), function))
+                .map(|(target, address)| (target.uid(), (target, address)))
                 .collect(),
         }
     }
 }
 impl<T: Expression> IntoIterator for NativeFunctionRegistry<T> {
-    type Item = NativeFunction<T>;
+    type Item = (NativeFunction<T>, InstructionPointer);
     type IntoIter = std::collections::hash_map::IntoValues<NativeFunctionId, Self::Item>;
     fn into_iter(self) -> Self::IntoIter {
         self.values.into_values()
@@ -419,8 +435,15 @@ impl CompilerOptions {
     pub fn unoptimized() -> Self {
         Self {
             debug: false,
-            hoist_free_variables: false,
+            hoist_free_variables: true,
             normalize: false,
+        }
+    }
+    pub fn debug() -> Self {
+        Self {
+            debug: true,
+            hoist_free_variables: true,
+            normalize: true,
         }
     }
 }
@@ -437,26 +460,43 @@ impl Default for CompilerOptions {
 #[derive(PartialEq, Debug)]
 pub struct CompilerOutput<T: Expression> {
     program: Program,
+    builtins: Vec<(BuiltinTerm, InstructionPointer)>,
     plugins: NativeFunctionRegistry<T>,
 }
 impl<T: Expression> CompilerOutput<T> {
-    pub fn new(program: Program, plugins: NativeFunctionRegistry<T>) -> Self {
-        Self { program, plugins }
+    pub fn new(
+        program: Program,
+        builtins: impl IntoIterator<Item = (BuiltinTerm, InstructionPointer)>,
+        plugins: NativeFunctionRegistry<T>,
+    ) -> Self {
+        Self {
+            program,
+            builtins: builtins.into_iter().collect(),
+            plugins,
+        }
     }
     pub fn program(&self) -> &Program {
         &self.program
     }
+    pub fn builtins(&self) -> impl IntoIterator<Item = (BuiltinTerm, InstructionPointer)> + '_ {
+        self.builtins.iter().copied()
+    }
     pub fn plugins(&self) -> &NativeFunctionRegistry<T> {
         &self.plugins
     }
-    pub fn into_parts(self) -> (Program, NativeFunctionRegistry<T>) {
-        (self.program, self.plugins)
+    pub fn into_parts(
+        self,
+    ) -> (
+        Program,
+        Vec<(BuiltinTerm, InstructionPointer)>,
+        NativeFunctionRegistry<T>,
+    ) {
+        (self.program, self.builtins, self.plugins)
     }
 }
 
 #[derive(Clone, Copy, Debug)]
 pub enum CompilerMode {
-    Program,
     Expression,
     Thunk,
 }
@@ -482,18 +522,6 @@ impl Compiler {
     pub(crate) fn retrieve_compiled_chunk_address(&self, id: HashId) -> Option<InstructionPointer> {
         self.compiled_chunks.get(&id).map(|(address, _)| *address)
     }
-    pub(crate) fn retrieve_compiled_instruction(
-        &self,
-        chunk_address: InstructionPointer,
-        offset: Option<InstructionPointer>,
-    ) -> Option<&Instruction> {
-        self.compiled_chunks
-            .values()
-            .find(|(address, _)| *address == chunk_address)
-            .and_then(|(_, instructions)| {
-                instructions.get(offset.unwrap_or_else(|| InstructionPointer::default()))
-            })
-    }
     pub(crate) fn store_compiled_chunk(
         &mut self,
         id: HashId,
@@ -505,10 +533,12 @@ impl Compiler {
             .insert(id, (chunk_address, instructions));
         chunk_address
     }
-    pub fn compile<T: Expression + Rewritable<T> + Reducible<T> + Compile<T>>(
+    pub fn compile<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>>(
         mut self,
         expression: &T,
         mode: CompilerMode,
+        builtins: bool,
+        plugins: impl IntoIterator<Item = NativeFunction<T>>,
         factory: &impl ExpressionFactory<T>,
         allocator: &impl HeapAllocator<T>,
     ) -> Result<CompilerOutput<T>, String> {
@@ -524,33 +554,49 @@ impl Compiler {
                 .normalize(factory, allocator, &mut SubstitutionCache::new())
                 .or(optimized_expression),
         };
-        let (compiled_expression, native_functions) = optimized_expression
+        let (compiled_expression, mut compiled_plugins) = optimized_expression
             .as_ref()
             .unwrap_or(expression)
             .compile(VarArgs::Eager, 0, factory, allocator, &mut self)?;
         let program = match mode {
-            CompilerMode::Expression => compiled_expression,
             CompilerMode::Thunk => Program::new(
                 once(Instruction::Function {
                     hash: hash_object(&compiled_expression),
                     arity: 0,
+                    variadic: false,
                 })
                 .chain(compiled_expression)
                 .chain(once(Instruction::Return)),
             ),
-            CompilerMode::Program => {
+            CompilerMode::Expression => {
                 let mut program = compiled_expression;
                 program.push(Instruction::Evaluate);
-                program.push(Instruction::End);
+                program.push(Instruction::Return);
                 program
             }
         };
+        let builtins = if builtins {
+            create_builtin_wrapper_functions::<T>(&mut self)
+                .into_iter()
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
+        let plugins = create_native_wrapper_functions(plugins, &mut self)
+            .into_iter()
+            .collect::<Vec<_>>();
         let compiled_chunks = std::mem::replace(&mut self.compiled_chunks, HashMap::new());
-        let compiled_program = link_compiled_chunks(program, self.prelude, compiled_chunks)?;
+        let (compiled_program, builtins, plugins) =
+            link_compiled_chunks(program, self.prelude, compiled_chunks, builtins, plugins)?;
         if self.options.debug {
             println!("{}", compiled_program);
         }
-        Ok(CompilerOutput::new(compiled_program, native_functions))
+        compiled_plugins.extend(plugins);
+        Ok(CompilerOutput::new(
+            compiled_program,
+            builtins,
+            compiled_plugins,
+        ))
     }
     pub fn intern(&mut self, target: &Program) -> Result<Program, String> {
         match target.instructions().first() {
@@ -573,18 +619,34 @@ impl Compiler {
             None => Err(format!("Invalid function inter: empty program")),
         }
     }
-    pub fn extract(target: &Program, program: &Program) -> Result<Program, String> {
+    pub fn extract<T: Expression>(target: &Program, program: &Program) -> Result<Program, String> {
         let mut compiled_chunks = HashMap::new();
         let chunk = extract_compiled_chunk(target.instructions(), program, &mut compiled_chunks)?;
-        link_compiled_chunks(chunk, None, compiled_chunks)
+        let (program, _builtins, _plugins) = link_compiled_chunks(
+            chunk,
+            None,
+            compiled_chunks,
+            empty(),
+            empty::<(NativeFunction<T>, InstructionPointer)>(),
+        )?;
+        Ok(program)
     }
 }
 
-fn link_compiled_chunks<TIndex>(
+fn link_compiled_chunks<T: Expression>(
     entry_chunk: Program,
     prelude: Option<Program>,
-    compiled_chunks: HashMap<TIndex, (InstructionPointer, Program)>,
-) -> Result<Program, String> {
+    compiled_chunks: HashMap<HashId, (InstructionPointer, Program)>,
+    builtins: impl IntoIterator<Item = (BuiltinTerm, InstructionPointer)>,
+    plugins: impl IntoIterator<Item = (NativeFunction<T>, InstructionPointer)>,
+) -> Result<
+    (
+        Program,
+        Vec<(BuiltinTerm, InstructionPointer)>,
+        Vec<(NativeFunction<T>, InstructionPointer)>,
+    ),
+    String,
+> {
     let prelude_length = prelude.as_ref().map(|chunk| chunk.len()).unwrap_or(0);
     let compiled_instruction_offset = prelude_length + entry_chunk.len();
     let ordered_chunks = compiled_chunks
@@ -603,48 +665,73 @@ fn link_compiled_chunks<TIndex>(
         .into_iter()
         .map(|(_index, chunk)| chunk)
         .flat_map(|chunk| chunk);
-    Ok(Program::new(
-        prelude.into_iter().flat_map(identity).chain(
-            entry_chunk
-                .into_iter()
-                .chain(compiled_instructions)
-                .map(|instruction| {
-                    let result = match instruction {
-                        // TODO: Differentiate between prelude functions and compiled chunks
-                        Instruction::PushFunction { target } => match address_mappings.get(&target)
-                        {
-                            Some(address) => Ok(Instruction::PushFunction { target: *address }),
-                            None if target.get() < prelude_length => {
-                                Ok(Instruction::PushFunction { target })
-                            }
-                            _ => Err((instruction, target)),
-                        },
-                        Instruction::Jump { target } => match address_mappings.get(&target) {
-                            Some(address) => Ok(Instruction::Jump { target: *address }),
-                            None if target.get() < prelude_length => {
-                                Ok(Instruction::Jump { target })
-                            }
-                            _ => Err((instruction, target)),
-                        },
-                        Instruction::Call { target } => match address_mappings.get(&target) {
-                            Some(address) => Ok(Instruction::Call { target: *address }),
-                            None if target.get() < prelude_length => {
-                                Ok(Instruction::Call { target })
-                            }
-                            _ => Err((instruction, target)),
-                        },
-                        _ => Ok(instruction),
-                    };
-                    match result {
-                        Ok(result) => Ok(result),
-                        Err((instruction, target_address)) => Err(format!(
-                            "Invalid address when compiling instruction {:?}: {:x}",
-                            instruction, target_address,
-                        )),
-                    }
-                })
-                .collect::<Result<Vec<_>, _>>()?,
+    let builtins = builtins
+        .into_iter()
+        .map(|(target, address)| match address_mappings.get(&address) {
+            Some(address) => Ok((target, *address)),
+            None => Err(format!(
+                "Invalid builtin function address for {}: {:x}",
+                target, address
+            )),
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let plugins = plugins
+        .into_iter()
+        .map(|(target, address)| match address_mappings.get(&address) {
+            Some(address) => Ok((target, *address)),
+            None => Err(format!(
+                "Invalid native function address for {}: {:x}",
+                target, address
+            )),
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok((
+        Program::new(
+            prelude.into_iter().flat_map(identity).chain(
+                entry_chunk
+                    .into_iter()
+                    .chain(compiled_instructions)
+                    .map(|instruction| {
+                        let result = match instruction {
+                            // TODO: Differentiate between prelude functions and compiled chunks
+                            Instruction::PushFunction { target } => match address_mappings
+                                .get(&target)
+                            {
+                                Some(address) => Ok(Instruction::PushFunction { target: *address }),
+                                None if target.get() < prelude_length => {
+                                    Ok(Instruction::PushFunction { target })
+                                }
+                                _ => Err((instruction, target)),
+                            },
+                            Instruction::Jump { target } => match address_mappings.get(&target) {
+                                Some(address) => Ok(Instruction::Jump { target: *address }),
+                                None if target.get() < prelude_length => {
+                                    Ok(Instruction::Jump { target })
+                                }
+                                _ => Err((instruction, target)),
+                            },
+                            Instruction::Call { target } => match address_mappings.get(&target) {
+                                Some(address) => Ok(Instruction::Call { target: *address }),
+                                None if target.get() < prelude_length => {
+                                    Ok(Instruction::Call { target })
+                                }
+                                _ => Err((instruction, target)),
+                            },
+                            _ => Ok(instruction),
+                        };
+                        match result {
+                            Ok(result) => Ok(result),
+                            Err((instruction, target_address)) => Err(format!(
+                                "Invalid address when compiling instruction {:?}: {:x}",
+                                instruction, target_address,
+                            )),
+                        }
+                    })
+                    .collect::<Result<Vec<_>, _>>()?,
+            ),
         ),
+        builtins,
+        plugins,
     ))
 }
 
@@ -676,7 +763,7 @@ fn extract_compiled_chunk<'a>(
                 })
             }
             // TODO: allow extracting functions containing early exit
-            Instruction::Return | Instruction::End => {
+            Instruction::Return => {
                 chunk.push(instruction.clone());
                 break;
             }
@@ -696,11 +783,16 @@ fn remap_compiled_address(
         Ok(*address)
     } else {
         match program.get(target) {
-            Some(Instruction::Function { hash, arity }) => {
+            Some(Instruction::Function {
+                hash,
+                arity,
+                variadic,
+            }) => {
                 let chunk_index = InstructionPointer::new(compiled_chunks.len());
                 let placeholder = Program::new(once(Instruction::Function {
                     hash: *hash,
                     arity: *arity,
+                    variadic: *variadic,
                 }));
                 compiled_chunks.insert(target_hash, (chunk_index, placeholder));
                 let instructions = program.instructions().iter().skip(target.get());
@@ -742,4 +834,26 @@ pub(crate) fn compile_expressions<'a, T: Expression + Compile<T> + 'a>(
             }
         },
     )
+}
+
+fn create_builtin_wrapper_functions<'a, T: Expression + Applicable<T>>(
+    compiler: &'a mut Compiler,
+) -> impl IntoIterator<Item = (BuiltinTerm, InstructionPointer)> + 'a {
+    BuiltinTerm::iter().into_iter().map(move |target| {
+        let compiled_address = compile_builtin_function::<T>(target, compiler);
+        (target, compiled_address)
+    })
+}
+
+fn create_native_wrapper_functions<'a, T: Expression + Applicable<T> + Compile<T> + 'a>(
+    plugins: impl IntoIterator<
+        Item = NativeFunction<T>,
+        IntoIter = impl Iterator<Item = NativeFunction<T>> + 'a,
+    >,
+    compiler: &'a mut Compiler,
+) -> impl IntoIterator<Item = (NativeFunction<T>, InstructionPointer)> + 'a {
+    plugins.into_iter().map(move |target| {
+        let compiled_address = compile_native_function(&target, compiler);
+        (target, compiled_address)
+    })
 }

@@ -1,18 +1,20 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use std::{collections::HashSet, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 
 use super::term::*;
 use crate::{
     compiler::{Compile, Compiler, InstructionPointer, NativeFunctionRegistry, Program},
     core::{
-        Applicable, DependencyList, DynamicState, Evaluate, EvaluationCache, EvaluationResult,
-        Expression, ExpressionFactory, GraphNode, HeapAllocator, Reducible, Rewritable, SignalList,
-        StackOffset, StateToken, StructPrototype, Substitutions, VarArgs,
+        Applicable, Arity, DependencyList, DynamicState, Evaluate, EvaluationCache,
+        EvaluationResult, Expression, ExpressionFactory, GraphNode, HeapAllocator, Reducible,
+        Rewritable, SignalList, StackOffset, StateToken, StructPrototype, Substitutions, VarArgs,
     },
     hash::{hash_object, HashId},
-    interpreter::{CallStack, Execute, ExecutionResult, VariableStack},
 };
 
 #[derive(Hash, PartialEq, Eq, Clone)]
@@ -189,22 +191,6 @@ impl Compile<CachedTerm<SharedTerm>> for SharedTerm {
             .compile(eager, stack_offset, factory, allocator, compiler)
     }
 }
-impl Execute<CachedTerm<SharedTerm>> for SharedTerm {
-    fn is_executable(&self) -> bool {
-        self.value.is_executable()
-    }
-    fn execute(
-        &self,
-        state: &DynamicState<CachedTerm<SharedTerm>>,
-        stack: &mut VariableStack<CachedTerm<SharedTerm>>,
-        call_stack: &CallStack,
-        factory: &impl ExpressionFactory<CachedTerm<SharedTerm>>,
-        allocator: &impl HeapAllocator<CachedTerm<SharedTerm>>,
-    ) -> Result<(ExecutionResult, DependencyList), String> {
-        self.value
-            .execute(state, stack, call_stack, factory, allocator)
-    }
-}
 impl std::fmt::Display for SharedTerm {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         std::fmt::Display::fmt(&self.value, f)
@@ -224,11 +210,62 @@ impl serde::Serialize for SharedTerm {
     }
 }
 
+pub trait WithCompiledBuiltins {
+    fn with_compiled_builtins(
+        &self,
+        builtins: &[(BuiltinTerm, InstructionPointer)],
+        plugins: &[(NativeFunctionId, Arity, InstructionPointer)],
+    ) -> Self;
+}
+
+struct BuiltinMappings {
+    builtins: HashMap<BuiltinTerm, CachedTerm<SharedTerm>>,
+    plugins: HashMap<NativeFunctionId, CachedTerm<SharedTerm>>,
+}
 #[derive(Clone, Default)]
-pub struct TermFactory {}
+pub struct TermFactory {
+    compiled_builtins: Option<Arc<BuiltinMappings>>,
+}
 impl TermFactory {
     fn create_expression(&self, value: Term<CachedTerm<SharedTerm>>) -> CachedTerm<SharedTerm> {
         CachedTerm::new(SharedTerm::new(value))
+    }
+}
+impl WithCompiledBuiltins for TermFactory {
+    fn with_compiled_builtins(
+        &self,
+        builtins: &[(BuiltinTerm, InstructionPointer)],
+        plugins: &[(NativeFunctionId, Arity, InstructionPointer)],
+    ) -> Self {
+        let builtins = builtins
+            .into_iter()
+            .map(|(target, address)| {
+                let hash = hash_object(target);
+                let arity = Applicable::<CachedTerm<SharedTerm>>::arity(target).unwrap();
+                let compiled_target = self.create_compiled_function_term(
+                    hash,
+                    *address,
+                    arity.required(),
+                    arity.variadic().is_some(),
+                );
+                (*target, compiled_target)
+            })
+            .collect();
+        let plugins = plugins
+            .iter()
+            .map(|(uid, arity, address)| {
+                let compiled_target = self.create_compiled_function_term(
+                    *uid,
+                    *address,
+                    arity.required(),
+                    arity.variadic().is_some(),
+                );
+                (*uid, compiled_target)
+            })
+            .collect();
+        Self {
+            compiled_builtins: Some(Arc::new(BuiltinMappings { builtins, plugins })),
+        }
     }
 }
 impl ExpressionFactory<CachedTerm<SharedTerm>> for TermFactory {
@@ -283,22 +320,31 @@ impl ExpressionFactory<CachedTerm<SharedTerm>> for TermFactory {
         self.create_expression(Term::Recursive(RecursiveTerm::new(factory)))
     }
     fn create_builtin_term(&self, target: BuiltinTerm) -> CachedTerm<SharedTerm> {
-        self.create_expression(Term::Builtin(target))
+        self.compiled_builtins
+            .as_ref()
+            .and_then(|mappings| mappings.builtins.get(&target).cloned())
+            .unwrap_or_else(|| self.create_expression(Term::Builtin(target)))
     }
     fn create_native_function_term(
         &self,
         target: NativeFunction<CachedTerm<SharedTerm>>,
     ) -> CachedTerm<SharedTerm> {
-        self.create_expression(Term::Native(NativeFunctionTerm::new(target)))
+        self.compiled_builtins
+            .as_ref()
+            .and_then(|mappings| mappings.plugins.get(&target.uid()).cloned())
+            .unwrap_or_else(|| {
+                self.create_expression(Term::Native(NativeFunctionTerm::new(target)))
+            })
     }
     fn create_compiled_function_term(
         &self,
         hash: HashId,
         address: InstructionPointer,
         num_args: StackOffset,
+        variadic: bool,
     ) -> CachedTerm<SharedTerm> {
         self.create_expression(Term::CompiledFunction(CompiledFunctionTerm::new(
-            hash, address, num_args,
+            hash, address, num_args, variadic,
         )))
     }
     fn create_tuple_term(&self, fields: CachedList<SharedTerm>) -> CachedTerm<SharedTerm> {
@@ -311,12 +357,8 @@ impl ExpressionFactory<CachedTerm<SharedTerm>> for TermFactory {
     ) -> CachedTerm<SharedTerm> {
         self.create_expression(Term::Struct(StructTerm::new(prototype, fields)))
     }
-    fn create_constructor_term(
-        &self,
-        prototype: StructPrototype,
-        eager: VarArgs,
-    ) -> CachedTerm<SharedTerm> {
-        self.create_expression(Term::Constructor(ConstructorTerm::new(prototype, eager)))
+    fn create_constructor_term(&self, prototype: StructPrototype) -> CachedTerm<SharedTerm> {
+        self.create_expression(Term::Constructor(ConstructorTerm::new(prototype)))
     }
     fn create_vector_term(&self, items: CachedList<SharedTerm>) -> CachedTerm<SharedTerm> {
         self.create_expression(Term::Collection(CollectionTerm::Vector(VectorTerm::new(
@@ -412,6 +454,15 @@ impl ExpressionFactory<CachedTerm<SharedTerm>> for TermFactory {
     ) -> Option<&'a PartialApplicationTerm<CachedTerm<SharedTerm>>> {
         match expression.value().value.as_ref() {
             Term::PartialApplication(term) => Some(term),
+            _ => None,
+        }
+    }
+    fn match_recursive_term<'a>(
+        &self,
+        expression: &'a CachedTerm<SharedTerm>,
+    ) -> Option<&'a RecursiveTerm<CachedTerm<SharedTerm>>> {
+        match expression.value().value.as_ref() {
+            Term::Recursive(term) => Some(term),
             _ => None,
         }
     }

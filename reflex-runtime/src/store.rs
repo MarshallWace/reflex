@@ -12,8 +12,8 @@ use reflex::{
         HeapAllocator, Reducible, Rewritable, Signal, SignalId, SignalType, StateToken,
     },
     hash::{hash_object, HashId},
-    interpreter::{execute, Execute, InterpreterCache, InterpreterOptions},
-    lang::ValueTerm,
+    interpreter::{execute, InterpreterCache, InterpreterOptions},
+    lang::{BuiltinTerm, ValueTerm, WithCompiledBuiltins},
     DependencyCache,
 };
 
@@ -22,10 +22,11 @@ pub type SubscriptionToken = usize;
 type HandlerError = Option<String>;
 
 pub struct Store<
-    T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Execute<T>,
+    T: Expression + Rewritable<T> + Reducible<T> + Applicable<T>,
     TCache: InterpreterCache<T>,
 > {
     state: DynamicState<T>,
+    builtins: Vec<(BuiltinTerm, InstructionPointer)>,
     plugins: NativeFunctionRegistry<T>,
     interpreter_options: InterpreterOptions,
     cache: TCache,
@@ -34,19 +35,19 @@ pub struct Store<
     subscription_counter: usize,
     pending_updates: Option<UpdateBatch>,
 }
-impl<
-        T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Execute<T>,
-        TCache: InterpreterCache<T>,
-    > Store<T, TCache>
+impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T>, TCache: InterpreterCache<T>>
+    Store<T, TCache>
 {
     pub fn new(
         cache: TCache,
         state: Option<DynamicState<T>>,
+        builtins: Vec<(BuiltinTerm, InstructionPointer)>,
         plugins: NativeFunctionRegistry<T>,
         interpreter_options: InterpreterOptions,
     ) -> Self {
         Self {
             state: state.unwrap_or_else(|| DynamicState::new()),
+            builtins,
             plugins,
             interpreter_options,
             cache,
@@ -124,7 +125,7 @@ impl<
     pub fn flush<THandler>(
         &mut self,
         signal_handler: THandler,
-        factory: &impl ExpressionFactory<T>,
+        factory: &(impl ExpressionFactory<T> + WithCompiledBuiltins),
         allocator: &impl HeapAllocator<T>,
     ) -> impl IntoIterator<Item = (SubscriptionToken, Result<T, Vec<String>>)> + '_
     where
@@ -144,6 +145,7 @@ impl<
             &mut self.state,
             factory,
             allocator,
+            &self.builtins,
             &self.plugins,
             &self.interpreter_options,
             &mut self.cache,
@@ -161,7 +163,7 @@ impl<
             .filter_map(|(subscription_id, result)| match result {
                 None => None,
                 Some(result) => {
-                    println!("[Store] Update #{}", subscription_id);
+                    println!("[Store] Emit #{}", subscription_id);
                     Some((subscription_id, result))
                 }
             })
@@ -214,7 +216,7 @@ impl<T: Expression> SubscriptionResult<T> {
         &self.result
     }
 }
-impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Execute<T>> Subscription<T> {
+impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T>> Subscription<T> {
     fn new(
         id: SubscriptionToken,
         target: Program,
@@ -233,8 +235,9 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Execute<T>> 
         &mut self,
         state: &DynamicState<T>,
         updates: Option<&UpdateSet>,
-        factory: &impl ExpressionFactory<T>,
+        factory: &(impl ExpressionFactory<T> + WithCompiledBuiltins),
         allocator: &impl HeapAllocator<T>,
+        builtins: &[(BuiltinTerm, InstructionPointer)],
         plugins: &NativeFunctionRegistry<T>,
         interpreter_options: &InterpreterOptions,
         cache: &mut impl InterpreterCache<T>,
@@ -244,7 +247,7 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Execute<T>> 
             Some(updates) => match &self.result {
                 Some(result) => {
                     result.state_hash == state_hash
-                        || !result.result.dependencies().contains(updates)
+                        || !result.result.dependencies().intersects(updates)
                 }
                 _ => false,
             },
@@ -259,6 +262,7 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Execute<T>> 
             state,
             factory,
             allocator,
+            builtins,
             plugins,
             interpreter_options,
             cache,
@@ -312,14 +316,12 @@ fn combine_updates<'a>(updates: impl IntoIterator<Item = &'a UpdateSet>) -> Opti
     }
 }
 
-struct FlushTask<'a, T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Execute<T>> {
+struct FlushTask<'a, T: Expression + Rewritable<T> + Reducible<T> + Applicable<T>> {
     subscription: &'a mut Subscription<T>,
     result: Option<Result<T, Vec<String>>>,
     latest_update_batch: Option<NonZeroUsize>,
 }
-impl<'a, T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Execute<T>>
-    FlushTask<'a, T>
-{
+impl<'a, T: Expression + Rewritable<T> + Reducible<T> + Applicable<T>> FlushTask<'a, T> {
     fn new(subscription: &'a mut Subscription<T>) -> Self {
         Self {
             subscription,
@@ -373,16 +375,13 @@ impl UpdateBatch {
     }
 }
 
-fn flush_recursive<
-    'a,
-    T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Execute<T>,
-    THandler,
->(
+fn flush_recursive<'a, T: Expression + Rewritable<T> + Reducible<T> + Applicable<T>, THandler>(
     mut tasks: Vec<FlushTask<'a, T>>,
     signal_handler: THandler,
     state: &mut DynamicState<T>,
-    factory: &impl ExpressionFactory<T>,
+    factory: &(impl ExpressionFactory<T> + WithCompiledBuiltins),
     allocator: &impl HeapAllocator<T>,
+    builtins: &[(BuiltinTerm, InstructionPointer)],
     plugins: &NativeFunctionRegistry<T>,
     interpreter_options: &InterpreterOptions,
     cache: &mut impl InterpreterCache<T>,
@@ -414,6 +413,7 @@ where
             combined_updates,
             factory,
             allocator,
+            builtins,
             plugins,
             interpreter_options,
             cache,
@@ -479,6 +479,7 @@ where
                         state,
                         factory,
                         allocator,
+                        builtins,
                         plugins,
                         interpreter_options,
                         cache,

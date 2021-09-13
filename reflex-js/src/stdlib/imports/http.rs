@@ -6,7 +6,7 @@ use std::any::TypeId;
 use reflex::{
     core::{
         Arity, Expression, ExpressionFactory, ExpressionList, HeapAllocator, NativeAllocator,
-        StructPrototype, VarArgs,
+        StructPrototype,
     },
     hash::{hash_object, HashId},
     lang::{create_struct, BuiltinTerm, NativeFunction, ValueTerm},
@@ -37,20 +37,77 @@ fn import_http_fetch<T: Expression>(
 ) -> T {
     factory.create_lambda_term(
         1,
-        factory.create_application_term(
-            factory.create_lambda_term(
-                1,
+        factory.create_let_term(
+            factory.create_application_term(
+                factory.create_native_function_term(to_request()),
+                allocator.create_unit_list(factory.create_static_variable_term(0)),
+            ),
+            factory.create_let_term(
                 factory.create_application_term(
-                    factory.create_lambda_term(
-                        1,
-                        factory.create_struct_term(
-                            allocator.create_struct_prototype(vec![
-                                String::from("status"),
-                                String::from("ok"),
-                                String::from("text"),
-                                String::from("json"),
-                            ]),
-                            allocator.create_list(vec![
+                    factory.create_builtin_term(BuiltinTerm::Effect),
+                    allocator.create_list(vec![
+                        factory.create_value_term(ValueTerm::String(
+                            allocator.create_string(String::from("reflex::http::fetch")),
+                        )),
+                        factory.create_application_term(
+                            factory.create_builtin_term(BuiltinTerm::Get),
+                            allocator.create_pair(
+                                factory.create_static_variable_term(0),
+                                factory.create_value_term(ValueTerm::String(
+                                    allocator.create_string(String::from("url")),
+                                )),
+                            ),
+                        ),
+                        factory.create_application_term(
+                            factory.create_builtin_term(BuiltinTerm::Get),
+                            allocator.create_pair(
+                                factory.create_static_variable_term(0),
+                                factory.create_value_term(ValueTerm::String(
+                                    allocator.create_string(String::from("method")),
+                                )),
+                            ),
+                        ),
+                        factory.create_application_term(
+                            factory.create_builtin_term(BuiltinTerm::ResolveDeep),
+                            allocator.create_unit_list(factory.create_application_term(
+                                factory.create_builtin_term(BuiltinTerm::Get),
+                                allocator.create_pair(
+                                    factory.create_static_variable_term(0),
+                                    factory.create_value_term(ValueTerm::String(
+                                        allocator.create_string(String::from("headers")),
+                                    )),
+                                ),
+                            )),
+                        ),
+                        factory.create_application_term(
+                            factory.create_builtin_term(BuiltinTerm::Get),
+                            allocator.create_pair(
+                                factory.create_static_variable_term(0),
+                                factory.create_value_term(ValueTerm::String(
+                                    allocator.create_string(String::from("body")),
+                                )),
+                            ),
+                        ),
+                    ]),
+                ),
+                factory.create_struct_term(
+                    allocator.create_struct_prototype(vec![
+                        String::from("status"),
+                        String::from("ok"),
+                        String::from("text"),
+                        String::from("json"),
+                    ]),
+                    allocator.create_list(vec![
+                        factory.create_application_term(
+                            factory.create_builtin_term(BuiltinTerm::Get),
+                            allocator.create_pair(
+                                factory.create_static_variable_term(0),
+                                factory.create_value_term(ValueTerm::Int(0)),
+                            ),
+                        ),
+                        factory.create_application_term(
+                            factory.create_builtin_term(BuiltinTerm::Lt),
+                            allocator.create_pair(
                                 factory.create_application_term(
                                     factory.create_builtin_term(BuiltinTerm::Get),
                                     allocator.create_pair(
@@ -58,100 +115,35 @@ fn import_http_fetch<T: Expression>(
                                         factory.create_value_term(ValueTerm::Int(0)),
                                     ),
                                 ),
-                                factory.create_application_term(
-                                    factory.create_builtin_term(BuiltinTerm::Lt),
-                                    allocator.create_pair(
-                                        factory.create_application_term(
-                                            factory.create_builtin_term(BuiltinTerm::Get),
-                                            allocator.create_pair(
-                                                factory.create_static_variable_term(0),
-                                                factory.create_value_term(ValueTerm::Int(0)),
-                                            ),
-                                        ),
-                                        factory.create_value_term(ValueTerm::Int(400)),
-                                    ),
-                                ),
-                                factory.create_lambda_term(
-                                    0,
-                                    factory.create_application_term(
-                                        factory.create_builtin_term(BuiltinTerm::Get),
-                                        allocator.create_pair(
-                                            factory.create_static_variable_term(0),
-                                            factory.create_value_term(ValueTerm::Int(1)),
-                                        ),
-                                    ),
-                                ),
-                                factory.create_lambda_term(
-                                    0,
-                                    factory.create_application_term(
-                                        factory.create_native_function_term(json_parse()),
-                                        allocator.create_unit_list(
-                                            factory.create_application_term(
-                                                factory.create_builtin_term(BuiltinTerm::Get),
-                                                allocator.create_pair(
-                                                    factory.create_static_variable_term(0),
-                                                    factory.create_value_term(ValueTerm::Int(1)),
-                                                ),
-                                            ),
-                                        ),
-                                    ),
-                                ),
-                            ]),
+                                factory.create_value_term(ValueTerm::Int(400)),
+                            ),
                         ),
-                    ),
-                    allocator.create_unit_list(factory.create_application_term(
-                        factory.create_builtin_term(BuiltinTerm::Effect),
-                        allocator.create_list(vec![
-                            factory.create_value_term(ValueTerm::String(
-                                allocator.create_string(String::from("reflex::http::fetch")),
-                            )),
+                        factory.create_lambda_term(
+                            0,
                             factory.create_application_term(
                                 factory.create_builtin_term(BuiltinTerm::Get),
                                 allocator.create_pair(
                                     factory.create_static_variable_term(0),
-                                    factory.create_value_term(ValueTerm::String(
-                                        allocator.create_string(String::from("url")),
-                                    )),
+                                    factory.create_value_term(ValueTerm::Int(1)),
                                 ),
                             ),
+                        ),
+                        factory.create_lambda_term(
+                            0,
                             factory.create_application_term(
-                                factory.create_builtin_term(BuiltinTerm::Get),
-                                allocator.create_pair(
-                                    factory.create_static_variable_term(0),
-                                    factory.create_value_term(ValueTerm::String(
-                                        allocator.create_string(String::from("method")),
-                                    )),
-                                ),
-                            ),
-                            factory.create_application_term(
-                                factory.create_builtin_term(BuiltinTerm::ResolveDeep),
+                                factory.create_native_function_term(json_parse()),
                                 allocator.create_unit_list(factory.create_application_term(
                                     factory.create_builtin_term(BuiltinTerm::Get),
                                     allocator.create_pair(
                                         factory.create_static_variable_term(0),
-                                        factory.create_value_term(ValueTerm::String(
-                                            allocator.create_string(String::from("headers")),
-                                        )),
+                                        factory.create_value_term(ValueTerm::Int(1)),
                                     ),
                                 )),
                             ),
-                            factory.create_application_term(
-                                factory.create_builtin_term(BuiltinTerm::Get),
-                                allocator.create_pair(
-                                    factory.create_static_variable_term(0),
-                                    factory.create_value_term(ValueTerm::String(
-                                        allocator.create_string(String::from("body")),
-                                    )),
-                                ),
-                            ),
-                        ]),
-                    )),
+                        ),
+                    ]),
                 ),
             ),
-            allocator.create_unit_list(factory.create_application_term(
-                factory.create_native_function_term(to_request()),
-                allocator.create_unit_list(factory.create_static_variable_term(0)),
-            )),
         ),
     )
 }
@@ -160,7 +152,7 @@ fn import_http_request<T: Expression>(
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
 ) -> T {
-    factory.create_constructor_term(http_request_prototype(allocator), VarArgs::Eager)
+    factory.create_constructor_term(http_request_prototype(allocator))
 }
 
 fn http_request_prototype<T: Expression>(allocator: &impl HeapAllocator<T>) -> StructPrototype {

@@ -15,12 +15,13 @@ use std::{
 use crate::graphql_service;
 use hyper::{server::conn::AddrStream, service::make_service_fn, Server};
 use reflex::{
-    compiler::{Compile, Compiler, CompilerMode, CompilerOptions, NativeFunctionRegistry},
+    compiler::{Compile, Compiler, CompilerMode, CompilerOptions},
     core::{
         Applicable, Expression, ExpressionFactory, HeapAllocator, Reducible, Rewritable, Signal,
         StringValue,
     },
-    interpreter::{Execute, InterpreterOptions},
+    interpreter::InterpreterOptions,
+    lang::{NativeFunction, WithCompiledBuiltins},
 };
 use reflex_cli::parse_cli_args;
 use reflex_handlers::debug_signal_handler;
@@ -42,6 +43,7 @@ struct CliArgs {
     debug_signals: bool,
     debug_compiler: bool,
     debug_interpreter: bool,
+    debug_stack: bool,
 }
 
 pub async fn cli<
@@ -51,7 +53,6 @@ pub async fn cli<
         + Reducible<T>
         + Applicable<T>
         + Compile<T>
-        + Execute<T>
         + 'static,
 >(
     signal_handler: impl Fn(&str, &[&Signal<T>], &SignalHelpers<T>) -> SignalHandlerResult<T>
@@ -59,9 +60,9 @@ pub async fn cli<
         + Sync
         + 'static,
     custom_loader: Option<impl Fn(&str, &Path) -> Option<Result<T, String>> + 'static>,
-    factory: &impl AsyncExpressionFactory<T>,
+    factory: &(impl AsyncExpressionFactory<T> + WithCompiledBuiltins),
     allocator: &impl AsyncHeapAllocator<T>,
-    plugins: NativeFunctionRegistry<T>,
+    plugins: impl IntoIterator<Item = NativeFunction<T>>,
     compiler_options: Option<CompilerOptions>,
     interpreter_options: Option<InterpreterOptions>,
 ) -> Result<(), String>
@@ -70,15 +71,12 @@ where
 {
     let config = match parse_command_line_args() {
         Err(error) => Err(error),
-        Ok(CliArgs {
-            entry_point,
-            port,
-            debug_signals,
-            debug_compiler,
-            debug_interpreter,
-        }) => {
-            let entry_point = match PathBuf::from_str(&entry_point) {
-                Err(_) => Err(format!("Invalid entry point module path: {}", entry_point)),
+        Ok(args) => {
+            let entry_point = match PathBuf::from_str(&args.entry_point) {
+                Err(_) => Err(format!(
+                    "Invalid entry point module path: {}",
+                    &args.entry_point
+                )),
                 Ok(path) => load_file(&path).map(|source| (path, source)),
             };
             match entry_point {
@@ -86,17 +84,15 @@ where
                 Ok(entry_point) => Ok((
                     env::vars(),
                     entry_point,
-                    SocketAddr::from(([0, 0, 0, 0], port)),
-                    debug_signals,
-                    debug_compiler,
-                    debug_interpreter,
+                    SocketAddr::from(([0, 0, 0, 0], args.port)),
+                    args,
                 )),
             }
         }
     };
     match config {
         Err(error) => Err(format!("Unable to start server: {}", error)),
-        Ok((env_vars, entry_point, address, debug_signals, debug_compiler, debug_interpreter)) => {
+        Ok((env_vars, entry_point, address, args)) => {
             let (root_module_path, root_module_source) = entry_point;
             match create_graph_root(
                 &root_module_path,
@@ -109,15 +105,16 @@ where
                 Err(error) => Err(format!("Failed to load entry point module: {}", error)),
                 Ok(root) => {
                     let compiler_options = compiler_options.unwrap_or_else(|| CompilerOptions {
-                        debug: debug_compiler,
+                        debug: args.debug_compiler,
                         ..CompilerOptions::default()
                     });
                     let interpreter_options =
                         interpreter_options.unwrap_or_else(|| InterpreterOptions {
-                            debug: debug_interpreter,
+                            debug_instructions: args.debug_interpreter || args.debug_stack,
+                            debug_stack: args.debug_stack,
                             ..InterpreterOptions::default()
                         });
-                    let store = if debug_signals {
+                    let store = if args.debug_signals {
                         create_store(
                             root,
                             debug_signal_handler(signal_handler),
@@ -176,14 +173,14 @@ fn create_graph_root<T: Expression + 'static>(
 }
 
 fn create_store<
-    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T> + Execute<T>,
+    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
     THandler,
 >(
     root: T,
     signal_handler: THandler,
-    factory: &impl AsyncExpressionFactory<T>,
+    factory: &(impl AsyncExpressionFactory<T> + WithCompiledBuiltins),
     allocator: &impl AsyncHeapAllocator<T>,
-    plugins: NativeFunctionRegistry<T>,
+    plugins: impl IntoIterator<Item = NativeFunction<T>>,
     compiler_options: CompilerOptions,
     interpreter_options: InterpreterOptions,
 ) -> Result<Runtime<T>, String>
@@ -200,12 +197,14 @@ where
     let compiled_root = Compiler::new(compiler_options, None).compile(
         &root,
         CompilerMode::Thunk,
+        true,
+        plugins,
         factory,
         allocator,
     )?;
     println!(" {:?}", start_time.elapsed());
     // TODO: Error if graph root depends on unrecognized native functions
-    let (program, _) = compiled_root.into_parts();
+    let (program, builtins, plugins) = compiled_root.into_parts();
     // TODO: Establish sensible defaults for channel buffer sizes
     let command_buffer_size = 1024;
     let result_buffer_size = 1024;
@@ -214,6 +213,7 @@ where
         signal_handler,
         factory,
         allocator,
+        builtins,
         plugins,
         compiler_options,
         interpreter_options,
@@ -223,7 +223,7 @@ where
 }
 
 async fn create_server<
-    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T> + Execute<T>,
+    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
 >(
     store: Runtime<T>,
     factory: &impl AsyncExpressionFactory<T>,
@@ -259,6 +259,7 @@ fn parse_command_line_args() -> Result<CliArgs, String> {
     let debug_signals = args.get("debug").is_some();
     let debug_compiler = args.get("bytecode").is_some();
     let debug_interpreter = args.get("vm").is_some();
+    let debug_stack = args.get("stack").is_some();
     let mut args = args.into_iter();
     let entry_point = args.next();
     match entry_point {
@@ -273,6 +274,7 @@ fn parse_command_line_args() -> Result<CliArgs, String> {
                     debug_signals,
                     debug_compiler,
                     debug_interpreter,
+                    debug_stack,
                 })
             }
         }

@@ -251,18 +251,33 @@ impl<T: Expression + Compile<T>> Compile<T> for HashMapTerm<T> {
         compiler: &mut Compiler,
     ) -> Result<(Program, NativeFunctionRegistry<T>), String> {
         compile_expressions(
-            self.keys.iter().chain(self.values.iter()),
-            VarArgs::Lazy,
+            self.keys.iter(),
+            VarArgs::Eager,
             stack_offset,
             factory,
             allocator,
             compiler,
         )
-        .map(|(mut program, native_functions)| {
-            program.push(Instruction::ConstructHashMap {
-                size: self.keys.len(),
-            });
-            (program, native_functions)
+        .and_then(|(keys_chunk, keys_native_functions)| {
+            compile_expressions(
+                self.values.iter(),
+                VarArgs::Lazy,
+                stack_offset,
+                factory,
+                allocator,
+                compiler,
+            )
+            .map(|(values_chunk, values_native_functions)| {
+                let mut program = keys_chunk;
+                program.extend(values_chunk);
+                program.push(Instruction::ConstructHashMap {
+                    size: self.keys.len(),
+                });
+                (
+                    program,
+                    keys_native_functions.union(values_native_functions),
+                )
+            })
         })
     }
 }

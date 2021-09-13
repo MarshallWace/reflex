@@ -4,6 +4,8 @@
 #![feature(test)]
 extern crate test;
 
+use std::iter::empty;
+
 use reflex::{
     allocator::DefaultAllocator,
     cache::SubstitutionCache,
@@ -50,21 +52,28 @@ fn js_compiled(b: &mut Bencher) {
         },
         None,
     )
-    .compile(&expression, CompilerMode::Program, &factory, &allocator)
+    .compile(
+        &expression,
+        CompilerMode::Expression,
+        true,
+        empty(),
+        &factory,
+        &allocator,
+    )
     .unwrap();
     let state = DynamicState::new();
     let options = InterpreterOptions::default();
-    let program = compiled.program();
-    let plugins = compiled.plugins();
+    let (program, builtins, plugins) = compiled.into_parts();
     b.iter(|| {
         let mut cache = DefaultInterpreterCache::default();
         execute(
-            program,
+            &program,
             InstructionPointer::default(),
             &state,
             &factory,
             &allocator,
-            plugins,
+            &builtins,
+            &plugins,
             &options,
             &mut cache,
         )

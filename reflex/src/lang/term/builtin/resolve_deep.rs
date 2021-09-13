@@ -5,8 +5,7 @@ use std::iter::once;
 
 use crate::{
     core::{
-        Applicable, Arity, EvaluationCache, Expression, ExpressionFactory, GraphNode,
-        HeapAllocator, VarArgs,
+        Applicable, Arity, EvaluationCache, Expression, ExpressionFactory, GraphNode, HeapAllocator,
     },
     lang::BuiltinTerm,
 };
@@ -51,20 +50,23 @@ impl<T: Expression> Applicable<T> for ResolveDeep {
                 Ok(target)
             } else {
                 Ok(factory.create_application_term(
-                    factory.create_constructor_term(
-                        allocator.clone_struct_prototype(value.prototype()),
-                        VarArgs::Eager,
+                    factory.create_builtin_term(BuiltinTerm::CollectStruct),
+                    allocator.create_sized_list(
+                        value.fields().len() + 1,
+                        once(factory.create_constructor_term(
+                            allocator.clone_struct_prototype(value.prototype()),
+                        ))
+                        .chain(value.fields().iter().map(|field| {
+                            if field.is_atomic() {
+                                field.clone()
+                            } else {
+                                factory.create_application_term(
+                                    factory.create_builtin_term(BuiltinTerm::ResolveDeep),
+                                    allocator.create_list(once(field.clone())),
+                                )
+                            }
+                        })),
                     ),
-                    allocator.create_list(value.fields().iter().map(|field| {
-                        if field.is_atomic() {
-                            field.clone()
-                        } else {
-                            factory.create_application_term(
-                                factory.create_builtin_term(BuiltinTerm::ResolveDeep),
-                                allocator.create_list(once(field.clone())),
-                            )
-                        }
-                    })),
                 ))
             }
         } else if let Some(value) = factory.match_vector_term(&target) {

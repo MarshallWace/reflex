@@ -241,14 +241,18 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Compile<T>> Compile<T> for L
                     let address = compiler.store_compiled_chunk(
                         hash,
                         Program::new(
-                            once(Instruction::Function { hash, arity: num_args })
-                                .chain(compiled_body)
-                                .chain(if num_args > 0 {
-                                    Some(Instruction::Squash { depth: num_args })
-                                } else {
-                                    None
-                                })
-                                .chain(once(Instruction::Return)),
+                            once(Instruction::Function {
+                                hash,
+                                arity: num_args,
+                                variadic: false,
+                            })
+                            .chain(compiled_body)
+                            .chain(if num_args > 0 {
+                                Some(Instruction::Squash { depth: num_args })
+                            } else {
+                                None
+                            })
+                            .chain(once(Instruction::Return)),
                         ),
                     );
                     (address, native_functions)

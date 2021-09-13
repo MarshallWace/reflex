@@ -66,7 +66,7 @@ impl<K, V> Default for DependencyCache<K, V> {
         }
     }
 }
-impl<K: Eq + Copy + std::hash::Hash + 'static, V> DependencyCache<K, V> {
+impl<K: Eq + Copy + std::fmt::Debug + std::hash::Hash + 'static, V> DependencyCache<K, V> {
     pub fn len(&self) -> usize {
         self.cache.len()
     }
@@ -163,7 +163,10 @@ impl<K: Eq + Copy + std::hash::Hash + 'static, V> DependencyCache<K, V> {
     pub fn retain<'a>(&mut self, keys: impl IntoIterator<Item = &'a K>) {
         let mut queue = VecDeque::from_iter(keys.into_iter().copied());
         while let Some(key) = queue.pop_front() {
-            let entry = self.cache.get_mut(&key).expect("Invalid cache key");
+            let entry = match self.cache.get_mut(&key) {
+                Some(entry) => entry,
+                None => panic!("Invalid cache key: {:?}", key),
+            };
             entry.retain_count += 1;
             if entry.retain_count == 1 {
                 queue.extend(entry.children.iter().copied());
@@ -173,7 +176,10 @@ impl<K: Eq + Copy + std::hash::Hash + 'static, V> DependencyCache<K, V> {
     pub fn release<'a>(&mut self, keys: impl IntoIterator<Item = &'a K>) {
         let mut queue = VecDeque::from_iter(keys.into_iter().copied());
         while let Some(key) = queue.pop_front() {
-            let entry = self.cache.get_mut(&key).expect("Invalid cache key");
+            let entry = match self.cache.get_mut(&key) {
+                Some(entry) => entry,
+                None => panic!("Invalid cache key: {:?}", key),
+            };
             if entry.retain_count == 0 {
                 continue;
             }

@@ -35,6 +35,7 @@ pub async fn main() {
     let debug_signals = args.get("debug").is_some();
     let debug_compiler = args.get("bytecode").is_some();
     let debug_interpreter = args.get("vm").is_some();
+    let debug_stack = args.get("stack").is_some();
     let factory = TermFactory::default();
     let allocator = DefaultAllocator::default();
     let parser = match args.get("syntax") {
@@ -83,7 +84,9 @@ pub async fn main() {
                         match parser(&source).and_then(|expression| {
                             Compiler::new(compiler_options, None).compile(
                                 &expression,
-                                CompilerMode::Program,
+                                CompilerMode::Expression,
+                                true,
+                                empty(),
                                 &factory,
                                 &allocator,
                             )
@@ -92,9 +95,10 @@ pub async fn main() {
                             Ok(compiled) => {
                                 let mut stdout = io::stdout();
                                 let state = DynamicState::new();
-                                let (program, plugins) = compiled.into_parts();
+                                let (program, builtins, plugins) = compiled.into_parts();
                                 let interpreter_options = InterpreterOptions {
-                                    debug: debug_interpreter,
+                                    debug_instructions: debug_interpreter || debug_stack,
+                                    debug_stack: debug_stack,
                                     ..InterpreterOptions::default()
                                 };
                                 let mut interpreter_cache = DefaultInterpreterCache::default();
@@ -104,6 +108,7 @@ pub async fn main() {
                                     &state,
                                     &factory,
                                     &allocator,
+                                    &builtins,
                                     &plugins,
                                     &interpreter_options,
                                     &mut interpreter_cache,
@@ -126,6 +131,7 @@ pub async fn main() {
                                                     debug_signal_handler(signal_handler),
                                                     &factory,
                                                     &allocator,
+                                                    builtins,
                                                     plugins,
                                                     compiler_options,
                                                     interpreter_options,
@@ -138,6 +144,7 @@ pub async fn main() {
                                                     signal_handler,
                                                     &factory,
                                                     &allocator,
+                                                    builtins,
                                                     plugins,
                                                     compiler_options,
                                                     interpreter_options,

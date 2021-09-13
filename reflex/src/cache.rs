@@ -262,7 +262,7 @@ struct SubstitutionCacheEntry<T: Expression> {
 impl<T: Expression> SubstitutionCacheEntry<T> {
     fn new(target: &T) -> Self {
         Self {
-            state_dependencies: target.dynamic_dependencies().into_iter().collect(),
+            state_dependencies: target.dynamic_dependencies().iter().collect(),
             reduce: None,
             evaluate: HashMap::new(),
             substitute_static: HashMap::new(),

@@ -1781,6 +1781,7 @@ mod tests {
 
     use super::{parse, parse_module};
     use crate::{
+        builtin_plugins,
         builtins::{dispatch, throw, to_string},
         static_module_loader,
         stdlib::builtin_imports,
@@ -4513,27 +4514,28 @@ mod tests {
             const greet = (user) => `Hello, ${fullName(user.first, user.last)}!`;
             greet({ first: 'John', last: 'Doe' })";
         let expression = parse(input, &env, &factory, &allocator).unwrap();
-        let compiled = Compiler::new(
-            CompilerOptions {
-                debug: false,
-                hoist_free_variables: true,
-                normalize: false,
-            },
-            None,
-        )
-        .compile(&expression, CompilerMode::Program, &factory, &allocator)
-        .unwrap();
+        let compiled = Compiler::new(CompilerOptions::unoptimized(), None)
+            .compile(
+                &expression,
+                CompilerMode::Expression,
+                true,
+                builtin_plugins(),
+                &factory,
+                &allocator,
+            )
+            .unwrap();
+        let (program, builtins, plugins) = compiled.into_parts();
         let state = DynamicState::new();
         let mut cache = DefaultInterpreterCache::default();
-        let options = InterpreterOptions::default();
         let (result, _) = execute(
-            compiled.program(),
+            &program,
             InstructionPointer::default(),
             &state,
             &factory,
             &allocator,
-            compiled.plugins(),
-            &options,
+            &builtins,
+            &plugins,
+            &InterpreterOptions::default(),
             &mut cache,
         )
         .unwrap();

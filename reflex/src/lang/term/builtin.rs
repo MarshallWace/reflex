@@ -4,14 +4,17 @@
 use std::{collections::HashSet, iter::once};
 
 use crate::{
-    compiler::{Compile, Compiler, Instruction, NativeFunctionRegistry, Program},
+    compiler::{
+        Compile, Compiler, Instruction, InstructionPointer, NativeFunctionRegistry, Program,
+    },
     core::{
         Applicable, Arity, DependencyList, EvaluationCache, Expression, ExpressionFactory,
-        GraphNode, HeapAllocator, Reducible, Rewritable, StackOffset, VarArgs,
+        GraphNode, HeapAllocator, StackOffset, VarArgs,
     },
-    hash::hash_object,
+    hash::{hash_object, HashId},
     lang::with_eagerness,
 };
+use strum_macros::EnumIter;
 
 mod add;
 pub use add::*;
@@ -116,7 +119,7 @@ pub use subtract::*;
 mod values;
 pub use values::*;
 
-#[derive(Hash, Eq, PartialEq, Clone, Copy, Debug)]
+#[derive(Hash, Eq, PartialEq, Clone, Copy, Debug, EnumIter)]
 pub enum BuiltinTerm {
     Add,
     Abs,
@@ -129,6 +132,7 @@ pub enum BuiltinTerm {
     CollectFilterResults,
     CollectHashMap,
     CollectHashSet,
+    CollectStruct,
     CollectTuple,
     CollectVector,
     ConstructHashMap,
@@ -200,9 +204,7 @@ impl GraphNode for BuiltinTerm {
         true
     }
 }
-impl<T: Expression + Applicable<T> + Rewritable<T> + Reducible<T> + Compile<T>> Applicable<T>
-    for BuiltinTerm
-{
+impl<T: Expression + Applicable<T>> Applicable<T> for BuiltinTerm {
     fn arity(&self) -> Option<Arity> {
         match self {
             Self::Add => Applicable::<T>::arity(&Add {}),
@@ -216,6 +218,7 @@ impl<T: Expression + Applicable<T> + Rewritable<T> + Reducible<T> + Compile<T>> 
             Self::CollectFilterResults => Applicable::<T>::arity(&CollectFilterResults {}),
             Self::CollectHashMap => Applicable::<T>::arity(&CollectHashMap {}),
             Self::CollectHashSet => Applicable::<T>::arity(&CollectHashSet {}),
+            Self::CollectStruct => Applicable::<T>::arity(&CollectStruct {}),
             Self::CollectTuple => Applicable::<T>::arity(&CollectTuple {}),
             Self::CollectVector => Applicable::<T>::arity(&CollectVector {}),
             Self::ConstructHashMap => Applicable::<T>::arity(&ConstructHashMap {}),
@@ -295,6 +298,9 @@ impl<T: Expression + Applicable<T> + Rewritable<T> + Reducible<T> + Compile<T>> 
             }
             Self::CollectHashSet => {
                 Applicable::<T>::apply(&CollectHashSet {}, args, factory, allocator, cache)
+            }
+            Self::CollectStruct => {
+                Applicable::<T>::apply(&CollectStruct {}, args, factory, allocator, cache)
             }
             Self::CollectTuple => {
                 Applicable::<T>::apply(&CollectTuple {}, args, factory, allocator, cache)
@@ -385,9 +391,7 @@ impl<T: Expression + Applicable<T> + Rewritable<T> + Reducible<T> + Compile<T>> 
         .map_err(|err| format!("{}: {}", self, err))
     }
 }
-impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>> Compile<T>
-    for BuiltinTerm
-{
+impl<T: Expression + Applicable<T> + Compile<T>> Compile<T> for BuiltinTerm {
     fn compile(
         &self,
         _eager: VarArgs,
@@ -396,61 +400,12 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>> 
         _allocator: &impl HeapAllocator<T>,
         compiler: &mut Compiler,
     ) -> Result<(Program, NativeFunctionRegistry<T>), String> {
-        match Applicable::<T>::arity(self) {
-            None => Err(format!("Unable to compile builtin function: {}", self)),
-            Some(arity) => match arity.variadic() {
-                Some(_) => Ok((
-                    Program::new(once(Instruction::PushBuiltin { target: *self })),
-                    NativeFunctionRegistry::default(),
-                )),
-                None => {
-                    let hash = hash_object(self);
-                    Ok((
-                        Program::new(once(Instruction::PushFunction {
-                            target: match compiler.retrieve_compiled_chunk_address(hash) {
-                                Some(address) => address,
-                                None => {
-                                    let num_args = arity.required();
-                                    compiler.store_compiled_chunk(
-                                        hash,
-                                        Program::new(
-                                            once(Instruction::Function {
-                                                hash,
-                                                arity: num_args,
-                                            })
-                                            .chain(
-                                                with_eagerness(0..arity.required(), &arity)
-                                                    .into_iter()
-                                                    .flat_map(|(_, eager)| {
-                                                        once(Instruction::PushStatic {
-                                                            offset: num_args - 1,
-                                                        })
-                                                        .chain(match eager {
-                                                            VarArgs::Eager => {
-                                                                Some(Instruction::Evaluate)
-                                                            }
-                                                            VarArgs::Lazy => None,
-                                                        })
-                                                    }),
-                                            )
-                                            .chain(once(Instruction::PushBuiltin { target: *self }))
-                                            .chain(once(Instruction::Apply { num_args }))
-                                            .chain(if num_args > 0 {
-                                                Some(Instruction::Squash { depth: num_args })
-                                            } else {
-                                                None
-                                            })
-                                            .chain(once(Instruction::Return)),
-                                        ),
-                                    )
-                                }
-                            },
-                        })),
-                        NativeFunctionRegistry::default(),
-                    ))
-                }
-            },
-        }
+        Ok((
+            Program::new(once(Instruction::PushFunction {
+                target: compile_builtin_function::<T>(*self, compiler),
+            })),
+            NativeFunctionRegistry::default(),
+        ))
     }
 }
 impl std::fmt::Display for BuiltinTerm {
@@ -467,5 +422,73 @@ impl serde::Serialize for BuiltinTerm {
             "Unable to serialize term: {}",
             self
         )))
+    }
+}
+
+pub(crate) fn compile_builtin_function<T: Expression + Applicable<T>>(
+    target: BuiltinTerm,
+    compiler: &mut Compiler,
+) -> InstructionPointer {
+    compile_function(
+        hash_object(&target),
+        Applicable::<T>::arity(&target).unwrap(),
+        Instruction::PushBuiltin { target },
+        compiler,
+    )
+}
+
+pub(crate) fn compile_function(
+    hash: HashId,
+    arity: Arity,
+    target: Instruction,
+    compiler: &mut Compiler,
+) -> InstructionPointer {
+    match compiler.retrieve_compiled_chunk_address(hash) {
+        Some(address) => address,
+        None => {
+            let num_args = arity.required();
+            let variadic_offset = if arity.variadic().is_some() { 1 } else { 0 };
+            compiler.store_compiled_chunk(
+                hash,
+                Program::new(
+                    once(Instruction::Function {
+                        hash,
+                        arity: num_args,
+                        variadic: arity.variadic().is_some(),
+                    })
+                    .chain(
+                        with_eagerness(0..arity.required(), &arity)
+                            .into_iter()
+                            .flat_map(|(_, eager)| {
+                                once(Instruction::PushStatic {
+                                    offset: num_args + variadic_offset - 1,
+                                })
+                                .chain(match eager {
+                                    VarArgs::Eager => Some(Instruction::Evaluate),
+                                    VarArgs::Lazy => None,
+                                })
+                            }),
+                    )
+                    .chain(arity.variadic().into_iter().flat_map(|eager| {
+                        once(Instruction::PushStatic { offset: num_args }).chain(match eager {
+                            VarArgs::Eager => Some(Instruction::EvaluateArgList),
+                            VarArgs::Lazy => None,
+                        })
+                    }))
+                    .chain(once(target))
+                    .chain(once(Instruction::Apply {
+                        num_args: num_args + variadic_offset,
+                    }))
+                    .chain(if num_args + variadic_offset > 0 {
+                        Some(Instruction::Squash {
+                            depth: num_args + variadic_offset,
+                        })
+                    } else {
+                        None
+                    })
+                    .chain(once(Instruction::Return)),
+                ),
+            )
+        }
     }
 }

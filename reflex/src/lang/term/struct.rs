@@ -12,7 +12,6 @@ use crate::{
         EvaluationCache, Expression, ExpressionFactory, ExpressionList, GraphNode, HeapAllocator,
         Reducible, Rewritable, StackOffset, StructPrototype, Substitutions, VarArgs,
     },
-    hash::hash_object,
 };
 
 #[derive(Hash, Eq, PartialEq, Debug)]
@@ -135,10 +134,14 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Compile<T>> Compile<T> for S
             compiler,
         )
         .map(|(mut program, native_functions)| {
-            program.push(Instruction::ConstructStruct {
-                prototype: allocator.clone_struct_prototype(&self.prototype),
-                eager: false,
-            });
+            program.extend(
+                once(Instruction::PushConstructor {
+                    prototype: allocator.clone_struct_prototype(&self.prototype),
+                })
+                .chain(once(Instruction::Apply {
+                    num_args: self.fields.len(),
+                })),
+            );
             (program, native_functions)
         })
     }
@@ -178,17 +181,13 @@ impl<T: Expression> serde::Serialize for StructTerm<T> {
 #[derive(Hash, Eq, PartialEq, Debug)]
 pub struct ConstructorTerm {
     prototype: StructPrototype,
-    eager: VarArgs,
 }
 impl ConstructorTerm {
-    pub fn new(prototype: StructPrototype, eager: VarArgs) -> Self {
-        Self { prototype, eager }
+    pub fn new(prototype: StructPrototype) -> Self {
+        Self { prototype }
     }
     pub fn prototype(&self) -> &StructPrototype {
         &self.prototype
-    }
-    pub fn eager(&self) -> VarArgs {
-        self.eager
     }
 }
 impl GraphNode for ConstructorTerm {
@@ -210,11 +209,7 @@ impl GraphNode for ConstructorTerm {
 }
 impl<T: Expression> Applicable<T> for ConstructorTerm {
     fn arity(&self) -> Option<Arity> {
-        let num_fields = self.prototype().keys().len();
-        Some(match self.eager() {
-            VarArgs::Eager => Arity::from(num_fields, 0, None),
-            VarArgs::Lazy => Arity::from(0, num_fields, None),
-        })
+        Some(Arity::from(0, self.prototype().keys().len(), None))
     }
     fn apply(
         &self,
@@ -236,48 +231,11 @@ impl<T: Expression + Compile<T>> Compile<T> for ConstructorTerm {
         _stack_offset: StackOffset,
         _factory: &impl ExpressionFactory<T>,
         allocator: &impl HeapAllocator<T>,
-        compiler: &mut Compiler,
+        _compiler: &mut Compiler,
     ) -> Result<(Program, NativeFunctionRegistry<T>), String> {
-        let size = self.prototype.keys().len();
-        let hash = hash_object(self);
         Ok((
-            Program::new(once(Instruction::PushFunction {
-                target: match compiler.retrieve_compiled_chunk_address(hash) {
-                    Some(address) => address,
-                    None => compiler.store_compiled_chunk(
-                        hash,
-                        Program::new(
-                            once(Instruction::Function { hash, arity: size })
-                                .chain(
-                                    (match self.eager {
-                                        VarArgs::Lazy => None,
-                                        VarArgs::Eager => {
-                                            Some(self.prototype.keys().iter().flat_map(|_| {
-                                                once(Instruction::PushStatic { offset: size - 1 })
-                                                    .chain(once(Instruction::Evaluate))
-                                            }))
-                                        }
-                                    })
-                                    .into_iter()
-                                    .flatten(),
-                                )
-                                .chain(once(Instruction::ConstructStruct {
-                                    prototype: allocator.clone_struct_prototype(&self.prototype),
-                                    eager: match self.eager {
-                                        VarArgs::Eager => true,
-                                        VarArgs::Lazy => false,
-                                    },
-                                }))
-                                .chain(match self.eager {
-                                    VarArgs::Eager if size > 0 => {
-                                        Some(Instruction::Squash { depth: size })
-                                    }
-                                    _ => None,
-                                })
-                                .chain(once(Instruction::Return)),
-                        ),
-                    ),
-                },
+            Program::new(once(Instruction::PushConstructor {
+                prototype: allocator.clone_struct_prototype(&self.prototype),
             })),
             NativeFunctionRegistry::default(),
         ))

@@ -88,6 +88,35 @@ impl<T: Expression> Applicable<T> for CollectTuple {
     }
 }
 
+pub struct CollectStruct {}
+impl<T: Expression> Applicable<T> for CollectStruct {
+    fn arity(&self) -> Option<Arity> {
+        Some(Arity::from(1, 0, Some(VarArgs::Eager)))
+    }
+    fn apply(
+        &self,
+        args: impl IntoIterator<Item = T, IntoIter = impl ExactSizeIterator<Item = T>>,
+        factory: &impl ExpressionFactory<T>,
+        allocator: &impl HeapAllocator<T>,
+        _cache: &mut impl EvaluationCache<T>,
+    ) -> Result<T, String> {
+        let mut args = args.into_iter();
+        let prototype = args.next().unwrap();
+        match factory.match_constructor_term(&prototype) {
+            Some(constructor) if constructor.prototype().keys().len() == args.len() => Ok(factory
+                .create_struct_term(
+                    allocator.clone_struct_prototype(constructor.prototype()),
+                    allocator.create_list(args),
+                )),
+            _ => Err(format!(
+                "Expected <constructor:{}>, received {}",
+                args.len(),
+                prototype
+            )),
+        }
+    }
+}
+
 pub struct CollectVector {}
 impl<T: Expression> Applicable<T> for CollectVector {
     fn arity(&self) -> Option<Arity> {

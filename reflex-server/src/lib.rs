@@ -16,7 +16,6 @@ use hyper::{
 use reflex::{
     compiler::{Compile, CompilerOptions},
     core::{Applicable, Reducible, Rewritable, StringValue},
-    interpreter::Execute,
 };
 use reflex_runtime::{AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator, Runtime};
 
@@ -29,7 +28,7 @@ mod graphql {
 }
 
 pub fn graphql_service<
-    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T> + Execute<T>,
+    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
 >(
     store: Arc<Runtime<T>>,
     factory: &impl AsyncExpressionFactory<T>,
@@ -100,7 +99,7 @@ fn handle_cors_preflight_request(req: Request<Body>) -> Result<Response<Body>, I
 }
 
 async fn handle_graphql_upgrade_request<
-    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T> + Execute<T>,
+    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
 >(
     req: Request<Body>,
     store: Arc<Runtime<T>>,

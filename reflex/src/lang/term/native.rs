@@ -4,14 +4,15 @@
 use std::{collections::HashSet, hash::Hash, iter::once};
 
 use crate::{
-    compiler::{Compile, Compiler, Instruction, NativeFunctionRegistry, Program},
+    compiler::{
+        Compile, Compiler, Instruction, InstructionPointer, NativeFunctionRegistry, Program,
+    },
     core::{
         Applicable, Arity, DependencyList, EvaluationCache, Expression, ExpressionFactory,
-        ExpressionList, GraphNode, HeapAllocator, NativeAllocator, Reducible, Rewritable,
-        StackOffset, VarArgs,
+        ExpressionList, GraphNode, HeapAllocator, NativeAllocator, StackOffset, VarArgs,
     },
-    hash::{hash_object, HashId},
-    lang::with_eagerness,
+    hash::HashId,
+    lang::compile_function,
 };
 
 pub type NativeFunctionId = HashId;
@@ -134,9 +135,7 @@ impl<T: Expression> PartialEq for NativeFunctionTerm<T> {
         self.uid() == other.uid()
     }
 }
-impl<T: Expression + Rewritable<T> + Reducible<T> + Compile<T>> Compile<T>
-    for NativeFunctionTerm<T>
-{
+impl<T: Expression + Compile<T>> Compile<T> for NativeFunctionTerm<T> {
     fn compile(
         &self,
         _eager: VarArgs,
@@ -145,62 +144,13 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Compile<T>> Compile<T>
         _allocator: &impl HeapAllocator<T>,
         compiler: &mut Compiler,
     ) -> Result<(Program, NativeFunctionRegistry<T>), String> {
-        match Applicable::<T>::arity(self) {
-            None => Err(format!("Unable to compile native function: {}", self)),
-            Some(arity) => match arity.variadic() {
-                Some(_) => Ok((
-                    Program::new(once(Instruction::PushNative {
-                        target: self.target.uid(),
-                    })),
-                    NativeFunctionRegistry::from(self.target.clone()),
-                )),
-                None => {
-                    let hash = hash_object(self);
-                    Ok((
-                        Program::new(once(Instruction::PushFunction {
-                            target: match compiler.retrieve_compiled_chunk_address(hash) {
-                                Some(address) => address,
-                                None => {
-                                    let num_args = arity.required();
-                                    compiler.store_compiled_chunk(
-                                        hash,
-                                        Program::new(
-                                            once(Instruction::Function { hash, arity: num_args })
-                                                .chain(
-                                                    with_eagerness(0..arity.required(), &arity)
-                                                        .into_iter()
-                                                        .flat_map(|(_, eager)| {
-                                                            once(Instruction::PushStatic {
-                                                                offset: num_args - 1,
-                                                            })
-                                                            .chain(match eager {
-                                                                VarArgs::Eager => {
-                                                                    Some(Instruction::Evaluate)
-                                                                }
-                                                                VarArgs::Lazy => None,
-                                                            })
-                                                        }),
-                                                )
-                                                .chain(once(Instruction::PushNative {
-                                                    target: self.target.uid(),
-                                                }))
-                                                .chain(once(Instruction::Apply { num_args }))
-                                                .chain(if num_args > 0 {
-                                                    Some(Instruction::Squash { depth: num_args })
-                                                } else {
-                                                    None
-                                                })
-                                                .chain(once(Instruction::Return)),
-                                        ),
-                                    )
-                                }
-                            },
-                        })),
-                        NativeFunctionRegistry::from(self.target.clone()),
-                    ))
-                }
-            },
-        }
+        let compiled_address = compile_native_function(&self.target, compiler);
+        Ok((
+            Program::new(once(Instruction::PushFunction {
+                target: compiled_address,
+            })),
+            NativeFunctionRegistry::from((self.target.clone(), compiled_address)),
+        ))
     }
 }
 impl<T: Expression> std::fmt::Display for NativeFunctionTerm<T> {
@@ -223,4 +173,18 @@ impl<T: Expression> serde::Serialize for NativeFunctionTerm<T> {
             self
         )))
     }
+}
+
+pub(crate) fn compile_native_function<T: Expression>(
+    target: &NativeFunction<T>,
+    compiler: &mut Compiler,
+) -> InstructionPointer {
+    compile_function(
+        target.uid(),
+        target.arity(),
+        Instruction::PushNative {
+            target: target.uid(),
+        },
+        compiler,
+    )
 }

@@ -72,10 +72,10 @@ impl StructTypeFactory {
         }
         let shape = args.next().unwrap();
         if let Some(shape) = factory.match_struct_term(&shape) {
-            Ok(factory.create_constructor_term(
-                allocator.clone_struct_prototype(shape.prototype()),
-                reflex::core::VarArgs::Lazy,
-            ))
+            Ok(
+                factory
+                    .create_constructor_term(allocator.clone_struct_prototype(shape.prototype())),
+            )
         } else {
             Err(format!(
                 "Invalid shape definition: Expected <struct>, received {}",
@@ -95,7 +95,7 @@ mod tests {
         cache::SubstitutionCache,
         core::{
             evaluate, DependencyList, DynamicState, EvaluationResult, ExpressionFactory,
-            HeapAllocator, VarArgs,
+            HeapAllocator,
         },
         lang::{BuiltinTerm, TermFactory, ValueTerm},
     };
@@ -133,14 +133,11 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                factory.create_constructor_term(
-                    allocator.create_struct_prototype(vec![
-                        allocator.create_string(String::from("foo")),
-                        allocator.create_string(String::from("bar")),
-                        allocator.create_string(String::from("baz")),
-                    ]),
-                    VarArgs::Lazy
-                ),
+                factory.create_constructor_term(allocator.create_struct_prototype(vec![
+                    allocator.create_string(String::from("foo")),
+                    allocator.create_string(String::from("bar")),
+                    allocator.create_string(String::from("baz")),
+                ])),
                 DependencyList::empty(),
             ),
         );

@@ -96,56 +96,10 @@ impl Construct {
         let target = args.next().unwrap();
         if let Some(constructor) = factory.match_constructor_term(&target) {
             let prototype = constructor.prototype();
-            let eager = constructor.eager();
-            let properties = args.next();
-            match properties {
-                None => Err(format!("Invalid constructor call: {}", constructor)),
-                Some(properties) => {
-                    let result = match factory.match_struct_term(&properties) {
-                        Some(property_values) => match eager {
-                            VarArgs::Lazy => {
-                                match prototype.parse_struct(&properties, &factory, &allocator) {
-                                    Some(result) => Some(result),
-                                    None => None,
-                                }
-                            }
-                            VarArgs::Eager => {
-                                let mut ordered_properties =
-                                    prototype.keys().iter().map(|key| property_values.get(key));
-                                let has_missing_fields =
-                                    ordered_properties.by_ref().any(|value| value.is_none());
-                                if has_missing_fields {
-                                    None
-                                } else {
-                                    let mut field_values =
-                                        ordered_properties.map(|value| value.unwrap()).cloned();
-                                    let has_unresolved_fields =
-                                        field_values.by_ref().any(|property| !property.is_static());
-                                    if has_unresolved_fields {
-                                        Some(factory.create_application_term(
-                                            target.clone(),
-                                            allocator.create_list(args.collect()),
-                                        ))
-                                    } else {
-                                        Some(factory.create_struct_term(
-                                            allocator.clone_struct_prototype(prototype),
-                                            allocator.create_list(field_values.collect()),
-                                        ))
-                                    }
-                                }
-                            }
-                        },
-                        _ => None,
-                    };
-                    match result {
-                        Some(result) => Ok(result),
-                        None => Err(format!(
-                            "Invalid constructor call: {} {}",
-                            constructor, properties
-                        )),
-                    }
-                }
-            }
+            let properties = args.next().unwrap();
+            prototype
+                .parse_struct(&properties, &factory, &allocator)
+                .ok_or_else(|| format!("Invalid constructor call: {} {}", constructor, properties))
         } else {
             Ok(factory.create_application_term(target, allocator.create_list(args.collect())))
         }

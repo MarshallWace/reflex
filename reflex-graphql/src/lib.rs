@@ -8,7 +8,7 @@ use graphql_parser::{parse_query, query::*};
 use reflex::{
     core::{
         Arity, Expression, ExpressionFactory, ExpressionList, HeapAllocator, NativeAllocator,
-        SignalType, VarArgs,
+        SignalType,
     },
     hash::{hash_object, HashId},
     lang::{create_struct, BuiltinTerm, NativeFunction, ValueTerm},
@@ -307,16 +307,20 @@ fn parse_selection_set<'src, T: Expression>(
             factory.create_lambda_term(
                 1,
                 factory.create_application_term(
-                    factory.create_constructor_term(
-                        allocator.create_struct_prototype(keys),
-                        VarArgs::Eager,
-                    ),
-                    allocator.create_list(values.into_iter().map(|query| {
-                        factory.create_application_term(
-                            query,
-                            allocator.create_unit_list(factory.create_static_variable_term(0)),
+                    factory.create_builtin_term(BuiltinTerm::CollectStruct),
+                    allocator.create_sized_list(
+                        values.len() + 1,
+                        once(
+                            factory
+                                .create_constructor_term(allocator.create_struct_prototype(keys)),
                         )
-                    })),
+                        .chain(values.into_iter().map(|query| {
+                            factory.create_application_term(
+                                query,
+                                allocator.create_unit_list(factory.create_static_variable_term(0)),
+                            )
+                        })),
+                    ),
                 ),
             ),
             factory,

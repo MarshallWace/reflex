@@ -18,7 +18,7 @@ use reflex::{
         SignalId, SignalType, StateToken,
     },
     hash::{hash_object, HashId},
-    lang::{BuiltinTerm, ValueTerm},
+    lang::{BuiltinTerm, ValueTerm, WithCompiledBuiltins},
 };
 use reflex_runtime::{
     AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator, RuntimeEffect,
@@ -32,7 +32,7 @@ const HASH_NAMESPACE_LOADER: &'static str = "reflex::loader";
 pub fn load_signal_handler<
     T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
 >(
-    factory: &impl AsyncExpressionFactory<T>,
+    factory: &(impl AsyncExpressionFactory<T> + WithCompiledBuiltins),
     allocator: &impl AsyncHeapAllocator<T>,
 ) -> impl Fn(&str, &[&Signal<T>], &SignalHelpers<T>) -> SignalHandlerResult<T>
 where
@@ -118,18 +118,22 @@ where
                                 *cache_key,
                                 create_pending(&factory, &allocator),
                             );
-                            let cache_entries = factory.create_vector_term(allocator.create_list(
-                                keys.iter().map(|key| {
-                                    create_property_accessor(
-                                        cache.clone(),
-                                        factory.create_value_term(ValueTerm::Int(
-                                            *(loader_key_lookup.get(key).unwrap()) as i32,
-                                        )),
-                                        &factory,
-                                        &allocator,
-                                    )
-                                }),
-                            ));
+                            let cache_entries = {
+                                let factory = factory
+                                    .with_compiled_builtins(helpers.builtins(), helpers.plugins());
+                                factory.create_vector_term(allocator.create_list(keys.iter().map(
+                                    |key| {
+                                        create_property_accessor(
+                                            cache.clone(),
+                                            factory.create_value_term(ValueTerm::Int(
+                                                *(loader_key_lookup.get(key).unwrap()) as i32,
+                                            )),
+                                            &factory,
+                                            &allocator,
+                                        )
+                                    },
+                                )))
+                            };
                             let effect = if signal == *last_signal {
                                 let (cache_key, signal_ids, loader_keys, _, _) =
                                     keys_by_loader.remove(loader).unwrap();
@@ -191,12 +195,12 @@ fn get_loader_cache_key<T: Expression>(loader: &T, keys: &[T]) -> StateToken {
     generate_hash(HASH_NAMESPACE_LOADER, once(loader).chain(keys))
 }
 
-fn load_batch<T: AsyncExpression + Rewritable<T> + Reducible<T> + Compile<T>>(
+fn load_batch<T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>>(
     loader: &T,
     keys: &[T],
     signal_ids: impl IntoIterator<Item = SignalId>,
     helpers: &SignalHelpers<T>,
-    factory: &impl AsyncExpressionFactory<T>,
+    factory: &(impl AsyncExpressionFactory<T> + WithCompiledBuiltins),
     allocator: &impl AsyncHeapAllocator<T>,
 ) -> impl Stream<Item = Result<Vec<T>, Vec<String>>>
 where

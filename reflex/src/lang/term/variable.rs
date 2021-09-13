@@ -9,37 +9,15 @@ use std::{
 use crate::{
     compiler::{Compile, Compiler, Instruction, NativeFunctionRegistry, Program},
     core::{
-        Applicable, DependencyList, DynamicState, EvaluationCache, Expression, ExpressionFactory,
-        GraphNode, HeapAllocator, Rewritable, StackOffset, StateToken, Substitutions, VarArgs,
+        DependencyList, DynamicState, EvaluationCache, Expression, ExpressionFactory, GraphNode,
+        HeapAllocator, Rewritable, StackOffset, StateToken, Substitutions, VarArgs,
     },
-    interpreter::{CallStack, Execute, ExecutionResult, VariableStack},
 };
 
 #[derive(Hash, Eq, PartialEq, Debug)]
 pub enum VariableTerm<T: Expression> {
     Static(StaticVariableTerm),
     Dynamic(DynamicVariableTerm<T>),
-}
-impl<T: Expression + Applicable<T>> Execute<T> for VariableTerm<T> {
-    fn is_executable(&self) -> bool {
-        match self {
-            Self::Static(term) => Execute::<T>::is_executable(term),
-            Self::Dynamic(term) => Execute::<T>::is_executable(term),
-        }
-    }
-    fn execute(
-        &self,
-        state: &DynamicState<T>,
-        stack: &mut VariableStack<T>,
-        call_stack: &CallStack,
-        factory: &impl ExpressionFactory<T>,
-        allocator: &impl HeapAllocator<T>,
-    ) -> Result<(ExecutionResult, DependencyList), String> {
-        match self {
-            Self::Static(term) => term.execute(state, stack, call_stack, factory, allocator),
-            Self::Dynamic(term) => term.execute(state, stack, call_stack, factory, allocator),
-        }
-    }
 }
 impl<T: Expression> GraphNode for VariableTerm<T> {
     fn capture_depth(&self) -> StackOffset {
@@ -245,27 +223,6 @@ impl<T: Expression + Compile<T>> Compile<T> for StaticVariableTerm {
         ))
     }
 }
-impl<T: Expression + Applicable<T>> Execute<T> for StaticVariableTerm {
-    fn is_executable(&self) -> bool {
-        true
-    }
-    fn execute(
-        &self,
-        _state: &DynamicState<T>,
-        stack: &mut VariableStack<T>,
-        _call_stack: &CallStack,
-        _factory: &impl ExpressionFactory<T>,
-        _allocator: &impl HeapAllocator<T>,
-    ) -> Result<(ExecutionResult, DependencyList), String> {
-        let stack_offset = self.offset;
-        let value = stack
-            .get(stack_offset)
-            .cloned()
-            .ok_or_else(|| format!("Invalid stack offset: {}", stack_offset))?;
-        stack.push(value);
-        Ok((ExecutionResult::Repeat, DependencyList::empty()))
-    }
-}
 impl std::fmt::Display for StaticVariableTerm {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "<static:{}>", self.offset)
@@ -365,7 +322,7 @@ impl<T: Expression + Rewritable<T>> Rewritable<T> for DynamicVariableTerm<T> {
 impl<T: Expression + Compile<T>> Compile<T> for DynamicVariableTerm<T> {
     fn compile(
         &self,
-        eager: VarArgs,
+        _eager: VarArgs,
         stack_offset: StackOffset,
         factory: &impl ExpressionFactory<T>,
         allocator: &impl HeapAllocator<T>,
@@ -373,31 +330,12 @@ impl<T: Expression + Compile<T>> Compile<T> for DynamicVariableTerm<T> {
     ) -> Result<(Program, NativeFunctionRegistry<T>), String> {
         let (compiled_fallback, native_functions) =
             self.fallback
-                .compile(eager, stack_offset, factory, allocator, compiler)?;
+                .compile(VarArgs::Lazy, stack_offset, factory, allocator, compiler)?;
         let mut result = compiled_fallback;
         result.push(Instruction::PushDynamic {
             state_token: self.state_token,
         });
         Ok((result, native_functions))
-    }
-}
-impl<T: Expression + Applicable<T>> Execute<T> for DynamicVariableTerm<T> {
-    fn is_executable(&self) -> bool {
-        true
-    }
-    fn execute(
-        &self,
-        state: &DynamicState<T>,
-        stack: &mut VariableStack<T>,
-        _call_stack: &CallStack,
-        _factory: &impl ExpressionFactory<T>,
-        _allocator: &impl HeapAllocator<T>,
-    ) -> Result<(ExecutionResult, DependencyList), String> {
-        let state_token = self.state_token;
-        let fallback = &self.fallback;
-        let value = state.get(state_token).unwrap_or(fallback).clone();
-        stack.push(value);
-        Ok((ExecutionResult::Repeat, DependencyList::of(state_token)))
     }
 }
 impl<T: Expression> std::fmt::Display for DynamicVariableTerm<T> {

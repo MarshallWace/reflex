@@ -7,7 +7,6 @@ use std::{
 };
 
 use crate::{
-    cache::NoopCache,
     compiler::{
         Compile, Compiler, Instruction, InstructionPointer, NativeFunctionRegistry, Program,
     },
@@ -16,7 +15,6 @@ use crate::{
         EvaluationCache, Expression, ExpressionFactory, ExpressionList, GraphNode, HeapAllocator,
         Reducible, Rewritable, SignalType, StackOffset, Substitutions, VarArgs,
     },
-    interpreter::{CallStack, Execute, ExecutionResult, VariableStack},
     lang::{SignalTerm, ValueTerm},
 };
 
@@ -317,17 +315,7 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>> 
         let num_args = args.len();
         let eager_arity = match eager {
             VarArgs::Lazy => None,
-            VarArgs::Eager => {
-                let precompiled_target_instruction = factory
-                    .match_compiled_function_term(target)
-                    .and_then(|target| {
-                        compiler.retrieve_compiled_instruction(target.address(), None)
-                    });
-                match precompiled_target_instruction {
-                    Some(Instruction::Function { arity, .. }) => Some(Arity::from(0, *arity, None)),
-                    _ => target.arity(),
-                }
-            }
+            VarArgs::Eager => target.arity(),
         };
         let (compiled_target, target_native_functions) =
             target.compile(eager, stack_offset + num_args, factory, allocator, compiler)?;
@@ -370,6 +358,12 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>> 
                         num_args,
                     ))
                 } else {
+                    let mut compiled_args = compiled_args;
+                    if arity.variadic().is_some() {
+                        compiled_args.push(Instruction::ConstructTuple {
+                            size: num_args - arity.required(),
+                        });
+                    }
                     if let Some(target_address) = match_compiled_function_result(&compiled_target) {
                         let mut result = compiled_args;
                         // TODO: jump to target if in tail position
@@ -385,189 +379,6 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>> 
                         }
                         result.push(Instruction::Apply { num_args });
                         Ok((result, combined_native_functions))
-                    }
-                }
-            }
-        }
-    }
-}
-impl<T: Expression + Applicable<T>> Execute<T> for ApplicationTerm<T> {
-    fn is_executable(&self) -> bool {
-        true
-    }
-    fn execute(
-        &self,
-        _state: &DynamicState<T>,
-        stack: &mut VariableStack<T>,
-        call_stack: &CallStack,
-        factory: &impl ExpressionFactory<T>,
-        allocator: &impl HeapAllocator<T>,
-    ) -> Result<(ExecutionResult, DependencyList), String> {
-        let target = &self.target;
-        let args = &self.args;
-        let num_args = args.len();
-        if !target.is_static() {
-            stack.push_multiple(args.iter().cloned());
-            stack.push(target.clone());
-            let subroutine = Program::new(
-                once(Instruction::Evaluate)
-                    .chain(once(Instruction::ConstructApplication { num_args }))
-                    .chain(once(Instruction::Return)),
-            );
-            let resume_address = call_stack.get_program_counter();
-            Ok((
-                ExecutionResult::CallSubroutine {
-                    subroutine,
-                    num_args: args.len() + 1,
-                    resume_address,
-                },
-                DependencyList::empty(),
-            ))
-        } else {
-            match target.arity() {
-                None => Err(format!("Invalid function application target: {}", target)),
-                Some(arity) => {
-                    if num_args < arity.required() {
-                        stack.push(create_error_signal_term(
-                            factory.create_value_term(ValueTerm::String(allocator.create_string(
-                                format!(
-                                    "{}: expected {}{} arguments, received {}",
-                                    target,
-                                    arity.required(),
-                                    if arity.variadic().is_some() {
-                                        " or more"
-                                    } else {
-                                        ""
-                                    },
-                                    num_args,
-                                ),
-                            ))),
-                            factory,
-                            allocator,
-                        ));
-                        Ok((ExecutionResult::Advance, DependencyList::empty()))
-                    } else {
-                        match factory.match_compiled_function_term(target) {
-                            Some(compiled_function) => {
-                                stack.push_multiple(args.iter().cloned());
-                                let target_address = compiled_function.address();
-                                let resume_address = call_stack.get_program_counter();
-                                Ok((
-                                    ExecutionResult::CallFunction {
-                                        target_address,
-                                        resume_address,
-                                    },
-                                    DependencyList::empty(),
-                                ))
-                            }
-                            _ => match factory.match_partial_application_term(target).and_then(
-                                |partial| {
-                                    factory
-                                        .match_compiled_function_term(partial.target())
-                                        .map(|compiled_function| (partial, compiled_function))
-                                },
-                            ) {
-                                Some((partial, compiled_function)) => {
-                                    stack.push_multiple(partial.args().iter().cloned());
-                                    stack.push_multiple(args.iter().cloned());
-                                    let target_address = compiled_function.address();
-                                    let resume_address = call_stack.get_program_counter();
-                                    Ok((
-                                        ExecutionResult::CallFunction {
-                                            target_address,
-                                            resume_address,
-                                        },
-                                        DependencyList::empty(),
-                                    ))
-                                }
-                                _ => {
-                                    let has_unresolved_args = with_eagerness(args.iter(), &arity)
-                                        .into_iter()
-                                        .any(|(arg, eager)| match eager {
-                                            VarArgs::Eager => !arg.is_static(),
-                                            VarArgs::Lazy => false,
-                                        });
-                                    if has_unresolved_args {
-                                        stack.push_multiple(args.iter().cloned());
-                                        stack.push(target.clone());
-                                        let subroutine = Program::new(
-                                            with_eagerness(args.iter(), &arity)
-                                                .into_iter()
-                                                .enumerate()
-                                                .flat_map(|(arg_index, (arg, eager))| match eager {
-                                                    VarArgs::Eager if !arg.is_static() => {
-                                                        let arg_offset =
-                                                            (num_args - arg_index - 1) + 1;
-                                                        Some(arg_offset)
-                                                    }
-                                                    _ => None,
-                                                })
-                                                .flat_map(|arg_offset| {
-                                                    once(Instruction::PushStatic {
-                                                        offset: arg_offset,
-                                                    })
-                                                    .chain(once(Instruction::Evaluate))
-                                                    .chain(once(Instruction::Move {
-                                                        offset: arg_offset + 1,
-                                                    }))
-                                                })
-                                                .chain(once(Instruction::ConstructApplication {
-                                                    num_args,
-                                                }))
-                                                .chain(once(Instruction::Return)),
-                                        );
-                                        let resume_address = call_stack.get_program_counter();
-                                        Ok((
-                                            ExecutionResult::CallSubroutine {
-                                                subroutine,
-                                                num_args: args.len() + 1,
-                                                resume_address,
-                                            },
-                                            DependencyList::empty(),
-                                        ))
-                                    } else {
-                                        match get_short_circuit_signal(
-                                            args.as_slice(),
-                                            &arity,
-                                            factory,
-                                            allocator,
-                                        ) {
-                                            Some(signal) => {
-                                                stack.push(signal);
-                                                Ok((
-                                                    ExecutionResult::Advance,
-                                                    DependencyList::empty(),
-                                                ))
-                                            }
-                                            None => {
-                                                let result = match target.apply(
-                                                    args.iter().cloned(),
-                                                    factory,
-                                                    allocator,
-                                                    &mut NoopCache::default(),
-                                                ) {
-                                                    Ok(result) => result,
-                                                    Err(error) => create_error_signal_term(
-                                                        factory.create_value_term(
-                                                            ValueTerm::String(
-                                                                allocator.create_string(error),
-                                                            ),
-                                                        ),
-                                                        factory,
-                                                        allocator,
-                                                    ),
-                                                };
-                                                stack.push(result);
-                                                Ok((
-                                                    ExecutionResult::Repeat,
-                                                    DependencyList::empty(),
-                                                ))
-                                            }
-                                        }
-                                    }
-                                }
-                            },
-                        }
                     }
                 }
             }
@@ -760,9 +571,6 @@ pub(crate) fn compile_args<'a, T: Expression + Compile<T> + 'a>(
                 arg.compile(eager, stack_offset + index, factory, allocator, compiler)?;
             native_functions.extend(arg_native_functions);
             program.extend(compiled_arg);
-            if let VarArgs::Eager = eager {
-                program.push(Instruction::Evaluate);
-            }
             Ok((program, native_functions))
         },
     )

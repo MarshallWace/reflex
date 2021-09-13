@@ -1,10 +1,11 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+use std::iter::once;
+
 use crate::{
     core::{
-        Applicable, Arity, EvaluationCache, Expression, ExpressionFactory, GraphNode,
-        HeapAllocator, VarArgs,
+        Applicable, Arity, EvaluationCache, Expression, ExpressionFactory, GraphNode, HeapAllocator,
     },
     lang::BuiltinTerm,
 };
@@ -63,11 +64,14 @@ impl<T: Expression> Applicable<T> for ResolveStruct {
                 Ok(target)
             } else {
                 Ok(factory.create_application_term(
-                    factory.create_constructor_term(
-                        allocator.clone_struct_prototype(value.prototype()),
-                        VarArgs::Eager,
+                    factory.create_builtin_term(BuiltinTerm::CollectStruct),
+                    allocator.create_sized_list(
+                        value.fields().len() + 1,
+                        once(factory.create_constructor_term(
+                            allocator.clone_struct_prototype(value.prototype()),
+                        ))
+                        .chain(value.fields().iter().cloned()),
                     ),
-                    allocator.create_list(value.fields().iter().cloned()),
                 ))
             }
         } else {

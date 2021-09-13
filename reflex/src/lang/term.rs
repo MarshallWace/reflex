@@ -39,7 +39,6 @@ use crate::core::{
     StackOffset, StringValue, Substitutions, VarArgs,
 };
 use crate::hash::HashId;
-use crate::interpreter::{CallStack, Execute, ExecutionResult, VariableStack};
 
 pub type StringPrimitive = String;
 impl StringValue for StringPrimitive {
@@ -216,24 +215,6 @@ impl<T: Expression + Rewritable<CachedTerm<T>> + Compile<CachedTerm<T>>> Compile
     ) -> Result<(Program, NativeFunctionRegistry<CachedTerm<T>>), String> {
         self.value
             .compile(eager, stack_offset, factory, allocator, compiler)
-    }
-}
-impl<T: Expression + Applicable<CachedTerm<T>> + Execute<CachedTerm<T>>> Execute<CachedTerm<T>>
-    for CachedTerm<T>
-{
-    fn is_executable(&self) -> bool {
-        self.value.is_executable()
-    }
-    fn execute(
-        &self,
-        state: &DynamicState<CachedTerm<T>>,
-        stack: &mut VariableStack<CachedTerm<T>>,
-        call_stack: &CallStack,
-        factory: &impl ExpressionFactory<CachedTerm<T>>,
-        allocator: &impl HeapAllocator<CachedTerm<T>>,
-    ) -> Result<(ExecutionResult, DependencyList), String> {
-        self.value
-            .execute(state, stack, call_stack, factory, allocator)
     }
 }
 impl<T: Expression + Rewritable<CachedTerm<T>> + Reducible<CachedTerm<T>>> Evaluate<CachedTerm<T>>
@@ -650,33 +631,6 @@ impl<
             Self::SignalTransformer(term) => {
                 term.compile(eager, stack_offset, factory, allocator, compiler)
             }
-        }
-    }
-}
-impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>> Execute<T>
-    for Term<T>
-{
-    fn is_executable(&self) -> bool {
-        match self {
-            Self::Variable(term) => term.is_executable(),
-            Self::Application(term) => term.is_executable(),
-            Self::Recursive(term) => term.is_executable(),
-            _ => false,
-        }
-    }
-    fn execute(
-        &self,
-        state: &DynamicState<T>,
-        stack: &mut VariableStack<T>,
-        call_stack: &CallStack,
-        factory: &impl ExpressionFactory<T>,
-        allocator: &impl HeapAllocator<T>,
-    ) -> Result<(ExecutionResult, DependencyList), String> {
-        match self {
-            Self::Variable(term) => term.execute(state, stack, call_stack, factory, allocator),
-            Self::Application(term) => term.execute(state, stack, call_stack, factory, allocator),
-            Self::Recursive(term) => term.execute(state, stack, call_stack, factory, allocator),
-            _ => Ok((ExecutionResult::Advance, DependencyList::empty())),
         }
     }
 }

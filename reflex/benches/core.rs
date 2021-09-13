@@ -8,7 +8,15 @@ use std::iter::once;
 
 use test::Bencher;
 
-use reflex::{allocator::DefaultAllocator, cache::SubstitutionCache, compiler::{Instruction, InstructionPointer, NativeFunctionRegistry, Program}, core::{evaluate, DynamicState, ExpressionFactory, HeapAllocator}, interpreter::{execute, DefaultInterpreterCache, InterpreterOptions}, lang::{BuiltinTerm, TermFactory, ValueTerm}, parser::sexpr::parse};
+use reflex::{
+    allocator::DefaultAllocator,
+    cache::SubstitutionCache,
+    compiler::{Instruction, InstructionPointer, NativeFunctionRegistry, Program},
+    core::{evaluate, DynamicState, ExpressionFactory, HeapAllocator},
+    interpreter::{execute, DefaultInterpreterCache, InterpreterOptions},
+    lang::{BuiltinTerm, TermFactory, ValueTerm},
+    parser::sexpr::parse,
+};
 
 #[bench]
 fn nested_expressions(b: &mut Bencher) {
@@ -44,11 +52,12 @@ fn nested_expressions_compiled(b: &mut Bencher) {
         },
         Instruction::Apply { num_args: 2 },
         Instruction::Evaluate,
-        Instruction::End,
+        Instruction::Return,
     ]);
     let allocator = DefaultAllocator::default();
     let mut cache = DefaultInterpreterCache::default();
     let state = DynamicState::new();
+    let builtins = Vec::new();
     let plugins = NativeFunctionRegistry::default();
     let options = InterpreterOptions::default();
     b.iter(|| {
@@ -58,6 +67,7 @@ fn nested_expressions_compiled(b: &mut Bencher) {
             &state,
             &factory,
             &allocator,
+            &builtins,
             &plugins,
             &options,
             &mut cache,

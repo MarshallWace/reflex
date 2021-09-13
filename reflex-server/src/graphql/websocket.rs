@@ -14,7 +14,6 @@ use hyper_tungstenite::{
 use reflex::{
     compiler::{Compile, Compiler, CompilerMode, CompilerOptions, Instruction, InstructionPointer},
     core::{Applicable, Reducible, Rewritable, StringValue},
-    interpreter::Execute,
 };
 use reflex_graphql::{
     parse_graphql_operation,
@@ -27,13 +26,13 @@ use reflex_json::{json_array, json_object, sanitize, JsonMap, JsonValue};
 use reflex_runtime::{AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator, Runtime};
 use std::{
     collections::HashMap,
-    iter::once,
+    iter::{empty, once},
     sync::{Arc, Mutex},
 };
 use tokio::sync::mpsc;
 
 pub(crate) async fn handle_graphql_ws_request<
-    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T> + Execute<T>,
+    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
 >(
     req: Request<Body>,
     store: Arc<Runtime<T>>,
@@ -83,7 +82,7 @@ where
 }
 
 async fn handle_websocket_connection<
-    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T> + Execute<T>,
+    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
 >(
     websocket: WebSocketStream<Upgraded>,
     store: Arc<Runtime<T>>,
@@ -155,8 +154,12 @@ where
                             ))
                             .await;
                     } else {
-                        match parse_graphql_operation(message.payload(), &root, &factory, &allocator)
-                        {
+                        match parse_graphql_operation(
+                            message.payload(),
+                            &root,
+                            &factory,
+                            &allocator,
+                        ) {
                             Err(error) => {
                                 let _ = messages_tx
                                     .send(GraphQlSubscriptionServerMessage::Error(
@@ -175,7 +178,9 @@ where
                                 });
                                 match Compiler::new(*compiler_options, Some(prelude)).compile(
                                     &query,
-                                    CompilerMode::Program,
+                                    CompilerMode::Expression,
+                                    false,
+                                    empty(),
                                     &factory,
                                     &allocator,
                                 ) {
@@ -192,7 +197,7 @@ where
                                     }
                                     Ok(compiled) => {
                                         // TODO: Error if runtime expression depends on unrecognized native functions
-                                        let (program, _) = compiled.into_parts();
+                                        let (program, _, _) = compiled.into_parts();
                                         match store
                                             .subscribe(
                                                 program,

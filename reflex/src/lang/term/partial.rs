@@ -3,11 +3,14 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use std::{collections::HashSet, iter::once};
 
-use crate::{compiler::{Compile, Compiler, Instruction, NativeFunctionRegistry, Program}, core::{
+use crate::{
+    compiler::{Compile, Compiler, Instruction, NativeFunctionRegistry, Program},
+    core::{
         transform_expression_list, Applicable, Arity, DependencyList, DynamicState,
         EvaluationCache, Expression, ExpressionFactory, ExpressionList, GraphNode, HeapAllocator,
         Reducible, Rewritable, StackOffset, Substitutions, VarArgs,
-    }};
+    },
+};
 
 use super::application::{compile_args, with_eagerness};
 
@@ -223,30 +226,31 @@ impl<T: Expression + Applicable<T> + Rewritable<T> + Reducible<T> + Compile<T>> 
         let num_args = args.len();
         let eager_arity = match eager {
             VarArgs::Lazy => None,
-            VarArgs::Eager => {
-                let precompiled_target_instruction = factory
-                    .match_compiled_function_term(target)
-                    .and_then(|target| {
-                        compiler.retrieve_compiled_instruction(target.address(), None)
-                    });
-                match precompiled_target_instruction {
-                    Some(Instruction::Function { arity, .. }) => Some(Arity::from(0, *arity, None)),
-                    _ => target.arity(),
-                }
-            }
+            VarArgs::Eager => target.arity(),
+            // VarArgs::Eager => {
+            //     let precompiled_target_instruction = factory
+            //         .match_compiled_function_term(target)
+            //         .and_then(|target| {
+            //             compiler.retrieve_compiled_instruction(target.address(), None)
+            //         });
+            //     match precompiled_target_instruction {
+            //         Some(Instruction::Function { arity, .. }) => Some(Arity::from(0, *arity, None)),
+            //         _ => target.arity(),
+            //     }
+            // }
         };
         let (compiled_target, target_native_functions) =
             target.compile(eager, stack_offset + num_args, factory, allocator, compiler)?;
         let (compiled_args, arg_native_functions) = match eager_arity {
-            None => compile_args(
-                args.iter().map(|arg| (arg, VarArgs::Lazy)),
+            Some(arity) => compile_args(
+                with_eagerness(args.iter(), &arity),
                 stack_offset,
                 factory,
                 allocator,
                 compiler,
             ),
-            Some(arity) => compile_args(
-                with_eagerness(args.iter(), &arity),
+            None => compile_args(
+                args.iter().map(|arg| (arg, VarArgs::Lazy)),
                 stack_offset,
                 factory,
                 allocator,
