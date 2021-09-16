@@ -4,10 +4,12 @@
 use std::{
     convert::Infallible,
     env, fs,
+    io::Write,
     net::SocketAddr,
     path::{Path, PathBuf},
     str::FromStr,
     sync::Arc,
+    time::Instant,
 };
 
 use crate::graphql_service;
@@ -192,12 +194,16 @@ where
         + Sync
         + 'static,
 {
+    print!("Compiling graph root...");
+    let _ = std::io::stdout().flush();
+    let start_time = Instant::now();
     let compiled_root = Compiler::new(compiler_options, None).compile(
         &root,
         CompilerMode::Thunk,
         factory,
         allocator,
     )?;
+    println!(" {:?}", start_time.elapsed());
     // TODO: Error if graph root depends on unrecognized native functions
     let (program, _) = compiled_root.into_parts();
     // TODO: Establish sensible defaults for channel buffer sizes
