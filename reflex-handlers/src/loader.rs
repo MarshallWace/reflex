@@ -141,6 +141,7 @@ where
                                 );
                                 let factory = factory.clone();
                                 let allocator = allocator.clone();
+                                // TODO: Dispose dataloader subscriptions
                                 let dispose = future::ready(());
                                 Some(RuntimeEffect::stream(
                                     load_batch(

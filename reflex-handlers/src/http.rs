@@ -3,10 +3,11 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use std::iter::once;
 
-use futures_util::future;
+use futures_util::future::{AbortHandle, Abortable};
 use reflex::{
     core::{
-        Expression, ExpressionFactory, ExpressionList, Signal, SignalType, StateToken, StringValue,
+        Expression, ExpressionFactory, ExpressionList, HeapAllocator, Signal, SignalType,
+        StateToken, StringValue,
     },
     lang::ValueTerm,
 };
@@ -57,43 +58,66 @@ fn handle_http_fetch_signal<T: AsyncExpression>(
     let body = parse_optional_string_arg(args.next().unwrap(), factory);
     match (method, url, headers, body) {
         (Some(method), Some(url), Some(headers), Some(body)) => Ok((
-            factory.create_signal_term(allocator.create_signal_list(once(
-                allocator.create_signal(SignalType::Pending, allocator.create_empty_list()),
-            ))),
+            create_pending_signal(factory, allocator),
             Some({
-                let dispose = future::ready(());
+                let (task, dispose) = {
+                    let factory = factory.clone();
+                    let allocator = allocator.clone();
+                    let (abort_handle, abort_registration) = AbortHandle::new_pair();
+                    let task = async move {
+                        let value = match fetch(&method, &url, headers, body).await {
+                            Ok((status, data)) => factory.create_tuple_term(allocator.create_pair(
+                                factory.create_value_term(ValueTerm::Int(status as i32)),
+                                factory.create_value_term(ValueTerm::String(
+                                    allocator.create_string(data),
+                                )),
+                            )),
+                            Err(error) => factory.create_signal_term(allocator.create_signal_list(
+                                once(allocator.create_signal(
+                                    SignalType::Error,
+                                    allocator.create_unit_list(factory.create_value_term(
+                                        ValueTerm::String(allocator.create_string(error)),
+                                    )),
+                                )),
+                            )),
+                        };
+                        StateUpdate::value(signal_id, value)
+                    };
+                    let dispose = async move {
+                        abort_handle.abort();
+                    };
+                    (Abortable::new(task, abort_registration), dispose)
+                };
                 RuntimeEffect::deferred(
-                    {
+                    Box::pin({
                         let factory = factory.clone();
                         let allocator = allocator.clone();
                         async move {
-                            let value = match fetch(&method, &url, headers, body).await {
-                                Ok((status, data)) => {
-                                    factory.create_tuple_term(allocator.create_pair(
-                                        factory.create_value_term(ValueTerm::Int(status as i32)),
-                                        factory.create_value_term(ValueTerm::String(
-                                            allocator.create_string(data),
-                                        )),
-                                    ))
-                                }
-                                Err(error) => factory.create_signal_term(
-                                    allocator.create_signal_list(once(allocator.create_signal(
-                                        SignalType::Error,
-                                        allocator.create_unit_list(factory.create_value_term(
-                                            ValueTerm::String(allocator.create_string(error)),
-                                        )),
-                                    ))),
+                            let result = task.await;
+                            match result {
+                                Ok(result) => result,
+                                Err(_) => StateUpdate::value(
+                                    signal_id,
+                                    create_pending_signal(&factory, &allocator),
                                 ),
-                            };
-                            StateUpdate::value(signal_id, value)
+                            }
                         }
-                    },
+                    }),
                     dispose,
                 )
             }),
         )),
         _ => Err(String::from("Invalid fetch signal arguments")),
     }
+}
+
+fn create_pending_signal<T: Expression>(
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> T {
+    factory.create_signal_term(allocator.create_signal_list(once(
+        allocator.create_signal(SignalType::Pending, allocator.create_empty_list()),
+    )))
 }
 
 fn parse_string_arg<T: Expression>(

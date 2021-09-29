@@ -6,7 +6,10 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use futures_util::{future, stream, FutureExt, StreamExt};
+use futures_util::{
+    future::{self, AbortHandle, Abortable},
+    stream, FutureExt, StreamExt,
+};
 use reflex::{
     core::{
         Expression, ExpressionFactory, ExpressionList, HeapAllocator, Signal, SignalType,
@@ -112,68 +115,81 @@ fn handle_graphql_http_operation<T: AsyncExpression>(
         String::from("application/json"),
     ));
     let body = format!("{}", operation.into_json());
-    let dispose = future::ready(());
     Ok((
-        factory.create_signal_term(allocator.create_signal_list(once(
-            allocator.create_signal(SignalType::Pending, allocator.create_empty_list()),
-        ))),
-        Some(RuntimeEffect::deferred(
-            {
+        create_pending_signal(factory, allocator),
+        Some({
+            let (task, dispose) = {
+                let factory = factory.clone();
+                let allocator = allocator.clone();
+                let (abort_handle, abort_registration) = AbortHandle::new_pair();
+                let task = async move {
+                    println!("[GraphQL] HTTP request: {} {}", method, url);
+                    let response = fetch(&method, &url, headers, Some(body)).await;
+                    let result = match response {
+                        Ok((_status, data)) => {
+                            let result = match reflex_json::deserialize(&data) {
+                                Ok(result) => {
+                                    parse_graphql_response_payload(result, &factory, &allocator)
+                                }
+                                Err(error) => Err(vec![create_json_error_object(error)]),
+                            };
+                            match result {
+                                Ok(result) => {
+                                    println!("[GraphQL] HTTP success response: {} {}", method, url);
+                                    Ok(result)
+                                }
+                                Err(errors) => {
+                                    println!(
+                                        "[GraphQL] HTTP error response: {} {}{}",
+                                        method,
+                                        url,
+                                        errors
+                                            .iter()
+                                            .map(|error| format!("\n {}", error))
+                                            .collect::<Vec<_>>()
+                                            .join("")
+                                    );
+                                    Err(errors)
+                                }
+                            }
+                        }
+                        Err(error) => {
+                            println!(
+                                "[GraphQL] HTTP network error: {} {}\n {}",
+                                method, url, error
+                            );
+                            Err(vec![create_json_error_object(error)])
+                        }
+                    };
+                    let result = match result {
+                        Ok(result) => result,
+                        Err(errors) => create_error_signal(errors, &factory, &allocator),
+                    };
+                    StateUpdate::value(signal_id, result)
+                };
+                let dispose = async move {
+                    abort_handle.abort();
+                };
+                (Abortable::new(task, abort_registration), dispose)
+            };
+            RuntimeEffect::deferred(
                 Box::pin({
                     let factory = factory.clone();
                     let allocator = allocator.clone();
                     async move {
-                        println!("[GraphQL] HTTP request: {} {}", method, url);
-                        let response = fetch(&method, &url, headers, Some(body)).await;
-                        let result = match response {
-                            Ok((_status, data)) => {
-                                let result = match reflex_json::deserialize(&data) {
-                                    Ok(result) => {
-                                        parse_graphql_response_payload(result, &factory, &allocator)
-                                    }
-                                    Err(error) => Err(vec![create_json_error_object(error)]),
-                                };
-                                match result {
-                                    Ok(result) => {
-                                        println!(
-                                            "[GraphQL] HTTP success response: {} {}",
-                                            method, url
-                                        );
-                                        Ok(result)
-                                    }
-                                    Err(errors) => {
-                                        println!(
-                                            "[GraphQL] HTTP error response: {} {}{}",
-                                            method,
-                                            url,
-                                            errors
-                                                .iter()
-                                                .map(|error| format!("\n {}", error))
-                                                .collect::<Vec<_>>()
-                                                .join("")
-                                        );
-                                        Err(errors)
-                                    }
-                                }
-                            }
-                            Err(error) => {
-                                println!(
-                                    "[GraphQL] HTTP network error: {} {}\n {}",
-                                    method, url, error
-                                );
-                                Err(vec![create_json_error_object(error)])
-                            }
-                        };
-                        let result = match result {
+                        let result = task.await;
+                        match result {
                             Ok(result) => result,
-                            Err(errors) => create_error_signal(errors, &factory, &allocator),
-                        };
-                        StateUpdate::value(signal_id, result)
+                            Err(_) => StateUpdate::value(
+                                signal_id,
+                                create_pending_signal(&factory, &allocator),
+                            ),
+                        }
                     }
-                })
-            },
-            dispose,
-        )),
+                }),
+                dispose,
+            )
+        }),
     ))
 }
 
@@ -330,6 +346,15 @@ fn parse_graphql_response_payload<T: Expression>(
             "Invalid GraphQL response payload",
         ))]),
     }
+}
+
+fn create_pending_signal<T: Expression>(
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> T {
+    factory.create_signal_term(allocator.create_signal_list(once(
+        allocator.create_signal(SignalType::Pending, allocator.create_empty_list()),
+    )))
 }
 
 fn create_error_signal<T: Expression>(
