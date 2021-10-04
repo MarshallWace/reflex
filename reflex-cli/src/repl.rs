@@ -15,7 +15,7 @@ pub(crate) type ReplParser<T> = Box<dyn Fn(&str) -> Result<T, String>>;
 
 pub(crate) fn run<T: Expression + Rewritable<T> + Reducible<T> + Evaluate<T>>(
     parser: ReplParser<T>,
-    state: &mut DynamicState<T>,
+    state: &impl DynamicState<T>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
     cache: &mut impl EvaluationCache<T>,
@@ -51,7 +51,7 @@ pub(crate) fn run<T: Expression + Rewritable<T> + Reducible<T> + Evaluate<T>>(
 
 pub(crate) fn eval<T: Expression + Evaluate<T>>(
     expression: &T,
-    state: &DynamicState<T>,
+    state: &impl DynamicState<T>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
     cache: &mut impl EvaluationCache<T>,

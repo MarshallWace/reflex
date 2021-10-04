@@ -1,18 +1,12 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use std::{
-    collections::{
-        hash_map::{DefaultHasher, Entry},
-        HashMap,
-    },
-    hash::Hasher,
-};
+use std::collections::{hash_map::Entry, HashMap};
 
 use crate::{
     core::{
-        DynamicState, EvaluationCache, EvaluationCacheMetrics, EvaluationResult, Expression,
-        Reducible, Rewritable, StateToken, Substitutions,
+        hash_state_values, DynamicState, EvaluationCache, EvaluationCacheMetrics, EvaluationResult,
+        Expression, Reducible, Rewritable, StateToken, Substitutions,
     },
     hash::{hash_object, HashId},
 };
@@ -37,28 +31,28 @@ impl<T: Expression> EvaluationCache<T> for NoopCache {
     fn retrieve_dynamic_substitution(
         &mut self,
         _expression: &T,
-        _state: &DynamicState<T>,
+        _state: &impl DynamicState<T>,
     ) -> Option<Option<T>> {
         None
     }
     fn store_dynamic_substitution(
         &mut self,
         _expression: &T,
-        _state: &DynamicState<T>,
+        _state: &impl DynamicState<T>,
         _result: Option<T>,
     ) {
     }
     fn retrieve_evaluation(
         &mut self,
         _expression: &T,
-        _state: &DynamicState<T>,
+        _state: &impl DynamicState<T>,
     ) -> Option<Option<EvaluationResult<T>>> {
         None
     }
     fn store_evaluation(
         &mut self,
         _expression: &T,
-        _state: &DynamicState<T>,
+        _state: &impl DynamicState<T>,
         _result: Option<EvaluationResult<T>>,
     ) {
     }
@@ -161,7 +155,7 @@ impl<T: Expression + Rewritable<T> + Reducible<T>> EvaluationCache<T> for Substi
     fn retrieve_dynamic_substitution(
         &mut self,
         expression: &T,
-        state: &DynamicState<T>,
+        state: &impl DynamicState<T>,
     ) -> Option<Option<T>> {
         if expression.dynamic_dependencies().is_empty() {
             return None;
@@ -186,7 +180,7 @@ impl<T: Expression + Rewritable<T> + Reducible<T>> EvaluationCache<T> for Substi
     fn store_dynamic_substitution(
         &mut self,
         expression: &T,
-        state: &DynamicState<T>,
+        state: &impl DynamicState<T>,
         result: Option<T>,
     ) {
         if expression.dynamic_dependencies().is_empty() {
@@ -204,7 +198,7 @@ impl<T: Expression + Rewritable<T> + Reducible<T>> EvaluationCache<T> for Substi
     fn retrieve_evaluation(
         &mut self,
         expression: &T,
-        state: &DynamicState<T>,
+        state: &impl DynamicState<T>,
     ) -> Option<Option<EvaluationResult<T>>> {
         if expression.is_static() {
             return None;
@@ -227,7 +221,7 @@ impl<T: Expression + Rewritable<T> + Reducible<T>> EvaluationCache<T> for Substi
     fn store_evaluation(
         &mut self,
         expression: &T,
-        state: &DynamicState<T>,
+        state: &impl DynamicState<T>,
         result: Option<EvaluationResult<T>>,
     ) {
         if expression.is_static() {
@@ -276,7 +270,7 @@ impl<T: Expression> SubstitutionCacheEntry<T> {
     }
     fn from_evaluate(
         target: &T,
-        state: &DynamicState<T>,
+        state: &impl DynamicState<T>,
         value: Option<EvaluationResult<T>>,
     ) -> Self {
         let mut entry = Self::new(target);
@@ -292,7 +286,7 @@ impl<T: Expression> SubstitutionCacheEntry<T> {
         entry.set_substitute_static(substitutions, value);
         entry
     }
-    fn from_substitute_dynamic(target: &T, state: &DynamicState<T>, value: Option<T>) -> Self {
+    fn from_substitute_dynamic(target: &T, state: &impl DynamicState<T>, value: Option<T>) -> Self {
         let mut entry = Self::new(target);
         entry.set_substitute_dynamic(state, value);
         entry
@@ -303,8 +297,8 @@ impl<T: Expression> SubstitutionCacheEntry<T> {
     fn set_reduce(&mut self, value: Option<T>) {
         self.reduce = value;
     }
-    fn get_evaluate(&self, state: &DynamicState<T>) -> Option<Option<&EvaluationResult<T>>> {
-        let overall_state_hash = hash_object(state);
+    fn get_evaluate(&self, state: &impl DynamicState<T>) -> Option<Option<&EvaluationResult<T>>> {
+        let overall_state_hash = state.id();
         self.evaluate
             .get(&overall_state_hash)
             .or_else(|| {
@@ -314,8 +308,8 @@ impl<T: Expression> SubstitutionCacheEntry<T> {
             })
             .map(|entry| entry.as_ref())
     }
-    fn set_evaluate(&mut self, state: &DynamicState<T>, value: Option<EvaluationResult<T>>) {
-        let overall_state_hash = hash_object(state);
+    fn set_evaluate(&mut self, state: &impl DynamicState<T>, value: Option<EvaluationResult<T>>) {
+        let overall_state_hash = state.id();
         self.evaluate.insert(overall_state_hash, value.clone());
         let minimal_state_hash = hash_state_values(state, self.state_dependencies.iter().copied());
         self.evaluate.insert(minimal_state_hash, value);
@@ -329,8 +323,8 @@ impl<T: Expression> SubstitutionCacheEntry<T> {
         self.substitute_static
             .insert(hash_object(substitutions), value);
     }
-    fn get_substitute_dynamic(&self, state: &DynamicState<T>) -> Option<Option<&T>> {
-        let overall_state_hash = hash_object(state);
+    fn get_substitute_dynamic(&self, state: &impl DynamicState<T>) -> Option<Option<&T>> {
+        let overall_state_hash = state.id();
         self.substitute_dynamic
             .get(&overall_state_hash)
             .or_else(|| {
@@ -340,8 +334,8 @@ impl<T: Expression> SubstitutionCacheEntry<T> {
             })
             .map(|entry| entry.as_ref())
     }
-    fn set_substitute_dynamic(&mut self, state: &DynamicState<T>, value: Option<T>) {
-        let overall_state_hash = hash_object(state);
+    fn set_substitute_dynamic(&mut self, state: &impl DynamicState<T>, value: Option<T>) {
+        let overall_state_hash = state.id();
         self.substitute_dynamic
             .insert(overall_state_hash, value.clone());
         let minimal_state_hash = hash_state_values(state, self.state_dependencies.iter().copied());
@@ -395,7 +389,7 @@ impl<T: Expression + Rewritable<T> + Reducible<T>> EvaluationCache<T>
     fn retrieve_evaluation(
         &mut self,
         expression: &T,
-        state: &DynamicState<T>,
+        state: &impl DynamicState<T>,
     ) -> Option<Option<EvaluationResult<T>>> {
         match self.current.retrieve_evaluation(expression, state) {
             Some(result) => Some(result),
@@ -418,7 +412,7 @@ impl<T: Expression + Rewritable<T> + Reducible<T>> EvaluationCache<T>
     fn store_evaluation(
         &mut self,
         expression: &T,
-        state: &DynamicState<T>,
+        state: &impl DynamicState<T>,
         result: Option<EvaluationResult<T>>,
     ) {
         self.current.store_evaluation(expression, state, result);
@@ -466,7 +460,7 @@ impl<T: Expression + Rewritable<T> + Reducible<T>> EvaluationCache<T>
     fn retrieve_dynamic_substitution(
         &mut self,
         expression: &T,
-        state: &DynamicState<T>,
+        state: &impl DynamicState<T>,
     ) -> Option<Option<T>> {
         match self
             .current
@@ -495,24 +489,10 @@ impl<T: Expression + Rewritable<T> + Reducible<T>> EvaluationCache<T>
     fn store_dynamic_substitution(
         &mut self,
         expression: &T,
-        state: &DynamicState<T>,
+        state: &impl DynamicState<T>,
         result: Option<T>,
     ) {
         self.current
             .store_dynamic_substitution(expression, state, result);
     }
-}
-
-pub(crate) fn hash_state_values<T: Expression>(
-    state: &DynamicState<T>,
-    state_tokens: impl IntoIterator<Item = StateToken>,
-) -> HashId {
-    let mut hasher = DefaultHasher::new();
-    for state_token in state_tokens {
-        match state.get(state_token) {
-            None => hasher.write_u8(0),
-            Some(value) => value.hash(&mut hasher),
-        }
-    }
-    hasher.finish()
 }

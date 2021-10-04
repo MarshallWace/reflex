@@ -4,21 +4,23 @@
 use crate::{create_http_response, get_cors_headers};
 use hyper::{header, Body, Request, Response, StatusCode};
 use reflex::{
-    compiler::{Compile, Compiler, CompilerMode, CompilerOptions, Instruction, InstructionPointer},
+    compiler::{
+        Compile, Compiler, CompilerMode, CompilerOptions, Instruction, InstructionPointer, Program,
+    },
     core::{
         Applicable, Expression, ExpressionFactory, HeapAllocator, Reducible, Rewritable,
         StringValue,
     },
     hash::hash_object,
-    lang::{create_struct, ValueTerm},
 };
 use reflex_graphql::{
-    create_introspection_query_response, deserialize_graphql_operation, parse_graphql_operation,
-    wrap_graphql_error_response, wrap_graphql_success_response, GraphQlOperationPayload,
+    create_graphql_error_response, create_graphql_success_response,
+    create_introspection_query_response, create_json_error_object, deserialize_graphql_operation,
+    parse_graphql_operation, sanitize_signal_errors, GraphQlOperationPayload,
 };
+use reflex_json::{json_object, JsonValue};
 use reflex_runtime::{
     AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator, Runtime, StreamExt,
-    SubscriptionResult,
 };
 use std::{
     convert::Infallible,
@@ -31,7 +33,8 @@ pub(crate) async fn handle_graphql_http_request<
     T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
 >(
     req: Request<Body>,
-    store: Arc<Runtime<T>>,
+    runtime: Arc<Runtime<T>>,
+    program: &Program,
     root: &T,
     factory: &impl AsyncExpressionFactory<T>,
     allocator: &impl AsyncHeapAllocator<T>,
@@ -45,7 +48,8 @@ where
     let response = match parse_graphql_request(req, root, factory, allocator).await {
         Err(response) => Ok(response),
         Ok(query) => {
-            let mut prelude = store.program().clone();
+            let mut prelude = program.clone();
+            let entry_point = InstructionPointer::new(prelude.len());
             prelude.push(Instruction::PushFunction {
                 target: InstructionPointer::default(),
             });
@@ -61,16 +65,12 @@ where
                 Ok(compiled) => {
                     // TODO: Error if runtime expression depends on unrecognized native functions
                     let (program, _, _) = compiled.into_parts();
-                    let entry_point = InstructionPointer::new(store.program().len());
-                    match store
-                        .subscribe(program, entry_point, factory, allocator)
-                        .await
-                    {
+                    match runtime.subscribe(program, entry_point).await {
                         Err(error) => Err(error),
                         Ok(mut results) => match results.next().await {
                             None => Err(String::from("Empty result stream")),
                             Some(result) => match results.unsubscribe().await {
-                                Ok(_) => Ok(format_http_response(result)),
+                                Ok(_) => Ok(format_http_response(result, factory)),
                                 Err(error) => Err(error),
                             },
                         },
@@ -92,27 +92,22 @@ where
             None,
         ));
     }
-    let payload = match response.result {
-        Ok(result) => wrap_graphql_success_response(result, factory, allocator),
-        Err(errors) => wrap_graphql_error_response(
-            errors
-                .into_iter()
-                .map(|error| create_graphql_error_object(error, factory, allocator)),
-            factory,
-            allocator,
-        ),
-    };
-    let (status, body) = match reflex_json::stringify(&payload) {
-        Ok(body) => (response.status, body),
-        Err(error) => (
-            StatusCode::NOT_ACCEPTABLE,
-            reflex_json::stringify(&wrap_graphql_error_response(
-                vec![create_graphql_error_object(error, factory, allocator)],
-                factory,
-                allocator,
-            ))
-            .unwrap(),
-        ),
+    let (status, body) = match response.result {
+        Err(errors) => {
+            let payload = create_graphql_error_response(errors);
+            (response.status, payload.to_string())
+        }
+        Ok(result) => {
+            let payload = create_graphql_success_response(result, factory, allocator);
+            match reflex_json::stringify(&payload) {
+                Ok(body) => (response.status, body),
+                Err(error) => (
+                    StatusCode::NOT_ACCEPTABLE,
+                    create_graphql_error_response(vec![create_json_error_object(error)])
+                        .to_string(),
+                ),
+            }
+        }
     };
     let headers = cors_headers.into_iter().chain(once((
         header::CONTENT_TYPE,
@@ -194,7 +189,7 @@ fn parse_request_body_graphql_json<T: Expression>(
 
 struct HttpResult<T> {
     status: StatusCode,
-    result: Result<T, Vec<String>>,
+    result: Result<T, Vec<JsonValue>>,
 }
 impl<T> HttpResult<T> {
     fn success(status: StatusCode, result: T) -> Self {
@@ -203,38 +198,29 @@ impl<T> HttpResult<T> {
             result: Ok(result),
         }
     }
-    fn error(status: StatusCode, message: String) -> Self {
+    fn error(status: StatusCode, error: String) -> Self {
         Self {
             status,
-            result: Err(vec![message]),
+            result: Err(vec![json_object(once((
+                String::from("message"),
+                JsonValue::String(error),
+            )))]),
         }
     }
-    fn errors(status: StatusCode, messages: impl IntoIterator<Item = String>) -> Self {
+    fn errors(status: StatusCode, errors: impl IntoIterator<Item = JsonValue>) -> Self {
         Self {
             status,
-            result: Err(messages.into_iter().collect()),
+            result: Err(errors.into_iter().collect()),
         }
     }
 }
 
-fn format_http_response<T>(result: SubscriptionResult<T>) -> HttpResult<T> {
-    match result {
-        Ok(result) => HttpResult::success(StatusCode::OK, result),
-        Err(errors) => HttpResult::errors(StatusCode::OK, errors),
-    }
-}
-
-fn create_graphql_error_object<T: Expression>(
-    message: String,
+fn format_http_response<T: Expression>(
+    result: T,
     factory: &impl ExpressionFactory<T>,
-    allocator: &impl HeapAllocator<T>,
-) -> T {
-    create_struct(
-        once((
-            String::from("message"),
-            factory.create_value_term(ValueTerm::String(allocator.create_string(message))),
-        )),
-        factory,
-        allocator,
-    )
+) -> HttpResult<T> {
+    match factory.match_signal_term(&result) {
+        Some(signal) => HttpResult::errors(StatusCode::OK, sanitize_signal_errors(signal)),
+        None => HttpResult::success(StatusCode::OK, result),
+    }
 }

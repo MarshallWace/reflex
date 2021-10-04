@@ -1869,10 +1869,12 @@ mod tests {
     use reflex::{
         allocator::DefaultAllocator,
         cache::SubstitutionCache,
-        compiler::{Compiler, CompilerMode, CompilerOptions, InstructionPointer},
+        compiler::{
+            hash_program_root, Compiler, CompilerMode, CompilerOptions, InstructionPointer,
+        },
         core::{
-            evaluate, DependencyList, DynamicState, EvaluationResult, Expression,
-            ExpressionFactory, HeapAllocator, SignalType, StringValue,
+            evaluate, DependencyList, EvaluationResult, Expression, ExpressionFactory,
+            HeapAllocator, SignalType, StateCache, StringValue,
         },
         interpreter::{execute, DefaultInterpreterCache, InterpreterOptions},
         lang::{create_struct, BuiltinTerm, TermFactory, ValueTerm},
@@ -2540,7 +2542,7 @@ mod tests {
         );
         let result = evaluate(
             &query,
-            &DynamicState::new(),
+            &StateCache::default(),
             &factory,
             &allocator,
             &mut SubstitutionCache::new(),
@@ -2599,7 +2601,7 @@ mod tests {
         );
         let result = evaluate(
             &query,
-            &DynamicState::new(),
+            &StateCache::default(),
             &factory,
             &allocator,
             &mut SubstitutionCache::new(),
@@ -2650,7 +2652,7 @@ mod tests {
         .unwrap();
         let result = evaluate(
             &expression,
-            &DynamicState::new(),
+            &StateCache::default(),
             &factory,
             &allocator,
             &mut SubstitutionCache::new(),
@@ -2710,7 +2712,7 @@ mod tests {
         );
         let result = evaluate(
             &query,
-            &DynamicState::new(),
+            &StateCache::default(),
             &factory,
             &allocator,
             &mut SubstitutionCache::new(),
@@ -2743,7 +2745,7 @@ mod tests {
         );
         let result = evaluate(
             &query,
-            &DynamicState::new(),
+            &StateCache::default(),
             &factory,
             &allocator,
             &mut SubstitutionCache::new(),
@@ -3576,7 +3578,7 @@ mod tests {
         .unwrap();
         let result = evaluate(
             &expression,
-            &DynamicState::new(),
+            &StateCache::default(),
             &factory,
             &allocator,
             &mut SubstitutionCache::new(),
@@ -3603,7 +3605,7 @@ mod tests {
         .unwrap();
         let result = evaluate(
             &expression,
-            &DynamicState::new(),
+            &StateCache::default(),
             &factory,
             &allocator,
             &mut SubstitutionCache::new(),
@@ -3636,7 +3638,7 @@ mod tests {
         .unwrap();
         let result = evaluate(
             &expression,
-            &DynamicState::new(),
+            &StateCache::default(),
             &factory,
             &allocator,
             &mut SubstitutionCache::new(),
@@ -3662,7 +3664,7 @@ mod tests {
         .unwrap();
         let result = evaluate(
             &expression,
-            &DynamicState::new(),
+            &StateCache::default(),
             &factory,
             &allocator,
             &mut SubstitutionCache::new(),
@@ -4134,7 +4136,7 @@ mod tests {
         .unwrap();
         let result = evaluate(
             &expression,
-            &DynamicState::new(),
+            &StateCache::default(),
             &factory,
             &allocator,
             &mut SubstitutionCache::new(),
@@ -4161,7 +4163,7 @@ mod tests {
         .unwrap();
         let result = evaluate(
             &expression,
-            &DynamicState::new(),
+            &StateCache::default(),
             &factory,
             &allocator,
             &mut SubstitutionCache::new(),
@@ -4188,7 +4190,7 @@ mod tests {
         .unwrap();
         let result = evaluate(
             &expression,
-            &DynamicState::new(),
+            &StateCache::default(),
             &factory,
             &allocator,
             &mut SubstitutionCache::new(),
@@ -4215,7 +4217,7 @@ mod tests {
         .unwrap();
         let result = evaluate(
             &expression,
-            &DynamicState::new(),
+            &StateCache::default(),
             &factory,
             &allocator,
             &mut SubstitutionCache::new(),
@@ -4242,7 +4244,7 @@ mod tests {
         .unwrap();
         let result = evaluate(
             &expression,
-            &DynamicState::new(),
+            &StateCache::default(),
             &factory,
             &allocator,
             &mut SubstitutionCache::new(),
@@ -4271,7 +4273,7 @@ mod tests {
         .unwrap();
         let result = evaluate(
             &expression,
-            &DynamicState::new(),
+            &StateCache::default(),
             &factory,
             &allocator,
             &mut SubstitutionCache::new(),
@@ -4302,7 +4304,7 @@ mod tests {
         .unwrap();
         let result = evaluate(
             &expression,
-            &DynamicState::new(),
+            &StateCache::default(),
             &factory,
             &allocator,
             &mut SubstitutionCache::new(),
@@ -4340,7 +4342,7 @@ mod tests {
         .unwrap();
         let result = evaluate(
             &expression,
-            &DynamicState::new(),
+            &StateCache::default(),
             &factory,
             &allocator,
             &mut SubstitutionCache::new(),
@@ -4380,7 +4382,7 @@ mod tests {
         .unwrap();
         let result = evaluate(
             &expression,
-            &DynamicState::new(),
+            &StateCache::default(),
             &factory,
             &allocator,
             &mut SubstitutionCache::new(),
@@ -4420,7 +4422,7 @@ mod tests {
         .unwrap();
         let result = evaluate(
             &expression,
-            &DynamicState::new(),
+            &StateCache::default(),
             &factory,
             &allocator,
             &mut SubstitutionCache::new(),
@@ -4970,7 +4972,7 @@ mod tests {
         .unwrap();
         let result = evaluate(
             &expression,
-            &DynamicState::new(),
+            &StateCache::default(),
             &factory,
             &allocator,
             &mut SubstitutionCache::new(),
@@ -5000,7 +5002,7 @@ mod tests {
         .unwrap();
         let result = evaluate(
             &expression,
-            &DynamicState::new(),
+            &StateCache::default(),
             &factory,
             &allocator,
             &mut SubstitutionCache::new(),
@@ -5038,7 +5040,7 @@ mod tests {
         .unwrap();
         let result = evaluate(
             &expression,
-            &DynamicState::new(),
+            &StateCache::default(),
             &factory,
             &allocator,
             &mut SubstitutionCache::new(),
@@ -5062,7 +5064,7 @@ mod tests {
             const greet = (user) => `Hello, ${fullName(user.first, user.last)}!`;
             greet({ first: 'John', last: 'Doe' })";
         let expression = parse(input, &env, &factory, &allocator).unwrap();
-        let state = DynamicState::new();
+        let state = StateCache::default();
         let mut cache = SubstitutionCache::new();
         let result = evaluate(&expression, &state, &factory, &allocator, &mut cache);
         assert_eq!(
@@ -5097,11 +5099,14 @@ mod tests {
             )
             .unwrap();
         let (program, builtins, plugins) = compiled.into_parts();
-        let state = DynamicState::new();
+        let state = StateCache::default();
         let mut cache = DefaultInterpreterCache::default();
+        let entry_point = InstructionPointer::default();
+        let cache_key = hash_program_root(&program, &entry_point);
         let (result, _) = execute(
+            cache_key,
             &program,
-            InstructionPointer::default(),
+            entry_point,
             &state,
             &factory,
             &allocator,

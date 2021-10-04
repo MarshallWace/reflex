@@ -12,10 +12,10 @@ use reflex::{
     allocator::DefaultAllocator,
     cache::SubstitutionCache,
     compiler::{
-        Compiler, CompilerMode, CompilerOptions, Instruction, InstructionPointer,
-        NativeFunctionRegistry, Program,
+        hash_program_root, Compiler, CompilerMode, CompilerOptions, Instruction,
+        InstructionPointer, NativeFunctionRegistry, Program,
     },
-    core::{evaluate, DynamicState, ExpressionFactory, HeapAllocator},
+    core::{evaluate, ExpressionFactory, HeapAllocator, StateCache},
     interpreter::{execute, DefaultInterpreterCache, InterpreterOptions},
     lang::{BuiltinTerm, TermFactory, ValueTerm},
     parser::sexpr::parse,
@@ -23,7 +23,7 @@ use reflex::{
 
 #[bench]
 fn nested_expressions(b: &mut Bencher) {
-    let state = DynamicState::new();
+    let state = StateCache::default();
     let factory = TermFactory::default();
     let allocator = DefaultAllocator::default();
     let expression = parse("(+ (+ (abs -3) 4) 5)", &factory, &allocator).unwrap();
@@ -57,15 +57,17 @@ fn nested_expressions_bytecode(b: &mut Bencher) {
         Instruction::Evaluate,
         Instruction::Return,
     ]);
+    let mut cache = DefaultInterpreterCache::default();
+    let state = StateCache::default();
     let builtins = Vec::new();
     let plugins = NativeFunctionRegistry::default();
     let entry_point = InstructionPointer::default();
     let allocator = DefaultAllocator::default();
-    let state = DynamicState::new();
     let options = InterpreterOptions::default();
-    let mut cache = DefaultInterpreterCache::default();
+    let cache_key = hash_program_root(&program, &entry_point);
     b.iter(|| {
         execute(
+            cache_key,
             &program,
             entry_point,
             &state,
@@ -96,11 +98,13 @@ fn nested_expressions_compiled(b: &mut Bencher) {
         .unwrap()
         .into_parts();
     let entry_point = InstructionPointer::default();
-    let state = DynamicState::new();
+    let state = StateCache::default();
     let options = InterpreterOptions::default();
     let mut cache = DefaultInterpreterCache::default();
+    let cache_key = hash_program_root(&program, &entry_point);
     b.iter(|| {
         execute(
+            cache_key,
             &program,
             entry_point,
             &state,
@@ -116,7 +120,7 @@ fn nested_expressions_compiled(b: &mut Bencher) {
 
 #[bench]
 fn function_application_nullary(b: &mut Bencher) {
-    let state = DynamicState::new();
+    let state = StateCache::default();
     let factory = TermFactory::default();
     let allocator = DefaultAllocator::default();
     let expression = parse("((lambda () 3))", &factory, &allocator).unwrap();
@@ -128,7 +132,7 @@ fn function_application_nullary(b: &mut Bencher) {
 
 #[bench]
 fn function_application_unary(b: &mut Bencher) {
-    let state = DynamicState::new();
+    let state = StateCache::default();
     let factory = TermFactory::default();
     let allocator = DefaultAllocator::default();
     let expression = parse("((lambda (foo) foo) 3)", &factory, &allocator).unwrap();
@@ -140,7 +144,7 @@ fn function_application_unary(b: &mut Bencher) {
 
 #[bench]
 fn function_application_binary(b: &mut Bencher) {
-    let state = DynamicState::new();
+    let state = StateCache::default();
     let factory = TermFactory::default();
     let allocator = DefaultAllocator::default();
     let expression = parse("((lambda (foo bar) foo) 3 4)", &factory, &allocator).unwrap();
@@ -152,7 +156,7 @@ fn function_application_binary(b: &mut Bencher) {
 
 #[bench]
 fn function_application_ternary(b: &mut Bencher) {
-    let state = DynamicState::new();
+    let state = StateCache::default();
     let factory = TermFactory::default();
     let allocator = DefaultAllocator::default();
     let expression = parse("((lambda (foo bar baz) foo) 3 4 5)", &factory, &allocator).unwrap();
@@ -164,7 +168,7 @@ fn function_application_ternary(b: &mut Bencher) {
 
 #[bench]
 fn function_application_unused_args(b: &mut Bencher) {
-    let state = DynamicState::new();
+    let state = StateCache::default();
     let factory = TermFactory::default();
     let allocator = DefaultAllocator::default();
     let expression = parse("((lambda (foo bar baz) 2) 3 4 5)", &factory, &allocator).unwrap();
@@ -176,7 +180,7 @@ fn function_application_unused_args(b: &mut Bencher) {
 
 #[bench]
 fn function_application_argument_scope(b: &mut Bencher) {
-    let state = DynamicState::new();
+    let state = StateCache::default();
     let factory = TermFactory::default();
     let allocator = DefaultAllocator::default();
     let expression = parse(
@@ -193,7 +197,7 @@ fn function_application_argument_scope(b: &mut Bencher) {
 
 #[bench]
 fn deeply_nested_function_application(b: &mut Bencher) {
-    let state = DynamicState::new();
+    let state = StateCache::default();
     let factory = TermFactory::default();
     let allocator = DefaultAllocator::default();
     let expression = (1..=100).fold(factory.create_value_term(ValueTerm::Int(0)), |acc, i| {
@@ -216,7 +220,7 @@ fn deeply_nested_function_application(b: &mut Bencher) {
 
 #[bench]
 fn function_application_closure(b: &mut Bencher) {
-    let state = DynamicState::new();
+    let state = StateCache::default();
     let factory = TermFactory::default();
     let allocator = DefaultAllocator::default();
     let expression = parse("(((lambda (foo) (lambda () foo)) 3))", &factory, &allocator).unwrap();
@@ -228,7 +232,7 @@ fn function_application_closure(b: &mut Bencher) {
 
 #[bench]
 fn conditional_expressions(b: &mut Bencher) {
-    let state = DynamicState::new();
+    let state = StateCache::default();
     let factory = TermFactory::default();
     let allocator = DefaultAllocator::default();
     let expression = parse("(if #t 3 4)", &factory, &allocator).unwrap();
@@ -240,7 +244,7 @@ fn conditional_expressions(b: &mut Bencher) {
 
 #[bench]
 fn list_transforms(b: &mut Bencher) {
-    let state = DynamicState::new();
+    let state = StateCache::default();
     let factory = TermFactory::default();
     let allocator = DefaultAllocator::default();
     let collection = factory.create_vector_term(allocator.create_list((0..1000).map(|index| {

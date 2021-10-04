@@ -1,41 +1,51 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use futures::FutureExt;
+use futures::{
+    future::{AbortHandle, Abortable},
+    stream, FutureExt,
+};
+use itertools::{Either, Itertools};
+use parking_lot::RwLock;
 use reflex::{
     compiler::{
-        Compile, Compiler, CompilerMode, CompilerOptions, Instruction, InstructionPointer,
-        NativeFunctionRegistry, Program,
+        hash_program_root, Compile, Compiler, CompilerMode, CompilerOptions, Instruction,
+        InstructionPointer, NativeFunctionRegistry, Program,
     },
     core::{
-        Applicable, Arity, Expression, ExpressionFactory, ExpressionList, HeapAllocator, Reducible,
-        Rewritable, Signal, SignalId, SignalType, StateToken, StringValue,
+        Applicable, Arity, DependencyList, DynamicState, EvaluationResult, Expression,
+        ExpressionFactory, HeapAllocator, Reducible, Rewritable, Signal, SignalId, SignalType,
+        StateCache, StateToken, StringValue,
     },
     hash::{hash_object, HashId},
-    interpreter::{DefaultInterpreterCache, InterpreterCache, InterpreterOptions},
+    interpreter::{
+        execute, CacheEntries, DefaultInterpreterCache, GcMetrics, InterpreterCache,
+        InterpreterCacheEntry, InterpreterCacheKey, InterpreterOptions,
+    },
     lang::{term::NativeFunctionId, BuiltinTerm, ValueTerm, WithCompiledBuiltins},
+    DependencyCache,
 };
 use std::{
-    any::TypeId,
-    collections::{hash_map::Entry, HashMap},
+    collections::{
+        hash_map::{DefaultHasher, Entry},
+        HashMap, HashSet,
+    },
     convert::identity,
     future::Future,
+    hash::{Hash, Hasher},
     iter::{empty, once},
     pin::Pin,
     sync::{Arc, Mutex},
     task::{Context, Poll},
+    time::Instant,
 };
 use tokio::{
     pin,
     sync::{broadcast, mpsc, oneshot, watch},
 };
-use tokio_stream::wrappers::{BroadcastStream, WatchStream};
+use tokio_stream::wrappers::WatchStream;
 pub use tokio_stream::{Stream, StreamExt};
 
-mod store;
-use store::{Store, SubscriptionToken};
-
-pub type SubscriptionResult<T> = Result<T, Vec<String>>;
 pub type SignalResult<T> = (T, Option<RuntimeEffect<T>>);
 pub type SignalHandlerResult<T> = Option<Vec<Result<SignalResult<T>, String>>>;
 
@@ -66,196 +76,18 @@ where
     E::String: StringValue + Send + Sync,
 {
 }
-#[derive(Clone)]
-pub struct SignalHelpers<T: AsyncExpression + Compile<T>>
-where
-    T::String: StringValue + Send + Sync,
+pub trait AsyncInterpreterCache<T: AsyncExpression>:
+    InterpreterCache<T> + Send + Sync + Clone + 'static
 {
-    program: Arc<Program>,
-    builtins: Vec<(BuiltinTerm, InstructionPointer)>,
-    plugins: Vec<(NativeFunctionId, Arity, InstructionPointer)>,
-    commands: CommandChannel<T>,
-    compiler_options: CompilerOptions,
 }
-impl<T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>>
-    SignalHelpers<T>
+impl<T, E: AsyncExpression> AsyncInterpreterCache<E> for T
 where
-    T::String: StringValue + Send + Sync,
+    T: InterpreterCache<E> + Send + Sync + Clone + 'static,
+    E::String: StringValue + Send + Sync,
 {
-    fn new(
-        program: Arc<Program>,
-        builtins: &[(BuiltinTerm, InstructionPointer)],
-        plugins: &NativeFunctionRegistry<T>,
-        commands: CommandChannel<T>,
-        compiler_options: CompilerOptions,
-    ) -> Self {
-        Self {
-            program,
-            builtins: builtins.iter().copied().collect(),
-            plugins: plugins
-                .iter()
-                .map(|(target, address)| (target.uid(), target.arity(), *address))
-                .collect(),
-            commands,
-            compiler_options,
-        }
-    }
-    pub fn program(&self) -> &Program {
-        &self.program
-    }
-    pub fn builtins(&self) -> &[(BuiltinTerm, InstructionPointer)] {
-        &self.builtins
-    }
-    pub fn plugins(&self) -> &[(NativeFunctionId, Arity, InstructionPointer)] {
-        &self.plugins
-    }
-    pub fn watch_expression(
-        self,
-        expression: T,
-        initiators: impl IntoIterator<Item = SignalId>,
-        factory: &(impl AsyncExpressionFactory<T> + WithCompiledBuiltins),
-        allocator: &impl AsyncHeapAllocator<T>,
-    ) -> Result<impl Stream<Item = SubscriptionResult<T>> + Send + 'static, String> {
-        let initiators = initiators.into_iter().collect::<Vec<_>>();
-        let entry_point = InstructionPointer::new(self.program.len());
-        let prelude = (*self.program).clone();
-        Compiler::new(self.compiler_options, Some(prelude))
-            .compile(
-                &expression,
-                CompilerMode::Expression,
-                false,
-                empty(),
-                factory,
-                allocator,
-            )
-            .map(|compiled| {
-                // TODO: Error if runtime expression depends on unrecognized native functions
-                let (program, _, _) = compiled.into_parts();
-                self.watch_compiled_expression(program, entry_point, initiators, factory, allocator)
-            })
-    }
-    pub fn watch_state(
-        self,
-        state_token: StateToken,
-        initiators: impl IntoIterator<Item = SignalId>,
-        factory: &(impl ExpressionFactory<T> + Send + Sync + Clone + 'static),
-        allocator: &(impl HeapAllocator<T> + Send + Sync + Clone + 'static),
-    ) -> impl Stream<Item = SubscriptionResult<T>> + Send + 'static {
-        let initiators = initiators.into_iter().collect::<Vec<_>>();
-        let program = Program::new(vec![
-            Instruction::PushHash { value: Void::uid() },
-            Instruction::PushDynamic { state_token },
-            Instruction::Evaluate,
-            Instruction::Return,
-        ]);
-        self.watch_compiled_expression(
-            program,
-            InstructionPointer::default(),
-            initiators,
-            factory,
-            allocator,
-        )
-        .filter({
-            let factory = factory.clone();
-            move |value| match value {
-                Ok(value) if Void::is(value, &factory) => false,
-                _ => true,
-            }
-        })
-    }
-    fn watch_compiled_expression(
-        self,
-        program: Program,
-        entry_point: InstructionPointer,
-        initiators: Vec<SignalId>,
-        factory: &impl AsyncExpressionFactory<T>,
-        allocator: &impl AsyncHeapAllocator<T>,
-    ) -> impl Stream<Item = SubscriptionResult<T>> + Send + 'static {
-        let (results_tx, results_rx) = watch::channel::<Option<Result<T, Vec<String>>>>(None);
-        // TODO: Unsubscribe signal handler watch expressions
-        tokio::spawn({
-            let factory = factory.clone();
-            let allocator = allocator.clone();
-            async move {
-                match create_subscription(
-                    program,
-                    entry_point,
-                    Some(initiators),
-                    &self.commands,
-                    &factory,
-                    &allocator,
-                )
-                .await
-                {
-                    Err(error) => {
-                        let _ = results_tx.send(Some(Err(vec![error])));
-                    }
-                    Ok(mut subscription) => {
-                        while let Some(result) = subscription.next().await {
-                            let _ = results_tx.send(Some(result));
-                        }
-                    }
-                }
-            }
-        });
-        WatchStream::new(results_rx).filter_map(identity)
-    }
-}
-
-struct Void {}
-impl Void {
-    fn uid() -> HashId {
-        hash_object(&TypeId::of::<Self>())
-    }
-    fn is<T: Expression>(value: &T, factory: &impl ExpressionFactory<T>) -> bool {
-        match factory.match_value_term(value) {
-            Some(ValueTerm::Hash(hash)) if *hash == Self::uid() => true,
-            _ => false,
-        }
-    }
-}
-
-struct Operation<TRequest, TResponse> {
-    payload: TRequest,
-    response: oneshot::Sender<TResponse>,
-}
-impl<TRequest, TResponse> Operation<TRequest, TResponse> {
-    fn new(payload: TRequest, response: oneshot::Sender<TResponse>) -> Self {
-        Self { payload, response }
-    }
-}
-
-struct StreamOperation<TRequest, TResponse, TUpdate> {
-    payload: TRequest,
-    response: oneshot::Sender<TResponse>,
-    update: watch::Sender<TUpdate>,
-}
-impl<TRequest, TResponse, TUpdate> StreamOperation<TRequest, TResponse, TUpdate> {
-    fn new(
-        payload: TRequest,
-        response: oneshot::Sender<TResponse>,
-        update: watch::Sender<TUpdate>,
-    ) -> Self {
-        Self {
-            payload,
-            response,
-            update,
-        }
-    }
 }
 
 pub type SubscriptionId = usize;
-
-type CommandChannel<T> = mpsc::Sender<Command<T>>;
-type ResultsChannel<T> = broadcast::Sender<(SubscriptionId, SubscriptionResult<T>)>;
-
-type SubscribeCommand<T> = StreamOperation<
-    (Program, InstructionPointer, Option<Vec<SignalId>>),
-    SubscriptionId,
-    Option<SubscriptionResult<T>>,
->;
-type UnsubscribeCommand = Operation<SubscriptionId, bool>;
-type UpdateCommand<T> = Operation<Vec<StateUpdate<T>>, ()>;
 
 pub struct StateUpdate<T: Expression> {
     state_token: StateToken,
@@ -355,41 +187,94 @@ impl<T: Expression> RuntimeEffect<T> {
     }
 }
 
-enum Command<T: Expression> {
-    Subscribe(SubscribeCommand<T>),
-    Unsubscribe(UnsubscribeCommand),
-    Update(UpdateCommand<T>),
+#[derive(Clone)]
+pub struct RuntimeState<T: Hash + Clone> {
+    hash: HashId,
+    values: im::HashMap<StateToken, T>,
 }
-impl<T: Expression> Command<T> {
-    fn subscribe(
-        program: Program,
-        entry_point: InstructionPointer,
-        initiators: Option<Vec<SignalId>>,
-        response: oneshot::Sender<SubscriptionId>,
-        update: watch::Sender<Option<SubscriptionResult<T>>>,
-    ) -> Self {
-        Self::Subscribe(StreamOperation::new(
-            (program, entry_point, initiators),
-            response,
-            update,
-        ))
-    }
-    fn unsubscribe(id: SubscriptionId, response: oneshot::Sender<bool>) -> Self {
-        Self::Unsubscribe(Operation::new(id, response))
-    }
-    fn update(updates: Vec<StateUpdate<T>>, response: oneshot::Sender<()>) -> Self {
-        Self::Update(Operation::new(updates, response))
+impl<T: Hash + Clone> Default for RuntimeState<T> {
+    fn default() -> Self {
+        Self {
+            hash: DefaultHasher::new().finish(),
+            values: im::HashMap::default(),
+        }
     }
 }
-pub struct StreamSubscription<'a, T: Expression, TUpdates: Stream<Item = SubscriptionResult<T>>> {
-    channel: &'a CommandChannel<T>,
+impl<T: Hash + Clone> Hash for RuntimeState<T> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        state.write_u64(self.hash)
+    }
+}
+impl<T: Hash + Clone> RuntimeState<T> {
+    pub fn set(&mut self, key: StateToken, value: T) {
+        self.extend(once((key, value)))
+    }
+    pub fn extend(&mut self, entries: impl IntoIterator<Item = (StateToken, T)>) {
+        let mut has_changes = false;
+        let mut hasher = DefaultHasher::new();
+        hasher.write_u64(self.hash);
+        for (key, value) in entries {
+            let value_hash = hash_object(&value);
+            let previous = self.values.insert(key, value);
+            let was_updated = match &previous {
+                Some(previous_value) => value_hash != hash_object(previous_value),
+                None => true,
+            };
+            if was_updated {
+                has_changes = true;
+                hasher.write_u64(key);
+                hasher.write_u64(value_hash);
+            }
+        }
+        if has_changes {
+            self.hash = hasher.finish();
+        }
+    }
+    pub fn remove(&mut self, key: &StateToken) -> Option<T> {
+        self.remove_many(once(key))
+            .into_iter()
+            .next()
+            .and_then(|value| value)
+    }
+    pub fn remove_many<'a>(
+        &'a mut self,
+        keys: impl IntoIterator<
+            Item = &'a StateToken,
+            IntoIter = impl Iterator<Item = &'a StateToken> + 'a,
+        >,
+    ) -> impl IntoIterator<Item = Option<T>> + 'a {
+        keys.into_iter().map(move |key| {
+            let result = self.values.remove(&key);
+            if result.is_some() {
+                let mut hasher = DefaultHasher::new();
+                hasher.write_u64(self.hash);
+                hasher.write_u64(*key);
+                hasher.write_u8(0);
+                self.hash = hasher.finish();
+            }
+            result
+        })
+    }
+}
+impl<T: Hash + Clone> DynamicState<T> for RuntimeState<T> {
+    fn id(&self) -> HashId {
+        self.hash
+    }
+    fn has(&self, key: &StateToken) -> bool {
+        self.values.contains_key(key)
+    }
+    fn get(&self, key: &StateToken) -> Option<&T> {
+        self.values.get(key)
+    }
+}
+
+pub struct StreamSubscription<'a, T: Expression, TUpdates: Stream<Item = T>> {
+    channel: &'a RuntimeCommandChannel<T>,
     id: SubscriptionId,
     updates: TUpdates,
 }
-impl<'a, T: Expression, TUpdates: Stream<Item = SubscriptionResult<T>>>
-    StreamSubscription<'a, T, TUpdates>
-{
-    fn new(channel: &'a CommandChannel<T>, id: SubscriptionId, updates: TUpdates) -> Self {
+impl<'a, T: Expression, TUpdates: Stream<Item = T>> StreamSubscription<'a, T, TUpdates> {
+    fn new(channel: &'a RuntimeCommandChannel<T>, id: SubscriptionId, updates: TUpdates) -> Self {
         Self {
             channel,
             id,
@@ -404,17 +289,20 @@ impl<'a, T: Expression, TUpdates: Stream<Item = SubscriptionResult<T>>>
     }
     pub async fn unsubscribe(&self) -> Result<bool, String> {
         let (send, receive) = oneshot::channel();
-        let _ = self.channel.send(Command::unsubscribe(self.id, send)).await;
+        let _ = self
+            .channel
+            .send(RuntimeCommand::unsubscribe(self.id, send))
+            .await;
         match receive.await {
             Err(error) => Err(format!("{}", error)),
             Ok(result) => Ok(result),
         }
     }
 }
-impl<'a, T: Expression, TUpdates: Stream<Item = SubscriptionResult<T>> + Unpin> Stream
+impl<'a, T: Expression, TUpdates: Stream<Item = T> + Unpin> Stream
     for StreamSubscription<'a, T, TUpdates>
 {
-    type Item = SubscriptionResult<T>;
+    type Item = T;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let updates = &mut self.updates;
@@ -423,447 +311,576 @@ impl<'a, T: Expression, TUpdates: Stream<Item = SubscriptionResult<T>> + Unpin> 
     }
 }
 
-pub struct Runtime<T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>> {
-    program: Arc<Program>,
-    commands: CommandChannel<T>,
-    results: ResultsChannel<T>,
+struct AsyncOperation<TRequest, TResponse> {
+    payload: TRequest,
+    response: oneshot::Sender<TResponse>,
 }
-impl<T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>> Runtime<T>
-where
-    T::String: StringValue + Send + Sync,
-{
+impl<TRequest, TResponse> AsyncOperation<TRequest, TResponse> {
+    fn new(payload: TRequest, response: oneshot::Sender<TResponse>) -> Self {
+        Self { payload, response }
+    }
+}
+
+struct StreamOperation<TRequest, TResponse, TUpdate> {
+    payload: TRequest,
+    response: oneshot::Sender<TResponse>,
+    updates: watch::Sender<Option<TUpdate>>,
+}
+impl<TRequest, TResponse, TUpdate> StreamOperation<TRequest, TResponse, TUpdate> {
+    fn new(
+        payload: TRequest,
+        response: oneshot::Sender<TResponse>,
+        updates: watch::Sender<Option<TUpdate>>,
+    ) -> Self {
+        Self {
+            payload,
+            response,
+            updates,
+        }
+    }
+}
+
+type RuntimeCommandChannel<T> = mpsc::Sender<RuntimeCommand<T>>;
+type FlushPayload<T> = Arc<(RuntimeState<T>, Vec<StateToken>)>;
+
+enum RuntimeCommand<T: Expression> {
+    Subscribe(StreamOperation<SubscribeCommand, SubscriptionId, T>),
+    Unsubscribe(AsyncOperation<UnsubscribeCommand, bool>),
+    Emit(EmitCommand<T>),
+    Update(UpdateCommand<T>),
+}
+struct SubscribeCommand {
+    target: Program,
+    entry_point: InstructionPointer,
+    initiators: Option<Vec<SignalId>>,
+}
+struct UnsubscribeCommand {
+    subscription_id: SubscriptionId,
+}
+struct UpdateCommand<T: Expression> {
+    updates: Vec<StateUpdate<T>>,
+}
+struct EmitCommand<T: Expression> {
+    subscription_id: SubscriptionId,
+    cache_key: HashId,
+    program: Arc<Program>,
+    state: RuntimeState<T>,
+    result: EvaluationResult<T>,
+    cache_entries: CacheEntries<T>,
+}
+impl<T: Expression> RuntimeCommand<T> {
+    fn subscribe(
+        target: Program,
+        entry_point: InstructionPointer,
+        initiators: Option<Vec<SignalId>>,
+        response: oneshot::Sender<SubscriptionId>,
+        updates: watch::Sender<Option<T>>,
+    ) -> Self {
+        let payload = SubscribeCommand {
+            target,
+            entry_point,
+            initiators,
+        };
+        Self::Subscribe(StreamOperation::new(payload, response, updates))
+    }
+    fn unsubscribe(subscription_id: SubscriptionId, response: oneshot::Sender<bool>) -> Self {
+        let payload = UnsubscribeCommand { subscription_id };
+        Self::Unsubscribe(AsyncOperation::new(payload, response))
+    }
+    fn emit(
+        subscription_id: SubscriptionId,
+        cache_key: HashId,
+        program: Arc<Program>,
+        state: RuntimeState<T>,
+        result: EvaluationResult<T>,
+        cache_entries: CacheEntries<T>,
+    ) -> Self {
+        let payload = EmitCommand {
+            subscription_id,
+            cache_key,
+            program,
+            state,
+            result,
+            cache_entries,
+        };
+        Self::Emit(payload)
+    }
+    fn update(updates: Vec<StateUpdate<T>>) -> Self {
+        let payload = UpdateCommand { updates };
+        Self::Update(payload)
+    }
+}
+
+pub struct Runtime<T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>> {
+    commands: RuntimeCommandChannel<T>,
+    _flush: broadcast::Receiver<FlushPayload<T>>,
+}
+impl<T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>> Runtime<T> {
     pub fn new<THandler>(
-        root: Program,
-        signal_handler: THandler,
-        factory: &(impl AsyncExpressionFactory<T> + WithCompiledBuiltins),
-        allocator: &impl AsyncHeapAllocator<T>,
+        state: RuntimeState<T>,
         builtins: Vec<(BuiltinTerm, InstructionPointer)>,
         plugins: NativeFunctionRegistry<T>,
-        compiler_options: CompilerOptions,
+        signal_handler: THandler,
+        cache: RuntimeCache<T>,
+        factory: &(impl AsyncExpressionFactory<T> + WithCompiledBuiltins),
+        allocator: &impl AsyncHeapAllocator<T>,
         interpreter_options: InterpreterOptions,
-        command_buffer_size: usize,
-        result_buffer_size: usize,
+        compiler_options: CompilerOptions,
     ) -> Self
     where
+        T::String: StringValue + Send + Sync,
         THandler: Fn(&str, &[&Signal<T>], &SignalHelpers<T>) -> SignalHandlerResult<T>
             + Send
             + Sync
             + 'static,
     {
-        let program = Arc::new(root);
-        let (commands, results) = create_store(
-            Arc::clone(&program),
-            signal_handler,
-            factory,
-            allocator,
-            builtins,
-            plugins,
-            interpreter_options,
-            compiler_options,
-            command_buffer_size,
-            result_buffer_size,
-        );
-        Self {
-            program,
-            commands,
-            results,
-        }
-    }
-    pub fn program(&self) -> &Program {
-        &self.program
-    }
-    pub async fn subscribe<'a>(
-        &'a self,
-        program: Program,
-        entry_point: InstructionPointer,
-        factory: &(impl ExpressionFactory<T> + Send + Clone + 'static),
-        allocator: &(impl HeapAllocator<T> + Send + Clone + 'static),
-    ) -> Result<StreamSubscription<'a, T, impl Stream<Item = SubscriptionResult<T>>>, String> {
-        create_subscription(
-            program,
-            entry_point,
-            None,
-            &self.commands,
-            factory,
-            allocator,
-        )
-        .await
-    }
-    pub async fn unsubscribe(&self, id: SubscriptionId) -> Result<bool, String> {
-        stop_subscription(id, &self.commands).await
-    }
-    pub fn watch_subscription(
-        &self,
-        subscription_id: SubscriptionId,
-        factory: &(impl ExpressionFactory<T> + Send + Clone + 'static),
-        allocator: &(impl HeapAllocator<T> + Send + Clone + 'static),
-    ) -> impl Stream<Item = SubscriptionResult<T>> {
-        BroadcastStream::new(self.results.subscribe()).filter_map({
+        // TODO: Establish sensible defaults for channel buffer sizes
+        let (commands_tx, mut commands_rx) = mpsc::channel(1024);
+        let (flush_tx, flush_rx) = broadcast::channel(1024);
+        tokio::spawn({
+            let mut store = Mutex::new(RuntimeStore::new(state));
             let factory = factory.clone();
             let allocator = allocator.clone();
-            move |payload| match payload {
-                Ok((id, result)) if id == subscription_id => match result {
-                    Ok(expression) => {
-                        match filter_pending_signals(expression, &factory, &allocator) {
-                            Some(expression) => Some(Ok(expression)),
-                            None => None,
-                        }
-                    }
-                    Err(error) => Some(Err(error)),
-                },
-                _ => None,
-            }
-        })
-    }
-}
+            let commands = commands_tx.clone();
+            let mut cache = cache;
+            let empty_result = create_pending_result(&factory, &allocator);
+            async move {
+                while let Some(command) = commands_rx.recv().await {
+                    let mut next_command = Some(command);
+                    let mut pending_retains = Vec::new();
+                    let mut pending_releases = Vec::new();
+                    let mut pending_updates = None;
+                    let mut pending_gc = false;
+                    while let Some(command) = next_command {
+                        match command {
+                            RuntimeCommand::Subscribe(command) => {
+                                let (subscription_id, cache_key) = process_subscribe_command(
+                                    command,
+                                    &mut store,
+                                    &mut cache,
+                                    &commands,
+                                    &flush_tx,
+                                    &factory,
+                                    &allocator,
+                                    &builtins,
+                                    &plugins,
+                                    &interpreter_options,
+                                );
+                                let subscription_cache_key = cache.register_subscription(
+                                    subscription_id,
+                                    cache_key,
+                                    empty_result.clone(),
+                                );
+                                pending_retains.push(subscription_cache_key);
+                            }
+                            RuntimeCommand::Unsubscribe(command) => {
+                                let subscription_id = command.payload.subscription_id;
+                                let result = process_unsubscribe_command(command, &mut store);
+                                if let Some((cache_key, dispose)) = result {
+                                    dispose();
+                                    let subscription_cache_key = generate_subscription_cache_key(
+                                        &subscription_id,
+                                        &cache_key,
+                                    );
+                                    pending_releases.push(subscription_cache_key);
+                                    pending_gc = true;
+                                }
+                            }
+                            RuntimeCommand::Emit(command) => {
+                                let updates = process_emit_command(
+                                    command,
+                                    &mut store,
+                                    &mut cache,
+                                    &commands,
+                                    &signal_handler,
+                                    &builtins,
+                                    &plugins,
+                                    &factory,
+                                    &allocator,
+                                    &compiler_options,
+                                );
+                                let (state, updated_keys) =
+                                    store.get_mut().unwrap().update_state(updates);
+                                match &mut pending_updates {
+                                    None => {
+                                        pending_updates = Some((state, updated_keys));
+                                    }
+                                    Some((pending_state, pending_updates)) => {
+                                        *pending_state = state;
+                                        pending_updates.extend(updated_keys)
+                                    }
+                                }
+                                // TODO: GC when flush queue empty rather than after every emission
+                                pending_gc = true
+                            }
+                            RuntimeCommand::Update(command) => {
+                                let updates = command.updates;
 
-struct SharedKeyValueStore<K: Eq + std::hash::Hash, V> {
-    commands: mpsc::Sender<SharedKeyValueStoreCommand<K, V>>,
-}
-impl<K: Eq + std::hash::Hash, V> Clone for SharedKeyValueStore<K, V> {
-    fn clone(&self) -> Self {
-        Self {
-            commands: self.commands.clone(),
-        }
-    }
-}
-enum SharedKeyValueStoreCommand<K, V> {
-    Insert(Operation<(K, V), Option<V>>),
-    Remove(Operation<K, Option<V>>),
-}
-impl<K: Eq + std::hash::Hash + Send + 'static, V: Send + 'static> SharedKeyValueStore<K, V> {
-    fn new() -> Self {
-        let (commands_tx, mut commands_rx) =
-            mpsc::channel::<SharedKeyValueStoreCommand<K, V>>(1024);
-        tokio::spawn(async move {
-            let mut cache = Mutex::new(HashMap::<K, V>::new());
-            while let Some(command) = commands_rx.recv().await {
-                match command {
-                    SharedKeyValueStoreCommand::Insert(command) => {
-                        let (key, value) = command.payload;
-                        let existing_value = cache.get_mut().unwrap().insert(key, value);
-                        let _ = command.response.send(existing_value);
+                                let (state, updated_keys) =
+                                    store.get_mut().unwrap().update_state(updates);
+                                match &mut pending_updates {
+                                    None => {
+                                        pending_updates = Some((state, updated_keys));
+                                    }
+                                    Some((pending_state, pending_updates)) => {
+                                        *pending_state = state;
+                                        pending_updates.extend(updated_keys)
+                                    }
+                                }
+                            }
+                        }
+                        next_command = next_queued_item(&mut commands_rx);
                     }
-                    SharedKeyValueStoreCommand::Remove(command) => {
-                        let key = command.payload;
-                        let value = cache.get_mut().unwrap().remove(&key);
-                        let _ = command.response.send(value);
+                    for cache_key in pending_retains {
+                        cache.retain(cache_key);
+                    }
+                    for cache_key in pending_releases {
+                        cache.release(cache_key);
+                    }
+                    if pending_gc {
+                        gc(&mut store, &mut cache);
+                    }
+                    if let Some((state, updated_keys)) = pending_updates {
+                        let _ = flush_tx.send(FlushPayload::new((state, updated_keys)));
                     }
                 }
             }
         });
         Self {
             commands: commands_tx,
+            _flush: flush_rx,
         }
     }
-    async fn insert(&self, key: K, value: V) -> Result<Option<V>, String> {
-        let (response_tx, response_rx) = oneshot::channel();
-        let _ = self
-            .commands
-            .send(SharedKeyValueStoreCommand::Insert(Operation::new(
-                (key, value),
-                response_tx,
-            )))
-            .await
-            .map_err(|error| format!("{}", error))?;
-        response_rx.await.map_err(|error| format!("{}", error))
+    pub async fn subscribe<'a>(
+        &'a self,
+        program: Program,
+        entry_point: InstructionPointer,
+    ) -> Result<StreamSubscription<'a, T, impl Stream<Item = T>>, String> {
+        create_subscription(&self.commands, program, entry_point, None).await
     }
-    async fn remove(&self, key: K) -> Result<Option<V>, String> {
+    pub async fn unsubscribe(&self, subscription_id: SubscriptionId) -> Result<bool, String> {
         let (response_tx, response_rx) = oneshot::channel();
         let _ = self
             .commands
-            .send(SharedKeyValueStoreCommand::Remove(Operation::new(
-                key,
-                response_tx,
-            )))
-            .await
-            .map_err(|error| format!("{}", error))?;
-        response_rx.await.map_err(|error| format!("{}", error))
+            .send(RuntimeCommand::unsubscribe(subscription_id, response_tx))
+            .await;
+        let result = response_rx.await;
+        match result {
+            Err(error) => Err(format!("{}", error)),
+            Ok(result) => Ok(result),
+        }
     }
 }
 
-fn create_store<
+async fn create_subscription<
+    'a,
     T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
-    THandler,
 >(
-    program: Arc<Program>,
-    signal_handler: THandler,
-    factory: &(impl AsyncExpressionFactory<T> + WithCompiledBuiltins),
-    allocator: &impl AsyncHeapAllocator<T>,
-    builtins: Vec<(BuiltinTerm, InstructionPointer)>,
-    plugins: NativeFunctionRegistry<T>,
-    interpreter_options: InterpreterOptions,
-    compiler_options: CompilerOptions,
-    command_buffer_size: usize,
-    result_buffer_size: usize,
-) -> (CommandChannel<T>, ResultsChannel<T>)
-where
-    T::String: StringValue + Send + Sync,
-    THandler: Fn(&str, &[&Signal<T>], &SignalHelpers<T>) -> SignalHandlerResult<T>
-        + Send
-        + Sync
-        + 'static,
-{
-    let (commands_tx, mut commands_rx) = mpsc::channel::<Command<T>>(command_buffer_size);
-    let (results_tx, _) = broadcast::channel(result_buffer_size);
-    tokio::spawn({
-        let signal_helpers = SignalHelpers::new(
-            program,
-            &builtins,
-            &plugins,
-            commands_tx.clone(),
-            compiler_options,
-        );
-        let dispose_cache = SharedKeyValueStore::<SignalId, DisposeCallback>::new();
-        let results = results_tx.clone();
-        let commands_tx = commands_tx.clone();
-        let factory = factory.clone();
-        let allocator = allocator.clone();
-        async move {
-            let cache = DefaultInterpreterCache::default();
-            let mut store = Mutex::new(Store::new(
-                cache,
-                None,
-                builtins,
-                plugins,
-                interpreter_options,
-            ));
-            while let Some(command) = commands_rx.recv().await {
-                let mut next_command = Some(command);
-                while let Some(command) = next_command {
-                    match command {
-                        Command::Subscribe(command) => {
-                            process_subscribe_command(command, &mut store, &results)
-                        }
-                        Command::Unsubscribe(command) => {
-                            process_unsubscribe_command(command, &mut store, &results)
-                        }
-                        Command::Update(command) => {
-                            process_update_command(command, &mut store, &results)
-                        }
-                    }
-                    next_command = next_queued_item(&mut commands_rx);
-                }
-                let updated_results = store.get_mut().unwrap().flush(
-                {
-                    |signals| {
-                        let signal_results = handle_signals(
-                            signals,
-                            &commands_tx,
-                            &signal_handler,
-                            &signal_helpers,
-                            &factory,
-                        );
-                        let (results, disposables): (Vec<_>, Vec<_>) = signals
-                            .iter()
-                            .map(|signal| signal.id())
-                            .zip(signal_results.into_iter())
-                            .map(|(signal_id, result)| match result {
-                                Ok((result, dispose)) => {
-                                    (Ok(result), dispose.map(|dispose| (signal_id, dispose)))
-                                }
-                                Err(error) => (Err(error), None),
-                            })
-                            .unzip();
-                        let disposables = disposables.into_iter().filter_map(identity);
-                        for (signal_id, dispose) in disposables {
-                            tokio::spawn({
-                                let dispose_cache = dispose_cache.clone();
-                                async move { dispose_cache.insert(signal_id, dispose).await }
-                            });
-                        }
-                        results
-                    }
-                },
-                &factory,
-                &allocator,
-            )
-                .into_iter()
-                .filter_map(|(id, result)| match strip_pending_results(result) {
-                    None => None,
-                    Some(result) => Some((id, result)),
-                });
-                for update in updated_results {
-                    let _ = results.send(update);
-                }
-                let disposed_signal_ids = gc(&mut store);
-                if !disposed_signal_ids.is_empty() {
-                    println!(
-                        "[Runtime] Disposing {} inactive signals",
-                        disposed_signal_ids.len()
-                    );
-                    for signal_id in disposed_signal_ids {
-                        tokio::spawn({
-                            let dispose_cache = dispose_cache.clone();
-                            async move {
-                                if let Some(dispose) =
-                                    dispose_cache.remove(signal_id).await.unwrap()
-                                {
-                                    let _ = dispose.await;
-                                }
-                            }
-                        });
-                    }
-                }
-            }
-        }
-    });
-    (commands_tx, results_tx)
-}
-
-fn gc<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T>>(
-    store: &mut Mutex<Store<T, DefaultInterpreterCache<T>>>,
-) -> Vec<SignalId> {
-    let mut combined_signal_ids = Vec::new();
-    loop {
-        let (disposed_signal_ids, disposed_subscriptions): (Vec<_>, Vec<_>) =
-            store.get_mut().unwrap().gc();
-        combined_signal_ids.extend(disposed_signal_ids);
-        if disposed_subscriptions.is_empty() {
-            break;
-        }
-        println!(
-            "[Runtime] Disposing {} inactive subscriptions",
-            disposed_subscriptions.len()
-        );
-        let store = store.get_mut().unwrap();
-        for subscription_id in disposed_subscriptions {
-            store.unsubscribe(subscription_id);
-        }
-    }
-    combined_signal_ids
-}
-
-fn process_subscribe_command<
-    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T>,
-    TCache: InterpreterCache<T>,
->(
-    command: SubscribeCommand<T>,
-    store: &mut Mutex<Store<T, TCache>>,
-    results_tx: &ResultsChannel<T>,
-) where
-    T::String: StringValue + Send + Sync,
-{
-    let (program, entry_point, initiators) = command.payload;
-    let subscription_id = store
-        .get_mut()
-        .unwrap()
-        .subscribe(program, entry_point, initiators);
-    let _ = command.response.send(subscription_id);
-
-    let mut results_stream = get_subscription_results_stream(results_tx, subscription_id);
-
-    let response_stream = command.update;
-    tokio::spawn(async move {
-        while let Some(update) = results_stream.next().await {
-            let _ = response_stream.send(Some(update));
-        }
-    });
-}
-
-fn process_unsubscribe_command<
-    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T>,
-    TCache: InterpreterCache<T>,
->(
-    command: UnsubscribeCommand,
-    store: &mut Mutex<Store<T, TCache>>,
-    _results_tx: &ResultsChannel<T>,
-) where
-    T::String: StringValue + Send + Sync,
-{
-    let id = command.payload;
-    let result = store.get_mut().unwrap().unsubscribe(id);
-    let _ = command.response.send(result);
-}
-
-fn process_update_command<
-    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T>,
-    TCache: InterpreterCache<T>,
->(
-    command: UpdateCommand<T>,
-    store: &mut Mutex<Store<T, TCache>>,
-    _results_tx: &ResultsChannel<T>,
-) where
-    T::String: StringValue + Send + Sync,
-{
-    let updates = command.payload;
-    store.get_mut().unwrap().update(updates);
-    let _ = command.response.send(());
-}
-
-async fn create_subscription<'a, T: AsyncExpression>(
+    commands: &'a RuntimeCommandChannel<T>,
     program: Program,
     entry_point: InstructionPointer,
     initiators: Option<Vec<SignalId>>,
-    commands: &'a CommandChannel<T>,
-    factory: &(impl ExpressionFactory<T> + Send + Clone + 'static),
-    allocator: &(impl HeapAllocator<T> + Send + Clone + 'static),
-) -> Result<StreamSubscription<'a, T, impl Stream<Item = SubscriptionResult<T>>>, String>
-where
-    T::String: StringValue + Send + Sync,
-{
-    let (send, receive) = oneshot::channel();
-    let (update_send, update_receive) = watch::channel(None);
-    let command = Command::subscribe(program, entry_point, initiators, send, update_send);
-    let _ = commands.send(command).await;
-    let factory = factory.clone();
-    let allocator = allocator.clone();
-    match receive.await {
+) -> Result<StreamSubscription<'a, T, impl Stream<Item = T>>, String> {
+    let (response_tx, response_rx) = oneshot::channel();
+    let (updates_tx, updates_rx) = watch::channel(None);
+    let _ = commands
+        .send(RuntimeCommand::subscribe(
+            program,
+            entry_point,
+            initiators,
+            response_tx,
+            updates_tx,
+        ))
+        .await;
+    let subscription_id = response_rx.await;
+    match subscription_id {
         Err(error) => Err(format!("{}", error)),
         Ok(subscription_id) => Ok(StreamSubscription::new(
             commands,
             subscription_id,
-            WatchStream::new(update_receive)
-                .filter_map(|result| result)
-                .filter_map(move |result| match result {
-                    Ok(expression) => {
-                        match filter_pending_signals(expression, &factory, &allocator) {
-                            Some(expression) => Some(Ok(expression)),
-                            None => None,
-                        }
-                    }
-                    Err(error) => Some(Err(error)),
-                }),
+            WatchStream::new(updates_rx).filter_map(identity),
         )),
     }
 }
 
-fn get_subscription_results_stream<T: AsyncExpression>(
-    results_tx: &ResultsChannel<T>,
-    subscription_id: SubscriptionToken,
-) -> impl Stream<Item = SubscriptionResult<T>>
+fn process_subscribe_command<T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T>>(
+    command: StreamOperation<SubscribeCommand, SubscriptionId, T>,
+    store: &mut Mutex<RuntimeStore<T>>,
+    cache: &mut RuntimeCache<T>,
+    commands: &RuntimeCommandChannel<T>,
+    flush: &broadcast::Sender<FlushPayload<T>>,
+    factory: &(impl AsyncExpressionFactory<T> + WithCompiledBuiltins),
+    allocator: &impl AsyncHeapAllocator<T>,
+    builtins: &[(BuiltinTerm, InstructionPointer)],
+    plugins: &NativeFunctionRegistry<T>,
+    interpreter_options: &InterpreterOptions,
+) -> (SubscriptionId, HashId)
 where
-    T::String: StringValue + Send + Sync,
+    T::String: Send + Sync,
 {
-    // TODO: Investigate per-subscription results channels instead of shared global results channel
-    BroadcastStream::new(results_tx.subscribe()).filter_map(move |payload| match payload {
-        Ok((id, result)) if id == subscription_id => Some(result),
-        _ => None,
-    })
+    let payload = command.payload;
+    let target = payload.target;
+    let entry_point = payload.entry_point;
+    let initiators = payload.initiators;
+    let cache_key = hash_program_root(&target, &entry_point);
+    let (abort_handle, abort_registration) = AbortHandle::new_pair();
+    let store = store.get_mut().unwrap();
+    let subscription_id = store.subscribe(cache_key, initiators, move || abort_handle.abort());
+    let _ = command.response.send(subscription_id);
+    tokio::spawn(Abortable::new(
+        {
+            let flush = flush.clone();
+            let factory = factory.clone();
+            let allocator = allocator.clone();
+            let builtins = builtins.iter().copied().collect::<Vec<_>>();
+            let plugins = plugins.clone();
+            let interpreter_options = interpreter_options.clone();
+            let cache = cache.clone();
+            let commands = commands.clone();
+            let updates = command.updates;
+            // TODO: Avoid cloning program when sharing between interpreter and signal helpers
+            let program = Arc::new(target.clone());
+            let state = store.state.clone();
+            async move {
+                let mut flush_receiver = flush.subscribe();
+
+                let (result, cache_entries) = evaluate_subscription(
+                    subscription_id,
+                    cache_key,
+                    &program,
+                    entry_point,
+                    &state,
+                    &factory,
+                    &allocator,
+                    &builtins,
+                    &plugins,
+                    &interpreter_options,
+                    &cache,
+                );
+
+                let mut latest_result = Mutex::new(result.clone());
+
+                if let Some(value) = parse_subscription_result(&result, &factory, &allocator) {
+                    println!("[Runtime] Emit #{}", subscription_id);
+                    let _ = updates.send(Some(value));
+                }
+                let _ = commands
+                    .send(RuntimeCommand::emit(
+                        subscription_id,
+                        cache_key,
+                        Arc::clone(&program),
+                        state,
+                        result,
+                        cache_entries,
+                    ))
+                    .await;
+
+                // TODO: Decrease subscription scheduling priority after initial result is emitted
+                while let Ok(state) = flush_receiver.recv().await {
+                    let (state, is_unchanged) = {
+                        let (state, updates) = state.as_ref();
+                        let mut latest_state = state.clone();
+                        let mut accumulated_updates = HashSet::<StateToken>::new();
+                        while let Ok(queued_state) = flush_receiver.try_recv() {
+                            let (next_state, next_updates) = queued_state.as_ref();
+                            latest_state = next_state.clone();
+                            accumulated_updates.extend(next_updates);
+                        }
+                        let previous_result = latest_result.lock().unwrap();
+                        let active_dependencies = previous_result.dependencies();
+                        let is_unchanged = !updates
+                            .iter()
+                            .copied()
+                            .chain(accumulated_updates)
+                            .any(|key| active_dependencies.contains(key));
+                        (latest_state, is_unchanged)
+                    };
+                    if is_unchanged {
+                        continue;
+                    }
+
+                    let (result, cache_entries) = evaluate_subscription(
+                        subscription_id,
+                        cache_key,
+                        &program,
+                        entry_point,
+                        &state,
+                        &factory,
+                        &allocator,
+                        &builtins,
+                        &plugins,
+                        &interpreter_options,
+                        &cache,
+                    );
+
+                    let previous_result =
+                        std::mem::replace(latest_result.get_mut().unwrap(), result.clone());
+                    if evaluation_results_are_equal(&previous_result, &result) {
+                        continue;
+                    }
+
+                    let output_value = parse_subscription_result(&result, &factory, &allocator);
+                    if let Some(value) = output_value {
+                        println!("[Runtime] Emit #{}", subscription_id);
+                        let _ = updates.send(Some(value));
+                    }
+                    let _ = commands
+                        .send(RuntimeCommand::emit(
+                            subscription_id,
+                            cache_key,
+                            Arc::clone(&program),
+                            state,
+                            result,
+                            cache_entries,
+                        ))
+                        .await;
+                }
+            }
+        },
+        abort_registration,
+    ));
+    (subscription_id, cache_key)
 }
 
-async fn stop_subscription<T: Expression>(
-    id: SubscriptionId,
-    channel: &CommandChannel<T>,
-) -> Result<bool, String> {
-    let (send, receive) = oneshot::channel();
-    let _ = channel.send(Command::unsubscribe(id, send)).await;
-    match receive.await {
-        Err(error) => Err(format!("{}", error)),
-        Ok(response) => Ok(response),
+fn evaluate_subscription<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T>>(
+    subscription_id: SubscriptionId,
+    cache_key: HashId,
+    program: &Program,
+    entry_point: InstructionPointer,
+    state: &impl DynamicState<T>,
+    factory: &(impl ExpressionFactory<T> + WithCompiledBuiltins),
+    allocator: &impl HeapAllocator<T>,
+    builtins: &[(BuiltinTerm, InstructionPointer)],
+    plugins: &NativeFunctionRegistry<T>,
+    interpreter_options: &InterpreterOptions,
+    cache: &impl InterpreterCache<T>,
+) -> (EvaluationResult<T>, CacheEntries<T>) {
+    println!("[Runtime] Evaluating subscription #{}", subscription_id);
+    let start_time = Instant::now();
+    let result = execute(
+        cache_key,
+        program,
+        entry_point,
+        state,
+        factory,
+        allocator,
+        builtins,
+        plugins,
+        interpreter_options,
+        cache,
+    )
+    .unwrap_or_else(|error| {
+        (
+            EvaluationResult::new(
+                create_error_expression(
+                    once(
+                        factory
+                            .create_value_term(ValueTerm::String(allocator.create_string(error))),
+                    ),
+                    factory,
+                    allocator,
+                ),
+                DependencyList::empty(),
+            ),
+            CacheEntries::default(),
+        )
+    });
+    println!(
+        "[Runtime] Evaluated subscription #{} in {:?}",
+        subscription_id,
+        start_time.elapsed()
+    );
+    result
+}
+
+fn parse_subscription_result<T: Expression>(
+    result: &EvaluationResult<T>,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> Option<T> {
+    let (custom_signals, error_signals, is_pending) =
+        match factory.match_signal_term(result.result()) {
+            Some(signal) => {
+                let (custom_signals, error_signals, is_pending) = signal.signals().iter().fold(
+                    (Vec::new(), Vec::new(), false),
+                    |(mut custom_signals, mut error_signals, mut is_pending), signal| {
+                        match signal.signal_type() {
+                            SignalType::Error => {
+                                error_signals.push(signal);
+                            }
+                            SignalType::Pending => {
+                                is_pending = true;
+                            }
+                            SignalType::Custom(_) => {
+                                custom_signals.push(signal);
+                                is_pending = true;
+                            }
+                        }
+                        (custom_signals, error_signals, is_pending)
+                    },
+                );
+                (custom_signals, error_signals, is_pending)
+            }
+            None => (Vec::new(), Vec::new(), false),
+        };
+    if !error_signals.is_empty() {
+        if custom_signals.is_empty() && !is_pending {
+            Some(result.result().clone())
+        } else {
+            Some(create_error_expression(
+                error_signals
+                    .into_iter()
+                    .map(|signal| {
+                        signal
+                            .args()
+                            .iter()
+                            .next()
+                            .cloned()
+                            .unwrap_or_else(|| factory.create_value_term(ValueTerm::Null))
+                    })
+                    .collect::<Vec<_>>(),
+                factory,
+                allocator,
+            ))
+        }
+    } else if is_pending {
+        None
+    } else {
+        Some(result.result().clone())
     }
 }
 
-fn handle_signals<
+fn process_unsubscribe_command<T: Expression>(
+    command: AsyncOperation<UnsubscribeCommand, bool>,
+    store: &mut Mutex<RuntimeStore<T>>,
+) -> Option<(HashId, impl FnOnce() + Send + Sync)> {
+    let payload = command.payload;
+    let subscription_id = payload.subscription_id;
+    let subscription = store.get_mut().unwrap().unsubscribe(subscription_id);
+    let result = if let Some(subscription) = subscription {
+        Some((subscription.cache_key, subscription.dispose))
+    } else {
+        None
+    };
+    let _ = command.response.send(result.is_some());
+    result
+}
+
+fn process_emit_command<
     T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
     THandler,
 >(
-    signals: &[&Signal<T>],
-    commands: &CommandChannel<T>,
+    payload: EmitCommand<T>,
+    store: &mut Mutex<RuntimeStore<T>>,
+    cache: &mut RuntimeCache<T>,
+    commands: &RuntimeCommandChannel<T>,
     signal_handler: &THandler,
-    signal_helpers: &SignalHelpers<T>,
-    factory: &impl AsyncExpressionFactory<T>,
-) -> Vec<Result<(T, Option<DisposeCallback>), Option<String>>>
+    builtins: &[(BuiltinTerm, InstructionPointer)],
+    plugins: &NativeFunctionRegistry<T>,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+    compiler_options: &CompilerOptions,
+) -> Vec<StateUpdate<T>>
 where
     T::String: StringValue + Send + Sync,
     THandler: Fn(&str, &[&Signal<T>], &SignalHelpers<T>) -> SignalHandlerResult<T>
@@ -871,35 +888,138 @@ where
         + Sync
         + 'static,
 {
-    let custom_signals = signals
+    let subscription_id = payload.subscription_id;
+    let cache_key = payload.cache_key;
+    let state = payload.state;
+    let result = payload.result;
+    let program = payload.program;
+    let cache_entries = payload.cache_entries;
+    cache.apply_updates(cache_entries);
+    let store = store.get_mut().unwrap();
+    let custom_signals = match factory.match_signal_term(result.result()) {
+        Some(signal) => signal
+            .signals()
+            .iter()
+            .filter(|signal| match signal.signal_type() {
+                SignalType::Custom(_) => true,
+                _ => false,
+            })
+            .collect::<Vec<_>>(),
+        None => Vec::new(),
+    };
+    let handler_results = if custom_signals.is_empty() {
+        None
+    } else {
+        let added_signals = custom_signals
+            .into_iter()
+            .filter(|signal| store.retrieve_signal_result(signal).is_none())
+            .collect::<Vec<_>>();
+        if added_signals.is_empty() {
+            None
+        } else {
+            let (signal_results, effects) = handle_custom_signals(
+                &added_signals,
+                signal_handler,
+                program,
+                builtins,
+                plugins,
+                factory,
+                allocator,
+                compiler_options,
+                commands,
+            );
+            store.register_signal_results(signal_results.iter().cloned());
+            cache.apply_updates(signal_results.iter().cloned().map(|(signal_id, value)| {
+                (
+                    signal_id,
+                    InterpreterCacheEntry::new(
+                        EvaluationResult::new(value, DependencyList::empty()),
+                        &state,
+                    ),
+                    Vec::new(),
+                )
+            }));
+            Some((signal_results, effects))
+        }
+    };
+    store.update_subscription_dependencies(subscription_id, result.dependencies());
+    ensure_cache_entries(result.dependencies(), cache, &state, factory, allocator);
+    cache.update_subscription_dependencies(subscription_id, cache_key, result.dependencies());
+    let results = if let Some((signal_results, effects)) = handler_results {
+        let (sync_updates, dispose_callbacks) = apply_effects(effects, commands);
+        let outdated_dispose_callbacks = store.register_dispose_callbacks(dispose_callbacks);
+        for dispose_callback in outdated_dispose_callbacks {
+            tokio::spawn(dispose_callback);
+        }
+        signal_results
+            .into_iter()
+            .map(|(signal_id, value)| StateUpdate::value(signal_id, value))
+            .chain(sync_updates)
+            .collect()
+    } else {
+        Vec::new()
+    };
+    results
+}
+
+fn handle_custom_signals<
+    'a,
+    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T> + 'a,
+    THandler,
+>(
+    signals: &[&'a Signal<T>],
+    signal_handler: &THandler,
+    program: Arc<Program>,
+    builtins: &[(BuiltinTerm, InstructionPointer)],
+    plugins: &NativeFunctionRegistry<T>,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+    compiler_options: &CompilerOptions,
+    commands: &RuntimeCommandChannel<T>,
+) -> (Vec<(SignalId, T)>, Vec<(SignalId, RuntimeEffect<T>)>)
+where
+    T::String: StringValue + Send + Sync,
+    THandler: Fn(&str, &[&Signal<T>], &SignalHelpers<T>) -> SignalHandlerResult<T>
+        + Send
+        + Sync
+        + 'static,
+{
+    let signal_helpers = SignalHelpers::new(
+        program,
+        builtins,
+        plugins,
+        commands.clone(),
+        *compiler_options,
+    );
+    let signals_by_type = signals
         .iter()
         .filter_map(|signal| match signal.signal_type() {
             SignalType::Custom(signal_type) => Some((signal, signal_type)),
             _ => None,
-        });
-    let custom_signals_by_type = custom_signals.fold(
-        HashMap::<&str, Vec<&Signal<T>>>::new(),
-        |mut results, (signal, signal_type)| {
-            match results.entry(signal_type.as_str()) {
-                Entry::Occupied(mut entry) => {
-                    entry.get_mut().push(signal);
+        })
+        .fold(
+            HashMap::<&str, Vec<&Signal<T>>>::new(),
+            |mut results, (signal, signal_type)| {
+                match results.entry(signal_type.as_str()) {
+                    Entry::Occupied(mut entry) => {
+                        entry.get_mut().push(signal);
+                    }
+                    Entry::Vacant(entry) => {
+                        entry.insert(vec![signal]);
+                    }
                 }
-                Entry::Vacant(entry) => {
-                    entry.insert(vec![signal]);
-                }
-            }
-            results
-        },
-    );
-    let mut custom_signal_results = HashMap::with_capacity(signals.len());
-    for (signal_type, signals) in custom_signals_by_type {
-        let results = signal_handler(signal_type, &signals, signal_helpers);
+                results
+            },
+        );
+    let mut signal_results = HashMap::with_capacity(signals.len());
+    for (signal_type, signals) in signals_by_type {
+        let results = signal_handler(signal_type, &signals, &signal_helpers);
         if let Some(results) = results {
             let signal_ids = signals.iter().map(|signal| signal.id());
             if results.len() == signals.len() {
-                custom_signal_results.extend(signal_ids.zip(results));
+                signal_results.extend(signal_ids.zip(results));
             } else {
-                custom_signal_results.extend(signal_ids.map(|id| {
+                signal_results.extend(signal_ids.map(|id| {
                     (
                         id,
                         Err(format!(
@@ -913,126 +1033,699 @@ where
             }
         }
     }
-
-    signals
-        .into_iter()
-        .map({
-            let factory = factory.clone();
-            let commands = commands.clone();
-            move |signal| match signal.signal_type() {
-                SignalType::Error => Err(Some(parse_error_signal_message(signal.args(), &factory))),
-                SignalType::Pending => Err(None),
-                SignalType::Custom(_) => match custom_signal_results.remove(&signal.id()) {
-                    Some(result) => match result {
-                        Ok((result, effect)) => {
-                            let dispose = match effect {
-                                Some(effect) => apply_effect(effect, &commands),
-                                _ => None,
-                            };
-                            Ok((result, dispose))
-                        }
-                        Err(error) => Err(Some(error)),
-                    },
-                    None => Err(Some(format!("Unhandled signal: {}", signal))),
-                },
-            }
+    let (signal_results, effects) = signals
+        .iter()
+        .map(|signal| {
+            let signal_id = signal.id();
+            let handler_result = match signal_results.remove(&signal.id()) {
+                Some(result) => result,
+                None => Err(format!("Unhandled signal: {}", signal)),
+            };
+            let (result, effect) = handler_result.unwrap_or_else(|error| {
+                (
+                    factory.create_value_term(ValueTerm::String(allocator.create_string(error))),
+                    None,
+                )
+            });
+            (signal_id, result, effect)
         })
-        .collect()
+        .fold(
+            (Vec::with_capacity(signals.len()), Vec::new()),
+            |(mut results, mut effects), (signal_id, result, effect)| {
+                results.push((signal_id, result));
+                if let Some(effect) = effect {
+                    effects.push((signal_id, effect));
+                }
+                (results, effects)
+            },
+        );
+    (signal_results, effects)
+}
+
+fn ensure_cache_entries<T: Expression>(
+    dependencies: impl IntoIterator<Item = InterpreterCacheKey>,
+    cache: &mut RuntimeCache<T>,
+    state: &impl DynamicState<T>,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) {
+    let missing_dependencies = {
+        let cache = cache.cache.read();
+        dependencies
+            .into_iter()
+            .filter(|key| !cache.contains_key(key))
+            .collect::<Vec<_>>()
+    };
+    if missing_dependencies.is_empty() {
+        return;
+    }
+    let dummy_result = create_pending_result(factory, allocator);
+    let mut cache = cache.cache.write();
+    for key in missing_dependencies {
+        cache.store_result(key, state, dummy_result.clone(), Vec::new());
+    }
+}
+
+fn apply_effects<T: AsyncExpression>(
+    effects: Vec<(SignalId, RuntimeEffect<T>)>,
+    commands: &RuntimeCommandChannel<T>,
+) -> (Vec<StateUpdate<T>>, Vec<(SignalId, DisposeCallback)>)
+where
+    T::String: StringValue + Send + Sync,
+{
+    effects
+        .into_iter()
+        .map(|(signal_id, effect)| {
+            let (updates, dispose) = apply_effect(effect, commands);
+            (updates, dispose.map(|dispose| (signal_id, dispose)))
+        })
+        .fold(
+            (Vec::new(), Vec::new()),
+            |(mut existing_sync_updates, mut existing_dispose_callbacks),
+             (sync_updates, dispose_callback)| {
+                existing_sync_updates.extend(sync_updates);
+                existing_dispose_callbacks.extend(dispose_callback);
+                (existing_sync_updates, existing_dispose_callbacks)
+            },
+        )
 }
 
 fn apply_effect<T: AsyncExpression>(
     effect: RuntimeEffect<T>,
-    commands: &CommandChannel<T>,
-) -> Option<DisposeCallback>
+    commands: &RuntimeCommandChannel<T>,
+) -> (Vec<StateUpdate<T>>, Option<DisposeCallback>)
 where
     T::String: StringValue + Send + Sync,
 {
     let commands = commands.clone();
     match effect {
-        RuntimeEffect::Sync(updates) => {
-            tokio::spawn(async move { emit_updates(updates, &commands).await });
-            None
-        }
+        RuntimeEffect::Sync(updates) => (updates, None),
         RuntimeEffect::Async((effect, dispose)) => {
-            tokio::spawn(async move {
-                let updates = effect.await;
-                emit_updates(updates, &commands).await
-            });
-            Some(dispose)
+            let (abort_handle, abort_registration) = AbortHandle::new_pair();
+            tokio::spawn(Abortable::new(
+                async move {
+                    let updates = effect.await;
+                    let _ = commands.send(RuntimeCommand::update(updates)).await;
+                },
+                abort_registration,
+            ));
+            (
+                Vec::new(),
+                Some(Box::pin(async move {
+                    abort_handle.abort();
+                    let _ = dispose.await;
+                })),
+            )
         }
         RuntimeEffect::Stream((mut effect, dispose)) => {
-            tokio::spawn(async move {
-                while let Some(updates) = effect.next().await {
-                    emit_updates(updates, &commands).await
-                }
-            });
-            Some(dispose)
+            let (abort_handle, abort_registration) = AbortHandle::new_pair();
+            tokio::spawn(Abortable::new(
+                async move {
+                    while let Some(updates) = effect.next().await {
+                        let _ = commands.send(RuntimeCommand::update(updates)).await;
+                    }
+                },
+                abort_registration,
+            ));
+            (
+                Vec::new(),
+                Some(Box::pin(async move {
+                    abort_handle.abort();
+                    let _ = dispose.await;
+                })),
+            )
         }
     }
 }
 
-async fn emit_updates<T: Expression>(updates: Vec<StateUpdate<T>>, commands: &CommandChannel<T>) {
-    let (send, receive) = oneshot::channel();
-    let _ = commands.send(Command::update(updates, send)).await;
-    let _ = receive.await;
+fn gc<T: Expression>(store: &mut Mutex<RuntimeStore<T>>, cache: &mut RuntimeCache<T>) {
+    let start_time = Instant::now();
+    println!("[Runtime] GC started");
+    {
+        print!("[Runtime] Purging cache entries...");
+        let start_time = Instant::now();
+        let metrics = cache.gc();
+        println!("{:?} ({})", start_time.elapsed(), metrics);
+    }
+    {
+        println!("[Runtime] Computing inactive subscriptions...");
+        let start_time = Instant::now();
+        let dispose_callbacks = store.get_mut().unwrap().gc();
+        println!(
+            "[Runtime] Inactive subscriptions computed in {:?}",
+            start_time.elapsed()
+        );
+        if !dispose_callbacks.is_empty() {
+            print!(
+                "[Runtime] Cleaning up {} signal effects...",
+                dispose_callbacks.len()
+            );
+            let start_time = Instant::now();
+            for dispose_callback in dispose_callbacks {
+                tokio::spawn(dispose_callback);
+            }
+            println!("{:?}", start_time.elapsed());
+        }
+    }
+    println!("[Runtime] GC completed in {:?}", start_time.elapsed());
 }
 
-fn parse_error_signal_message<T: Expression>(
-    args: &ExpressionList<T>,
-    factory: &impl ExpressionFactory<T>,
-) -> String {
-    args.iter()
-        .map(|arg| {
-            let message = match factory.match_value_term(arg) {
-                Some(ValueTerm::String(message)) => Some(String::from(message.as_str())),
+#[derive(Clone)]
+pub struct SignalHelpers<T: AsyncExpression + Compile<T>>
+where
+    T::String: StringValue + Send + Sync,
+{
+    program: Arc<Program>,
+    builtins: Vec<(BuiltinTerm, InstructionPointer)>,
+    plugins: Vec<(NativeFunctionId, Arity, InstructionPointer)>,
+    commands: RuntimeCommandChannel<T>,
+    compiler_options: CompilerOptions,
+}
+impl<T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>>
+    SignalHelpers<T>
+where
+    T::String: StringValue + Send + Sync,
+{
+    fn new(
+        program: Arc<Program>,
+        builtins: &[(BuiltinTerm, InstructionPointer)],
+        plugins: &NativeFunctionRegistry<T>,
+        commands: RuntimeCommandChannel<T>,
+        compiler_options: CompilerOptions,
+    ) -> Self {
+        Self {
+            program,
+            builtins: builtins.iter().copied().collect(),
+            plugins: plugins
+                .iter()
+                .map(|(target, address)| (target.uid(), target.arity(), *address))
+                .collect(),
+            commands,
+            compiler_options,
+        }
+    }
+    pub fn program(&self) -> &Program {
+        &self.program
+    }
+    pub fn builtins(&self) -> &[(BuiltinTerm, InstructionPointer)] {
+        &self.builtins
+    }
+    pub fn plugins(&self) -> &[(NativeFunctionId, Arity, InstructionPointer)] {
+        &self.plugins
+    }
+    pub fn watch_expression(
+        self,
+        expression: T,
+        initiators: impl IntoIterator<Item = SignalId>,
+        factory: &(impl AsyncExpressionFactory<T> + WithCompiledBuiltins),
+        allocator: &impl AsyncHeapAllocator<T>,
+    ) -> Result<impl Stream<Item = T> + Send + 'static, String> {
+        let initiators = initiators.into_iter().collect::<Vec<_>>();
+        let entry_point = InstructionPointer::new(self.program.len());
+        let prelude = (*self.program).clone();
+        Compiler::new(self.compiler_options, Some(prelude))
+            .compile(
+                &expression,
+                CompilerMode::Expression,
+                false,
+                empty(),
+                factory,
+                allocator,
+            )
+            .map(|compiled| {
+                // TODO: Error if runtime expression depends on unrecognized native functions
+                let (program, _, _) = compiled.into_parts();
+                self.watch_compiled_expression(program, entry_point, initiators, factory, allocator)
+            })
+    }
+    pub fn watch_state(
+        self,
+        state_token: StateToken,
+        initiators: impl IntoIterator<Item = SignalId>,
+        factory: &impl AsyncExpressionFactory<T>,
+        allocator: &impl AsyncHeapAllocator<T>,
+    ) -> impl Stream<Item = T> + Send + 'static {
+        let initiators = initiators.into_iter().collect::<Vec<_>>();
+        let program = Program::new(vec![
+            Instruction::PushSignal {
+                signal_type: SignalType::Pending,
+                num_args: 0,
+            },
+            Instruction::PushDynamic { state_token },
+            Instruction::Evaluate,
+            Instruction::Return,
+        ]);
+        self.watch_compiled_expression(
+            program,
+            InstructionPointer::default(),
+            initiators,
+            factory,
+            allocator,
+        )
+    }
+    fn watch_compiled_expression(
+        self,
+        program: Program,
+        entry_point: InstructionPointer,
+        initiators: Vec<SignalId>,
+        factory: &impl AsyncExpressionFactory<T>,
+        allocator: &impl AsyncHeapAllocator<T>,
+    ) -> impl Stream<Item = T> + Send + 'static {
+        futures::StreamExt::flatten(
+            {
+                let factory = factory.clone();
+                let allocator = allocator.clone();
+                async move {
+                    match create_subscription(
+                        &self.commands,
+                        program,
+                        entry_point,
+                        Some(initiators),
+                    )
+                    .await
+                    {
+                        Err(error) => futures::StreamExt::left_stream(stream::iter(once(
+                            create_error_expression(
+                                once(factory.create_value_term(ValueTerm::String(
+                                    allocator.create_string(error),
+                                ))),
+                                &factory,
+                                &allocator,
+                            ),
+                        ))),
+                        Ok(subscription) => {
+                            futures::StreamExt::right_stream(subscription.into_stream())
+                        }
+                    }
+                }
+            }
+            .into_stream(),
+        )
+    }
+}
+
+#[derive(Clone)]
+pub struct RuntimeCache<T: Expression> {
+    cache: Arc<RwLock<DefaultInterpreterCache<T>>>,
+}
+impl<T: Expression> Default for RuntimeCache<T> {
+    fn default() -> Self {
+        Self {
+            cache: Arc::new(RwLock::new(DefaultInterpreterCache::default())),
+        }
+    }
+}
+impl<T: Expression> InterpreterCache<T> for RuntimeCache<T> {
+    fn retrieve_result(
+        &self,
+        key: &InterpreterCacheKey,
+        state: &impl DynamicState<T>,
+    ) -> Option<(EvaluationResult<T>, Option<InterpreterCacheEntry<T>>)> {
+        self.cache.read().retrieve_result(key, state)
+    }
+    fn contains_key(&self, key: &InterpreterCacheKey) -> bool {
+        self.cache.read().contains_key(key)
+    }
+}
+impl<T: Expression> RuntimeCache<T> {
+    pub fn new(
+        entries: impl IntoIterator<
+            Item = (
+                InterpreterCacheKey,
+                InterpreterCacheEntry<T>,
+                Vec<InterpreterCacheKey>,
+            ),
+        >,
+    ) -> Self {
+        Self {
+            cache: Arc::new(RwLock::new(DefaultInterpreterCache::new(entries))),
+        }
+    }
+
+    pub fn register_subscription(
+        &mut self,
+        subscription_id: SubscriptionId,
+        cache_key: InterpreterCacheKey,
+        initial_result: EvaluationResult<T>,
+    ) -> HashId {
+        let subscription_cache_key = generate_subscription_cache_key(&subscription_id, &cache_key);
+        let empty_state = StateCache::default();
+        let mut cache = self.cache.write();
+        if !cache.contains_key(&cache_key) {
+            cache.store_result(cache_key, &empty_state, initial_result.clone(), Vec::new());
+        }
+        cache.store_result(
+            subscription_cache_key,
+            &empty_state,
+            initial_result,
+            vec![cache_key],
+        );
+        subscription_cache_key
+    }
+    pub fn update_subscription_dependencies(
+        &mut self,
+        subscription_id: SubscriptionId,
+        cache_key: HashId,
+        dependencies: &DependencyList,
+    ) {
+        let subscription_cache_key = generate_subscription_cache_key(&subscription_id, &cache_key);
+        let mut cache = self.cache.write();
+        let dependencies = once(cache_key)
+            .chain(
+                dependencies
+                    .iter()
+                    .filter(|state_token| cache.contains_key(state_token)),
+            )
+            .collect();
+        cache.replace_children(&subscription_cache_key, dependencies);
+    }
+    pub fn retain(&mut self, key: InterpreterCacheKey) {
+        self.cache.write().retain(key)
+    }
+    pub fn release(&mut self, key: InterpreterCacheKey) {
+        self.cache.write().release(key)
+    }
+    pub fn gc(&mut self) -> GcMetrics {
+        self.cache.write().gc()
+    }
+    pub fn apply_updates(
+        &mut self,
+        entries: impl IntoIterator<
+            Item = (
+                InterpreterCacheKey,
+                InterpreterCacheEntry<T>,
+                Vec<InterpreterCacheKey>,
+            ),
+        >,
+    ) {
+        self.cache.write().extend(entries)
+    }
+}
+
+struct RuntimeStore<T: Expression> {
+    state: RuntimeState<T>,
+    subscriptions: Vec<Subscription>,
+    subscription_counter: usize,
+    subscription_cache: SubscriptionCache<T>,
+    effect_cache: HashMap<SignalId, DisposeCallback>,
+}
+impl<T: Expression> RuntimeStore<T> {
+    fn new(state: RuntimeState<T>) -> Self {
+        Self {
+            state,
+            subscriptions: Vec::default(),
+            subscription_counter: 0,
+            subscription_cache: SubscriptionCache::default(),
+            effect_cache: HashMap::default(),
+        }
+    }
+    fn subscribe(
+        &mut self,
+        cache_key: HashId,
+        initiators: Option<Vec<SignalId>>,
+        dispose: impl FnOnce() -> () + Send + Sync + 'static,
+    ) -> SubscriptionId {
+        self.subscription_counter += 1;
+        let subscription_id = self.subscription_counter;
+        println!("[Runtime] Subscribe #{}", subscription_id);
+        let is_root = initiators.is_none();
+        self.subscriptions.push(Subscription::new(
+            subscription_id,
+            cache_key,
+            is_root,
+            dispose,
+        ));
+        self.subscription_cache
+            .register_subscription(subscription_id, initiators.unwrap_or(Vec::new()));
+        if is_root {
+            self.subscription_cache.retain_subscription(subscription_id);
+        }
+        subscription_id
+    }
+    fn unsubscribe(&mut self, subscription_id: SubscriptionId) -> Option<Subscription> {
+        println!("[Runtime] Unsubscribe #{}", subscription_id);
+        self.subscriptions
+            .iter()
+            .position(|subscription| subscription.id == subscription_id)
+            .map(|index| {
+                let subscription = self.subscriptions.remove(index);
+                if subscription.is_root {
+                    self.subscription_cache
+                        .release_subscription(subscription_id);
+                }
+                subscription
+            })
+    }
+    fn update_subscription_dependencies(
+        &mut self,
+        subscription_id: SubscriptionId,
+        dependencies: &DependencyList,
+    ) -> bool {
+        let subscription = self
+            .subscriptions
+            .iter()
+            .find(|subscription| subscription.id == subscription_id);
+        if let Some(_) = subscription {
+            self.subscription_cache
+                .update_subscription_dependencies(subscription_id, dependencies);
+            true
+        } else {
+            false
+        }
+    }
+    fn update_state(
+        &mut self,
+        updates: impl IntoIterator<Item = StateUpdate<T>>,
+    ) -> (RuntimeState<T>, Vec<StateToken>) {
+        let updates = updates
+            .into_iter()
+            .filter_map(|update| {
+                let key = update.state_token;
+                let existing_value = self.state.get(&key);
+                let value = match update.update {
+                    StateUpdateType::Value(value) => value,
+                    StateUpdateType::Patch(updater) => updater(existing_value),
+                };
+                match existing_value {
+                    Some(existing) if existing.id() == value.id() => None,
+                    _ => Some((key, value)),
+                }
+            })
+            .collect::<Vec<_>>();
+        let updated_keys = updates.iter().map(|(key, _)| *key).collect();
+        self.state.extend(updates);
+        (self.state.clone(), updated_keys)
+    }
+    fn retrieve_signal_result(&self, signal: &Signal<T>) -> Option<&T> {
+        self.subscription_cache.retrieve_signal_result(signal.id())
+    }
+    fn register_signal_results(&mut self, results: impl IntoIterator<Item = (SignalId, T)>) {
+        for (signal_id, result) in results {
+            self.subscription_cache.register_signal(signal_id, result);
+        }
+    }
+    fn register_dispose_callbacks(
+        &mut self,
+        callbacks: impl IntoIterator<Item = (SignalId, DisposeCallback)>,
+    ) -> impl IntoIterator<Item = DisposeCallback> {
+        callbacks
+            .into_iter()
+            .filter_map(|(signal_id, callback)| self.effect_cache.insert(signal_id, callback))
+            .collect::<Vec<_>>()
+    }
+    fn gc(&mut self) -> Vec<DisposeCallback> {
+        let mut dispose_callbacks = Vec::new();
+        loop {
+            let (disposed_signal_ids, disposed_subscriptions): (Vec<_>, Vec<_>) =
+                self.subscription_cache.gc();
+            if !disposed_signal_ids.is_empty() {
+                println!(
+                    "[Runtime] Disposing {} inactive signals",
+                    disposed_signal_ids.len()
+                );
+                for signal_id in disposed_signal_ids {
+                    self.state.remove(&signal_id);
+                    if let Some(dispose_callback) = self.effect_cache.remove(&signal_id) {
+                        dispose_callbacks.push(dispose_callback)
+                    }
+                }
+            }
+            if !disposed_subscriptions.is_empty() {
+                println!(
+                    "[Runtime] Disposing {} inactive subscriptions",
+                    disposed_subscriptions.len()
+                );
+                for subscription_id in disposed_subscriptions {
+                    self.unsubscribe(subscription_id);
+                }
+                continue;
+            }
+            break;
+        }
+        dispose_callbacks
+    }
+}
+struct Subscription {
+    id: SubscriptionId,
+    cache_key: HashId,
+    is_root: bool,
+    dispose: Box<dyn FnOnce() + Send + Sync>,
+}
+impl Subscription {
+    fn new(
+        id: SubscriptionId,
+        cache_key: HashId,
+        is_root: bool,
+        dispose: impl FnOnce() + Send + Sync + 'static,
+    ) -> Self {
+        Self {
+            id,
+            cache_key,
+            is_root,
+            dispose: Box::new(dispose),
+        }
+    }
+}
+
+struct SubscriptionCache<T: Expression> {
+    cache: DependencyCache<SignalCacheKey, SignalCacheEntry<T>>,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+enum SignalCacheKey {
+    Subscription(SubscriptionId),
+    Signal(SignalId),
+}
+enum SignalCacheEntry<T: Expression> {
+    Subscription(Option<HashId>),
+    Signal(T),
+}
+impl<T: Expression> Default for SubscriptionCache<T> {
+    fn default() -> Self {
+        Self {
+            cache: DependencyCache::default(),
+        }
+    }
+}
+impl<T: Expression> SubscriptionCache<T> {
+    fn register_subscription(
+        &mut self,
+        subscription_id: SubscriptionId,
+        initiators: impl IntoIterator<Item = SignalId>,
+    ) {
+        let key = SignalCacheKey::Subscription(subscription_id);
+        let value = SignalCacheEntry::Subscription(None);
+        self.cache.set(key, value, Vec::new());
+        for signal_id in initiators {
+            self.cache
+                .add_child(&SignalCacheKey::Signal(signal_id), &key);
+        }
+    }
+    fn update_subscription_dependencies(
+        &mut self,
+        subscription_id: SubscriptionId,
+        dependencies: &DependencyList,
+    ) -> bool {
+        let key = SignalCacheKey::Subscription(subscription_id);
+        let dependencies_hash = hash_object(dependencies);
+        match self.cache.replace_value(
+            &key,
+            SignalCacheEntry::Subscription(Some(dependencies_hash)),
+        ) {
+            Some(SignalCacheEntry::Subscription(previous_dependencies_hash))
+                if previous_dependencies_hash
+                    .map(|previous_hash| previous_hash != dependencies_hash)
+                    .unwrap_or(true) =>
+            {
+                self.cache.replace_children(
+                    &key,
+                    dependencies
+                        .iter()
+                        .map(|signal_id| SignalCacheKey::Signal(signal_id))
+                        // FIXME: Filter out non-signal dependencies before updating dependency tree
+                        .filter(|key| self.cache.contains_key(key))
+                        .collect(),
+                )
+            }
+            _ => false,
+        }
+    }
+    fn retain_subscription(&mut self, subscription_id: SubscriptionId) {
+        let key = SignalCacheKey::Subscription(subscription_id);
+        self.cache.retain(once(&key));
+    }
+    fn release_subscription(&mut self, subscription_id: SubscriptionId) {
+        let key = SignalCacheKey::Subscription(subscription_id);
+        self.cache.release(once(&key));
+    }
+    fn register_signal(&mut self, signal_id: SignalId, result: T) {
+        self.cache.set(
+            SignalCacheKey::Signal(signal_id),
+            SignalCacheEntry::Signal(result),
+            Vec::new(),
+        )
+    }
+    fn retrieve_signal_result(&self, signal_id: SignalId) -> Option<&T> {
+        self.cache
+            .get(&SignalCacheKey::Signal(signal_id))
+            .and_then(|entry| match entry {
+                SignalCacheEntry::Signal(result) => Some(result),
                 _ => None,
-            };
-            message.unwrap_or_else(|| format!("{}", arg))
-        })
-        .collect::<Vec<_>>()
-        .join(" ")
+            })
+    }
+    fn gc(&mut self) -> (Vec<SignalId>, Vec<SubscriptionId>) {
+        self.cache
+            .gc::<Vec<_>>()
+            .into_iter()
+            .partition_map(|(key, _)| match key {
+                SignalCacheKey::Signal(signal_id) => Either::Left(signal_id),
+                SignalCacheKey::Subscription(subscription_id) => Either::Right(subscription_id),
+            })
+    }
 }
 
-fn filter_pending_signals<T: Expression>(
-    expression: T,
+fn generate_subscription_cache_key(subscription_id: &SubscriptionId, cache_key: &HashId) -> HashId {
+    let mut hasher = DefaultHasher::new();
+    subscription_id.hash(&mut hasher);
+    cache_key.hash(&mut hasher);
+    hasher.finish()
+}
+
+fn create_error_expression<T: Expression>(
+    errors: impl IntoIterator<Item = T>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> Option<T> {
-    match factory.match_signal_term(&expression) {
-        Some(signal) if signal.signals().into_iter().any(is_pending_signal) => {
-            let signals = signal
-                .signals()
-                .into_iter()
-                .filter(|signal| !signal.is_type(&SignalType::Pending))
-                .map(|signal| allocator.clone_signal(signal))
-                .collect::<Vec<_>>();
-            if signals.is_empty() {
-                None
-            } else {
-                Some(factory.create_signal_term(allocator.create_signal_list(signals)))
-            }
-        }
-        _ => Some(expression),
-    }
+) -> T {
+    factory.create_signal_term(
+        allocator.create_signal_list(errors.into_iter().map(|error| {
+            allocator.create_signal(SignalType::Error, allocator.create_unit_list(error))
+        })),
+    )
 }
 
-fn is_pending_signal<T: Expression>(signal: &Signal<T>) -> bool {
-    signal.is_type(&SignalType::Pending)
+fn create_pending_result<T: Expression>(
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> EvaluationResult<T> {
+    EvaluationResult::new(
+        create_pending_expression(factory, allocator),
+        DependencyList::empty(),
+    )
 }
 
-fn strip_pending_results<T: Expression>(
-    result: Result<T, Vec<String>>,
-) -> Option<SubscriptionResult<T>> {
-    match result {
-        Ok(result) => Some(Ok(result)),
-        Err(errors) => {
-            if errors.is_empty() {
-                None
-            } else {
-                Some(Err(errors))
-            }
-        }
-    }
+fn create_pending_expression<T: Expression>(
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> T {
+    factory.create_signal_term(allocator.create_signal_list(once(
+        allocator.create_signal(SignalType::Pending, allocator.create_empty_list()),
+    )))
+}
+
+fn evaluation_results_are_equal<T: Expression>(
+    value1: &EvaluationResult<T>,
+    value2: &EvaluationResult<T>,
+) -> bool {
+    value1.result().id() == value2.result().id() && value1.dependencies().eq(value2.dependencies())
 }
 
 fn next_queued_item<T>(target: &mut tokio::sync::mpsc::Receiver<T>) -> Option<T> {

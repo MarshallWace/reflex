@@ -74,8 +74,8 @@ mod tests {
         allocator::DefaultAllocator,
         cache::SubstitutionCache,
         core::{
-            evaluate, DependencyList, DynamicState, EvaluationResult, ExpressionFactory,
-            HeapAllocator,
+            evaluate, DependencyList, EvaluationResult, ExpressionFactory, HeapAllocator,
+            StateCache,
         },
         lang::{TermFactory, ValueTerm},
     };
@@ -86,7 +86,7 @@ mod tests {
         let allocator = DefaultAllocator::default();
         let env = Env::new().with_globals(builtin_globals(&factory, &allocator));
         let mut cache = SubstitutionCache::new();
-        let state = DynamicState::new();
+        let state = StateCache::default();
         let expression = parse("new Set([])", &env, &factory, &allocator).unwrap();
         let result = evaluate(&expression, &state, &factory, &allocator, &mut cache);
         assert_eq!(
@@ -154,7 +154,7 @@ mod tests {
         let allocator = DefaultAllocator::default();
         let env = Env::new().with_globals(builtin_globals(&factory, &allocator));
         let mut cache = SubstitutionCache::new();
-        let state = DynamicState::new();
+        let state = StateCache::default();
         let expression = parse("new Set([]).values()", &env, &factory, &allocator).unwrap();
         let result = evaluate(&expression, &state, &factory, &allocator, &mut cache);
         assert_eq!(
@@ -222,7 +222,7 @@ mod tests {
         let allocator = DefaultAllocator::default();
         let env = Env::new().with_globals(builtin_globals(&factory, &allocator));
         let mut cache = SubstitutionCache::new();
-        let state = DynamicState::new();
+        let state = StateCache::default();
         let expression = parse("new Set([]).entries()", &env, &factory, &allocator).unwrap();
         let result = evaluate(&expression, &state, &factory, &allocator, &mut cache);
         assert_eq!(

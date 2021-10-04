@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::{hash_map::DefaultHasher, BTreeMap, HashMap},
     convert::identity,
+    hash::{Hash, Hasher},
     iter::{empty, once, FromIterator},
 };
 
@@ -348,7 +349,7 @@ impl std::fmt::Debug for InstructionPointer {
     }
 }
 
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Debug, Clone)]
 pub struct NativeFunctionRegistry<T: Expression> {
     values: HashMap<NativeFunctionId, (NativeFunction<T>, InstructionPointer)>,
 }
@@ -810,6 +811,13 @@ fn remap_compiled_address(
 
 fn get_instruction_hash(target: InstructionPointer, program: &Program) -> HashId {
     combine_hashes(program, &target)
+}
+
+pub fn hash_program_root(program: &Program, entry_point: &InstructionPointer) -> HashId {
+    let mut hasher = DefaultHasher::new();
+    program.hash(&mut hasher);
+    entry_point.hash(&mut hasher);
+    hasher.finish()
 }
 
 pub(crate) fn compile_expressions<'a, T: Expression + Compile<T> + 'a>(

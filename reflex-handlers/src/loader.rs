@@ -159,11 +159,13 @@ where
                                     .map(move |results| {
                                         let results = match results {
                                             Ok(results) => results,
-                                            Err(errors) => {
-                                                let error = create_combined_error_expression(
-                                                    errors, &factory, &allocator,
+                                            Err(error) => {
+                                                let result = create_error_expression(
+                                                    once(error),
+                                                    &factory,
+                                                    &allocator,
                                                 );
-                                                loader_keys.iter().map(|_| error.clone()).collect()
+                                                loader_keys.iter().map(|_| result.clone()).collect()
                                             }
                                         };
                                         println!(
@@ -202,7 +204,7 @@ fn load_batch<T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> 
     helpers: &SignalHelpers<T>,
     factory: &(impl AsyncExpressionFactory<T> + WithCompiledBuiltins),
     allocator: &impl AsyncHeapAllocator<T>,
-) -> impl Stream<Item = Result<Vec<T>, Vec<String>>>
+) -> impl Stream<Item = Result<Vec<T>, String>>
 where
     T::String: Send + Sync,
 {
@@ -217,38 +219,35 @@ where
         .clone()
         .watch_expression(expression, signal_ids, factory, allocator)
     {
-        Err(error) => stream::iter(once(Err(vec![error]))).left_stream(),
+        Err(error) => stream::iter(once(Err(error))).left_stream(),
         Ok(results) => results
             .map({
                 let factory = factory.clone();
                 move |result| {
-                    result.and_then(|result| {
-                        if let Some(results) = factory.match_hashmap_term(&result) {
-                            keys.iter()
-                                .map(|key| {
-                                    results
-                                        .get(key)
-                                        .cloned()
-                                        .ok_or_else(|| format!("Missing value for item {}", key))
-                                })
-                                .collect::<Result<Vec<_>, _>>()
-                        } else if let Some(results) = factory.match_vector_term(&result) {
-                            if results.items().len() != keys.len() {
-                                Err(format!(
-                                    "Expected {} items, received {}",
-                                    keys.len(),
-                                    results.items().len()
-                                ))
-                            } else {
-                                Ok(results.items().iter().cloned().collect::<Vec<_>>())
-                            }
-                        } else if let Some(_) = factory.match_signal_term(&result) {
-                            Ok(keys.iter().cloned().collect::<Vec<_>>())
+                    if let Some(results) = factory.match_hashmap_term(&result) {
+                        keys.iter()
+                            .map(|key| {
+                                results
+                                    .get(key)
+                                    .cloned()
+                                    .ok_or_else(|| format!("Missing value for item {}", key))
+                            })
+                            .collect::<Result<Vec<_>, _>>()
+                    } else if let Some(results) = factory.match_vector_term(&result) {
+                        if results.items().len() != keys.len() {
+                            Err(format!(
+                                "Expected {} items, received {}",
+                                keys.len(),
+                                results.items().len()
+                            ))
                         } else {
-                            Err(format!("Expected HashMap or Vector, received {}", result))
+                            Ok(results.items().iter().cloned().collect::<Vec<_>>())
                         }
-                        .map_err(|err| vec![err])
-                    })
+                    } else if let Some(_) = factory.match_signal_term(&result) {
+                        Ok(keys.iter().map(|_| result.clone()).collect::<Vec<_>>())
+                    } else {
+                        Err(format!("Expected HashMap or Vector, received {}", result))
+                    }
                 }
             })
             .right_stream(),
@@ -309,8 +308,8 @@ fn create_property_accessor<T: Expression>(
     )
 }
 
-fn create_combined_error_expression<T: Expression>(
-    messages: Vec<String>,
+fn create_error_expression<T: Expression>(
+    messages: impl IntoIterator<Item = String>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
 ) -> T {

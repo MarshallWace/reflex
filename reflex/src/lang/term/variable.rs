@@ -72,7 +72,7 @@ impl<T: Expression + Rewritable<T>> Rewritable<T> for VariableTerm<T> {
     }
     fn substitute_dynamic(
         &self,
-        state: &DynamicState<T>,
+        state: &impl DynamicState<T>,
         factory: &impl ExpressionFactory<T>,
         allocator: &impl HeapAllocator<T>,
         cache: &mut impl EvaluationCache<T>,
@@ -183,7 +183,7 @@ impl<T: Expression + Rewritable<T>> Rewritable<T> for StaticVariableTerm {
     }
     fn substitute_dynamic(
         &self,
-        _state: &DynamicState<T>,
+        _state: &impl DynamicState<T>,
         _factory: &impl ExpressionFactory<T>,
         _allocator: &impl HeapAllocator<T>,
         _cache: &mut impl EvaluationCache<T>,
@@ -291,14 +291,14 @@ impl<T: Expression + Rewritable<T>> Rewritable<T> for DynamicVariableTerm<T> {
     }
     fn substitute_dynamic(
         &self,
-        state: &DynamicState<T>,
+        state: &impl DynamicState<T>,
         _factory: &impl ExpressionFactory<T>,
         _allocator: &impl HeapAllocator<T>,
         _cache: &mut impl EvaluationCache<T>,
     ) -> Option<T> {
         Some(
             state
-                .get(self.state_token)
+                .get(&self.state_token)
                 .unwrap_or(&self.fallback)
                 .clone(),
         )

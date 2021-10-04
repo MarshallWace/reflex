@@ -94,8 +94,8 @@ mod tests {
         allocator::DefaultAllocator,
         cache::SubstitutionCache,
         core::{
-            evaluate, DependencyList, DynamicState, EvaluationResult, ExpressionFactory,
-            HeapAllocator,
+            evaluate, DependencyList, EvaluationResult, ExpressionFactory, HeapAllocator,
+            StateCache,
         },
         lang::{BuiltinTerm, TermFactory, ValueTerm},
     };
@@ -125,7 +125,7 @@ mod tests {
         .unwrap();
         let result = evaluate(
             &expression,
-            &DynamicState::new(),
+            &StateCache::default(),
             &factory,
             &allocator,
             &mut SubstitutionCache::new(),
@@ -160,7 +160,7 @@ mod tests {
         .unwrap();
         let result = evaluate(
             &expression,
-            &DynamicState::new(),
+            &StateCache::default(),
             &factory,
             &allocator,
             &mut SubstitutionCache::new(),
@@ -202,7 +202,7 @@ mod tests {
         .unwrap();
         let result = evaluate(
             &expression,
-            &DynamicState::new(),
+            &StateCache::default(),
             &factory,
             &allocator,
             &mut SubstitutionCache::new(),
@@ -244,7 +244,7 @@ mod tests {
         .unwrap();
         let result = evaluate(
             &expression,
-            &DynamicState::new(),
+            &StateCache::default(),
             &factory,
             &allocator,
             &mut SubstitutionCache::new(),
@@ -304,7 +304,7 @@ mod tests {
         .unwrap();
         let result = evaluate(
             &expression,
-            &DynamicState::new(),
+            &StateCache::default(),
             &factory,
             &allocator,
             &mut SubstitutionCache::new(),

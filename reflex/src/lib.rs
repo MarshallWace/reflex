@@ -67,6 +67,24 @@ impl<K, V> Default for DependencyCache<K, V> {
     }
 }
 impl<K: Eq + Copy + std::fmt::Debug + std::hash::Hash + 'static, V> DependencyCache<K, V> {
+    pub fn new(entries: impl IntoIterator<Item = (K, V, Vec<K>)>) -> Self {
+        Self {
+            cache: entries
+                .into_iter()
+                .map(|(key, value, children)| {
+                    (
+                        key,
+                        DependencyCacheEntry {
+                            retain_count: 0,
+                            value,
+                            children,
+                        },
+                    )
+                })
+                .collect(),
+        }
+    }
+
     pub fn len(&self) -> usize {
         self.cache.len()
     }
@@ -76,26 +94,22 @@ impl<K: Eq + Copy + std::fmt::Debug + std::hash::Hash + 'static, V> DependencyCa
     pub fn get(&self, key: &K) -> Option<&V> {
         self.cache.get(key).map(|entry| entry.value())
     }
-    pub fn get_mut(&mut self, key: &K) -> Option<&mut V> {
-        self.cache.get_mut(key).map(|entry| entry.value_mut())
-    }
-    pub fn set(&mut self, key: K, value: V, replace_children: Option<Vec<K>>) {
+    pub fn set(&mut self, key: K, value: V, children: Vec<K>) {
         let (retain_count, existing_children) = match self.cache.remove(&key) {
             Some(existing) => (existing.retain_count, existing.children),
             None => (0, Vec::new()),
         };
         if retain_count > 0 {
-            if let Some(children) = &replace_children {
-                self.retain(children.iter());
-                self.release(existing_children.iter());
-            }
+            self.retain(children.iter());
         }
+        let mut combined_children = existing_children;
+        combined_children.extend(children);
         self.cache.insert(
             key,
             DependencyCacheEntry {
                 retain_count,
                 value,
-                children: replace_children.unwrap_or(existing_children),
+                children: combined_children,
             },
         );
     }
@@ -211,6 +225,11 @@ impl<K: Eq + Copy + std::fmt::Debug + std::hash::Hash + 'static, V> DependencyCa
             .filter_map(identity)
             .collect::<I>()
     }
+    pub(crate) fn extend(&mut self, entries: impl IntoIterator<Item = (K, V, Vec<K>)>) {
+        for (key, value, children) in entries {
+            self.set(key, value, children);
+        }
+    }
 }
 struct DependencyCacheEntry<K, V> {
     value: V,
@@ -220,9 +239,6 @@ struct DependencyCacheEntry<K, V> {
 impl<K, V> DependencyCacheEntry<K, V> {
     fn value(&self) -> &V {
         &self.value
-    }
-    fn value_mut(&mut self) -> &mut V {
-        &mut self.value
     }
     fn into_value(self) -> V {
         self.value

@@ -1,14 +1,13 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use std::{
-    collections::hash_map::DefaultHasher,
-    hash::{Hash, Hasher},
-    iter::once,
-};
+use std::{collections::hash_map::DefaultHasher, hash::Hasher, iter::once};
 
 mod cache;
-pub use cache::{DefaultInterpreterCache, InterpreterCache};
+pub use cache::{
+    CacheEntries, DefaultInterpreterCache, GcMetrics, InterpreterCache, InterpreterCacheEntry,
+    InterpreterCacheKey,
+};
 mod stack;
 pub use stack::{CallStack, VariableStack};
 
@@ -72,19 +71,20 @@ impl InterpreterOptions {
 }
 
 pub fn execute<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T>>(
+    cache_key: HashId,
     program: &Program,
     entry_point: InstructionPointer,
-    state: &DynamicState<T>,
+    state: &impl DynamicState<T>,
     factory: &(impl ExpressionFactory<T> + WithCompiledBuiltins),
     allocator: &impl HeapAllocator<T>,
     builtins: &[(BuiltinTerm, InstructionPointer)],
     plugins: &NativeFunctionRegistry<T>,
     options: &InterpreterOptions,
-    cache: &mut impl InterpreterCache<T>,
-) -> Result<(EvaluationResult<T>, HashId), String> {
-    let cache_key = hash_program_root(program, &entry_point);
+    cache: &impl InterpreterCache<T>,
+) -> Result<(EvaluationResult<T>, CacheEntries<T>), String> {
     let mut stack = VariableStack::new(options.variable_stack_size);
     let mut call_stack = CallStack::new(program, entry_point, options.call_stack_size);
+    let mut cache_entries = CacheEntries::default();
     let result = evaluate_program_loop(
         state,
         &mut stack,
@@ -100,6 +100,7 @@ pub fn execute<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T>>(
         allocator,
         plugins,
         cache,
+        &mut cache_entries,
         options.debug_instructions,
         options.debug_stack,
     );
@@ -109,28 +110,26 @@ pub fn execute<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T>>(
             assert_eq!(call_stack.call_stack_depth(), 0);
             let (dependencies, subexpressions) = call_stack.drain();
             let result = EvaluationResult::new(value, dependencies);
-            cache.store_result(cache_key, state, result.clone(), subexpressions);
-            Ok((result, cache_key))
+            cache_entries.insert(
+                cache_key,
+                InterpreterCacheEntry::new(result.clone(), state),
+                subexpressions,
+            );
+            Ok((result, cache_entries))
         }
     }
 }
 
-fn hash_program_root(program: &Program, entry_point: &InstructionPointer) -> HashId {
-    let mut hasher = DefaultHasher::new();
-    program.hash(&mut hasher);
-    entry_point.hash(&mut hasher);
-    hasher.finish()
-}
-
 fn evaluate_program_loop<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T>>(
-    state: &DynamicState<T>,
+    state: &impl DynamicState<T>,
     stack: &mut VariableStack<T>,
     call_stack: &mut CallStack<T>,
     default_factory: &impl ExpressionFactory<T>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
     plugins: &NativeFunctionRegistry<T>,
-    cache: &mut impl InterpreterCache<T>,
+    cache: &impl InterpreterCache<T>,
+    cache_entries: &mut CacheEntries<T>,
     debug_instructions: bool,
     debug_stack: bool,
 ) -> Result<T, String> {
@@ -167,6 +166,7 @@ fn evaluate_program_loop<T: Expression + Rewritable<T> + Reducible<T> + Applicab
                     allocator,
                     plugins,
                     cache,
+                    cache_entries,
                 )
             }
         };
@@ -219,20 +219,18 @@ fn evaluate_program_loop<T: Expression + Rewritable<T> + Reducible<T> + Applicab
                                 call_stack.pop_expression_stack(previous_address)
                             {
                                 call_stack.add_state_dependencies(dependencies.iter());
-                                cache.store_result(
+                                cache_entries.insert(
                                     hash,
-                                    state,
-                                    EvaluationResult::new(value.clone(), dependencies),
+                                    InterpreterCacheEntry::new(
+                                        EvaluationResult::new(value.clone(), dependencies),
+                                        state,
+                                    ),
                                     subexpressions,
                                 );
                             }
                             if let Some((args, dependencies, subexpressions)) =
                                 call_stack.pop_application_target_stack()
                             {
-                                // FIXME: remove
-                                if let Some(_) = call_stack.peek_list_stack(previous_address) {
-                                    panic!("!!! EVALUATION NESTED WITHIN LIST");
-                                }
                                 call_stack.add_state_dependencies(dependencies);
                                 call_stack.add_subexpressions(subexpressions);
                                 let resolved_target = stack.pop().unwrap();
@@ -297,12 +295,17 @@ fn evaluate_program_loop<T: Expression + Rewritable<T> + Reducible<T> + Applicab
                                 target_hash,
                                 stack.slice(num_args + variadic_offset),
                             );
-                            if let Some(cached_result) = cache.retrieve_result(hash, state) {
+                            if let Some((cached_result, updated_cache_entry)) =
+                                retrieve_cached_result(&hash, state, cache, cache_entries)
+                            {
+                                if let Some(cache_entry) = updated_cache_entry {
+                                    cache_entries.insert(hash, cache_entry, Vec::new())
+                                }
+                                let (result, dependencies) = cached_result.into_parts();
                                 call_stack.add_subexpression(hash);
-                                call_stack
-                                    .add_state_dependencies(cached_result.dependencies().iter());
+                                call_stack.add_state_dependencies(dependencies.iter());
                                 stack.pop_multiple(num_args + variadic_offset);
-                                stack.push(cached_result.result().clone());
+                                stack.push(result);
 
                                 let is_resuming_list_evaluation = resume_address == caller_address
                                     && call_stack
@@ -348,10 +351,12 @@ fn evaluate_program_loop<T: Expression + Rewritable<T> + Reducible<T> + Applicab
                         )) => {
                             let value = stack.peek().unwrap();
                             call_stack.add_state_dependencies(dependencies.iter());
-                            cache.store_result(
+                            cache_entries.insert(
                                 hash,
-                                state,
-                                EvaluationResult::new(value.clone(), dependencies),
+                                InterpreterCacheEntry::new(
+                                    EvaluationResult::new(value.clone(), dependencies),
+                                    state,
+                                ),
                                 subexpressions,
                             );
 
@@ -435,14 +440,15 @@ fn process_next_list_item<T: Expression>(
 
 fn evaluate_instruction<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T>>(
     instruction: &Instruction,
-    state: &DynamicState<T>,
+    state: &impl DynamicState<T>,
     stack: &mut VariableStack<T>,
     call_stack: &CallStack<T>,
     default_factory: &impl ExpressionFactory<T>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
     plugins: &NativeFunctionRegistry<T>,
-    cache: &mut impl InterpreterCache<T>,
+    cache: &impl InterpreterCache<T>,
+    cache_entries: &mut CacheEntries<T>,
 ) -> Result<(ExecutionResult<T>, DependencyList), String> {
     match instruction {
         Instruction::PushStatic { offset } => {
@@ -456,7 +462,6 @@ fn evaluate_instruction<T: Expression + Rewritable<T> + Reducible<T> + Applicabl
             }
         }
         Instruction::PushDynamic { state_token } => {
-            let state_token = *state_token;
             let fallback = stack.pop();
             match fallback {
                 None => Err(format!(
@@ -466,7 +471,7 @@ fn evaluate_instruction<T: Expression + Rewritable<T> + Reducible<T> + Applicabl
                 Some(fallback) => {
                     let value = state.get(state_token).cloned().unwrap_or(fallback);
                     stack.push(value);
-                    Ok((ExecutionResult::Advance, DependencyList::of(state_token)))
+                    Ok((ExecutionResult::Advance, DependencyList::of(*state_token)))
                 }
             }
         }
@@ -747,12 +752,22 @@ fn evaluate_instruction<T: Expression + Rewritable<T> + Reducible<T> + Applicabl
                     factory,
                     allocator,
                     cache,
+                    cache_entries,
                 )
             }
         },
         Instruction::EvaluateArgList => {
             if let Some(item) = call_stack.peek_next_list_item(call_stack.program_counter()) {
-                evaluate_expression(item, state, stack, call_stack, factory, allocator, cache)
+                evaluate_expression(
+                    item,
+                    state,
+                    stack,
+                    call_stack,
+                    factory,
+                    allocator,
+                    cache,
+                    cache_entries,
+                )
             } else {
                 match stack.pop() {
                     Some(value) => {
@@ -906,24 +921,28 @@ fn evaluate_instruction<T: Expression + Rewritable<T> + Reducible<T> + Applicabl
 
 fn evaluate_expression<T: Expression>(
     expression: &T,
-    state: &DynamicState<T>,
+    state: &impl DynamicState<T>,
     stack: &mut VariableStack<T>,
     call_stack: &CallStack<T>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-    cache: &mut impl InterpreterCache<T>,
+    cache: &impl InterpreterCache<T>,
+    cache_entries: &mut CacheEntries<T>,
 ) -> Result<(ExecutionResult<T>, DependencyList), String> {
     if expression.is_static() {
         stack.push(expression.clone());
         Ok((ExecutionResult::Advance, DependencyList::empty()))
     } else {
         let hash = expression.id();
-        if let Some(cached_result) = cache.retrieve_result(hash, state) {
-            stack.push(cached_result.result().clone());
-            Ok((
-                ExecutionResult::Advance,
-                cached_result.dependencies().clone(),
-            ))
+        if let Some((cached_result, updated_cache_entry)) =
+            retrieve_cached_result(&hash, state, cache, cache_entries)
+        {
+            if let Some(cache_entry) = updated_cache_entry {
+                cache_entries.insert(hash, cache_entry, Vec::new())
+            }
+            let (result, dependencies) = cached_result.into_parts();
+            stack.push(result);
+            Ok((ExecutionResult::Advance, dependencies))
         } else if let Some(application) = factory.match_application_term(expression) {
             let target = application.target();
             let args = application.args();
@@ -988,7 +1007,7 @@ fn evaluate_expression<T: Expression>(
         } else if let Some(expression) = factory.match_dynamic_variable_term(expression) {
             stack.push(
                 state
-                    .get(expression.state_token())
+                    .get(&expression.state_token())
                     .unwrap_or(expression.fallback())
                     .clone(),
             );
@@ -1006,6 +1025,18 @@ fn evaluate_expression<T: Expression>(
             Err(format!("Unexpected evaluation target: {}", expression))
         }
     }
+}
+
+fn retrieve_cached_result<T: Expression>(
+    hash: &HashId,
+    state: &impl DynamicState<T>,
+    cache: &impl InterpreterCache<T>,
+    cache_entries: &CacheEntries<T>,
+) -> Option<(EvaluationResult<T>, Option<InterpreterCacheEntry<T>>)> {
+    cache_entries
+        .get(hash)
+        .map(|(entry, _subexpressions)| (entry.result().clone(), None))
+        .or_else(|| cache.retrieve_result(hash, state))
 }
 
 fn is_evaluate_instruction(instruction: &Instruction) -> bool {
@@ -1075,14 +1106,15 @@ fn generate_function_call_hash<'a, T: Expression + 'a>(
 mod tests {
     use std::iter::empty;
 
-    use crate::allocator::DefaultAllocator;
-    use crate::compiler::Compiler;
-    use crate::compiler::CompilerMode;
-    use crate::compiler::CompilerOptions;
-    use crate::core::DependencyList;
-    use crate::interpreter::*;
-    use crate::lang::*;
-    use crate::parser::sexpr::parse;
+    use super::*;
+
+    use crate::{
+        allocator::DefaultAllocator,
+        compiler::{hash_program_root, Compiler, CompilerMode, CompilerOptions},
+        core::{DependencyList, StateCache},
+        lang::*,
+        parser::sexpr::parse,
+    };
 
     #[test]
     fn compiled_functions() {
@@ -1115,10 +1147,13 @@ mod tests {
             )
             .unwrap()
             .into_parts();
-        let mut state = DynamicState::new();
+        let mut state = StateCache::default();
+        let entry_point = InstructionPointer::default();
+        let cache_key = hash_program_root(&program, &entry_point);
         let (result, _) = execute(
+            cache_key,
             &program,
-            InstructionPointer::default(),
+            entry_point,
             &state,
             &factory,
             &allocator,
@@ -1140,6 +1175,7 @@ mod tests {
 
         state.set(state_token, factory.create_value_term(ValueTerm::Int(4)));
         let (result, _) = execute(
+            cache_key,
             &program,
             InstructionPointer::default(),
             &state,
@@ -1183,10 +1219,13 @@ mod tests {
             )
             .unwrap()
             .into_parts();
+        let entry_point = InstructionPointer::default();
+        let cache_key = hash_program_root(&program, &entry_point);
         let (result, _) = execute(
+            cache_key,
             &program,
             InstructionPointer::default(),
-            &mut DynamicState::new(),
+            &mut StateCache::default(),
             &factory,
             &allocator,
             &builtins,
@@ -1227,10 +1266,13 @@ mod tests {
             )
             .unwrap()
             .into_parts();
+        let entry_point = InstructionPointer::default();
+        let cache_key = hash_program_root(&program, &entry_point);
         let (result, _) = execute(
+            cache_key,
             &program,
             InstructionPointer::default(),
-            &mut DynamicState::new(),
+            &mut StateCache::default(),
             &factory,
             &allocator,
             &builtins,
@@ -1258,8 +1300,11 @@ mod tests {
             Instruction::Evaluate,
             Instruction::Return,
         ]);
-        let state = DynamicState::new();
+        let state = StateCache::default();
+        let entry_point = InstructionPointer::default();
+        let cache_key = hash_program_root(&program, &entry_point);
         let (result, _) = execute(
+            cache_key,
             &program,
             InstructionPointer::default(),
             &state,
@@ -1306,8 +1351,11 @@ mod tests {
             Instruction::Evaluate,
             Instruction::Return,
         ]);
-        let state = DynamicState::new();
+        let state = StateCache::default();
+        let entry_point = InstructionPointer::default();
+        let cache_key = hash_program_root(&program, &entry_point);
         let (result, _) = execute(
+            cache_key,
             &program,
             InstructionPointer::default(),
             &state,
@@ -1351,8 +1399,11 @@ mod tests {
             )
             .unwrap()
             .into_parts();
-        let state = DynamicState::new();
+        let state = StateCache::default();
+        let entry_point = InstructionPointer::default();
+        let cache_key = hash_program_root(&program, &entry_point);
         let (result, _) = execute(
+            cache_key,
             &program,
             InstructionPointer::default(),
             &state,
@@ -1394,8 +1445,9 @@ mod tests {
             )
             .unwrap()
             .into_parts();
-        let state = DynamicState::new();
+        let state = StateCache::default();
         let (result, _) = execute(
+            cache_key,
             &program,
             InstructionPointer::default(),
             &state,
@@ -1437,8 +1489,11 @@ mod tests {
             )
             .unwrap()
             .into_parts();
-        let state = DynamicState::new();
+        let state = StateCache::default();
+        let entry_point = InstructionPointer::default();
+        let cache_key = hash_program_root(&program, &entry_point);
         let (result, _) = execute(
+            cache_key,
             &program,
             InstructionPointer::default(),
             &state,
@@ -1486,8 +1541,11 @@ mod tests {
             )
             .unwrap()
             .into_parts();
-        let state = DynamicState::new();
+        let state = StateCache::default();
+        let entry_point = InstructionPointer::default();
+        let cache_key = hash_program_root(&program, &entry_point);
         let (result, _) = execute(
+            cache_key,
             &program,
             InstructionPointer::default(),
             &state,
@@ -1535,8 +1593,11 @@ mod tests {
             )
             .unwrap()
             .into_parts();
-        let state = DynamicState::new();
+        let state = StateCache::default();
+        let entry_point = InstructionPointer::default();
+        let cache_key = hash_program_root(&program, &entry_point);
         let (result, _) = execute(
+            cache_key,
             &program,
             InstructionPointer::default(),
             &state,
@@ -1586,8 +1647,11 @@ mod tests {
             )
             .unwrap()
             .into_parts();
-        let state = DynamicState::new();
+        let state = StateCache::default();
+        let entry_point = InstructionPointer::default();
+        let cache_key = hash_program_root(&program, &entry_point);
         let (result, _) = execute(
+            cache_key,
             &program,
             InstructionPointer::default(),
             &state,
@@ -1635,8 +1699,11 @@ mod tests {
             )
             .unwrap()
             .into_parts();
-        let state = DynamicState::new();
+        let state = StateCache::default();
+        let entry_point = InstructionPointer::default();
+        let cache_key = hash_program_root(&program, &entry_point);
         let (result, _) = execute(
+            cache_key,
             &program,
             InstructionPointer::default(),
             &state,
@@ -1693,8 +1760,11 @@ mod tests {
             )
             .unwrap()
             .into_parts();
-        let state = DynamicState::new();
+        let state = StateCache::default();
+        let entry_point = InstructionPointer::default();
+        let cache_key = hash_program_root(&program, &entry_point);
         let (result, _) = execute(
+            cache_key,
             &program,
             InstructionPointer::default(),
             &state,
@@ -1776,8 +1846,11 @@ mod tests {
             )
             .unwrap()
             .into_parts();
-        let state = DynamicState::new();
+        let state = StateCache::default();
+        let entry_point = InstructionPointer::default();
+        let cache_key = hash_program_root(&program, &entry_point);
         let (result, _) = execute(
+            cache_key,
             &program,
             InstructionPointer::default(),
             &state,

@@ -14,17 +14,26 @@ use std::{
 use reflex::{
     allocator::DefaultAllocator,
     cache::SubstitutionCache,
-    compiler::{Compiler, CompilerMode, CompilerOptions, InstructionPointer, Program},
-    core::{DynamicState, Expression, ExpressionFactory, HeapAllocator, Reducible, Rewritable},
+    compiler::{
+        hash_program_root, Compile, Compiler, CompilerMode, CompilerOptions, InstructionPointer,
+        NativeFunctionRegistry,
+    },
+    core::{
+        Applicable, Expression, ExpressionFactory, HeapAllocator, Reducible, Rewritable, Signal,
+        StateCache, StringValue,
+    },
     interpreter::{execute, DefaultInterpreterCache, InterpreterOptions},
-    lang::TermFactory,
+    lang::{term::SignalTerm, BuiltinTerm, TermFactory, ValueTerm, WithCompiledBuiltins},
 };
 use reflex_cli::parse_cli_args;
 use reflex_handlers::{builtin_signal_handler, debug_signal_handler};
 use reflex_js::{
     self, create_js_env, create_module_loader, stdlib::imports::builtin_imports_loader,
 };
-use reflex_runtime::{Runtime, StreamExt};
+use reflex_runtime::{
+    AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator, Runtime, RuntimeCache,
+    RuntimeState, SignalHandlerResult, SignalHelpers, StreamExt,
+};
 use repl::ReplParser;
 
 mod repl;
@@ -69,9 +78,9 @@ pub async fn main() {
             Err(error) => Err(error),
             Ok(input_path) => match input_path {
                 None => {
-                    let mut state = DynamicState::new();
+                    let state = StateCache::default();
                     let mut cache = SubstitutionCache::new();
-                    repl::run(parser, &mut state, &factory, &allocator, &mut cache)
+                    repl::run(parser, &state, &factory, &allocator, &mut cache)
                         .or_else(|error| Err(format!("{}", error)))
                 }
                 Some(input_path) => match read_file(&input_path) {
@@ -94,7 +103,7 @@ pub async fn main() {
                             Err(error) => Err(error),
                             Ok(compiled) => {
                                 let mut stdout = io::stdout();
-                                let state = DynamicState::new();
+                                let state = StateCache::default();
                                 let (program, builtins, plugins) = compiled.into_parts();
                                 let interpreter_options = InterpreterOptions {
                                     debug_instructions: debug_interpreter || debug_stack,
@@ -102,9 +111,12 @@ pub async fn main() {
                                     ..InterpreterOptions::default()
                                 };
                                 let mut interpreter_cache = DefaultInterpreterCache::default();
+                                let entry_point = InstructionPointer::default();
+                                let cache_key = hash_program_root(&program, &entry_point);
                                 match execute(
+                                    cache_key,
                                     &program,
-                                    InstructionPointer::default(),
+                                    entry_point,
                                     &state,
                                     &factory,
                                     &allocator,
@@ -114,52 +126,34 @@ pub async fn main() {
                                     &mut interpreter_cache,
                                 ) {
                                     Err(error) => Err(error),
-                                    Ok((result, _cache_key)) => {
+                                    Ok((result, cache_entries)) => {
                                         let (output, dependencies) = result.into_parts();
                                         if dependencies.is_empty() {
                                             writeln!(stdout, "{}", output)
                                                 .or_else(|error| Err(format!("{}", error)))
                                         } else {
-                                            // TODO: Establish sensible defaults for channel buffer sizes
-                                            let command_buffer_size = 32;
-                                            let result_buffer_size = 32;
                                             let signal_handler =
                                                 builtin_signal_handler(&factory, &allocator);
-                                            let runtime = if debug_signals {
-                                                Runtime::new(
-                                                    Program::new(empty()),
-                                                    debug_signal_handler(signal_handler),
-                                                    &factory,
-                                                    &allocator,
-                                                    builtins,
-                                                    plugins,
-                                                    compiler_options,
-                                                    interpreter_options,
-                                                    command_buffer_size,
-                                                    result_buffer_size,
-                                                )
-                                            } else {
-                                                Runtime::new(
-                                                    Program::new(empty()),
-                                                    signal_handler,
-                                                    &factory,
-                                                    &allocator,
-                                                    builtins,
-                                                    plugins,
-                                                    compiler_options,
-                                                    interpreter_options,
-                                                    command_buffer_size,
-                                                    result_buffer_size,
-                                                )
-                                            };
+                                            let state = RuntimeState::default();
+                                            let cache = RuntimeCache::new(cache_entries);
+                                            let runtime = create_runtime(
+                                                state,
+                                                builtins,
+                                                plugins,
+                                                signal_handler,
+                                                cache,
+                                                &factory,
+                                                &allocator,
+                                                interpreter_options,
+                                                compiler_options,
+                                                debug_signals,
+                                            );
                                             let stdout = Mutex::new(stdout);
                                             async move {
                                                 match runtime
                                                     .subscribe(
                                                         program,
                                                         InstructionPointer::default(),
-                                                        &factory,
-                                                        &allocator,
                                                     )
                                                     .await
                                                 {
@@ -175,9 +169,19 @@ pub async fn main() {
                                                         while let Some(result) =
                                                             subscription.next().await
                                                         {
-                                                            let output = match result {
-                                                                Ok(result) => format!("{}", result),
-                                                                Err(errors) => errors.join("\n"),
+                                                            let output = match factory
+                                                                .match_signal_term(&result)
+                                                            {
+                                                                None => format!("{}", result),
+                                                                Some(signal) => {
+                                                                    format_signal_errors(signal)
+                                                                        .into_iter()
+                                                                        .map(|error| {
+                                                                            format!(" - {}", error)
+                                                                        })
+                                                                        .collect::<Vec<_>>()
+                                                                        .join("\n")
+                                                                }
                                                             };
                                                             writeln!(
                                                                 stdout.lock().unwrap(),
@@ -209,6 +213,56 @@ pub async fn main() {
             1
         }
     })
+}
+
+fn create_runtime<
+    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
+    THandler,
+>(
+    state: RuntimeState<T>,
+    builtins: Vec<(BuiltinTerm, InstructionPointer)>,
+    plugins: NativeFunctionRegistry<T>,
+    signal_handler: THandler,
+    cache: RuntimeCache<T>,
+    factory: &(impl AsyncExpressionFactory<T> + WithCompiledBuiltins),
+    allocator: &impl AsyncHeapAllocator<T>,
+    interpreter_options: InterpreterOptions,
+    compiler_options: CompilerOptions,
+    debug_signals: bool,
+) -> Runtime<T>
+where
+    T::String: StringValue + Send + Sync,
+    THandler: Fn(&str, &[&Signal<T>], &SignalHelpers<T>) -> SignalHandlerResult<T>
+        + Send
+        + Sync
+        + 'static,
+{
+    if debug_signals {
+        create_runtime(
+            state,
+            builtins,
+            plugins,
+            debug_signal_handler(signal_handler),
+            cache,
+            factory,
+            allocator,
+            interpreter_options,
+            compiler_options,
+            false,
+        )
+    } else {
+        Runtime::new(
+            state,
+            builtins,
+            plugins,
+            signal_handler,
+            cache,
+            factory,
+            allocator,
+            interpreter_options,
+            compiler_options,
+        )
+    }
 }
 
 fn create_js_script_parser<T: Expression + 'static>(
@@ -255,6 +309,18 @@ fn create_sexpr_parser<T: Expression + Rewritable<T> + Reducible<T>>(
             Err(error) => Err(format!("{}", error)),
         },
     )
+}
+
+fn format_signal_errors<T: Expression>(
+    signal: &SignalTerm<T>,
+) -> impl IntoIterator<Item = String> + '_ {
+    signal
+        .signals()
+        .iter()
+        .map(|signal| match signal.args().iter().next() {
+            Some(payload) => format!("{}", payload),
+            None => format!("{}", ValueTerm::<T::String>::Null),
+        })
 }
 
 fn read_file(path: &str) -> Result<String, String> {

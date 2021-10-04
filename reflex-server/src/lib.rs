@@ -14,7 +14,7 @@ use hyper::{
 };
 
 use reflex::{
-    compiler::{Compile, CompilerOptions},
+    compiler::{Compile, CompilerOptions, Program},
     core::{Applicable, Reducible, Rewritable, StringValue},
 };
 use reflex_runtime::{AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator, Runtime};
@@ -30,7 +30,8 @@ mod graphql {
 pub fn graphql_service<
     T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
 >(
-    store: Arc<Runtime<T>>,
+    runtime: Arc<Runtime<T>>,
+    program: Arc<Program>,
     factory: &impl AsyncExpressionFactory<T>,
     allocator: &impl AsyncHeapAllocator<T>,
     compiler_options: CompilerOptions,
@@ -47,7 +48,8 @@ where
         let factory = factory.clone();
         let allocator = allocator.clone();
         move |req| {
-            let store = Arc::clone(&store);
+            let runtime = Arc::clone(&runtime);
+            let program = Arc::clone(&program);
             let factory = factory.clone();
             let allocator = allocator.clone();
             let root = factory.create_application_term(
@@ -59,7 +61,8 @@ where
                     &Method::POST => {
                         handle_graphql_http_request(
                             req,
-                            store,
+                            runtime,
+                            &program,
                             &root,
                             &factory,
                             &allocator,
@@ -71,7 +74,8 @@ where
                         if req.headers().contains_key(header::UPGRADE) {
                             handle_graphql_upgrade_request(
                                 req,
-                                store,
+                                runtime,
+                                program,
                                 &root,
                                 &factory,
                                 &allocator,
@@ -102,7 +106,8 @@ async fn handle_graphql_upgrade_request<
     T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
 >(
     req: Request<Body>,
-    store: Arc<Runtime<T>>,
+    runtime: Arc<Runtime<T>>,
+    program: Arc<Program>,
     root: &T,
     factory: &impl AsyncExpressionFactory<T>,
     allocator: &impl AsyncHeapAllocator<T>,
@@ -112,8 +117,16 @@ where
     T::String: StringValue + Send + Sync,
 {
     Ok(if hyper_tungstenite::is_upgrade_request(&req) {
-        match handle_graphql_ws_request(req, store, root, factory, allocator, compiler_options)
-            .await
+        match handle_graphql_ws_request(
+            req,
+            runtime,
+            program,
+            root,
+            factory,
+            allocator,
+            compiler_options,
+        )
+        .await
         {
             Ok(response) => response,
             Err(_) => create_invalid_websocket_upgrade_response(),

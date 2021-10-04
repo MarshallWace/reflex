@@ -15,7 +15,7 @@ use std::{
 use crate::graphql_service;
 use hyper::{server::conn::AddrStream, service::make_service_fn, Server};
 use reflex::{
-    compiler::{Compile, Compiler, CompilerMode, CompilerOptions},
+    compiler::{Compile, Compiler, CompilerMode, CompilerOptions, CompilerOutput, Program},
     core::{
         Applicable, Expression, ExpressionFactory, HeapAllocator, Reducible, Rewritable, Signal,
         StringValue,
@@ -27,7 +27,8 @@ use reflex_cli::parse_cli_args;
 use reflex_handlers::debug_signal_handler;
 use reflex_js::{create_js_env, parse_module};
 use reflex_runtime::{
-    AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator, Runtime, SignalHelpers,
+    AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator, Runtime, RuntimeCache,
+    RuntimeState, SignalHelpers,
 };
 
 pub use reflex;
@@ -114,29 +115,44 @@ where
                             debug_stack: args.debug_stack,
                             ..InterpreterOptions::default()
                         });
-                    let store = if args.debug_signals {
-                        create_store(
-                            root,
+                    let compiled_root =
+                        compile_root(root, factory, allocator, plugins, compiler_options)?;
+                    let (program, builtins, plugins) = compiled_root.into_parts();
+                    let state = RuntimeState::default();
+                    let cache = RuntimeCache::default();
+                    let runtime = if args.debug_signals {
+                        Runtime::new(
+                            state,
+                            builtins,
+                            plugins,
                             debug_signal_handler(signal_handler),
+                            cache,
                             factory,
                             allocator,
-                            plugins,
-                            compiler_options,
                             interpreter_options,
+                            compiler_options,
                         )
                     } else {
-                        create_store(
-                            root,
+                        Runtime::new(
+                            state,
+                            builtins,
+                            plugins,
                             signal_handler,
+                            cache,
                             factory,
                             allocator,
-                            plugins,
-                            compiler_options,
                             interpreter_options,
+                            compiler_options,
                         )
-                    }?;
-                    let server =
-                        create_server(store, factory, allocator, compiler_options, &address);
+                    };
+                    let server = create_server(
+                        runtime,
+                        program,
+                        factory,
+                        allocator,
+                        compiler_options,
+                        &address,
+                    );
                     println!(
                         "Listening for incoming HTTP requests on port {}",
                         &address.port()
@@ -172,60 +188,34 @@ fn create_graph_root<T: Expression + 'static>(
     )
 }
 
-fn create_store<
-    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
-    THandler,
->(
+fn compile_root<T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>>(
     root: T,
-    signal_handler: THandler,
-    factory: &(impl AsyncExpressionFactory<T> + WithCompiledBuiltins),
-    allocator: &impl AsyncHeapAllocator<T>,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
     plugins: impl IntoIterator<Item = NativeFunction<T>>,
     compiler_options: CompilerOptions,
-    interpreter_options: InterpreterOptions,
-) -> Result<Runtime<T>, String>
-where
-    T::String: StringValue + Send + Sync,
-    THandler: Fn(&str, &[&Signal<T>], &SignalHelpers<T>) -> SignalHandlerResult<T>
-        + Send
-        + Sync
-        + 'static,
-{
+) -> Result<CompilerOutput<T>, String> {
     print!("Compiling graph root...");
     let _ = std::io::stdout().flush();
     let start_time = Instant::now();
-    let compiled_root = Compiler::new(compiler_options, None).compile(
+    let compiled = Compiler::new(compiler_options, None).compile(
         &root,
         CompilerMode::Thunk,
         true,
         plugins,
         factory,
         allocator,
-    )?;
+    );
     println!(" {:?}", start_time.elapsed());
     // TODO: Error if graph root depends on unrecognized native functions
-    let (program, builtins, plugins) = compiled_root.into_parts();
-    // TODO: Establish sensible defaults for channel buffer sizes
-    let command_buffer_size = 1024;
-    let result_buffer_size = 1024;
-    Ok(Runtime::new(
-        program,
-        signal_handler,
-        factory,
-        allocator,
-        builtins,
-        plugins,
-        compiler_options,
-        interpreter_options,
-        command_buffer_size,
-        result_buffer_size,
-    ))
+    compiled
 }
 
 async fn create_server<
     T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
 >(
-    store: Runtime<T>,
+    runtime: Runtime<T>,
+    program: Program,
     factory: &impl AsyncExpressionFactory<T>,
     allocator: &impl AsyncHeapAllocator<T>,
     compiler_options: CompilerOptions,
@@ -234,10 +224,12 @@ async fn create_server<
 where
     T::String: StringValue + Send + Sync,
 {
-    let store = Arc::new(store);
+    let runtime = Arc::new(runtime);
+    let program = Arc::new(program);
     let server = Server::bind(&address).serve(make_service_fn(|_socket: &AddrStream| {
-        let store = Arc::clone(&store);
-        let service = graphql_service(store, factory, allocator, compiler_options);
+        let runtime = Arc::clone(&runtime);
+        let program = Arc::clone(&program);
+        let service = graphql_service(runtime, program, factory, allocator, compiler_options);
         async { Ok::<_, Infallible>(service) }
     }));
     match server.await {

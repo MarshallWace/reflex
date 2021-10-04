@@ -127,7 +127,7 @@ impl<T: Expression + Rewritable<CachedTerm<T>>> Rewritable<CachedTerm<T>> for Ca
     }
     fn substitute_dynamic(
         &self,
-        state: &DynamicState<CachedTerm<T>>,
+        state: &impl DynamicState<CachedTerm<T>>,
         factory: &impl ExpressionFactory<CachedTerm<T>>,
         allocator: &impl HeapAllocator<CachedTerm<T>>,
         cache: &mut impl EvaluationCache<CachedTerm<T>>,
@@ -222,14 +222,14 @@ impl<T: Expression + Rewritable<CachedTerm<T>> + Reducible<CachedTerm<T>>> Evalu
 {
     fn evaluate(
         &self,
-        state: &DynamicState<CachedTerm<T>>,
+        state: &impl DynamicState<CachedTerm<T>>,
         factory: &impl ExpressionFactory<CachedTerm<T>>,
         allocator: &impl HeapAllocator<CachedTerm<T>>,
         cache: &mut impl EvaluationCache<CachedTerm<T>>,
     ) -> Option<EvaluationResult<CachedTerm<T>>> {
         fn evaluate_recursive<T: Expression + Rewritable<T> + Reducible<T>>(
             expression: &T,
-            state: &DynamicState<T>,
+            state: &impl DynamicState<T>,
             factory: &impl ExpressionFactory<T>,
             allocator: &impl HeapAllocator<T>,
             cache: &mut impl EvaluationCache<T>,
@@ -462,7 +462,7 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Evaluate<T> 
     }
     fn substitute_dynamic(
         &self,
-        state: &DynamicState<T>,
+        state: &impl DynamicState<T>,
         factory: &impl ExpressionFactory<T>,
         allocator: &impl HeapAllocator<T>,
         cache: &mut impl EvaluationCache<T>,

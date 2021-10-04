@@ -78,7 +78,7 @@ impl<T: Expression + Rewritable<T>> Rewritable<T> for StructTerm<T> {
     }
     fn substitute_dynamic(
         &self,
-        state: &DynamicState<T>,
+        state: &impl DynamicState<T>,
         factory: &impl ExpressionFactory<T>,
         allocator: &impl HeapAllocator<T>,
         cache: &mut impl EvaluationCache<T>,

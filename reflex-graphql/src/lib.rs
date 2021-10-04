@@ -11,13 +11,14 @@ use reflex::{
         SignalType,
     },
     hash::{hash_object, HashId},
-    lang::{create_struct, BuiltinTerm, NativeFunction, ValueTerm},
+    lang::{create_struct, term::SignalTerm, BuiltinTerm, NativeFunction, ValueTerm},
 };
 
 mod loader;
 pub use loader::graphql_loader;
 mod operation;
 pub use operation::{deserialize_graphql_operation, GraphQlOperationPayload};
+use reflex_json::{json_array, json_object, sanitize, JsonValue};
 
 pub mod subscriptions;
 
@@ -41,7 +42,7 @@ pub fn create_introspection_query_response<T: Expression>(
     ))))
 }
 
-pub fn wrap_graphql_success_response<T: Expression>(
+pub fn create_graphql_success_response<T: Expression>(
     value: T,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
@@ -49,19 +50,45 @@ pub fn wrap_graphql_success_response<T: Expression>(
     create_struct(once((String::from("data"), value)), factory, allocator)
 }
 
-pub fn wrap_graphql_error_response<T: Expression>(
-    errors: impl IntoIterator<Item = T, IntoIter = impl ExactSizeIterator<Item = T>>,
-    factory: &impl ExpressionFactory<T>,
-    allocator: &impl HeapAllocator<T>,
-) -> T {
-    create_struct(
-        once((
-            String::from("errors"),
-            factory.create_vector_term(allocator.create_list(errors)),
-        )),
-        factory,
-        allocator,
-    )
+pub fn create_graphql_error_response(errors: impl IntoIterator<Item = JsonValue>) -> JsonValue {
+    json_object(once((
+        String::from("errors"),
+        json_array(errors.into_iter().flat_map(parse_graphql_error_payload)),
+    )))
+}
+
+fn parse_graphql_error_payload(payload: JsonValue) -> Vec<JsonValue> {
+    match payload {
+        JsonValue::Array(errors) => errors
+            .into_iter()
+            .flat_map(parse_graphql_error_payload)
+            .collect(),
+        JsonValue::Object(_) => vec![payload],
+        payload => vec![json_object(once((String::from("message"), payload)))],
+    }
+}
+
+pub fn create_json_error_object(message: String) -> JsonValue {
+    json_object(once((String::from("message"), JsonValue::String(message))))
+}
+
+pub fn sanitize_signal_errors<T: Expression>(signal: &SignalTerm<T>) -> Vec<JsonValue> {
+    signal
+        .signals()
+        .iter()
+        .filter(|signal| match signal.signal_type() {
+            SignalType::Error => true,
+            _ => false,
+        })
+        .map(|signal| {
+            signal
+                .args()
+                .iter()
+                .next()
+                .and_then(|arg| sanitize(arg).ok())
+                .unwrap_or_else(|| JsonValue::Null)
+        })
+        .collect()
 }
 
 const DEFAULT_OPERATION_TYPE: &str = "query";
@@ -633,8 +660,8 @@ mod tests {
         allocator::DefaultAllocator,
         cache::SubstitutionCache,
         core::{
-            evaluate, DependencyList, DynamicState, Evaluate, EvaluationResult, Expression,
-            ExpressionFactory, HeapAllocator, Reducible, Rewritable,
+            evaluate, DependencyList, Evaluate, EvaluationResult, Expression, ExpressionFactory,
+            HeapAllocator, Reducible, Rewritable, StateCache,
         },
         lang::{create_struct, BuiltinTerm, TermFactory, ValueTerm},
     };
@@ -1072,7 +1099,7 @@ mod tests {
         let expression = factory.create_application_term(query, allocator.create_unit_list(root));
         evaluate(
             &expression,
-            &DynamicState::new(),
+            &StateCache::default(),
             factory,
             allocator,
             &mut SubstitutionCache::new(),

@@ -1,9 +1,10 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+use fnv::FnvHashMap;
 use im::OrdSet;
 use std::{
-    collections::{hash_map::DefaultHasher, BTreeSet, HashMap, HashSet},
+    collections::{hash_map::DefaultHasher, BTreeSet, HashSet},
     hash::{Hash, Hasher},
     iter::{once, FromIterator},
 };
@@ -51,7 +52,7 @@ pub trait Rewritable<T: Expression + Rewritable<T>> {
     ) -> Option<T>;
     fn substitute_dynamic(
         &self,
-        state: &DynamicState<T>,
+        state: &impl DynamicState<T>,
         factory: &impl ExpressionFactory<T>,
         allocator: &impl HeapAllocator<T>,
         cache: &mut impl EvaluationCache<T>,
@@ -93,7 +94,7 @@ pub trait Applicable<T: Expression> {
 pub trait Evaluate<T: Expression> {
     fn evaluate(
         &self,
-        state: &DynamicState<T>,
+        state: &impl DynamicState<T>,
         factory: &impl ExpressionFactory<T>,
         allocator: &impl HeapAllocator<T>,
         cache: &mut impl EvaluationCache<T>,
@@ -248,34 +249,41 @@ where
 
 pub type StateToken = HashId;
 
-pub struct DynamicState<T: Hash> {
-    hash: HashId,
-    values: HashMap<StateToken, T>,
+pub trait DynamicState<T: Hash> {
+    fn id(&self) -> HashId;
+    fn has(&self, key: &StateToken) -> bool;
+    fn get(&self, key: &StateToken) -> Option<&T>;
 }
-impl<T: Hash> Hash for DynamicState<T> {
+
+pub struct StateCache<T: Hash> {
+    hash: HashId,
+    values: FnvHashMap<StateToken, T>,
+}
+impl<T: Hash> Default for StateCache<T> {
+    fn default() -> Self {
+        Self {
+            hash: DefaultHasher::new().finish(),
+            values: FnvHashMap::default(),
+        }
+    }
+}
+impl<T: Hash> Hash for StateCache<T> {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         state.write_u64(self.hash)
     }
 }
-impl<T: Hash> DynamicState<T> {
-    pub fn new() -> Self {
-        DynamicState {
-            hash: DefaultHasher::new().finish(),
-            values: HashMap::new(),
-        }
-    }
-    pub fn id(&self) -> HashId {
+impl<T: Hash> DynamicState<T> for StateCache<T> {
+    fn id(&self) -> HashId {
         self.hash
     }
-    pub fn has(&self, key: StateToken) -> bool {
-        self.values.contains_key(&key)
+    fn has(&self, key: &StateToken) -> bool {
+        self.values.contains_key(key)
     }
-    pub fn get(&self, key: StateToken) -> Option<&T> {
-        self.values.get(&key)
+    fn get(&self, key: &StateToken) -> Option<&T> {
+        self.values.get(key)
     }
-    pub fn remove(&mut self, key: &StateToken) -> Option<T> {
-        self.values.remove(key)
-    }
+}
+impl<T: Hash> StateCache<T> {
     pub fn set(&mut self, key: StateToken, value: T) {
         let value_hash = hash_object(&value);
         let previous = self.values.insert(key, value);
@@ -293,16 +301,31 @@ impl<T: Hash> DynamicState<T> {
             }
         }
     }
-    pub fn hash_values(&self, state_tokens: impl IntoIterator<Item = StateToken>) -> HashId {
-        let mut hasher = DefaultHasher::new();
-        for state_token in state_tokens {
-            match self.get(state_token) {
-                None => hasher.write_u8(0),
-                Some(value) => value.hash(&mut hasher),
-            }
+    pub fn remove(&mut self, key: &StateToken) -> Option<T> {
+        let result = self.values.remove(key);
+        if result.is_some() {
+            let mut hasher = DefaultHasher::new();
+            hasher.write_u64(self.hash);
+            hasher.write_u64(*key);
+            hasher.write_u8(0);
+            self.hash = hasher.finish();
         }
-        hasher.finish()
+        result
     }
+}
+
+pub fn hash_state_values<T: Expression>(
+    state: &impl DynamicState<T>,
+    state_tokens: impl IntoIterator<Item = StateToken>,
+) -> HashId {
+    let mut hasher = DefaultHasher::new();
+    for state_token in state_tokens {
+        match state.get(&state_token) {
+            None => hasher.write_u8(0),
+            Some(value) => value.hash(&mut hasher),
+        }
+    }
+    hasher.finish()
 }
 
 pub trait EvaluationCache<T: Expression> {
@@ -320,12 +343,12 @@ pub trait EvaluationCache<T: Expression> {
     fn retrieve_dynamic_substitution(
         &mut self,
         expression: &T,
-        state: &DynamicState<T>,
+        state: &impl DynamicState<T>,
     ) -> Option<Option<T>>;
     fn store_dynamic_substitution(
         &mut self,
         expression: &T,
-        state: &DynamicState<T>,
+        state: &impl DynamicState<T>,
         result: Option<T>,
     );
     fn retrieve_reduction(&mut self, expression: &T) -> Option<Option<T>>;
@@ -333,12 +356,12 @@ pub trait EvaluationCache<T: Expression> {
     fn retrieve_evaluation(
         &mut self,
         expression: &T,
-        state: &DynamicState<T>,
+        state: &impl DynamicState<T>,
     ) -> Option<Option<EvaluationResult<T>>>;
     fn store_evaluation(
         &mut self,
         expression: &T,
-        state: &DynamicState<T>,
+        state: &impl DynamicState<T>,
         result: Option<EvaluationResult<T>>,
     );
     fn metrics(&self) -> Option<&EvaluationCacheMetrics> {
@@ -586,7 +609,9 @@ impl<'_self, T: Expression> ExpressionFactory<T> for &'_self dyn ExpressionFacto
         num_args: StackOffset,
         variadic: bool,
     ) -> T {
-        ExpressionFactory::<T>::create_compiled_function_term(*self, hash, address, num_args, variadic)
+        ExpressionFactory::<T>::create_compiled_function_term(
+            *self, hash, address, num_args, variadic,
+        )
     }
     fn create_tuple_term(&self, fields: ExpressionList<T>) -> T {
         ExpressionFactory::<T>::create_tuple_term(*self, fields)
@@ -1202,7 +1227,7 @@ pub(crate) fn transform_expression_list<T: Expression>(
 
 pub fn evaluate<T: Expression + Rewritable<T> + Reducible<T> + Evaluate<T>>(
     expression: &T,
-    state: &DynamicState<T>,
+    state: &impl DynamicState<T>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
     cache: &mut impl EvaluationCache<T>,
@@ -1248,9 +1273,9 @@ mod tests {
     };
 
     use super::{
-        evaluate, Arity, DependencyList, DynamicState, EvaluationResult, Expression,
-        ExpressionFactory, ExpressionList, GraphNode, HeapAllocator, NativeAllocator, Rewritable,
-        Signal, SignalType,
+        evaluate, Arity, DependencyList, EvaluationResult, Expression, ExpressionFactory,
+        ExpressionList, GraphNode, HeapAllocator, NativeAllocator, Rewritable, Signal, SignalType,
+        StateCache,
     };
 
     fn create_error_signal_term<T: Expression>(
@@ -1279,7 +1304,7 @@ mod tests {
 
     #[test]
     fn value_expressions() {
-        let state = DynamicState::new();
+        let state = StateCache::default();
         let mut cache = SubstitutionCache::new();
         let factory = TermFactory::default();
         let allocator = DefaultAllocator::default();
@@ -1317,7 +1342,7 @@ mod tests {
 
     #[test]
     fn lambda_application_expressions() {
-        let state = DynamicState::new();
+        let state = StateCache::default();
         let mut cache = SubstitutionCache::new();
         let factory = TermFactory::default();
         let allocator = DefaultAllocator::default();
@@ -1355,7 +1380,7 @@ mod tests {
 
     #[test]
     fn invalid_function_applications() {
-        let state = DynamicState::new();
+        let state = StateCache::default();
         let mut cache = SubstitutionCache::new();
         let factory = TermFactory::default();
         let allocator = DefaultAllocator::default();
@@ -1400,7 +1425,7 @@ mod tests {
 
     #[test]
     fn builtin_expressions() {
-        let state = DynamicState::new();
+        let state = StateCache::default();
         let mut cache = SubstitutionCache::new();
         let factory = TermFactory::default();
         let allocator = DefaultAllocator::default();
@@ -1417,7 +1442,7 @@ mod tests {
 
     #[test]
     fn builtin_application_expressions() {
-        let state = DynamicState::new();
+        let state = StateCache::default();
         let mut cache = SubstitutionCache::new();
         let factory = TermFactory::default();
         let allocator = DefaultAllocator::default();
@@ -1434,7 +1459,7 @@ mod tests {
 
     #[test]
     fn nested_expressions() {
-        let state = DynamicState::new();
+        let state = StateCache::default();
         let mut cache = SubstitutionCache::new();
         let factory = TermFactory::default();
         let allocator = DefaultAllocator::default();
@@ -1451,7 +1476,7 @@ mod tests {
 
     #[test]
     fn signal_short_circuiting() {
-        let state = DynamicState::new();
+        let state = StateCache::default();
         let mut cache = SubstitutionCache::new();
         let factory = TermFactory::default();
         let allocator = DefaultAllocator::default();
@@ -1547,7 +1572,7 @@ mod tests {
 
     #[test]
     fn let_expressions() {
-        let state = DynamicState::new();
+        let state = StateCache::default();
         let mut cache = SubstitutionCache::new();
         let factory = TermFactory::default();
         let allocator = DefaultAllocator::default();
@@ -1606,7 +1631,7 @@ mod tests {
 
     #[test]
     fn letrec_expressions() {
-        let state = DynamicState::new();
+        let state = StateCache::default();
         let mut cache = SubstitutionCache::new();
         let factory = TermFactory::default();
         let allocator = DefaultAllocator::default();
@@ -1786,7 +1811,7 @@ mod tests {
 
     #[test]
     fn native_functions() {
-        let state = DynamicState::new();
+        let state = StateCache::default();
         let mut cache = SubstitutionCache::new();
         let factory = TermFactory::default();
         let allocator = DefaultAllocator::default();

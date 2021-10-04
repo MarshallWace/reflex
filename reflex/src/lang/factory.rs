@@ -67,7 +67,7 @@ impl Rewritable<CachedTerm<SharedTerm>> for SharedTerm {
     }
     fn substitute_dynamic(
         &self,
-        state: &DynamicState<CachedTerm<SharedTerm>>,
+        state: &impl DynamicState<CachedTerm<SharedTerm>>,
         factory: &impl ExpressionFactory<CachedTerm<SharedTerm>>,
         allocator: &impl HeapAllocator<CachedTerm<SharedTerm>>,
         cache: &mut impl EvaluationCache<CachedTerm<SharedTerm>>,
@@ -124,7 +124,7 @@ impl Applicable<CachedTerm<SharedTerm>> for SharedTerm {
 impl Evaluate<CachedTerm<SharedTerm>> for SharedTerm {
     fn evaluate(
         &self,
-        state: &DynamicState<CachedTerm<SharedTerm>>,
+        state: &impl DynamicState<CachedTerm<SharedTerm>>,
         factory: &impl ExpressionFactory<CachedTerm<SharedTerm>>,
         allocator: &impl HeapAllocator<CachedTerm<SharedTerm>>,
         cache: &mut impl EvaluationCache<CachedTerm<SharedTerm>>,
@@ -134,7 +134,7 @@ impl Evaluate<CachedTerm<SharedTerm>> for SharedTerm {
             TValue: Expression + Rewritable<T> + Reducible<T>,
         >(
             expression: &TValue,
-            state: &DynamicState<T>,
+            state: &impl DynamicState<T>,
             factory: &impl ExpressionFactory<T>,
             allocator: &impl HeapAllocator<T>,
             cache: &mut impl EvaluationCache<T>,

@@ -80,7 +80,7 @@ impl<T: Expression + Rewritable<T>> Rewritable<T> for LambdaTerm<T> {
     }
     fn substitute_dynamic(
         &self,
-        state: &DynamicState<T>,
+        state: &impl DynamicState<T>,
         factory: &impl ExpressionFactory<T>,
         allocator: &impl HeapAllocator<T>,
         cache: &mut impl EvaluationCache<T>,
@@ -273,8 +273,8 @@ mod tests {
         allocator::DefaultAllocator,
         cache::SubstitutionCache,
         core::{
-            DependencyList, DynamicState, Evaluate, EvaluationResult, ExpressionFactory,
-            HeapAllocator, Rewritable,
+            DependencyList, Evaluate, EvaluationResult, ExpressionFactory,
+            HeapAllocator, Rewritable, StateCache,
         },
         lang::{BuiltinTerm, TermFactory, ValueTerm},
         parser::sexpr::parse,
@@ -333,7 +333,7 @@ mod tests {
         );
         assert_eq!(
             expression.evaluate(
-                &DynamicState::new(),
+                &StateCache::default(),
                 &factory,
                 &allocator,
                 &mut SubstitutionCache::new()
@@ -398,7 +398,7 @@ mod tests {
         );
         assert_eq!(
             expression.evaluate(
-                &DynamicState::new(),
+                &StateCache::default(),
                 &factory,
                 &allocator,
                 &mut SubstitutionCache::new()
@@ -493,7 +493,7 @@ mod tests {
         );
         assert_eq!(
             expression.evaluate(
-                &DynamicState::new(),
+                &StateCache::default(),
                 &factory,
                 &allocator,
                 &mut SubstitutionCache::new()

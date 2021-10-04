@@ -35,11 +35,11 @@ use tokio_tungstenite::{
 };
 use uuid::Uuid;
 
-struct Operation<TRequest, TResponse> {
+struct AsyncOperation<TRequest, TResponse> {
     payload: TRequest,
     response: oneshot::Sender<TResponse>,
 }
-impl<TRequest, TResponse> Operation<TRequest, TResponse> {
+impl<TRequest, TResponse> AsyncOperation<TRequest, TResponse> {
     fn new(payload: TRequest, response: oneshot::Sender<TResponse>) -> Self {
         Self { payload, response }
     }
@@ -48,18 +48,18 @@ impl<TRequest, TResponse> Operation<TRequest, TResponse> {
 struct StreamOperation<TRequest, TResponse, TUpdate> {
     payload: TRequest,
     response: oneshot::Sender<TResponse>,
-    update: watch::Sender<TUpdate>,
+    updates: watch::Sender<Option<TUpdate>>,
 }
 impl<TRequest, TResponse, TUpdate> StreamOperation<TRequest, TResponse, TUpdate> {
     fn new(
         payload: TRequest,
         response: oneshot::Sender<TResponse>,
-        update: watch::Sender<TUpdate>,
+        updates: watch::Sender<Option<TUpdate>>,
     ) -> Self {
         Self {
             payload,
             response,
-            update,
+            updates,
         }
     }
 }
@@ -75,27 +75,27 @@ enum WebSocketConnectionManagerCommand {
         StreamOperation<
             (ConnectionUrl, GraphQlOperationPayload),
             Result<SubscriptionId, String>,
-            Option<Result<JsonValue, Vec<JsonValue>>>,
+            Result<JsonValue, Vec<JsonValue>>,
         >,
     ),
-    Unsubscribe(Operation<SubscriptionId, Result<(), String>>),
+    Unsubscribe(AsyncOperation<SubscriptionId, Result<(), String>>),
 }
 impl WebSocketConnectionManagerCommand {
     fn subscribe(
         url: ConnectionUrl,
         operation: GraphQlOperationPayload,
         response: oneshot::Sender<Result<SubscriptionId, String>>,
-        update: watch::Sender<Option<Result<JsonValue, Vec<JsonValue>>>>,
+        updates: watch::Sender<Option<Result<JsonValue, Vec<JsonValue>>>>,
     ) -> Self {
         let payload = (url, operation);
-        Self::Subscribe(StreamOperation::new(payload, response, update))
+        Self::Subscribe(StreamOperation::new(payload, response, updates))
     }
     fn unsubscribe(
         subscription_id: SubscriptionId,
         response: oneshot::Sender<Result<(), String>>,
     ) -> Self {
         let payload = subscription_id;
-        Self::Unsubscribe(Operation::new(payload, response))
+        Self::Unsubscribe(AsyncOperation::new(payload, response))
     }
 }
 
@@ -131,7 +131,7 @@ impl Default for WebSocketConnectionManager {
                                 }
                                 Ok(results) => {
                                     let _ = command.response.send(Ok(subscription_id));
-                                    let update_tx = command.update;
+                                    let update_tx = command.updates;
                                     let mut results = Box::pin(results);
                                     tokio::spawn(async move {
                                         while let Some(result) = results.next().await {
@@ -288,9 +288,9 @@ impl ConnectionCache {
 }
 
 enum WebSocketConnectionCommand {
-    Subscribe(Operation<(SubscriptionId, GraphQlOperationPayload), Result<(), String>>),
-    Unsubscribe(Operation<SubscriptionId, Result<(), String>>),
-    Close(Operation<(), Result<(), String>>),
+    Subscribe(AsyncOperation<(SubscriptionId, GraphQlOperationPayload), Result<(), String>>),
+    Unsubscribe(AsyncOperation<SubscriptionId, Result<(), String>>),
+    Close(AsyncOperation<(), Result<(), String>>),
 }
 impl WebSocketConnectionCommand {
     fn subscribe(
@@ -299,18 +299,18 @@ impl WebSocketConnectionCommand {
         response: oneshot::Sender<Result<(), String>>,
     ) -> Self {
         let payload = (subscription_id, operation);
-        Self::Subscribe(Operation::new(payload, response))
+        Self::Subscribe(AsyncOperation::new(payload, response))
     }
     fn unsubscribe(
         subscription_id: SubscriptionId,
         response: oneshot::Sender<Result<(), String>>,
     ) -> Self {
         let payload = subscription_id;
-        Self::Unsubscribe(Operation::new(payload, response))
+        Self::Unsubscribe(AsyncOperation::new(payload, response))
     }
     fn close(response: oneshot::Sender<Result<(), String>>) -> Self {
         let payload = ();
-        Self::Close(Operation::new(payload, response))
+        Self::Close(AsyncOperation::new(payload, response))
     }
 }
 

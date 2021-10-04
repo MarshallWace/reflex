@@ -12,11 +12,13 @@ use hyper_tungstenite::{
     WebSocketStream,
 };
 use reflex::{
-    compiler::{Compile, Compiler, CompilerMode, CompilerOptions, Instruction, InstructionPointer},
+    compiler::{
+        Compile, Compiler, CompilerMode, CompilerOptions, Instruction, InstructionPointer, Program,
+    },
     core::{Applicable, Reducible, Rewritable, StringValue},
 };
 use reflex_graphql::{
-    parse_graphql_operation,
+    create_json_error_object, parse_graphql_operation, sanitize_signal_errors,
     subscriptions::{
         deserialize_graphql_client_message, GraphQlSubscriptionClientMessage,
         GraphQlSubscriptionServerMessage, GraphQlSubscriptionStartMessage, SubscriptionId,
@@ -35,7 +37,8 @@ pub(crate) async fn handle_graphql_ws_request<
     T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
 >(
     req: Request<Body>,
-    store: Arc<Runtime<T>>,
+    runtime: Arc<Runtime<T>>,
+    program: Arc<Program>,
     root: &T,
     factory: &impl AsyncExpressionFactory<T>,
     allocator: &impl AsyncHeapAllocator<T>,
@@ -57,7 +60,8 @@ where
                 Ok(websocket) => {
                     match handle_websocket_connection(
                         websocket,
-                        store,
+                        runtime,
+                        &program,
                         &root,
                         &factory,
                         &allocator,
@@ -85,7 +89,8 @@ async fn handle_websocket_connection<
     T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
 >(
     websocket: WebSocketStream<Upgraded>,
-    store: Arc<Runtime<T>>,
+    runtime: Arc<Runtime<T>>,
+    program: &Program,
     root: &T,
     factory: &impl AsyncExpressionFactory<T>,
     allocator: &impl AsyncHeapAllocator<T>,
@@ -172,7 +177,8 @@ where
                                     .await;
                             }
                             Ok(query) => {
-                                let mut prelude = store.program().clone();
+                                let mut prelude = program.clone();
+                                let entry_point = InstructionPointer::new(prelude.len());
                                 prelude.push(Instruction::PushFunction {
                                     target: InstructionPointer::default(),
                                 });
@@ -198,15 +204,7 @@ where
                                     Ok(compiled) => {
                                         // TODO: Error if runtime expression depends on unrecognized native functions
                                         let (program, _, _) = compiled.into_parts();
-                                        match store
-                                            .subscribe(
-                                                program,
-                                                InstructionPointer::new(store.program().len()),
-                                                &factory,
-                                                &allocator,
-                                            )
-                                            .await
-                                        {
+                                        match runtime.subscribe(program, entry_point).await {
                                             Err(error) => {
                                                 let _ = messages_tx
                                                     .send(GraphQlSubscriptionServerMessage::Error(
@@ -224,15 +222,23 @@ where
                                                     .get_mut()
                                                     .unwrap()
                                                     .insert(subscription_id.clone(), store_id);
-                                                let results =
-                                                    subscription.into_stream().map(|result| {
-                                                        result.and_then(|result| {
-                                                            match sanitize(&result) {
-                                                                Ok(result) => Ok(result),
-                                                                Err(error) => Err(vec![error]),
+                                                let results = subscription.into_stream().map({
+                                                    let factory = factory.clone();
+                                                    move |result| match factory
+                                                        .match_signal_term(&result)
+                                                    {
+                                                        Some(signal) => {
+                                                            Err(sanitize_signal_errors(signal))
+                                                        }
+                                                        // TODO: avoid unnecessary sanitizing for non-diff streams
+                                                        None => match sanitize(&result) {
+                                                            Ok(result) => Ok(result),
+                                                            Err(error) => {
+                                                                Err(vec![JsonValue::String(error)])
                                                             }
-                                                        })
-                                                    });
+                                                        },
+                                                    }
+                                                });
                                                 let mut results = if is_diff_subscription(&message)
                                                 {
                                                     create_diff_stream(results).left_stream()
@@ -277,7 +283,7 @@ where
                                 ))
                                 .await;
                         }
-                        Some(store_id) => match store.unsubscribe(store_id).await {
+                        Some(store_id) => match runtime.unsubscribe(store_id).await {
                             Ok(result) => {
                                 if result {
                                     let _ = messages_tx
@@ -320,7 +326,7 @@ where
                         .drain()
                         .map(|(_, store_id)| store_id);
                     for id in store_ids {
-                        let _ = store.unsubscribe(id).await;
+                        let _ = runtime.unsubscribe(id).await;
                     }
                 }
             },
@@ -348,8 +354,8 @@ fn is_diff_subscription(message: &GraphQlSubscriptionStartMessage) -> bool {
 }
 
 fn create_diff_stream(
-    results: impl Stream<Item = Result<JsonValue, Vec<String>>>,
-) -> impl Stream<Item = Result<(JsonValue, bool), Vec<String>>> {
+    results: impl Stream<Item = Result<JsonValue, Vec<JsonValue>>>,
+) -> impl Stream<Item = Result<(JsonValue, bool), Vec<JsonValue>>> {
     results
         .scan(None, |previous, value| {
             let result = match (&previous, &value) {
@@ -443,7 +449,7 @@ fn is_empty_json_object(value: &JsonValue) -> bool {
 
 fn format_subscription_result_message(
     subscription_id: &SubscriptionId,
-    result: Result<(JsonValue, bool), Vec<String>>,
+    result: Result<(JsonValue, bool), Vec<JsonValue>>,
 ) -> GraphQlSubscriptionServerMessage {
     match result {
         Ok((data, is_diff)) => {
@@ -465,13 +471,20 @@ fn create_graphql_json_success_response(value: JsonValue) -> JsonValue {
     json_object(once((String::from("data"), value)))
 }
 
-fn create_graphql_json_error_response(errors: impl IntoIterator<Item = String>) -> JsonValue {
+fn create_graphql_json_error_response(errors: impl IntoIterator<Item = JsonValue>) -> JsonValue {
     json_object(once((
         String::from("errors"),
-        json_array(errors.into_iter().map(create_json_error_object)),
+        json_array(errors.into_iter().flat_map(parse_json_error_payload)),
     )))
 }
 
-fn create_json_error_object(message: String) -> JsonValue {
-    json_object(once((String::from("message"), JsonValue::String(message))))
+fn parse_json_error_payload(payload: JsonValue) -> Vec<JsonValue> {
+    match payload {
+        JsonValue::Array(errors) => errors
+            .into_iter()
+            .flat_map(parse_json_error_payload)
+            .collect(),
+        JsonValue::Object(_) => vec![payload],
+        payload => vec![json_object(once((String::from("message"), payload)))],
+    }
 }

@@ -9,8 +9,8 @@ use std::iter::empty;
 use reflex::{
     allocator::DefaultAllocator,
     cache::SubstitutionCache,
-    compiler::{Compiler, CompilerMode, CompilerOptions, InstructionPointer},
-    core::{evaluate, DynamicState},
+    compiler::{hash_program_root, Compiler, CompilerMode, CompilerOptions, InstructionPointer},
+    core::{evaluate, StateCache},
     interpreter::{execute, DefaultInterpreterCache, InterpreterOptions},
     lang::TermFactory,
 };
@@ -27,7 +27,7 @@ fn js_interpreted(b: &mut Bencher) {
         const greet = (user) => `Hello, ${fullName(user.first, user.last)}!`;
         greet({ first: 'John', last: 'Doe' })";
     let expression = parse(input, &env, &factory, &allocator).unwrap();
-    let state = DynamicState::new();
+    let state = StateCache::default();
     b.iter(|| {
         let mut cache = SubstitutionCache::new();
         evaluate(&expression, &state, &factory, &allocator, &mut cache)
@@ -61,14 +61,17 @@ fn js_compiled(b: &mut Bencher) {
         &allocator,
     )
     .unwrap();
-    let state = DynamicState::new();
+    let state = StateCache::default();
     let options = InterpreterOptions::default();
     let (program, builtins, plugins) = compiled.into_parts();
     b.iter(|| {
         let mut cache = DefaultInterpreterCache::default();
+        let entry_point = InstructionPointer::default();
+        let cache_key = hash_program_root(&program, &entry_point);
         execute(
+            cache_key,
             &program,
-            InstructionPointer::default(),
+            entry_point,
             &state,
             &factory,
             &allocator,
