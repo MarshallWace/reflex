@@ -24,6 +24,8 @@ mod and;
 pub use and::*;
 mod append;
 pub use append::*;
+mod apply;
+pub use apply::*;
 mod car;
 pub use car::*;
 mod cdr;
@@ -125,6 +127,7 @@ pub enum BuiltinTerm {
     Abs,
     And,
     Append,
+    Apply,
     Car,
     Cdr,
     Ceil,
@@ -211,6 +214,7 @@ impl<T: Expression + Applicable<T>> Applicable<T> for BuiltinTerm {
             Self::Abs => Applicable::<T>::arity(&Abs {}),
             Self::And => Applicable::<T>::arity(&And {}),
             Self::Append => Applicable::<T>::arity(&Append {}),
+            Self::Apply => Applicable::<T>::arity(&Apply {}),
             Self::Car => Applicable::<T>::arity(&Car {}),
             Self::Cdr => Applicable::<T>::arity(&Cdr {}),
             Self::Ceil => Applicable::<T>::arity(&Ceil {}),
@@ -286,6 +290,7 @@ impl<T: Expression + Applicable<T>> Applicable<T> for BuiltinTerm {
             Self::Abs => Applicable::<T>::apply(&Abs {}, args, factory, allocator, cache),
             Self::And => Applicable::<T>::apply(&And {}, args, factory, allocator, cache),
             Self::Append => Applicable::<T>::apply(&Append {}, args, factory, allocator, cache),
+            Self::Apply => Applicable::<T>::apply(&Apply {}, args, factory, allocator, cache),
             Self::Car => Applicable::<T>::apply(&Car {}, args, factory, allocator, cache),
             Self::Cdr => Applicable::<T>::apply(&Cdr {}, args, factory, allocator, cache),
             Self::Ceil => Applicable::<T>::apply(&Ceil {}, args, factory, allocator, cache),
