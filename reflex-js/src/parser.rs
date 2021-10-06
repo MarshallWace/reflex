@@ -732,25 +732,16 @@ fn parse_expression<'src, T: Expression>(
 }
 
 fn parse_expressions<'src: 'temp, 'temp, T: Expression>(
-    expressions: impl IntoIterator<Item = &'temp Expr<'src>> + ExactSizeIterator,
+    expressions: impl IntoIterator<Item = &'temp Expr<'src>>,
     scope: &LexicalScope,
     env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
 ) -> ParserResult<Vec<T>> {
-    let num_expressions = expressions.len();
     expressions
         .into_iter()
-        .fold(Ok(Vec::with_capacity(num_expressions)), |results, node| {
-            let mut args = results?;
-            match parse_expression(node, scope, env, factory, allocator) {
-                Ok(arg) => {
-                    args.push(arg);
-                    Ok(args)
-                }
-                Err(err) => Err(err),
-            }
-        })
+        .map(|node| parse_expression(node, scope, env, factory, allocator))
+        .collect::<Result<Vec<_>, _>>()
 }
 
 fn parse_variable_reference<'src, T: Expression>(
@@ -1753,8 +1744,35 @@ fn parse_function_application_expression<'src: 'temp, 'temp, T: Expression>(
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
 ) -> ParserResult<T> {
+    let num_args = args.len();
+    let (args, spread) = args.into_iter().fold(
+        (Vec::with_capacity(num_args), None),
+        |(mut args, spread), node| match node {
+            Expr::Spread(node) => (args, Some(node)),
+            _ => {
+                args.push(node);
+                (args, spread)
+            }
+        },
+    );
     let args = parse_expressions(args, scope, env, factory, allocator)?;
-    Ok(factory.create_application_term(target, allocator.create_list(args)))
+    let spread = match spread {
+        Some(spread) => parse_expression(spread, scope, env, factory, allocator).map(Some),
+        None => Ok(None),
+    }?;
+    if let Some(spread) = spread {
+        let target = if args.is_empty() {
+            target
+        } else {
+            factory.create_partial_application_term(target, allocator.create_list(args))
+        };
+        Ok(factory.create_application_term(
+            factory.create_builtin_term(BuiltinTerm::Apply),
+            allocator.create_pair(target, spread),
+        ))
+    } else {
+        Ok(factory.create_application_term(target, allocator.create_list(args)))
+    }
 }
 
 fn parse_constructor_expression<'src, T: Expression>(
@@ -4373,6 +4391,63 @@ mod tests {
                     allocator.create_unit_list(factory.create_value_term(ValueTerm::Float(4.0))),
                 ),
                 allocator.create_unit_list(factory.create_value_term(ValueTerm::Float(5.0))),
+            )),
+        );
+    }
+
+    #[test]
+    fn function_arg_spreading() {
+        let factory = TermFactory::default();
+        let allocator = DefaultAllocator::default();
+        let env = Env::new();
+        assert_eq!(
+            parse("((x, y) => x + y)(...[3, 4])", &env, &factory, &allocator),
+            Ok(factory.create_application_term(
+                factory.create_builtin_term(BuiltinTerm::Apply),
+                allocator.create_pair(
+                    factory.create_lambda_term(
+                        2,
+                        factory.create_application_term(
+                            factory.create_builtin_term(BuiltinTerm::Add),
+                            allocator.create_pair(
+                                factory.create_static_variable_term(1),
+                                factory.create_static_variable_term(0)
+                            ),
+                        )
+                    ),
+                    factory.create_vector_term(allocator.create_pair(
+                        factory.create_value_term(ValueTerm::Float(3.0)),
+                        factory.create_value_term(ValueTerm::Float(4.0)),
+                    )),
+                ),
+            )),
+        );
+        assert_eq!(
+            parse("((x, y) => x + y)(1, 2, ...[3, 4])", &env, &factory, &allocator),
+            Ok(factory.create_application_term(
+                factory.create_builtin_term(BuiltinTerm::Apply),
+                allocator.create_pair(
+                    factory.create_partial_application_term(
+                        factory.create_lambda_term(
+                            2,
+                            factory.create_application_term(
+                                factory.create_builtin_term(BuiltinTerm::Add),
+                                allocator.create_pair(
+                                    factory.create_static_variable_term(1),
+                                    factory.create_static_variable_term(0)
+                                ),
+                            )
+                        ),
+                        allocator.create_pair(
+                            factory.create_value_term(ValueTerm::Float(1.0)),
+                            factory.create_value_term(ValueTerm::Float(2.0)),
+                        ),
+                    ),
+                    factory.create_vector_term(allocator.create_pair(
+                        factory.create_value_term(ValueTerm::Float(3.0)),
+                        factory.create_value_term(ValueTerm::Float(4.0)),
+                    )),
+                ),
             )),
         );
     }
