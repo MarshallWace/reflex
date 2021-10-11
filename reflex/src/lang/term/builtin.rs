@@ -66,6 +66,10 @@ mod gte;
 pub use gte::*;
 mod r#if;
 pub use r#if::*;
+mod if_error;
+pub use if_error::*;
+mod if_pending;
+pub use if_pending::*;
 mod insert;
 pub use insert::*;
 mod keys;
@@ -158,6 +162,8 @@ pub enum BuiltinTerm {
     Gt,
     Gte,
     If,
+    IfError,
+    IfPending,
     Insert,
     Keys,
     Lt,
@@ -245,6 +251,8 @@ impl<T: Expression + Applicable<T>> Applicable<T> for BuiltinTerm {
             Self::Gt => Applicable::<T>::arity(&Gt {}),
             Self::Gte => Applicable::<T>::arity(&Gte {}),
             Self::If => Applicable::<T>::arity(&If {}),
+            Self::IfError => Applicable::<T>::arity(&IfError {}),
+            Self::IfPending => Applicable::<T>::arity(&IfPending {}),
             Self::Insert => Applicable::<T>::arity(&Insert {}),
             Self::Keys => Applicable::<T>::arity(&Keys {}),
             Self::Lt => Applicable::<T>::arity(&Lt {}),
@@ -343,6 +351,8 @@ impl<T: Expression + Applicable<T>> Applicable<T> for BuiltinTerm {
             Self::Gt => Applicable::<T>::apply(&Gt {}, args, factory, allocator, cache),
             Self::Gte => Applicable::<T>::apply(&Gte {}, args, factory, allocator, cache),
             Self::If => Applicable::<T>::apply(&If {}, args, factory, allocator, cache),
+            Self::IfError => Applicable::<T>::apply(&IfError {}, args, factory, allocator, cache),
+            Self::IfPending => Applicable::<T>::apply(&IfPending {}, args, factory, allocator, cache),
             Self::Insert => Applicable::<T>::apply(&Insert {}, args, factory, allocator, cache),
             Self::Keys => Applicable::<T>::apply(&Keys {}, args, factory, allocator, cache),
             Self::Lt => Applicable::<T>::apply(&Lt {}, args, factory, allocator, cache),

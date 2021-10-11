@@ -198,7 +198,7 @@ impl<T: Expression + Rewritable<T>> Rewritable<T> for SignalTransformerTerm<T> {
 }
 impl<T: Expression> Applicable<T> for SignalTransformerTerm<T> {
     fn arity(&self) -> Option<Arity> {
-        Some(Arity::from(0, 1, None))
+        Some(Arity::from(1, 0, None))
     }
     fn apply(
         &self,
@@ -207,7 +207,13 @@ impl<T: Expression> Applicable<T> for SignalTransformerTerm<T> {
         allocator: &impl HeapAllocator<T>,
         _cache: &mut impl EvaluationCache<T>,
     ) -> Result<T, String> {
-        Ok(factory.create_application_term(self.handler.clone(), allocator.create_list(args)))
+        let arg = args.into_iter().next().unwrap();
+        if let Some(_) = factory.match_signal_term(&arg) {
+            Ok(factory
+                .create_application_term(self.handler.clone(), allocator.create_unit_list(arg)))
+        } else {
+            Ok(arg)
+        }
     }
 }
 impl<T: Expression + Rewritable<T> + Reducible<T> + Compile<T>> Compile<T>
