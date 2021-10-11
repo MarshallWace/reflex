@@ -16,6 +16,7 @@ use ressa::Builder;
 
 use crate::{
     builtins::{construct, dispatch, get_builtin_field, throw, to_string},
+    stdlib::globals::global_aggregate_error,
     Env,
 };
 
@@ -351,7 +352,44 @@ fn parse_block_statements<'src: 'temp, 'temp, T: Expression>(
                             }
                         }
                     }
-                    Stmt::Try(_) => Err(err_unimplemented(statement)),
+                    Stmt::Try(node) => {
+                        let BlockStmt(body) = &node.block;
+                        let body = parse_branch(&statement, body, scope, env, factory, allocator)?;
+                        if let Some(node) = &node.finalizer {
+                            Err(err_unimplemented(node))
+                        } else if let Some(handler) = &node.handler {
+                            let identifier = match &handler.param {
+                                Some(pattern) => match pattern {
+                                    Pat::Ident(identifier) => {
+                                        parse_identifier(&identifier).map(Some)
+                                    }
+                                    // TODO: Support destructuring patterns in catch variable assignment
+                                    _ => Err(err_unimplemented(pattern)),
+                                },
+                                None => Ok(None),
+                            }?;
+                            let BlockStmt(handler) = &handler.body;
+                            let handler = factory.create_lambda_term(
+                                1,
+                                parse_branch(
+                                    &statement,
+                                    handler,
+                                    &scope.create_child(once(identifier)),
+                                    env,
+                                    factory,
+                                    allocator,
+                                )?,
+                            );
+                            let expression =
+                                create_try_catch_expression(body, handler, factory, allocator);
+                            let result = Some(expression);
+                            parse_block_statements(
+                                remaining, result, scope, env, factory, allocator,
+                            )
+                        } else {
+                            Err(err_unimplemented(node))
+                        }
+                    }
                     Stmt::Switch(_) => Err(err_unimplemented(statement)),
                     Stmt::Empty => {
                         parse_block_statements(remaining, result, scope, env, factory, allocator)
@@ -637,31 +675,14 @@ fn parse_throw_statement<'src, T: Expression>(
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
 ) -> ParserResult<T> {
-    match value {
-        Expr::New(constructor) => match &*constructor.callee {
-            Expr::Ident(node) => match parse_identifier(&node)? {
-                "Error" => {
-                    if constructor.arguments.is_empty() {
-                        Err(err_unimplemented(node))
-                    } else {
-                        let message = constructor
-                            .arguments
-                            .iter()
-                            .map(|arg| parse_expression(arg, scope, env, factory, allocator))
-                            .next()
-                            .unwrap()?;
-                        Ok(factory.create_application_term(
-                            factory.create_native_function_term(throw()),
-                            allocator.create_unit_list(message),
-                        ))
-                    }
-                }
-                _ => Err(err_unimplemented(node)),
-            },
-            _ => Err(err_unimplemented(value)),
-        },
-        _ => Err(err_unimplemented(value)),
-    }
+    let error = parse_expression(value, scope, env, factory, allocator)?;
+    Ok(factory.create_application_term(
+        factory.create_native_function_term(throw()),
+        allocator.create_unit_list(factory.create_application_term(
+            factory.create_builtin_term(BuiltinTerm::ResolveDeep),
+            allocator.create_unit_list(error),
+        )),
+    ))
 }
 
 fn parse_if_branch<'src, T: Expression>(
@@ -1484,6 +1505,43 @@ fn create_if_expression<T: Expression>(
     )
 }
 
+fn create_try_catch_expression<T: Expression>(
+    body: T,
+    handler: T,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> T {
+    factory.create_let_term(
+        handler,
+        factory.create_application_term(
+            factory.create_signal_transformer_term(factory.create_lambda_term(
+                1,
+                factory.create_application_term(
+                    factory.create_builtin_term(BuiltinTerm::IfError),
+                    allocator.create_pair(
+                        factory.create_static_variable_term(0),
+                        factory.create_lambda_term(
+                            1,
+                            factory.create_application_term(
+                                factory.create_static_variable_term(2),
+                                allocator.create_unit_list(
+                                    factory.create_application_term(
+                                        global_aggregate_error(factory, allocator),
+                                        allocator.create_unit_list(
+                                            factory.create_static_variable_term(0),
+                                        ),
+                                    ),
+                                ),
+                            ),
+                        ),
+                    ),
+                ),
+            )),
+            allocator.create_unit_list(body),
+        ),
+    )
+}
+
 fn parse_arrow_function_expression<'src, T: Expression>(
     node: &ArrowFuncExpr<'src>,
     scope: &LexicalScope,
@@ -1795,14 +1853,17 @@ fn parse_constructor_expression<'src, T: Expression>(
 
 #[cfg(test)]
 mod tests {
-    use std::{iter::empty, path::Path};
+    use std::{
+        iter::{empty, once},
+        path::Path,
+    };
 
     use super::{parse, parse_module};
     use crate::{
         builtin_plugins,
-        builtins::{dispatch, throw, to_string},
+        builtins::{construct, dispatch, throw, to_string},
         static_module_loader,
-        stdlib::builtin_imports,
+        stdlib::{builtin_globals, builtin_imports, globals::global_error},
         Env,
     };
     use reflex::{
@@ -1810,12 +1871,77 @@ mod tests {
         cache::SubstitutionCache,
         compiler::{Compiler, CompilerMode, CompilerOptions, InstructionPointer},
         core::{
-            evaluate, DependencyList, DynamicState, EvaluationResult, ExpressionFactory,
-            HeapAllocator,
+            evaluate, DependencyList, DynamicState, EvaluationResult, Expression,
+            ExpressionFactory, HeapAllocator, SignalType, StringValue,
         },
         interpreter::{execute, DefaultInterpreterCache, InterpreterOptions},
-        lang::{BuiltinTerm, TermFactory, ValueTerm},
+        lang::{create_struct, BuiltinTerm, TermFactory, ValueTerm},
     };
+
+    fn get_combined_errors<T: Expression>(
+        messages: impl IntoIterator<Item = String>,
+        factory: &impl ExpressionFactory<T>,
+        allocator: &impl HeapAllocator<T>,
+    ) -> Vec<String> {
+        let combined_signal = factory.create_signal_term(allocator.create_signal_list(
+            messages.into_iter().map(|message| {
+                allocator.create_signal(
+                    SignalType::Error,
+                    allocator.create_unit_list(create_struct(
+                        once((
+                            String::from("name"),
+                            factory.create_value_term(ValueTerm::String(
+                                allocator.create_string(String::from("Error")),
+                            )),
+                        ))
+                        .chain(once((
+                            String::from("message"),
+                            factory.create_value_term(ValueTerm::String(
+                                allocator.create_string(message),
+                            )),
+                        ))),
+                        factory,
+                        allocator,
+                    )),
+                )
+            }),
+        ));
+        factory
+            .match_signal_term(&combined_signal)
+            .unwrap()
+            .signals()
+            .into_iter()
+            .map(|signal| {
+                let message = factory
+                    .match_struct_term(signal.args().into_iter().next().unwrap())
+                    .unwrap()
+                    .get("message")
+                    .unwrap();
+                String::from(
+                    factory
+                        .match_value_term(message)
+                        .unwrap()
+                        .match_string()
+                        .unwrap()
+                        .as_str(),
+                )
+            })
+            .collect()
+    }
+
+    fn create_error_instance<T: Expression>(
+        payload: T,
+        factory: &impl ExpressionFactory<T>,
+        allocator: &impl HeapAllocator<T>,
+    ) -> T {
+        factory.create_application_term(
+            factory.create_builtin_term(BuiltinTerm::ResolveDeep),
+            allocator.create_unit_list(factory.create_application_term(
+                factory.create_native_function_term(construct()),
+                allocator.create_pair(global_error(factory, allocator), payload),
+            )),
+        )
+    }
 
     #[test]
     fn null_literals() {
@@ -3764,7 +3890,7 @@ mod tests {
     fn if_statements() {
         let factory = TermFactory::default();
         let allocator = DefaultAllocator::default();
-        let env = Env::new();
+        let env = Env::new().with_globals(builtin_globals(&factory, &allocator));
         assert_eq!(
             parse(
                 "(() => { if (true) { return 3; } else { return 4; }})()",
@@ -3799,13 +3925,21 @@ mod tests {
                             factory.create_application_term(
                                 factory.create_native_function_term(throw()),
                                 allocator.create_unit_list(
-                                    factory.create_value_term(ValueTerm::String(allocator.create_string(String::from("foo")))),
+                                    create_error_instance(
+                                        factory.create_value_term(ValueTerm::String(allocator.create_string(String::from("foo")))),
+                                        &factory,
+                                        &allocator,
+                                    )
                                 ),
                             ),
                             factory.create_application_term(
                                 factory.create_native_function_term(throw()),
                                 allocator.create_unit_list(
-                                    factory.create_value_term(ValueTerm::String(allocator.create_string(String::from("bar")))),
+                                    create_error_instance(
+                                        factory.create_value_term(ValueTerm::String(allocator.create_string(String::from("bar")))),
+                                        &factory,
+                                        &allocator,
+                                    )
                                 ),
                             ),
                         ),
@@ -3908,7 +4042,11 @@ mod tests {
                             factory.create_application_term(
                                 factory.create_native_function_term(throw()),
                                 allocator.create_unit_list(
-                                    factory.create_value_term(ValueTerm::String(allocator.create_string(String::from("foo")))),
+                                    create_error_instance(
+                                        factory.create_value_term(ValueTerm::String(allocator.create_string(String::from("foo")))),
+                                        &factory,
+                                        &allocator,
+                                    )
                                 ),
                             ),
                             factory.create_let_term(
@@ -3936,35 +4074,389 @@ mod tests {
     fn throw_statements() {
         let factory = TermFactory::default();
         let allocator = DefaultAllocator::default();
-        let env = Env::new();
+        let env = Env::new().with_globals(builtin_globals(&factory, &allocator));
         assert_eq!(
             parse("throw new Error(\"foo\")", &env, &factory, &allocator),
             Ok(factory.create_application_term(
                 factory.create_native_function_term(throw()),
-                allocator.create_unit_list(factory.create_value_term(ValueTerm::String(
-                    allocator.create_string(String::from("foo"))
-                ))),
+                allocator.create_unit_list(create_error_instance(
+                    factory.create_value_term(ValueTerm::String(
+                        allocator.create_string(String::from("foo"))
+                    )),
+                    &factory,
+                    &allocator
+                )),
             )),
         );
         assert_eq!(
             parse("throw new Error(`foo${'bar'}`)", &env, &factory, &allocator),
             Ok(factory.create_application_term(
                 factory.create_native_function_term(throw()),
-                allocator.create_unit_list(factory.create_application_term(
-                    factory.create_builtin_term(BuiltinTerm::Concat),
-                    allocator.create_pair(
-                        factory.create_value_term(ValueTerm::String(
-                            allocator.create_string(String::from("foo"))
-                        )),
-                        factory.create_application_term(
-                            factory.create_native_function_term(to_string()),
-                            allocator.create_unit_list(factory.create_value_term(
-                                ValueTerm::String(allocator.create_string(String::from("bar")))
+                allocator.create_unit_list(create_error_instance(
+                    factory.create_application_term(
+                        factory.create_builtin_term(BuiltinTerm::Concat),
+                        allocator.create_pair(
+                            factory.create_value_term(ValueTerm::String(
+                                allocator.create_string(String::from("foo"))
                             )),
+                            factory.create_application_term(
+                                factory.create_native_function_term(to_string()),
+                                allocator.create_unit_list(factory.create_value_term(
+                                    ValueTerm::String(allocator.create_string(String::from("bar")))
+                                )),
+                            ),
                         ),
                     ),
+                    &factory,
+                    &allocator
                 )),
             )),
+        );
+    }
+
+    #[test]
+    fn try_catch_statements() {
+        let factory = TermFactory::default();
+        let allocator = DefaultAllocator::default();
+        let env = Env::new().with_globals(builtin_globals(&factory, &allocator));
+        let expression = parse(
+            "(() => {
+                try {
+                    return 3;
+                } catch {
+                    return 4;
+                }
+            })()",
+            &env,
+            &factory,
+            &allocator,
+        )
+        .unwrap();
+        let result = evaluate(
+            &expression,
+            &DynamicState::new(),
+            &factory,
+            &allocator,
+            &mut SubstitutionCache::new(),
+        );
+        assert_eq!(
+            result,
+            EvaluationResult::new(
+                factory.create_value_term(ValueTerm::Float(3.0)),
+                DependencyList::empty(),
+            ),
+        );
+        let expression = parse(
+            "(() => {
+                try {
+                    throw new Error('foo');
+                } catch {
+                    return 3;
+                }
+            })()",
+            &env,
+            &factory,
+            &allocator,
+        )
+        .unwrap();
+        let result = evaluate(
+            &expression,
+            &DynamicState::new(),
+            &factory,
+            &allocator,
+            &mut SubstitutionCache::new(),
+        );
+        assert_eq!(
+            result,
+            EvaluationResult::new(
+                factory.create_value_term(ValueTerm::Float(3.0)),
+                DependencyList::empty(),
+            ),
+        );
+        let expression = parse(
+            "(() => {
+                try {
+                    return 3;
+                } catch (error) {
+                    return 4;
+                }
+            })()",
+            &env,
+            &factory,
+            &allocator,
+        )
+        .unwrap();
+        let result = evaluate(
+            &expression,
+            &DynamicState::new(),
+            &factory,
+            &allocator,
+            &mut SubstitutionCache::new(),
+        );
+        assert_eq!(
+            result,
+            EvaluationResult::new(
+                factory.create_value_term(ValueTerm::Float(3.0)),
+                DependencyList::empty(),
+            ),
+        );
+        let expression = parse(
+            "(() => {
+                try {
+                    throw new Error('foo');
+                } catch (error) {
+                    return 3;
+                }
+            })()",
+            &env,
+            &factory,
+            &allocator,
+        )
+        .unwrap();
+        let result = evaluate(
+            &expression,
+            &DynamicState::new(),
+            &factory,
+            &allocator,
+            &mut SubstitutionCache::new(),
+        );
+        assert_eq!(
+            result,
+            EvaluationResult::new(
+                factory.create_value_term(ValueTerm::Float(3.0)),
+                DependencyList::empty(),
+            ),
+        );
+        let expression = parse(
+            "(() => {
+                try {
+                    throw new Error('foo');
+                } catch (error) {
+                    return error.message;
+                }
+            })()",
+            &env,
+            &factory,
+            &allocator,
+        )
+        .unwrap();
+        let result = evaluate(
+            &expression,
+            &DynamicState::new(),
+            &factory,
+            &allocator,
+            &mut SubstitutionCache::new(),
+        );
+        assert_eq!(
+            result,
+            EvaluationResult::new(
+                factory.create_value_term(ValueTerm::String(
+                    allocator.create_string(String::from("foo")),
+                )),
+                DependencyList::empty(),
+            ),
+        );
+        let expression = parse(
+            "(() => {
+                try {
+                    throw new Error('foo');
+                } catch (error) {
+                    return error.errors[0].message;
+                }
+            })()",
+            &env,
+            &factory,
+            &allocator,
+        )
+        .unwrap();
+        let result = evaluate(
+            &expression,
+            &DynamicState::new(),
+            &factory,
+            &allocator,
+            &mut SubstitutionCache::new(),
+        );
+        assert_eq!(
+            result,
+            EvaluationResult::new(
+                factory.create_value_term(ValueTerm::String(
+                    allocator.create_string(String::from("foo")),
+                )),
+                DependencyList::empty(),
+            ),
+        );
+        let expression = parse(
+            "(() => {
+                try {
+                    const foo = (() => { throw new Error('foo'); })();
+                    const bar = (() => { throw new Error('bar'); })();
+                    return foo + bar;
+                } catch (error) {
+                    return error.message;
+                }
+            })()",
+            &env,
+            &factory,
+            &allocator,
+        )
+        .unwrap();
+        let result = evaluate(
+            &expression,
+            &DynamicState::new(),
+            &factory,
+            &allocator,
+            &mut SubstitutionCache::new(),
+        );
+        assert_eq!(
+            result,
+            EvaluationResult::new(
+                factory.create_value_term(ValueTerm::String(
+                    allocator.create_string(
+                        get_combined_errors(
+                            vec![String::from("foo"), String::from("bar")],
+                            &factory,
+                            &allocator
+                        )
+                        .join("\n")
+                    )
+                )),
+                DependencyList::empty(),
+            ),
+        );
+        let expression = parse(
+            "(() => {
+                try {
+                    const foo = (() => { throw new Error('foo'); })();
+                    const bar = (() => { throw new Error('bar'); })();
+                    return foo + bar;
+                } catch (error) {
+                    return error.errors[0].message;
+                }
+            })()",
+            &env,
+            &factory,
+            &allocator,
+        )
+        .unwrap();
+        let result = evaluate(
+            &expression,
+            &DynamicState::new(),
+            &factory,
+            &allocator,
+            &mut SubstitutionCache::new(),
+        );
+        assert_eq!(
+            result,
+            EvaluationResult::new(
+                factory.create_value_term(ValueTerm::String(
+                    allocator.create_string(
+                        get_combined_errors(
+                            vec![String::from("foo"), String::from("bar")],
+                            &factory,
+                            &allocator
+                        )
+                        .get(0)
+                        .cloned()
+                        .unwrap()
+                    )
+                )),
+                DependencyList::empty(),
+            ),
+        );
+        let expression = parse(
+            "(() => {
+                try {
+                    const foo = (() => { throw new Error('foo'); })();
+                    const bar = (() => { throw new Error('bar'); })();
+                    return foo + bar;
+                } catch (error) {
+                    return error.errors[1].message;
+                }
+            })()",
+            &env,
+            &factory,
+            &allocator,
+        )
+        .unwrap();
+        let result = evaluate(
+            &expression,
+            &DynamicState::new(),
+            &factory,
+            &allocator,
+            &mut SubstitutionCache::new(),
+        );
+        assert_eq!(
+            result,
+            EvaluationResult::new(
+                factory.create_value_term(ValueTerm::String(
+                    allocator.create_string(
+                        get_combined_errors(
+                            vec![String::from("foo"), String::from("bar")],
+                            &factory,
+                            &allocator
+                        )
+                        .get(1)
+                        .cloned()
+                        .unwrap()
+                    )
+                )),
+                DependencyList::empty(),
+            ),
+        );
+        let expression = parse(
+            "(() => {
+                try {
+                    const foo = (() => { throw new Error('foo'); })();
+                    const bar = (() => { throw new Error('bar'); })();
+                    return foo + bar;
+                } catch (error) {
+                    throw error;
+                }
+            })()",
+            &env,
+            &factory,
+            &allocator,
+        )
+        .unwrap();
+        let result = evaluate(
+            &expression,
+            &DynamicState::new(),
+            &factory,
+            &allocator,
+            &mut SubstitutionCache::new(),
+        );
+        assert_eq!(
+            result,
+            EvaluationResult::new(
+                factory.create_signal_term(
+                    allocator.create_signal_list(
+                        vec![String::from("foo"), String::from("bar")]
+                            .into_iter()
+                            .map(|message| {
+                                allocator.create_signal(
+                                    SignalType::Error,
+                                    allocator.create_unit_list(create_struct(
+                                        once((
+                                            String::from("name"),
+                                            factory.create_value_term(ValueTerm::String(
+                                                allocator.create_string(String::from("Error")),
+                                            )),
+                                        ))
+                                        .chain(once((
+                                            String::from("message"),
+                                            factory.create_value_term(ValueTerm::String(
+                                                allocator.create_string(message),
+                                            )),
+                                        ))),
+                                        &factory,
+                                        &allocator,
+                                    )),
+                                )
+                            }),
+                    )
+                ),
+                DependencyList::empty(),
+            ),
         );
     }
 
@@ -4423,7 +4915,12 @@ mod tests {
             )),
         );
         assert_eq!(
-            parse("((x, y) => x + y)(1, 2, ...[3, 4])", &env, &factory, &allocator),
+            parse(
+                "((x, y) => x + y)(1, 2, ...[3, 4])",
+                &env,
+                &factory,
+                &allocator
+            ),
             Ok(factory.create_application_term(
                 factory.create_builtin_term(BuiltinTerm::Apply),
                 allocator.create_pair(

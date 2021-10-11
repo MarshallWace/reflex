@@ -5,7 +5,8 @@ use std::{any::TypeId, iter::once};
 
 use reflex::{
     core::{
-        Arity, Expression, ExpressionFactory, ExpressionList, NativeAllocator, StringValue, VarArgs,
+        Arity, Expression, ExpressionFactory, ExpressionList, HeapAllocator, NativeAllocator,
+        Signal, SignalType, StringValue, VarArgs,
     },
     hash::{hash_object, HashId},
     lang::{BuiltinTerm, NativeFunction, ValueTerm},
@@ -28,6 +29,7 @@ pub fn builtin_plugins<T: Expression>() -> impl IntoIterator<Item = NativeFuncti
         dispatch(),
         encode_uri_component(),
         from_entries(),
+        format_error_message(),
         json_parse(),
         json_stringify(),
         map_constructor(),
@@ -56,16 +58,53 @@ impl Throw {
     fn apply<T: Expression>(
         args: ExpressionList<T>,
         factory: &dyn ExpressionFactory<T>,
-        _allocator: &dyn NativeAllocator<T>,
+        allocator: &dyn NativeAllocator<T>,
     ) -> Result<T, String> {
         let mut args = args.into_iter();
-        let message = args.next().unwrap();
-        let message = match factory.match_value_term(&message) {
-            Some(message) => format_value(message),
-            _ => String::from("Unknown error"),
+        let error = args.next().unwrap();
+        if !error.is_static() {
+            return Err(String::from(
+                "Thrown exceptions cannot contain dynamic values",
+            ));
+        }
+        let signals = if let Some(errors) = parse_aggregate_error(&error, &factory) {
+            allocator.create_signal_list(
+                errors
+                    .iter()
+                    .cloned()
+                    .map(|error| create_error_signal(error, &allocator))
+                    .collect(),
+            )
+        } else {
+            allocator.create_signal_list(once(create_error_signal(error, &allocator)).collect())
         };
-        Err(message)
+        Ok(factory.create_signal_term(signals))
     }
+}
+fn parse_aggregate_error<'a, T: Expression + 'a>(
+    target: &'a T,
+    factory: &impl ExpressionFactory<T>,
+) -> Option<&'a ExpressionList<T>> {
+    factory.match_struct_term(target).and_then(|target| {
+        target.get("name").and_then(|error_type| {
+            factory.match_value_term(error_type).and_then(|error_type| {
+                error_type.match_string().and_then(|name| {
+                    if name.as_str() == "AggregateError" {
+                        target.get("errors").and_then(|errors| {
+                            factory
+                                .match_vector_term(errors)
+                                .map(|errors| errors.items())
+                        })
+                    } else {
+                        None
+                    }
+                })
+            })
+        })
+    })
+}
+fn create_error_signal<T: Expression>(error: T, allocator: &impl HeapAllocator<T>) -> Signal<T> {
+    allocator.create_signal(SignalType::Error, allocator.create_unit_list(error))
 }
 
 pub fn construct<T: Expression>() -> NativeFunction<T> {
@@ -186,6 +225,93 @@ impl ToString {
             ))),
             _ => Err(format!("Expected printable value, received {}", operand)),
         }
+    }
+}
+
+pub fn format_error_message<T: Expression>() -> NativeFunction<T> {
+    NativeFunction::new(
+        FormatErrorMessage::uid(),
+        FormatErrorMessage::name(),
+        FormatErrorMessage::arity(),
+        FormatErrorMessage::apply,
+    )
+}
+const UNKNOWN_ERROR_MESSAGE: &'static str = "Unknown error";
+struct FormatErrorMessage {}
+impl FormatErrorMessage {
+    fn uid() -> HashId {
+        hash_object(&TypeId::of::<Self>())
+    }
+    fn name() -> Option<&'static str> {
+        Some("FormatErrorMessage")
+    }
+    fn arity() -> Arity {
+        Arity::from(1, 0, None)
+    }
+    fn apply<T: Expression>(
+        args: ExpressionList<T>,
+        factory: &dyn ExpressionFactory<T>,
+        allocator: &dyn NativeAllocator<T>,
+    ) -> Result<T, String> {
+        let mut args = args.into_iter();
+        if args.len() != 1 {
+            return Err(format!("Expected 1 argument, received {}", args.len(),));
+        }
+        let operand = args.next().unwrap();
+        let message = parse_error_message(&operand, &factory)
+            .or_else(|| {
+                if let Some(value) = factory.match_vector_term(&operand) {
+                    let max_displayed_errors = 10;
+                    let num_errors = value.items().len();
+                    let messages = value
+                        .items()
+                        .iter()
+                        .take(if num_errors > max_displayed_errors {
+                            max_displayed_errors - 1
+                        } else {
+                            num_errors
+                        })
+                        .map(|item| {
+                            parse_error_message(item, &factory)
+                                .unwrap_or_else(|| String::from(UNKNOWN_ERROR_MESSAGE))
+                        });
+                    Some(
+                        messages
+                            .chain(if num_errors > max_displayed_errors {
+                                Some(format!(
+                                    "...{} more errors",
+                                    num_errors - max_displayed_errors - 1
+                                ))
+                            } else {
+                                None
+                            })
+                            .collect::<Vec<_>>()
+                            .join("\n"),
+                    )
+                } else {
+                    None
+                }
+            })
+            .unwrap_or_else(|| String::from(UNKNOWN_ERROR_MESSAGE));
+        Ok(factory.create_value_term(ValueTerm::String(allocator.create_string(message))))
+    }
+}
+fn parse_error_message<T: Expression>(
+    target: &T,
+    factory: &impl ExpressionFactory<T>,
+) -> Option<String> {
+    if let Some(value) = factory.match_value_term(&target) {
+        Some(format_value(value))
+    } else if let Some(value) = factory.match_struct_term(&target) {
+        value.get("message").and_then(|value| {
+            factory.match_value_term(value).and_then(|value| {
+                value
+                    .match_string()
+                    .map(|value| String::from(value.as_str()))
+            })
+        })
+    } else {
+        None
     }
 }
 

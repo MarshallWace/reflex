@@ -5,6 +5,8 @@ use reflex::core::{Expression, ExpressionFactory, HeapAllocator};
 
 pub(crate) mod boolean;
 pub use boolean::global_boolean;
+pub(crate) mod error;
+pub use error::{global_aggregate_error, global_error};
 pub(crate) mod json;
 pub use json::global_json;
 pub(crate) mod map;
@@ -28,6 +30,8 @@ pub fn builtin_globals<T: Expression>(
         ("Boolean", global_boolean(factory, allocator)),
         ("String", global_string(factory, allocator)),
         ("Object", global_object(factory, allocator)),
+        ("Error", global_error(factory, allocator)),
+        ("AggregateError", global_aggregate_error(factory, allocator)),
         ("Math", global_math(factory, allocator)),
         ("Map", global_map(factory)),
         ("Set", global_set(factory)),
