@@ -4,14 +4,17 @@
 #![feature(test)]
 extern crate test;
 
-use std::iter::once;
+use std::iter::{empty, once};
 
 use test::Bencher;
 
 use reflex::{
     allocator::DefaultAllocator,
     cache::SubstitutionCache,
-    compiler::{Instruction, InstructionPointer, NativeFunctionRegistry, Program},
+    compiler::{
+        Compiler, CompilerMode, CompilerOptions, Instruction, InstructionPointer,
+        NativeFunctionRegistry, Program,
+    },
     core::{evaluate, DynamicState, ExpressionFactory, HeapAllocator},
     interpreter::{execute, DefaultInterpreterCache, InterpreterOptions},
     lang::{BuiltinTerm, TermFactory, ValueTerm},
@@ -31,7 +34,7 @@ fn nested_expressions(b: &mut Bencher) {
 }
 
 #[bench]
-fn nested_expressions_compiled(b: &mut Bencher) {
+fn nested_expressions_bytecode(b: &mut Bencher) {
     let factory = TermFactory::default();
     let program = Program::new(vec![
         Instruction::PushInt { value: 5 },
@@ -54,16 +57,52 @@ fn nested_expressions_compiled(b: &mut Bencher) {
         Instruction::Evaluate,
         Instruction::Return,
     ]);
-    let allocator = DefaultAllocator::default();
-    let mut cache = DefaultInterpreterCache::default();
-    let state = DynamicState::new();
     let builtins = Vec::new();
     let plugins = NativeFunctionRegistry::default();
+    let entry_point = InstructionPointer::default();
+    let allocator = DefaultAllocator::default();
+    let state = DynamicState::new();
     let options = InterpreterOptions::default();
+    let mut cache = DefaultInterpreterCache::default();
     b.iter(|| {
         execute(
             &program,
-            InstructionPointer::default(),
+            entry_point,
+            &state,
+            &factory,
+            &allocator,
+            &builtins,
+            &plugins,
+            &options,
+            &mut cache,
+        )
+    });
+}
+
+#[bench]
+fn nested_expressions_compiled(b: &mut Bencher) {
+    let factory = TermFactory::default();
+    let allocator = DefaultAllocator::default();
+    let expression = parse("(+ (+ (abs -3) 4) 5)", &factory, &allocator).unwrap();
+    let (program, builtins, plugins) = Compiler::new(CompilerOptions::unoptimized(), None)
+        .compile(
+            &expression,
+            CompilerMode::Expression,
+            false,
+            empty(),
+            &factory,
+            &allocator,
+        )
+        .unwrap()
+        .into_parts();
+    let entry_point = InstructionPointer::default();
+    let state = DynamicState::new();
+    let options = InterpreterOptions::default();
+    let mut cache = DefaultInterpreterCache::default();
+    b.iter(|| {
+        execute(
+            &program,
+            entry_point,
             &state,
             &factory,
             &allocator,
