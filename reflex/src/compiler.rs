@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use std::{
     collections::{hash_map::DefaultHasher, BTreeMap, HashMap},
     convert::identity,
@@ -20,7 +21,10 @@ use crate::{
         NativeFunction, NativeFunctionId, SymbolId,
     },
 };
+use serde::Serialize;
 use strum::IntoEnumIterator;
+
+pub mod serialization;
 
 pub trait Compile<T: Expression + Compile<T>> {
     fn compile(
@@ -33,7 +37,7 @@ pub trait Compile<T: Expression + Compile<T>> {
     ) -> Result<(Program, NativeFunctionRegistry<T>), String>;
 }
 
-#[derive(Hash, PartialEq, Clone, Debug)]
+#[derive(Hash, PartialEq, Clone, Debug, Serialize)]
 pub struct Program {
     instructions: Vec<Instruction>,
 }
@@ -85,7 +89,7 @@ impl std::fmt::Display for Program {
     }
 }
 
-#[derive(PartialEq, Clone, Debug)]
+#[derive(PartialEq, Clone, Debug, Serialize)]
 pub enum Instruction {
     PushStatic {
         offset: StackOffset,
@@ -317,7 +321,7 @@ impl std::hash::Hash for Instruction {
     }
 }
 
-#[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Default, Clone, Copy)]
+#[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Default, Clone, Copy, Serialize)]
 pub struct InstructionPointer(usize);
 impl InstructionPointer {
     pub fn new(address: usize) -> Self {

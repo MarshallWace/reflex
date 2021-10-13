@@ -10,6 +10,6 @@ edition = "2018"
 [dependencies]
 fnv = "1.0.7"
 im = "15.0.0"
-serde = "1.0"
+serde = { version = "^1.0", features = ["derive"] }
 strum = "0.21"
 strum_macros = "0.21"

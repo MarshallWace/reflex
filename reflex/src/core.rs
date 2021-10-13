@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use fnv::FnvHashMap;
 use im::OrdSet;
 use std::{
@@ -14,6 +15,7 @@ use crate::{
     compiler::InstructionPointer,
     hash::{hash_object, HashId},
 };
+use serde::Serialize;
 
 pub trait Expression:
     GraphNode
@@ -413,7 +415,7 @@ impl std::fmt::Display for CacheMetrics {
     }
 }
 
-#[derive(Hash, Eq, PartialEq, Clone, Debug)]
+#[derive(Hash, Eq, PartialEq, Clone, Debug, Serialize)]
 pub struct StructPrototype {
     keys: Vec<String>,
 }
@@ -791,7 +793,7 @@ impl<T: Expression> HeapAllocator<T> for &dyn NativeAllocator<T> {
     }
 }
 
-#[derive(Hash, Eq, PartialEq, Clone, Copy, Debug)]
+#[derive(Hash, Eq, PartialEq, Clone, Copy, Debug, Serialize)]
 pub struct Arity {
     eager: usize,
     lazy: usize,
@@ -824,7 +826,7 @@ impl std::fmt::Display for Arity {
     }
 }
 
-#[derive(Hash, Eq, PartialEq, Clone, Copy, Debug)]
+#[derive(Hash, Eq, PartialEq, Clone, Copy, Debug, Serialize)]
 pub enum VarArgs {
     Eager,
     Lazy,
@@ -897,7 +899,7 @@ impl<T: Expression> std::fmt::Display for Signal<T> {
     }
 }
 
-#[derive(Hash, Eq, PartialEq, Clone, Debug)]
+#[derive(Hash, Eq, PartialEq, Clone, Debug, Serialize)]
 pub enum SignalType {
     Error,
     Pending,

@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use std::{collections::HashSet, iter::once};
 
 use crate::{
@@ -14,6 +15,7 @@ use crate::{
     hash::{hash_object, HashId},
     lang::with_eagerness,
 };
+use serde::Serialize;
 use strum_macros::EnumIter;
 
 mod add;
@@ -127,7 +129,7 @@ pub use subtract::*;
 mod values;
 pub use values::*;
 
-#[derive(Hash, Eq, PartialEq, Clone, Copy, Debug, EnumIter)]
+#[derive(Hash, Eq, PartialEq, Clone, Copy, Debug, EnumIter, Serialize)]
 pub enum BuiltinTerm {
     Add,
     Abs,
@@ -433,17 +435,6 @@ impl<T: Expression + Applicable<T> + Compile<T>> Compile<T> for BuiltinTerm {
 impl std::fmt::Display for BuiltinTerm {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "<builtin:{:?}>", self)
-    }
-}
-impl serde::Serialize for BuiltinTerm {
-    fn serialize<S>(&self, _serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        Err(serde::ser::Error::custom(format!(
-            "Unable to serialize term: {}",
-            self
-        )))
     }
 }
 
