@@ -3,21 +3,18 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use std::{
-    convert::Infallible,
-    env, fs,
-    io::Write,
-    net::SocketAddr,
-    path::{Path, PathBuf},
-    str::FromStr,
-    sync::Arc,
-    time::Instant,
+    convert::Infallible, env, fs, io::Write, net::SocketAddr, path::Path, sync::Arc, time::Instant,
 };
 
 use crate::graphql_service;
+use anyhow::{anyhow, Context, Result};
 use clap::Parser;
 use hyper::{server::conn::AddrStream, service::make_service_fn, Server};
 use reflex::{
-    compiler::{Compile, Compiler, CompilerMode, CompilerOptions, CompilerOutput, Program},
+    compiler::{
+        serialization::SerializableCompilerOutput, Compile, Compiler, CompilerMode,
+        CompilerOptions, CompilerOutput, Program,
+    },
     core::{
         Applicable, Expression, ExpressionFactory, HeapAllocator, Reducible, Rewritable, Signal,
         StringValue,
@@ -76,104 +73,127 @@ pub async fn cli<
     plugins: impl IntoIterator<Item = NativeFunction<T>>,
     compiler_options: Option<CompilerOptions>,
     interpreter_options: Option<InterpreterOptions>,
-) -> Result<(), String>
+) -> Result<()>
 where
     T::String: StringValue + Send + Sync,
 {
     let args: Opts = Opts::parse();
-    let config = {
-        let entry_point = match PathBuf::from_str(&args.entry_point) {
-            Err(_) => Err(format!(
-                "Invalid entry point module path: {}",
-                &args.entry_point
-            )),
-            Ok(path) => load_file(&path).map(|source| (path, source)),
-        };
-        match entry_point {
-            Err(error) => Err(error),
-            Ok(entry_point) => Ok((
-                env::vars(),
-                entry_point,
-                SocketAddr::from(([0, 0, 0, 0], args.port)),
-                args,
-            )),
-        }
+    let root_module_path = &args.entry_point;
+    let compiler_options = compiler_options.unwrap_or_else(|| CompilerOptions {
+        debug: args.debug_compiler,
+        ..CompilerOptions::default()
+    });
+    let compiled_root = if args.precompiled {
+        deserialize_compiler_output(root_module_path, plugins)?
+    } else {
+        compile_source(
+            root_module_path,
+            custom_loader,
+            factory,
+            allocator,
+            plugins,
+            compiler_options,
+        )?
     };
-    match config {
-        Err(error) => Err(format!("Unable to start server: {}", error)),
-        Ok((env_vars, entry_point, address, args)) => {
-            let (root_module_path, root_module_source) = entry_point;
-            match create_graph_root(
-                &root_module_path,
-                &root_module_source,
-                env_vars,
-                custom_loader,
-                factory,
-                allocator,
-            ) {
-                Err(error) => Err(format!("Failed to load entry point module: {}", error)),
-                Ok(root) => {
-                    let compiler_options = compiler_options.unwrap_or_else(|| CompilerOptions {
-                        debug: args.debug_compiler,
-                        ..CompilerOptions::default()
-                    });
-                    let interpreter_options =
-                        interpreter_options.unwrap_or_else(|| InterpreterOptions {
-                            debug_instructions: args.debug_interpreter || args.debug_stack,
-                            debug_stack: args.debug_stack,
-                            ..InterpreterOptions::default()
-                        });
-                    let compiled_root =
-                        compile_root(root, factory, allocator, plugins, compiler_options)?;
-                    let (program, builtins, plugins) = compiled_root.into_parts();
-                    let state = RuntimeState::default();
-                    let cache = RuntimeCache::default();
-                    let runtime = if args.debug_signals {
-                        Runtime::new(
-                            state,
-                            builtins,
-                            plugins,
-                            debug_signal_handler(signal_handler),
-                            cache,
-                            factory,
-                            allocator,
-                            interpreter_options,
-                            compiler_options,
-                        )
-                    } else {
-                        Runtime::new(
-                            state,
-                            builtins,
-                            plugins,
-                            signal_handler,
-                            cache,
-                            factory,
-                            allocator,
-                            interpreter_options,
-                            compiler_options,
-                        )
-                    };
-                    let server = create_server(
-                        runtime,
-                        program,
-                        factory,
-                        allocator,
-                        compiler_options,
-                        &address,
-                    );
-                    println!(
-                        "Listening for incoming HTTP requests on port {}",
-                        &address.port()
-                    );
-                    if let Err(error) = server.await {
-                        Err(format!("Server error: {}", error))
-                    } else {
-                        Ok(())
-                    }
-                }
-            }
-        }
+
+    let interpreter_options = interpreter_options.unwrap_or_else(|| InterpreterOptions {
+        debug_instructions: args.debug_interpreter || args.debug_stack,
+        debug_stack: args.debug_stack,
+        ..InterpreterOptions::default()
+    });
+    let (program, builtins, plugins) = compiled_root.into_parts();
+    let state = RuntimeState::default();
+    let cache = RuntimeCache::default();
+    let runtime = if args.debug_signals {
+        Runtime::new(
+            state,
+            builtins,
+            plugins,
+            debug_signal_handler(signal_handler),
+            cache,
+            factory,
+            allocator,
+            interpreter_options,
+            compiler_options,
+        )
+    } else {
+        Runtime::new(
+            state,
+            builtins,
+            plugins,
+            signal_handler,
+            cache,
+            factory,
+            allocator,
+            interpreter_options,
+            compiler_options,
+        )
+    };
+    let address = SocketAddr::from(([0, 0, 0, 0], args.port));
+    let server = create_server(
+        runtime,
+        program,
+        factory,
+        allocator,
+        compiler_options,
+        &address,
+    );
+    println!(
+        "Listening for incoming HTTP requests on port {}",
+        &address.port()
+    );
+    if let Err(error) = server.await {
+        Err(anyhow!("Server error: {}", error))
+    } else {
+        Ok(())
     }
+}
+
+fn deserialize_compiler_output<T>(
+    bytecode_file: impl AsRef<Path> + std::fmt::Display,
+    plugins: impl IntoIterator<Item = NativeFunction<T>>,
+) -> Result<CompilerOutput<T>>
+where
+    T: Expression,
+{
+    let bytecode_file = fs::File::open(&bytecode_file)
+        .with_context(|| format!("Failed to open {}", bytecode_file))?;
+    let serialized_output: SerializableCompilerOutput = serde_json::from_reader(bytecode_file)?;
+    let plugins = plugins.into_iter().map(|func| (func.uid(), func)).collect();
+    serialized_output
+        .to_compiler_output(plugins)
+        .map_err(|err| anyhow!(err))
+}
+
+fn compile_source<T>(
+    root_module_path: impl AsRef<Path> + std::fmt::Display,
+    custom_loader: Option<impl Fn(&str, &Path) -> Option<Result<T, String>> + 'static>,
+    factory: &(impl AsyncExpressionFactory<T> + WithCompiledBuiltins),
+    allocator: &impl AsyncHeapAllocator<T>,
+    plugins: impl IntoIterator<Item = NativeFunction<T>>,
+    compiler_options: CompilerOptions,
+) -> Result<CompilerOutput<T>>
+where
+    T: AsyncExpression
+        + Expression<String = String>
+        + Rewritable<T>
+        + Reducible<T>
+        + Applicable<T>
+        + Compile<T>
+        + 'static,
+{
+    let root_module_source = fs::read_to_string(&root_module_path)
+        .with_context(|| format!("Failed to load {}", root_module_path))?;
+    let env_vars = env::vars();
+    let root = create_graph_root(
+        root_module_path,
+        &root_module_source,
+        env_vars,
+        custom_loader,
+        factory,
+        allocator,
+    )?;
+    compile_root(root, factory, allocator, plugins, compiler_options)
 }
 
 pub fn create_graph_root<T: Expression + 'static>(
@@ -183,7 +203,7 @@ pub fn create_graph_root<T: Expression + 'static>(
     custom_loader: Option<impl Fn(&str, &Path) -> Option<Result<T, String>> + 'static>,
     factory: &(impl ExpressionFactory<T> + Clone + 'static),
     allocator: &(impl HeapAllocator<T> + Clone + 'static),
-) -> Result<T, String> {
+) -> Result<T> {
     let env = create_js_env(env_args, factory, allocator);
     let module_loader = create_module_loader(env.clone(), custom_loader, factory, allocator);
     parse_module(
@@ -194,6 +214,7 @@ pub fn create_graph_root<T: Expression + 'static>(
         factory,
         allocator,
     )
+    .map_err(|err| anyhow!("Failed to parse module: {}", err))
 }
 
 pub fn compile_root<
@@ -204,7 +225,7 @@ pub fn compile_root<
     allocator: &impl HeapAllocator<T>,
     plugins: impl IntoIterator<Item = NativeFunction<T>>,
     compiler_options: CompilerOptions,
-) -> Result<CompilerOutput<T>, String> {
+) -> Result<CompilerOutput<T>> {
     print!("Compiling graph root...");
     let _ = std::io::stdout().flush();
     let start_time = Instant::now();
@@ -218,7 +239,7 @@ pub fn compile_root<
     );
     println!(" {:?}", start_time.elapsed());
     // TODO: Error if graph root depends on unrecognized native functions
-    compiled
+    compiled.map_err(|err| anyhow!(err))
 }
 
 async fn create_server<
@@ -245,15 +266,5 @@ where
     match server.await {
         Err(error) => Err(format!("{}", error)),
         Ok(()) => Ok(()),
-    }
-}
-
-fn load_file(path: &Path) -> Result<String, String> {
-    match fs::read_to_string(&path) {
-        Ok(data) => Ok(data),
-        Err(_) => Err(format!(
-            "Failed to load {}",
-            path.to_str().unwrap_or_else(|| "file")
-        )),
     }
 }

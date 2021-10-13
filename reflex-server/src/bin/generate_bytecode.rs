@@ -3,7 +3,11 @@
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use anyhow::{anyhow, Result};
 use clap::Parser;
-use reflex::{allocator::DefaultAllocator, compiler::{CompilerOptions, serialization::SerializableCompilerOutput}, lang::{term::CachedTerm, SharedTerm, TermFactory}};
+use reflex::{
+    allocator::DefaultAllocator,
+    compiler::{serialization::SerializableCompilerOutput, CompilerOptions},
+    lang::{term::CachedTerm, SharedTerm, TermFactory},
+};
 use reflex_graphql::{graphql_loader, graphql_plugins};
 use reflex_server::cli::{compile_root, create_graph_root};
 use std::{env, fs};
@@ -49,8 +53,10 @@ fn main() -> Result<()> {
         debug: args.print_bytecode,
         ..CompilerOptions::default()
     };
-    let compiler_output: SerializableCompilerOutput = compile_root(root, factory, allocator, plugins, compiler_options)
-        .map_err(|err| anyhow!(err))?.into();
+    let compiler_output: SerializableCompilerOutput =
+        compile_root(root, factory, allocator, plugins, compiler_options)
+            .map_err(|err| anyhow!(err))?
+            .into();
     let out_file = fs::File::create(args.out_file)?;
 
     serde_json::to_writer(out_file, &compiler_output)?;
