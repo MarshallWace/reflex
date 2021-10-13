@@ -21,7 +21,7 @@ use crate::{
         NativeFunction, NativeFunctionId, SymbolId,
     },
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use strum::IntoEnumIterator;
 
 pub mod serialization;
@@ -37,7 +37,7 @@ pub trait Compile<T: Expression + Compile<T>> {
     ) -> Result<(Program, NativeFunctionRegistry<T>), String>;
 }
 
-#[derive(Hash, PartialEq, Clone, Debug, Serialize)]
+#[derive(Hash, PartialEq, Clone, Debug, Serialize, Deserialize)]
 pub struct Program {
     instructions: Vec<Instruction>,
 }
@@ -89,7 +89,7 @@ impl std::fmt::Display for Program {
     }
 }
 
-#[derive(PartialEq, Clone, Debug, Serialize)]
+#[derive(PartialEq, Clone, Debug, Serialize, Deserialize)]
 pub enum Instruction {
     PushStatic {
         offset: StackOffset,
@@ -321,7 +321,7 @@ impl std::hash::Hash for Instruction {
     }
 }
 
-#[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Default, Clone, Copy, Serialize)]
+#[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Default, Clone, Copy, Serialize, Deserialize)]
 pub struct InstructionPointer(usize);
 impl InstructionPointer {
     pub fn new(address: usize) -> Self {

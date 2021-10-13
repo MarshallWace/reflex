@@ -4,12 +4,12 @@ version = "0.1.0"
 license = "Apache-2.0"
 authors = ["Marshall Wace LLP <opensource@mwam.com>", "Tim Kendrick <t.kendrick@mwam.com>", "Jordan Hall <j.hall@mwam.com>", "Chris Campbell <c.campbell@mwam.com>"]
 edition = "2018"
+default-run = "reflex-server"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 reflex = { path = "../reflex" }
-reflex-cli = { path = "../reflex-cli" }
 reflex-graphql = { path = "../reflex-graphql" }
 reflex-handlers = { path = "../reflex-handlers" }
 reflex-js = { path = "../reflex-js" }
@@ -19,3 +19,7 @@ futures = "*"
 hyper = { version = "0.14", features = ["full"] }
 hyper-tungstenite = "0.3.2"
 tokio = { version = "1", features = ["full"] }
+clap = { git = "https://github.com/clap-rs/clap", rev = "efeb02cd342af78d2eb8446ecce8aed05643594b" } # TODO: once clap 3.0 comes out depend on it from crates.io
+proc-macro2 = "^1.0.28"
+anyhow = "^1.0.44"
+serde_json = "^1.0"

@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 use crate::{
@@ -10,6 +11,7 @@ use crate::{
 
 use super::{CompilerOutput, InstructionPointer, NativeFunctionRegistry, Program};
 
+#[derive(Serialize, Deserialize)]
 pub struct SerializableNativeFunctionRegistry {
     values: HashMap<NativeFunctionId, InstructionPointer>,
 }
@@ -37,6 +39,18 @@ impl SerializableNativeFunctionRegistry {
     }
 }
 
+impl<T: Expression> From<NativeFunctionRegistry<T>> for SerializableNativeFunctionRegistry {
+    fn from(mut native_function_registry: NativeFunctionRegistry<T>) -> Self {
+        let values = native_function_registry
+            .values
+            .drain()
+            .map(|(key, (_, pointer))| (key, pointer))
+            .collect();
+        Self { values }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
 pub struct SerializableCompilerOutput {
     program: Program,
     builtins: Vec<(BuiltinTerm, InstructionPointer)>,
@@ -53,5 +67,15 @@ impl SerializableCompilerOutput {
             self.builtins,
             self.plugins.to_registry(native_functions)?,
         ))
+    }
+}
+
+impl<T: Expression> From<CompilerOutput<T>> for SerializableCompilerOutput {
+    fn from(compiler_output: CompilerOutput<T>) -> Self {
+        Self {
+            program: compiler_output.program,
+            builtins: compiler_output.builtins,
+            plugins: compiler_output.plugins.into(),
+        }
     }
 }

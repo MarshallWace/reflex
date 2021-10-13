@@ -15,7 +15,7 @@ use crate::{
     compiler::InstructionPointer,
     hash::{hash_object, HashId},
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 pub trait Expression:
     GraphNode
@@ -415,7 +415,7 @@ impl std::fmt::Display for CacheMetrics {
     }
 }
 
-#[derive(Hash, Eq, PartialEq, Clone, Debug, Serialize)]
+#[derive(Hash, Eq, PartialEq, Clone, Debug, Serialize, Deserialize)]
 pub struct StructPrototype {
     keys: Vec<String>,
 }
@@ -899,7 +899,7 @@ impl<T: Expression> std::fmt::Display for Signal<T> {
     }
 }
 
-#[derive(Hash, Eq, PartialEq, Clone, Debug, Serialize)]
+#[derive(Hash, Eq, PartialEq, Clone, Debug, Serialize, Deserialize)]
 pub enum SignalType {
     Error,
     Pending,

@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use std::{
     convert::Infallible,
     env, fs,
@@ -13,6 +14,7 @@ use std::{
 };
 
 use crate::graphql_service;
+use clap::Parser;
 use hyper::{server::conn::AddrStream, service::make_service_fn, Server};
 use reflex::{
     compiler::{Compile, Compiler, CompilerMode, CompilerOptions, CompilerOutput, Program},
@@ -23,7 +25,6 @@ use reflex::{
     interpreter::InterpreterOptions,
     lang::{NativeFunction, WithCompiledBuiltins},
 };
-use reflex_cli::parse_cli_args;
 use reflex_handlers::debug_signal_handler;
 use reflex_js::{create_js_env, parse_module};
 use reflex_runtime::{
@@ -38,12 +39,21 @@ pub use reflex_js::{
 };
 pub use reflex_runtime::{SignalHandlerResult, SignalResult};
 
-struct CliArgs {
+#[derive(Parser)]
+struct Opts {
+    #[clap(about = "Either a js file or a precompiled bytecode file")]
     entry_point: String,
+    #[clap(about = "Port on which to expose a server")]
     port: u16,
+    #[clap(long, about = "Interpret entry_point as a precompiled bytecode file")]
+    precompiled: bool,
+    #[clap(long, about = "Add debug printing of signal handlers")]
     debug_signals: bool,
+    #[clap(long, about = "Add debug printing of bytecode output from compiler")]
     debug_compiler: bool,
+    #[clap(long, about = "Add debug printing of bytecode execution")]
     debug_interpreter: bool,
+    #[clap(long, about = "Add debug printing of stack during execution")]
     debug_stack: bool,
 }
 
@@ -70,25 +80,23 @@ pub async fn cli<
 where
     T::String: StringValue + Send + Sync,
 {
-    let config = match parse_command_line_args() {
-        Err(error) => Err(error),
-        Ok(args) => {
-            let entry_point = match PathBuf::from_str(&args.entry_point) {
-                Err(_) => Err(format!(
-                    "Invalid entry point module path: {}",
-                    &args.entry_point
-                )),
-                Ok(path) => load_file(&path).map(|source| (path, source)),
-            };
-            match entry_point {
-                Err(error) => Err(error),
-                Ok(entry_point) => Ok((
-                    env::vars(),
-                    entry_point,
-                    SocketAddr::from(([0, 0, 0, 0], args.port)),
-                    args,
-                )),
-            }
+    let args: Opts = Opts::parse();
+    let config = {
+        let entry_point = match PathBuf::from_str(&args.entry_point) {
+            Err(_) => Err(format!(
+                "Invalid entry point module path: {}",
+                &args.entry_point
+            )),
+            Ok(path) => load_file(&path).map(|source| (path, source)),
+        };
+        match entry_point {
+            Err(error) => Err(error),
+            Ok(entry_point) => Ok((
+                env::vars(),
+                entry_point,
+                SocketAddr::from(([0, 0, 0, 0], args.port)),
+                args,
+            )),
         }
     };
     match config {
@@ -168,8 +176,8 @@ where
     }
 }
 
-fn create_graph_root<T: Expression + 'static>(
-    root_module_path: &Path,
+pub fn create_graph_root<T: Expression + 'static>(
+    root_module_path: impl AsRef<Path>,
     root_module_source: &str,
     env_args: impl IntoIterator<Item = (String, String)>,
     custom_loader: Option<impl Fn(&str, &Path) -> Option<Result<T, String>> + 'static>,
@@ -181,14 +189,16 @@ fn create_graph_root<T: Expression + 'static>(
     parse_module(
         root_module_source,
         &env,
-        root_module_path,
+        root_module_path.as_ref(),
         &module_loader,
         factory,
         allocator,
     )
 }
 
-fn compile_root<T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>>(
+pub fn compile_root<
+    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
+>(
     root: T,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
@@ -235,41 +245,6 @@ where
     match server.await {
         Err(error) => Err(format!("{}", error)),
         Ok(()) => Ok(()),
-    }
-}
-
-fn parse_command_line_args() -> Result<CliArgs, String> {
-    let args = parse_cli_args(env::args().skip(1));
-    let port = match args
-        .get("port")
-        .and_then(|port| port.map(|port| port.parse::<u16>().or_else(|_| Err(port))))
-    {
-        Some(Ok(value)) => Ok(value),
-        None => Err(String::from("Missing --port argument")),
-        Some(Err(value)) => Err(format!("Invalid --port argument: {}", value)),
-    }?;
-    let debug_signals = args.get("debug").is_some();
-    let debug_compiler = args.get("bytecode").is_some();
-    let debug_interpreter = args.get("vm").is_some();
-    let debug_stack = args.get("stack").is_some();
-    let mut args = args.into_iter();
-    let entry_point = args.next();
-    match entry_point {
-        None => Err(String::from("Missing entry point module path")),
-        Some(entry_point) => {
-            if let Some(_) = args.next() {
-                Err(String::from("Multiple entry point modules specified"))
-            } else {
-                Ok(CliArgs {
-                    port,
-                    entry_point,
-                    debug_signals,
-                    debug_compiler,
-                    debug_interpreter,
-                    debug_stack,
-                })
-            }
-        }
     }
 }
 

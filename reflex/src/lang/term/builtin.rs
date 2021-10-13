@@ -15,7 +15,7 @@ use crate::{
     hash::{hash_object, HashId},
     lang::with_eagerness,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use strum_macros::EnumIter;
 
 mod add;
@@ -129,7 +129,7 @@ pub use subtract::*;
 mod values;
 pub use values::*;
 
-#[derive(Hash, Eq, PartialEq, Clone, Copy, Debug, EnumIter, Serialize)]
+#[derive(Hash, Eq, PartialEq, Clone, Copy, Debug, EnumIter, Serialize, Deserialize)]
 pub enum BuiltinTerm {
     Add,
     Abs,
