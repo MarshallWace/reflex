@@ -30,11 +30,14 @@ pub fn import_loader<T: Expression>(
                                         create_load_expression(
                                             factory.create_static_variable_term(1),
                                             factory.create_application_term(
-                                                factory.create_builtin_term(BuiltinTerm::ResolveDeep),
+                                                factory
+                                                    .create_builtin_term(BuiltinTerm::ResolveDeep),
                                                 allocator.create_unit_list(
-                                                    factory.create_vector_term(allocator.create_unit_list(
-                                                        factory.create_static_variable_term(0),
-                                                    )),
+                                                    factory.create_vector_term(
+                                                        allocator.create_unit_list(
+                                                            factory.create_static_variable_term(0),
+                                                        ),
+                                                    ),
                                                 ),
                                             ),
                                             factory,
@@ -85,7 +88,19 @@ fn create_load_expression<T: Expression>(
             once(factory.create_value_term(ValueTerm::String(
                 allocator.create_string(String::from(SIGNAL_TYPE_LOAD)),
             )))
-            .chain(once(loader))
+            .chain(once(factory.create_partial_application_term(
+                factory.create_lambda_term(
+                    2,
+                    factory.create_application_term(
+                        factory.create_builtin_term(BuiltinTerm::ResolveShallow),
+                        allocator.create_unit_list(factory.create_application_term(
+                            factory.create_static_variable_term(1),
+                            allocator.create_unit_list(factory.create_static_variable_term(0)),
+                        )),
+                    ),
+                ),
+                allocator.create_unit_list(loader),
+            )))
             .chain(once(keys))
             .collect::<Vec<_>>(),
         ),

@@ -110,6 +110,8 @@ mod resolve;
 pub use resolve::*;
 mod resolve_deep;
 pub use resolve_deep::*;
+mod resolve_shallow;
+pub use resolve_shallow::*;
 mod round;
 pub use round::*;
 mod sequence;
@@ -185,6 +187,7 @@ pub enum BuiltinTerm {
     ResolveDeep,
     ResolveHashMap,
     ResolveHashSet,
+    ResolveShallow,
     ResolveStruct,
     ResolveTuple,
     ResolveVector,
@@ -274,6 +277,7 @@ impl<T: Expression + Applicable<T>> Applicable<T> for BuiltinTerm {
             Self::ResolveDeep => Applicable::<T>::arity(&ResolveDeep {}),
             Self::ResolveHashMap => Applicable::<T>::arity(&ResolveHashMap {}),
             Self::ResolveHashSet => Applicable::<T>::arity(&ResolveHashSet {}),
+            Self::ResolveShallow => Applicable::<T>::arity(&ResolveShallow {}),
             Self::ResolveStruct => Applicable::<T>::arity(&ResolveStruct {}),
             Self::ResolveTuple => Applicable::<T>::arity(&ResolveTuple {}),
             Self::ResolveVector => Applicable::<T>::arity(&ResolveVector {}),
@@ -383,6 +387,9 @@ impl<T: Expression + Applicable<T>> Applicable<T> for BuiltinTerm {
             }
             Self::ResolveHashSet => {
                 Applicable::<T>::apply(&ResolveHashSet {}, args, factory, allocator, cache)
+            }
+            Self::ResolveShallow => {
+                Applicable::<T>::apply(&ResolveShallow {}, args, factory, allocator, cache)
             }
             Self::ResolveStruct => {
                 Applicable::<T>::apply(&ResolveStruct {}, args, factory, allocator, cache)
