@@ -48,7 +48,7 @@ fn main() -> Result<()> {
 
     let stdout = std::io::stdout();
     let stdout_handle = stdout.lock();
-    // serde_json::to_writer(stdout_handle, &compiler_output)?;
+    serde_json::to_writer(stdout_handle, &compiler_output)?;
 
     Ok(())
 }

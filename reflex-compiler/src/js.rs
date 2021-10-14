@@ -75,8 +75,6 @@ pub fn compile_js_source(
     let env_vars = env::vars();
     let module_loaders = standard_js_loaders(factory, allocator);
     let plugins = standard_js_plugins();
-    let plugins: Vec<_> = plugins.into_iter().collect();
-    plugins.iter().for_each(|func| println!("func id: {}", func.uid()));
 
     compile_js_source_with_customisation(
         root_module_path,

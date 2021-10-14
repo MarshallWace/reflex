@@ -1,7 +1,8 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use std::{any::TypeId, collections::HashMap, iter::once};
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
+use std::{collections::HashMap, iter::once, str::FromStr};
 
 use either::Either;
 use graphql_parser::{parse_query, query::*};
@@ -10,7 +11,6 @@ use reflex::{
         Arity, Expression, ExpressionFactory, ExpressionList, HeapAllocator, NativeAllocator,
         SignalType,
     },
-    hash::{hash_object, HashId},
     lang::{create_struct, term::SignalTerm, BuiltinTerm, NativeFunction, ValueTerm},
 };
 
@@ -19,6 +19,7 @@ pub use loader::graphql_loader;
 mod operation;
 pub use operation::{deserialize_graphql_operation, GraphQlOperationPayload};
 use reflex_json::{json_array, json_object, sanitize, JsonValue};
+use uuid::Uuid;
 
 pub mod subscriptions;
 
@@ -550,7 +551,7 @@ fn create_query_branch<T: Expression>(
 }
 
 fn flatten_deep<T: Expression>() -> NativeFunction<T> {
-    NativeFunction::new(
+    NativeFunction::new_with_uuid(
         FlattenDeep::uid(),
         FlattenDeep::name(),
         FlattenDeep::arity(),
@@ -559,8 +560,8 @@ fn flatten_deep<T: Expression>() -> NativeFunction<T> {
 }
 struct FlattenDeep {}
 impl FlattenDeep {
-    fn uid() -> HashId {
-        hash_object(&TypeId::of::<Self>())
+    fn uid() -> Uuid {
+        Uuid::from_str("52299fbb-a84b-488e-81ef-98c439869f74").expect("Hardcoded uuid value")
     }
     fn name() -> Option<&'static str> {
         Some("FlattenDeep")
@@ -602,7 +603,7 @@ impl FlattenDeep {
 }
 
 fn dynamic_query_branch<T: Expression>() -> NativeFunction<T> {
-    NativeFunction::new(
+    NativeFunction::new_with_uuid(
         DynamicQueryBranch::uid(),
         DynamicQueryBranch::name(),
         DynamicQueryBranch::arity(),
@@ -611,8 +612,8 @@ fn dynamic_query_branch<T: Expression>() -> NativeFunction<T> {
 }
 struct DynamicQueryBranch {}
 impl DynamicQueryBranch {
-    fn uid() -> HashId {
-        hash_object(&TypeId::of::<Self>())
+    fn uid() -> Uuid {
+        Uuid::from_str("58dd19b7-c9f0-473b-84c5-34af607c176b").expect("Hardcoded uuid value")
     }
     fn name() -> Option<&'static str> {
         Some("DynamicQueryBranch")

@@ -1,13 +1,14 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use std::any::TypeId;
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
+use std::str::FromStr;
 
 use reflex::{
     core::{Arity, Expression, ExpressionFactory, ExpressionList, HeapAllocator, NativeAllocator},
-    hash::{hash_object, HashId},
     lang::{create_struct, NativeFunction, ValueTerm},
 };
+use uuid::Uuid;
 
 pub(crate) fn import_types<T: Expression>(
     factory: &impl ExpressionFactory<T>,
@@ -43,7 +44,7 @@ pub(crate) fn import_types<T: Expression>(
 }
 
 pub fn struct_type_factory<T: Expression>() -> NativeFunction<T> {
-    NativeFunction::new(
+    NativeFunction::new_with_uuid(
         StructTypeFactory::uid(),
         StructTypeFactory::name(),
         StructTypeFactory::arity(),
@@ -52,8 +53,8 @@ pub fn struct_type_factory<T: Expression>() -> NativeFunction<T> {
 }
 struct StructTypeFactory {}
 impl StructTypeFactory {
-    fn uid() -> HashId {
-        hash_object(&TypeId::of::<Self>())
+    fn uid() -> Uuid {
+        Uuid::from_str("69fdfb4f-7a4a-4414-8140-ededbdc9368c").expect("Hardcoded Uuid value")
     }
     fn name() -> Option<&'static str> {
         Some("StructTypeFactory")

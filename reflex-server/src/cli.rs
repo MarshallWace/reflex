@@ -95,8 +95,8 @@ pub async fn cli<
 where
     T::String: StringValue + Send + Sync,
 {
-    let plugins: Vec<NativeFunction<T>> = plugins.into_iter().collect();
-    plugins.iter().for_each(|func| println!("func id: {}", func.uid()));
+    // let plugins: Vec<NativeFunction<T>> = plugins.into_iter().collect();
+    // plugins.iter().for_each(|func| println!("func id: {}", func.uid()));
     let args: Opts = Opts::parse();
     let root_module_path = &args.entry_point;
     let compiler_options = compiler_options.unwrap_or_else(|| CompilerOptions {

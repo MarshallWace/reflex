@@ -1,23 +1,24 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use std::any::TypeId;
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
+use std::str::FromStr;
 
 use reflex::{
     core::{
         Arity, Expression, ExpressionFactory, ExpressionList, HeapAllocator, NativeAllocator,
         VarArgs,
     },
-    hash::{hash_object, HashId},
     lang::{deduplicate_hashmap_entries, BuiltinTerm, NativeFunction, ValueTerm},
 };
+use uuid::Uuid;
 
 pub fn global_map<T: Expression>(factory: &impl ExpressionFactory<T>) -> T {
     factory.create_native_function_term(map_constructor())
 }
 
 pub fn map_constructor<T: Expression>() -> NativeFunction<T> {
-    NativeFunction::new(
+    NativeFunction::new_with_uuid(
         MapConstructor::uid(),
         MapConstructor::name(),
         MapConstructor::arity(),
@@ -26,8 +27,8 @@ pub fn map_constructor<T: Expression>() -> NativeFunction<T> {
 }
 struct MapConstructor {}
 impl MapConstructor {
-    fn uid() -> HashId {
-        hash_object(&TypeId::of::<Self>())
+    fn uid() -> Uuid {
+        Uuid::from_str("81fae6f8-9557-4784-998a-13ebfbf289ef").expect("Hardcoded Uuid value")
     }
     fn name() -> Option<&'static str> {
         Some("MapConstructor")

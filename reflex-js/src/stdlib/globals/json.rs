@@ -1,16 +1,17 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use std::any::TypeId;
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
+use std::str::FromStr;
 
 use reflex::{
     core::{
         Arity, Expression, ExpressionFactory, ExpressionList, HeapAllocator, NativeAllocator,
         StringValue,
     },
-    hash::{hash_object, HashId},
     lang::{create_struct, BuiltinTerm, NativeFunction, ValueTerm},
 };
+use uuid::Uuid;
 
 pub fn global_json<T: Expression>(
     factory: &impl ExpressionFactory<T>,
@@ -42,7 +43,7 @@ pub fn global_json<T: Expression>(
 }
 
 pub fn json_parse<T: Expression>() -> NativeFunction<T> {
-    NativeFunction::new(
+    NativeFunction::new_with_uuid(
         JsonParse::uid(),
         JsonParse::name(),
         JsonParse::arity(),
@@ -51,8 +52,8 @@ pub fn json_parse<T: Expression>() -> NativeFunction<T> {
 }
 struct JsonParse {}
 impl JsonParse {
-    fn uid() -> HashId {
-        hash_object(&TypeId::of::<Self>())
+    fn uid() -> Uuid {
+        Uuid::from_str("6e8468d3-34cc-423c-a787-3d3e9154885d").expect("Hardocded uuid value")
     }
     fn name() -> Option<&'static str> {
         Some("JsonParse")
@@ -81,7 +82,7 @@ impl JsonParse {
 }
 
 pub fn json_stringify<T: Expression>() -> NativeFunction<T> {
-    NativeFunction::new(
+    NativeFunction::new_with_uuid(
         JsonStringify::uid(),
         JsonStringify::name(),
         JsonStringify::arity(),
@@ -90,8 +91,8 @@ pub fn json_stringify<T: Expression>() -> NativeFunction<T> {
 }
 struct JsonStringify {}
 impl JsonStringify {
-    fn uid() -> HashId {
-        hash_object(&TypeId::of::<Self>())
+    fn uid() -> Uuid {
+        Uuid::from_str("b0a2caca-1101-402c-a21e-bccdf276e44c").expect("Hardcoded uuid value")
     }
     fn name() -> Option<&'static str> {
         Some("JsonStringify")

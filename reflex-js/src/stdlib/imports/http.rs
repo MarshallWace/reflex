@@ -1,16 +1,17 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use std::any::TypeId;
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
+use std::str::FromStr;
 
 use reflex::{
     core::{
         Arity, Expression, ExpressionFactory, ExpressionList, HeapAllocator, NativeAllocator,
         StructPrototype,
     },
-    hash::{hash_object, HashId},
     lang::{create_struct, BuiltinTerm, NativeFunction, ValueTerm},
 };
+use uuid::Uuid;
 
 use crate::stdlib::globals::json::json_parse;
 
@@ -165,7 +166,7 @@ fn http_request_prototype<T: Expression>(allocator: &impl HeapAllocator<T>) -> S
 }
 
 pub fn to_request<T: Expression>() -> NativeFunction<T> {
-    NativeFunction::new(
+    NativeFunction::new_with_uuid(
         ToRequest::uid(),
         ToRequest::name(),
         ToRequest::arity(),
@@ -174,8 +175,8 @@ pub fn to_request<T: Expression>() -> NativeFunction<T> {
 }
 struct ToRequest {}
 impl ToRequest {
-    fn uid() -> HashId {
-        hash_object(&TypeId::of::<Self>())
+    fn uid() -> Uuid {
+        Uuid::from_str("29d89369-0b7b-41df-aa14-47ea708a8fa6").expect("Hardcoded Uuid value")
     }
     fn name() -> Option<&'static str> {
         Some("ToRequest")

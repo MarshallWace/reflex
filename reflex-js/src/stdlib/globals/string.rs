@@ -1,16 +1,17 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use std::any::TypeId;
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
+use std::str::FromStr;
 
 use reflex::{
     core::{
         Arity, Expression, ExpressionFactory, ExpressionList, HeapAllocator, NativeAllocator,
         StringValue,
     },
-    hash::{hash_object, HashId},
     lang::{NativeFunction, ValueTerm},
 };
+use uuid::Uuid;
 
 use crate::builtins::to_string;
 
@@ -29,7 +30,7 @@ pub fn global_encode_uri_component<T: Expression>(
 }
 
 pub fn encode_uri_component<T: Expression>() -> NativeFunction<T> {
-    NativeFunction::new(
+    NativeFunction::new_with_uuid(
         EncodeUriComponent::uid(),
         EncodeUriComponent::name(),
         EncodeUriComponent::arity(),
@@ -38,8 +39,8 @@ pub fn encode_uri_component<T: Expression>() -> NativeFunction<T> {
 }
 struct EncodeUriComponent {}
 impl EncodeUriComponent {
-    fn uid() -> HashId {
-        hash_object(&TypeId::of::<Self>())
+    fn uid() -> Uuid {
+        Uuid::from_str("ad730068-31a7-49a4-ae09-ecbda0c9914a").expect("Hardcoded uuid valued")
     }
     fn name() -> Option<&'static str> {
         Some("EncodeUriComponent")

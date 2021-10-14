@@ -1,16 +1,17 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use std::any::TypeId;
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
+use std::str::FromStr;
 
 use reflex::{
     core::{
         Arity, Expression, ExpressionFactory, ExpressionList, HeapAllocator, NativeAllocator,
         StringValue,
     },
-    hash::{hash_object, HashId},
     lang::{create_struct, BuiltinTerm, NativeFunction, ValueTerm},
 };
+use uuid::Uuid;
 
 pub fn global_object<T: Expression>(
     factory: &impl ExpressionFactory<T>,
@@ -27,7 +28,7 @@ pub fn global_object<T: Expression>(
 }
 
 pub fn from_entries<T: Expression>() -> NativeFunction<T> {
-    NativeFunction::new(
+    NativeFunction::new_with_uuid(
         FromEntries::uid(),
         FromEntries::name(),
         FromEntries::arity(),
@@ -36,8 +37,8 @@ pub fn from_entries<T: Expression>() -> NativeFunction<T> {
 }
 struct FromEntries {}
 impl FromEntries {
-    fn uid() -> HashId {
-        hash_object(&TypeId::of::<Self>())
+    fn uid() -> Uuid {
+        Uuid::from_str("0dff2d00-33c8-49cd-b350-423bd9389645").expect("Hardcoded uuid valued")
     }
     fn name() -> Option<&'static str> {
         Some("FromEntries")

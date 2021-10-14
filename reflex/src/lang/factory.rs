@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
@@ -255,7 +256,7 @@ impl WithCompiledBuiltins for TermFactory {
             .iter()
             .map(|(uid, arity, address)| {
                 let compiled_target = self.create_compiled_function_term(
-                    *uid,
+                    hash_object(uid),
                     *address,
                     arity.required(),
                     arity.variadic().is_some(),

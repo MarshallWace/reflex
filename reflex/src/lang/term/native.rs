@@ -1,21 +1,19 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use std::{collections::HashSet, hash::Hash, iter::once};
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
+use std::{collections::HashSet, hash::Hash, iter::once, str::FromStr};
 
-use crate::{
-    compiler::{
-        Compile, Compiler, Instruction, InstructionPointer, NativeFunctionRegistry, Program,
-    },
-    core::{
-        Applicable, Arity, DependencyList, EvaluationCache, Expression, ExpressionFactory,
-        ExpressionList, GraphNode, HeapAllocator, NativeAllocator, StackOffset, VarArgs,
-    },
-    hash::HashId,
-    lang::compile_function,
-};
+use uuid::Uuid;
 
-pub type NativeFunctionId = HashId;
+use crate::{compiler::{
+    Compile, Compiler, Instruction, InstructionPointer, NativeFunctionRegistry, Program,
+}, core::{
+    Applicable, Arity, DependencyList, EvaluationCache, Expression, ExpressionFactory,
+    ExpressionList, GraphNode, HeapAllocator, NativeAllocator, StackOffset, VarArgs,
+}, hash::hash_object, lang::compile_function};
+
+pub type NativeFunctionId = Uuid;
 
 #[derive(Clone)]
 pub struct NativeFunction<T: Expression> {
@@ -30,7 +28,26 @@ pub struct NativeFunction<T: Expression> {
 }
 impl<T: Expression> NativeFunction<T> {
     pub fn new(
-        uid: NativeFunctionId,
+        uid: String,
+        name: Option<&'static str>,
+        arity: Arity,
+        apply: fn(
+            ExpressionList<T>,
+            &dyn ExpressionFactory<T>,
+            &dyn NativeAllocator<T>,
+        ) -> Result<T, String>,
+    ) -> Result<Self, String> {
+        let uid = Uuid::from_str(&uid).map_err(|err| format!("Unable to parse uid {}, is it actually a UUID? Error: {}", uid, err))?;
+        Ok(Self {
+            uid,
+            name,
+            arity,
+            apply,
+        })
+    }
+
+    pub fn new_with_uuid(
+        uid: Uuid,
         name: Option<&'static str>,
         arity: Arity,
         apply: fn(
@@ -39,13 +56,14 @@ impl<T: Expression> NativeFunction<T> {
             &dyn NativeAllocator<T>,
         ) -> Result<T, String>,
     ) -> Self {
-        Self {
+        Self{
             uid,
             name,
             arity,
             apply,
         }
     }
+
     pub fn uid(&self) -> NativeFunctionId {
         self.uid
     }
@@ -127,7 +145,7 @@ impl<T: Expression> GraphNode for NativeFunctionTerm<T> {
 impl<T: Expression> Eq for NativeFunctionTerm<T> {}
 impl<T: Expression> Hash for NativeFunctionTerm<T> {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        state.write_u64(self.uid());
+        self.uid().hash(state);
     }
 }
 impl<T: Expression> PartialEq for NativeFunctionTerm<T> {
@@ -180,7 +198,7 @@ pub(crate) fn compile_native_function<T: Expression>(
     compiler: &mut Compiler,
 ) -> InstructionPointer {
     compile_function(
-        target.uid(),
+        hash_object(&target.uid()),
         target.arity(),
         Instruction::PushNative {
             target: target.uid(),

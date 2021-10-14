@@ -1,20 +1,21 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use std::any::TypeId;
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
+use std::str::FromStr;
 
 use reflex::{
     core::{Arity, Expression, ExpressionFactory, ExpressionList, NativeAllocator, VarArgs},
-    hash::{hash_object, HashId},
     lang::{deduplicate_hashset_entries, BuiltinTerm, NativeFunction},
 };
+use uuid::Uuid;
 
 pub fn global_set<T: Expression>(factory: &impl ExpressionFactory<T>) -> T {
     factory.create_native_function_term(set_constructor())
 }
 
 pub fn set_constructor<T: Expression>() -> NativeFunction<T> {
-    NativeFunction::new(
+    NativeFunction::new_with_uuid(
         SetConstructor::uid(),
         SetConstructor::name(),
         SetConstructor::arity(),
@@ -23,8 +24,8 @@ pub fn set_constructor<T: Expression>() -> NativeFunction<T> {
 }
 struct SetConstructor {}
 impl SetConstructor {
-    fn uid() -> HashId {
-        hash_object(&TypeId::of::<Self>())
+    fn uid() -> Uuid {
+        Uuid::from_str("c87cb7a9-a926-4f78-b38b-5be67ac83baf").expect("Hardcoded uuid value")
     }
     fn name() -> Option<&'static str> {
         Some("SetConstructor")

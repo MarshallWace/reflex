@@ -10,6 +10,7 @@ edition = "2018"
 [dependencies]
 reflex = { path = "../reflex" }
 reflex-json = { path = "../reflex-json" }
+uuid = "^0.8"
 resast = "0.4.1"
 ressa = "0.7.1"
 urlencoding = "1.3.3"

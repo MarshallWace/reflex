@@ -1,16 +1,17 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use std::{any::TypeId, iter::once};
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
+use std::{iter::once, str::FromStr};
 
 use reflex::{
     core::{
         Arity, Expression, ExpressionFactory, ExpressionList, HeapAllocator, NativeAllocator,
         Signal, SignalType, StringValue, VarArgs,
     },
-    hash::{hash_object, HashId},
     lang::{BuiltinTerm, NativeFunction, ValueTerm},
 };
+use uuid::Uuid;
 
 use crate::stdlib::{
     globals::{
@@ -42,12 +43,12 @@ pub fn builtin_plugins<T: Expression>() -> impl IntoIterator<Item = NativeFuncti
 }
 
 pub fn throw<T: Expression>() -> NativeFunction<T> {
-    NativeFunction::new(Throw::uid(), Throw::name(), Throw::arity(), Throw::apply)
+    NativeFunction::new_with_uuid(Throw::uid(), Throw::name(), Throw::arity(), Throw::apply)
 }
 struct Throw {}
 impl Throw {
-    fn uid() -> HashId {
-        hash_object(&TypeId::of::<Self>())
+    fn uid() -> Uuid {
+        Uuid::from_str("fb9bef4b-da7a-46ef-af03-50ed2984274c").expect("Hardcoded uuid value")
     }
     fn name() -> Option<&'static str> {
         Some("Throw")
@@ -108,7 +109,7 @@ fn create_error_signal<T: Expression>(error: T, allocator: &impl HeapAllocator<T
 }
 
 pub fn construct<T: Expression>() -> NativeFunction<T> {
-    NativeFunction::new(
+    NativeFunction::new_with_uuid(
         Construct::uid(),
         Construct::name(),
         Construct::arity(),
@@ -117,8 +118,8 @@ pub fn construct<T: Expression>() -> NativeFunction<T> {
 }
 struct Construct {}
 impl Construct {
-    fn uid() -> HashId {
-        hash_object(&TypeId::of::<Self>())
+    fn uid() -> Uuid {
+        Uuid::from_str("5a68dc6b-71fa-407f-8039-bcd87323f2bf").expect("Hardcoded uuid valued")
     }
     fn name() -> Option<&'static str> {
         Some("Construct")
@@ -146,7 +147,7 @@ impl Construct {
 }
 
 pub fn dispatch<T: Expression>() -> NativeFunction<T> {
-    NativeFunction::new(
+    NativeFunction::new_with_uuid(
         Dispatch::uid(),
         Dispatch::name(),
         Dispatch::arity(),
@@ -155,8 +156,8 @@ pub fn dispatch<T: Expression>() -> NativeFunction<T> {
 }
 struct Dispatch {}
 impl Dispatch {
-    fn uid() -> HashId {
-        hash_object(&TypeId::of::<Self>())
+    fn uid() -> Uuid {
+        Uuid::from_str("f37c66ee-cd73-496d-8420-1ce83ab924ad").expect("Hardcoded uuid value")
     }
     fn name() -> Option<&'static str> {
         Some("Dispatch")
@@ -190,7 +191,7 @@ impl Dispatch {
 }
 
 pub fn to_string<T: Expression>() -> NativeFunction<T> {
-    NativeFunction::new(
+    NativeFunction::new_with_uuid(
         ToString::uid(),
         ToString::name(),
         ToString::arity(),
@@ -199,8 +200,8 @@ pub fn to_string<T: Expression>() -> NativeFunction<T> {
 }
 struct ToString {}
 impl ToString {
-    fn uid() -> HashId {
-        hash_object(&TypeId::of::<Self>())
+    fn uid() -> Uuid {
+        Uuid::from_str("7f651286-8d00-4854-a956-0a54dfe662d0").expect("Hardcoded uuid value")
     }
     fn name() -> Option<&'static str> {
         Some("ToString")
@@ -229,7 +230,7 @@ impl ToString {
 }
 
 pub fn format_error_message<T: Expression>() -> NativeFunction<T> {
-    NativeFunction::new(
+    NativeFunction::new_with_uuid(
         FormatErrorMessage::uid(),
         FormatErrorMessage::name(),
         FormatErrorMessage::arity(),
@@ -239,8 +240,8 @@ pub fn format_error_message<T: Expression>() -> NativeFunction<T> {
 const UNKNOWN_ERROR_MESSAGE: &'static str = "Unknown error";
 struct FormatErrorMessage {}
 impl FormatErrorMessage {
-    fn uid() -> HashId {
-        hash_object(&TypeId::of::<Self>())
+    fn uid() -> Uuid {
+        Uuid::from_str("3f88d05d-47f1-4b49-b16e-b8dc2f4ee61c").expect("Hardcoded uuid valued")
     }
     fn name() -> Option<&'static str> {
         Some("FormatErrorMessage")
