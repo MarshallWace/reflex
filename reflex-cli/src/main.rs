@@ -14,26 +14,17 @@ use std::{
 use reflex::{
     allocator::DefaultAllocator,
     cache::SubstitutionCache,
-    compiler::{
-        hash_program_root, Compile, Compiler, CompilerMode, CompilerOptions, InstructionPointer,
-        NativeFunctionRegistry,
-    },
-    core::{
-        Applicable, Expression, ExpressionFactory, HeapAllocator, Reducible, Rewritable, Signal,
-        StateCache, StringValue,
-    },
+    compiler::{hash_program_root, Compiler, CompilerMode, CompilerOptions, InstructionPointer},
+    core::{Expression, ExpressionFactory, HeapAllocator, Reducible, Rewritable, StateCache},
     interpreter::{execute, DefaultInterpreterCache, InterpreterOptions},
-    lang::{term::SignalTerm, BuiltinTerm, TermFactory, ValueTerm, WithCompiledBuiltins},
+    lang::{term::SignalTerm, TermFactory, ValueTerm},
 };
 use reflex_cli::parse_cli_args;
 use reflex_handlers::{builtin_signal_handler, debug_signal_handler};
 use reflex_js::{
     self, create_js_env, create_module_loader, stdlib::imports::builtin_imports_loader,
 };
-use reflex_runtime::{
-    AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator, Runtime, RuntimeCache,
-    RuntimeState, SignalHandlerResult, SignalHelpers, StreamExt,
-};
+use reflex_runtime::{Runtime, RuntimeCache, RuntimeState, StreamExt};
 use repl::ReplParser;
 
 mod repl;
@@ -136,18 +127,31 @@ pub async fn main() {
                                                 builtin_signal_handler(&factory, &allocator);
                                             let state = RuntimeState::default();
                                             let cache = RuntimeCache::new(cache_entries);
-                                            let runtime = create_runtime(
-                                                state,
-                                                builtins,
-                                                plugins,
-                                                signal_handler,
-                                                cache,
-                                                &factory,
-                                                &allocator,
-                                                interpreter_options,
-                                                compiler_options,
-                                                debug_signals,
-                                            );
+                                            let runtime = if debug_signals {
+                                                Runtime::new(
+                                                    state,
+                                                    builtins,
+                                                    plugins,
+                                                    debug_signal_handler(signal_handler),
+                                                    cache,
+                                                    &factory,
+                                                    &allocator,
+                                                    interpreter_options,
+                                                    compiler_options,
+                                                )
+                                            } else {
+                                                Runtime::new(
+                                                    state,
+                                                    builtins,
+                                                    plugins,
+                                                    signal_handler,
+                                                    cache,
+                                                    &factory,
+                                                    &allocator,
+                                                    interpreter_options,
+                                                    compiler_options,
+                                                )
+                                            };
                                             let stdout = Mutex::new(stdout);
                                             async move {
                                                 match runtime
@@ -213,56 +217,6 @@ pub async fn main() {
             1
         }
     })
-}
-
-fn create_runtime<
-    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
-    THandler,
->(
-    state: RuntimeState<T>,
-    builtins: Vec<(BuiltinTerm, InstructionPointer)>,
-    plugins: NativeFunctionRegistry<T>,
-    signal_handler: THandler,
-    cache: RuntimeCache<T>,
-    factory: &(impl AsyncExpressionFactory<T> + WithCompiledBuiltins),
-    allocator: &impl AsyncHeapAllocator<T>,
-    interpreter_options: InterpreterOptions,
-    compiler_options: CompilerOptions,
-    debug_signals: bool,
-) -> Runtime<T>
-where
-    T::String: StringValue + Send + Sync,
-    THandler: Fn(&str, &[&Signal<T>], &SignalHelpers<T>) -> SignalHandlerResult<T>
-        + Send
-        + Sync
-        + 'static,
-{
-    if debug_signals {
-        create_runtime(
-            state,
-            builtins,
-            plugins,
-            debug_signal_handler(signal_handler),
-            cache,
-            factory,
-            allocator,
-            interpreter_options,
-            compiler_options,
-            false,
-        )
-    } else {
-        Runtime::new(
-            state,
-            builtins,
-            plugins,
-            signal_handler,
-            cache,
-            factory,
-            allocator,
-            interpreter_options,
-            compiler_options,
-        )
-    }
 }
 
 fn create_js_script_parser<T: Expression + 'static>(
