@@ -454,6 +454,7 @@ impl<T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile
                     while let Some(command) = next_command {
                         match command {
                             RuntimeCommand::Subscribe(command) => {
+                                let is_root = command.payload.initiators.is_none();
                                 let (subscription_id, cache_key) = process_subscribe_command(
                                     command,
                                     &mut store,
@@ -471,7 +472,9 @@ impl<T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile
                                     cache_key,
                                     empty_result.clone(),
                                 );
-                                pending_retains.push(subscription_cache_key);
+                                if is_root {
+                                    pending_retains.push(subscription_cache_key);
+                                }
                             }
                             RuntimeCommand::Unsubscribe(command) => {
                                 let subscription_id = command.payload.subscription_id;
@@ -1463,11 +1466,11 @@ impl<T: Expression> RuntimeStore<T> {
         subscription_id
     }
     fn unsubscribe(&mut self, subscription_id: SubscriptionId) -> Option<Subscription> {
-        println!("[Runtime] Unsubscribe #{}", subscription_id);
         self.subscriptions
             .iter()
             .position(|subscription| subscription.id == subscription_id)
             .map(|index| {
+                println!("[Runtime] Unsubscribe #{}", subscription_id);
                 let subscription = self.subscriptions.remove(index);
                 if subscription.is_root {
                     self.subscription_cache
