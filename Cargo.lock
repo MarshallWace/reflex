@@ -949,6 +949,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "reflex-compiler"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "reflex",
+ "reflex-graphql",
+ "reflex-js",
+ "reflex-json",
+ "reflex-runtime",
+ "serde_json",
+]
+
+[[package]]
 name = "reflex-graphql"
 version = "0.1.0"
 dependencies = [
@@ -1018,6 +1032,7 @@ dependencies = [
  "hyper-tungstenite",
  "proc-macro2",
  "reflex",
+ "reflex-compiler",
  "reflex-graphql",
  "reflex-handlers",
  "reflex-js",

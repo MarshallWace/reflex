@@ -2,9 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
-use std::{
-    convert::Infallible, env, fs, io::Write, net::SocketAddr, path::Path, sync::Arc, time::Instant,
-};
+use std::{convert::Infallible, env, fs, net::SocketAddr, path::Path, str::FromStr, sync::Arc};
 
 use crate::graphql_service;
 use anyhow::{anyhow, Context, Result};
@@ -12,18 +10,15 @@ use clap::Parser;
 use hyper::{server::conn::AddrStream, service::make_service_fn, Server};
 use reflex::{
     compiler::{
-        serialization::SerializableCompilerOutput, Compile, Compiler, CompilerMode,
-        CompilerOptions, CompilerOutput, Program,
+        serialization::SerializableCompilerOutput, Compile, CompilerOptions, CompilerOutput,
+        Program,
     },
-    core::{
-        Applicable, Expression, ExpressionFactory, HeapAllocator, Reducible, Rewritable, Signal,
-        StringValue,
-    },
+    core::{Applicable, Expression, Reducible, Rewritable, Signal, StringValue},
     interpreter::InterpreterOptions,
     lang::{NativeFunction, WithCompiledBuiltins},
 };
+use reflex_compiler::js::compile_js_source_with_customisation;
 use reflex_handlers::debug_signal_handler;
-use reflex_js::{create_js_env, parse_module};
 use reflex_runtime::{
     AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator, Runtime, RuntimeCache,
     RuntimeState, SignalHelpers,
@@ -42,8 +37,12 @@ struct Opts {
     entry_point: String,
     #[clap(about = "Port on which to expose a server")]
     port: u16,
-    #[clap(long, about = "Interpret entry_point as a precompiled bytecode file")]
-    precompiled: bool,
+    #[clap(
+        long,
+        about = "What syntax to interpret the input file as",
+        default_value = "javascript"
+    )]
+    syntax: Syntax,
     #[clap(long, about = "Add debug printing of signal handlers")]
     debug_signals: bool,
     #[clap(long, about = "Add debug printing of bytecode output from compiler")]
@@ -52,6 +51,25 @@ struct Opts {
     debug_interpreter: bool,
     #[clap(long, about = "Add debug printing of stack during execution")]
     debug_stack: bool,
+}
+
+enum Syntax {
+    JavaScript,
+    ByteCode,
+}
+
+impl FromStr for Syntax {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s.to_lowercase() == "javascript" || s == "js" {
+            return Ok(Self::JavaScript);
+        } else if s == "bytecode" {
+            return Ok(Self::ByteCode);
+        } else {
+            return Err(anyhow!("Unknown syntax {}", s));
+        }
+    }
 }
 
 pub async fn cli<
@@ -77,23 +95,25 @@ pub async fn cli<
 where
     T::String: StringValue + Send + Sync,
 {
+    let plugins: Vec<NativeFunction<T>> = plugins.into_iter().collect();
+    plugins.iter().for_each(|func| println!("func id: {}", func.uid()));
     let args: Opts = Opts::parse();
     let root_module_path = &args.entry_point;
     let compiler_options = compiler_options.unwrap_or_else(|| CompilerOptions {
         debug: args.debug_compiler,
         ..CompilerOptions::default()
     });
-    let compiled_root = if args.precompiled {
-        deserialize_compiler_output(root_module_path, plugins)?
-    } else {
-        compile_source(
+    let compiled_root = match args.syntax {
+        Syntax::ByteCode => deserialize_compiler_output(root_module_path, plugins)?,
+        Syntax::JavaScript => compile_js_source_with_customisation(
             root_module_path,
             custom_loader,
             factory,
             allocator,
             plugins,
             compiler_options,
-        )?
+            env::vars(),
+        )?,
     };
 
     let interpreter_options = interpreter_options.unwrap_or_else(|| InterpreterOptions {
@@ -163,83 +183,6 @@ where
     serialized_output
         .to_compiler_output(plugins)
         .map_err(|err| anyhow!(err))
-}
-
-fn compile_source<T>(
-    root_module_path: impl AsRef<Path> + std::fmt::Display,
-    custom_loader: Option<impl Fn(&str, &Path) -> Option<Result<T, String>> + 'static>,
-    factory: &(impl AsyncExpressionFactory<T> + WithCompiledBuiltins),
-    allocator: &impl AsyncHeapAllocator<T>,
-    plugins: impl IntoIterator<Item = NativeFunction<T>>,
-    compiler_options: CompilerOptions,
-) -> Result<CompilerOutput<T>>
-where
-    T: AsyncExpression
-        + Expression<String = String>
-        + Rewritable<T>
-        + Reducible<T>
-        + Applicable<T>
-        + Compile<T>
-        + 'static,
-{
-    let root_module_source = fs::read_to_string(&root_module_path)
-        .with_context(|| format!("Failed to load {}", root_module_path))?;
-    let env_vars = env::vars();
-    let root = create_graph_root(
-        root_module_path,
-        &root_module_source,
-        env_vars,
-        custom_loader,
-        factory,
-        allocator,
-    )?;
-    compile_root(root, factory, allocator, plugins, compiler_options)
-}
-
-pub fn create_graph_root<T: Expression + 'static>(
-    root_module_path: impl AsRef<Path>,
-    root_module_source: &str,
-    env_args: impl IntoIterator<Item = (String, String)>,
-    custom_loader: Option<impl Fn(&str, &Path) -> Option<Result<T, String>> + 'static>,
-    factory: &(impl ExpressionFactory<T> + Clone + 'static),
-    allocator: &(impl HeapAllocator<T> + Clone + 'static),
-) -> Result<T> {
-    let env = create_js_env(env_args, factory, allocator);
-    let module_loader = create_module_loader(env.clone(), custom_loader, factory, allocator);
-    parse_module(
-        root_module_source,
-        &env,
-        root_module_path.as_ref(),
-        &module_loader,
-        factory,
-        allocator,
-    )
-    .map_err(|err| anyhow!("Failed to parse module: {}", err))
-}
-
-pub fn compile_root<
-    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
->(
-    root: T,
-    factory: &impl ExpressionFactory<T>,
-    allocator: &impl HeapAllocator<T>,
-    plugins: impl IntoIterator<Item = NativeFunction<T>>,
-    compiler_options: CompilerOptions,
-) -> Result<CompilerOutput<T>> {
-    print!("Compiling graph root...");
-    let _ = std::io::stdout().flush();
-    let start_time = Instant::now();
-    let compiled = Compiler::new(compiler_options, None).compile(
-        &root,
-        CompilerMode::Thunk,
-        true,
-        plugins,
-        factory,
-        allocator,
-    );
-    println!(" {:?}", start_time.elapsed());
-    // TODO: Error if graph root depends on unrecognized native functions
-    compiled.map_err(|err| anyhow!(err))
 }
 
 async fn create_server<

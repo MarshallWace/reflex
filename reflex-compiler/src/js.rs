@@ -1,0 +1,165 @@
+// SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
+use std::{
+    env::{self, Vars},
+    fs,
+    io::Write,
+    path::Path,
+    time::Instant,
+};
+
+use anyhow::{anyhow, Context, Result};
+use reflex::{
+    allocator::DefaultAllocator,
+    compiler::{Compile, Compiler, CompilerMode, CompilerOptions, CompilerOutput},
+    core::{Applicable, Expression, ExpressionFactory, HeapAllocator, Reducible, Rewritable},
+    lang::{term::CachedTerm, NativeFunction, SharedTerm, TermFactory, WithCompiledBuiltins},
+};
+
+use reflex_graphql::{graphql_loader, graphql_plugins};
+use reflex_js::{
+    builtin_plugins, compose_module_loaders, create_js_env, parse_module,
+    stdlib::imports::builtin_imports_loader,
+};
+use reflex_runtime::{AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator};
+
+use reflex;
+
+use reflex_js::create_module_loader;
+
+pub fn standard_js_loaders<T>(
+    factory: &(impl AsyncExpressionFactory<T> + WithCompiledBuiltins),
+    allocator: &impl AsyncHeapAllocator<T>,
+) -> impl Fn(&str, &Path) -> Option<Result<T, String>> + 'static
+where
+    T: AsyncExpression
+        + Expression<String = String>
+        + Rewritable<T>
+        + Reducible<T>
+        + Applicable<T>
+        + Compile<T>
+        + 'static,
+{
+    compose_module_loaders(
+        builtin_imports_loader(factory, allocator),
+        graphql_loader(factory, allocator),
+    )
+}
+
+pub fn standard_js_plugins<T>() -> impl IntoIterator<Item = NativeFunction<T>>
+where
+    T: AsyncExpression
+        + Expression<String = String>
+        + Rewritable<T>
+        + Reducible<T>
+        + Applicable<T>
+        + Compile<T>
+        + 'static,
+{
+    builtin_plugins().into_iter().chain(graphql_plugins())
+}
+
+/**
+Compile Reflex source file using the standard Reflex Javascript plugins and
+module loaders, expression factory and heap allocator. If you wish to
+customize these, or e.g. add additional environment variables use
+[compile_js_source_with_customisation]
+*/
+pub fn compile_js_source(
+    root_module_path: impl AsRef<Path> + std::fmt::Display,
+    compiler_options: CompilerOptions,
+) -> Result<CompilerOutput<CachedTerm<SharedTerm>>> {
+    let factory = &TermFactory::default();
+    let allocator = &DefaultAllocator::default();
+    let env_vars = env::vars();
+    let module_loaders = standard_js_loaders(factory, allocator);
+    let plugins = standard_js_plugins();
+    let plugins: Vec<_> = plugins.into_iter().collect();
+    plugins.iter().for_each(|func| println!("func id: {}", func.uid()));
+
+    compile_js_source_with_customisation(
+        root_module_path,
+        Some(module_loaders),
+        factory,
+        allocator,
+        plugins,
+        compiler_options,
+        env_vars,
+    )
+}
+
+pub fn compile_js_source_with_customisation<T>(
+    root_module_path: impl AsRef<Path> + std::fmt::Display,
+    custom_loader: Option<impl Fn(&str, &Path) -> Option<Result<T, String>> + 'static>,
+    factory: &(impl AsyncExpressionFactory<T> + WithCompiledBuiltins),
+    allocator: &impl AsyncHeapAllocator<T>,
+    plugins: impl IntoIterator<Item = NativeFunction<T>>,
+    compiler_options: CompilerOptions,
+    env_vars: Vars,
+) -> Result<CompilerOutput<T>>
+where
+    T: AsyncExpression
+        + Expression<String = String>
+        + Rewritable<T>
+        + Reducible<T>
+        + Applicable<T>
+        + Compile<T>
+        + 'static,
+{
+    let root_module_source = fs::read_to_string(&root_module_path)
+        .with_context(|| format!("Failed to load {}", root_module_path))?;
+    let root = create_graph_root(
+        root_module_path,
+        &root_module_source,
+        env_vars,
+        custom_loader,
+        factory,
+        allocator,
+    )?;
+    compile_root(root, factory, allocator, plugins, compiler_options)
+}
+
+fn create_graph_root<T: Expression + 'static>(
+    root_module_path: impl AsRef<Path>,
+    root_module_source: &str,
+    env_args: impl IntoIterator<Item = (String, String)>,
+    custom_loader: Option<impl Fn(&str, &Path) -> Option<Result<T, String>> + 'static>,
+    factory: &(impl ExpressionFactory<T> + Clone + 'static),
+    allocator: &(impl HeapAllocator<T> + Clone + 'static),
+) -> Result<T> {
+    let env = create_js_env(env_args, factory, allocator);
+    let module_loader = create_module_loader(env.clone(), custom_loader, factory, allocator);
+    parse_module(
+        root_module_source,
+        &env,
+        root_module_path.as_ref(),
+        &module_loader,
+        factory,
+        allocator,
+    )
+    .map_err(|err| anyhow!("Failed to parse module: {}", err))
+}
+
+fn compile_root<T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>>(
+    root: T,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+    plugins: impl IntoIterator<Item = NativeFunction<T>>,
+    compiler_options: CompilerOptions,
+) -> Result<CompilerOutput<T>> {
+    eprint!("Compiling graph root...");
+    let _ = std::io::stdout().flush();
+    let start_time = Instant::now();
+    let compiled = Compiler::new(compiler_options, None).compile(
+        &root,
+        CompilerMode::Thunk,
+        true,
+        plugins,
+        factory,
+        allocator,
+    );
+    eprintln!(" {:?}", start_time.elapsed());
+    // TODO: Error if graph root depends on unrecognized native functions
+    compiled.map_err(|err| anyhow!(err))
+}

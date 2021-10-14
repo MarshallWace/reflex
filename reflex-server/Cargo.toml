@@ -10,6 +10,7 @@ default-run = "reflex-server"
 
 [dependencies]
 reflex = { path = "../reflex" }
+reflex-compiler = { path = "../reflex-compiler" }
 reflex-graphql = { path = "../reflex-graphql" }
 reflex-handlers = { path = "../reflex-handlers" }
 reflex-js = { path = "../reflex-js" }
