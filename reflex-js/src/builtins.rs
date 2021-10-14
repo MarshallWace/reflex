@@ -425,12 +425,13 @@ fn get_builtin_hashset_field<T: Expression>(
 
 pub fn format_value<TString: StringValue>(value: &ValueTerm<TString>) -> String {
     match value {
-        ValueTerm::Hash(_) | ValueTerm::Symbol(_) => format!("{}", value),
         ValueTerm::Null => String::from("null"),
         ValueTerm::Boolean(value) => format!("{}", value),
         ValueTerm::Int(value) => format!("{}", value),
         ValueTerm::Float(value) => format!("{}", value),
         ValueTerm::String(value) => String::from(value.as_str()),
+        ValueTerm::Symbol(_) => format!("{}", value),
+        ValueTerm::Hash(value) => format!("{:016x}", value),
     }
 }
 
