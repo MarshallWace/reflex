@@ -65,30 +65,13 @@ impl<T: Expression> SerializeJson for VectorTerm<T> {
 
 impl<T: Expression> SerializeJson for HashSetTerm<T> {
     fn to_json(&self) -> Result<Value, String> {
-        self.values()
-            .iter()
-            .map(|key| key.to_json())
-            .collect::<Result<Vec<Value>, String>>()
-            .map(|values| Value::Array(values))
+        Err(format!("Unable to serialize term: {}", self))
     }
 }
 
 impl<T: Expression> SerializeJson for HashMapTerm<T> {
     fn to_json(&self) -> Result<Value, String> {
-        let map: Result<serde_json::Map<String, Value>, String> = self
-            .keys()
-            .iter()
-            .zip(self.values().iter())
-            .map(|(key, value)| {
-                let key_value = key.to_json()?;
-                let key = serde_json::to_string(&key_value)
-                    .map_err(|_| format!("Failed to serialize key type: {}", key))?;
-                let value = value.to_json()?;
-                Ok((key, value))
-            })
-            .collect();
-
-        Ok(map?.into())
+        Err(format!("Unable to serialize term: {}", self))
     }
 }
 

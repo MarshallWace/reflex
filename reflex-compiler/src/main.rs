@@ -3,7 +3,7 @@
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use anyhow::{anyhow, Result};
 use clap::Parser;
-use reflex::compiler::{serialization::SerializableCompilerOutput, CompilerOptions};
+use reflex::compiler::{CompilerMode, CompilerOptions, serialization::SerializableCompilerOutput};
 
 use reflex_compiler::js::compile_js_source;
 // use reflex_server::cli::{compile_root, create_graph_root};
@@ -15,6 +15,8 @@ struct Opts {
     in_file: String,
     #[clap(long, about = "Syntax of the input file", default_value = "JavaScript")]
     syntax: Syntax,
+    #[clap(long, about = "Mode to run the compiler in", default_value = "expression")]
+    compiler_mode: String,
 }
 
 enum Syntax {
@@ -42,8 +44,14 @@ fn main() -> Result<()> {
         ..CompilerOptions::default()
     };
 
+    let compiler_mode = if args.compiler_mode.to_lowercase() == "expression" {
+        CompilerMode::Expression
+    } else {
+        CompilerMode::Thunk
+    };
+
     let compiler_output: SerializableCompilerOutput = match args.syntax {
-        Syntax::JavaScript => compile_js_source(path, compiler_options)?.into(),
+        Syntax::JavaScript => compile_js_source(path, compiler_options, compiler_mode)?.into(),
     };
 
     let stdout = std::io::stdout();

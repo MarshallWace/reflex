@@ -69,6 +69,7 @@ customize these, or e.g. add additional environment variables use
 pub fn compile_js_source(
     root_module_path: impl AsRef<Path> + std::fmt::Display,
     compiler_options: CompilerOptions,
+    compiler_mode: CompilerMode,
 ) -> Result<CompilerOutput<CachedTerm<SharedTerm>>> {
     let factory = &TermFactory::default();
     let allocator = &DefaultAllocator::default();
@@ -83,6 +84,7 @@ pub fn compile_js_source(
         allocator,
         plugins,
         compiler_options,
+        compiler_mode,
         env_vars,
     )
 }
@@ -94,6 +96,7 @@ pub fn compile_js_source_with_customisation<T>(
     allocator: &impl AsyncHeapAllocator<T>,
     plugins: impl IntoIterator<Item = NativeFunction<T>>,
     compiler_options: CompilerOptions,
+    compiler_mode: CompilerMode,
     env_vars: Vars,
 ) -> Result<CompilerOutput<T>>
 where
@@ -115,7 +118,7 @@ where
         factory,
         allocator,
     )?;
-    compile_root(root, factory, allocator, plugins, compiler_options)
+    compile_root(root, factory, allocator, plugins, compiler_options, compiler_mode)
 }
 
 fn create_graph_root<T: Expression + 'static>(
@@ -145,13 +148,14 @@ fn compile_root<T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T
     allocator: &impl HeapAllocator<T>,
     plugins: impl IntoIterator<Item = NativeFunction<T>>,
     compiler_options: CompilerOptions,
+    compiler_mode: CompilerMode,
 ) -> Result<CompilerOutput<T>> {
     eprint!("Compiling graph root...");
     let _ = std::io::stdout().flush();
     let start_time = Instant::now();
     let compiled = Compiler::new(compiler_options, None).compile(
         &root,
-        CompilerMode::Thunk,
+        compiler_mode,
         true,
         plugins,
         factory,

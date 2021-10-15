@@ -8,15 +8,7 @@ use crate::graphql_service;
 use anyhow::{anyhow, Context, Result};
 use clap::Parser;
 use hyper::{server::conn::AddrStream, service::make_service_fn, Server};
-use reflex::{
-    compiler::{
-        serialization::SerializableCompilerOutput, Compile, CompilerOptions, CompilerOutput,
-        Program,
-    },
-    core::{Applicable, Expression, Reducible, Rewritable, Signal, StringValue},
-    interpreter::InterpreterOptions,
-    lang::{NativeFunction, WithCompiledBuiltins},
-};
+use reflex::{compiler::{Compile, CompilerMode, CompilerOptions, CompilerOutput, Program, serialization::SerializableCompilerOutput}, core::{Applicable, Expression, Reducible, Rewritable, Signal, StringValue}, interpreter::InterpreterOptions, lang::{NativeFunction, WithCompiledBuiltins}};
 use reflex_compiler::js::compile_js_source_with_customisation;
 use reflex_handlers::debug_signal_handler;
 use reflex_runtime::{
@@ -35,7 +27,7 @@ pub use reflex_runtime::{SignalHandlerResult, SignalResult};
 struct Opts {
     #[clap(about = "Either a js file or a precompiled bytecode file")]
     entry_point: String,
-    #[clap(about = "Port on which to expose a server")]
+    #[clap(long, about = "Port on which to expose a server")]
     port: u16,
     #[clap(
         long,
@@ -112,6 +104,7 @@ where
             allocator,
             plugins,
             compiler_options,
+            CompilerMode::Thunk,
             env::vars(),
         )?,
     };

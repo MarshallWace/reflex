@@ -130,6 +130,7 @@ mod values;
 pub use values::*;
 
 #[derive(Hash, Eq, PartialEq, Clone, Copy, Debug, EnumIter, Serialize, Deserialize)]
+#[serde(tag = "type")]
 pub enum BuiltinTerm {
     Add,
     Abs,
