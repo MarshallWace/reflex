@@ -7,8 +7,8 @@ use std::{cmp::Eq, collections::HashSet, hash::Hash, iter::once};
 use crate::{
     compiler::{Compile, Compiler, Instruction, NativeFunctionRegistry, Program},
     core::{
-        DependencyList, Expression, ExpressionFactory, GraphNode, HeapAllocator, StackOffset,
-        StringValue, VarArgs,
+        DependencyList, Expression, ExpressionFactory, GraphNode, HeapAllocator, SerializeJson,
+        StackOffset, StringValue, VarArgs,
     },
     hash::HashId,
 };
@@ -164,6 +164,25 @@ impl<TString: StringValue> std::fmt::Display for ValueTerm<TString> {
 impl<TString: StringValue> std::fmt::Debug for ValueTerm<TString> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         std::fmt::Display::fmt(self, f)
+    }
+}
+
+impl<TString: StringValue> SerializeJson for ValueTerm<TString> {
+    fn to_json(&self) -> Result<serde_json::Value, String> {
+        match self {
+            ValueTerm::Null => Ok(serde_json::Value::Null),
+            ValueTerm::Boolean(boolean) => Ok(serde_json::Value::Bool(*boolean)),
+            ValueTerm::Int(integer) => Ok(serde_json::Value::Number((*integer).into())),
+            ValueTerm::String(string) => Ok(serde_json::Value::String(string.as_str().to_owned())),
+            ValueTerm::Float(float) => match serde_json::Number::from_f64(*float) {
+                Some(number) => Ok(serde_json::Value::Number(number)),
+                None => Err(format!(
+                    "Unable to serialize float as it is NaN or infinite: {}",
+                    self
+                )),
+            },
+            _ => Err(format!("Unable to serialize term: {}", self)),
+        }
     }
 }
 

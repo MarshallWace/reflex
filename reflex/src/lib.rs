@@ -20,7 +20,6 @@ pub mod interpreter;
 
 pub mod lang {
     mod factory;
-    pub mod serialization;
     pub use factory::*;
     pub mod term;
     pub(crate) use term::*;

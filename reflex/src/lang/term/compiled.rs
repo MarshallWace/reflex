@@ -10,7 +10,7 @@ use crate::{
     },
     core::{
         Applicable, Arity, DependencyList, EvaluationCache, Expression, ExpressionFactory,
-        GraphNode, HeapAllocator, StackOffset, VarArgs,
+        GraphNode, HeapAllocator, SerializeJson, StackOffset, VarArgs,
     },
     hash::HashId,
 };
@@ -108,5 +108,11 @@ impl<T: Expression + Compile<T>> Compile<T> for CompiledFunctionTerm {
 impl std::fmt::Display for CompiledFunctionTerm {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "<compiled:{:x}>", self.address)
+    }
+}
+
+impl SerializeJson for CompiledFunctionTerm {
+    fn to_json(&self) -> Result<serde_json::Value, String> {
+        Err(format!("Unable to serialize term: {}", self))
     }
 }

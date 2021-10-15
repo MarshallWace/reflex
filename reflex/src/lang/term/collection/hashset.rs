@@ -11,7 +11,7 @@ use crate::{
     core::{
         transform_expression_list, DependencyList, DynamicState, EvaluationCache, Expression,
         ExpressionFactory, ExpressionList, GraphNode, HeapAllocator, Iterable, Rewritable,
-        StackOffset, Substitutions, VarArgs,
+        SerializeJson, StackOffset, Substitutions, VarArgs,
     },
     hash::HashId,
 };
@@ -164,6 +164,13 @@ impl<T: Expression> std::fmt::Display for HashSetTerm<T> {
         )
     }
 }
+
+impl<T: Expression> SerializeJson for HashSetTerm<T> {
+    fn to_json(&self) -> Result<serde_json::Value, String> {
+        Err(format!("Unable to serialize term: {}", self))
+    }
+}
+
 impl<T: Expression> Iterable for HashSetTerm<T> {
     fn is_empty(&self) -> bool {
         self.values.is_empty()

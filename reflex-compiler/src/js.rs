@@ -118,7 +118,14 @@ where
         factory,
         allocator,
     )?;
-    compile_root(root, factory, allocator, plugins, compiler_options, compiler_mode)
+    compile_root(
+        root,
+        factory,
+        allocator,
+        plugins,
+        compiler_options,
+        compiler_mode,
+    )
 }
 
 fn create_graph_root<T: Expression + 'static>(

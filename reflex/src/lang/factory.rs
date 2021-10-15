@@ -7,16 +7,18 @@ use std::{
     sync::Arc,
 };
 
-use super::term::*;
 use crate::{
     compiler::{Compile, Compiler, InstructionPointer, NativeFunctionRegistry, Program},
     core::{
         Applicable, Arity, DependencyList, DynamicState, Evaluate, EvaluationCache,
         EvaluationResult, Expression, ExpressionFactory, GraphNode, HeapAllocator, Reducible,
-        Rewritable, SignalList, StackOffset, StateToken, StructPrototype, Substitutions, VarArgs,
+        Rewritable, SerializeJson, SignalList, StackOffset, StateToken, StructPrototype,
+        Substitutions, VarArgs,
     },
     hash::{hash_object, HashId},
 };
+
+use super::term::*;
 
 #[derive(Hash, PartialEq, Eq, Clone)]
 pub struct SharedTerm {
@@ -200,6 +202,12 @@ impl std::fmt::Display for SharedTerm {
 impl std::fmt::Debug for SharedTerm {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         std::fmt::Debug::fmt(&self.value, f)
+    }
+}
+
+impl SerializeJson for SharedTerm {
+    fn to_json(&self) -> Result<serde_json::Value, String> {
+        (*self.value).to_json()
     }
 }
 

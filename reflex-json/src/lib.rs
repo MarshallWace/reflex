@@ -28,10 +28,10 @@ pub fn parse<T: Expression>(
 }
 
 pub fn stringify<'a, T: Expression>(value: &T) -> Result<String, String> {
-    value.to_json()
+    value
+        .to_json()
         .and_then(|value| serde_json::to_string(&value).map_err(|err| format!("{}", err)))
         .map_err(|err| format!("JSON serialization failed: {}", err))
-
 }
 
 pub fn deserialize(value: &str) -> Result<JsonValue, String> {
@@ -113,7 +113,7 @@ mod tests {
         let factory = TermFactory::default();
         assert_eq!(
             stringify(&factory.create_value_term(ValueTerm::Symbol(3))),
-            Err(String::from("Unable to serialize term: <symbol:3>")),
+            Err(String::from("JSON serialization failed: Unable to serialize term: <symbol:3>")),
         );
         assert_eq!(
             stringify(&factory.create_value_term(ValueTerm::Null)),

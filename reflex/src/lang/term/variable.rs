@@ -11,7 +11,7 @@ use crate::{
     compiler::{Compile, Compiler, Instruction, NativeFunctionRegistry, Program},
     core::{
         DependencyList, DynamicState, EvaluationCache, Expression, ExpressionFactory, GraphNode,
-        HeapAllocator, Rewritable, StackOffset, StateToken, Substitutions, VarArgs,
+        HeapAllocator, Rewritable, SerializeJson, StackOffset, StateToken, Substitutions, VarArgs,
     },
 };
 
@@ -129,6 +129,15 @@ impl<T: Expression> std::fmt::Display for VariableTerm<T> {
     }
 }
 
+impl<T: Expression> SerializeJson for VariableTerm<T> {
+    fn to_json(&self) -> Result<serde_json::Value, String> {
+        match self {
+            Self::Static(term) => term.to_json(),
+            Self::Dynamic(term) => term.to_json(),
+        }
+    }
+}
+
 #[derive(Hash, Eq, PartialEq, Debug)]
 pub struct StaticVariableTerm {
     offset: StackOffset,
@@ -216,6 +225,11 @@ impl<T: Expression + Compile<T>> Compile<T> for StaticVariableTerm {
 impl std::fmt::Display for StaticVariableTerm {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "<static:{}>", self.offset)
+    }
+}
+impl SerializeJson for StaticVariableTerm {
+    fn to_json(&self) -> Result<serde_json::Value, String> {
+        Err(format!("Unable to serialize term: {}", self))
     }
 }
 
@@ -320,5 +334,11 @@ impl<T: Expression + Compile<T>> Compile<T> for DynamicVariableTerm<T> {
 impl<T: Expression> std::fmt::Display for DynamicVariableTerm<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "<dynamic:{}:{}>", self.state_token, self.fallback)
+    }
+}
+
+impl<T: Expression> SerializeJson for DynamicVariableTerm<T> {
+    fn to_json(&self) -> Result<serde_json::Value, String> {
+        Err(format!("Unable to serialize term: {}", self))
     }
 }

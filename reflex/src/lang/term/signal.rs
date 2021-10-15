@@ -13,8 +13,8 @@ use crate::{
     },
     core::{
         Applicable, Arity, DependencyList, DynamicState, EvaluationCache, Expression,
-        ExpressionFactory, GraphNode, HeapAllocator, Reducible, Rewritable, Signal, SignalList,
-        StackOffset, Substitutions, VarArgs,
+        ExpressionFactory, GraphNode, HeapAllocator, Reducible, Rewritable, SerializeJson, Signal,
+        SignalList, StackOffset, Substitutions, VarArgs,
     },
 };
 
@@ -83,6 +83,12 @@ impl<T: Expression> std::fmt::Display for SignalTerm<T> {
                 .collect::<Vec<_>>()
                 .join(",")
         )
+    }
+}
+
+impl<T: Expression> SerializeJson for SignalTerm<T> {
+    fn to_json(&self) -> Result<serde_json::Value, String> {
+        Err(format!("Unable to serialize term: {}", self))
     }
 }
 
@@ -228,5 +234,11 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Compile<T>> Compile<T>
 impl<T: Expression> std::fmt::Display for SignalTransformerTerm<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "<transformer:{}>", self.handler)
+    }
+}
+
+impl<T: Expression> SerializeJson for SignalTransformerTerm<T> {
+    fn to_json(&self) -> Result<serde_json::Value, String> {
+        Err(format!("Unable to serialize term: {}", self))
     }
 }

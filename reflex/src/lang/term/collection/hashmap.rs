@@ -15,7 +15,7 @@ use crate::{
     core::{
         transform_expression_list, DependencyList, DynamicState, EvaluationCache, Expression,
         ExpressionFactory, ExpressionList, GraphNode, HeapAllocator, Iterable, Rewritable,
-        StackOffset, Substitutions, VarArgs,
+        SerializeJson, StackOffset, Substitutions, VarArgs,
     },
     hash::HashId,
 };
@@ -309,6 +309,13 @@ impl<T: Expression> std::fmt::Display for HashMapTerm<T> {
         )
     }
 }
+
+impl<T: Expression> SerializeJson for HashMapTerm<T> {
+    fn to_json(&self) -> Result<serde_json::Value, String> {
+        Err(format!("Unable to serialize term: {}", self))
+    }
+}
+
 fn build_lookup_table<'a, T: Expression + 'a>(
     keys: impl IntoIterator<Item = &'a T, IntoIter = impl ExactSizeIterator<Item = &'a T>>,
 ) -> HashMap<HashId, usize> {

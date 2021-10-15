@@ -12,7 +12,8 @@ use crate::{
     },
     core::{
         Applicable, Arity, DependencyList, EvaluationCache, Expression, ExpressionFactory,
-        ExpressionList, GraphNode, HeapAllocator, NativeAllocator, StackOffset, VarArgs,
+        ExpressionList, GraphNode, HeapAllocator, NativeAllocator, SerializeJson, StackOffset,
+        VarArgs,
     },
     hash::hash_object,
     lang::compile_function,
@@ -189,6 +190,12 @@ impl<T: Expression> std::fmt::Display for NativeFunctionTerm<T> {
 impl<T: Expression> std::fmt::Debug for NativeFunctionTerm<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         std::fmt::Display::fmt(self, f)
+    }
+}
+
+impl<T: Expression> SerializeJson for NativeFunctionTerm<T> {
+    fn to_json(&self) -> Result<serde_json::Value, String> {
+        Err(format!("Unable to serialize term: {}", self))
     }
 }
 

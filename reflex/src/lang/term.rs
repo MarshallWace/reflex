@@ -33,13 +33,15 @@ pub use value::*;
 mod variable;
 pub use variable::*;
 
-use crate::compiler::{Compile, Compiler, NativeFunctionRegistry, Program};
-use crate::core::{
-    Applicable, Arity, DependencyList, DynamicState, Evaluate, EvaluationCache, EvaluationResult,
-    Expression, ExpressionFactory, ExpressionList, GraphNode, HeapAllocator, Reducible, Rewritable,
-    StackOffset, StringValue, Substitutions, VarArgs,
+use crate::{
+    compiler::{Compile, Compiler, NativeFunctionRegistry, Program},
+    core::{
+        Applicable, Arity, DependencyList, DynamicState, Evaluate, EvaluationCache,
+        EvaluationResult, Expression, ExpressionFactory, ExpressionList, GraphNode, HeapAllocator,
+        Reducible, Rewritable, SerializeJson, StackOffset, StringValue, Substitutions, VarArgs,
+    },
+    hash::HashId,
 };
-use crate::hash::HashId;
 
 pub type StringPrimitive = String;
 impl StringValue for StringPrimitive {
@@ -278,6 +280,12 @@ impl<T: Expression> std::fmt::Display for CachedTerm<T> {
 impl<T: Expression> std::fmt::Debug for CachedTerm<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         std::fmt::Debug::fmt(&self.value, f)
+    }
+}
+
+impl<T: Expression> SerializeJson for CachedTerm<T> {
+    fn to_json(&self) -> Result<serde_json::Value, String> {
+        self.value().to_json()
     }
 }
 
@@ -646,6 +654,29 @@ impl<T: Expression + Compile<T>> std::fmt::Display for Term<T> {
             Self::Collection(term) => std::fmt::Display::fmt(term, f),
             Self::Signal(term) => std::fmt::Display::fmt(term, f),
             Self::SignalTransformer(term) => std::fmt::Display::fmt(term, f),
+        }
+    }
+}
+
+impl<'a, T: Expression + Compile<T>> SerializeJson for Term<T> {
+    fn to_json(&self) -> Result<serde_json::Value, String> {
+        match self {
+            Term::Value(term) => term.to_json(),
+            Term::Variable(term) => term.to_json(),
+            Term::Let(term) => term.to_json(),
+            Term::Lambda(term) => term.to_json(),
+            Term::Application(term) => term.to_json(),
+            Term::PartialApplication(term) => term.to_json(),
+            Term::Recursive(term) => term.to_json(),
+            Term::CompiledFunction(term) => term.to_json(),
+            Term::Builtin(term) => term.to_json(),
+            Term::Native(term) => term.to_json(),
+            Term::Tuple(term) => term.to_json(),
+            Term::Struct(term) => term.to_json(),
+            Term::Constructor(term) => term.to_json(),
+            Term::Collection(term) => term.to_json(),
+            Term::Signal(term) => term.to_json(),
+            Term::SignalTransformer(term) => term.to_json(),
         }
     }
 }

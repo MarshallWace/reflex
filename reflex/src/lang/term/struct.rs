@@ -11,7 +11,7 @@ use crate::{
     core::{
         transform_expression_list, Applicable, Arity, DependencyList, DynamicState,
         EvaluationCache, Expression, ExpressionFactory, ExpressionList, GraphNode, HeapAllocator,
-        Reducible, Rewritable, StackOffset, StructPrototype, Substitutions, VarArgs,
+        Reducible, Rewritable, SerializeJson, StackOffset, StructPrototype, Substitutions, VarArgs,
     },
 };
 
@@ -166,6 +166,23 @@ impl<T: Expression> std::fmt::Display for StructTerm<T> {
     }
 }
 
+impl<T: Expression> SerializeJson for StructTerm<T> {
+    fn to_json(&self) -> Result<serde_json::Value, String> {
+        let map: Result<serde_json::Map<_, _>, String> = self
+            .prototype()
+            .keys()
+            .iter()
+            .zip(self.fields().iter())
+            .map(|(key, value)| {
+                let value = value.to_json()?;
+                Ok((key.clone(), value))
+            })
+            .collect();
+
+        Ok(map?.into())
+    }
+}
+
 #[derive(Hash, Eq, PartialEq, Debug)]
 pub struct ConstructorTerm {
     prototype: StructPrototype,
@@ -241,6 +258,12 @@ impl std::fmt::Display for ConstructorTerm {
                 .collect::<Vec<_>>()
                 .join(","),
         )
+    }
+}
+
+impl SerializeJson for ConstructorTerm {
+    fn to_json(&self) -> Result<serde_json::Value, String> {
+        Err(format!("Unable to serialize term: {}", self))
     }
 }
 

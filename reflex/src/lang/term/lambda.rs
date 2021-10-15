@@ -10,7 +10,7 @@ use crate::{
     core::{
         Applicable, Arity, DependencyList, DynamicState, EvaluationCache, Expression,
         ExpressionFactory, GraphNode, HeapAllocator, Reducible, Rewritable, ScopeOffset,
-        StackOffset, Substitutions, VarArgs,
+        SerializeJson, StackOffset, Substitutions, VarArgs,
     },
     hash::hash_object,
 };
@@ -189,6 +189,11 @@ impl<T: Expression> std::fmt::Display for LambdaTerm<T> {
     }
 }
 
+impl<T: Expression> SerializeJson for LambdaTerm<T> {
+    fn to_json(&self) -> Result<serde_json::Value, String> {
+        Err(format!("Unable to serialize term: {}", self))
+    }
+}
 fn apply_eta_reduction<'a, T: Expression>(
     body: &'a T,
     num_args: StackOffset,

@@ -9,7 +9,7 @@ use crate::{
     core::{
         transform_expression_list, Applicable, Arity, DependencyList, DynamicState,
         EvaluationCache, Expression, ExpressionFactory, ExpressionList, GraphNode, HeapAllocator,
-        Reducible, Rewritable, StackOffset, Substitutions, VarArgs,
+        Reducible, Rewritable, SerializeJson, StackOffset, Substitutions, VarArgs,
     },
 };
 
@@ -278,5 +278,11 @@ impl<T: Expression> std::fmt::Display for PartialApplicationTerm<T> {
                 .collect::<Vec<_>>()
                 .join(",")
         )
+    }
+}
+
+impl<T: Expression> SerializeJson for PartialApplicationTerm<T> {
+    fn to_json(&self) -> Result<serde_json::Value, String> {
+        Err(format!("Unable to serialize term: {}", self))
     }
 }

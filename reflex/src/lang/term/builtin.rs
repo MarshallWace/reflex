@@ -4,130 +4,133 @@
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use std::{collections::HashSet, iter::once};
 
+use serde::{Deserialize, Serialize};
+use strum_macros::EnumIter;
+
+pub use abs::*;
+pub use add::*;
+pub use and::*;
+pub use append::*;
+pub use apply::*;
+pub use car::*;
+pub use cdr::*;
+pub use ceil::*;
+pub use collect::*;
+pub use concat::*;
+pub use cons::*;
+pub use construct::*;
+pub use contains::*;
+pub use divide::*;
+pub use effect::*;
+pub use ends_with::*;
+pub use entries::*;
+pub use eq::*;
+pub use equal::*;
+pub use filter::*;
+pub use floor::*;
+pub use get::*;
+pub use gt::*;
+pub use gte::*;
+pub use if_error::*;
+pub use if_pending::*;
+pub use insert::*;
+pub use keys::*;
+pub use lt::*;
+pub use lte::*;
+pub use map::*;
+pub use max::*;
+pub use merge::*;
+pub use min::*;
+pub use multiply::*;
+pub use not::*;
+pub use or::*;
+pub use pow::*;
+pub use push::*;
+pub use push_front::*;
+pub use r#if::*;
+pub use r#match::*;
+pub use reduce::*;
+pub use remainder::*;
+pub use replace::*;
+pub use resolve::*;
+pub use resolve_deep::*;
+pub use round::*;
+pub use sequence::*;
+pub use slice::*;
+pub use split::*;
+pub use starts_with::*;
+pub use subtract::*;
+pub use values::*;
+
 use crate::{
     compiler::{
         Compile, Compiler, Instruction, InstructionPointer, NativeFunctionRegistry, Program,
     },
     core::{
         Applicable, Arity, DependencyList, EvaluationCache, Expression, ExpressionFactory,
-        GraphNode, HeapAllocator, StackOffset, VarArgs,
+        GraphNode, HeapAllocator, SerializeJson, StackOffset, VarArgs,
     },
     hash::{hash_object, HashId},
     lang::with_eagerness,
 };
-use serde::{Deserialize, Serialize};
-use strum_macros::EnumIter;
 
-mod add;
-pub use add::*;
 mod abs;
-pub use abs::*;
+mod add;
 mod and;
-pub use and::*;
 mod append;
-pub use append::*;
 mod apply;
-pub use apply::*;
 mod car;
-pub use car::*;
 mod cdr;
-pub use cdr::*;
 mod ceil;
-pub use ceil::*;
 mod collect;
-pub use collect::*;
 mod concat;
-pub use concat::*;
 mod cons;
-pub use cons::*;
 mod construct;
-pub use construct::*;
 mod contains;
-pub use contains::*;
 mod divide;
-pub use divide::*;
 mod effect;
-pub use effect::*;
 mod ends_with;
-pub use ends_with::*;
 mod entries;
-pub use entries::*;
 mod eq;
-pub use eq::*;
 mod equal;
-pub use equal::*;
 mod filter;
-pub use filter::*;
 mod floor;
-pub use floor::*;
 mod get;
-pub use get::*;
 mod gt;
-pub use gt::*;
 mod gte;
-pub use gte::*;
 mod r#if;
-pub use r#if::*;
 mod if_error;
-pub use if_error::*;
 mod if_pending;
-pub use if_pending::*;
 mod insert;
-pub use insert::*;
 mod keys;
-pub use keys::*;
 mod lt;
-pub use lt::*;
 mod lte;
-pub use lte::*;
 mod map;
-pub use map::*;
 mod r#match;
-pub use r#match::*;
 mod max;
-pub use max::*;
 mod merge;
-pub use merge::*;
 mod min;
-pub use min::*;
 mod multiply;
-pub use multiply::*;
 mod not;
-pub use not::*;
 mod or;
-pub use or::*;
 mod pow;
-pub use pow::*;
 mod push;
-pub use push::*;
 mod push_front;
-pub use push_front::*;
 mod reduce;
-pub use reduce::*;
 mod remainder;
-pub use remainder::*;
 mod replace;
-pub use replace::*;
 mod resolve;
-pub use resolve::*;
 mod resolve_deep;
 pub use resolve_deep::*;
 mod resolve_shallow;
 pub use resolve_shallow::*;
 mod round;
-pub use round::*;
 mod sequence;
-pub use sequence::*;
 mod slice;
-pub use slice::*;
 mod split;
-pub use split::*;
 mod starts_with;
-pub use starts_with::*;
 mod subtract;
-pub use subtract::*;
 mod values;
-pub use values::*;
 
 #[derive(Hash, Eq, PartialEq, Clone, Copy, Debug, EnumIter, Serialize, Deserialize)]
 #[serde(tag = "type")]
@@ -438,6 +441,12 @@ impl<T: Expression + Applicable<T> + Compile<T>> Compile<T> for BuiltinTerm {
 impl std::fmt::Display for BuiltinTerm {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "<builtin:{:?}>", self)
+    }
+}
+
+impl SerializeJson for BuiltinTerm {
+    fn to_json(&self) -> Result<serde_json::Value, String> {
+        Err(format!("Unable to serialize term: {}", self))
     }
 }
 

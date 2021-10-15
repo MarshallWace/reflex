@@ -2,20 +2,21 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
-use fnv::FnvHashMap;
-use im::OrdSet;
 use std::{
     collections::{hash_map::DefaultHasher, BTreeSet, HashSet},
     hash::{Hash, Hasher},
     iter::{once, FromIterator},
 };
 
-use crate::lang::{serialization::SerializeJson, *};
+use fnv::FnvHashMap;
+use im::OrdSet;
+use serde::{Deserialize, Serialize};
+
+use crate::lang::*;
 use crate::{
     compiler::InstructionPointer,
     hash::{hash_object, HashId},
 };
-use serde::{Deserialize, Serialize};
 
 pub trait Expression:
     GraphNode
@@ -1948,4 +1949,8 @@ mod tests {
             Some(factory.create_value_term(ValueTerm::Int(6)))
         );
     }
+}
+
+pub trait SerializeJson {
+    fn to_json(&self) -> Result<serde_json::Value, String>;
 }

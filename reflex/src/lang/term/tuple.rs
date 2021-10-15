@@ -10,8 +10,8 @@ use crate::{
     },
     core::{
         transform_expression_list, DependencyList, DynamicState, EvaluationCache, Expression,
-        ExpressionFactory, ExpressionList, GraphNode, HeapAllocator, Rewritable, StackOffset,
-        StructFieldOffset, Substitutions, VarArgs,
+        ExpressionFactory, ExpressionList, GraphNode, HeapAllocator, Rewritable, SerializeJson,
+        StackOffset, StructFieldOffset, Substitutions, VarArgs,
     },
 };
 
@@ -139,5 +139,15 @@ impl<T: Expression> std::fmt::Display for TupleTerm<T> {
                 .collect::<Vec<_>>()
                 .join(", "),
         )
+    }
+}
+
+impl<T: Expression> SerializeJson for TupleTerm<T> {
+    fn to_json(&self) -> Result<serde_json::Value, String> {
+        self.fields()
+            .iter()
+            .map(|key| key.to_json())
+            .collect::<Result<Vec<_>, String>>()
+            .map(|values| serde_json::Value::Array(values))
     }
 }

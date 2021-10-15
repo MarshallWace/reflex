@@ -4,20 +4,21 @@
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use std::collections::HashSet;
 
+pub use hashmap::*;
+pub use hashset::*;
+pub use vector::*;
+
 use crate::{
     compiler::{Compile, Compiler, NativeFunctionRegistry, Program},
     core::{
         DependencyList, DynamicState, EvaluationCache, Expression, ExpressionFactory, GraphNode,
-        HeapAllocator, Iterable, Rewritable, StackOffset, Substitutions, VarArgs,
+        HeapAllocator, Iterable, Rewritable, SerializeJson, StackOffset, Substitutions, VarArgs,
     },
 };
 
 mod hashmap;
-pub use hashmap::*;
 mod hashset;
-pub use hashset::*;
 mod vector;
-pub use vector::*;
 
 #[derive(Hash, Eq, PartialEq, Debug)]
 pub enum CollectionTerm<T: Expression> {
@@ -151,6 +152,16 @@ impl<T: Expression> std::fmt::Display for CollectionTerm<T> {
             Self::Vector(term) => std::fmt::Display::fmt(term, f),
             Self::HashMap(term) => std::fmt::Display::fmt(term, f),
             Self::HashSet(term) => std::fmt::Display::fmt(term, f),
+        }
+    }
+}
+
+impl<T: Expression> SerializeJson for CollectionTerm<T> {
+    fn to_json(&self) -> Result<serde_json::Value, String> {
+        match self {
+            CollectionTerm::Vector(term) => term.to_json(),
+            CollectionTerm::HashMap(term) => term.to_json(),
+            CollectionTerm::HashSet(term) => term.to_json(),
         }
     }
 }

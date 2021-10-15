@@ -11,7 +11,7 @@ use crate::{
     core::{
         transform_expression_list, DependencyList, DynamicState, EvaluationCache, Expression,
         ExpressionFactory, ExpressionList, GraphNode, HeapAllocator, Iterable, Rewritable,
-        StackOffset, Substitutions, VarArgs,
+        SerializeJson, StackOffset, Substitutions, VarArgs,
     },
 };
 
@@ -154,5 +154,15 @@ impl<T: Expression> std::fmt::Display for VectorTerm<T> {
                     .join(", ")
             }
         )
+    }
+}
+
+impl<T: Expression> SerializeJson for VectorTerm<T> {
+    fn to_json(&self) -> Result<serde_json::Value, String> {
+        self.items()
+            .iter()
+            .map(|key| key.to_json())
+            .collect::<Result<Vec<_>, String>>()
+            .map(|values| serde_json::Value::Array(values))
     }
 }

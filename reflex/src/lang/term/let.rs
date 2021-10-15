@@ -8,7 +8,8 @@ use crate::{
     compiler::{Compile, Compiler, NativeFunctionRegistry, Program},
     core::{
         DependencyList, DynamicState, EvaluationCache, Expression, ExpressionFactory, GraphNode,
-        HeapAllocator, Reducible, Rewritable, ScopeOffset, StackOffset, Substitutions, VarArgs,
+        HeapAllocator, Reducible, Rewritable, ScopeOffset, SerializeJson, StackOffset,
+        Substitutions, VarArgs,
     },
 };
 
@@ -203,5 +204,11 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Compile<T>> Compile<T> for L
             program,
             initializer_native_functions.union(body_native_functions),
         ))
+    }
+}
+
+impl<T: Expression> SerializeJson for LetTerm<T> {
+    fn to_json(&self) -> Result<serde_json::Value, String> {
+        Err(format!("Unable to serialize term: {}", self))
     }
 }

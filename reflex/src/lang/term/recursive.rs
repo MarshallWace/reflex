@@ -8,7 +8,7 @@ use crate::{
     compiler::{Compile, Compiler, Instruction, NativeFunctionRegistry, Program},
     core::{
         DependencyList, DynamicState, EvaluationCache, Expression, ExpressionFactory, GraphNode,
-        HeapAllocator, Reducible, Rewritable, StackOffset, Substitutions, VarArgs,
+        HeapAllocator, Reducible, Rewritable, SerializeJson, StackOffset, Substitutions, VarArgs,
     },
 };
 
@@ -128,5 +128,11 @@ impl<T: Expression + Compile<T>> Compile<T> for RecursiveTerm<T> {
 impl<T: Expression> std::fmt::Display for RecursiveTerm<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "<recursive:{}>", format!("{}", self.factory))
+    }
+}
+
+impl<T: Expression> SerializeJson for RecursiveTerm<T> {
+    fn to_json(&self) -> Result<serde_json::Value, String> {
+        Err(format!("Unable to serialize term: {}", self))
     }
 }
