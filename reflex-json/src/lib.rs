@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use std::iter::FromIterator;
 
 use reflex::{
@@ -26,16 +27,19 @@ pub fn parse<T: Expression>(
     deserialize(value).and_then(|value| hydrate(value, factory, allocator))
 }
 
-pub fn stringify<T: Expression>(value: &T) -> Result<String, String> {
-    serde_json::to_string(value).map_err(|err| format!("JSON serialization failed: {}", err))
+pub fn stringify<'a, T: Expression>(value: &T) -> Result<String, String> {
+    value.to_json()
+        .and_then(|value| serde_json::to_string(&value).map_err(|err| format!("{}", err)))
+        .map_err(|err| format!("JSON serialization failed: {}", err))
+
 }
 
 pub fn deserialize(value: &str) -> Result<JsonValue, String> {
     serde_json::from_str(value).map_err(|err| format!("JSON deserialization failed: {}", err))
 }
 
-pub fn sanitize<T: Expression>(value: &T) -> Result<JsonValue, String> {
-    serde_json::to_value(value).map_err(|err| format!("JSON sanitization failed: {}", err))
+pub fn sanitize<'a, T: Expression>(value: &T) -> Result<JsonValue, String> {
+    value.to_json()
 }
 
 pub fn hydrate<T: Expression>(
@@ -109,9 +113,7 @@ mod tests {
         let factory = TermFactory::default();
         assert_eq!(
             stringify(&factory.create_value_term(ValueTerm::Symbol(3))),
-            Err(String::from(
-                "JSON serialization failed: Unable to serialize term: <symbol:3>"
-            )),
+            Err(String::from("Unable to serialize term: <symbol:3>")),
         );
         assert_eq!(
             stringify(&factory.create_value_term(ValueTerm::Null)),

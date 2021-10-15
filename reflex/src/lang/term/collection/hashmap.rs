@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use std::{
     collections::{HashMap, HashSet},
     hash::Hash,
@@ -308,20 +309,6 @@ impl<T: Expression> std::fmt::Display for HashMapTerm<T> {
         )
     }
 }
-impl<T: Expression> serde::Serialize for HashMapTerm<T> {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        let entries = self.keys.iter().zip(self.values.iter());
-        let mut result = serializer.serialize_map(Some(entries.len()))?;
-        for (key, value) in entries {
-            serde::ser::SerializeMap::serialize_entry(&mut result, key, value)?;
-        }
-        serde::ser::SerializeMap::end(result)
-    }
-}
-
 fn build_lookup_table<'a, T: Expression + 'a>(
     keys: impl IntoIterator<Item = &'a T, IntoIter = impl ExactSizeIterator<Item = &'a T>>,
 ) -> HashMap<HashId, usize> {

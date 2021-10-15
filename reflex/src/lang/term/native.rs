@@ -6,12 +6,17 @@ use std::{collections::HashSet, hash::Hash, iter::once, str::FromStr};
 
 use uuid::Uuid;
 
-use crate::{compiler::{
-    Compile, Compiler, Instruction, InstructionPointer, NativeFunctionRegistry, Program,
-}, core::{
-    Applicable, Arity, DependencyList, EvaluationCache, Expression, ExpressionFactory,
-    ExpressionList, GraphNode, HeapAllocator, NativeAllocator, StackOffset, VarArgs,
-}, hash::hash_object, lang::compile_function};
+use crate::{
+    compiler::{
+        Compile, Compiler, Instruction, InstructionPointer, NativeFunctionRegistry, Program,
+    },
+    core::{
+        Applicable, Arity, DependencyList, EvaluationCache, Expression, ExpressionFactory,
+        ExpressionList, GraphNode, HeapAllocator, NativeAllocator, StackOffset, VarArgs,
+    },
+    hash::hash_object,
+    lang::compile_function,
+};
 
 pub type NativeFunctionId = Uuid;
 
@@ -37,7 +42,12 @@ impl<T: Expression> NativeFunction<T> {
             &dyn NativeAllocator<T>,
         ) -> Result<T, String>,
     ) -> Result<Self, String> {
-        let uid = Uuid::from_str(&uid).map_err(|err| format!("Unable to parse uid {}, is it actually a UUID? Error: {}", uid, err))?;
+        let uid = Uuid::from_str(&uid).map_err(|err| {
+            format!(
+                "Unable to parse uid {}, is it actually a UUID? Error: {}",
+                uid, err
+            )
+        })?;
         Ok(Self {
             uid,
             name,
@@ -56,7 +66,7 @@ impl<T: Expression> NativeFunction<T> {
             &dyn NativeAllocator<T>,
         ) -> Result<T, String>,
     ) -> Self {
-        Self{
+        Self {
             uid,
             name,
             arity,
@@ -179,17 +189,6 @@ impl<T: Expression> std::fmt::Display for NativeFunctionTerm<T> {
 impl<T: Expression> std::fmt::Debug for NativeFunctionTerm<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         std::fmt::Display::fmt(self, f)
-    }
-}
-impl<T: Expression> serde::Serialize for NativeFunctionTerm<T> {
-    fn serialize<S>(&self, _serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        Err(serde::ser::Error::custom(format!(
-            "Unable to serialize term: {}",
-            self
-        )))
     }
 }
 

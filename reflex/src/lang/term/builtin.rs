@@ -358,7 +358,9 @@ impl<T: Expression + Applicable<T>> Applicable<T> for BuiltinTerm {
             Self::Gte => Applicable::<T>::apply(&Gte {}, args, factory, allocator, cache),
             Self::If => Applicable::<T>::apply(&If {}, args, factory, allocator, cache),
             Self::IfError => Applicable::<T>::apply(&IfError {}, args, factory, allocator, cache),
-            Self::IfPending => Applicable::<T>::apply(&IfPending {}, args, factory, allocator, cache),
+            Self::IfPending => {
+                Applicable::<T>::apply(&IfPending {}, args, factory, allocator, cache)
+            }
             Self::Insert => Applicable::<T>::apply(&Insert {}, args, factory, allocator, cache),
             Self::Keys => Applicable::<T>::apply(&Keys {}, args, factory, allocator, cache),
             Self::Lt => Applicable::<T>::apply(&Lt {}, args, factory, allocator, cache),

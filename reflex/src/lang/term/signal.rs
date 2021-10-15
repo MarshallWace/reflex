@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use std::{
     collections::HashSet,
     iter::{empty, once},
@@ -82,17 +83,6 @@ impl<T: Expression> std::fmt::Display for SignalTerm<T> {
                 .collect::<Vec<_>>()
                 .join(",")
         )
-    }
-}
-impl<T: Expression> serde::Serialize for SignalTerm<T> {
-    fn serialize<S>(&self, _serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        Err(serde::ser::Error::custom(format!(
-            "Unable to serialize term: {}",
-            self
-        )))
     }
 }
 
@@ -238,16 +228,5 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Compile<T>> Compile<T>
 impl<T: Expression> std::fmt::Display for SignalTransformerTerm<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "<transformer:{}>", self.handler)
-    }
-}
-impl<T: Expression> serde::Serialize for SignalTransformerTerm<T> {
-    fn serialize<S>(&self, _serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        Err(serde::ser::Error::custom(format!(
-            "Unable to serialize term: {}",
-            self
-        )))
     }
 }

@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use std::{cmp::Eq, collections::HashSet, hash::Hash, iter::once};
 
 use crate::{
@@ -163,24 +164,6 @@ impl<TString: StringValue> std::fmt::Display for ValueTerm<TString> {
 impl<TString: StringValue> std::fmt::Debug for ValueTerm<TString> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         std::fmt::Display::fmt(self, f)
-    }
-}
-impl<TString: StringValue> serde::Serialize for ValueTerm<TString> {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        match self {
-            ValueTerm::Null => serializer.serialize_none(),
-            ValueTerm::Boolean(value) => serializer.serialize_bool(*value),
-            ValueTerm::Int(value) => serializer.serialize_i32(*value),
-            ValueTerm::Float(value) => serializer.serialize_f64(*value),
-            ValueTerm::String(value) => serde::Serialize::serialize(value, serializer),
-            _ => Err(serde::ser::Error::custom(format!(
-                "Unable to serialize term: {}",
-                self
-            ))),
-        }
     }
 }
 

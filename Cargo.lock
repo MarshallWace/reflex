@@ -933,6 +933,7 @@ dependencies = [
  "fnv",
  "im",
  "serde",
+ "serde_json",
  "strum",
  "strum_macros",
  "uuid",

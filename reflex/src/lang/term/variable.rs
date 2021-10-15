@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use std::{
     collections::HashSet,
     iter::{once, FromIterator},
@@ -127,17 +128,6 @@ impl<T: Expression> std::fmt::Display for VariableTerm<T> {
         }
     }
 }
-impl<T: Expression> serde::Serialize for VariableTerm<T> {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        match self {
-            Self::Static(term) => serde::Serialize::serialize(term, serializer),
-            Self::Dynamic(term) => serde::Serialize::serialize(term, serializer),
-        }
-    }
-}
 
 #[derive(Hash, Eq, PartialEq, Debug)]
 pub struct StaticVariableTerm {
@@ -226,17 +216,6 @@ impl<T: Expression + Compile<T>> Compile<T> for StaticVariableTerm {
 impl std::fmt::Display for StaticVariableTerm {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "<static:{}>", self.offset)
-    }
-}
-impl serde::Serialize for StaticVariableTerm {
-    fn serialize<S>(&self, _serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        Err(serde::ser::Error::custom(format!(
-            "Unable to serialize term: {}",
-            self
-        )))
     }
 }
 
@@ -341,16 +320,5 @@ impl<T: Expression + Compile<T>> Compile<T> for DynamicVariableTerm<T> {
 impl<T: Expression> std::fmt::Display for DynamicVariableTerm<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "<dynamic:{}:{}>", self.state_token, self.fallback)
-    }
-}
-impl<T: Expression> serde::Serialize for DynamicVariableTerm<T> {
-    fn serialize<S>(&self, _serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        Err(serde::ser::Error::custom(format!(
-            "Unable to serialize term: {}",
-            self
-        )))
     }
 }

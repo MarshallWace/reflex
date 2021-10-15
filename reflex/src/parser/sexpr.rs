@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use std::{collections::HashMap, fmt, iter::once};
 
 use crate::{
@@ -654,8 +655,8 @@ fn parse_binding_expression<'src, T: Expression + Rewritable<T> + Reducible<T>>(
                             Substitutions::named(&initializer_replacements, None);
                         let bindings = factory.create_recursive_term(factory.create_lambda_term(
                             1,
-                            factory.create_tuple_term(
-                                allocator.create_list(initializers.iter().map(|initializer| {
+                            factory.create_tuple_term(allocator.create_list(
+                                initializers.iter().map(|initializer| {
                                     initializer
                                         .substitute_static(
                                             &initializer_substitutions,
@@ -664,8 +665,8 @@ fn parse_binding_expression<'src, T: Expression + Rewritable<T> + Reducible<T>>(
                                             evaluation_cache,
                                         )
                                         .unwrap_or_else(|| initializer.clone())
-                                })),
-                            ),
+                                }),
+                            )),
                         ));
                         factory.create_application_term(
                             factory.create_lambda_term(num_bindings, body),
@@ -773,558 +774,589 @@ mod tests {
 
     use super::parse;
 
-//     #[test]
-//     fn invalid_expression() {
-//         assert_eq!(
-//             parse("#"),
-//             Err(ParserError {
-//                 message: String::from("Expected expression, received '#'"),
-//                 source: None
-//             })
-//         );
-//         assert_eq!(
-//             parse("1."),
-//             Err(ParserError {
-//                 message: String::from("Expected end of input, received '.'"),
-//                 source: None
-//             })
-//         );
-//         assert_eq!(
-//             parse(".1"),
-//             Err(ParserError {
-//                 message: String::from("Expected expression, received '.'"),
-//                 source: None
-//             })
-//         );
-//         assert_eq!(
-//             parse("-.1"),
-//             Err(ParserError {
-//                 message: String::from("Expected end of input, received '.'"),
-//                 source: None
-//             })
-//         );
-//     }
+    //     #[test]
+    //     fn invalid_expression() {
+    //         assert_eq!(
+    //             parse("#"),
+    //             Err(ParserError {
+    //                 message: String::from("Expected expression, received '#'"),
+    //                 source: None
+    //             })
+    //         );
+    //         assert_eq!(
+    //             parse("1."),
+    //             Err(ParserError {
+    //                 message: String::from("Expected end of input, received '.'"),
+    //                 source: None
+    //             })
+    //         );
+    //         assert_eq!(
+    //             parse(".1"),
+    //             Err(ParserError {
+    //                 message: String::from("Expected expression, received '.'"),
+    //                 source: None
+    //             })
+    //         );
+    //         assert_eq!(
+    //             parse("-.1"),
+    //             Err(ParserError {
+    //                 message: String::from("Expected end of input, received '.'"),
+    //                 source: None
+    //             })
+    //         );
+    //     }
 
-//     #[test]
-//     fn multiple_expressions() {
-//         assert_eq!(
-//             parse("3 3"),
-//             Err(ParserError {
-//                 message: String::from("Expected end of input, received '3'"),
-//                 source: None,
-//             })
-//         );
-//         assert_eq!(
-//             parse("3 foo"),
-//             Err(ParserError {
-//                 message: String::from("Expected end of input, received 'f'"),
-//                 source: None,
-//             })
-//         );
-//     }
+    //     #[test]
+    //     fn multiple_expressions() {
+    //         assert_eq!(
+    //             parse("3 3"),
+    //             Err(ParserError {
+    //                 message: String::from("Expected end of input, received '3'"),
+    //                 source: None,
+    //             })
+    //         );
+    //         assert_eq!(
+    //             parse("3 foo"),
+    //             Err(ParserError {
+    //                 message: String::from("Expected end of input, received 'f'"),
+    //                 source: None,
+    //             })
+    //         );
+    //     }
 
-//     #[test]
-//     fn ignore_extra_whitespace() {
-//         assert_eq!(
-//             parse("  \n\r\t3\n\r\t  "),
-//             Ok(Expression::new(Term::Value(ValueTerm::Int(3))))
-//         );
-//     }
+    //     #[test]
+    //     fn ignore_extra_whitespace() {
+    //         assert_eq!(
+    //             parse("  \n\r\t3\n\r\t  "),
+    //             Ok(Expression::new(Term::Value(ValueTerm::Int(3))))
+    //         );
+    //     }
 
-//     #[test]
-//     fn global_primitives() {
-//         assert_eq!(
-//             parse("#t"),
-//             Ok(Expression::new(Term::Value(ValueTerm::Boolean(true))))
-//         );
-//         assert_eq!(
-//             parse("#f"),
-//             Ok(Expression::new(Term::Value(ValueTerm::Boolean(false))))
-//         );
-//     }
+    //     #[test]
+    //     fn global_primitives() {
+    //         assert_eq!(
+    //             parse("#t"),
+    //             Ok(Expression::new(Term::Value(ValueTerm::Boolean(true))))
+    //         );
+    //         assert_eq!(
+    //             parse("#f"),
+    //             Ok(Expression::new(Term::Value(ValueTerm::Boolean(false))))
+    //         );
+    //     }
 
-//     #[test]
-//     fn primitive_values() {
-//         assert_eq!(
-//             parse("0"),
-//             Ok(Expression::new(Term::Value(ValueTerm::Int(0))))
-//         );
-//         assert_eq!(
-//             parse("-0"),
-//             Ok(Expression::new(Term::Value(ValueTerm::Int(0))))
-//         );
-//         assert_eq!(
-//             parse("3"),
-//             Ok(Expression::new(Term::Value(ValueTerm::Int(3))))
-//         );
-//         assert_eq!(
-//             parse("-3"),
-//             Ok(Expression::new(Term::Value(ValueTerm::Int(-3))))
-//         );
-//         assert_eq!(
-//             parse("123"),
-//             Ok(Expression::new(Term::Value(ValueTerm::Int(123))))
-//         );
-//         assert_eq!(
-//             parse("-123"),
-//             Ok(Expression::new(Term::Value(ValueTerm::Int(-123))))
-//         );
-//         assert_eq!(
-//             parse("0.0"),
-//             Ok(Expression::new(Term::Value(ValueTerm::Float(0.0))))
-//         );
-//         assert_eq!(
-//             parse("-0.0"),
-//             Ok(Expression::new(Term::Value(ValueTerm::Float(-0.0))))
-//         );
-//         assert_eq!(
-//             parse("3.142"),
-//             Ok(Expression::new(Term::Value(ValueTerm::Float(3.142))))
-//         );
-//         assert_eq!(
-//             parse("-3.142"),
-//             Ok(Expression::new(Term::Value(ValueTerm::Float(-3.142))))
-//         );
-//         assert_eq!(
-//             parse("123.45"),
-//             Ok(Expression::new(Term::Value(ValueTerm::Float(123.45))))
-//         );
-//         assert_eq!(
-//             parse("-123.45"),
-//             Ok(Expression::new(Term::Value(ValueTerm::Float(-123.45))))
-//         );
-//         assert_eq!(
-//             parse("\"\""),
-//             Ok(Expression::new(Term::Value(ValueTerm::String(
-//                 StringValue::from("")
-//             ))))
-//         );
-//         assert_eq!(
-//             parse("\" \""),
-//             Ok(Expression::new(Term::Value(ValueTerm::String(
-//                 StringValue::from(" ")
-//             ))))
-//         );
-//         assert_eq!(
-//             parse("\"foo\""),
-//             Ok(Expression::new(Term::Value(ValueTerm::String(
-//                 StringValue::from("foo")
-//             ))))
-//         );
-//         assert_eq!(
-//             parse("\"foo bar\""),
-//             Ok(Expression::new(Term::Value(ValueTerm::String(
-//                 StringValue::from("foo bar")
-//             ))))
-//         );
-//     }
+    //     #[test]
+    //     fn primitive_values() {
+    //         assert_eq!(
+    //             parse("0"),
+    //             Ok(Expression::new(Term::Value(ValueTerm::Int(0))))
+    //         );
+    //         assert_eq!(
+    //             parse("-0"),
+    //             Ok(Expression::new(Term::Value(ValueTerm::Int(0))))
+    //         );
+    //         assert_eq!(
+    //             parse("3"),
+    //             Ok(Expression::new(Term::Value(ValueTerm::Int(3))))
+    //         );
+    //         assert_eq!(
+    //             parse("-3"),
+    //             Ok(Expression::new(Term::Value(ValueTerm::Int(-3))))
+    //         );
+    //         assert_eq!(
+    //             parse("123"),
+    //             Ok(Expression::new(Term::Value(ValueTerm::Int(123))))
+    //         );
+    //         assert_eq!(
+    //             parse("-123"),
+    //             Ok(Expression::new(Term::Value(ValueTerm::Int(-123))))
+    //         );
+    //         assert_eq!(
+    //             parse("0.0"),
+    //             Ok(Expression::new(Term::Value(ValueTerm::Float(0.0))))
+    //         );
+    //         assert_eq!(
+    //             parse("-0.0"),
+    //             Ok(Expression::new(Term::Value(ValueTerm::Float(-0.0))))
+    //         );
+    //         assert_eq!(
+    //             parse("3.142"),
+    //             Ok(Expression::new(Term::Value(ValueTerm::Float(3.142))))
+    //         );
+    //         assert_eq!(
+    //             parse("-3.142"),
+    //             Ok(Expression::new(Term::Value(ValueTerm::Float(-3.142))))
+    //         );
+    //         assert_eq!(
+    //             parse("123.45"),
+    //             Ok(Expression::new(Term::Value(ValueTerm::Float(123.45))))
+    //         );
+    //         assert_eq!(
+    //             parse("-123.45"),
+    //             Ok(Expression::new(Term::Value(ValueTerm::Float(-123.45))))
+    //         );
+    //         assert_eq!(
+    //             parse("\"\""),
+    //             Ok(Expression::new(Term::Value(ValueTerm::String(
+    //                 StringValue::from("")
+    //             ))))
+    //         );
+    //         assert_eq!(
+    //             parse("\" \""),
+    //             Ok(Expression::new(Term::Value(ValueTerm::String(
+    //                 StringValue::from(" ")
+    //             ))))
+    //         );
+    //         assert_eq!(
+    //             parse("\"foo\""),
+    //             Ok(Expression::new(Term::Value(ValueTerm::String(
+    //                 StringValue::from("foo")
+    //             ))))
+    //         );
+    //         assert_eq!(
+    //             parse("\"foo bar\""),
+    //             Ok(Expression::new(Term::Value(ValueTerm::String(
+    //                 StringValue::from("foo bar")
+    //             ))))
+    //         );
+    //     }
 
-//     #[test]
-//     fn symbols() {
-//         assert_eq!(
-//             parse("'foo"),
-//             Ok(Expression::new(Term::Value(ValueTerm::Symbol(0)))),
-//         );
-//         assert_eq!(
-//             parse("(quote foo)"),
-//             Ok(Expression::new(Term::Value(ValueTerm::Symbol(0)))),
-//         );
-//         assert_eq!(
-//             parse("(+ 'foo 'foo)"),
-//             Ok(Expression::new(Term::Application(ApplicationTerm::new(
-//                 Expression::new(Term::Builtin(BuiltinTerm::Add)),
-//                 vec![
-//                     Expression::new(Term::Value(ValueTerm::Symbol(0))),
-//                     Expression::new(Term::Value(ValueTerm::Symbol(0))),
-//                 ],
-//             )))),
-//         );
-//         assert_eq!(
-//             parse("(+ 'foo 'bar)"),
-//             Ok(Expression::new(Term::Application(ApplicationTerm::new(
-//                 Expression::new(Term::Builtin(BuiltinTerm::Add)),
-//                 vec![
-//                     Expression::new(Term::Value(ValueTerm::Symbol(0))),
-//                     Expression::new(Term::Value(ValueTerm::Symbol(1))),
-//                 ],
-//             )))),
-//         );
-//     }
+    //     #[test]
+    //     fn symbols() {
+    //         assert_eq!(
+    //             parse("'foo"),
+    //             Ok(Expression::new(Term::Value(ValueTerm::Symbol(0)))),
+    //         );
+    //         assert_eq!(
+    //             parse("(quote foo)"),
+    //             Ok(Expression::new(Term::Value(ValueTerm::Symbol(0)))),
+    //         );
+    //         assert_eq!(
+    //             parse("(+ 'foo 'foo)"),
+    //             Ok(Expression::new(Term::Application(ApplicationTerm::new(
+    //                 Expression::new(Term::Builtin(BuiltinTerm::Add)),
+    //                 vec![
+    //                     Expression::new(Term::Value(ValueTerm::Symbol(0))),
+    //                     Expression::new(Term::Value(ValueTerm::Symbol(0))),
+    //                 ],
+    //             )))),
+    //         );
+    //         assert_eq!(
+    //             parse("(+ 'foo 'bar)"),
+    //             Ok(Expression::new(Term::Application(ApplicationTerm::new(
+    //                 Expression::new(Term::Builtin(BuiltinTerm::Add)),
+    //                 vec![
+    //                     Expression::new(Term::Value(ValueTerm::Symbol(0))),
+    //                     Expression::new(Term::Value(ValueTerm::Symbol(1))),
+    //                 ],
+    //             )))),
+    //         );
+    //     }
 
-//     #[test]
-//     fn escaped_string_literals() {
-//         assert_eq!(
-//             parse("\"foo\\\\bar\""),
-//             Ok(Expression::new(Term::Value(ValueTerm::String(
-//                 StringValue::from("foo\\bar")
-//             ))))
-//         );
-//         assert_eq!(
-//             parse("\"foo\\nbar\""),
-//             Ok(Expression::new(Term::Value(ValueTerm::String(
-//                 StringValue::from("foo\nbar")
-//             ))))
-//         );
-//         assert_eq!(
-//             parse("\"foo\\tbar\""),
-//             Ok(Expression::new(Term::Value(ValueTerm::String(
-//                 StringValue::from("foo\tbar")
-//             ))))
-//         );
-//         assert_eq!(
-//             parse("\"foo\\rbar\""),
-//             Ok(Expression::new(Term::Value(ValueTerm::String(
-//                 StringValue::from("foo\rbar")
-//             ))))
-//         );
-//         assert_eq!(
-//             parse("\"foo\\\"bar\\\"baz\""),
-//             Ok(Expression::new(Term::Value(ValueTerm::String(
-//                 StringValue::from("foo\"bar\"baz")
-//             ))))
-//         );
-//     }
+    //     #[test]
+    //     fn escaped_string_literals() {
+    //         assert_eq!(
+    //             parse("\"foo\\\\bar\""),
+    //             Ok(Expression::new(Term::Value(ValueTerm::String(
+    //                 StringValue::from("foo\\bar")
+    //             ))))
+    //         );
+    //         assert_eq!(
+    //             parse("\"foo\\nbar\""),
+    //             Ok(Expression::new(Term::Value(ValueTerm::String(
+    //                 StringValue::from("foo\nbar")
+    //             ))))
+    //         );
+    //         assert_eq!(
+    //             parse("\"foo\\tbar\""),
+    //             Ok(Expression::new(Term::Value(ValueTerm::String(
+    //                 StringValue::from("foo\tbar")
+    //             ))))
+    //         );
+    //         assert_eq!(
+    //             parse("\"foo\\rbar\""),
+    //             Ok(Expression::new(Term::Value(ValueTerm::String(
+    //                 StringValue::from("foo\rbar")
+    //             ))))
+    //         );
+    //         assert_eq!(
+    //             parse("\"foo\\\"bar\\\"baz\""),
+    //             Ok(Expression::new(Term::Value(ValueTerm::String(
+    //                 StringValue::from("foo\"bar\"baz")
+    //             ))))
+    //         );
+    //     }
 
-//     #[test]
-//     fn identifiers() {
-//         assert_eq!(
-//             parse("foo"),
-//             Err(ParserError::new(
-//                 String::from("Undefined identifier: foo"),
-//                 &SyntaxDatum::Symbol("foo")
-//             )),
-//         );
-//         assert_eq!(
-//             parse("(lambda (a) a)"),
-//             Ok(Expression::new(Term::Lambda(LambdaTerm::new(
-//                 Arity::from(0, 1, None),
-//                 Expression::new(Term::Variable(VariableTerm::scoped(0)))
-//             ))))
-//         );
-//         assert_eq!(
-//             parse("(lambda (_) _)"),
-//             Ok(Expression::new(Term::Lambda(LambdaTerm::new(
-//                 Arity::from(0, 1, None),
-//                 Expression::new(Term::Variable(VariableTerm::scoped(0)))
-//             ))))
-//         );
-//         assert_eq!(
-//             parse("(lambda (foo) foo)"),
-//             Ok(Expression::new(Term::Lambda(LambdaTerm::new(
-//                 Arity::from(0, 1, None),
-//                 Expression::new(Term::Variable(VariableTerm::scoped(0)))
-//             ))))
-//         );
-//         assert_eq!(
-//             parse("(lambda (_foo) _foo)"),
-//             Ok(Expression::new(Term::Lambda(LambdaTerm::new(
-//                 Arity::from(0, 1, None),
-//                 Expression::new(Term::Variable(VariableTerm::scoped(0)))
-//             ))))
-//         );
-//         assert_eq!(
-//             parse("(lambda (foo!) foo!)"),
-//             Ok(Expression::new(Term::Lambda(LambdaTerm::new(
-//                 Arity::from(0, 1, None),
-//                 Expression::new(Term::Variable(VariableTerm::scoped(0)))
-//             ))))
-//         );
-//         assert_eq!(
-//             parse("(lambda (foo?) foo?)"),
-//             Ok(Expression::new(Term::Lambda(LambdaTerm::new(
-//                 Arity::from(0, 1, None),
-//                 Expression::new(Term::Variable(VariableTerm::scoped(0)))
-//             ))))
-//         );
-//         assert_eq!(
-//             parse("(lambda (foo_bar) foo_bar)"),
-//             Ok(Expression::new(Term::Lambda(LambdaTerm::new(
-//                 Arity::from(0, 1, None),
-//                 Expression::new(Term::Variable(VariableTerm::scoped(0)))
-//             ))))
-//         );
-//         assert_eq!(
-//             parse("(lambda (foo-bar) foo-bar)"),
-//             Ok(Expression::new(Term::Lambda(LambdaTerm::new(
-//                 Arity::from(0, 1, None),
-//                 Expression::new(Term::Variable(VariableTerm::scoped(0)))
-//             ))))
-//         );
-//     }
+    //     #[test]
+    //     fn identifiers() {
+    //         assert_eq!(
+    //             parse("foo"),
+    //             Err(ParserError::new(
+    //                 String::from("Undefined identifier: foo"),
+    //                 &SyntaxDatum::Symbol("foo")
+    //             )),
+    //         );
+    //         assert_eq!(
+    //             parse("(lambda (a) a)"),
+    //             Ok(Expression::new(Term::Lambda(LambdaTerm::new(
+    //                 Arity::from(0, 1, None),
+    //                 Expression::new(Term::Variable(VariableTerm::scoped(0)))
+    //             ))))
+    //         );
+    //         assert_eq!(
+    //             parse("(lambda (_) _)"),
+    //             Ok(Expression::new(Term::Lambda(LambdaTerm::new(
+    //                 Arity::from(0, 1, None),
+    //                 Expression::new(Term::Variable(VariableTerm::scoped(0)))
+    //             ))))
+    //         );
+    //         assert_eq!(
+    //             parse("(lambda (foo) foo)"),
+    //             Ok(Expression::new(Term::Lambda(LambdaTerm::new(
+    //                 Arity::from(0, 1, None),
+    //                 Expression::new(Term::Variable(VariableTerm::scoped(0)))
+    //             ))))
+    //         );
+    //         assert_eq!(
+    //             parse("(lambda (_foo) _foo)"),
+    //             Ok(Expression::new(Term::Lambda(LambdaTerm::new(
+    //                 Arity::from(0, 1, None),
+    //                 Expression::new(Term::Variable(VariableTerm::scoped(0)))
+    //             ))))
+    //         );
+    //         assert_eq!(
+    //             parse("(lambda (foo!) foo!)"),
+    //             Ok(Expression::new(Term::Lambda(LambdaTerm::new(
+    //                 Arity::from(0, 1, None),
+    //                 Expression::new(Term::Variable(VariableTerm::scoped(0)))
+    //             ))))
+    //         );
+    //         assert_eq!(
+    //             parse("(lambda (foo?) foo?)"),
+    //             Ok(Expression::new(Term::Lambda(LambdaTerm::new(
+    //                 Arity::from(0, 1, None),
+    //                 Expression::new(Term::Variable(VariableTerm::scoped(0)))
+    //             ))))
+    //         );
+    //         assert_eq!(
+    //             parse("(lambda (foo_bar) foo_bar)"),
+    //             Ok(Expression::new(Term::Lambda(LambdaTerm::new(
+    //                 Arity::from(0, 1, None),
+    //                 Expression::new(Term::Variable(VariableTerm::scoped(0)))
+    //             ))))
+    //         );
+    //         assert_eq!(
+    //             parse("(lambda (foo-bar) foo-bar)"),
+    //             Ok(Expression::new(Term::Lambda(LambdaTerm::new(
+    //                 Arity::from(0, 1, None),
+    //                 Expression::new(Term::Variable(VariableTerm::scoped(0)))
+    //             ))))
+    //         );
+    //     }
 
-//     #[test]
-//     fn quoted_expressions() {
-//         assert_eq!(
-//             parse("(quote 3)"),
-//             Ok(Expression::new(Term::Value(ValueTerm::Int(3)))),
-//         );
-//         assert_eq!(
-//             parse("(quote 3.142)"),
-//             Ok(Expression::new(Term::Value(ValueTerm::Float(3.142)))),
-//         );
-//         assert_eq!(
-//             parse("(quote \"foo\")"),
-//             Ok(Expression::new(Term::Value(ValueTerm::String(
-//                 StringValue::from("foo")
-//             )))),
-//         );
-//         assert_eq!(
-//             parse("(quote foo)"),
-//             Ok(Expression::new(Term::Value(ValueTerm::Symbol(0)))),
-//         );
-//         assert_eq!(
-//             parse("'()"),
-//             Ok(Expression::new(Term::Struct(StructTerm::new(
-//                 None,
-//                 vec![Expression::new(Term::Value(ValueTerm::Int(0))),]
-//             )))),
-//         );
-//         assert_eq!(
-//             parse("'(3 4 5)"),
-//             Ok(Expression::new(Term::Struct(StructTerm::new(
-//                 None,
-//                 vec![
-//                     Expression::new(Term::Value(ValueTerm::Int(1))),
-//                     Expression::new(Term::Value(ValueTerm::Int(3))),
-//                     Expression::new(Term::Struct(StructTerm::new(
-//                         None,
-//                         vec![
-//                             Expression::new(Term::Value(ValueTerm::Int(1))),
-//                             Expression::new(Term::Value(ValueTerm::Int(4))),
-//                             Expression::new(Term::Struct(StructTerm::new(
-//                                 None,
-//                                 vec![
-//                                     Expression::new(Term::Value(ValueTerm::Int(1))),
-//                                     Expression::new(Term::Value(ValueTerm::Int(5))),
-//                                     Expression::new(Term::Struct(StructTerm::new(
-//                                         None,
-//                                         vec![Expression::new(Term::Value(ValueTerm::Int(0))),]
-//                                     ))),
-//                                 ],
-//                             ),)),
-//                         ],
-//                     ),)),
-//                 ],
-//             )),)),
-//         );
-//     }
+    //     #[test]
+    //     fn quoted_expressions() {
+    //         assert_eq!(
+    //             parse("(quote 3)"),
+    //             Ok(Expression::new(Term::Value(ValueTerm::Int(3)))),
+    //         );
+    //         assert_eq!(
+    //             parse("(quote 3.142)"),
+    //             Ok(Expression::new(Term::Value(ValueTerm::Float(3.142)))),
+    //         );
+    //         assert_eq!(
+    //             parse("(quote \"foo\")"),
+    //             Ok(Expression::new(Term::Value(ValueTerm::String(
+    //                 StringValue::from("foo")
+    //             )))),
+    //         );
+    //         assert_eq!(
+    //             parse("(quote foo)"),
+    //             Ok(Expression::new(Term::Value(ValueTerm::Symbol(0)))),
+    //         );
+    //         assert_eq!(
+    //             parse("'()"),
+    //             Ok(Expression::new(Term::Struct(StructTerm::new(
+    //                 None,
+    //                 vec![Expression::new(Term::Value(ValueTerm::Int(0))),]
+    //             )))),
+    //         );
+    //         assert_eq!(
+    //             parse("'(3 4 5)"),
+    //             Ok(Expression::new(Term::Struct(StructTerm::new(
+    //                 None,
+    //                 vec![
+    //                     Expression::new(Term::Value(ValueTerm::Int(1))),
+    //                     Expression::new(Term::Value(ValueTerm::Int(3))),
+    //                     Expression::new(Term::Struct(StructTerm::new(
+    //                         None,
+    //                         vec![
+    //                             Expression::new(Term::Value(ValueTerm::Int(1))),
+    //                             Expression::new(Term::Value(ValueTerm::Int(4))),
+    //                             Expression::new(Term::Struct(StructTerm::new(
+    //                                 None,
+    //                                 vec![
+    //                                     Expression::new(Term::Value(ValueTerm::Int(1))),
+    //                                     Expression::new(Term::Value(ValueTerm::Int(5))),
+    //                                     Expression::new(Term::Struct(StructTerm::new(
+    //                                         None,
+    //                                         vec![Expression::new(Term::Value(ValueTerm::Int(0))),]
+    //                                     ))),
+    //                                 ],
+    //                             ),)),
+    //                         ],
+    //                     ),)),
+    //                 ],
+    //             )),)),
+    //         );
+    //     }
 
-//     #[test]
-//     fn let_bindings() {
-//         assert_eq!(
-//             parse("(let () 3)"),
-//             Ok(Expression::new(Term::Value(ValueTerm::Int(3)))),
-//         );
-//         assert_eq!(
-//             parse("(let ((foo 3)) foo)"),
-//             Ok(Expression::new(Term::Application(ApplicationTerm::new(
-//                 Expression::new(Term::Lambda(LambdaTerm::new(
-//                     Arity::from(0, 1, None),
-//                     Expression::new(Term::Variable(VariableTerm::scoped(0))),
-//                 ))),
-//                 vec![Expression::new(Term::Value(ValueTerm::Int(3)))],
-//             )))),
-//         );
-//         assert_eq!(
-//             parse("(let ((foo 3) (bar 4)) foo)"),
-//             Ok(Expression::new(Term::Application(ApplicationTerm::new(
-//                 Expression::new(Term::Lambda(LambdaTerm::new(
-//                     Arity::from(0, 2, None),
-//                     Expression::new(Term::Variable(VariableTerm::scoped(1))),
-//                 ))),
-//                 vec![
-//                     Expression::new(Term::Value(ValueTerm::Int(3))),
-//                     Expression::new(Term::Value(ValueTerm::Int(4))),
-//                 ],
-//             )))),
-//         );
-//         assert_eq!(
-//             parse("(let ((foo 3) (bar 4)) bar)"),
-//             Ok(Expression::new(Term::Application(ApplicationTerm::new(
-//                 Expression::new(Term::Lambda(LambdaTerm::new(
-//                     Arity::from(0, 2, None),
-//                     Expression::new(Term::Variable(VariableTerm::scoped(0))),
-//                 ))),
-//                 vec![
-//                     Expression::new(Term::Value(ValueTerm::Int(3))),
-//                     Expression::new(Term::Value(ValueTerm::Int(4))),
-//                 ],
-//             )))),
-//         );
-//         assert_eq!(
-//             parse("(let ((foo (lambda (bar baz) (+ bar baz)))) (foo 3 4))"),
-//             Ok(Expression::new(Term::Application(ApplicationTerm::new(
-//                 Expression::new(Term::Lambda(LambdaTerm::new(
-//                     Arity::from(0, 1, None),
-//                     Expression::new(Term::Application(ApplicationTerm::new(
-//                         Expression::new(Term::Variable(VariableTerm::scoped(0))),
-//                         vec![
-//                             Expression::new(Term::Value(ValueTerm::Int(3))),
-//                             Expression::new(Term::Value(ValueTerm::Int(4))),
-//                         ],
-//                     ))),
-//                 ))),
-//                 vec![Expression::new(Term::Lambda(LambdaTerm::new(
-//                     Arity::from(0, 2, None),
-//                     Expression::new(Term::Application(ApplicationTerm::new(
-//                         Expression::new(Term::Builtin(BuiltinTerm::Add)),
-//                         vec![
-//                             Expression::new(Term::Variable(VariableTerm::scoped(1))),
-//                             Expression::new(Term::Variable(VariableTerm::scoped(0))),
-//                         ],
-//                     ))),
-//                 ))),],
-//             )))),
-//         );
-//         assert_eq!(
-//             parse("(lambda (outer) (let ((foo 3) (bar 4)) outer))"),
-//             Ok(Expression::new(Term::Lambda(LambdaTerm::new(
-//                 Arity::from(0, 1, None),
-//                 Expression::new(Term::Application(ApplicationTerm::new(
-//                     Expression::new(Term::Lambda(LambdaTerm::new(
-//                         Arity::from(0, 2, None),
-//                         Expression::new(Term::Variable(VariableTerm::scoped(2))),
-//                     ))),
-//                     vec![
-//                         Expression::new(Term::Value(ValueTerm::Int(3))),
-//                         Expression::new(Term::Value(ValueTerm::Int(4))),
-//                     ],
-//                 ))),
-//             )))),
-//         );
-//     }
+    //     #[test]
+    //     fn let_bindings() {
+    //         assert_eq!(
+    //             parse("(let () 3)"),
+    //             Ok(Expression::new(Term::Value(ValueTerm::Int(3)))),
+    //         );
+    //         assert_eq!(
+    //             parse("(let ((foo 3)) foo)"),
+    //             Ok(Expression::new(Term::Application(ApplicationTerm::new(
+    //                 Expression::new(Term::Lambda(LambdaTerm::new(
+    //                     Arity::from(0, 1, None),
+    //                     Expression::new(Term::Variable(VariableTerm::scoped(0))),
+    //                 ))),
+    //                 vec![Expression::new(Term::Value(ValueTerm::Int(3)))],
+    //             )))),
+    //         );
+    //         assert_eq!(
+    //             parse("(let ((foo 3) (bar 4)) foo)"),
+    //             Ok(Expression::new(Term::Application(ApplicationTerm::new(
+    //                 Expression::new(Term::Lambda(LambdaTerm::new(
+    //                     Arity::from(0, 2, None),
+    //                     Expression::new(Term::Variable(VariableTerm::scoped(1))),
+    //                 ))),
+    //                 vec![
+    //                     Expression::new(Term::Value(ValueTerm::Int(3))),
+    //                     Expression::new(Term::Value(ValueTerm::Int(4))),
+    //                 ],
+    //             )))),
+    //         );
+    //         assert_eq!(
+    //             parse("(let ((foo 3) (bar 4)) bar)"),
+    //             Ok(Expression::new(Term::Application(ApplicationTerm::new(
+    //                 Expression::new(Term::Lambda(LambdaTerm::new(
+    //                     Arity::from(0, 2, None),
+    //                     Expression::new(Term::Variable(VariableTerm::scoped(0))),
+    //                 ))),
+    //                 vec![
+    //                     Expression::new(Term::Value(ValueTerm::Int(3))),
+    //                     Expression::new(Term::Value(ValueTerm::Int(4))),
+    //                 ],
+    //             )))),
+    //         );
+    //         assert_eq!(
+    //             parse("(let ((foo (lambda (bar baz) (+ bar baz)))) (foo 3 4))"),
+    //             Ok(Expression::new(Term::Application(ApplicationTerm::new(
+    //                 Expression::new(Term::Lambda(LambdaTerm::new(
+    //                     Arity::from(0, 1, None),
+    //                     Expression::new(Term::Application(ApplicationTerm::new(
+    //                         Expression::new(Term::Variable(VariableTerm::scoped(0))),
+    //                         vec![
+    //                             Expression::new(Term::Value(ValueTerm::Int(3))),
+    //                             Expression::new(Term::Value(ValueTerm::Int(4))),
+    //                         ],
+    //                     ))),
+    //                 ))),
+    //                 vec![Expression::new(Term::Lambda(LambdaTerm::new(
+    //                     Arity::from(0, 2, None),
+    //                     Expression::new(Term::Application(ApplicationTerm::new(
+    //                         Expression::new(Term::Builtin(BuiltinTerm::Add)),
+    //                         vec![
+    //                             Expression::new(Term::Variable(VariableTerm::scoped(1))),
+    //                             Expression::new(Term::Variable(VariableTerm::scoped(0))),
+    //                         ],
+    //                     ))),
+    //                 ))),],
+    //             )))),
+    //         );
+    //         assert_eq!(
+    //             parse("(lambda (outer) (let ((foo 3) (bar 4)) outer))"),
+    //             Ok(Expression::new(Term::Lambda(LambdaTerm::new(
+    //                 Arity::from(0, 1, None),
+    //                 Expression::new(Term::Application(ApplicationTerm::new(
+    //                     Expression::new(Term::Lambda(LambdaTerm::new(
+    //                         Arity::from(0, 2, None),
+    //                         Expression::new(Term::Variable(VariableTerm::scoped(2))),
+    //                     ))),
+    //                     vec![
+    //                         Expression::new(Term::Value(ValueTerm::Int(3))),
+    //                         Expression::new(Term::Value(ValueTerm::Int(4))),
+    //                     ],
+    //                 ))),
+    //             )))),
+    //         );
+    //     }
 
-#[test]
-fn letrec_bindings() {
-    let factory = TermFactory::default();
-    let allocator = DefaultAllocator::default();
-    assert_eq!(
-        parse("(letrec () 3)", &factory, &allocator),
-        Ok(factory.create_value_term(ValueTerm::Int(3))),
-    );
-    assert_eq!(
-        parse("(letrec ((foo 3)) foo)", &factory, &allocator),
-        Ok(factory.create_application_term(
-            factory.create_lambda_term(1, factory.create_static_variable_term(0)),
-            allocator.create_unit_list(factory.create_recursive_term(
-                factory.create_lambda_term(1, factory.create_value_term(ValueTerm::Int(3)))
-            )),
-        )),
-    );
-    assert_eq!(
-        parse("(letrec ((foo 3) (bar 4)) foo)", &factory, &allocator),
-        Ok(factory.create_application_term(
-            factory.create_lambda_term(2, factory.create_static_variable_term(1)),
-            allocator.create_pair(
-                factory.create_application_term(
-                    factory.create_builtin_term(BuiltinTerm::Get),
-                    allocator.create_pair(
-                        factory.create_recursive_term(factory.create_lambda_term(
-                            1,
-                            factory.create_tuple_term(
-                                allocator.create_pair(
-                                    factory.create_value_term(ValueTerm::Int(3)),
-                                    factory.create_value_term(ValueTerm::Int(4)),
-                                ),
-                            ),
-                        )),
-                        factory.create_value_term(ValueTerm::Int(0)),
-                    ),
-                ),
-                factory.create_application_term(
-                    factory.create_builtin_term(BuiltinTerm::Get),
-                    allocator.create_pair(
-                        factory.create_recursive_term(factory.create_lambda_term(
-                            1,
-                            factory.create_tuple_term(
-                                allocator.create_pair(
-                                    factory.create_value_term(ValueTerm::Int(3)),
-                                    factory.create_value_term(ValueTerm::Int(4)),
-                                ),
-                            ),
-                        )),
-                        factory.create_value_term(ValueTerm::Int(1)),
-                    ),
-                ),
-            ),
-        )),
-    );
-    assert_eq!(
-        parse("(letrec ((foo 3) (bar 4)) bar)", &factory, &allocator),
-        Ok(factory.create_application_term(
-            factory.create_lambda_term(2, factory.create_static_variable_term(0)),
-            allocator.create_pair(
-                factory.create_application_term(
-                    factory.create_builtin_term(BuiltinTerm::Get),
-                    allocator.create_pair(
-                        factory.create_recursive_term(factory.create_lambda_term(
-                            1,
-                            factory.create_tuple_term(
-                                allocator.create_pair(
-                                    factory.create_value_term(ValueTerm::Int(3)),
-                                    factory.create_value_term(ValueTerm::Int(4)),
-                                ),
-                            ),
-                        )),
-                        factory.create_value_term(ValueTerm::Int(0)),
-                    ),
-                ),
-                factory.create_application_term(
-                    factory.create_builtin_term(BuiltinTerm::Get),
-                    allocator.create_pair(
-                        factory.create_recursive_term(factory.create_lambda_term(
-                            1,
-                            factory.create_tuple_term(
-                                allocator.create_pair(
-                                    factory.create_value_term(ValueTerm::Int(3)),
-                                    factory.create_value_term(ValueTerm::Int(4)),
-                                ),
-                            ),
-                        )),
-                        factory.create_value_term(ValueTerm::Int(1)),
-                    ),
-                ),
-            ),
-        )),
-    );
-    assert_eq!(
-        parse(
-            "(lambda (outer) (letrec ((foo 3)) outer))",
-            &factory,
-            &allocator
-        ),
-        Ok(factory.create_lambda_term(
-            1,
-            factory.create_application_term(
-                factory.create_lambda_term(1, factory.create_static_variable_term(1)),
+    #[test]
+    fn letrec_bindings() {
+        let factory = TermFactory::default();
+        let allocator = DefaultAllocator::default();
+        assert_eq!(
+            parse("(letrec () 3)", &factory, &allocator),
+            Ok(factory.create_value_term(ValueTerm::Int(3))),
+        );
+        assert_eq!(
+            parse("(letrec ((foo 3)) foo)", &factory, &allocator),
+            Ok(factory.create_application_term(
+                factory.create_lambda_term(1, factory.create_static_variable_term(0)),
                 allocator.create_unit_list(factory.create_recursive_term(
-                    factory.create_lambda_term(1, factory.create_value_term(ValueTerm::Int(3))),
+                    factory.create_lambda_term(1, factory.create_value_term(ValueTerm::Int(3)))
                 )),
-            ),
-        )),
-    );
-    assert_eq!(
-        parse(
-            "(lambda (outer) (letrec ((foo 3) (bar 4)) outer))",
-            &factory,
-            &allocator
-        ),
-        Ok(factory.create_lambda_term(
-            1,
-            factory.create_application_term(
-                factory.create_lambda_term(2, factory.create_static_variable_term(2)),
+            )),
+        );
+        assert_eq!(
+            parse("(letrec ((foo 3) (bar 4)) foo)", &factory, &allocator),
+            Ok(factory.create_application_term(
+                factory.create_lambda_term(2, factory.create_static_variable_term(1)),
                 allocator.create_pair(
                     factory.create_application_term(
                         factory.create_builtin_term(BuiltinTerm::Get),
                         allocator.create_pair(
                             factory.create_recursive_term(factory.create_lambda_term(
                                 1,
-                                factory.create_tuple_term(
-                                    allocator.create_pair(
+                                factory.create_tuple_term(allocator.create_pair(
+                                    factory.create_value_term(ValueTerm::Int(3)),
+                                    factory.create_value_term(ValueTerm::Int(4)),
+                                ),),
+                            )),
+                            factory.create_value_term(ValueTerm::Int(0)),
+                        ),
+                    ),
+                    factory.create_application_term(
+                        factory.create_builtin_term(BuiltinTerm::Get),
+                        allocator.create_pair(
+                            factory.create_recursive_term(factory.create_lambda_term(
+                                1,
+                                factory.create_tuple_term(allocator.create_pair(
+                                    factory.create_value_term(ValueTerm::Int(3)),
+                                    factory.create_value_term(ValueTerm::Int(4)),
+                                ),),
+                            )),
+                            factory.create_value_term(ValueTerm::Int(1)),
+                        ),
+                    ),
+                ),
+            )),
+        );
+        assert_eq!(
+            parse("(letrec ((foo 3) (bar 4)) bar)", &factory, &allocator),
+            Ok(factory.create_application_term(
+                factory.create_lambda_term(2, factory.create_static_variable_term(0)),
+                allocator.create_pair(
+                    factory.create_application_term(
+                        factory.create_builtin_term(BuiltinTerm::Get),
+                        allocator.create_pair(
+                            factory.create_recursive_term(factory.create_lambda_term(
+                                1,
+                                factory.create_tuple_term(allocator.create_pair(
+                                    factory.create_value_term(ValueTerm::Int(3)),
+                                    factory.create_value_term(ValueTerm::Int(4)),
+                                ),),
+                            )),
+                            factory.create_value_term(ValueTerm::Int(0)),
+                        ),
+                    ),
+                    factory.create_application_term(
+                        factory.create_builtin_term(BuiltinTerm::Get),
+                        allocator.create_pair(
+                            factory.create_recursive_term(factory.create_lambda_term(
+                                1,
+                                factory.create_tuple_term(allocator.create_pair(
+                                    factory.create_value_term(ValueTerm::Int(3)),
+                                    factory.create_value_term(ValueTerm::Int(4)),
+                                ),),
+                            )),
+                            factory.create_value_term(ValueTerm::Int(1)),
+                        ),
+                    ),
+                ),
+            )),
+        );
+        assert_eq!(
+            parse(
+                "(lambda (outer) (letrec ((foo 3)) outer))",
+                &factory,
+                &allocator
+            ),
+            Ok(factory.create_lambda_term(
+                1,
+                factory.create_application_term(
+                    factory.create_lambda_term(1, factory.create_static_variable_term(1)),
+                    allocator.create_unit_list(factory.create_recursive_term(
+                        factory.create_lambda_term(1, factory.create_value_term(ValueTerm::Int(3))),
+                    )),
+                ),
+            )),
+        );
+        assert_eq!(
+            parse(
+                "(lambda (outer) (letrec ((foo 3) (bar 4)) outer))",
+                &factory,
+                &allocator
+            ),
+            Ok(factory.create_lambda_term(
+                1,
+                factory.create_application_term(
+                    factory.create_lambda_term(2, factory.create_static_variable_term(2)),
+                    allocator.create_pair(
+                        factory.create_application_term(
+                            factory.create_builtin_term(BuiltinTerm::Get),
+                            allocator.create_pair(
+                                factory.create_recursive_term(factory.create_lambda_term(
+                                    1,
+                                    factory.create_tuple_term(allocator.create_pair(
                                         factory.create_value_term(ValueTerm::Int(3)),
                                         factory.create_value_term(ValueTerm::Int(4)),
-                                    )
-                                ),
+                                    )),
+                                ),),
+                                factory.create_value_term(ValueTerm::Int(0)),
+                            ),
+                        ),
+                        factory.create_application_term(
+                            factory.create_builtin_term(BuiltinTerm::Get),
+                            allocator.create_pair(
+                                factory.create_recursive_term(factory.create_lambda_term(
+                                    1,
+                                    factory.create_tuple_term(allocator.create_pair(
+                                        factory.create_value_term(ValueTerm::Int(3)),
+                                        factory.create_value_term(ValueTerm::Int(4)),
+                                    )),
+                                ),),
+                                factory.create_value_term(ValueTerm::Int(1)),
+                            ),
+                        ),
+                    ),
+                ),
+            )),
+        );
+        assert_eq!(
+            parse("(letrec ((foo 3) (bar foo)) foo)", &factory, &allocator),
+            Ok(factory.create_application_term(
+                factory.create_lambda_term(2, factory.create_static_variable_term(1)),
+                allocator.create_pair(
+                    factory.create_application_term(
+                        factory.create_builtin_term(BuiltinTerm::Get),
+                        allocator.create_pair(
+                            factory.create_recursive_term(factory.create_lambda_term(
+                                1,
+                                factory.create_tuple_term(allocator.create_pair(
+                                    factory.create_value_term(ValueTerm::Int(3)),
+                                    factory.create_application_term(
+                                        factory.create_builtin_term(BuiltinTerm::Get),
+                                        allocator.create_pair(
+                                            factory.create_static_variable_term(0),
+                                            factory.create_value_term(ValueTerm::Int(0)),
+                                        ),
+                                    ),
+                                )),
                             ),),
                             factory.create_value_term(ValueTerm::Int(0)),
                         ),
@@ -1334,32 +1366,93 @@ fn letrec_bindings() {
                         allocator.create_pair(
                             factory.create_recursive_term(factory.create_lambda_term(
                                 1,
-                                factory.create_tuple_term(
-                                    allocator.create_pair(
-                                        factory.create_value_term(ValueTerm::Int(3)),
-                                        factory.create_value_term(ValueTerm::Int(4)),
-                                    )
-                                ),
+                                factory.create_tuple_term(allocator.create_pair(
+                                    factory.create_value_term(ValueTerm::Int(3)),
+                                    factory.create_application_term(
+                                        factory.create_builtin_term(BuiltinTerm::Get),
+                                        allocator.create_pair(
+                                            factory.create_static_variable_term(0),
+                                            factory.create_value_term(ValueTerm::Int(0)),
+                                        ),
+                                    ),
+                                )),
                             ),),
                             factory.create_value_term(ValueTerm::Int(1)),
                         ),
                     ),
                 ),
+            )),
+        );
+        assert_eq!(
+            parse("(letrec ((foo 3) (bar foo)) bar)", &factory, &allocator),
+            Ok(factory.create_application_term(
+                factory.create_lambda_term(2, factory.create_static_variable_term(0)),
+                allocator.create_pair(
+                    factory.create_application_term(
+                        factory.create_builtin_term(BuiltinTerm::Get),
+                        allocator.create_pair(
+                            factory.create_recursive_term(factory.create_lambda_term(
+                                1,
+                                factory.create_tuple_term(allocator.create_pair(
+                                    factory.create_value_term(ValueTerm::Int(3)),
+                                    factory.create_application_term(
+                                        factory.create_builtin_term(BuiltinTerm::Get),
+                                        allocator.create_pair(
+                                            factory.create_static_variable_term(0),
+                                            factory.create_value_term(ValueTerm::Int(0)),
+                                        ),
+                                    ),
+                                )),
+                            ),),
+                            factory.create_value_term(ValueTerm::Int(0)),
+                        ),
+                    ),
+                    factory.create_application_term(
+                        factory.create_builtin_term(BuiltinTerm::Get),
+                        allocator.create_pair(
+                            factory.create_recursive_term(factory.create_lambda_term(
+                                1,
+                                factory.create_tuple_term(allocator.create_pair(
+                                    factory.create_value_term(ValueTerm::Int(3)),
+                                    factory.create_application_term(
+                                        factory.create_builtin_term(BuiltinTerm::Get),
+                                        allocator.create_pair(
+                                            factory.create_static_variable_term(0),
+                                            factory.create_value_term(ValueTerm::Int(0)),
+                                        ),
+                                    ),
+                                )),
+                            ),),
+                            factory.create_value_term(ValueTerm::Int(1)),
+                        ),
+                    ),
+                ),
+            )),
+        );
+        assert_eq!(
+            parse(
+                "(letrec ((foo 3) (bar foo)) (+ foo bar))",
+                &factory,
+                &allocator
             ),
-        )),
-    );
-    assert_eq!(
-        parse("(letrec ((foo 3) (bar foo)) foo)", &factory, &allocator),
-        Ok(factory.create_application_term(
-            factory.create_lambda_term(2, factory.create_static_variable_term(1)),
-            allocator.create_pair(
-                factory.create_application_term(
-                    factory.create_builtin_term(BuiltinTerm::Get),
-                    allocator.create_pair(
-                        factory.create_recursive_term(factory.create_lambda_term(
-                            1,
-                            factory.create_tuple_term(
-                                allocator.create_pair(
+            Ok(factory.create_application_term(
+                factory.create_lambda_term(
+                    2,
+                    factory.create_application_term(
+                        factory.create_builtin_term(BuiltinTerm::Add),
+                        allocator.create_pair(
+                            factory.create_static_variable_term(1),
+                            factory.create_static_variable_term(0),
+                        ),
+                    )
+                ),
+                allocator.create_pair(
+                    factory.create_application_term(
+                        factory.create_builtin_term(BuiltinTerm::Get),
+                        allocator.create_pair(
+                            factory.create_recursive_term(factory.create_lambda_term(
+                                1,
+                                factory.create_tuple_term(allocator.create_pair(
                                     factory.create_value_term(ValueTerm::Int(3)),
                                     factory.create_application_term(
                                         factory.create_builtin_term(BuiltinTerm::Get),
@@ -1368,19 +1461,17 @@ fn letrec_bindings() {
                                             factory.create_value_term(ValueTerm::Int(0)),
                                         ),
                                     ),
-                                )
-                            ),
-                        ),),
-                        factory.create_value_term(ValueTerm::Int(0)),
+                                )),
+                            )),
+                            factory.create_value_term(ValueTerm::Int(0)),
+                        ),
                     ),
-                ),
-                factory.create_application_term(
-                    factory.create_builtin_term(BuiltinTerm::Get),
-                    allocator.create_pair(
-                        factory.create_recursive_term(factory.create_lambda_term(
-                            1,
-                            factory.create_tuple_term(
-                                allocator.create_pair(
+                    factory.create_application_term(
+                        factory.create_builtin_term(BuiltinTerm::Get),
+                        allocator.create_pair(
+                            factory.create_recursive_term(factory.create_lambda_term(
+                                1,
+                                factory.create_tuple_term(allocator.create_pair(
                                     factory.create_value_term(ValueTerm::Int(3)),
                                     factory.create_application_term(
                                         factory.create_builtin_term(BuiltinTerm::Get),
@@ -1389,140 +1480,25 @@ fn letrec_bindings() {
                                             factory.create_value_term(ValueTerm::Int(0)),
                                         ),
                                     ),
-                                )
-                            ),
-                        ),),
-                        factory.create_value_term(ValueTerm::Int(1)),
+                                )),
+                            )),
+                            factory.create_value_term(ValueTerm::Int(1)),
+                        ),
                     ),
                 ),
-            ),
-        )),
-    );
-    assert_eq!(
-        parse("(letrec ((foo 3) (bar foo)) bar)", &factory, &allocator),
-        Ok(factory.create_application_term(
-            factory.create_lambda_term(2, factory.create_static_variable_term(0)),
-            allocator.create_pair(
-                factory.create_application_term(
-                    factory.create_builtin_term(BuiltinTerm::Get),
-                    allocator.create_pair(
-                        factory.create_recursive_term(factory.create_lambda_term(
-                            1,
-                            factory.create_tuple_term(
-                                allocator.create_pair(
-                                    factory.create_value_term(ValueTerm::Int(3)),
-                                    factory.create_application_term(
-                                        factory.create_builtin_term(BuiltinTerm::Get),
-                                        allocator.create_pair(
-                                            factory.create_static_variable_term(0),
-                                            factory.create_value_term(ValueTerm::Int(0)),
-                                        ),
-                                    ),
-                                )
-                            ),
-                        ),),
-                        factory.create_value_term(ValueTerm::Int(0)),
-                    ),
-                ),
-                factory.create_application_term(
-                    factory.create_builtin_term(BuiltinTerm::Get),
-                    allocator.create_pair(
-                        factory.create_recursive_term(factory.create_lambda_term(
-                            1,
-                            factory.create_tuple_term(
-                                allocator.create_pair(
-                                    factory.create_value_term(ValueTerm::Int(3)),
-                                    factory.create_application_term(
-                                        factory.create_builtin_term(BuiltinTerm::Get),
-                                        allocator.create_pair(
-                                            factory.create_static_variable_term(0),
-                                            factory.create_value_term(ValueTerm::Int(0)),
-                                        ),
-                                    ),
-                                )
-                            ),
-                        ),),
-                        factory.create_value_term(ValueTerm::Int(1)),
-                    ),
-                ),
-            ),
-        )),
-    );
-    assert_eq!(
-        parse(
-            "(letrec ((foo 3) (bar foo)) (+ foo bar))",
-            &factory,
-            &allocator
-        ),
-        Ok(factory.create_application_term(
-            factory.create_lambda_term(
-                2,
-                factory.create_application_term(
-                    factory.create_builtin_term(BuiltinTerm::Add),
-                    allocator.create_pair(
-                        factory.create_static_variable_term(1),
-                        factory.create_static_variable_term(0),
-                    ),
-                )
-            ),
-            allocator.create_pair(
-                factory.create_application_term(
-                    factory.create_builtin_term(BuiltinTerm::Get),
-                    allocator.create_pair(
-                        factory.create_recursive_term(factory.create_lambda_term(
-                            1,
-                            factory.create_tuple_term(
-                                allocator.create_pair(
-                                    factory.create_value_term(ValueTerm::Int(3)),
-                                    factory.create_application_term(
-                                        factory.create_builtin_term(BuiltinTerm::Get),
-                                        allocator.create_pair(
-                                            factory.create_static_variable_term(0),
-                                            factory.create_value_term(ValueTerm::Int(0)),
-                                        ),
-                                    ),
-                                )
-                            ),
-                        )),
-                        factory.create_value_term(ValueTerm::Int(0)),
-                    ),
-                ),
-                factory.create_application_term(
-                    factory.create_builtin_term(BuiltinTerm::Get),
-                    allocator.create_pair(
-                        factory.create_recursive_term(factory.create_lambda_term(
-                            1,
-                            factory.create_tuple_term(
-                                allocator.create_pair(
-                                    factory.create_value_term(ValueTerm::Int(3)),
-                                    factory.create_application_term(
-                                        factory.create_builtin_term(BuiltinTerm::Get),
-                                        allocator.create_pair(
-                                            factory.create_static_variable_term(0),
-                                            factory.create_value_term(ValueTerm::Int(0)),
-                                        ),
-                                    ),
-                                )
-                            ),
-                        )),
-                        factory.create_value_term(ValueTerm::Int(1)),
-                    ),
-                ),
-            ),
-        )),
-    );
-    assert_eq!(
-        parse("(letrec ((foo bar) (bar 3)) foo)", &factory, &allocator),
-        Ok(factory.create_application_term(
-            factory.create_lambda_term(2, factory.create_static_variable_term(1)),
-            allocator.create_pair(
-                factory.create_application_term(
-                    factory.create_builtin_term(BuiltinTerm::Get),
-                    allocator.create_pair(
-                        factory.create_recursive_term(factory.create_lambda_term(
-                            1,
-                            factory.create_tuple_term(
-                                allocator.create_pair(
+            )),
+        );
+        assert_eq!(
+            parse("(letrec ((foo bar) (bar 3)) foo)", &factory, &allocator),
+            Ok(factory.create_application_term(
+                factory.create_lambda_term(2, factory.create_static_variable_term(1)),
+                allocator.create_pair(
+                    factory.create_application_term(
+                        factory.create_builtin_term(BuiltinTerm::Get),
+                        allocator.create_pair(
+                            factory.create_recursive_term(factory.create_lambda_term(
+                                1,
+                                factory.create_tuple_term(allocator.create_pair(
                                     factory.create_application_term(
                                         factory.create_builtin_term(BuiltinTerm::Get),
                                         allocator.create_pair(
@@ -1531,19 +1507,17 @@ fn letrec_bindings() {
                                         )
                                     ),
                                     factory.create_value_term(ValueTerm::Int(3)),
-                                )
-                            )
-                        )),
-                        factory.create_value_term(ValueTerm::Int(0)),
+                                ))
+                            )),
+                            factory.create_value_term(ValueTerm::Int(0)),
+                        ),
                     ),
-                ),
-                factory.create_application_term(
-                    factory.create_builtin_term(BuiltinTerm::Get),
-                    allocator.create_pair(
-                        factory.create_recursive_term(factory.create_lambda_term(
-                            1,
-                            factory.create_tuple_term(
-                                allocator.create_pair(
+                    factory.create_application_term(
+                        factory.create_builtin_term(BuiltinTerm::Get),
+                        allocator.create_pair(
+                            factory.create_recursive_term(factory.create_lambda_term(
+                                1,
+                                factory.create_tuple_term(allocator.create_pair(
                                     factory.create_application_term(
                                         factory.create_builtin_term(BuiltinTerm::Get),
                                         allocator.create_pair(
@@ -1552,27 +1526,25 @@ fn letrec_bindings() {
                                         )
                                     ),
                                     factory.create_value_term(ValueTerm::Int(3)),
-                                )
-                            )
-                        )),
-                        factory.create_value_term(ValueTerm::Int(1)),
+                                ))
+                            )),
+                            factory.create_value_term(ValueTerm::Int(1)),
+                        ),
                     ),
                 ),
-            ),
-        )),
-    );
-    assert_eq!(
-        parse("(letrec ((foo bar) (bar 3)) bar)", &factory, &allocator),
-        Ok(factory.create_application_term(
-            factory.create_lambda_term(2, factory.create_static_variable_term(0)),
-            allocator.create_pair(
-                factory.create_application_term(
-                    factory.create_builtin_term(BuiltinTerm::Get),
-                    allocator.create_pair(
-                        factory.create_recursive_term(factory.create_lambda_term(
-                            1,
-                            factory.create_tuple_term(
-                                allocator.create_pair(
+            )),
+        );
+        assert_eq!(
+            parse("(letrec ((foo bar) (bar 3)) bar)", &factory, &allocator),
+            Ok(factory.create_application_term(
+                factory.create_lambda_term(2, factory.create_static_variable_term(0)),
+                allocator.create_pair(
+                    factory.create_application_term(
+                        factory.create_builtin_term(BuiltinTerm::Get),
+                        allocator.create_pair(
+                            factory.create_recursive_term(factory.create_lambda_term(
+                                1,
+                                factory.create_tuple_term(allocator.create_pair(
                                     factory.create_application_term(
                                         factory.create_builtin_term(BuiltinTerm::Get),
                                         allocator.create_pair(
@@ -1581,19 +1553,17 @@ fn letrec_bindings() {
                                         )
                                     ),
                                     factory.create_value_term(ValueTerm::Int(3)),
-                                )
-                            )
-                        )),
-                        factory.create_value_term(ValueTerm::Int(0)),
+                                ))
+                            )),
+                            factory.create_value_term(ValueTerm::Int(0)),
+                        ),
                     ),
-                ),
-                factory.create_application_term(
-                    factory.create_builtin_term(BuiltinTerm::Get),
-                    allocator.create_pair(
-                        factory.create_recursive_term(factory.create_lambda_term(
-                            1,
-                            factory.create_tuple_term(
-                                allocator.create_pair(
+                    factory.create_application_term(
+                        factory.create_builtin_term(BuiltinTerm::Get),
+                        allocator.create_pair(
+                            factory.create_recursive_term(factory.create_lambda_term(
+                                1,
+                                factory.create_tuple_term(allocator.create_pair(
                                     factory.create_application_term(
                                         factory.create_builtin_term(BuiltinTerm::Get),
                                         allocator.create_pair(
@@ -1602,16 +1572,15 @@ fn letrec_bindings() {
                                         )
                                     ),
                                     factory.create_value_term(ValueTerm::Int(3)),
-                                )
-                            )
-                        )),
-                        factory.create_value_term(ValueTerm::Int(1)),
+                                ))
+                            )),
+                            factory.create_value_term(ValueTerm::Int(1)),
+                        ),
                     ),
                 ),
-            ),
-        )),
-    );
-    assert_eq!(
+            )),
+        );
+        assert_eq!(
         parse("(letrec ((foo (lambda (bar baz) (+ (+ first bar) (+ second baz)))) (first 3) (second 4)) (foo 5 6))", &factory, &allocator),
         Ok(factory.create_application_term(
             factory.create_lambda_term(3, factory.create_application_term(
@@ -1760,281 +1729,287 @@ fn letrec_bindings() {
             ),
         )),
     );
-    assert_eq!(
-        parse(
-            "(letrec ((fac (lambda (n) (if (= n 1) n (* n (fac (- n 1))))))) (fac 5))",
-            &factory,
-            &allocator
-        ),
-        Ok(factory.create_application_term(
-            factory.create_lambda_term(
-                1,
-                factory.create_application_term(
-                    factory.create_static_variable_term(0),
-                    allocator.create_unit_list(factory.create_value_term(ValueTerm::Int(5))),
-                )
+        assert_eq!(
+            parse(
+                "(letrec ((fac (lambda (n) (if (= n 1) n (* n (fac (- n 1))))))) (fac 5))",
+                &factory,
+                &allocator
             ),
-            allocator.create_unit_list(factory.create_recursive_term(factory.create_lambda_term(
-                1,
+            Ok(factory.create_application_term(
                 factory.create_lambda_term(
                     1,
                     factory.create_application_term(
-                        factory.create_builtin_term(BuiltinTerm::If),
-                        allocator.create_triple(
+                        factory.create_static_variable_term(0),
+                        allocator.create_unit_list(factory.create_value_term(ValueTerm::Int(5))),
+                    )
+                ),
+                allocator.create_unit_list(factory.create_recursive_term(
+                    factory.create_lambda_term(
+                        1,
+                        factory.create_lambda_term(
+                            1,
                             factory.create_application_term(
-                                factory.create_builtin_term(BuiltinTerm::Equal),
-                                allocator.create_pair(
-                                    factory.create_static_variable_term(0),
-                                    factory.create_value_term(ValueTerm::Int(1)),
-                                ),
-                            ),
-                            factory.create_static_variable_term(0),
-                            factory.create_application_term(
-                                factory.create_builtin_term(BuiltinTerm::Multiply),
-                                allocator.create_pair(
+                                factory.create_builtin_term(BuiltinTerm::If),
+                                allocator.create_triple(
+                                    factory.create_application_term(
+                                        factory.create_builtin_term(BuiltinTerm::Equal),
+                                        allocator.create_pair(
+                                            factory.create_static_variable_term(0),
+                                            factory.create_value_term(ValueTerm::Int(1)),
+                                        ),
+                                    ),
                                     factory.create_static_variable_term(0),
                                     factory.create_application_term(
-                                        factory.create_static_variable_term(1),
-                                        allocator.create_unit_list(
+                                        factory.create_builtin_term(BuiltinTerm::Multiply),
+                                        allocator.create_pair(
+                                            factory.create_static_variable_term(0),
                                             factory.create_application_term(
-                                                factory.create_builtin_term(BuiltinTerm::Subtract),
-                                                allocator.create_pair(
-                                                    factory.create_static_variable_term(0),
-                                                    factory.create_value_term(ValueTerm::Int(1)),
+                                                factory.create_static_variable_term(1),
+                                                allocator.create_unit_list(
+                                                    factory.create_application_term(
+                                                        factory.create_builtin_term(
+                                                            BuiltinTerm::Subtract
+                                                        ),
+                                                        allocator.create_pair(
+                                                            factory.create_static_variable_term(0),
+                                                            factory.create_value_term(
+                                                                ValueTerm::Int(1)
+                                                            ),
+                                                        ),
+                                                    ),
                                                 ),
                                             ),
                                         ),
                                     ),
                                 ),
                             ),
-                        ),
+                        )
                     ),
-                )
-            ),)),
-        )),
-    );
-}
+                )),
+            )),
+        );
+    }
 
-//     #[test]
-//     fn function_expressions() {
-//         assert_eq!(
-//             parse("(lambda () (+ 3 4))"),
-//             Ok(Expression::new(Term::Lambda(LambdaTerm::new(
-//                 Arity::from(0, 0, None),
-//                 Expression::new(Term::Application(ApplicationTerm::new(
-//                     Expression::new(Term::Builtin(BuiltinTerm::Add)),
-//                     vec![
-//                         Expression::new(Term::Value(ValueTerm::Int(3))),
-//                         Expression::new(Term::Value(ValueTerm::Int(4))),
-//                     ]
-//                 ))),
-//             )))),
-//         );
-//         assert_eq!(
-//             parse("(lambda (foo) (+ foo 4))"),
-//             Ok(Expression::new(Term::Lambda(LambdaTerm::new(
-//                 Arity::from(0, 1, None),
-//                 Expression::new(Term::Application(ApplicationTerm::new(
-//                     Expression::new(Term::Builtin(BuiltinTerm::Add)),
-//                     vec![
-//                         Expression::new(Term::Variable(VariableTerm::scoped(0))),
-//                         Expression::new(Term::Value(ValueTerm::Int(4)))
-//                     ]
-//                 ))),
-//             )))),
-//         );
-//         assert_eq!(
-//             parse("(lambda (foo bar) (+ foo bar))"),
-//             Ok(Expression::new(Term::Lambda(LambdaTerm::new(
-//                 Arity::from(0, 2, None),
-//                 Expression::new(Term::Application(ApplicationTerm::new(
-//                     Expression::new(Term::Builtin(BuiltinTerm::Add)),
-//                     vec![
-//                         Expression::new(Term::Variable(VariableTerm::scoped(1))),
-//                         Expression::new(Term::Variable(VariableTerm::scoped(0)))
-//                     ]
-//                 ))),
-//             )))),
-//         );
-//         assert_eq!(
-//             parse("(lambda (first) (lambda (second) (lambda (foo bar) (+ foo bar))))",),
-//             Ok(Expression::new(Term::Lambda(LambdaTerm::new(
-//                 Arity::from(0, 1, None),
-//                 Expression::new(Term::Lambda(LambdaTerm::new(
-//                     Arity::from(0, 1, None),
-//                     Expression::new(Term::Lambda(LambdaTerm::new(
-//                         Arity::from(0, 2, None),
-//                         Expression::new(Term::Application(ApplicationTerm::new(
-//                             Expression::new(Term::Builtin(BuiltinTerm::Add)),
-//                             vec![
-//                                 Expression::new(Term::Variable(VariableTerm::scoped(1))),
-//                                 Expression::new(Term::Variable(VariableTerm::scoped(0)))
-//                             ]
-//                         ))),
-//                     ))),
-//                 ))),
-//             )))),
-//         );
-//     }
+    //     #[test]
+    //     fn function_expressions() {
+    //         assert_eq!(
+    //             parse("(lambda () (+ 3 4))"),
+    //             Ok(Expression::new(Term::Lambda(LambdaTerm::new(
+    //                 Arity::from(0, 0, None),
+    //                 Expression::new(Term::Application(ApplicationTerm::new(
+    //                     Expression::new(Term::Builtin(BuiltinTerm::Add)),
+    //                     vec![
+    //                         Expression::new(Term::Value(ValueTerm::Int(3))),
+    //                         Expression::new(Term::Value(ValueTerm::Int(4))),
+    //                     ]
+    //                 ))),
+    //             )))),
+    //         );
+    //         assert_eq!(
+    //             parse("(lambda (foo) (+ foo 4))"),
+    //             Ok(Expression::new(Term::Lambda(LambdaTerm::new(
+    //                 Arity::from(0, 1, None),
+    //                 Expression::new(Term::Application(ApplicationTerm::new(
+    //                     Expression::new(Term::Builtin(BuiltinTerm::Add)),
+    //                     vec![
+    //                         Expression::new(Term::Variable(VariableTerm::scoped(0))),
+    //                         Expression::new(Term::Value(ValueTerm::Int(4)))
+    //                     ]
+    //                 ))),
+    //             )))),
+    //         );
+    //         assert_eq!(
+    //             parse("(lambda (foo bar) (+ foo bar))"),
+    //             Ok(Expression::new(Term::Lambda(LambdaTerm::new(
+    //                 Arity::from(0, 2, None),
+    //                 Expression::new(Term::Application(ApplicationTerm::new(
+    //                     Expression::new(Term::Builtin(BuiltinTerm::Add)),
+    //                     vec![
+    //                         Expression::new(Term::Variable(VariableTerm::scoped(1))),
+    //                         Expression::new(Term::Variable(VariableTerm::scoped(0)))
+    //                     ]
+    //                 ))),
+    //             )))),
+    //         );
+    //         assert_eq!(
+    //             parse("(lambda (first) (lambda (second) (lambda (foo bar) (+ foo bar))))",),
+    //             Ok(Expression::new(Term::Lambda(LambdaTerm::new(
+    //                 Arity::from(0, 1, None),
+    //                 Expression::new(Term::Lambda(LambdaTerm::new(
+    //                     Arity::from(0, 1, None),
+    //                     Expression::new(Term::Lambda(LambdaTerm::new(
+    //                         Arity::from(0, 2, None),
+    //                         Expression::new(Term::Application(ApplicationTerm::new(
+    //                             Expression::new(Term::Builtin(BuiltinTerm::Add)),
+    //                             vec![
+    //                                 Expression::new(Term::Variable(VariableTerm::scoped(1))),
+    //                                 Expression::new(Term::Variable(VariableTerm::scoped(0)))
+    //                             ]
+    //                         ))),
+    //                     ))),
+    //                 ))),
+    //             )))),
+    //         );
+    //     }
 
-//     #[test]
-//     fn closures() {
-//         assert_eq!(
-//             parse("(lambda (foo) (lambda () foo))"),
-//             Ok(Expression::new(Term::Lambda(LambdaTerm::new(
-//                 Arity::from(0, 1, None),
-//                 Expression::new(Term::Lambda(LambdaTerm::new(
-//                     Arity::from(0, 0, None),
-//                     Expression::new(Term::Variable(VariableTerm::scoped(0)))
-//                 ))),
-//             )))),
-//         );
-//         assert_eq!(
-//             parse("(lambda (foo bar) (lambda () foo))"),
-//             Ok(Expression::new(Term::Lambda(LambdaTerm::new(
-//                 Arity::from(0, 2, None),
-//                 Expression::new(Term::Lambda(LambdaTerm::new(
-//                     Arity::from(0, 0, None),
-//                     Expression::new(Term::Variable(VariableTerm::scoped(1)))
-//                 ))),
-//             ))))
-//         );
-//         assert_eq!(
-//             parse("(lambda (foo bar) (lambda () bar))"),
-//             Ok(Expression::new(Term::Lambda(LambdaTerm::new(
-//                 Arity::from(0, 2, None),
-//                 Expression::new(Term::Lambda(LambdaTerm::new(
-//                     Arity::from(0, 0, None),
-//                     Expression::new(Term::Variable(VariableTerm::scoped(0))),
-//                 ))),
-//             )))),
-//         );
-//         assert_eq!(
-//             parse("(lambda (foo bar) (lambda (baz) (+ foo baz)))",),
-//             Ok(Expression::new(Term::Lambda(LambdaTerm::new(
-//                 Arity::from(0, 2, None),
-//                 Expression::new(Term::Lambda(LambdaTerm::new(
-//                     Arity::from(0, 1, None),
-//                     Expression::new(Term::Application(ApplicationTerm::new(
-//                         Expression::new(Term::Builtin(BuiltinTerm::Add)),
-//                         vec![
-//                             Expression::new(Term::Variable(VariableTerm::scoped(2))),
-//                             Expression::new(Term::Variable(VariableTerm::scoped(0))),
-//                         ]
-//                     ))),
-//                 ))),
-//             )))),
-//         );
-//         assert_eq!(
-//             parse("(lambda (first second third) (lambda (fourth fifth) (lambda (sixth) (+ first (+ second (+ third (+ fourth (+ fifth sixth))))))))"),
-//             Ok(Expression::new(Term::Lambda(LambdaTerm::new(
-//                 Arity::from(0, 3, None),
-//                 Expression::new(Term::Lambda(
-//                     LambdaTerm::new(
-//                         Arity::from(0, 2, None),
-//                         Expression::new(Term::Lambda(
-//                             LambdaTerm::new(
-//                                 Arity::from(0, 1, None),
-//                                 Expression::new(Term::Application(ApplicationTerm::new(Expression::new(Term::Builtin(BuiltinTerm::Add)), vec![
-//                                     Expression::new(Term::Variable(VariableTerm::scoped(5))),
-//                                     Expression::new(Term::Application(ApplicationTerm::new(Expression::new(Term::Builtin(BuiltinTerm::Add)), vec![
-//                                         Expression::new(Term::Variable(VariableTerm::scoped(4))),
-//                                         Expression::new(Term::Application(ApplicationTerm::new(Expression::new(Term::Builtin(BuiltinTerm::Add)), vec![
-//                                             Expression::new(Term::Variable(VariableTerm::scoped(3))),
-//                                             Expression::new(Term::Application(ApplicationTerm::new(Expression::new(Term::Builtin(BuiltinTerm::Add)), vec![
-//                                                 Expression::new(Term::Variable(VariableTerm::scoped(2))),
-//                                                 Expression::new(Term::Application(ApplicationTerm::new(Expression::new(Term::Builtin(BuiltinTerm::Add)), vec![
-//                                                     Expression::new(Term::Variable(VariableTerm::scoped(1))),
-//                                                     Expression::new(Term::Variable(VariableTerm::scoped(0))),
-//                                                 ]))),
-//                                             ]))),
-//                                         ]))),
-//                                     ]))),
-//                                 ]))),
-//                             ),
-//                         )),
-//                 )),
-//             ))))),
-//         );
-//         assert_eq!(
-//             parse("(lambda (foo) (lambda () (lambda () foo)))"),
-//             Ok(Expression::new(Term::Lambda(LambdaTerm::new(
-//                 Arity::from(0, 1, None),
-//                 Expression::new(Term::Lambda(LambdaTerm::new(
-//                     Arity::from(0, 0, None),
-//                     Expression::new(Term::Lambda(LambdaTerm::new(
-//                         Arity::from(0, 0, None),
-//                         Expression::new(Term::Variable(VariableTerm::scoped(0))),
-//                     ))),
-//                 ))),
-//             )))),
-//         );
-//     }
+    //     #[test]
+    //     fn closures() {
+    //         assert_eq!(
+    //             parse("(lambda (foo) (lambda () foo))"),
+    //             Ok(Expression::new(Term::Lambda(LambdaTerm::new(
+    //                 Arity::from(0, 1, None),
+    //                 Expression::new(Term::Lambda(LambdaTerm::new(
+    //                     Arity::from(0, 0, None),
+    //                     Expression::new(Term::Variable(VariableTerm::scoped(0)))
+    //                 ))),
+    //             )))),
+    //         );
+    //         assert_eq!(
+    //             parse("(lambda (foo bar) (lambda () foo))"),
+    //             Ok(Expression::new(Term::Lambda(LambdaTerm::new(
+    //                 Arity::from(0, 2, None),
+    //                 Expression::new(Term::Lambda(LambdaTerm::new(
+    //                     Arity::from(0, 0, None),
+    //                     Expression::new(Term::Variable(VariableTerm::scoped(1)))
+    //                 ))),
+    //             ))))
+    //         );
+    //         assert_eq!(
+    //             parse("(lambda (foo bar) (lambda () bar))"),
+    //             Ok(Expression::new(Term::Lambda(LambdaTerm::new(
+    //                 Arity::from(0, 2, None),
+    //                 Expression::new(Term::Lambda(LambdaTerm::new(
+    //                     Arity::from(0, 0, None),
+    //                     Expression::new(Term::Variable(VariableTerm::scoped(0))),
+    //                 ))),
+    //             )))),
+    //         );
+    //         assert_eq!(
+    //             parse("(lambda (foo bar) (lambda (baz) (+ foo baz)))",),
+    //             Ok(Expression::new(Term::Lambda(LambdaTerm::new(
+    //                 Arity::from(0, 2, None),
+    //                 Expression::new(Term::Lambda(LambdaTerm::new(
+    //                     Arity::from(0, 1, None),
+    //                     Expression::new(Term::Application(ApplicationTerm::new(
+    //                         Expression::new(Term::Builtin(BuiltinTerm::Add)),
+    //                         vec![
+    //                             Expression::new(Term::Variable(VariableTerm::scoped(2))),
+    //                             Expression::new(Term::Variable(VariableTerm::scoped(0))),
+    //                         ]
+    //                     ))),
+    //                 ))),
+    //             )))),
+    //         );
+    //         assert_eq!(
+    //             parse("(lambda (first second third) (lambda (fourth fifth) (lambda (sixth) (+ first (+ second (+ third (+ fourth (+ fifth sixth))))))))"),
+    //             Ok(Expression::new(Term::Lambda(LambdaTerm::new(
+    //                 Arity::from(0, 3, None),
+    //                 Expression::new(Term::Lambda(
+    //                     LambdaTerm::new(
+    //                         Arity::from(0, 2, None),
+    //                         Expression::new(Term::Lambda(
+    //                             LambdaTerm::new(
+    //                                 Arity::from(0, 1, None),
+    //                                 Expression::new(Term::Application(ApplicationTerm::new(Expression::new(Term::Builtin(BuiltinTerm::Add)), vec![
+    //                                     Expression::new(Term::Variable(VariableTerm::scoped(5))),
+    //                                     Expression::new(Term::Application(ApplicationTerm::new(Expression::new(Term::Builtin(BuiltinTerm::Add)), vec![
+    //                                         Expression::new(Term::Variable(VariableTerm::scoped(4))),
+    //                                         Expression::new(Term::Application(ApplicationTerm::new(Expression::new(Term::Builtin(BuiltinTerm::Add)), vec![
+    //                                             Expression::new(Term::Variable(VariableTerm::scoped(3))),
+    //                                             Expression::new(Term::Application(ApplicationTerm::new(Expression::new(Term::Builtin(BuiltinTerm::Add)), vec![
+    //                                                 Expression::new(Term::Variable(VariableTerm::scoped(2))),
+    //                                                 Expression::new(Term::Application(ApplicationTerm::new(Expression::new(Term::Builtin(BuiltinTerm::Add)), vec![
+    //                                                     Expression::new(Term::Variable(VariableTerm::scoped(1))),
+    //                                                     Expression::new(Term::Variable(VariableTerm::scoped(0))),
+    //                                                 ]))),
+    //                                             ]))),
+    //                                         ]))),
+    //                                     ]))),
+    //                                 ]))),
+    //                             ),
+    //                         )),
+    //                 )),
+    //             ))))),
+    //         );
+    //         assert_eq!(
+    //             parse("(lambda (foo) (lambda () (lambda () foo)))"),
+    //             Ok(Expression::new(Term::Lambda(LambdaTerm::new(
+    //                 Arity::from(0, 1, None),
+    //                 Expression::new(Term::Lambda(LambdaTerm::new(
+    //                     Arity::from(0, 0, None),
+    //                     Expression::new(Term::Lambda(LambdaTerm::new(
+    //                         Arity::from(0, 0, None),
+    //                         Expression::new(Term::Variable(VariableTerm::scoped(0))),
+    //                     ))),
+    //                 ))),
+    //             )))),
+    //         );
+    //     }
 
-//     #[test]
-//     fn function_applications() {
-//         assert_eq!(
-//             parse("((lambda (foo) foo) 3)"),
-//             Ok(Expression::new(Term::Application(ApplicationTerm::new(
-//                 Expression::new(Term::Lambda(LambdaTerm::new(
-//                     Arity::from(0, 1, None),
-//                     Expression::new(Term::Variable(VariableTerm::scoped(0)))
-//                 ))),
-//                 vec![Expression::new(Term::Value(ValueTerm::Int(3)))],
-//             ),))),
-//         );
-//         assert_eq!(
-//             parse("((lambda (foo bar baz) foo) 3 4 5)"),
-//             Ok(Expression::new(Term::Application(ApplicationTerm::new(
-//                 Expression::new(Term::Lambda(LambdaTerm::new(
-//                     Arity::from(0, 3, None),
-//                     Expression::new(Term::Variable(VariableTerm::scoped(2)))
-//                 ))),
-//                 vec![
-//                     Expression::new(Term::Value(ValueTerm::Int(3))),
-//                     Expression::new(Term::Value(ValueTerm::Int(4))),
-//                     Expression::new(Term::Value(ValueTerm::Int(5))),
-//                 ],
-//             ),))),
-//         );
-//         assert_eq!(
-//             parse("((lambda (+) (+ 3 4)) (lambda (first second) (+ first second)))",),
-//             Ok(Expression::new(Term::Application(ApplicationTerm::new(
-//                 Expression::new(Term::Lambda(LambdaTerm::new(
-//                     Arity::from(0, 1, None),
-//                     Expression::new(Term::Application(ApplicationTerm::new(
-//                         Expression::new(Term::Variable(VariableTerm::scoped(0))),
-//                         vec![
-//                             Expression::new(Term::Value(ValueTerm::Int(3))),
-//                             Expression::new(Term::Value(ValueTerm::Int(4))),
-//                         ],
-//                     ))),
-//                 ))),
-//                 vec![Expression::new(Term::Lambda(LambdaTerm::new(
-//                     Arity::from(0, 2, None),
-//                     Expression::new(Term::Application(ApplicationTerm::new(
-//                         Expression::new(Term::Builtin(BuiltinTerm::Add)),
-//                         vec![
-//                             Expression::new(Term::Variable(VariableTerm::scoped(1))),
-//                             Expression::new(Term::Variable(VariableTerm::scoped(0))),
-//                         ]
-//                     ))),
-//                 )))],
-//             ),))),
-//         );
-//     }
+    //     #[test]
+    //     fn function_applications() {
+    //         assert_eq!(
+    //             parse("((lambda (foo) foo) 3)"),
+    //             Ok(Expression::new(Term::Application(ApplicationTerm::new(
+    //                 Expression::new(Term::Lambda(LambdaTerm::new(
+    //                     Arity::from(0, 1, None),
+    //                     Expression::new(Term::Variable(VariableTerm::scoped(0)))
+    //                 ))),
+    //                 vec![Expression::new(Term::Value(ValueTerm::Int(3)))],
+    //             ),))),
+    //         );
+    //         assert_eq!(
+    //             parse("((lambda (foo bar baz) foo) 3 4 5)"),
+    //             Ok(Expression::new(Term::Application(ApplicationTerm::new(
+    //                 Expression::new(Term::Lambda(LambdaTerm::new(
+    //                     Arity::from(0, 3, None),
+    //                     Expression::new(Term::Variable(VariableTerm::scoped(2)))
+    //                 ))),
+    //                 vec![
+    //                     Expression::new(Term::Value(ValueTerm::Int(3))),
+    //                     Expression::new(Term::Value(ValueTerm::Int(4))),
+    //                     Expression::new(Term::Value(ValueTerm::Int(5))),
+    //                 ],
+    //             ),))),
+    //         );
+    //         assert_eq!(
+    //             parse("((lambda (+) (+ 3 4)) (lambda (first second) (+ first second)))",),
+    //             Ok(Expression::new(Term::Application(ApplicationTerm::new(
+    //                 Expression::new(Term::Lambda(LambdaTerm::new(
+    //                     Arity::from(0, 1, None),
+    //                     Expression::new(Term::Application(ApplicationTerm::new(
+    //                         Expression::new(Term::Variable(VariableTerm::scoped(0))),
+    //                         vec![
+    //                             Expression::new(Term::Value(ValueTerm::Int(3))),
+    //                             Expression::new(Term::Value(ValueTerm::Int(4))),
+    //                         ],
+    //                     ))),
+    //                 ))),
+    //                 vec![Expression::new(Term::Lambda(LambdaTerm::new(
+    //                     Arity::from(0, 2, None),
+    //                     Expression::new(Term::Application(ApplicationTerm::new(
+    //                         Expression::new(Term::Builtin(BuiltinTerm::Add)),
+    //                         vec![
+    //                             Expression::new(Term::Variable(VariableTerm::scoped(1))),
+    //                             Expression::new(Term::Variable(VariableTerm::scoped(0))),
+    //                         ]
+    //                     ))),
+    //                 )))],
+    //             ),))),
+    //         );
+    //     }
 
-//     #[test]
-//     fn builtin_applications() {
-//         assert_eq!(
-//             parse("(+ 3 4)"),
-//             Ok(Expression::new(Term::Application(ApplicationTerm::new(
-//                 Expression::new(Term::Builtin(BuiltinTerm::Add)),
-//                 vec![
-//                     Expression::new(Term::Value(ValueTerm::Int(3))),
-//                     Expression::new(Term::Value(ValueTerm::Int(4))),
-//                 ],
-//             )))),
-//         );
-//     }
+    //     #[test]
+    //     fn builtin_applications() {
+    //         assert_eq!(
+    //             parse("(+ 3 4)"),
+    //             Ok(Expression::new(Term::Application(ApplicationTerm::new(
+    //                 Expression::new(Term::Builtin(BuiltinTerm::Add)),
+    //                 vec![
+    //                     Expression::new(Term::Value(ValueTerm::Int(3))),
+    //                     Expression::new(Term::Value(ValueTerm::Int(4))),
+    //                 ],
+    //             )))),
+    //         );
+    //     }
 }

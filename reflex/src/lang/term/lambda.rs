@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use std::{collections::HashSet, iter::once};
 
 use crate::{
@@ -187,17 +188,6 @@ impl<T: Expression> std::fmt::Display for LambdaTerm<T> {
         write!(f, "<function:{}>", self.num_args)
     }
 }
-impl<T: Expression> serde::Serialize for LambdaTerm<T> {
-    fn serialize<S>(&self, _serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        Err(serde::ser::Error::custom(format!(
-            "Unable to serialize term: {}",
-            self
-        )))
-    }
-}
 
 fn apply_eta_reduction<'a, T: Expression>(
     body: &'a T,
@@ -273,8 +263,8 @@ mod tests {
         allocator::DefaultAllocator,
         cache::SubstitutionCache,
         core::{
-            DependencyList, Evaluate, EvaluationResult, ExpressionFactory,
-            HeapAllocator, Rewritable, StateCache,
+            DependencyList, Evaluate, EvaluationResult, ExpressionFactory, HeapAllocator,
+            Rewritable, StateCache,
         },
         lang::{BuiltinTerm, TermFactory, ValueTerm},
         parser::sexpr::parse,

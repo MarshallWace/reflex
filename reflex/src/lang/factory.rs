@@ -20,7 +20,7 @@ use crate::{
 
 #[derive(Hash, PartialEq, Eq, Clone)]
 pub struct SharedTerm {
-    value: Arc<Term<CachedTerm<SharedTerm>>>,
+    pub(crate) value: Arc<Term<CachedTerm<SharedTerm>>>,
 }
 impl SharedTerm {
     fn new(value: Term<CachedTerm<SharedTerm>>) -> Self {
@@ -200,14 +200,6 @@ impl std::fmt::Display for SharedTerm {
 impl std::fmt::Debug for SharedTerm {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         std::fmt::Debug::fmt(&self.value, f)
-    }
-}
-impl serde::Serialize for SharedTerm {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serde::Serialize::serialize(&*self.value, serializer)
     }
 }
 

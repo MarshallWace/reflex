@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use std::{collections::HashSet, hash::Hash, iter::once};
 
 use crate::{
@@ -168,19 +169,6 @@ impl<T: Expression> Iterable for HashSetTerm<T> {
         self.values.is_empty()
     }
 }
-impl<T: Expression> serde::Serialize for HashSetTerm<T> {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        let mut result = serializer.serialize_seq(Some(self.values.len()))?;
-        for item in self.values.iter() {
-            serde::ser::SerializeSeq::serialize_element(&mut result, item)?;
-        }
-        serde::ser::SerializeSeq::end(result)
-    }
-}
-
 fn build_lookup_table<'a, T: Expression + 'a>(
     values: impl IntoIterator<Item = &'a T, IntoIter = impl ExactSizeIterator<Item = &'a T>>,
 ) -> HashSet<HashId> {

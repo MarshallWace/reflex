@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use std::collections::HashSet;
 
 use crate::{
@@ -150,18 +151,6 @@ impl<T: Expression> std::fmt::Display for CollectionTerm<T> {
             Self::Vector(term) => std::fmt::Display::fmt(term, f),
             Self::HashMap(term) => std::fmt::Display::fmt(term, f),
             Self::HashSet(term) => std::fmt::Display::fmt(term, f),
-        }
-    }
-}
-impl<T: Expression> serde::Serialize for CollectionTerm<T> {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        match self {
-            Self::Vector(term) => serde::Serialize::serialize(term, serializer),
-            Self::HashMap(term) => serde::Serialize::serialize(term, serializer),
-            Self::HashSet(term) => serde::Serialize::serialize(term, serializer),
         }
     }
 }

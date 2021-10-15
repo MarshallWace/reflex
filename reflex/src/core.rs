@@ -10,7 +10,7 @@ use std::{
     iter::{once, FromIterator},
 };
 
-use crate::lang::*;
+use crate::lang::{serialization::SerializeJson, *};
 use crate::{
     compiler::InstructionPointer,
     hash::{hash_object, HashId},
@@ -19,13 +19,13 @@ use serde::{Deserialize, Serialize};
 
 pub trait Expression:
     GraphNode
+    + SerializeJson
     + std::hash::Hash
     + std::cmp::Eq
     + std::cmp::PartialEq
     + std::clone::Clone
     + std::fmt::Debug
     + std::fmt::Display
-    + serde::Serialize
 where
     Self: std::marker::Sized,
 {
@@ -242,7 +242,6 @@ pub trait StringValue:
     + std::clone::Clone
     + std::fmt::Debug
     + std::fmt::Display
-    + serde::Serialize
 where
     Self: std::marker::Sized,
 {
@@ -1264,12 +1263,13 @@ impl<T: Expression> EvaluationResult<T> {
 
 #[cfg(test)]
 mod tests {
-    use std::iter::once;
+    use std::{iter::once, str::FromStr};
+
+    use uuid::Uuid;
 
     use crate::{
         allocator::DefaultAllocator,
         cache::SubstitutionCache,
-        hash::{hash_object, HashId},
         lang::{term::NativeFunction, BuiltinTerm, TermFactory, ValueTerm},
         parser::sexpr::parse,
     };
@@ -1823,8 +1823,8 @@ mod tests {
             fn name() -> Option<&'static str> {
                 Some("Constant")
             }
-            fn uid() -> HashId {
-                hash_object(&std::any::TypeId::of::<Self>())
+            fn uid() -> Uuid {
+                Uuid::from_str("9f3b754b-62ef-4aec-a657-cb3c2b13147f").unwrap()
             }
             fn arity() -> Arity {
                 Arity::from(0, 0, None)
@@ -1839,7 +1839,7 @@ mod tests {
         }
 
         let expression = factory.create_application_term(
-            factory.create_native_function_term(NativeFunction::new(
+            factory.create_native_function_term(NativeFunction::new_with_uuid(
                 Constant::uid(),
                 Constant::name(),
                 Constant::arity(),
@@ -1861,8 +1861,8 @@ mod tests {
             fn name() -> Option<&'static str> {
                 Some("Add3")
             }
-            fn uid() -> HashId {
-                hash_object(&std::any::TypeId::of::<Self>())
+            fn uid() -> Uuid {
+                Uuid::from_str("b765e5ba-8b8c-41f8-86f3-1d6deb09461e").unwrap()
             }
             fn arity() -> Arity {
                 Arity::from(0, 0, None)
@@ -1892,7 +1892,7 @@ mod tests {
         }
 
         let expression = factory.create_application_term(
-            factory.create_native_function_term(NativeFunction::new(
+            factory.create_native_function_term(NativeFunction::new_with_uuid(
                 Add3::uid(),
                 Add3::name(),
                 Add3::arity(),

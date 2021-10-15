@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use crate::{
     core::{
         Applicable, Arity, EvaluationCache, Expression, ExpressionFactory, HeapAllocator,
@@ -32,7 +33,9 @@ impl<T: Expression> Applicable<T> for Contains {
                 Some(ValueTerm::String(value)) => Some(value),
                 _ => None,
             };
-            Ok(field_name.and_then(|key| target.get(key.as_str())).is_some())
+            Ok(field_name
+                .and_then(|key| target.get(key.as_str()))
+                .is_some())
         } else if let Some(target) = factory.match_hashmap_term(&target) {
             Ok(target.get(&key).is_some())
         } else if let Some(target) = factory.match_hashset_term(&target) {

@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use std::{
     iter::{empty, once},
     marker::PhantomData,
@@ -69,11 +70,7 @@ impl<T: Expression<String = String>> HeapAllocator<T> for DefaultAllocator<T> {
     fn clone_struct_prototype(&self, prototype: &StructPrototype) -> StructPrototype {
         StructPrototype::new(prototype.keys().iter().cloned())
     }
-    fn create_signal(
-        &self,
-        signal_type: SignalType,
-        args: ExpressionList<T>,
-    ) -> Signal<T> {
+    fn create_signal(&self, signal_type: SignalType, args: ExpressionList<T>) -> Signal<T> {
         Signal::new(signal_type, args)
     }
     fn clone_signal(&self, signal: &Signal<T>) -> Signal<T> {
@@ -126,11 +123,7 @@ impl<T: Expression<String = String>> NativeAllocator<T> for DefaultAllocator<T> 
     fn clone_struct_prototype(&self, prototype: &StructPrototype) -> StructPrototype {
         HeapAllocator::<T>::clone_struct_prototype(self, prototype)
     }
-    fn create_signal(
-        &self,
-        signal_type: SignalType,
-        args: ExpressionList<T>,
-    ) -> Signal<T> {
+    fn create_signal(&self, signal_type: SignalType, args: ExpressionList<T>) -> Signal<T> {
         HeapAllocator::<T>::create_signal(self, signal_type, args)
     }
     fn clone_signal(&self, signal: &Signal<T>) -> Signal<T> {

@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 mod application;
 use std::collections::HashSet;
 
@@ -277,14 +278,6 @@ impl<T: Expression> std::fmt::Display for CachedTerm<T> {
 impl<T: Expression> std::fmt::Debug for CachedTerm<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         std::fmt::Debug::fmt(&self.value, f)
-    }
-}
-impl<T: Expression> serde::Serialize for CachedTerm<T> {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serde::Serialize::serialize(&self.value, serializer)
     }
 }
 
@@ -653,31 +646,6 @@ impl<T: Expression + Compile<T>> std::fmt::Display for Term<T> {
             Self::Collection(term) => std::fmt::Display::fmt(term, f),
             Self::Signal(term) => std::fmt::Display::fmt(term, f),
             Self::SignalTransformer(term) => std::fmt::Display::fmt(term, f),
-        }
-    }
-}
-impl<T: Expression + Compile<T>> serde::Serialize for Term<T> {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        match self {
-            Self::Value(term) => serde::Serialize::serialize(term, serializer),
-            Self::Variable(term) => serde::Serialize::serialize(term, serializer),
-            Self::Let(term) => serde::Serialize::serialize(term, serializer),
-            Self::Lambda(term) => serde::Serialize::serialize(term, serializer),
-            Self::Application(term) => serde::Serialize::serialize(term, serializer),
-            Self::PartialApplication(term) => serde::Serialize::serialize(term, serializer),
-            Self::Recursive(term) => serde::Serialize::serialize(term, serializer),
-            Self::CompiledFunction(term) => serde::Serialize::serialize(term, serializer),
-            Self::Builtin(term) => serde::Serialize::serialize(term, serializer),
-            Self::Native(term) => serde::Serialize::serialize(term, serializer),
-            Self::Tuple(term) => serde::Serialize::serialize(term, serializer),
-            Self::Struct(term) => serde::Serialize::serialize(term, serializer),
-            Self::Constructor(term) => serde::Serialize::serialize(term, serializer),
-            Self::Collection(term) => serde::Serialize::serialize(term, serializer),
-            Self::Signal(term) => serde::Serialize::serialize(term, serializer),
-            Self::SignalTransformer(term) => serde::Serialize::serialize(term, serializer),
         }
     }
 }
