@@ -5,7 +5,7 @@
 use std::process;
 
 use reflex::{allocator::DefaultAllocator, lang::TermFactory};
-use reflex_compiler::js::{standard_js_loaders, standard_js_plugins};
+use reflex_cli::compiler::js::{standard_js_loaders, standard_js_plugins};
 use reflex_server::cli::{builtin_signal_handler, cli};
 
 #[tokio::main]

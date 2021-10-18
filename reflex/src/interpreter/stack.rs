@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use std::collections::HashSet;
 
 use crate::{
@@ -103,10 +104,12 @@ impl<'src, T: Expression> CallStack<'src, T> {
         &'src self,
         address: InstructionPointer,
     ) -> Option<&'src Instruction> {
-        self.program.get(address).or_else(|| if address == Self::EVALUATE_ARG_ADDRESS {
-            Some(&Self::EVALUATE_ARG_INSTRUCTION)
-        } else {
-            None
+        self.program.get(address).or_else(|| {
+            if address == Self::EVALUATE_ARG_ADDRESS {
+                Some(&Self::EVALUATE_ARG_INSTRUCTION)
+            } else {
+                None
+            }
         })
     }
     pub fn next_program_counter(&self) -> InstructionPointer {
@@ -198,9 +201,11 @@ impl<'src, T: Expression> CallStack<'src, T> {
         self.call_stack
             .last()
             .and_then(|entry| match &entry.context {
-                StackFrame::ApplicationArgList { args: items, results, .. } => {
-                    Some((items.as_slice(), results.as_slice()))
-                }
+                StackFrame::ApplicationArgList {
+                    args: items,
+                    results,
+                    ..
+                } => Some((items.as_slice(), results.as_slice())),
                 _ => None,
             })
     }
@@ -228,7 +233,9 @@ impl<'src, T: Expression> CallStack<'src, T> {
                                 resume_address,
                                 args,
                                 results,
-                            } => Some((target, arity, caller_address, resume_address, args, results)),
+                            } => {
+                                Some((target, arity, caller_address, resume_address, args, results))
+                            }
                             _ => None,
                         }
                         .unwrap();

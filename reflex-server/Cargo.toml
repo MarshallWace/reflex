@@ -10,7 +10,7 @@ default-run = "reflex-server"
 
 [dependencies]
 reflex = { path = "../reflex" }
-reflex-compiler = { path = "../reflex-compiler" }
+reflex-cli = { path = "../reflex-cli" }
 reflex-graphql = { path = "../reflex-graphql" }
 reflex-handlers = { path = "../reflex-handlers" }
 reflex-js = { path = "../reflex-js" }
@@ -23,4 +23,4 @@ tokio = { version = "1", features = ["full"] }
 clap = { git = "https://github.com/clap-rs/clap", rev = "efeb02cd342af78d2eb8446ecce8aed05643594b" } # TODO: once clap 3.0 comes out depend on it from crates.io
 proc-macro2 = "^1.0"
 anyhow = "^1.0"
-serde_json = "^1.0"
+rmp-serde = "^0.15"

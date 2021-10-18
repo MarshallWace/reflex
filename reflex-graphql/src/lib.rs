@@ -6,7 +6,13 @@ use std::{collections::HashMap, iter::once, str::FromStr};
 
 use either::Either;
 use graphql_parser::{parse_query, query::*};
-use reflex::{core::{ArgType, Arity, Expression, ExpressionFactory, ExpressionList, FunctionArity, HeapAllocator, NativeAllocator, SignalType}, lang::{create_struct, term::SignalTerm, BuiltinTerm, NativeFunction, ValueTerm}};
+use reflex::{
+    core::{
+        ArgType, Arity, Expression, ExpressionFactory, ExpressionList, FunctionArity,
+        HeapAllocator, NativeAllocator, SignalType,
+    },
+    lang::{create_struct, term::SignalTerm, BuiltinTerm, NativeFunction, ValueTerm},
+};
 
 mod loader;
 pub use loader::graphql_loader;

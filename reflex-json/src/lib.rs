@@ -113,7 +113,9 @@ mod tests {
         let factory = TermFactory::default();
         assert_eq!(
             stringify(&factory.create_value_term(ValueTerm::Symbol(3))),
-            Err(String::from("JSON serialization failed: Unable to serialize term: <symbol:3>")),
+            Err(String::from(
+                "JSON serialization failed: Unable to serialize term: <symbol:3>"
+            )),
         );
         assert_eq!(
             stringify(&factory.create_value_term(ValueTerm::Null)),

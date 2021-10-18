@@ -6,8 +6,8 @@ use anyhow::{anyhow, Result};
 use clap::Parser;
 use reflex::compiler::{CompilerMode, CompilerOptions};
 
-use reflex_compiler::js::compile_js_source;
-// use reflex_server::cli::{compile_root, create_graph_root};
+use reflex_cli::compiler::js::compile_js_source;
+use reflex_cli::Syntax;
 use std::str::FromStr;
 
 #[derive(Parser)]
@@ -18,24 +18,33 @@ struct Opts {
     syntax: Syntax,
     #[clap(
         long,
+        about = "Serialization format of the output file",
+        default_value = "RMP"
+    )]
+    output_format: OutputFormat,
+    #[clap(
+        long,
         about = "Mode to run the compiler in",
         default_value = "expression"
     )]
     compiler_mode: String,
 }
 
-enum Syntax {
-    JavaScript,
+enum OutputFormat {
+    Json,
+    Rmp,
 }
 
-impl FromStr for Syntax {
+impl FromStr for OutputFormat {
     type Err = anyhow::Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if s.to_lowercase() == "javascript" || s == "js" {
-            return Ok(Self::JavaScript);
+        if s.to_lowercase() == "json" {
+            Ok(Self::Json)
+        } else if s.to_ascii_lowercase() == "rmp" {
+            Ok(Self::Rmp)
         } else {
-            return Err(anyhow!("Unknown syntax {}", s));
+            Err(anyhow!("Unknown syntax {}", s))
         }
     }
 }
@@ -57,11 +66,20 @@ fn main() -> Result<()> {
 
     let compiler_output = match args.syntax {
         Syntax::JavaScript => compile_js_source(path, compiler_options, compiler_mode)?,
+        _ => {
+            return Err(anyhow!(
+                "Syntax {:?} is not currently supported for bytecode compilation",
+                args.syntax
+            ))
+        }
     };
 
     let stdout = std::io::stdout();
-    let stdout_handle = stdout.lock();
-    serde_json::to_writer(stdout_handle, &compiler_output)?;
+    let mut stdout_handle = stdout.lock();
+    match args.output_format {
+        OutputFormat::Json => serde_json::to_writer(stdout_handle, &compiler_output)?,
+        OutputFormat::Rmp => rmp_serde::encode::write(&mut stdout_handle, &compiler_output)?,
+    }
 
     Ok(())
 }

@@ -2,7 +2,6 @@
 members = [
   "reflex",
   "reflex-cli",
-  "reflex-compiler",
   "reflex-graphql",
   "reflex-js",
   "reflex-json",

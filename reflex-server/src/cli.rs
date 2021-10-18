@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
-use std::{convert::Infallible, env, fs, net::SocketAddr, path::Path, str::FromStr, sync::Arc};
+use std::{convert::Infallible, env, fs, net::SocketAddr, path::Path, sync::Arc};
 
 use crate::graphql_service;
 use anyhow::{anyhow, Context, Result};
@@ -14,7 +14,7 @@ use reflex::{
     interpreter::InterpreterOptions,
     lang::NativeFunction,
 };
-use reflex_compiler::js::compile_js_source_with_customisation;
+use reflex_cli::{compiler::js::compile_js_source_with_customisation, Syntax};
 use reflex_handlers::debug_signal_handler;
 use reflex_runtime::{
     AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator, Runtime, RuntimeCache,
@@ -48,25 +48,6 @@ struct Opts {
     debug_interpreter: bool,
     #[clap(long, about = "Add debug printing of stack during execution")]
     debug_stack: bool,
-}
-
-enum Syntax {
-    JavaScript,
-    ByteCode,
-}
-
-impl FromStr for Syntax {
-    type Err = anyhow::Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if s.to_lowercase() == "javascript" || s == "js" {
-            return Ok(Self::JavaScript);
-        } else if s == "bytecode" {
-            return Ok(Self::ByteCode);
-        } else {
-            return Err(anyhow!("Unknown syntax {}", s));
-        }
-    }
 }
 
 pub async fn cli<
@@ -113,6 +94,7 @@ where
             CompilerMode::Thunk,
             env::vars(),
         )?,
+        _ => return Err(anyhow!("This syntax is not currently supported")),
     };
 
     let interpreter_options = interpreter_options.unwrap_or_else(|| InterpreterOptions {
@@ -170,7 +152,7 @@ fn deserialize_compiler_output(
 ) -> Result<Program> {
     let bytecode_file = fs::File::open(&bytecode_file)
         .with_context(|| format!("Failed to open {}", bytecode_file))?;
-    serde_json::from_reader(bytecode_file).map_err(|err| anyhow!(err))
+    rmp_serde::decode::from_read(bytecode_file).map_err(|err| anyhow!(err))
 }
 
 async fn create_server<

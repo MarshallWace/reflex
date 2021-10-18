@@ -661,6 +661,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "num-traits"
+version = "0.2.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9a64b1ec5cda2586e284722486d802acf1f7dbdc623e2bfc57e65ca1cd099290"
+dependencies = [
+ "autocfg",
+]
+
+[[package]]
 name = "num_cpus"
 version = "1.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -941,25 +950,16 @@ dependencies = [
 name = "reflex-cli"
 version = "0.1.0"
 dependencies = [
- "reflex",
- "reflex-handlers",
- "reflex-js",
- "reflex-runtime",
- "tokio",
-]
-
-[[package]]
-name = "reflex-compiler"
-version = "0.1.0"
-dependencies = [
  "anyhow",
  "clap",
  "reflex",
  "reflex-graphql",
+ "reflex-handlers",
  "reflex-js",
- "reflex-json",
  "reflex-runtime",
+ "rmp-serde",
  "serde_json",
+ "tokio",
 ]
 
 [[package]]
@@ -1034,13 +1034,13 @@ dependencies = [
  "hyper-tungstenite",
  "proc-macro2",
  "reflex",
- "reflex-compiler",
+ "reflex-cli",
  "reflex-graphql",
  "reflex-handlers",
  "reflex-js",
  "reflex-json",
  "reflex-runtime",
- "serde_json",
+ "rmp-serde",
  "tokio",
 ]
 
@@ -1091,6 +1091,27 @@ dependencies = [
  "res-regex",
  "resast",
  "ress",
+]
+
+[[package]]
+name = "rmp"
+version = "0.8.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4f55e5fa1446c4d5dd1f5daeed2a4fe193071771a2636274d0d7a3b082aa7ad6"
+dependencies = [
+ "byteorder",
+ "num-traits",
+]
+
+[[package]]
+name = "rmp-serde"
+version = "0.15.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "723ecff9ad04f4ad92fe1c8ca6c20d2196d9286e9c60727c4cb5511629260e9d"
+dependencies = [
+ "byteorder",
+ "rmp",
+ "serde",
 ]
 
 [[package]]

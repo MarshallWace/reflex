@@ -259,7 +259,9 @@ impl HeterogeneousArity {
     fn partial(&self, offset: usize) -> Self {
         Self {
             required: &self.required[offset.min(self.required.len())..],
-            optional: &self.optional[offset.saturating_sub(self.required.len()).min(self.optional.len())..],
+            optional: &self.optional[offset
+                .saturating_sub(self.required.len())
+                .min(self.optional.len())..],
             variadic: self.variadic,
         }
     }
@@ -1606,7 +1608,11 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                create_error_signal_term("<function:1>: Expected 1 argument, received 0", &factory, &allocator),
+                create_error_signal_term(
+                    "<function:1>: Expected 1 argument, received 0",
+                    &factory,
+                    &allocator
+                ),
                 DependencyList::empty(),
             ),
         );
@@ -1620,7 +1626,11 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                create_error_signal_term("<function:3>: Expected 3 arguments, received 1", &factory, &allocator),
+                create_error_signal_term(
+                    "<function:3>: Expected 3 arguments, received 1",
+                    &factory,
+                    &allocator
+                ),
                 DependencyList::empty(),
             ),
         );
@@ -1634,7 +1644,11 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                create_error_signal_term("<function:3>: Expected 3 arguments, received 2", &factory, &allocator),
+                create_error_signal_term(
+                    "<function:3>: Expected 3 arguments, received 2",
+                    &factory,
+                    &allocator
+                ),
                 DependencyList::empty(),
             ),
         );
