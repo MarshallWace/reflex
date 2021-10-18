@@ -5,16 +5,23 @@ use std::iter::once;
 
 use crate::{
     core::{
-        match_typed_expression_list, Applicable, Arity, EvaluationCache, Expression,
-        ExpressionFactory, HeapAllocator, VarArgs,
+        match_typed_expression_list, Applicable, ArgType, Arity, EvaluationCache, Expression,
+        ExpressionFactory, FunctionArity, HeapAllocator,
     },
     lang::deduplicate_hashset_entries,
 };
 
 pub struct Append {}
+impl Append {
+    const ARITY: FunctionArity<1, 0> = FunctionArity {
+        required: [ArgType::Strict],
+        optional: [],
+        variadic: Some(ArgType::Strict),
+    };
+}
 impl<T: Expression> Applicable<T> for Append {
     fn arity(&self) -> Option<Arity> {
-        Some(Arity::from(1, 0, Some(VarArgs::Eager)))
+        Some(Arity::from(&Self::ARITY))
     }
     fn apply(
         &self,
@@ -24,12 +31,6 @@ impl<T: Expression> Applicable<T> for Append {
         _cache: &mut impl EvaluationCache<T>,
     ) -> Result<T, String> {
         let mut args = args.into_iter();
-        if args.len() < 1 {
-            return Err(format!(
-                "Expected 1 or more arguments, received {}",
-                args.len()
-            ));
-        }
         let target = args.next().unwrap();
         if let Some(collection) = factory.match_vector_term(&target) {
             let args = args.collect::<Vec<_>>();

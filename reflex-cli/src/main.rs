@@ -4,7 +4,7 @@
 use std::{
     env, fs,
     io::{self, Write},
-    iter::empty,
+    iter::once,
     path::PathBuf,
     process,
     str::FromStr,
@@ -17,7 +17,10 @@ use reflex::{
     compiler::{hash_program_root, Compiler, CompilerMode, CompilerOptions, InstructionPointer},
     core::{Expression, ExpressionFactory, HeapAllocator, Reducible, Rewritable, StateCache},
     interpreter::{execute, DefaultInterpreterCache, InterpreterOptions},
-    lang::{term::SignalTerm, TermFactory, ValueTerm},
+    lang::{
+        term::{NativeFunctionId, SignalTerm},
+        TermFactory, ValueTerm,
+    },
 };
 use reflex_cli::parse_cli_args;
 use reflex_handlers::{builtin_signal_handler, debug_signal_handler};
@@ -82,20 +85,20 @@ pub async fn main() {
                             ..CompilerOptions::default()
                         };
                         match parser(&source).and_then(|expression| {
-                            Compiler::new(compiler_options, None).compile(
-                                &expression,
-                                CompilerMode::Expression,
-                                true,
-                                empty(),
-                                &factory,
-                                &allocator,
-                            )
+                            let plugins = find_expression_plugins(&expression, &factory);
+                            Compiler::new(compiler_options, None)
+                                .compile(
+                                    &expression,
+                                    CompilerMode::Expression,
+                                    &factory,
+                                    &allocator,
+                                )
+                                .map(|program| (program, plugins))
                         }) {
                             Err(error) => Err(error),
-                            Ok(compiled) => {
+                            Ok((program, plugins)) => {
                                 let mut stdout = io::stdout();
                                 let state = StateCache::default();
-                                let (program, builtins, plugins) = compiled.into_parts();
                                 let interpreter_options = InterpreterOptions {
                                     debug_instructions: debug_interpreter || debug_stack,
                                     debug_stack: debug_stack,
@@ -111,7 +114,6 @@ pub async fn main() {
                                     &state,
                                     &factory,
                                     &allocator,
-                                    &builtins,
                                     &plugins,
                                     &interpreter_options,
                                     &mut interpreter_cache,
@@ -130,7 +132,6 @@ pub async fn main() {
                                             let runtime = if debug_signals {
                                                 Runtime::new(
                                                     state,
-                                                    builtins,
                                                     plugins,
                                                     debug_signal_handler(signal_handler),
                                                     cache,
@@ -142,7 +143,6 @@ pub async fn main() {
                                             } else {
                                                 Runtime::new(
                                                     state,
-                                                    builtins,
                                                     plugins,
                                                     signal_handler,
                                                     cache,
@@ -217,6 +217,21 @@ pub async fn main() {
             1
         }
     })
+}
+
+fn find_expression_plugins<T: Expression + Rewritable<T>>(
+    expression: &T,
+    factory: &impl ExpressionFactory<T>,
+) -> Vec<(NativeFunctionId, T)> {
+    if let Some(term) = factory.match_native_function_term(expression) {
+        once((term.uid(), expression.clone())).collect::<Vec<_>>()
+    } else {
+        expression
+            .subexpressions()
+            .into_iter()
+            .flat_map(|expression| find_expression_plugins(expression, factory))
+            .collect::<Vec<_>>()
+    }
 }
 
 fn create_js_script_parser<T: Expression + 'static>(

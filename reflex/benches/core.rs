@@ -4,7 +4,7 @@
 #![feature(test)]
 extern crate test;
 
-use std::iter::{empty, once};
+use std::iter::once;
 
 use test::Bencher;
 
@@ -13,7 +13,7 @@ use reflex::{
     cache::SubstitutionCache,
     compiler::{
         hash_program_root, Compiler, CompilerMode, CompilerOptions, Instruction,
-        InstructionPointer, NativeFunctionRegistry, Program,
+        InstructionPointer, Program,
     },
     core::{evaluate, ExpressionFactory, HeapAllocator, StateCache},
     interpreter::{execute, DefaultInterpreterCache, InterpreterOptions},
@@ -59,8 +59,7 @@ fn nested_expressions_bytecode(b: &mut Bencher) {
     ]);
     let mut cache = DefaultInterpreterCache::default();
     let state = StateCache::default();
-    let builtins = Vec::new();
-    let plugins = NativeFunctionRegistry::default();
+    let plugins = Vec::new();
     let entry_point = InstructionPointer::default();
     let allocator = DefaultAllocator::default();
     let options = InterpreterOptions::default();
@@ -73,7 +72,6 @@ fn nested_expressions_bytecode(b: &mut Bencher) {
             &state,
             &factory,
             &allocator,
-            &builtins,
             &plugins,
             &options,
             &mut cache,
@@ -86,17 +84,9 @@ fn nested_expressions_compiled(b: &mut Bencher) {
     let factory = TermFactory::default();
     let allocator = DefaultAllocator::default();
     let expression = parse("(+ (+ (abs -3) 4) 5)", &factory, &allocator).unwrap();
-    let (program, builtins, plugins) = Compiler::new(CompilerOptions::unoptimized(), None)
-        .compile(
-            &expression,
-            CompilerMode::Expression,
-            false,
-            empty(),
-            &factory,
-            &allocator,
-        )
-        .unwrap()
-        .into_parts();
+    let program = Compiler::new(CompilerOptions::unoptimized(), None)
+        .compile(&expression, CompilerMode::Expression, &factory, &allocator)
+        .unwrap();
     let entry_point = InstructionPointer::default();
     let state = StateCache::default();
     let options = InterpreterOptions::default();
@@ -110,8 +100,7 @@ fn nested_expressions_compiled(b: &mut Bencher) {
             &state,
             &factory,
             &allocator,
-            &builtins,
-            &plugins,
+            Vec::new(),
             &options,
             &mut cache,
         )

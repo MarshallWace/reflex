@@ -3,16 +3,23 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use crate::{
     core::{
-        Applicable, Arity, EvaluationCache, Expression, ExpressionFactory, HeapAllocator,
-        StringValue, StructFieldOffset,
+        Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory, FunctionArity,
+        HeapAllocator, StringValue, StructFieldOffset,
     },
     lang::{as_integer, ValueTerm},
 };
 
 pub struct Get {}
+impl Get {
+    const ARITY: FunctionArity<2, 0> = FunctionArity {
+        required: [ArgType::Strict, ArgType::Strict],
+        optional: [],
+        variadic: None,
+    };
+}
 impl<T: Expression> Applicable<T> for Get {
     fn arity(&self) -> Option<Arity> {
-        Some(Arity::from(2, 0, None))
+        Some(Arity::from(&Self::ARITY))
     }
     fn apply(
         &self,
@@ -22,9 +29,6 @@ impl<T: Expression> Applicable<T> for Get {
         _cache: &mut impl EvaluationCache<T>,
     ) -> Result<T, String> {
         let mut args = args.into_iter();
-        if args.len() != 2 {
-            return Err(format!("Expected 2 arguments, received {}", args.len()));
-        }
         let target = args.next().unwrap();
         let key = args.next().unwrap();
         if let Some(target) = factory.match_tuple_term(&target) {

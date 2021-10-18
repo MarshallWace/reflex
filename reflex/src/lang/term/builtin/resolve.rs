@@ -5,15 +5,23 @@ use std::iter::once;
 
 use crate::{
     core::{
-        Applicable, Arity, EvaluationCache, Expression, ExpressionFactory, GraphNode, HeapAllocator,
+        Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory, FunctionArity,
+        GraphNode, HeapAllocator,
     },
     lang::BuiltinTerm,
 };
 
 pub struct ResolveTuple {}
+impl ResolveTuple {
+    const ARITY: FunctionArity<1, 0> = FunctionArity {
+        required: [ArgType::Strict],
+        optional: [],
+        variadic: None,
+    };
+}
 impl<T: Expression> Applicable<T> for ResolveTuple {
     fn arity(&self) -> Option<Arity> {
-        Some(Arity::from(1, 0, None))
+        Some(Arity::from(&Self::ARITY))
     }
     fn apply(
         &self,
@@ -23,9 +31,6 @@ impl<T: Expression> Applicable<T> for ResolveTuple {
         _cache: &mut impl EvaluationCache<T>,
     ) -> Result<T, String> {
         let mut args = args.into_iter();
-        if args.len() != 1 {
-            return Err(format!("Expected 1 argument, received {}", args.len()));
-        }
         let target = args.next().unwrap();
         if let Some(value) = factory.match_tuple_term(&target) {
             if value.is_static() {
@@ -43,9 +48,16 @@ impl<T: Expression> Applicable<T> for ResolveTuple {
 }
 
 pub struct ResolveStruct {}
+impl ResolveStruct {
+    const ARITY: FunctionArity<1, 0> = FunctionArity {
+        required: [ArgType::Strict],
+        optional: [],
+        variadic: None,
+    };
+}
 impl<T: Expression> Applicable<T> for ResolveStruct {
     fn arity(&self) -> Option<Arity> {
-        Some(Arity::from(1, 0, None))
+        Some(Arity::from(&Self::ARITY))
     }
     fn apply(
         &self,
@@ -55,9 +67,6 @@ impl<T: Expression> Applicable<T> for ResolveStruct {
         _cache: &mut impl EvaluationCache<T>,
     ) -> Result<T, String> {
         let mut args = args.into_iter();
-        if args.len() != 1 {
-            return Err(format!("Expected 1 argument, received {}", args.len()));
-        }
         let target = args.next().unwrap();
         if let Some(value) = factory.match_struct_term(&target) {
             if value.is_static() {
@@ -81,9 +90,16 @@ impl<T: Expression> Applicable<T> for ResolveStruct {
 }
 
 pub struct ResolveVector {}
+impl ResolveVector {
+    const ARITY: FunctionArity<1, 0> = FunctionArity {
+        required: [ArgType::Strict],
+        optional: [],
+        variadic: None,
+    };
+}
 impl<T: Expression> Applicable<T> for ResolveVector {
     fn arity(&self) -> Option<Arity> {
-        Some(Arity::from(1, 0, None))
+        Some(Arity::from(&Self::ARITY))
     }
     fn apply(
         &self,
@@ -93,9 +109,6 @@ impl<T: Expression> Applicable<T> for ResolveVector {
         _cache: &mut impl EvaluationCache<T>,
     ) -> Result<T, String> {
         let mut args = args.into_iter();
-        if args.len() != 1 {
-            return Err(format!("Expected 1 argument, received {}", args.len()));
-        }
         let target = args.next().unwrap();
         if let Some(value) = factory.match_vector_term(&target) {
             if value.is_static() {
@@ -113,9 +126,16 @@ impl<T: Expression> Applicable<T> for ResolveVector {
 }
 
 pub struct ResolveHashSet {}
+impl ResolveHashSet {
+    const ARITY: FunctionArity<1, 0> = FunctionArity {
+        required: [ArgType::Strict],
+        optional: [],
+        variadic: None,
+    };
+}
 impl<T: Expression> Applicable<T> for ResolveHashSet {
     fn arity(&self) -> Option<Arity> {
-        Some(Arity::from(1, 0, None))
+        Some(Arity::from(&Self::ARITY))
     }
     fn apply(
         &self,
@@ -125,9 +145,6 @@ impl<T: Expression> Applicable<T> for ResolveHashSet {
         _cache: &mut impl EvaluationCache<T>,
     ) -> Result<T, String> {
         let mut args = args.into_iter();
-        if args.len() != 1 {
-            return Err(format!("Expected 1 argument, received {}", args.len()));
-        }
         let target = args.next().unwrap();
         if let Some(value) = factory.match_hashset_term(&target) {
             if value.is_static() {
@@ -145,9 +162,16 @@ impl<T: Expression> Applicable<T> for ResolveHashSet {
 }
 
 pub struct ResolveHashMap {}
+impl ResolveHashMap {
+    const ARITY: FunctionArity<1, 0> = FunctionArity {
+        required: [ArgType::Strict],
+        optional: [],
+        variadic: None,
+    };
+}
 impl<T: Expression> Applicable<T> for ResolveHashMap {
     fn arity(&self) -> Option<Arity> {
-        Some(Arity::from(1, 0, None))
+        Some(Arity::from(&Self::ARITY))
     }
     fn apply(
         &self,
@@ -157,9 +181,6 @@ impl<T: Expression> Applicable<T> for ResolveHashMap {
         _cache: &mut impl EvaluationCache<T>,
     ) -> Result<T, String> {
         let mut args = args.into_iter();
-        if args.len() != 1 {
-            return Err(format!("Expected 1 argument, received {}", args.len()));
-        }
         let target = args.next().unwrap();
         if let Some(value) = factory.match_hashmap_term(&target) {
             if value.keys().is_static() {

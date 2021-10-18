@@ -6,8 +6,8 @@ use std::str::FromStr;
 
 use reflex::{
     core::{
-        Arity, Expression, ExpressionFactory, ExpressionList, HeapAllocator, NativeAllocator,
-        StructPrototype,
+        ArgType, Arity, Expression, ExpressionFactory, ExpressionList, FunctionArity,
+        HeapAllocator, NativeAllocator, StructPrototype,
     },
     lang::{create_struct, BuiltinTerm, NativeFunction, ValueTerm},
 };
@@ -175,14 +175,21 @@ pub fn to_request<T: Expression>() -> NativeFunction<T> {
 }
 struct ToRequest {}
 impl ToRequest {
+    const NAME: &'static str = "ToRequest";
+    const UUID: &'static str = "29d89369-0b7b-41df-aa14-47ea708a8fa6";
+    const ARITY: FunctionArity<1, 0> = FunctionArity {
+        required: [ArgType::Strict],
+        optional: [],
+        variadic: None,
+    };
     fn uid() -> Uuid {
-        Uuid::from_str("29d89369-0b7b-41df-aa14-47ea708a8fa6").expect("Hardcoded Uuid value")
+        Uuid::from_str(Self::UUID).unwrap()
     }
     fn name() -> Option<&'static str> {
-        Some("ToRequest")
+        Some(Self::NAME)
     }
     fn arity() -> Arity {
-        Arity::from(1, 0, None)
+        Arity::from(&Self::ARITY)
     }
     fn apply<T: Expression>(
         args: ExpressionList<T>,

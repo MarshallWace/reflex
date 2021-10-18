@@ -4,8 +4,6 @@
 #![feature(test)]
 extern crate test;
 
-use std::iter::empty;
-
 use reflex::{
     allocator::DefaultAllocator,
     cache::SubstitutionCache,
@@ -44,7 +42,7 @@ fn js_compiled(b: &mut Bencher) {
         const greet = (user) => `Hello, ${fullName(user.first, user.last)}!`;
         greet({ first: 'John', last: 'Doe' })";
     let expression = parse(input, &env, &factory, &allocator).unwrap();
-    let compiled = Compiler::new(
+    let program = Compiler::new(
         CompilerOptions {
             debug: false,
             hoist_free_variables: true,
@@ -52,22 +50,15 @@ fn js_compiled(b: &mut Bencher) {
         },
         None,
     )
-    .compile(
-        &expression,
-        CompilerMode::Expression,
-        true,
-        empty(),
-        &factory,
-        &allocator,
-    )
+    .compile(&expression, CompilerMode::Expression, &factory, &allocator)
     .unwrap();
     let state = StateCache::default();
     let options = InterpreterOptions::default();
-    let (program, builtins, plugins) = compiled.into_parts();
     b.iter(|| {
         let mut cache = DefaultInterpreterCache::default();
         let entry_point = InstructionPointer::default();
         let cache_key = hash_program_root(&program, &entry_point);
+        let plugins = Vec::new();
         execute(
             cache_key,
             &program,
@@ -75,7 +66,6 @@ fn js_compiled(b: &mut Bencher) {
             &state,
             &factory,
             &allocator,
-            &builtins,
             &plugins,
             &options,
             &mut cache,

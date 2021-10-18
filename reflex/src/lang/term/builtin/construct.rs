@@ -3,16 +3,23 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use crate::{
     core::{
-        match_typed_expression_list, Applicable, Arity, EvaluationCache, Expression,
-        ExpressionFactory, HeapAllocator, StringValue, VarArgs,
+        match_typed_expression_list, Applicable, ArgType, Arity, EvaluationCache, Expression,
+        ExpressionFactory, FunctionArity, HeapAllocator, StringValue,
     },
     lang::{deduplicate_hashmap_entries, deduplicate_hashset_entries},
 };
 
 pub struct ConstructTuple {}
+impl ConstructTuple {
+    const ARITY: FunctionArity<0, 0> = FunctionArity {
+        required: [],
+        optional: [],
+        variadic: Some(ArgType::Lazy),
+    };
+}
 impl<T: Expression> Applicable<T> for ConstructTuple {
     fn arity(&self) -> Option<Arity> {
-        Some(Arity::from(0, 0, Some(VarArgs::Lazy)))
+        Some(Arity::from(&Self::ARITY))
     }
     fn apply(
         &self,
@@ -26,9 +33,16 @@ impl<T: Expression> Applicable<T> for ConstructTuple {
 }
 
 pub struct ConstructStruct {}
+impl ConstructStruct {
+    const ARITY: FunctionArity<2, 0> = FunctionArity {
+        required: [ArgType::Strict, ArgType::Strict],
+        optional: [],
+        variadic: None,
+    };
+}
 impl<T: Expression> Applicable<T> for ConstructStruct {
     fn arity(&self) -> Option<Arity> {
-        Some(Arity::from(2, 0, None))
+        Some(Arity::from(&Self::ARITY))
     }
     fn apply(
         &self,
@@ -83,9 +97,16 @@ impl<T: Expression> Applicable<T> for ConstructStruct {
 }
 
 pub struct ConstructHashMap {}
+impl ConstructHashMap {
+    const ARITY: FunctionArity<2, 0> = FunctionArity {
+        required: [ArgType::Strict, ArgType::Strict],
+        optional: [],
+        variadic: None,
+    };
+}
 impl<T: Expression> Applicable<T> for ConstructHashMap {
     fn arity(&self) -> Option<Arity> {
-        Some(Arity::from(2, 0, None))
+        Some(Arity::from(&Self::ARITY))
     }
     fn apply(
         &self,
@@ -140,9 +161,16 @@ impl<T: Expression> Applicable<T> for ConstructHashMap {
 }
 
 pub struct ConstructHashSet {}
+impl ConstructHashSet {
+    const ARITY: FunctionArity<0, 0> = FunctionArity {
+        required: [],
+        optional: [],
+        variadic: Some(ArgType::Lazy),
+    };
+}
 impl<T: Expression> Applicable<T> for ConstructHashSet {
     fn arity(&self) -> Option<Arity> {
-        Some(Arity::from(0, 0, Some(VarArgs::Lazy)))
+        Some(Arity::from(&Self::ARITY))
     }
     fn apply(
         &self,
@@ -161,9 +189,16 @@ impl<T: Expression> Applicable<T> for ConstructHashSet {
 }
 
 pub struct ConstructVector {}
+impl ConstructVector {
+    const ARITY: FunctionArity<0, 0> = FunctionArity {
+        required: [],
+        optional: [],
+        variadic: Some(ArgType::Lazy),
+    };
+}
 impl<T: Expression> Applicable<T> for ConstructVector {
     fn arity(&self) -> Option<Arity> {
-        Some(Arity::from(0, 0, Some(VarArgs::Lazy)))
+        Some(Arity::from(&Self::ARITY))
     }
     fn apply(
         &self,

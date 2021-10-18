@@ -4,13 +4,21 @@
 use std::iter::once;
 
 use crate::core::{
-    Applicable, Arity, EvaluationCache, Expression, ExpressionFactory, HeapAllocator,
+    Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory, FunctionArity,
+    HeapAllocator,
 };
 
 pub struct PushFront {}
+impl PushFront {
+    const ARITY: FunctionArity<2, 0> = FunctionArity {
+        required: [ArgType::Strict, ArgType::Lazy],
+        optional: [],
+        variadic: None,
+    };
+}
 impl<T: Expression> Applicable<T> for PushFront {
     fn arity(&self) -> Option<Arity> {
-        Some(Arity::from(1, 1, None))
+        Some(Arity::from(&Self::ARITY))
     }
     fn apply(
         &self,
@@ -20,9 +28,6 @@ impl<T: Expression> Applicable<T> for PushFront {
         _cache: &mut impl EvaluationCache<T>,
     ) -> Result<T, String> {
         let mut args = args.into_iter();
-        if args.len() != 2 {
-            return Err(format!("Expected 2 arguments, received {}", args.len()));
-        }
         let target = args.next().unwrap();
         let value = args.next().unwrap();
         if let Some(collection) = factory.match_vector_term(&target) {

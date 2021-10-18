@@ -6,13 +6,7 @@ use std::{collections::HashMap, iter::once, str::FromStr};
 
 use either::Either;
 use graphql_parser::{parse_query, query::*};
-use reflex::{
-    core::{
-        Arity, Expression, ExpressionFactory, ExpressionList, HeapAllocator, NativeAllocator,
-        SignalType,
-    },
-    lang::{create_struct, term::SignalTerm, BuiltinTerm, NativeFunction, ValueTerm},
-};
+use reflex::{core::{ArgType, Arity, Expression, ExpressionFactory, ExpressionList, FunctionArity, HeapAllocator, NativeAllocator, SignalType}, lang::{create_struct, term::SignalTerm, BuiltinTerm, NativeFunction, ValueTerm}};
 
 mod loader;
 pub use loader::graphql_loader;
@@ -560,14 +554,21 @@ fn flatten_deep<T: Expression>() -> NativeFunction<T> {
 }
 struct FlattenDeep {}
 impl FlattenDeep {
+    const NAME: &'static str = "FlattenDeep";
+    const UUID: &'static str = "52299fbb-a84b-488e-81ef-98c439869f74";
+    const ARITY: FunctionArity<1, 0> = FunctionArity {
+        required: [ArgType::Strict],
+        optional: [],
+        variadic: None,
+    };
     fn uid() -> Uuid {
-        Uuid::from_str("52299fbb-a84b-488e-81ef-98c439869f74").expect("Hardcoded uuid value")
+        Uuid::from_str(Self::UUID).unwrap()
     }
     fn name() -> Option<&'static str> {
-        Some("FlattenDeep")
+        Some(Self::NAME)
     }
     fn arity() -> Arity {
-        Arity::from(1, 0, None)
+        Arity::from(&Self::ARITY)
     }
     fn apply<T: Expression>(
         args: ExpressionList<T>,
@@ -612,14 +613,21 @@ fn dynamic_query_branch<T: Expression>() -> NativeFunction<T> {
 }
 struct DynamicQueryBranch {}
 impl DynamicQueryBranch {
+    const NAME: &'static str = "DynamicQueryBranch";
+    const UUID: &'static str = "58dd19b7-c9f0-473b-84c5-34af607c176b";
+    const ARITY: FunctionArity<2, 0> = FunctionArity {
+        required: [ArgType::Strict, ArgType::Strict],
+        optional: [],
+        variadic: None,
+    };
     fn uid() -> Uuid {
-        Uuid::from_str("58dd19b7-c9f0-473b-84c5-34af607c176b").expect("Hardcoded uuid value")
+        Uuid::from_str(Self::UUID).unwrap()
     }
     fn name() -> Option<&'static str> {
-        Some("DynamicQueryBranch")
+        Some(Self::NAME)
     }
     fn arity() -> Arity {
-        Arity::from(2, 0, None)
+        Arity::from(&Self::ARITY)
     }
     fn apply<T: Expression>(
         args: ExpressionList<T>,

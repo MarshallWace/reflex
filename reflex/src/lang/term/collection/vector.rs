@@ -5,9 +5,7 @@
 use std::{collections::HashSet, iter::once};
 
 use crate::{
-    compiler::{
-        compile_expressions, Compile, Compiler, Instruction, NativeFunctionRegistry, Program,
-    },
+    compiler::{compile_expressions, Compile, Compiler, Instruction, Program},
     core::{
         transform_expression_list, DependencyList, DynamicState, EvaluationCache, Expression,
         ExpressionFactory, ExpressionList, GraphNode, HeapAllocator, Iterable, Rewritable,
@@ -110,7 +108,7 @@ impl<T: Expression + Compile<T>> Compile<T> for VectorTerm<T> {
         factory: &impl ExpressionFactory<T>,
         allocator: &impl HeapAllocator<T>,
         compiler: &mut Compiler,
-    ) -> Result<(Program, NativeFunctionRegistry<T>), String> {
+    ) -> Result<Program, String> {
         compile_expressions(
             self.items.iter(),
             VarArgs::Lazy,
@@ -119,11 +117,11 @@ impl<T: Expression + Compile<T>> Compile<T> for VectorTerm<T> {
             allocator,
             compiler,
         )
-        .map(|(mut program, native_functions)| {
+        .map(|mut program| {
             program.push(Instruction::ConstructVector {
                 size: self.items.len(),
             });
-            (program, native_functions)
+            program
         })
     }
 }

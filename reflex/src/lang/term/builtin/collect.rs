@@ -5,16 +5,23 @@ use std::iter::once;
 
 use crate::{
     core::{
-        Applicable, Arity, EvaluationCache, Expression, ExpressionFactory, HeapAllocator,
-        SignalType, VarArgs,
+        Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory, FunctionArity,
+        GraphNode, HeapAllocator, SignalType,
     },
     lang::{deduplicate_hashmap_entries, deduplicate_hashset_entries, BuiltinTerm, ValueTerm},
 };
 
 pub struct Collect {}
+impl Collect {
+    const ARITY: FunctionArity<1, 0> = FunctionArity {
+        required: [ArgType::Strict],
+        optional: [],
+        variadic: None,
+    };
+}
 impl<T: Expression> Applicable<T> for Collect {
     fn arity(&self) -> Option<Arity> {
-        Some(Arity::from(1, 0, None))
+        Some(Arity::from(&Self::ARITY))
     }
     fn apply(
         &self,
@@ -24,28 +31,34 @@ impl<T: Expression> Applicable<T> for Collect {
         _cache: &mut impl EvaluationCache<T>,
     ) -> Result<T, String> {
         let mut args = args.into_iter();
-        if args.len() != 1 {
-            return Err(format!("Expected 1 argument, received {}", args.len()));
-        }
         let target = args.next().unwrap();
         if let Some(collection) = factory.match_vector_term(&target) {
-            let items = collection.items().iter().cloned();
-            Ok(
-                collect_dynamic_items(items, BuiltinTerm::CollectVector, factory, allocator)
-                    .unwrap_or_else(|| target.clone()),
-            )
-        } else if let Some(collection) = factory.match_hashmap_term(&target) {
-            let entries = collection.entries(factory, allocator);
-            Ok(
-                collect_dynamic_items(entries, BuiltinTerm::CollectHashMap, factory, allocator)
-                    .unwrap_or_else(|| target.clone()),
-            )
+            Ok(if collection.is_static() {
+                target.clone()
+            } else {
+                factory.create_application_term(
+                    factory.create_builtin_term(BuiltinTerm::CollectVector),
+                    allocator.clone_list(collection.items()),
+                )
+            })
         } else if let Some(collection) = factory.match_hashset_term(&target) {
-            let values = collection.values().iter().cloned();
-            Ok(
-                collect_dynamic_items(values, BuiltinTerm::CollectHashSet, factory, allocator)
-                    .unwrap_or_else(|| target.clone()),
-            )
+            Ok(if collection.is_static() {
+                target.clone()
+            } else {
+                factory.create_application_term(
+                    factory.create_builtin_term(BuiltinTerm::CollectHashSet),
+                    allocator.clone_list(collection.values()),
+                )
+            })
+        } else if let Some(collection) = factory.match_hashmap_term(&target) {
+            Ok(if collection.is_static() {
+                target.clone()
+            } else {
+                factory.create_application_term(
+                    factory.create_builtin_term(BuiltinTerm::CollectHashMap),
+                    allocator.create_list(collection.entries(factory, allocator)),
+                )
+            })
         } else {
             Err(format!(
                 "Expected Vector or HashSet or HashMap, received {}",
@@ -55,27 +68,15 @@ impl<T: Expression> Applicable<T> for Collect {
     }
 }
 
-fn collect_dynamic_items<T: Expression>(
-    items: impl IntoIterator<Item = T, IntoIter = impl ExactSizeIterator<Item = T>>,
-    combine: BuiltinTerm,
-    factory: &impl ExpressionFactory<T>,
-    allocator: &impl HeapAllocator<T>,
-) -> Option<T> {
-    let mut items = items.into_iter();
-    if items.by_ref().all(|item| item.is_static()) {
-        None
-    } else {
-        Some(factory.create_application_term(
-            factory.create_builtin_term(combine),
-            allocator.create_list(items),
-        ))
-    }
-}
-
+const COLLECT_TUPLE_ARITY: FunctionArity<0, 0> = FunctionArity {
+    required: [],
+    optional: [],
+    variadic: Some(ArgType::Strict),
+};
 pub struct CollectTuple {}
 impl<T: Expression> Applicable<T> for CollectTuple {
     fn arity(&self) -> Option<Arity> {
-        Some(Arity::from(0, 0, Some(VarArgs::Eager)))
+        Some(Arity::from(&COLLECT_TUPLE_ARITY))
     }
     fn apply(
         &self,
@@ -89,9 +90,16 @@ impl<T: Expression> Applicable<T> for CollectTuple {
 }
 
 pub struct CollectStruct {}
+impl CollectStruct {
+    const ARITY: FunctionArity<1, 0> = FunctionArity {
+        required: [ArgType::Strict],
+        optional: [],
+        variadic: Some(ArgType::Strict),
+    };
+}
 impl<T: Expression> Applicable<T> for CollectStruct {
     fn arity(&self) -> Option<Arity> {
-        Some(Arity::from(1, 0, Some(VarArgs::Eager)))
+        Some(Arity::from(&Self::ARITY))
     }
     fn apply(
         &self,
@@ -118,9 +126,16 @@ impl<T: Expression> Applicable<T> for CollectStruct {
 }
 
 pub struct CollectVector {}
+impl CollectVector {
+    const ARITY: FunctionArity<0, 0> = FunctionArity {
+        required: [],
+        optional: [],
+        variadic: Some(ArgType::Strict),
+    };
+}
 impl<T: Expression> Applicable<T> for CollectVector {
     fn arity(&self) -> Option<Arity> {
-        Some(Arity::from(0, 0, Some(VarArgs::Eager)))
+        Some(Arity::from(&Self::ARITY))
     }
     fn apply(
         &self,
@@ -134,9 +149,16 @@ impl<T: Expression> Applicable<T> for CollectVector {
 }
 
 pub struct CollectHashSet {}
+impl CollectHashSet {
+    const ARITY: FunctionArity<0, 0> = FunctionArity {
+        required: [],
+        optional: [],
+        variadic: Some(ArgType::Strict),
+    };
+}
 impl<T: Expression> Applicable<T> for CollectHashSet {
     fn arity(&self) -> Option<Arity> {
-        Some(Arity::from(0, 0, Some(VarArgs::Eager)))
+        Some(Arity::from(&Self::ARITY))
     }
     fn apply(
         &self,
@@ -155,9 +177,16 @@ impl<T: Expression> Applicable<T> for CollectHashSet {
 }
 
 pub struct CollectHashMap {}
+impl CollectHashMap {
+    const ARITY: FunctionArity<0, 0> = FunctionArity {
+        required: [],
+        optional: [],
+        variadic: Some(ArgType::Strict),
+    };
+}
 impl<T: Expression> Applicable<T> for CollectHashMap {
     fn arity(&self) -> Option<Arity> {
-        Some(Arity::from(0, 0, Some(VarArgs::Eager)))
+        Some(Arity::from(&Self::ARITY))
     }
     fn apply(
         &self,

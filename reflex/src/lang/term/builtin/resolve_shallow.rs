@@ -3,15 +3,23 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use crate::{
     core::{
-        Applicable, Arity, EvaluationCache, Expression, ExpressionFactory, GraphNode, HeapAllocator,
+        Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory, FunctionArity,
+        GraphNode, HeapAllocator,
     },
     lang::BuiltinTerm,
 };
 
 pub struct ResolveShallow {}
+impl ResolveShallow {
+    const ARITY: FunctionArity<1, 0> = FunctionArity {
+        required: [ArgType::Strict],
+        optional: [],
+        variadic: None,
+    };
+}
 impl<T: Expression> Applicable<T> for ResolveShallow {
     fn arity(&self) -> Option<Arity> {
-        Some(Arity::from(1, 0, None))
+        Some(Arity::from(&Self::ARITY))
     }
     fn apply(
         &self,
@@ -21,9 +29,6 @@ impl<T: Expression> Applicable<T> for ResolveShallow {
         _cache: &mut impl EvaluationCache<T>,
     ) -> Result<T, String> {
         let mut args = args.into_iter();
-        if args.len() != 1 {
-            return Err(format!("Expected 1 argument, received {}", args.len()));
-        }
         let target = args.next().unwrap();
         if let Some(value) = factory.match_tuple_term(&target) {
             if value.is_atomic() {

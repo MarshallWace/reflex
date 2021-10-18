@@ -8,11 +8,9 @@ use std::{
 };
 
 use crate::{
-    compiler::{
-        Compile, Compiler, Instruction, InstructionPointer, NativeFunctionRegistry, Program,
-    },
+    compiler::{Compile, Compiler, Instruction, InstructionPointer, Program},
     core::{
-        transform_expression_list, Applicable, Arity, DependencyList, DynamicState,
+        transform_expression_list, Applicable, ArgType, Arity, DependencyList, DynamicState,
         EvaluationCache, Expression, ExpressionFactory, ExpressionList, GraphNode, HeapAllocator,
         Reducible, Rewritable, SerializeJson, SignalType, StackOffset, Substitutions, VarArgs,
     },
@@ -57,11 +55,12 @@ impl<T: Expression + Applicable<T>> GraphNode for ApplicationTerm<T> {
     fn dynamic_dependencies(&self) -> DependencyList {
         let target_dependencies = self.target.dynamic_dependencies();
         let eager_args = self.target.arity().map(|arity| {
-            with_eagerness(self.args.iter(), &arity)
-                .into_iter()
-                .filter_map(|(arg, eager)| match eager {
-                    VarArgs::Eager => Some(arg),
-                    VarArgs::Lazy => None,
+            self.args
+                .iter()
+                .zip(arity.iter())
+                .filter_map(|(arg, arg_type)| match arg_type {
+                    ArgType::Strict | ArgType::Eager => Some(arg),
+                    ArgType::Lazy => None,
                 })
         });
         match eager_args {
@@ -128,16 +127,18 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T>> Rewritable<T>
             .any(|arg| !arg.dynamic_dependencies().is_empty());
         let args = if has_dynamic_args {
             self.target.arity().map(|arity| {
-                allocator.create_list(with_eagerness(self.args.iter(), &arity).into_iter().map(
-                    |(arg, eager)| {
-                        match eager {
-                            VarArgs::Eager => arg
+                allocator.create_sized_list(
+                    self.args.len(),
+                    self.args
+                        .iter()
+                        .zip(arity.iter())
+                        .map(|(arg, arg_type)| match arg_type {
+                            ArgType::Strict | ArgType::Eager => arg
                                 .substitute_dynamic(state, factory, allocator, cache)
                                 .unwrap_or(arg.clone()),
-                            VarArgs::Lazy => arg.clone(),
-                        }
-                    },
-                ))
+                            ArgType::Lazy => arg.clone(),
+                        }),
+                )
             })
         } else {
             None
@@ -226,16 +227,21 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T>> Reducible<T>
         match target.arity() {
             None => None,
             Some(arity) => {
-                if self.args.len() < arity.required() {
+                if self.args.len() < arity.required().len() {
                     return Some(create_error_signal_term(
                         factory.create_value_term(ValueTerm::String(allocator.create_string(
                             format!(
-                                "Expected {}, received {}",
-                                match arity.required() {
-                                    1 => String::from("1 argument"),
-                                    arity => format!("{} arguments", arity),
+                                "{}: Expected {} {}, received {}",
+                                target,
+                                arity.required().len(),
+                                if arity.optional().len() > 0 || arity.variadic().is_some() {
+                                    "or more arguments"
+                                } else if arity.required().len() != 1 {
+                                    "arguments"
+                                } else {
+                                    "argument"
                                 },
-                                self.args.len()
+                                self.args.len(),
                             ),
                         ))),
                         factory,
@@ -250,29 +256,23 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T>> Reducible<T>
                     cache,
                 ) {
                     Err(args) => Err(args),
-                    Ok((args, signal)) => {
-                        if is_compiled_application_target(target, factory) {
-                            Err(args)
+                    Ok((resolved_args, short_circuit_signal)) => {
+                        if let Some(signal) = short_circuit_signal {
+                            Ok(signal)
+                        } else if is_compiled_application_target(target, factory) {
+                            Err(resolved_args)
                         } else {
-                            match signal {
-                                None => target.apply(args.into_iter(), factory, allocator, cache),
-                                Some(signal) => match factory.match_signal_transformer_term(target)
-                                {
-                                    Some(transformer) => {
-                                        transformer.apply(once(signal), factory, allocator, cache)
-                                    }
-                                    _ => Ok(signal),
-                                },
-                            }
-                            .or_else(|error| {
-                                Ok(create_error_signal_term(
-                                    factory.create_value_term(ValueTerm::String(
-                                        allocator.create_string(error),
-                                    )),
-                                    factory,
-                                    allocator,
-                                ))
-                            })
+                            target
+                                .apply(resolved_args, factory, allocator, cache)
+                                .or_else(|error| {
+                                    Ok(create_error_signal_term(
+                                        factory.create_value_term(ValueTerm::String(
+                                            allocator.create_string(error),
+                                        )),
+                                        factory,
+                                        allocator,
+                                    ))
+                                })
                         }
                     }
                 };
@@ -310,68 +310,55 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>> 
         factory: &impl ExpressionFactory<T>,
         allocator: &impl HeapAllocator<T>,
         compiler: &mut Compiler,
-    ) -> Result<(Program, NativeFunctionRegistry<T>), String> {
+    ) -> Result<Program, String> {
         let target = &self.target;
         let args = &self.args;
         let num_args = args.len();
-        let eager_arity = match eager {
-            VarArgs::Lazy => None,
+        let arity = match eager {
             VarArgs::Eager => target.arity(),
-        };
-        let (compiled_target, target_native_functions) =
+            VarArgs::Lazy => None,
+        }
+        .unwrap_or_else(|| Arity::lazy(num_args, 0, false));
+        let compiled_target =
             target.compile(eager, stack_offset + num_args, factory, allocator, compiler)?;
-        let (compiled_args, arg_native_functions) = match eager_arity {
-            None => compile_args(
-                args.iter().map(|arg| (arg, VarArgs::Lazy)),
-                stack_offset,
-                factory,
-                allocator,
-                compiler,
-            ),
-            Some(arity) => compile_args(
-                with_eagerness(args.iter(), &arity),
-                stack_offset,
-                factory,
-                allocator,
-                compiler,
-            ),
-        }?;
-        let mut combined_native_functions = target_native_functions;
-        combined_native_functions.extend(arg_native_functions);
-        match eager_arity {
-            None => {
+        let compiled_args = compile_args(
+            args.iter().map(|arg| (arg, ArgType::Lazy)),
+            stack_offset,
+            factory,
+            allocator,
+            compiler,
+        )?;
+        match eager {
+            VarArgs::Lazy => {
                 let mut result = compiled_args;
                 result.extend(compiled_target);
                 result.push(Instruction::ConstructApplication { num_args });
-                Ok((result, combined_native_functions))
+                Ok(result)
             }
-            Some(arity) => {
-                if num_args < arity.required() {
+            VarArgs::Eager => {
+                if num_args < arity.required().len() {
                     Err(format!(
-                        "{}: expected {}{} arguments, received {}",
+                        "{}: expected {} {}, received {}",
                         target,
-                        arity.required(),
-                        if arity.variadic().is_some() {
-                            " or more"
+                        arity.required().len(),
+                        if arity.optional().len() > 0 || arity.variadic().is_some() {
+                            "or more arguments"
+                        } else if arity.required().len() != 1 {
+                            "arguments"
                         } else {
-                            ""
+                            "argument"
                         },
                         num_args,
                     ))
                 } else {
-                    let mut compiled_args = compiled_args;
-                    if arity.variadic().is_some() {
-                        compiled_args.push(Instruction::ConstructTuple {
-                            size: num_args - arity.required(),
-                        });
-                    }
                     if let Some(target_address) = match_compiled_function_result(&compiled_target) {
                         let mut result = compiled_args;
                         // TODO: jump to target if in tail position
                         result.push(Instruction::Call {
                             target: target_address,
+                            num_args,
                         });
-                        Ok((result, combined_native_functions))
+                        Ok(result)
                     } else {
                         let mut result = compiled_args;
                         result.extend(compiled_target);
@@ -379,7 +366,7 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>> 
                             result.push(Instruction::Evaluate);
                         }
                         result.push(Instruction::Apply { num_args });
-                        Ok((result, combined_native_functions))
+                        Ok(result)
                     }
                 }
             }
@@ -408,37 +395,46 @@ impl<T: Expression> SerializeJson for ApplicationTerm<T> {
 }
 
 fn reduce_function_args<'a, T: Expression + Rewritable<T> + Reducible<T> + 'a>(
-    args: impl IntoIterator<
-        Item = &'a T,
-        IntoIter = (impl ExactSizeIterator<Item = &'a T> + DoubleEndedIterator<Item = &'a T>),
-    >,
+    args: impl IntoIterator<Item = &'a T>,
     arity: Arity,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
     cache: &mut impl EvaluationCache<T>,
 ) -> Result<(Vec<T>, Option<T>), Vec<T>> {
-    let args = args.into_iter();
-    let args = with_eagerness(args, &arity)
+    let mut has_unresolved_args = false;
+    let mut num_short_circuit_signals = ShortCircuitCount::None;
+    let resolved_args = args
         .into_iter()
-        .map(|(arg, eager)| match eager {
-            VarArgs::Eager => {
-                Reducible::reduce(arg, factory, allocator, cache).unwrap_or_else(|| arg.clone())
+        .zip(arity.iter())
+        .map(|(arg, arg_type)| match arg_type {
+            ArgType::Strict | ArgType::Eager => {
+                let resolved_arg = Reducible::reduce(arg, factory, allocator, cache)
+                    .unwrap_or_else(|| arg.clone());
+                if is_unresolved_arg(&resolved_arg) {
+                    has_unresolved_args = true;
+                }
+                if factory.match_signal_term(&resolved_arg).is_some() {
+                    if let ArgType::Strict = arg_type {
+                        num_short_circuit_signals.increment();
+                    }
+                }
+                resolved_arg
             }
-            VarArgs::Lazy => arg.clone(),
+            ArgType::Lazy => arg.clone(),
         })
         .collect::<Vec<_>>();
-    let has_unresolved_args =
-        with_eagerness(args.iter(), &arity)
-            .into_iter()
-            .any(|(arg, eager)| match eager {
-                VarArgs::Eager => is_unresolved_arg(arg),
-                VarArgs::Lazy => false,
-            });
     if has_unresolved_args {
-        return Err(args);
+        Err(resolved_args)
+    } else {
+        let short_circuit_signal = get_combined_short_circuit_signal(
+            num_short_circuit_signals,
+            &resolved_args,
+            &arity,
+            factory,
+            allocator,
+        );
+        Ok((resolved_args, short_circuit_signal))
     }
-    let short_circuit_signal = get_short_circuit_signal(&args, &arity, factory, allocator);
-    Ok((args, short_circuit_signal))
 }
 
 fn is_unresolved_arg<T: Expression + Rewritable<T> + Reducible<T>>(arg: &T) -> bool {
@@ -464,23 +460,75 @@ pub(crate) fn get_short_circuit_signal<T: Expression>(
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
 ) -> Option<T> {
-    let num_short_circuit_args = filter_signal_args(args.iter(), arity, factory)
+    get_combined_short_circuit_signal(
+        get_num_short_circuit_signals(args, arity, factory),
+        args,
+        arity,
+        factory,
+        allocator,
+    )
+}
+
+#[derive(Eq, PartialEq, Copy, Clone, Debug)]
+pub(crate) enum ShortCircuitCount {
+    None,
+    Single,
+    Multiple,
+}
+impl ShortCircuitCount {
+    fn increment(&mut self) {
+        *self = match self {
+            Self::None => Self::Single,
+            Self::Single => Self::Multiple,
+            Self::Multiple => Self::Multiple,
+        }
+    }
+}
+
+pub(crate) fn get_num_short_circuit_signals<'a, T: Expression + 'a>(
+    args: impl IntoIterator<Item = &'a T>,
+    arity: &Arity,
+    factory: &'a impl ExpressionFactory<T>,
+) -> ShortCircuitCount {
+    let short_circuit_args = args
         .into_iter()
-        .count();
-    match num_short_circuit_args {
-        0 => None,
-        1 => Some(
-            filter_signal_args(args.iter(), arity, factory)
+        .zip(arity.iter())
+        .filter(|(arg, arg_type)| match arg_type {
+            ArgType::Strict => factory.match_signal_term(arg).is_some(),
+            _ => false,
+        });
+    let mut num_short_circuit_args = ShortCircuitCount::None;
+    for _ in short_circuit_args {
+        if let ShortCircuitCount::None = num_short_circuit_args {
+            num_short_circuit_args = ShortCircuitCount::Single;
+        } else {
+            return ShortCircuitCount::Multiple;
+        }
+    }
+    num_short_circuit_args
+}
+
+pub(crate) fn get_combined_short_circuit_signal<'a, T: Expression + 'a>(
+    num_short_circuit_args: ShortCircuitCount,
+    args: impl IntoIterator<Item = &'a T>,
+    arity: &Arity,
+    factory: &'a impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> Option<T> {
+    match num_short_circuit_args.into() {
+        ShortCircuitCount::None => None,
+        ShortCircuitCount::Single => Some(
+            filter_short_circuit_args(args.into_iter(), arity, factory)
                 .into_iter()
                 .map(|(arg, _)| arg)
                 .cloned()
                 .next()
                 .unwrap(),
         ),
-        _ => {
+        ShortCircuitCount::Multiple => {
             let combined_signal = factory.create_signal_term(
                 allocator.create_signal_list(
-                    filter_signal_args(args.iter(), arity, factory)
+                    filter_short_circuit_args(args.into_iter(), arity, factory)
                         .into_iter()
                         .flat_map(|(_, signal)| {
                             signal
@@ -495,48 +543,17 @@ pub(crate) fn get_short_circuit_signal<T: Expression>(
     }
 }
 
-fn filter_signal_args<'a, T: Expression + 'a>(
-    args: impl IntoIterator<
-            Item = &'a T,
-            IntoIter = (impl ExactSizeIterator<Item = &'a T> + DoubleEndedIterator<Item = &'a T>),
-        > + ExactSizeIterator,
+fn filter_short_circuit_args<'a, T: Expression + 'a>(
+    args: impl IntoIterator<Item = &'a T>,
     arity: &Arity,
     matcher: &'a impl ExpressionFactory<T>,
 ) -> impl IntoIterator<Item = (&'a T, &'a SignalTerm<T>)> {
-    with_eagerness(args.into_iter(), arity)
-        .into_iter()
-        .filter_map(move |(arg, eager)| match eager {
-            VarArgs::Eager => matcher.match_signal_term(&arg).map(|signal| (arg, signal)),
-            VarArgs::Lazy => None,
+    args.into_iter()
+        .zip(arity.iter())
+        .filter_map(move |(arg, arg_type)| match arg_type {
+            ArgType::Strict => matcher.match_signal_term(&arg).map(|signal| (arg, signal)),
+            ArgType::Eager | ArgType::Lazy => None,
         })
-}
-
-pub(crate) fn with_eagerness<T>(
-    args: impl IntoIterator<
-        Item = T,
-        IntoIter = (impl ExactSizeIterator<Item = T> + DoubleEndedIterator<Item = T>),
-    >,
-    arity: &Arity,
-) -> impl IntoIterator<
-    Item = (T, VarArgs),
-    IntoIter = (impl ExactSizeIterator<Item = (T, VarArgs)> + DoubleEndedIterator<Item = (T, VarArgs)>),
-> {
-    let required_arity = arity.required();
-    let eager_arity = arity.eager();
-    let eager_varargs = match arity.variadic() {
-        Some(VarArgs::Eager) => true,
-        _ => false,
-    };
-    args.into_iter().enumerate().map(move |(index, arg)| {
-        let is_eager = index < eager_arity || (eager_varargs && index >= required_arity);
-        (
-            arg,
-            match is_eager {
-                true => VarArgs::Eager,
-                false => VarArgs::Lazy,
-            },
-        )
-    })
 }
 
 fn create_error_signal_term<T: Expression>(
@@ -550,26 +567,34 @@ fn create_error_signal_term<T: Expression>(
 }
 
 pub(crate) fn compile_args<'a, T: Expression + Compile<T> + 'a>(
-    args: impl IntoIterator<
-        Item = (&'a T, VarArgs),
-        IntoIter = impl DoubleEndedIterator<Item = (&'a T, VarArgs)>,
-    >,
+    args: impl IntoIterator<Item = (&'a T, ArgType)>,
     stack_offset: StackOffset,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
     compiler: &mut Compiler,
-) -> Result<(Program, NativeFunctionRegistry<T>), String> {
-    args.into_iter().enumerate().fold(
-        Ok((Program::new(empty()), NativeFunctionRegistry::default())),
-        |result, (index, (arg, eager))| {
-            let (mut program, mut native_functions) = result?;
-            let (compiled_arg, arg_native_functions) =
-                arg.compile(eager, stack_offset + index, factory, allocator, compiler)?;
-            native_functions.extend(arg_native_functions);
-            program.extend(compiled_arg);
-            Ok((program, native_functions))
+) -> Result<Program, String> {
+    Ok(Program::new(args.into_iter().enumerate().fold(
+        Ok(Program::new(empty())),
+        |program, (index, (arg, arg_type))| {
+            let mut program = program?;
+            match arg.compile(
+                match arg_type {
+                    ArgType::Eager | ArgType::Strict => VarArgs::Eager,
+                    ArgType::Lazy => VarArgs::Lazy,
+                },
+                stack_offset + index,
+                factory,
+                allocator,
+                compiler,
+            ) {
+                Err(error) => Err(error),
+                Ok(compiled_arg) => {
+                    program.extend(compiled_arg);
+                    Ok(program)
+                }
+            }
         },
-    )
+    )?))
 }
 
 fn match_compiled_function_result(program: &Program) -> Option<InstructionPointer> {

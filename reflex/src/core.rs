@@ -5,7 +5,7 @@
 use std::{
     collections::{hash_map::DefaultHasher, BTreeSet, HashSet},
     hash::{Hash, Hasher},
-    iter::{once, FromIterator},
+    iter::{once, repeat, FromIterator},
 };
 
 use fnv::FnvHashMap;
@@ -83,6 +83,239 @@ pub trait Reducible<T: Expression + Rewritable<T>> {
     ) -> Option<T>;
 }
 
+#[derive(Hash, Eq, PartialEq, Clone, Copy, Debug)]
+pub enum ArgType {
+    /** Evaluate argument before function application, short-circuiting any signals encountered during evaluation */
+    Strict,
+    /** Evaluate argument before function application, passing signals into function body */
+    Eager,
+    /** Pass argument directly into function body without evaluating */
+    Lazy,
+}
+
+#[derive(Hash, Eq, PartialEq, Clone, Copy, Debug)]
+pub struct FunctionArity<const REQUIRED: usize, const OPTIONAL: usize> {
+    pub required: [ArgType; REQUIRED],
+    pub optional: [ArgType; OPTIONAL],
+    pub variadic: Option<ArgType>,
+}
+impl<const REQUIRED: usize, const OPTIONAL: usize> FunctionArity<REQUIRED, OPTIONAL> {
+    pub fn required(&self) -> &[ArgType] {
+        &self.required
+    }
+    pub fn optional(&self) -> &[ArgType] {
+        &self.optional
+    }
+    pub fn variadic(&self) -> Option<ArgType> {
+        self.variadic
+    }
+}
+
+#[derive(Hash, Eq, PartialEq, Clone, Copy, Debug)]
+pub enum Arity {
+    Implicit(ImplicitArity),
+    Explicit(ExplicitArity),
+}
+impl<const R: usize, const O: usize> From<&'static FunctionArity<R, O>> for Arity {
+    fn from(definition: &'static FunctionArity<R, O>) -> Self {
+        Self::Explicit(ExplicitArity::from(definition))
+    }
+}
+impl Arity {
+    pub fn lazy(required: usize, optional: usize, variadic: bool) -> Self {
+        Self::Implicit(ImplicitArity {
+            required,
+            optional,
+            variadic,
+        })
+    }
+    pub fn required(&self) -> impl ExactSizeIterator<Item = ArgType> {
+        match self {
+            Self::Implicit(arity) => ArityIterator::Implicit(arity.required()),
+            Self::Explicit(arity) => ArityIterator::Explicit(arity.required()),
+        }
+    }
+    pub fn optional(&self) -> impl ExactSizeIterator<Item = ArgType> {
+        match self {
+            Self::Implicit(arity) => ArityIterator::Implicit(arity.optional()),
+            Self::Explicit(arity) => ArityIterator::Explicit(arity.optional()),
+        }
+    }
+    pub fn variadic(&self) -> Option<ArgType> {
+        match self {
+            Self::Implicit(arity) => arity.variadic(),
+            Self::Explicit(arity) => arity.variadic(),
+        }
+    }
+    pub fn partial(&self, offset: usize) -> Self {
+        match self {
+            Self::Implicit(arity) => Self::Implicit(arity.partial(offset)),
+            Self::Explicit(arity) => Self::Explicit(arity.partial(offset)),
+        }
+    }
+    pub fn iter(&self) -> impl Iterator<Item = ArgType> {
+        self.required()
+            .chain(self.optional())
+            .chain(self.variadic().into_iter().flat_map(repeat))
+    }
+}
+impl std::fmt::Display for Arity {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Implicit(arity) => std::fmt::Display::fmt(arity, f),
+            Self::Explicit(arity) => std::fmt::Display::fmt(arity, f),
+        }
+    }
+}
+#[derive(Hash, Eq, PartialEq, Clone, Copy, Debug)]
+pub struct ImplicitArity {
+    required: usize,
+    optional: usize,
+    variadic: bool,
+}
+impl ImplicitArity {
+    fn required(&self) -> ImplicitArityIterator {
+        ImplicitArityIterator(self.required)
+    }
+    fn optional(&self) -> ImplicitArityIterator {
+        ImplicitArityIterator(self.optional)
+    }
+    fn variadic(&self) -> Option<ArgType> {
+        match self.variadic {
+            true => Some(ArgType::Lazy),
+            false => None,
+        }
+    }
+    fn partial(&self, offset: usize) -> Self {
+        Self {
+            required: self.required.saturating_sub(offset),
+            optional: self
+                .optional
+                .saturating_sub(offset.saturating_sub(self.required)),
+            variadic: self.variadic,
+        }
+    }
+}
+impl std::fmt::Display for ImplicitArity {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}{}",
+            self.required + self.optional,
+            if self.variadic {
+                String::from("+")
+            } else {
+                String::from("")
+            }
+        )
+    }
+}
+#[derive(Hash, Eq, PartialEq, Clone, Copy, Debug)]
+pub struct ExplicitArity {
+    required: &'static [ArgType],
+    optional: &'static [ArgType],
+    variadic: Option<ArgType>,
+}
+impl<'a, const R: usize, const O: usize> From<&'static FunctionArity<R, O>> for ExplicitArity {
+    fn from(definition: &'static FunctionArity<R, O>) -> Self {
+        Self {
+            required: definition.required(),
+            optional: definition.optional(),
+            variadic: definition.variadic(),
+        }
+    }
+}
+impl ExplicitArity {
+    fn required(&self) -> ExplicitArityIterator {
+        ExplicitArityIterator(self.required, 0)
+    }
+    fn optional(&self) -> ExplicitArityIterator {
+        ExplicitArityIterator(self.optional, 0)
+    }
+    fn variadic(&self) -> Option<ArgType> {
+        self.variadic
+    }
+    fn partial(&self, offset: usize) -> Self {
+        Self {
+            required: &self.required[offset.min(self.required.len())..],
+            optional: &self.optional[offset.saturating_sub(self.required.len()).min(self.optional.len())..],
+            variadic: self.variadic,
+        }
+    }
+}
+impl std::fmt::Display for ExplicitArity {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}{}",
+            self.required.len() + self.optional.len(),
+            if self.variadic.is_some() {
+                String::from("+")
+            } else {
+                String::from("")
+            }
+        )
+    }
+}
+pub enum ArityIterator {
+    Implicit(ImplicitArityIterator),
+    Explicit(ExplicitArityIterator),
+}
+impl Iterator for ArityIterator {
+    type Item = ArgType;
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            Self::Implicit(iter) => iter.next(),
+            Self::Explicit(iter) => iter.next(),
+        }
+    }
+}
+impl ExactSizeIterator for ArityIterator {
+    fn len(&self) -> usize {
+        match self {
+            Self::Implicit(iter) => iter.len(),
+            Self::Explicit(iter) => iter.len(),
+        }
+    }
+}
+pub struct ImplicitArityIterator(usize);
+impl Iterator for ImplicitArityIterator {
+    type Item = ArgType;
+    fn next(&mut self) -> Option<Self::Item> {
+        let remaining = self.0;
+        if remaining == 0 {
+            None
+        } else {
+            self.0 -= 1;
+            Some(ArgType::Lazy)
+        }
+    }
+}
+impl ExactSizeIterator for ImplicitArityIterator {
+    fn len(&self) -> usize {
+        let remaining = self.0;
+        remaining
+    }
+}
+pub struct ExplicitArityIterator(&'static [ArgType], usize);
+impl Iterator for ExplicitArityIterator {
+    type Item = ArgType;
+    fn next(&mut self) -> Option<Self::Item> {
+        let args = self.0;
+        let index = self.1;
+        let arg = args.get(index)?;
+        self.1 += 1;
+        Some(*arg)
+    }
+}
+impl ExactSizeIterator for ExplicitArityIterator {
+    fn len(&self) -> usize {
+        let args = self.0;
+        let index = self.1;
+        args.len() - index
+    }
+}
+
 pub trait Applicable<T: Expression> {
     fn arity(&self) -> Option<Arity>;
     fn apply(
@@ -106,6 +339,9 @@ pub trait Evaluate<T: Expression> {
 
 pub trait Iterable {
     fn is_empty(&self) -> bool;
+}
+pub trait SerializeJson {
+    fn to_json(&self) -> Result<serde_json::Value, String>;
 }
 
 #[derive(Eq, PartialEq, Debug)]
@@ -497,10 +733,10 @@ pub trait ExpressionFactory<T: Expression> {
     fn create_native_function_term(&self, target: NativeFunction<T>) -> T;
     fn create_compiled_function_term(
         &self,
-        hash: HashId,
         address: InstructionPointer,
-        num_args: StackOffset,
-        variadic: bool,
+        hash: HashId,
+        required_args: StackOffset,
+        optional_args: StackOffset,
     ) -> T;
     fn create_tuple_term(&self, fields: ExpressionList<T>) -> T;
     fn create_struct_term(&self, prototype: StructPrototype, fields: ExpressionList<T>) -> T;
@@ -509,7 +745,6 @@ pub trait ExpressionFactory<T: Expression> {
     fn create_hashmap_term(&self, keys: ExpressionList<T>, values: ExpressionList<T>) -> T;
     fn create_hashset_term(&self, values: ExpressionList<T>) -> T;
     fn create_signal_term(&self, signals: SignalList<T>) -> T;
-    fn create_signal_transformer_term(&self, transform: T) -> T;
 
     fn match_value_term<'a>(&self, expression: &'a T) -> Option<&'a ValueTerm<T::String>>;
     fn match_static_variable_term<'a>(&self, expression: &'a T) -> Option<&'a StaticVariableTerm>;
@@ -538,10 +773,6 @@ pub trait ExpressionFactory<T: Expression> {
     fn match_hashmap_term<'a>(&self, expression: &'a T) -> Option<&'a HashMapTerm<T>>;
     fn match_hashset_term<'a>(&self, expression: &'a T) -> Option<&'a HashSetTerm<T>>;
     fn match_signal_term<'a>(&self, expression: &'a T) -> Option<&'a SignalTerm<T>>;
-    fn match_signal_transformer_term<'a>(
-        &self,
-        expression: &'a T,
-    ) -> Option<&'a SignalTransformerTerm<T>>;
 }
 
 pub trait HeapAllocator<T: Expression> {
@@ -606,13 +837,17 @@ impl<'_self, T: Expression> ExpressionFactory<T> for &'_self dyn ExpressionFacto
     }
     fn create_compiled_function_term(
         &self,
-        hash: HashId,
         address: InstructionPointer,
-        num_args: StackOffset,
-        variadic: bool,
+        hash: HashId,
+        required_args: StackOffset,
+        optional_args: StackOffset,
     ) -> T {
         ExpressionFactory::<T>::create_compiled_function_term(
-            *self, hash, address, num_args, variadic,
+            *self,
+            address,
+            hash,
+            required_args,
+            optional_args,
         )
     }
     fn create_tuple_term(&self, fields: ExpressionList<T>) -> T {
@@ -635,9 +870,6 @@ impl<'_self, T: Expression> ExpressionFactory<T> for &'_self dyn ExpressionFacto
     }
     fn create_signal_term(&self, signals: SignalList<T>) -> T {
         ExpressionFactory::<T>::create_signal_term(*self, signals)
-    }
-    fn create_signal_transformer_term(&self, transform: T) -> T {
-        ExpressionFactory::<T>::create_signal_transformer_term(*self, transform)
     }
 
     fn match_value_term<'a>(&self, expression: &'a T) -> Option<&'a ValueTerm<T::String>> {
@@ -705,12 +937,6 @@ impl<'_self, T: Expression> ExpressionFactory<T> for &'_self dyn ExpressionFacto
     }
     fn match_signal_term<'a>(&self, expression: &'a T) -> Option<&'a SignalTerm<T>> {
         ExpressionFactory::<T>::match_signal_term(*self, expression)
-    }
-    fn match_signal_transformer_term<'a>(
-        &self,
-        expression: &'a T,
-    ) -> Option<&'a SignalTransformerTerm<T>> {
-        ExpressionFactory::<T>::match_signal_transformer_term(*self, expression)
     }
 }
 
@@ -790,39 +1016,6 @@ impl<T: Expression> HeapAllocator<T> for &dyn NativeAllocator<T> {
     }
     fn as_object(&self) -> &dyn NativeAllocator<T> {
         *self
-    }
-}
-
-#[derive(Hash, Eq, PartialEq, Clone, Copy, Debug, Serialize)]
-pub struct Arity {
-    eager: usize,
-    lazy: usize,
-    variadic: Option<VarArgs>,
-}
-impl Arity {
-    pub fn from(eager: usize, lazy: usize, variadic: Option<VarArgs>) -> Self {
-        Self {
-            eager,
-            lazy,
-            variadic,
-        }
-    }
-    pub fn eager(&self) -> usize {
-        self.eager
-    }
-    pub fn lazy(&self) -> usize {
-        self.lazy
-    }
-    pub fn variadic(&self) -> Option<VarArgs> {
-        self.variadic
-    }
-    pub fn required(&self) -> usize {
-        self.eager + self.lazy
-    }
-}
-impl std::fmt::Display for Arity {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}:{}", self.eager, self.lazy)
     }
 }
 
@@ -1271,14 +1464,14 @@ mod tests {
     use crate::{
         allocator::DefaultAllocator,
         cache::SubstitutionCache,
+        core::{ArgType, Arity, FunctionArity},
         lang::{term::NativeFunction, BuiltinTerm, TermFactory, ValueTerm},
         parser::sexpr::parse,
     };
 
     use super::{
-        evaluate, Arity, DependencyList, EvaluationResult, Expression, ExpressionFactory,
-        ExpressionList, GraphNode, HeapAllocator, NativeAllocator, Rewritable, Signal, SignalType,
-        StateCache,
+        evaluate, DependencyList, EvaluationResult, Expression, ExpressionFactory, ExpressionList,
+        GraphNode, HeapAllocator, NativeAllocator, Rewritable, Signal, SignalType, StateCache,
     };
 
     fn create_error_signal_term<T: Expression>(
@@ -1392,7 +1585,7 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                create_error_signal_term("Expected 1 argument, received 0", &factory, &allocator),
+                create_error_signal_term("<function:1>: Expected 1 argument, received 0", &factory, &allocator),
                 DependencyList::empty(),
             ),
         );
@@ -1406,7 +1599,7 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                create_error_signal_term("Expected 3 arguments, received 1", &factory, &allocator),
+                create_error_signal_term("<function:3>: Expected 3 arguments, received 1", &factory, &allocator),
                 DependencyList::empty(),
             ),
         );
@@ -1420,7 +1613,7 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                create_error_signal_term("Expected 3 arguments, received 2", &factory, &allocator),
+                create_error_signal_term("<function:3>: Expected 3 arguments, received 2", &factory, &allocator),
                 DependencyList::empty(),
             ),
         );
@@ -1821,15 +2014,13 @@ mod tests {
 
         struct Constant {}
         impl Constant {
-            fn name() -> Option<&'static str> {
-                Some("Constant")
-            }
-            fn uid() -> Uuid {
-                Uuid::from_str("9f3b754b-62ef-4aec-a657-cb3c2b13147f").unwrap()
-            }
-            fn arity() -> Arity {
-                Arity::from(0, 0, None)
-            }
+            const UUID: &'static str = "9f3b754b-62ef-4aec-a657-cb3c2b13147f";
+            const NAME: &'static str = "Constant";
+            const ARITY: FunctionArity<0, 0> = FunctionArity {
+                required: [],
+                optional: [],
+                variadic: None,
+            };
             fn apply<T: Expression>(
                 _args: ExpressionList<T>,
                 factory: &dyn ExpressionFactory<T>,
@@ -1841,9 +2032,9 @@ mod tests {
 
         let expression = factory.create_application_term(
             factory.create_native_function_term(NativeFunction::new_with_uuid(
-                Constant::uid(),
-                Constant::name(),
-                Constant::arity(),
+                Uuid::from_str(Constant::UUID).unwrap(),
+                Some(Constant::NAME),
+                Arity::from(&Constant::ARITY),
                 Constant::apply,
             )),
             HeapAllocator::create_empty_list(&allocator),
@@ -1859,15 +2050,13 @@ mod tests {
 
         struct Add3 {}
         impl Add3 {
-            fn name() -> Option<&'static str> {
-                Some("Add3")
-            }
-            fn uid() -> Uuid {
-                Uuid::from_str("b765e5ba-8b8c-41f8-86f3-1d6deb09461e").unwrap()
-            }
-            fn arity() -> Arity {
-                Arity::from(0, 0, None)
-            }
+            const UUID: &'static str = "b765e5ba-8b8c-41f8-86f3-1d6deb09461e";
+            const NAME: &'static str = "Add3";
+            const ARITY: FunctionArity<3, 0> = FunctionArity {
+                required: [ArgType::Strict, ArgType::Strict, ArgType::Strict],
+                optional: [],
+                variadic: None,
+            };
             fn apply<T: Expression>(
                 args: ExpressionList<T>,
                 factory: &dyn ExpressionFactory<T>,
@@ -1894,9 +2083,9 @@ mod tests {
 
         let expression = factory.create_application_term(
             factory.create_native_function_term(NativeFunction::new_with_uuid(
-                Add3::uid(),
-                Add3::name(),
-                Add3::arity(),
+                Uuid::from_str(Add3::UUID).unwrap(),
+                Some(Add3::NAME),
+                Arity::from(&Add3::ARITY),
                 Add3::apply,
             )),
             HeapAllocator::create_list(
@@ -1949,8 +2138,74 @@ mod tests {
             Some(factory.create_value_term(ValueTerm::Int(6)))
         );
     }
-}
 
-pub trait SerializeJson {
-    fn to_json(&self) -> Result<serde_json::Value, String>;
+    #[test]
+    fn arity() {
+        trait MyApplicable {
+            fn required_args(&self) -> &[ArgType];
+            fn optional_args(&self) -> &[ArgType];
+            fn variadic_args(&self) -> Option<ArgType>;
+        }
+        const FOO_ARITY: FunctionArity<3, 1> = FunctionArity {
+            required: [ArgType::Strict, ArgType::Lazy, ArgType::Lazy],
+            optional: [ArgType::Strict],
+            variadic: None,
+        };
+        struct Foo {}
+        impl MyApplicable for Foo {
+            fn required_args(&self) -> &[ArgType] {
+                &FOO_ARITY.required()
+            }
+            fn optional_args(&self) -> &[ArgType] {
+                &FOO_ARITY.optional()
+            }
+            fn variadic_args(&self) -> Option<ArgType> {
+                FOO_ARITY.variadic()
+            }
+        }
+        let expression = Foo {};
+        assert_eq!(expression.required_args().len(), 3);
+        assert_eq!(expression.optional_args().len(), 1);
+        assert_eq!(
+            expression
+                .required_args()
+                .iter()
+                .map(|arg| match arg {
+                    ArgType::Strict => String::from("strict"),
+                    ArgType::Eager => String::from("eager"),
+                    ArgType::Lazy => String::from("lazy"),
+                })
+                .collect::<String>(),
+            "strictlazylazy"
+        );
+        struct Bar {
+            offset: usize,
+        }
+        impl MyApplicable for Bar {
+            fn required_args(&self) -> &[ArgType] {
+                &FOO_ARITY.required()[self.offset.min(FOO_ARITY.required().len())..]
+            }
+            fn optional_args(&self) -> &[ArgType] {
+                &FOO_ARITY.optional()[self.offset.saturating_sub(FOO_ARITY.required().len())..]
+            }
+            fn variadic_args(&self) -> Option<ArgType> {
+                FOO_ARITY.variadic()
+            }
+        }
+        let expression = Bar { offset: 4 };
+        assert_eq!(expression.required_args().len(), 0);
+        assert_eq!(expression.optional_args().len(), 0);
+        assert_eq!(
+            expression
+                .required_args()
+                .iter()
+                .map(|arg| match arg {
+                    ArgType::Strict => String::from("strict"),
+                    ArgType::Eager => String::from("eager"),
+                    ArgType::Lazy => String::from("lazy"),
+                })
+                .collect::<String>(),
+            ""
+        );
+    }
 }

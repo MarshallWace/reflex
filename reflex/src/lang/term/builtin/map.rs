@@ -4,13 +4,21 @@
 use std::iter::once;
 
 use crate::core::{
-    Applicable, Arity, EvaluationCache, Expression, ExpressionFactory, HeapAllocator,
+    Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory, FunctionArity,
+    HeapAllocator,
 };
 
 pub struct Map {}
+impl Map {
+    const ARITY: FunctionArity<2, 0> = FunctionArity {
+        required: [ArgType::Strict, ArgType::Strict],
+        optional: [],
+        variadic: None,
+    };
+}
 impl<T: Expression> Applicable<T> for Map {
     fn arity(&self) -> Option<Arity> {
-        Some(Arity::from(2, 0, None))
+        Some(Arity::from(&Self::ARITY))
     }
     fn apply(
         &self,
@@ -20,9 +28,6 @@ impl<T: Expression> Applicable<T> for Map {
         _cache: &mut impl EvaluationCache<T>,
     ) -> Result<T, String> {
         let mut args = args.into_iter();
-        if args.len() != 2 {
-            return Err(format!("Expected 2 arguments, received {}", args.len()));
-        }
         let target = args.next().unwrap();
         let iteratee = args.next().unwrap();
         let result = if let Some(target) = factory.match_vector_term(&target) {

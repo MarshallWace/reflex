@@ -8,7 +8,7 @@ use std::{
 };
 
 use crate::{
-    compiler::{Compile, Compiler, Instruction, NativeFunctionRegistry, Program},
+    compiler::{Compile, Compiler, Instruction, Program},
     core::{
         DependencyList, DynamicState, EvaluationCache, Expression, ExpressionFactory, GraphNode,
         HeapAllocator, Rewritable, SerializeJson, StackOffset, StateToken, Substitutions, VarArgs,
@@ -113,7 +113,7 @@ impl<T: Expression + Compile<T>> Compile<T> for VariableTerm<T> {
         factory: &impl ExpressionFactory<T>,
         allocator: &impl HeapAllocator<T>,
         compiler: &mut Compiler,
-    ) -> Result<(Program, NativeFunctionRegistry<T>), String> {
+    ) -> Result<Program, String> {
         match self {
             Self::Static(term) => term.compile(eager, stack_offset, factory, allocator, compiler),
             Self::Dynamic(term) => term.compile(eager, stack_offset, factory, allocator, compiler),
@@ -213,13 +213,10 @@ impl<T: Expression + Compile<T>> Compile<T> for StaticVariableTerm {
         _factory: &impl ExpressionFactory<T>,
         _allocator: &impl HeapAllocator<T>,
         _compiler: &mut Compiler,
-    ) -> Result<(Program, NativeFunctionRegistry<T>), String> {
-        Ok((
-            Program::new(once(Instruction::PushStatic {
-                offset: self.offset + stack_offset,
-            })),
-            NativeFunctionRegistry::default(),
-        ))
+    ) -> Result<Program, String> {
+        Ok(Program::new(once(Instruction::PushStatic {
+            offset: self.offset + stack_offset,
+        })))
     }
 }
 impl std::fmt::Display for StaticVariableTerm {
@@ -320,15 +317,15 @@ impl<T: Expression + Compile<T>> Compile<T> for DynamicVariableTerm<T> {
         factory: &impl ExpressionFactory<T>,
         allocator: &impl HeapAllocator<T>,
         compiler: &mut Compiler,
-    ) -> Result<(Program, NativeFunctionRegistry<T>), String> {
-        let (compiled_fallback, native_functions) =
+    ) -> Result<Program, String> {
+        let compiled_fallback =
             self.fallback
                 .compile(VarArgs::Lazy, stack_offset, factory, allocator, compiler)?;
         let mut result = compiled_fallback;
         result.push(Instruction::PushDynamic {
             state_token: self.state_token,
         });
-        Ok((result, native_functions))
+        Ok(result)
     }
 }
 impl<T: Expression> std::fmt::Display for DynamicVariableTerm<T> {

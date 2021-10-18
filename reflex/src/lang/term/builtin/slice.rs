@@ -2,14 +2,24 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use crate::{
-    core::{Applicable, Arity, EvaluationCache, Expression, ExpressionFactory, HeapAllocator},
+    core::{
+        Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory, FunctionArity,
+        HeapAllocator,
+    },
     lang::{as_integer, ValueTerm},
 };
 
 pub struct Slice {}
+impl Slice {
+    const ARITY: FunctionArity<3, 0> = FunctionArity {
+        required: [ArgType::Strict, ArgType::Strict, ArgType::Strict],
+        optional: [],
+        variadic: None,
+    };
+}
 impl<T: Expression> Applicable<T> for Slice {
     fn arity(&self) -> Option<Arity> {
-        Some(Arity::from(3, 0, None))
+        Some(Arity::from(&Self::ARITY))
     }
     fn apply(
         &self,
@@ -19,9 +29,6 @@ impl<T: Expression> Applicable<T> for Slice {
         _cache: &mut impl EvaluationCache<T>,
     ) -> Result<T, String> {
         let mut args = args.into_iter();
-        if args.len() != 3 {
-            return Err(format!("Expected 3 arguments, received {}", args.len()));
-        }
         let target = args.next().unwrap();
         let start_index = args.next().unwrap();
         let end_index = args.next().unwrap();

@@ -4,13 +4,21 @@
 use std::collections::{hash_map::Entry, HashMap};
 
 use crate::core::{
-    Applicable, Arity, EvaluationCache, Expression, ExpressionFactory, HeapAllocator, VarArgs,
+    Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory, FunctionArity,
+    HeapAllocator,
 };
 
 pub struct Merge {}
+impl Merge {
+    const ARITY: FunctionArity<1, 0> = FunctionArity {
+        required: [ArgType::Strict],
+        optional: [],
+        variadic: Some(ArgType::Strict),
+    };
+}
 impl<T: Expression> Applicable<T> for Merge {
     fn arity(&self) -> Option<Arity> {
-        Some(Arity::from(1, 0, Some(VarArgs::Eager)))
+        Some(Arity::from(&Self::ARITY))
     }
     fn apply(
         &self,

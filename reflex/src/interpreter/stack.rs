@@ -5,7 +5,7 @@ use std::collections::HashSet;
 
 use crate::{
     compiler::{Instruction, InstructionPointer, Program},
-    core::{DependencyList, Expression, StackOffset, StateToken},
+    core::{Arity, DependencyList, Expression, ExpressionList, StackOffset, StateToken},
     hash::HashId,
 };
 
@@ -22,18 +22,21 @@ pub(crate) enum StackFrame<T: Expression> {
         address: InstructionPointer,
     },
     ApplicationTarget {
+        args: ExpressionList<T>,
+    },
+    ApplicationArgList {
+        target: T,
+        arity: Arity,
+        caller_address: InstructionPointer,
+        resume_address: InstructionPointer,
         args: Vec<T>,
+        results: Vec<T>,
     },
     Function {
         #[allow(dead_code)]
         target_address: InstructionPointer,
         caller_address: InstructionPointer,
         resume_address: InstructionPointer,
-    },
-    List {
-        address: InstructionPointer,
-        items: Vec<T>,
-        results: Vec<T>,
     },
 }
 
@@ -62,6 +65,8 @@ impl<'a, T: Expression> std::fmt::Debug for CallStack<'a, T> {
     }
 }
 impl<'src, T: Expression> CallStack<'src, T> {
+    const EVALUATE_ARG_INSTRUCTION: Instruction = Instruction::Evaluate;
+    const EVALUATE_ARG_ADDRESS: InstructionPointer = InstructionPointer(usize::MAX);
     pub fn new(
         program: &'src Program,
         entry_point: InstructionPointer,
@@ -88,6 +93,9 @@ impl<'src, T: Expression> CallStack<'src, T> {
     pub fn program_counter(&self) -> InstructionPointer {
         self.program_counter
     }
+    pub fn evaluate_arg_program_counter(&self) -> InstructionPointer {
+        Self::EVALUATE_ARG_ADDRESS
+    }
     pub fn current_instruction(&'src self) -> Option<&'src Instruction> {
         self.lookup_instruction(self.program_counter)
     }
@@ -95,7 +103,11 @@ impl<'src, T: Expression> CallStack<'src, T> {
         &'src self,
         address: InstructionPointer,
     ) -> Option<&'src Instruction> {
-        self.program.get(address)
+        self.program.get(address).or_else(|| if address == Self::EVALUATE_ARG_ADDRESS {
+            Some(&Self::EVALUATE_ARG_INSTRUCTION)
+        } else {
+            None
+        })
     }
     pub fn next_program_counter(&self) -> InstructionPointer {
         self.program_counter.advance()
@@ -135,7 +147,7 @@ impl<'src, T: Expression> CallStack<'src, T> {
             None
         }
     }
-    pub(crate) fn enter_application_target(&mut self, args: Vec<T>) {
+    pub(crate) fn enter_application_target(&mut self, args: ExpressionList<T>) {
         self.enter_stack_frame(None, StackFrame::ApplicationTarget { args });
     }
     pub(crate) fn peek_application_target_stack(&self) -> Option<&[T]> {
@@ -148,7 +160,7 @@ impl<'src, T: Expression> CallStack<'src, T> {
     }
     pub(crate) fn pop_application_target_stack(
         &mut self,
-    ) -> Option<(Vec<T>, DependencyList, Vec<HashId>)> {
+    ) -> Option<(ExpressionList<T>, DependencyList, Vec<HashId>)> {
         if self.peek_application_target_stack().is_some() {
             self.pop_call_stack()
                 .and_then(|(_, dependencies, subexpressions, frame)| match frame {
@@ -156,6 +168,80 @@ impl<'src, T: Expression> CallStack<'src, T> {
                         Some((args, dependencies, subexpressions))
                     }
                     _ => None,
+                })
+        } else {
+            None
+        }
+    }
+    pub(crate) fn enter_application_arg_list(
+        &mut self,
+        target: T,
+        arity: Arity,
+        caller_address: InstructionPointer,
+        resume_address: InstructionPointer,
+        args: Vec<T>,
+        results: Vec<T>,
+    ) {
+        self.enter_stack_frame(
+            None,
+            StackFrame::ApplicationArgList {
+                target,
+                arity,
+                caller_address,
+                resume_address,
+                args,
+                results,
+            },
+        );
+    }
+    pub(crate) fn peek_application_arg_list_stack(&self) -> Option<(&[T], &[T])> {
+        self.call_stack
+            .last()
+            .and_then(|entry| match &entry.context {
+                StackFrame::ApplicationArgList { args: items, results, .. } => {
+                    Some((items.as_slice(), results.as_slice()))
+                }
+                _ => None,
+            })
+    }
+    pub(crate) fn pop_application_arg_list_stack(
+        &mut self,
+    ) -> Option<(
+        T,
+        Arity,
+        InstructionPointer,
+        InstructionPointer,
+        Vec<T>,
+        Vec<T>,
+        DependencyList,
+        Vec<HashId>,
+    )> {
+        if self.peek_application_arg_list_stack().is_some() {
+            self.pop_call_stack()
+                .map(|(_, dependencies, subexpressions, frame)| {
+                    let (target, arity, caller_address, resume_address, args, results) =
+                        match frame {
+                            StackFrame::ApplicationArgList {
+                                target,
+                                arity,
+                                caller_address,
+                                resume_address,
+                                args,
+                                results,
+                            } => Some((target, arity, caller_address, resume_address, args, results)),
+                            _ => None,
+                        }
+                        .unwrap();
+                    (
+                        target,
+                        arity,
+                        caller_address,
+                        resume_address,
+                        args,
+                        results,
+                        dependencies,
+                        subexpressions,
+                    )
                 })
         } else {
             None
@@ -214,54 +300,6 @@ impl<'src, T: Expression> CallStack<'src, T> {
                         caller_address,
                         resume_address,
                     )
-                })
-        } else {
-            None
-        }
-    }
-    pub(crate) fn enter_list(&mut self, items: Vec<T>, results: Option<Vec<T>>) {
-        let num_items = items.len();
-        self.enter_stack_frame(
-            None,
-            StackFrame::List {
-                address: self.program_counter,
-                items,
-                results: results.unwrap_or_else(|| Vec::with_capacity(num_items)),
-            },
-        );
-    }
-    pub(crate) fn peek_list_stack(
-        &self,
-        program_counter: InstructionPointer,
-    ) -> Option<(&[T], &[T])> {
-        self.call_stack
-            .last()
-            .and_then(|entry| match &entry.context {
-                StackFrame::List {
-                    address,
-                    items,
-                    results,
-                } if *address == program_counter => Some((items.as_slice(), results.as_slice())),
-                _ => None,
-            })
-    }
-    pub(crate) fn peek_next_list_item(&self, program_counter: InstructionPointer) -> Option<&T> {
-        self.peek_list_stack(program_counter)
-            .and_then(|(items, results)| items.get(results.len()))
-    }
-    pub(crate) fn pop_list_stack(
-        &mut self,
-        program_counter: InstructionPointer,
-    ) -> Option<(Vec<T>, Vec<T>, DependencyList, Vec<HashId>)> {
-        if self.peek_list_stack(program_counter).is_some() {
-            self.pop_call_stack()
-                .map(|(_, dependencies, subexpressions, frame)| {
-                    let (items, results) = match frame {
-                        StackFrame::List { items, results, .. } => Some((items, results)),
-                        _ => None,
-                    }
-                    .unwrap();
-                    (items, results, dependencies, subexpressions)
                 })
         } else {
             None
@@ -396,8 +434,8 @@ impl<T: Expression> VariableStack<T> {
     pub fn len(&self) -> usize {
         self.variable_stack.len()
     }
-    pub fn slice(&self, count: usize) -> impl IntoIterator<Item = &T> {
-        self.variable_stack.iter().rev().take(count)
+    pub fn slice(&self, count: usize) -> &[T] {
+        &self.variable_stack[(self.variable_stack.len() - count)..]
     }
     pub fn clone_shallow(&self, depth: StackOffset) -> Self {
         Self {

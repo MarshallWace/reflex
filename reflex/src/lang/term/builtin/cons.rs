@@ -2,14 +2,24 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use crate::{
-    core::{Applicable, Arity, EvaluationCache, Expression, ExpressionFactory, HeapAllocator},
+    core::{
+        Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory, FunctionArity,
+        HeapAllocator,
+    },
     lang::ValueTerm,
 };
 
 pub struct Cons {}
+impl Cons {
+    const ARITY: FunctionArity<2, 0> = FunctionArity {
+        required: [ArgType::Lazy, ArgType::Lazy],
+        optional: [],
+        variadic: None,
+    };
+}
 impl<T: Expression> Applicable<T> for Cons {
     fn arity(&self) -> Option<Arity> {
-        Some(Arity::from(0, 2, None))
+        Some(Arity::from(&Self::ARITY))
     }
     fn apply(
         &self,

@@ -5,7 +5,7 @@
 use std::{collections::HashSet, iter::once};
 
 use crate::{
-    compiler::{Compile, Compiler, Instruction, NativeFunctionRegistry, Program},
+    compiler::{Compile, Compiler, Instruction, Program},
     core::{
         DependencyList, DynamicState, EvaluationCache, Expression, ExpressionFactory, GraphNode,
         HeapAllocator, Reducible, Rewritable, SerializeJson, StackOffset, Substitutions, VarArgs,
@@ -115,14 +115,14 @@ impl<T: Expression + Compile<T>> Compile<T> for RecursiveTerm<T> {
         factory: &impl ExpressionFactory<T>,
         allocator: &impl HeapAllocator<T>,
         compiler: &mut Compiler,
-    ) -> Result<(Program, NativeFunctionRegistry<T>), String> {
-        let (compiled_factory, native_functions) =
+    ) -> Result<Program, String> {
+        let compiled_factory =
             self.factory
                 .compile(eager, stack_offset, factory, allocator, compiler)?;
         let mut result = compiled_factory;
         result.push(Instruction::PushStatic { offset: 0 });
         result.push(Instruction::Apply { num_args: 1 });
-        Ok((result, native_functions))
+        Ok(result)
     }
 }
 impl<T: Expression> std::fmt::Display for RecursiveTerm<T> {

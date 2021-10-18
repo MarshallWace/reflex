@@ -6,8 +6,8 @@ use std::str::FromStr;
 
 use reflex::{
     core::{
-        Arity, Expression, ExpressionFactory, ExpressionList, HeapAllocator, NativeAllocator,
-        StringValue,
+        ArgType, Arity, Expression, ExpressionFactory, ExpressionList, FunctionArity,
+        HeapAllocator, NativeAllocator, StringValue,
     },
     lang::{NativeFunction, ValueTerm},
 };
@@ -39,14 +39,21 @@ pub fn encode_uri_component<T: Expression>() -> NativeFunction<T> {
 }
 struct EncodeUriComponent {}
 impl EncodeUriComponent {
+    const NAME: &'static str = "EncodeUriComponent";
+    const UUID: &'static str = "ad730068-31a7-49a4-ae09-ecbda0c9914a";
+    const ARITY: FunctionArity<1, 0> = FunctionArity {
+        required: [ArgType::Strict],
+        optional: [],
+        variadic: None,
+    };
     fn uid() -> Uuid {
-        Uuid::from_str("ad730068-31a7-49a4-ae09-ecbda0c9914a").expect("Hardcoded uuid valued")
+        Uuid::from_str(Self::UUID).unwrap()
     }
     fn name() -> Option<&'static str> {
-        Some("EncodeUriComponent")
+        Some(Self::NAME)
     }
     fn arity() -> Arity {
-        Arity::from(1, 0, None)
+        Arity::from(&Self::ARITY)
     }
     fn apply<T: Expression>(
         args: ExpressionList<T>,

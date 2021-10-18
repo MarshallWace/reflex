@@ -5,9 +5,7 @@
 use std::{collections::HashSet, iter::once};
 
 use crate::{
-    compiler::{
-        compile_expressions, Compile, Compiler, Instruction, NativeFunctionRegistry, Program,
-    },
+    compiler::{compile_expressions, Compile, Compiler, Instruction, Program},
     core::{
         transform_expression_list, Applicable, Arity, DependencyList, DynamicState,
         EvaluationCache, Expression, ExpressionFactory, ExpressionList, GraphNode, HeapAllocator,
@@ -125,7 +123,7 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Compile<T>> Compile<T> for S
         factory: &impl ExpressionFactory<T>,
         allocator: &impl HeapAllocator<T>,
         compiler: &mut Compiler,
-    ) -> Result<(Program, NativeFunctionRegistry<T>), String> {
+    ) -> Result<Program, String> {
         compile_expressions(
             self.fields.iter(),
             VarArgs::Lazy,
@@ -134,7 +132,7 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Compile<T>> Compile<T> for S
             allocator,
             compiler,
         )
-        .map(|(mut program, native_functions)| {
+        .map(|mut program| {
             program.extend(
                 once(Instruction::PushConstructor {
                     prototype: allocator.clone_struct_prototype(&self.prototype),
@@ -143,7 +141,7 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Compile<T>> Compile<T> for S
                     num_args: self.fields.len(),
                 })),
             );
-            (program, native_functions)
+            program
         })
     }
 }
@@ -214,7 +212,7 @@ impl GraphNode for ConstructorTerm {
 }
 impl<T: Expression> Applicable<T> for ConstructorTerm {
     fn arity(&self) -> Option<Arity> {
-        Some(Arity::from(0, self.prototype().keys().len(), None))
+        Some(Arity::lazy(0, self.prototype().keys().len(), false))
     }
     fn apply(
         &self,
@@ -237,13 +235,10 @@ impl<T: Expression + Compile<T>> Compile<T> for ConstructorTerm {
         _factory: &impl ExpressionFactory<T>,
         allocator: &impl HeapAllocator<T>,
         _compiler: &mut Compiler,
-    ) -> Result<(Program, NativeFunctionRegistry<T>), String> {
-        Ok((
-            Program::new(once(Instruction::PushConstructor {
-                prototype: allocator.clone_struct_prototype(&self.prototype),
-            })),
-            NativeFunctionRegistry::default(),
-        ))
+    ) -> Result<Program, String> {
+        Ok(Program::new(once(Instruction::PushConstructor {
+            prototype: allocator.clone_struct_prototype(&self.prototype),
+        })))
     }
 }
 impl std::fmt::Display for ConstructorTerm {

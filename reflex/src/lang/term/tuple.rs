@@ -5,9 +5,7 @@
 use std::{collections::HashSet, iter::once};
 
 use crate::{
-    compiler::{
-        compile_expressions, Compile, Compiler, Instruction, NativeFunctionRegistry, Program,
-    },
+    compiler::{compile_expressions, Compile, Compiler, Instruction, Program},
     core::{
         transform_expression_list, DependencyList, DynamicState, EvaluationCache, Expression,
         ExpressionFactory, ExpressionList, GraphNode, HeapAllocator, Rewritable, SerializeJson,
@@ -111,7 +109,7 @@ impl<T: Expression + Compile<T>> Compile<T> for TupleTerm<T> {
         factory: &impl ExpressionFactory<T>,
         allocator: &impl HeapAllocator<T>,
         compiler: &mut Compiler,
-    ) -> Result<(Program, NativeFunctionRegistry<T>), String> {
+    ) -> Result<Program, String> {
         compile_expressions(
             self.fields.iter(),
             VarArgs::Lazy,
@@ -120,11 +118,11 @@ impl<T: Expression + Compile<T>> Compile<T> for TupleTerm<T> {
             allocator,
             compiler,
         )
-        .map(|(mut program, native_functions)| {
+        .map(|mut program| {
             program.push(Instruction::ConstructTuple {
                 size: self.fields.len(),
             });
-            (program, native_functions)
+            program
         })
     }
 }

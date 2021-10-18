@@ -5,9 +5,7 @@
 use std::{collections::HashSet, iter::once};
 
 use crate::{
-    compiler::{
-        Compile, Compiler, Instruction, InstructionPointer, NativeFunctionRegistry, Program,
-    },
+    compiler::{Compile, Compiler, Instruction, InstructionPointer, Program},
     core::{
         Applicable, Arity, DependencyList, EvaluationCache, Expression, ExpressionFactory,
         GraphNode, HeapAllocator, SerializeJson, StackOffset, VarArgs,
@@ -17,33 +15,33 @@ use crate::{
 
 #[derive(Hash, Eq, PartialEq, Debug)]
 pub struct CompiledFunctionTerm {
-    hash: HashId,
     address: InstructionPointer,
-    num_args: StackOffset,
-    variadic: bool,
+    hash: HashId,
+    required_args: StackOffset,
+    optional_args: StackOffset,
 }
 impl CompiledFunctionTerm {
     pub fn new(
-        hash: HashId,
         address: InstructionPointer,
-        num_args: StackOffset,
-        variadic: bool,
+        hash: HashId,
+        required_args: StackOffset,
+        optional_args: StackOffset,
     ) -> Self {
         Self {
-            hash,
             address,
-            num_args,
-            variadic,
+            hash,
+            required_args,
+            optional_args,
         }
     }
     pub fn address(&self) -> InstructionPointer {
         self.address
     }
-    pub fn num_args(&self) -> StackOffset {
-        self.num_args
+    pub fn required_args(&self) -> StackOffset {
+        self.required_args
     }
-    pub fn variadic(&self) -> bool {
-        self.variadic
+    pub fn optional_args(&self) -> StackOffset {
+        self.optional_args
     }
 }
 impl GraphNode for CompiledFunctionTerm {
@@ -65,15 +63,7 @@ impl GraphNode for CompiledFunctionTerm {
 }
 impl<T: Expression> Applicable<T> for CompiledFunctionTerm {
     fn arity(&self) -> Option<Arity> {
-        Some(Arity::from(
-            0,
-            self.num_args,
-            if self.variadic {
-                Some(VarArgs::Lazy)
-            } else {
-                None
-            },
-        ))
+        Some(Arity::lazy(self.required_args, self.optional_args, false))
     }
     fn apply(
         &self,
@@ -96,13 +86,10 @@ impl<T: Expression + Compile<T>> Compile<T> for CompiledFunctionTerm {
         _factory: &impl ExpressionFactory<T>,
         _allocator: &impl HeapAllocator<T>,
         _compiler: &mut Compiler,
-    ) -> Result<(Program, NativeFunctionRegistry<T>), String> {
-        Ok((
-            Program::new(once(Instruction::PushFunction {
-                target: self.address,
-            })),
-            NativeFunctionRegistry::default(),
-        ))
+    ) -> Result<Program, String> {
+        Ok(Program::new(once(Instruction::PushFunction {
+            target: self.address,
+        })))
     }
 }
 impl std::fmt::Display for CompiledFunctionTerm {

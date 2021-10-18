@@ -6,8 +6,8 @@ use std::str::FromStr;
 
 use reflex::{
     core::{
-        Arity, Expression, ExpressionFactory, ExpressionList, HeapAllocator, NativeAllocator,
-        StringValue,
+        ArgType, Arity, Expression, ExpressionFactory, ExpressionList, FunctionArity,
+        HeapAllocator, NativeAllocator, StringValue,
     },
     lang::{create_struct, BuiltinTerm, NativeFunction, ValueTerm},
 };
@@ -52,14 +52,21 @@ pub fn json_parse<T: Expression>() -> NativeFunction<T> {
 }
 struct JsonParse {}
 impl JsonParse {
+    const NAME: &'static str = "JsonParse";
+    const UUID: &'static str = "6e8468d3-34cc-423c-a787-3d3e9154885d";
+    const ARITY: FunctionArity<1, 0> = FunctionArity {
+        required: [ArgType::Strict],
+        optional: [],
+        variadic: None,
+    };
     fn uid() -> Uuid {
-        Uuid::from_str("6e8468d3-34cc-423c-a787-3d3e9154885d").expect("Hardocded uuid value")
+        Uuid::from_str(Self::UUID).unwrap()
     }
     fn name() -> Option<&'static str> {
-        Some("JsonParse")
+        Some(Self::NAME)
     }
     fn arity() -> Arity {
-        Arity::from(1, 0, None)
+        Arity::from(&Self::ARITY)
     }
     fn apply<T: Expression>(
         args: ExpressionList<T>,
@@ -91,14 +98,21 @@ pub fn json_stringify<T: Expression>() -> NativeFunction<T> {
 }
 struct JsonStringify {}
 impl JsonStringify {
+    const NAME: &'static str = "JsonStringify";
+    const UUID: &'static str = "b0a2caca-1101-402c-a21e-bccdf276e44c";
+    const ARITY: FunctionArity<1, 0> = FunctionArity {
+        required: [ArgType::Strict],
+        optional: [],
+        variadic: None,
+    };
     fn uid() -> Uuid {
-        Uuid::from_str("b0a2caca-1101-402c-a21e-bccdf276e44c").expect("Hardcoded uuid value")
+        Uuid::from_str(Self::UUID).unwrap()
     }
     fn name() -> Option<&'static str> {
-        Some("JsonStringify")
+        Some(Self::NAME)
     }
     fn arity() -> Arity {
-        Arity::from(1, 0, None)
+        Arity::from(&Self::ARITY)
     }
     fn apply<T: Expression>(
         args: ExpressionList<T>,

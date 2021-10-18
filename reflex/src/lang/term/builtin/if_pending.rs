@@ -2,13 +2,21 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use crate::core::{
-    Applicable, Arity, EvaluationCache, Expression, ExpressionFactory, HeapAllocator, SignalType,
+    Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory, FunctionArity,
+    HeapAllocator, SignalType,
 };
 
 pub struct IfPending {}
+impl IfPending {
+    const ARITY: FunctionArity<2, 0> = FunctionArity {
+        required: [ArgType::Eager, ArgType::Lazy],
+        optional: [],
+        variadic: None,
+    };
+}
 impl<T: Expression> Applicable<T> for IfPending {
     fn arity(&self) -> Option<Arity> {
-        Some(Arity::from(0, 2, None))
+        Some(Arity::from(&Self::ARITY))
     }
     fn apply(
         &self,
@@ -18,9 +26,6 @@ impl<T: Expression> Applicable<T> for IfPending {
         _cache: &mut impl EvaluationCache<T>,
     ) -> Result<T, String> {
         let mut args = args.into_iter();
-        if args.len() != 2 {
-            return Err(format!("Expected 2 arguments, received {}", args.len()));
-        }
         let target = args.next().unwrap();
         let fallback = args.next().unwrap();
         if let Some(signal) = factory.match_signal_term(&target) {

@@ -5,7 +5,10 @@
 use std::str::FromStr;
 
 use reflex::{
-    core::{Arity, Expression, ExpressionFactory, ExpressionList, NativeAllocator, VarArgs},
+    core::{
+        ArgType, Arity, Expression, ExpressionFactory, ExpressionList, FunctionArity,
+        NativeAllocator,
+    },
     lang::{deduplicate_hashset_entries, BuiltinTerm, NativeFunction},
 };
 use uuid::Uuid;
@@ -24,14 +27,21 @@ pub fn set_constructor<T: Expression>() -> NativeFunction<T> {
 }
 struct SetConstructor {}
 impl SetConstructor {
+    const NAME: &'static str = "SetConstructor";
+    const UUID: &'static str = "c87cb7a9-a926-4f78-b38b-5be67ac83baf";
+    const ARITY: FunctionArity<0, 1> = FunctionArity {
+        required: [],
+        optional: [ArgType::Strict],
+        variadic: None,
+    };
     fn uid() -> Uuid {
-        Uuid::from_str("c87cb7a9-a926-4f78-b38b-5be67ac83baf").expect("Hardcoded uuid value")
+        Uuid::from_str(Self::UUID).unwrap()
     }
     fn name() -> Option<&'static str> {
-        Some("SetConstructor")
+        Some(Self::NAME)
     }
     fn arity() -> Arity {
-        Arity::from(0, 0, Some(VarArgs::Eager))
+        Arity::from(&Self::ARITY)
     }
     fn apply<T: Expression>(
         args: ExpressionList<T>,
@@ -39,33 +49,38 @@ impl SetConstructor {
         allocator: &dyn NativeAllocator<T>,
     ) -> Result<T, String> {
         let mut args = args.into_iter();
-        if args.len() == 0 {
+        let values = args.next().unwrap();
+        if is_null_value_term(&values, &factory) {
             Ok(factory.create_hashset_term(allocator.create_empty_list()))
-        } else {
-            let values = args.next().unwrap();
-            if let Some(values) = factory.match_vector_term(&values) {
-                let values = values.items().iter().cloned().collect::<Vec<_>>();
-                let has_dynamic_values = values.iter().any(|value| !value.is_static());
-                if has_dynamic_values {
-                    Ok(factory.create_application_term(
-                        factory.create_builtin_term(BuiltinTerm::CollectHashSet),
-                        allocator.create_list(values),
-                    ))
-                } else {
-                    let values = match deduplicate_hashset_entries(&values) {
-                        Some(values) => values,
-                        _ => values,
-                    };
-                    Ok(factory.create_hashset_term(allocator.create_list(values)))
-                }
-            } else {
-                Err(format!(
-                    "Invalid Set constructor: Expected array of values, received {}",
-                    values,
+        } else if let Some(values) = factory.match_vector_term(&values) {
+            let values = values.items().iter().cloned().collect::<Vec<_>>();
+            let has_dynamic_values = values.iter().any(|value| !value.is_static());
+            if has_dynamic_values {
+                Ok(factory.create_application_term(
+                    factory.create_builtin_term(BuiltinTerm::CollectHashSet),
+                    allocator.create_list(values),
                 ))
+            } else {
+                let values = match deduplicate_hashset_entries(&values) {
+                    Some(values) => values,
+                    _ => values,
+                };
+                Ok(factory.create_hashset_term(allocator.create_list(values)))
             }
+        } else {
+            Err(format!(
+                "Invalid Set constructor: Expected array of values, received {}",
+                values,
+            ))
         }
     }
+}
+
+fn is_null_value_term<T: Expression>(expression: &T, factory: &impl ExpressionFactory<T>) -> bool {
+    factory
+        .match_value_term(expression)
+        .and_then(|value| value.match_null())
+        .is_some()
 }
 
 #[cfg(test)]

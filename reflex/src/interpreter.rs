@@ -1,7 +1,11 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use std::{collections::hash_map::DefaultHasher, hash::Hasher, iter::once};
+use std::{
+    collections::{hash_map::DefaultHasher, HashMap},
+    hash::Hasher,
+    iter::once,
+};
 
 mod cache;
 pub use cache::{
@@ -13,15 +17,15 @@ pub use stack::{CallStack, VariableStack};
 
 use crate::{
     cache::NoopCache,
-    compiler::{Instruction, InstructionPointer, NativeFunctionRegistry, Program},
+    compiler::{Instruction, InstructionPointer, Program},
     core::{
-        Applicable, DependencyList, DynamicState, EvaluationResult, Expression, ExpressionFactory,
-        ExpressionList, HeapAllocator, Reducible, Rewritable, SignalType,
+        Applicable, ArgType, Arity, DependencyList, DynamicState, EvaluationResult, Expression,
+        ExpressionFactory, ExpressionList, HeapAllocator, Reducible, Rewritable,
     },
     hash::HashId,
     lang::{
-        get_short_circuit_signal, BuiltinTerm, CompiledFunctionTerm, ValueTerm,
-        WithCompiledBuiltins,
+        get_combined_short_circuit_signal, get_num_short_circuit_signals, get_short_circuit_signal,
+        CompiledFunctionTerm, NativeFunctionId, ValueTerm,
     },
 };
 
@@ -31,6 +35,7 @@ enum ExecutionResult<T: Expression> {
     Jump(InstructionPointer),
     CallFunction {
         target_address: InstructionPointer,
+        num_args: usize,
         caller_address: InstructionPointer,
         resume_address: InstructionPointer,
     },
@@ -38,9 +43,14 @@ enum ExecutionResult<T: Expression> {
     ResolveExpression,
     ResolveApplicationTarget {
         target: T,
-        args: Vec<T>,
+        args: ExpressionList<T>,
     },
-    ResolveList(ExpressionList<T>),
+    ResolveApplicationArgs {
+        target: T,
+        args: Vec<T>,
+        caller_address: InstructionPointer,
+        resume_address: InstructionPointer,
+    },
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -70,15 +80,14 @@ impl InterpreterOptions {
     }
 }
 
-pub fn execute<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T>>(
+pub fn execute<'a, T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + 'a>(
     cache_key: HashId,
     program: &Program,
     entry_point: InstructionPointer,
     state: &impl DynamicState<T>,
-    factory: &(impl ExpressionFactory<T> + WithCompiledBuiltins),
+    factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-    builtins: &[(BuiltinTerm, InstructionPointer)],
-    plugins: &NativeFunctionRegistry<T>,
+    plugins: impl IntoIterator<Item = &'a (NativeFunctionId, T)>,
     options: &InterpreterOptions,
     cache: &impl InterpreterCache<T>,
 ) -> Result<(EvaluationResult<T>, CacheEntries<T>), String> {
@@ -90,15 +99,8 @@ pub fn execute<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T>>(
         &mut stack,
         &mut call_stack,
         factory,
-        &factory.with_compiled_builtins(
-            builtins,
-            &plugins
-                .iter()
-                .map(|(target, address)| (target.uid(), target.arity(), *address))
-                .collect::<Vec<_>>(),
-        ),
         allocator,
-        plugins,
+        &plugins.into_iter().cloned().collect(),
         cache,
         &mut cache_entries,
         options.debug_instructions,
@@ -124,10 +126,9 @@ fn evaluate_program_loop<T: Expression + Rewritable<T> + Reducible<T> + Applicab
     state: &impl DynamicState<T>,
     stack: &mut VariableStack<T>,
     call_stack: &mut CallStack<T>,
-    default_factory: &impl ExpressionFactory<T>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-    plugins: &NativeFunctionRegistry<T>,
+    plugins: &HashMap<NativeFunctionId, T>,
     cache: &impl InterpreterCache<T>,
     cache_entries: &mut CacheEntries<T>,
     debug_instructions: bool,
@@ -161,7 +162,6 @@ fn evaluate_program_loop<T: Expression + Rewritable<T> + Reducible<T> + Applicab
                     state,
                     stack,
                     call_stack,
-                    default_factory,
                     factory,
                     allocator,
                     plugins,
@@ -186,10 +186,7 @@ fn evaluate_program_loop<T: Expression + Rewritable<T> + Reducible<T> + Applicab
                     }
                     ExecutionResult::ResolveApplicationTarget { target, args } => {
                         if target.is_static() {
-                            stack.push(factory.create_application_term(
-                                target.clone(),
-                                allocator.create_list(args),
-                            ));
+                            stack.push(factory.create_application_term(target, args));
                             continue;
                         } else {
                             let target_hash = target.id();
@@ -199,21 +196,40 @@ fn evaluate_program_loop<T: Expression + Rewritable<T> + Reducible<T> + Applicab
                             continue;
                         }
                     }
-                    ExecutionResult::ResolveList(items) => {
-                        call_stack.enter_list(items.into_values(), None);
-                        continue;
+                    ExecutionResult::ResolveApplicationArgs {
+                        target,
+                        args,
+                        caller_address,
+                        resume_address,
+                    } => {
+                        let arity = get_function_arity(&target)?;
+                        let results =
+                            fill_resolved_args(&args, &arity, Vec::with_capacity(args.len()));
+                        let next_arg = args.get(results.len()).unwrap().clone();
+                        call_stack
+                            .update_program_counter(call_stack.evaluate_arg_program_counter());
+                        call_stack.enter_application_arg_list(
+                            target,
+                            arity,
+                            caller_address,
+                            resume_address,
+                            args,
+                            results,
+                        );
+                        let expression_hash = next_arg.id();
+                        stack.push(next_arg);
+                        call_stack.enter_expression(expression_hash);
                     }
                     ExecutionResult::Advance => {
                         let previous_address = call_stack.program_counter();
-                        let next_address = call_stack.next_program_counter();
                         let is_leaving_evaluation = call_stack
                             .lookup_instruction(previous_address)
                             .map(|instruction| match instruction {
-                                Instruction::Evaluate | Instruction::EvaluateArgList => true,
+                                Instruction::Evaluate => true,
                                 _ => false,
                             })
                             .unwrap_or(false);
-                        if is_leaving_evaluation {
+                        let next_address = if is_leaving_evaluation {
                             let value = stack.peek().unwrap();
                             while let Some((hash, dependencies, subexpressions)) =
                                 call_stack.pop_expression_stack(previous_address)
@@ -239,24 +255,58 @@ fn evaluate_program_loop<T: Expression + Rewritable<T> + Reducible<T> + Applicab
                                     allocator.create_list(args),
                                 ));
                                 continue;
-                            } else if let Some((items, results, dependencies, subexpressions)) =
-                                call_stack.pop_list_stack(previous_address)
+                            } else if let Some((
+                                target,
+                                arity,
+                                caller_address,
+                                resume_address,
+                                args,
+                                results,
+                                dependencies,
+                                subexpressions,
+                            )) = call_stack.pop_application_arg_list_stack()
                             {
                                 call_stack.add_state_dependencies(dependencies);
                                 call_stack.add_subexpressions(subexpressions);
                                 let resolved_item = stack.pop().unwrap();
                                 let mut results = results;
                                 results.push(resolved_item);
-                                if results.len() < items.len() {
-                                    call_stack.enter_list(items, Some(results));
+                                let results = fill_resolved_args(&args, &arity, results);
+                                if results.len() < args.len() {
+                                    let next_arg = args.get(results.len()).unwrap().clone();
+                                    call_stack.enter_application_arg_list(
+                                        target,
+                                        arity,
+                                        caller_address,
+                                        resume_address,
+                                        args,
+                                        results,
+                                    );
+                                    let expression_hash = next_arg.id();
+                                    stack.push(next_arg);
+                                    call_stack.enter_expression(expression_hash);
                                     continue;
+                                } else if let Some(signal) =
+                                    get_short_circuit_signal(&results, &arity, factory, allocator)
+                                {
+                                    stack.push(signal);
+                                    resume_address
                                 } else {
-                                    let resolved_list =
-                                        factory.create_tuple_term(allocator.create_list(results));
-                                    stack.push(resolved_list);
+                                    let result = apply_function(
+                                        &target,
+                                        results.into_iter(),
+                                        factory,
+                                        allocator,
+                                    )?;
+                                    stack.push(result);
+                                    resume_address
                                 }
+                            } else {
+                                call_stack.next_program_counter()
                             }
-                        }
+                        } else {
+                            call_stack.next_program_counter()
+                        };
                         call_stack.update_program_counter(next_address);
                         let is_entering_evaluation = call_stack
                             .current_instruction()
@@ -275,26 +325,24 @@ fn evaluate_program_loop<T: Expression + Rewritable<T> + Reducible<T> + Applicab
                         continue;
                     }
                     ExecutionResult::CallFunction {
+                        num_args,
                         target_address,
                         caller_address,
                         resume_address,
                     } => {
-                        if let Some((target_hash, num_args, variadic)) = call_stack
+                        if let Some((target_hash, required_args, optional_args)) = call_stack
                             .lookup_instruction(target_address)
                             .and_then(|target| match target {
-                                Instruction::Function {
+                                &Instruction::Function {
                                     hash,
-                                    arity,
-                                    variadic,
-                                } => Some((hash, *arity, *variadic)),
+                                    required_args,
+                                    optional_args,
+                                } => Some((hash, required_args, optional_args)),
                                 _ => None,
                             })
                         {
-                            let variadic_offset = if variadic { 1 } else { 0 };
-                            let hash = generate_function_call_hash(
-                                target_hash,
-                                stack.slice(num_args + variadic_offset),
-                            );
+                            let hash =
+                                generate_function_call_hash(&target_hash, stack.slice(num_args));
                             if let Some((cached_result, updated_cache_entry)) =
                                 retrieve_cached_result(&hash, state, cache, cache_entries)
                             {
@@ -304,28 +352,25 @@ fn evaluate_program_loop<T: Expression + Rewritable<T> + Reducible<T> + Applicab
                                 let (result, dependencies) = cached_result.into_parts();
                                 call_stack.add_subexpression(hash);
                                 call_stack.add_state_dependencies(dependencies.iter());
-                                stack.pop_multiple(num_args + variadic_offset);
+                                stack.pop_multiple(num_args);
                                 stack.push(result);
 
-                                let is_resuming_list_evaluation = resume_address == caller_address
-                                    && call_stack
-                                        .lookup_instruction(resume_address)
-                                        .map(is_evaluate_list_instruction)
-                                        .unwrap_or(false);
-                                if is_resuming_list_evaluation {
-                                    process_next_list_item(
-                                        stack,
-                                        call_stack,
-                                        resume_address,
-                                        factory,
-                                        allocator,
-                                    );
+                                let is_resuming_arg_evaluation = resume_address == caller_address
+                                    && call_stack.peek_application_arg_list_stack().is_some();
+                                if is_resuming_arg_evaluation {
+                                    process_next_list_item(stack, call_stack, factory, allocator)?;
                                     continue;
                                 } else {
                                     call_stack.update_program_counter(resume_address);
                                     continue;
                                 }
                             } else {
+                                let num_unspecified_optional_args =
+                                    required_args + optional_args - num_args;
+                                stack.push_multiple(
+                                    (0..num_unspecified_optional_args)
+                                        .map(|_| factory.create_value_term(ValueTerm::Null)),
+                                );
                                 call_stack.enter_function(
                                     hash,
                                     target_address,
@@ -376,19 +421,10 @@ fn evaluate_program_loop<T: Expression + Rewritable<T> + Reducible<T> + Applicab
                                 }
                             }
 
-                            let is_resuming_list_evaluation = resume_address == caller_address
-                                && call_stack
-                                    .lookup_instruction(resume_address)
-                                    .map(is_evaluate_list_instruction)
-                                    .unwrap_or(false);
-                            if is_resuming_list_evaluation {
-                                process_next_list_item(
-                                    stack,
-                                    call_stack,
-                                    resume_address,
-                                    factory,
-                                    allocator,
-                                );
+                            let is_resuming_arg_evaluation = resume_address == caller_address
+                                && call_stack.peek_application_arg_list_stack().is_some();
+                            if is_resuming_arg_evaluation {
+                                process_next_list_item(stack, call_stack, factory, allocator)?;
                                 continue;
                             }
 
@@ -406,47 +442,14 @@ fn evaluate_program_loop<T: Expression + Rewritable<T> + Reducible<T> + Applicab
     }
 }
 
-fn process_next_list_item<T: Expression>(
-    stack: &mut VariableStack<T>,
-    call_stack: &mut CallStack<T>,
-    resume_address: InstructionPointer,
-    factory: &impl ExpressionFactory<T>,
-    allocator: &impl HeapAllocator<T>,
-) {
-    let (items, results, dependencies, subexpressions) =
-        call_stack.pop_list_stack(resume_address).unwrap();
-    call_stack.add_state_dependencies(dependencies);
-    call_stack.add_subexpressions(subexpressions);
-    let resolved_item = stack.pop().unwrap();
-    if !resolved_item.is_static() {
-        let current_index = results.len();
-        let mut items = items;
-        items[current_index] = resolved_item;
-        call_stack.update_program_counter(resume_address);
-        call_stack.enter_list(items, Some(results));
-    } else {
-        let mut results = results;
-        results.push(resolved_item);
-        if results.len() < items.len() {
-            call_stack.update_program_counter(resume_address);
-            call_stack.enter_list(items, Some(results));
-        } else {
-            let resolved_list = factory.create_tuple_term(allocator.create_list(results));
-            stack.push(resolved_list);
-            call_stack.update_program_counter(resume_address.advance());
-        }
-    }
-}
-
 fn evaluate_instruction<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T>>(
     instruction: &Instruction,
     state: &impl DynamicState<T>,
     stack: &mut VariableStack<T>,
     call_stack: &CallStack<T>,
-    default_factory: &impl ExpressionFactory<T>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-    plugins: &NativeFunctionRegistry<T>,
+    plugins: &HashMap<NativeFunctionId, T>,
     cache: &impl InterpreterCache<T>,
     cache_entries: &mut CacheEntries<T>,
 ) -> Result<(ExecutionResult<T>, DependencyList), String> {
@@ -508,17 +511,16 @@ fn evaluate_instruction<T: Expression + Rewritable<T> + Reducible<T> + Applicabl
         Instruction::PushFunction { target } => {
             let target_address = *target;
             match call_stack.lookup_instruction(target_address) {
-                Some(Instruction::Function {
+                Some(&Instruction::Function {
                     hash,
-                    arity,
-                    variadic,
+                    required_args,
+                    optional_args,
                 }) => {
-                    let num_args = *arity;
                     stack.push(factory.create_compiled_function_term(
-                        *hash,
                         target_address,
-                        num_args,
-                        *variadic,
+                        hash,
+                        required_args,
+                        optional_args,
                     ));
                     Ok((ExecutionResult::Advance, DependencyList::empty()))
                 }
@@ -529,14 +531,14 @@ fn evaluate_instruction<T: Expression + Rewritable<T> + Reducible<T> + Applicabl
             }
         }
         Instruction::PushBuiltin { target } => {
-            stack.push(default_factory.create_builtin_term(*target));
+            stack.push(factory.create_builtin_term(*target));
             Ok((ExecutionResult::Advance, DependencyList::empty()))
         }
         Instruction::PushNative { target } => {
             let uid = *target;
-            match plugins.get(uid) {
+            match plugins.get(&uid) {
                 Some(target) => {
-                    stack.push(default_factory.create_native_function_term(target.clone()));
+                    stack.push(target.clone());
                     Ok((ExecutionResult::Advance, DependencyList::empty()))
                 }
                 None => Err(format!("Invalid native function id: {}", uid)),
@@ -607,13 +609,15 @@ fn evaluate_instruction<T: Expression + Rewritable<T> + Reducible<T> + Applicabl
                 DependencyList::empty(),
             ))
         }
-        Instruction::Call { target } => {
+        Instruction::Call { target, num_args } => {
             let target_address = *target;
+            let num_args = *num_args;
             let caller_address = call_stack.program_counter();
             let resume_address = call_stack.next_program_counter();
             Ok((
                 ExecutionResult::CallFunction {
                     target_address,
+                    num_args,
                     caller_address,
                     resume_address,
                 },
@@ -634,105 +638,42 @@ fn evaluate_instruction<T: Expression + Rewritable<T> + Reducible<T> + Applicabl
                     let target_address = compiled_target.address();
                     let caller_address = call_stack.program_counter();
                     let resume_address = call_stack.next_program_counter();
+                    let num_combined_args = num_args + partial_args.len();
                     if !partial_args.is_empty() {
-                        stack.splice(num_args, partial_args.into_iter().cloned());
+                        stack.splice(num_args, partial_args);
                     }
                     Ok((
                         ExecutionResult::CallFunction {
                             target_address,
+                            num_args: num_combined_args,
                             caller_address,
                             resume_address,
                         },
                         DependencyList::empty(),
                     ))
                 } else {
-                    match target.arity() {
-                        None => Err(format!("Invalid function application target: {}", target)),
-                        Some(arity) => {
-                            let variadic_args = if arity.variadic().is_some() {
-                                let variadic_args = stack.pop().unwrap();
-                                if let Some(args) = factory.match_tuple_term(&variadic_args) {
-                                    Ok(Some(allocator.clone_list(args.fields())))
-                                } else {
-                                    Err(format!(
-                                        "{}: Expected variadic argument list, received {}",
-                                        target, variadic_args
-                                    ))
-                                }
-                            } else {
-                                Ok(None)
-                            };
-                            match variadic_args {
-                                Err(error) => Err(error),
-                                Ok(variadic_args) => {
-                                    let variadic_offset =
-                                        if variadic_args.is_some() { 1 } else { 0 };
-                                    let num_positional_args = num_args - variadic_offset;
-                                    let positional_args = stack.pop_multiple(num_positional_args);
-                                    let args = match variadic_args {
-                                        None => allocator.create_list(positional_args),
-                                        Some(variadic_args) => allocator.create_sized_list(
-                                            num_positional_args + variadic_args.len(),
-                                            positional_args.into_iter().chain(variadic_args),
-                                        ),
-                                    };
-                                    let result = if args.len() < arity.required() {
-                                        create_error_signal(
-                                            format!(
-                                                "{}: expected {}{} arguments, received {}",
-                                                target,
-                                                arity.required(),
-                                                if arity.variadic().is_some() {
-                                                    " or more"
-                                                } else {
-                                                    ""
-                                                },
-                                                num_args,
-                                            ),
-                                            factory,
-                                            allocator,
-                                        )
-                                    } else if let Some(signal) = get_short_circuit_signal(
-                                        args.as_slice(),
-                                        &arity,
-                                        factory,
-                                        allocator,
-                                    ) {
-                                        if let Some(_) =
-                                            factory.match_signal_transformer_term(&target)
-                                        {
-                                            match target.apply(
-                                                vec![signal],
-                                                factory,
-                                                allocator,
-                                                &mut NoopCache::default(),
-                                            ) {
-                                                Ok(result) => result,
-                                                Err(error) => {
-                                                    create_error_signal(error, factory, allocator)
-                                                }
-                                            }
-                                        } else {
-                                            signal
-                                        }
-                                    } else {
-                                        match target.apply(
-                                            args.iter().cloned(),
-                                            factory,
-                                            allocator,
-                                            &mut NoopCache::default(),
-                                        ) {
-                                            Ok(result) => result,
-                                            Err(error) => {
-                                                create_error_signal(error, factory, allocator)
-                                            }
-                                        }
-                                    };
-                                    stack.push(result);
-                                    Ok((ExecutionResult::Advance, DependencyList::empty()))
-                                }
-                            }
-                        }
+                    let arity = get_function_arity(&target)?;
+                    if has_unresolved_args(&arity, stack.slice(num_args)) {
+                        let args = stack.pop_multiple(num_args);
+                        Ok((
+                            ExecutionResult::ResolveApplicationArgs {
+                                target,
+                                args: args.into_iter().collect(),
+                                caller_address: call_stack.program_counter(),
+                                resume_address: call_stack.next_program_counter(),
+                            },
+                            DependencyList::empty(),
+                        ))
+                    } else if let Some(signal) =
+                        get_short_circuit_signal(stack.slice(num_args), &arity, factory, allocator)
+                    {
+                        stack.push(signal);
+                        Ok((ExecutionResult::Advance, DependencyList::empty()))
+                    } else {
+                        let args = stack.pop_multiple(num_args);
+                        let result = apply_function(&target, args.into_iter(), factory, allocator)?;
+                        stack.push(result);
+                        Ok((ExecutionResult::Advance, DependencyList::empty()))
                     }
                 }
             }
@@ -756,41 +697,6 @@ fn evaluate_instruction<T: Expression + Rewritable<T> + Reducible<T> + Applicabl
                 )
             }
         },
-        Instruction::EvaluateArgList => {
-            if let Some(item) = call_stack.peek_next_list_item(call_stack.program_counter()) {
-                evaluate_expression(
-                    item,
-                    state,
-                    stack,
-                    call_stack,
-                    factory,
-                    allocator,
-                    cache,
-                    cache_entries,
-                )
-            } else {
-                match stack.pop() {
-                    Some(value) => {
-                        if let Some(arg_list) = factory.match_tuple_term(&value) {
-                            if arg_list.fields().is_empty() {
-                                stack.push(value);
-                                Ok((ExecutionResult::Advance, DependencyList::empty()))
-                            } else {
-                                let unresolved_values = allocator.clone_list(arg_list.fields());
-                                Ok((
-                                    ExecutionResult::ResolveList(unresolved_values),
-                                    DependencyList::empty(),
-                                ))
-                            }
-                        } else {
-                            Err(format!("Expected <tuple>, received {}", value))
-                        }
-                    }
-                    None => Err(String::from("No items on stack")),
-                }
-                .map_err(|err| format!("Unable to perform multiple evaluation: {}", err))
-            }
-        }
         Instruction::ConstructApplication { num_args } => {
             let num_args = *num_args;
             if stack.len() < (1 + num_args) {
@@ -905,21 +811,10 @@ fn evaluate_instruction<T: Expression + Rewritable<T> + Reducible<T> + Applicabl
                 Ok((ExecutionResult::Advance, DependencyList::empty()))
             }
         }
-        Instruction::ConstructSignalTransformer => {
-            if stack.len() < 1 {
-                Err(format!(
-                    "Unable to create signal transformer: insufficient arguments on stack",
-                ))
-            } else {
-                let transform = stack.pop().unwrap();
-                stack.push(factory.create_signal_transformer_term(transform));
-                Ok((ExecutionResult::Advance, DependencyList::empty()))
-            }
-        }
     }
 }
 
-fn evaluate_expression<T: Expression>(
+fn evaluate_expression<T: Expression + Applicable<T>>(
     expression: &T,
     state: &impl DynamicState<T>,
     stack: &mut VariableStack<T>,
@@ -947,13 +842,16 @@ fn evaluate_expression<T: Expression>(
             let target = application.target();
             let args = application.args();
             let (target, partial_args) = extract_partial_args(target, factory);
-            let num_args = partial_args.len() + args.len();
-            let combined_args = partial_args.into_iter().chain(args.iter()).cloned();
+            let combined_args = combine_slices(partial_args.as_slice(), args.as_slice());
             if !target.is_static() {
                 Ok((
                     ExecutionResult::ResolveApplicationTarget {
                         target: target.clone(),
-                        args: combined_args.collect(),
+                        args: if partial_args.len() > 0 {
+                            allocator.create_list(combined_args.into_iter().cloned())
+                        } else {
+                            allocator.clone_list(args)
+                        },
                     },
                     DependencyList::empty(),
                 ))
@@ -964,37 +862,50 @@ fn evaluate_expression<T: Expression>(
                 let target_address = compiled_function.address();
                 let caller_address = call_stack.program_counter();
                 let resume_address = call_stack.program_counter();
-                if compiled_function.variadic() {
-                    let num_positional_args = compiled_function.num_args();
-                    let num_variadic_args = num_args - num_positional_args;
-                    let mut combined_args = combined_args;
-                    let mut positional_args = Vec::with_capacity(num_positional_args);
-                    for _ in 0..num_positional_args {
-                        positional_args.push(combined_args.next().unwrap());
-                    }
-                    stack.push_multiple(positional_args);
-                    stack.push(factory.create_tuple_term(
-                        allocator.create_sized_list(num_variadic_args, combined_args),
-                    ));
-                } else {
-                    stack.push_multiple(combined_args);
-                }
+                let num_args = combined_args.len();
+                stack.push_multiple(combined_args.into_iter().cloned());
                 Ok((
                     ExecutionResult::CallFunction {
                         target_address,
+                        num_args,
                         caller_address,
                         resume_address,
                     },
                     DependencyList::empty(),
                 ))
-            } else if let Some(constructor) = factory.match_constructor_term(target) {
-                stack.push(factory.create_struct_term(
-                    allocator.clone_struct_prototype(constructor.prototype()),
-                    allocator.create_sized_list(num_args, combined_args),
-                ));
-                Ok((ExecutionResult::Advance, DependencyList::empty()))
             } else {
-                Err(format!("Invalid function application target: {}", target))
+                let arity = get_function_arity(target)?;
+                if has_unresolved_args(&arity, combined_args.iter()) {
+                    Ok((
+                        ExecutionResult::ResolveApplicationArgs {
+                            target: target.clone(),
+                            args: combined_args.into_iter().cloned().collect(),
+                            caller_address: call_stack.program_counter(),
+                            resume_address: call_stack.program_counter(),
+                        },
+                        DependencyList::empty(),
+                    ))
+                } else {
+                    if let Some(signal) = get_combined_short_circuit_signal(
+                        get_num_short_circuit_signals(combined_args.iter(), &arity, factory),
+                        combined_args.iter(),
+                        &arity,
+                        factory,
+                        allocator,
+                    ) {
+                        stack.push(signal);
+                        Ok((ExecutionResult::Advance, DependencyList::empty()))
+                    } else {
+                        let result = apply_function(
+                            target,
+                            combined_args.into_iter().cloned(),
+                            factory,
+                            allocator,
+                        )?;
+                        stack.push(result);
+                        Ok((ExecutionResult::ResolveExpression, DependencyList::empty()))
+                    }
+                }
             }
         } else if let Some(expression) = factory.match_static_variable_term(expression) {
             match stack.get(expression.offset()).cloned() {
@@ -1027,6 +938,131 @@ fn evaluate_expression<T: Expression>(
     }
 }
 
+fn get_function_arity<T: Expression + Applicable<T>>(target: &T) -> Result<Arity, String> {
+    target
+        .arity()
+        .ok_or_else(|| format!("Invalid function application target: {}", target))
+}
+
+fn has_unresolved_args<'a, T: Expression + 'a>(
+    arity: &Arity,
+    args: impl IntoIterator<Item = &'a T>,
+) -> bool {
+    args.into_iter()
+        .zip(arity.iter())
+        .any(|(arg, arg_type)| match arg_type {
+            ArgType::Lazy => false,
+            ArgType::Strict | ArgType::Eager => !arg.is_static(),
+        })
+}
+
+fn apply_function<T: Expression + Applicable<T>>(
+    target: &T,
+    args: impl ExactSizeIterator<Item = T>,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> Result<T, String> {
+    let arity = get_function_arity(target)?;
+    if args.len() < arity.required().len() {
+        return Err(format!(
+            "{}: Expected {} {}, received {}",
+            target,
+            arity.required().len(),
+            if arity.optional().len() > 0 || arity.variadic().is_some() {
+                "or more arguments"
+            } else if arity.required().len() != 1 {
+                "arguments"
+            } else {
+                "argument"
+            },
+            args.len(),
+        ));
+    }
+    // TODO: distinguish between type errors vs runtime errors, and wrap runtime errors as signals
+    target.apply(args, factory, allocator, &mut NoopCache::default())
+}
+
+fn process_next_list_item<T: Expression + Applicable<T>>(
+    stack: &mut VariableStack<T>,
+    call_stack: &mut CallStack<T>,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> Result<(), String> {
+    let (
+        target,
+        arity,
+        caller_address,
+        resume_address,
+        args,
+        results,
+        dependencies,
+        subexpressions,
+    ) = call_stack.pop_application_arg_list_stack().unwrap();
+    call_stack.add_state_dependencies(dependencies);
+    call_stack.add_subexpressions(subexpressions);
+    let resolved_item = stack.pop().unwrap();
+    if !resolved_item.is_static() {
+        let next_arg = resolved_item;
+        call_stack.enter_application_arg_list(
+            target,
+            arity,
+            caller_address,
+            resume_address,
+            args,
+            results,
+        );
+        let expression_hash = next_arg.id();
+        stack.push(next_arg);
+        call_stack.enter_expression(expression_hash);
+    } else {
+        let mut results = results;
+        results.push(resolved_item);
+        let results = fill_resolved_args(&args, &arity, results);
+        if results.len() < args.len() {
+            let next_arg = args.get(results.len()).unwrap().clone();
+            call_stack.enter_application_arg_list(
+                target,
+                arity,
+                caller_address,
+                resume_address,
+                args,
+                results,
+            );
+            let expression_hash = next_arg.id();
+            stack.push(next_arg);
+            call_stack.enter_expression(expression_hash);
+        } else if let Some(signal) = get_short_circuit_signal(&results, &arity, factory, allocator)
+        {
+            stack.push(signal);
+            call_stack.update_program_counter(resume_address);
+        } else {
+            let result = apply_function(&target, results.into_iter(), factory, allocator)?;
+            stack.push(result);
+            call_stack.update_program_counter(resume_address);
+        }
+    }
+    Ok(())
+}
+
+fn fill_resolved_args<T: Expression>(args: &[T], arity: &Arity, results: Vec<T>) -> Vec<T> {
+    let num_resolved_args = results.len();
+    let mut results = results;
+    for (arg, arg_type) in args[num_resolved_args..]
+        .iter()
+        .zip(arity.partial(num_resolved_args).iter())
+    {
+        let is_resolved = match arg_type {
+            ArgType::Lazy => true,
+            ArgType::Strict | ArgType::Eager => arg.is_static(),
+        };
+        if !is_resolved {
+            break;
+        }
+        results.push(arg.clone());
+    }
+    results
+}
+
 fn retrieve_cached_result<T: Expression>(
     hash: &HashId,
     state: &impl DynamicState<T>,
@@ -1046,17 +1082,10 @@ fn is_evaluate_instruction(instruction: &Instruction) -> bool {
     }
 }
 
-fn is_evaluate_list_instruction(instruction: &Instruction) -> bool {
-    match instruction {
-        Instruction::EvaluateArgList => true,
-        _ => false,
-    }
-}
-
 fn match_compiled_application_target<'a, T: Expression>(
     target: &'a T,
     factory: &impl ExpressionFactory<T>,
-) -> Option<(&'a CompiledFunctionTerm, Vec<&'a T>)> {
+) -> Option<(&'a CompiledFunctionTerm, Vec<T>)> {
     let (target, partial_args) = extract_partial_args(target, factory);
     match factory.match_compiled_function_term(target) {
         Some(target) => Some((target, partial_args)),
@@ -1067,27 +1096,14 @@ fn match_compiled_application_target<'a, T: Expression>(
 fn extract_partial_args<'a, T: Expression>(
     target: &'a T,
     factory: &impl ExpressionFactory<T>,
-) -> (&'a T, Vec<&'a T>) {
+) -> (&'a T, Vec<T>) {
     let mut partial_args = Vec::new();
     let mut current = target;
     while let Some(partial) = factory.match_partial_application_term(current) {
-        partial_args.extend(partial.args());
+        partial_args.extend(partial.args().iter().cloned());
         current = partial.target();
     }
     (current, partial_args)
-}
-
-fn create_error_signal<T: Expression>(
-    message: String,
-    factory: &impl ExpressionFactory<T>,
-    allocator: &impl HeapAllocator<T>,
-) -> T {
-    factory.create_signal_term(allocator.create_signal_list(once(allocator.create_signal(
-        SignalType::Error,
-        allocator.create_unit_list(
-            factory.create_value_term(ValueTerm::String(allocator.create_string(message))),
-        ),
-    ))))
 }
 
 fn generate_function_call_hash<'a, T: Expression + 'a>(
@@ -1102,16 +1118,68 @@ fn generate_function_call_hash<'a, T: Expression + 'a>(
     hasher.finish()
 }
 
+fn combine_slices<'a, T>(left: &'a [T], right: &'a [T]) -> CombinedSlice<'a, T> {
+    CombinedSlice { left, right }
+}
+struct CombinedSlice<'a, T> {
+    left: &'a [T],
+    right: &'a [T],
+}
+impl<'a, T> CombinedSlice<'a, T> {
+    fn len(&self) -> usize {
+        self.left.len() + self.right.len()
+    }
+    fn iter(&self) -> CombinedSliceIterator<'a, T> {
+        CombinedSliceIterator {
+            left: self.left,
+            right: self.right,
+            index: 0,
+        }
+    }
+}
+impl<'a, T> IntoIterator for CombinedSlice<'a, T> {
+    type Item = &'a T;
+    type IntoIter = CombinedSliceIterator<'a, T>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+struct CombinedSliceIterator<'a, T> {
+    left: &'a [T],
+    right: &'a [T],
+    index: usize,
+}
+impl<'a, T> Iterator for CombinedSliceIterator<'a, T> {
+    type Item = &'a T;
+    fn next(&mut self) -> Option<Self::Item> {
+        let left_len = self.left.len();
+        if self.index < left_len {
+            let result = self.left.get(self.index);
+            self.index += 1;
+            result
+        } else if self.index - left_len < self.right.len() {
+            let result = self.right.get(self.index - left_len);
+            self.index += 1;
+            result
+        } else {
+            None
+        }
+    }
+}
+impl<'a, T> ExactSizeIterator for CombinedSliceIterator<'a, T> {
+    fn len(&self) -> usize {
+        self.left.len() + self.right.len()
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use std::iter::empty;
-
     use super::*;
 
     use crate::{
         allocator::DefaultAllocator,
         compiler::{hash_program_root, Compiler, CompilerMode, CompilerOptions},
-        core::{DependencyList, StateCache},
+        core::{DependencyList, SignalType, StateCache},
         lang::*,
         parser::sexpr::parse,
     };
@@ -1136,17 +1204,9 @@ mod tests {
             ),
         );
         let compiler = Compiler::new(CompilerOptions::unoptimized(), None);
-        let (program, builtins, plugins) = compiler
-            .compile(
-                &expression,
-                CompilerMode::Expression,
-                true,
-                empty(),
-                &factory,
-                &allocator,
-            )
-            .unwrap()
-            .into_parts();
+        let program = compiler
+            .compile(&expression, CompilerMode::Expression, &factory, &allocator)
+            .unwrap();
         let mut state = StateCache::default();
         let entry_point = InstructionPointer::default();
         let cache_key = hash_program_root(&program, &entry_point);
@@ -1157,8 +1217,7 @@ mod tests {
             &state,
             &factory,
             &allocator,
-            &builtins,
-            &plugins,
+            Vec::new(),
             &InterpreterOptions::default(),
             &mut cache,
         )
@@ -1181,8 +1240,7 @@ mod tests {
             &state,
             &factory,
             &allocator,
-            &builtins,
-            &plugins,
+            Vec::new(),
             &InterpreterOptions::default(),
             &mut cache,
         )
@@ -1208,28 +1266,19 @@ mod tests {
         )
         .unwrap();
         let compiler = Compiler::new(CompilerOptions::unoptimized(), None);
-        let (program, builtins, plugins) = compiler
-            .compile(
-                &expression,
-                CompilerMode::Expression,
-                true,
-                empty(),
-                &factory,
-                &allocator,
-            )
-            .unwrap()
-            .into_parts();
+        let program = compiler
+            .compile(&expression, CompilerMode::Expression, &factory, &allocator)
+            .unwrap();
         let entry_point = InstructionPointer::default();
         let cache_key = hash_program_root(&program, &entry_point);
         let (result, _) = execute(
             cache_key,
             &program,
-            InstructionPointer::default(),
+            entry_point,
             &mut StateCache::default(),
             &factory,
             &allocator,
-            &builtins,
-            &plugins,
+            Vec::new(),
             &InterpreterOptions::default(),
             &mut cache,
         )
@@ -1255,28 +1304,19 @@ mod tests {
         )
         .unwrap();
         let compiler = Compiler::new(CompilerOptions::unoptimized(), None);
-        let (program, builtins, plugins) = compiler
-            .compile(
-                &expression,
-                CompilerMode::Expression,
-                true,
-                empty(),
-                &factory,
-                &allocator,
-            )
-            .unwrap()
-            .into_parts();
+        let program = compiler
+            .compile(&expression, CompilerMode::Expression, &factory, &allocator)
+            .unwrap();
         let entry_point = InstructionPointer::default();
         let cache_key = hash_program_root(&program, &entry_point);
         let (result, _) = execute(
             cache_key,
             &program,
-            InstructionPointer::default(),
+            entry_point,
             &mut StateCache::default(),
             &factory,
             &allocator,
-            &builtins,
-            &plugins,
+            Vec::new(),
             &InterpreterOptions::default(),
             &mut cache,
         )
@@ -1310,8 +1350,7 @@ mod tests {
             &state,
             &factory,
             &allocator,
-            &Vec::new(),
-            &NativeFunctionRegistry::default(),
+            Vec::new(),
             &InterpreterOptions::default(),
             &mut cache,
         )
@@ -1361,8 +1400,7 @@ mod tests {
             &state,
             &factory,
             &allocator,
-            &Vec::new(),
-            &NativeFunctionRegistry::default(),
+            Vec::new(),
             &InterpreterOptions::default(),
             &mut cache,
         )
@@ -1388,17 +1426,9 @@ mod tests {
                 factory.create_value_term(ValueTerm::Int(4)),
             ),
         );
-        let (program, builtins, plugins) = Compiler::new(CompilerOptions::unoptimized(), None)
-            .compile(
-                &expression,
-                CompilerMode::Expression,
-                true,
-                empty(),
-                &factory,
-                &allocator,
-            )
-            .unwrap()
-            .into_parts();
+        let program = Compiler::new(CompilerOptions::unoptimized(), None)
+            .compile(&expression, CompilerMode::Expression, &factory, &allocator)
+            .unwrap();
         let state = StateCache::default();
         let entry_point = InstructionPointer::default();
         let cache_key = hash_program_root(&program, &entry_point);
@@ -1409,8 +1439,7 @@ mod tests {
             &state,
             &factory,
             &allocator,
-            &builtins,
-            &plugins,
+            Vec::new(),
             &InterpreterOptions::default(),
             &mut cache,
         )
@@ -1434,17 +1463,9 @@ mod tests {
                 factory.create_value_term(ValueTerm::Int(4)),
             ),
         );
-        let (program, builtins, plugins) = Compiler::new(CompilerOptions::unoptimized(), None)
-            .compile(
-                &expression,
-                CompilerMode::Expression,
-                true,
-                empty(),
-                &factory,
-                &allocator,
-            )
-            .unwrap()
-            .into_parts();
+        let program = Compiler::new(CompilerOptions::unoptimized(), None)
+            .compile(&expression, CompilerMode::Expression, &factory, &allocator)
+            .unwrap();
         let state = StateCache::default();
         let (result, _) = execute(
             cache_key,
@@ -1453,8 +1474,7 @@ mod tests {
             &state,
             &factory,
             &allocator,
-            &builtins,
-            &plugins,
+            Vec::new(),
             &InterpreterOptions::default(),
             &mut cache,
         )
@@ -1478,17 +1498,9 @@ mod tests {
                 factory.create_value_term(ValueTerm::Int(4)),
             ),
         );
-        let (program, builtins, plugins) = Compiler::new(CompilerOptions::unoptimized(), None)
-            .compile(
-                &expression,
-                CompilerMode::Expression,
-                true,
-                empty(),
-                &factory,
-                &allocator,
-            )
-            .unwrap()
-            .into_parts();
+        let program = Compiler::new(CompilerOptions::unoptimized(), None)
+            .compile(&expression, CompilerMode::Expression, &factory, &allocator)
+            .unwrap();
         let state = StateCache::default();
         let entry_point = InstructionPointer::default();
         let cache_key = hash_program_root(&program, &entry_point);
@@ -1499,8 +1511,7 @@ mod tests {
             &state,
             &factory,
             &allocator,
-            &builtins,
-            &plugins,
+            Vec::new(),
             &InterpreterOptions::default(),
             &mut cache,
         )
@@ -1530,17 +1541,9 @@ mod tests {
                 factory.create_value_term(ValueTerm::Int(4)),
             ),
         );
-        let (program, builtins, plugins) = Compiler::new(CompilerOptions::unoptimized(), None)
-            .compile(
-                &expression,
-                CompilerMode::Expression,
-                true,
-                empty(),
-                &factory,
-                &allocator,
-            )
-            .unwrap()
-            .into_parts();
+        let program = Compiler::new(CompilerOptions::unoptimized(), None)
+            .compile(&expression, CompilerMode::Expression, &factory, &allocator)
+            .unwrap();
         let state = StateCache::default();
         let entry_point = InstructionPointer::default();
         let cache_key = hash_program_root(&program, &entry_point);
@@ -1551,8 +1554,7 @@ mod tests {
             &state,
             &factory,
             &allocator,
-            &builtins,
-            &plugins,
+            Vec::new(),
             &InterpreterOptions::default(),
             &mut cache,
         )
@@ -1582,17 +1584,9 @@ mod tests {
                 factory.create_value_term(ValueTerm::Int(4)),
             ),
         );
-        let (program, builtins, plugins) = Compiler::new(CompilerOptions::unoptimized(), None)
-            .compile(
-                &expression,
-                CompilerMode::Expression,
-                true,
-                empty(),
-                &factory,
-                &allocator,
-            )
-            .unwrap()
-            .into_parts();
+        let program = Compiler::new(CompilerOptions::unoptimized(), None)
+            .compile(&expression, CompilerMode::Expression, &factory, &allocator)
+            .unwrap();
         let state = StateCache::default();
         let entry_point = InstructionPointer::default();
         let cache_key = hash_program_root(&program, &entry_point);
@@ -1603,8 +1597,7 @@ mod tests {
             &state,
             &factory,
             &allocator,
-            &builtins,
-            &plugins,
+            Vec::new(),
             &InterpreterOptions::default(),
             &mut cache,
         )
@@ -1636,17 +1629,9 @@ mod tests {
                 factory.create_value_term(ValueTerm::Int(5)),
             ),
         );
-        let (program, builtins, plugins) = Compiler::new(CompilerOptions::unoptimized(), None)
-            .compile(
-                &expression,
-                CompilerMode::Expression,
-                true,
-                empty(),
-                &factory,
-                &allocator,
-            )
-            .unwrap()
-            .into_parts();
+        let program = Compiler::new(CompilerOptions::unoptimized(), None)
+            .compile(&expression, CompilerMode::Expression, &factory, &allocator)
+            .unwrap();
         let state = StateCache::default();
         let entry_point = InstructionPointer::default();
         let cache_key = hash_program_root(&program, &entry_point);
@@ -1657,8 +1642,7 @@ mod tests {
             &state,
             &factory,
             &allocator,
-            &builtins,
-            &plugins,
+            Vec::new(),
             &InterpreterOptions::default(),
             &mut cache,
         )
@@ -1688,17 +1672,9 @@ mod tests {
                 factory.create_value_term(ValueTerm::Int(4)),
             ),
         );
-        let (program, builtins, plugins) = Compiler::new(CompilerOptions::unoptimized(), None)
-            .compile(
-                &expression,
-                CompilerMode::Expression,
-                true,
-                empty(),
-                &factory,
-                &allocator,
-            )
-            .unwrap()
-            .into_parts();
+        let program = Compiler::new(CompilerOptions::unoptimized(), None)
+            .compile(&expression, CompilerMode::Expression, &factory, &allocator)
+            .unwrap();
         let state = StateCache::default();
         let entry_point = InstructionPointer::default();
         let cache_key = hash_program_root(&program, &entry_point);
@@ -1709,8 +1685,7 @@ mod tests {
             &state,
             &factory,
             &allocator,
-            &builtins,
-            &plugins,
+            Vec::new(),
             &InterpreterOptions::default(),
             &mut cache,
         )
@@ -1749,17 +1724,9 @@ mod tests {
                 ])),
             ),
         );
-        let (program, builtins, plugins) = Compiler::new(CompilerOptions::unoptimized(), None)
-            .compile(
-                &expression,
-                CompilerMode::Expression,
-                true,
-                empty(),
-                &factory,
-                &allocator,
-            )
-            .unwrap()
-            .into_parts();
+        let program = Compiler::new(CompilerOptions::unoptimized(), None)
+            .compile(&expression, CompilerMode::Expression, &factory, &allocator)
+            .unwrap();
         let state = StateCache::default();
         let entry_point = InstructionPointer::default();
         let cache_key = hash_program_root(&program, &entry_point);
@@ -1770,8 +1737,7 @@ mod tests {
             &state,
             &factory,
             &allocator,
-            &builtins,
-            &plugins,
+            Vec::new(),
             &InterpreterOptions::default(),
             &mut cache,
         )
@@ -1835,17 +1801,9 @@ mod tests {
                 ),
             ),
         );
-        let (program, builtins, plugins) = Compiler::new(CompilerOptions::unoptimized(), None)
-            .compile(
-                &expression,
-                CompilerMode::Expression,
-                true,
-                empty(),
-                &factory,
-                &allocator,
-            )
-            .unwrap()
-            .into_parts();
+        let program = Compiler::new(CompilerOptions::unoptimized(), None)
+            .compile(&expression, CompilerMode::Expression, &factory, &allocator)
+            .unwrap();
         let state = StateCache::default();
         let entry_point = InstructionPointer::default();
         let cache_key = hash_program_root(&program, &entry_point);
@@ -1856,8 +1814,7 @@ mod tests {
             &state,
             &factory,
             &allocator,
-            &builtins,
-            &plugins,
+            Vec::new(),
             &InterpreterOptions::default(),
             &mut cache,
         )

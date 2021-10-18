@@ -14,11 +14,11 @@ use futures_util::{future, stream, StreamExt};
 use reflex::{
     compiler::Compile,
     core::{
-        Applicable, Expression, ExpressionFactory, HeapAllocator, Reducible, Rewritable, Signal,
-        SignalId, SignalType, StateToken,
+        Applicable, Arity, Expression, ExpressionFactory, HeapAllocator, Reducible, Rewritable,
+        Signal, SignalId, SignalType, StateToken,
     },
     hash::{hash_object, HashId},
-    lang::{BuiltinTerm, ValueTerm, WithCompiledBuiltins},
+    lang::{BuiltinTerm, ValueTerm},
 };
 use reflex_runtime::{
     AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator, RuntimeEffect,
@@ -32,7 +32,7 @@ const HASH_NAMESPACE_LOADER: &'static str = "reflex::loader";
 pub fn load_signal_handler<
     T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
 >(
-    factory: &(impl AsyncExpressionFactory<T> + WithCompiledBuiltins),
+    factory: &impl AsyncExpressionFactory<T>,
     allocator: &impl AsyncHeapAllocator<T>,
 ) -> impl Fn(&str, &[&Signal<T>], &SignalHelpers<T>) -> SignalHandlerResult<T>
 where
@@ -119,8 +119,6 @@ where
                                 create_pending(&factory, &allocator),
                             );
                             let cache_entries = {
-                                let factory = factory
-                                    .with_compiled_builtins(helpers.builtins(), helpers.plugins());
                                 factory.create_vector_term(allocator.create_list(keys.iter().map(
                                     |key| {
                                         create_property_accessor(
@@ -202,7 +200,7 @@ fn load_batch<T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> 
     keys: &[T],
     signal_ids: impl IntoIterator<Item = SignalId>,
     helpers: &SignalHelpers<T>,
-    factory: &(impl AsyncExpressionFactory<T> + WithCompiledBuiltins),
+    factory: &impl AsyncExpressionFactory<T>,
     allocator: &impl AsyncHeapAllocator<T>,
 ) -> impl Stream<Item = Result<Vec<T>, String>>
 where
@@ -284,15 +282,19 @@ fn match_loader_expression<'a, T: Expression + Applicable<T>>(
     loader: &'a T,
 ) -> Result<&'a T, String> {
     match loader.arity() {
-        Some(arity)
-            if (arity.required() == 1) || (arity.required() < 1 && arity.variadic().is_some()) =>
-        {
-            Ok(loader)
-        }
+        Some(arity) if is_valid_loader_signature(&arity) => Ok(loader),
         _ => Err(format!(
             "Invalid load signal factory: Expected <function:1>, received {}",
             loader
         )),
+    }
+}
+
+fn is_valid_loader_signature(arity: &Arity) -> bool {
+    match arity.required().len() {
+        1 => true,
+        0 => arity.optional().len() > 0 || arity.variadic().is_some(),
+        _ => false,
     }
 }
 

@@ -3,16 +3,23 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use crate::{
     core::{
-        match_typed_expression_list, Applicable, Arity, EvaluationCache, Expression,
-        ExpressionFactory, HeapAllocator, StringValue, VarArgs,
+        match_typed_expression_list, Applicable, ArgType, Arity, EvaluationCache, Expression,
+        ExpressionFactory, FunctionArity, HeapAllocator, StringValue,
     },
     lang::ValueTerm,
 };
 
 pub struct Concat {}
+impl Concat {
+    const ARITY: FunctionArity<0, 0> = FunctionArity {
+        required: [],
+        optional: [],
+        variadic: Some(ArgType::Strict),
+    };
+}
 impl<T: Expression> Applicable<T> for Concat {
     fn arity(&self) -> Option<Arity> {
-        Some(Arity::from(0, 0, Some(VarArgs::Eager)))
+        Some(Arity::from(&Self::ARITY))
     }
     fn apply(
         &self,

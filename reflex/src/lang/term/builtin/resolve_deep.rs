@@ -5,15 +5,23 @@ use std::iter::once;
 
 use crate::{
     core::{
-        Applicable, Arity, EvaluationCache, Expression, ExpressionFactory, GraphNode, HeapAllocator,
+        Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory, FunctionArity,
+        GraphNode, HeapAllocator,
     },
     lang::BuiltinTerm,
 };
 
 pub struct ResolveDeep {}
+impl ResolveDeep {
+    const ARITY: FunctionArity<1, 0> = FunctionArity {
+        required: [ArgType::Strict],
+        optional: [],
+        variadic: None,
+    };
+}
 impl<T: Expression> Applicable<T> for ResolveDeep {
     fn arity(&self) -> Option<Arity> {
-        Some(Arity::from(1, 0, None))
+        Some(Arity::from(&Self::ARITY))
     }
     fn apply(
         &self,

@@ -7,16 +7,12 @@ use std::{collections::HashSet, hash::Hash, iter::once, str::FromStr};
 use uuid::Uuid;
 
 use crate::{
-    compiler::{
-        Compile, Compiler, Instruction, InstructionPointer, NativeFunctionRegistry, Program,
-    },
+    compiler::{Compile, Compiler, Instruction, Program},
     core::{
         Applicable, Arity, DependencyList, EvaluationCache, Expression, ExpressionFactory,
         ExpressionList, GraphNode, HeapAllocator, NativeAllocator, SerializeJson, StackOffset,
         VarArgs,
     },
-    hash::hash_object,
-    lang::compile_function,
 };
 
 pub type NativeFunctionId = Uuid;
@@ -56,7 +52,6 @@ impl<T: Expression> NativeFunction<T> {
             apply,
         })
     }
-
     pub fn new_with_uuid(
         uid: Uuid,
         name: Option<&'static str>,
@@ -74,7 +69,6 @@ impl<T: Expression> NativeFunction<T> {
             apply,
         }
     }
-
     pub fn uid(&self) -> NativeFunctionId {
         self.uid
     }
@@ -171,15 +165,11 @@ impl<T: Expression + Compile<T>> Compile<T> for NativeFunctionTerm<T> {
         _stack_offset: StackOffset,
         _factory: &impl ExpressionFactory<T>,
         _allocator: &impl HeapAllocator<T>,
-        compiler: &mut Compiler,
-    ) -> Result<(Program, NativeFunctionRegistry<T>), String> {
-        let compiled_address = compile_native_function(&self.target, compiler);
-        Ok((
-            Program::new(once(Instruction::PushFunction {
-                target: compiled_address,
-            })),
-            NativeFunctionRegistry::from((self.target.clone(), compiled_address)),
-        ))
+        _compiler: &mut Compiler,
+    ) -> Result<Program, String> {
+        Ok(Program::new(once(Instruction::PushNative {
+            target: self.uid(),
+        })))
     }
 }
 impl<T: Expression> std::fmt::Display for NativeFunctionTerm<T> {
@@ -192,23 +182,8 @@ impl<T: Expression> std::fmt::Debug for NativeFunctionTerm<T> {
         std::fmt::Display::fmt(self, f)
     }
 }
-
 impl<T: Expression> SerializeJson for NativeFunctionTerm<T> {
     fn to_json(&self) -> Result<serde_json::Value, String> {
         Err(format!("Unable to serialize term: {}", self))
     }
-}
-
-pub(crate) fn compile_native_function<T: Expression>(
-    target: &NativeFunction<T>,
-    compiler: &mut Compiler,
-) -> InstructionPointer {
-    compile_function(
-        hash_object(&target.uid()),
-        target.arity(),
-        Instruction::PushNative {
-            target: target.uid(),
-        },
-        compiler,
-    )
 }

@@ -10,19 +10,19 @@ use parking_lot::RwLock;
 use reflex::{
     compiler::{
         hash_program_root, Compile, Compiler, CompilerMode, CompilerOptions, Instruction,
-        InstructionPointer, NativeFunctionRegistry, Program,
+        InstructionPointer, Program,
     },
     core::{
-        Applicable, Arity, DependencyList, DynamicState, EvaluationResult, Expression,
-        ExpressionFactory, HeapAllocator, Reducible, Rewritable, Signal, SignalId, SignalType,
-        StateCache, StateToken, StringValue,
+        Applicable, DependencyList, DynamicState, EvaluationResult, Expression, ExpressionFactory,
+        HeapAllocator, Reducible, Rewritable, Signal, SignalId, SignalType, StateCache, StateToken,
+        StringValue,
     },
     hash::{hash_object, HashId},
     interpreter::{
         execute, CacheEntries, DefaultInterpreterCache, GcMetrics, InterpreterCache,
         InterpreterCacheEntry, InterpreterCacheKey, InterpreterOptions,
     },
-    lang::{term::NativeFunctionId, BuiltinTerm, ValueTerm, WithCompiledBuiltins},
+    lang::{term::NativeFunctionId, ValueTerm},
     DependencyCache,
 };
 use std::{
@@ -33,7 +33,7 @@ use std::{
     convert::identity,
     future::Future,
     hash::{Hash, Hasher},
-    iter::{empty, once},
+    iter::once,
     pin::Pin,
     sync::{Arc, Mutex},
     task::{Context, Poll},
@@ -418,11 +418,10 @@ pub struct Runtime<T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicabl
 impl<T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>> Runtime<T> {
     pub fn new<THandler>(
         state: RuntimeState<T>,
-        builtins: Vec<(BuiltinTerm, InstructionPointer)>,
-        plugins: NativeFunctionRegistry<T>,
+        plugins: impl IntoIterator<Item = (NativeFunctionId, T)>,
         signal_handler: THandler,
         cache: RuntimeCache<T>,
-        factory: &(impl AsyncExpressionFactory<T> + WithCompiledBuiltins),
+        factory: &impl AsyncExpressionFactory<T>,
         allocator: &impl AsyncHeapAllocator<T>,
         interpreter_options: InterpreterOptions,
         compiler_options: CompilerOptions,
@@ -438,6 +437,7 @@ impl<T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile
         let (commands_tx, mut commands_rx) = mpsc::channel(1024);
         let (flush_tx, flush_rx) = broadcast::channel(1024);
         tokio::spawn({
+            let plugins = Arc::new(plugins.into_iter().collect::<Vec<_>>());
             let mut store = Mutex::new(RuntimeStore::new(state));
             let factory = factory.clone();
             let allocator = allocator.clone();
@@ -463,7 +463,6 @@ impl<T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile
                                     &flush_tx,
                                     &factory,
                                     &allocator,
-                                    &builtins,
                                     &plugins,
                                     &interpreter_options,
                                 );
@@ -496,8 +495,6 @@ impl<T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile
                                     &mut cache,
                                     &commands,
                                     &signal_handler,
-                                    &builtins,
-                                    &plugins,
                                     &factory,
                                     &allocator,
                                     &compiler_options,
@@ -612,10 +609,9 @@ fn process_subscribe_command<T: AsyncExpression + Rewritable<T> + Reducible<T> +
     cache: &mut RuntimeCache<T>,
     commands: &RuntimeCommandChannel<T>,
     flush: &broadcast::Sender<FlushPayload<T>>,
-    factory: &(impl AsyncExpressionFactory<T> + WithCompiledBuiltins),
+    factory: &impl AsyncExpressionFactory<T>,
     allocator: &impl AsyncHeapAllocator<T>,
-    builtins: &[(BuiltinTerm, InstructionPointer)],
-    plugins: &NativeFunctionRegistry<T>,
+    plugins: &Arc<Vec<(NativeFunctionId, T)>>,
     interpreter_options: &InterpreterOptions,
 ) -> (SubscriptionId, HashId)
 where
@@ -635,7 +631,6 @@ where
             let flush = flush.clone();
             let factory = factory.clone();
             let allocator = allocator.clone();
-            let builtins = builtins.iter().copied().collect::<Vec<_>>();
             let plugins = plugins.clone();
             let interpreter_options = interpreter_options.clone();
             let cache = cache.clone();
@@ -655,7 +650,6 @@ where
                     &state,
                     &factory,
                     &allocator,
-                    &builtins,
                     &plugins,
                     &interpreter_options,
                     &cache,
@@ -710,7 +704,6 @@ where
                         &state,
                         &factory,
                         &allocator,
-                        &builtins,
                         &plugins,
                         &interpreter_options,
                         &cache,
@@ -751,10 +744,9 @@ fn evaluate_subscription<T: Expression + Rewritable<T> + Reducible<T> + Applicab
     program: &Program,
     entry_point: InstructionPointer,
     state: &impl DynamicState<T>,
-    factory: &(impl ExpressionFactory<T> + WithCompiledBuiltins),
+    factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-    builtins: &[(BuiltinTerm, InstructionPointer)],
-    plugins: &NativeFunctionRegistry<T>,
+    plugins: &[(NativeFunctionId, T)],
     interpreter_options: &InterpreterOptions,
     cache: &impl InterpreterCache<T>,
 ) -> (EvaluationResult<T>, CacheEntries<T>) {
@@ -767,7 +759,6 @@ fn evaluate_subscription<T: Expression + Rewritable<T> + Reducible<T> + Applicab
         state,
         factory,
         allocator,
-        builtins,
         plugins,
         interpreter_options,
         cache,
@@ -878,8 +869,6 @@ fn process_emit_command<
     cache: &mut RuntimeCache<T>,
     commands: &RuntimeCommandChannel<T>,
     signal_handler: &THandler,
-    builtins: &[(BuiltinTerm, InstructionPointer)],
-    plugins: &NativeFunctionRegistry<T>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
     compiler_options: &CompilerOptions,
@@ -924,8 +913,6 @@ where
                 &added_signals,
                 signal_handler,
                 program,
-                builtins,
-                plugins,
                 factory,
                 allocator,
                 compiler_options,
@@ -973,8 +960,6 @@ fn handle_custom_signals<
     signals: &[&'a Signal<T>],
     signal_handler: &THandler,
     program: Arc<Program>,
-    builtins: &[(BuiltinTerm, InstructionPointer)],
-    plugins: &NativeFunctionRegistry<T>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
     compiler_options: &CompilerOptions,
@@ -987,13 +972,7 @@ where
         + Sync
         + 'static,
 {
-    let signal_helpers = SignalHelpers::new(
-        program,
-        builtins,
-        plugins,
-        commands.clone(),
-        *compiler_options,
-    );
+    let signal_helpers = SignalHelpers::new(program, commands.clone(), *compiler_options);
     let signals_by_type = signals
         .iter()
         .filter_map(|signal| match signal.signal_type() {
@@ -1199,8 +1178,6 @@ where
     T::String: StringValue + Send + Sync,
 {
     program: Arc<Program>,
-    builtins: Vec<(BuiltinTerm, InstructionPointer)>,
-    plugins: Vec<(NativeFunctionId, Arity, InstructionPointer)>,
     commands: RuntimeCommandChannel<T>,
     compiler_options: CompilerOptions,
 }
@@ -1211,18 +1188,11 @@ where
 {
     fn new(
         program: Arc<Program>,
-        builtins: &[(BuiltinTerm, InstructionPointer)],
-        plugins: &NativeFunctionRegistry<T>,
         commands: RuntimeCommandChannel<T>,
         compiler_options: CompilerOptions,
     ) -> Self {
         Self {
             program,
-            builtins: builtins.iter().copied().collect(),
-            plugins: plugins
-                .iter()
-                .map(|(target, address)| (target.uid(), target.arity(), *address))
-                .collect(),
             commands,
             compiler_options,
         }
@@ -1230,34 +1200,20 @@ where
     pub fn program(&self) -> &Program {
         &self.program
     }
-    pub fn builtins(&self) -> &[(BuiltinTerm, InstructionPointer)] {
-        &self.builtins
-    }
-    pub fn plugins(&self) -> &[(NativeFunctionId, Arity, InstructionPointer)] {
-        &self.plugins
-    }
     pub fn watch_expression(
         self,
         expression: T,
         initiators: impl IntoIterator<Item = SignalId>,
-        factory: &(impl AsyncExpressionFactory<T> + WithCompiledBuiltins),
+        factory: &impl AsyncExpressionFactory<T>,
         allocator: &impl AsyncHeapAllocator<T>,
     ) -> Result<impl Stream<Item = T> + Send + 'static, String> {
         let initiators = initiators.into_iter().collect::<Vec<_>>();
         let entry_point = InstructionPointer::new(self.program.len());
         let prelude = (*self.program).clone();
         Compiler::new(self.compiler_options, Some(prelude))
-            .compile(
-                &expression,
-                CompilerMode::Expression,
-                false,
-                empty(),
-                factory,
-                allocator,
-            )
-            .map(|compiled| {
+            .compile(&expression, CompilerMode::Expression, factory, allocator)
+            .map(|program| {
                 // TODO: Error if runtime expression depends on unrecognized native functions
-                let (program, _, _) = compiled.into_parts();
                 self.watch_compiled_expression(program, entry_point, initiators, factory, allocator)
             })
     }

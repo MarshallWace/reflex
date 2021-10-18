@@ -3,13 +3,21 @@
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use crate::core::{
-    Applicable, Arity, EvaluationCache, Expression, ExpressionFactory, HeapAllocator,
+    Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory, FunctionArity,
+    HeapAllocator,
 };
 
 pub struct Values {}
+impl Values {
+    const ARITY: FunctionArity<1, 0> = FunctionArity {
+        required: [ArgType::Strict],
+        optional: [],
+        variadic: None,
+    };
+}
 impl<T: Expression> Applicable<T> for Values {
     fn arity(&self) -> Option<Arity> {
-        Some(Arity::from(1, 0, None))
+        Some(Arity::from(&Self::ARITY))
     }
     fn apply(
         &self,

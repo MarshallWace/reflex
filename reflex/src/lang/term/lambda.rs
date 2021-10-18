@@ -6,7 +6,7 @@ use std::{collections::HashSet, iter::once};
 
 use crate::{
     cache::NoopCache,
-    compiler::{Compile, Compiler, Instruction, NativeFunctionRegistry, Program},
+    compiler::{Compile, Compiler, Instruction, Program},
     core::{
         Applicable, Arity, DependencyList, DynamicState, EvaluationCache, Expression,
         ExpressionFactory, GraphNode, HeapAllocator, Reducible, Rewritable, ScopeOffset,
@@ -155,7 +155,7 @@ impl<T: Expression + Rewritable<T>> Rewritable<T> for LambdaTerm<T> {
 }
 impl<T: Expression + Rewritable<T>> Applicable<T> for LambdaTerm<T> {
     fn arity(&self) -> Option<Arity> {
-        Some(Arity::from(0, self.num_args, None))
+        Some(Arity::lazy(self.num_args, 0, false))
     }
     fn apply(
         &self,
@@ -223,42 +223,37 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Compile<T>> Compile<T> for L
         factory: &impl ExpressionFactory<T>,
         allocator: &impl HeapAllocator<T>,
         compiler: &mut Compiler,
-    ) -> Result<(Program, NativeFunctionRegistry<T>), String> {
+    ) -> Result<Program, String> {
         let hash = hash_object(self);
         let num_args = self.num_args;
-        let (target_address, native_functions) =
-            match compiler.retrieve_compiled_chunk_address(hash) {
-                Some(address) => (address, NativeFunctionRegistry::default()),
-                None => {
-                    let (compiled_body, native_functions) =
-                        self.body
-                            .compile(VarArgs::Eager, 0, factory, allocator, compiler)?;
-                    let address = compiler.store_compiled_chunk(
-                        hash,
-                        Program::new(
-                            once(Instruction::Function {
-                                hash,
-                                arity: num_args,
-                                variadic: false,
-                            })
-                            .chain(compiled_body)
-                            .chain(if num_args > 0 {
-                                Some(Instruction::Squash { depth: num_args })
-                            } else {
-                                None
-                            })
-                            .chain(once(Instruction::Return)),
-                        ),
-                    );
-                    (address, native_functions)
-                }
-            };
-        Ok((
-            Program::new(once(Instruction::PushFunction {
-                target: target_address,
-            })),
-            native_functions,
-        ))
+        let target_address = match compiler.retrieve_compiled_chunk_address(hash) {
+            Some(address) => address,
+            None => {
+                let compiled_body =
+                    self.body
+                        .compile(VarArgs::Eager, 0, factory, allocator, compiler)?;
+                compiler.store_compiled_chunk(
+                    hash,
+                    Program::new(
+                        once(Instruction::Function {
+                            hash,
+                            required_args: num_args,
+                            optional_args: 0,
+                        })
+                        .chain(compiled_body)
+                        .chain(if num_args > 0 {
+                            Some(Instruction::Squash { depth: num_args })
+                        } else {
+                            None
+                        })
+                        .chain(once(Instruction::Return)),
+                    ),
+                )
+            }
+        };
+        Ok(Program::new(once(Instruction::PushFunction {
+            target: target_address,
+        })))
     }
 }
 

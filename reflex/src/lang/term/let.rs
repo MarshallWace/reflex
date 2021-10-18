@@ -5,7 +5,7 @@
 use std::{collections::HashSet, iter::once};
 
 use crate::{
-    compiler::{Compile, Compiler, NativeFunctionRegistry, Program},
+    compiler::{Compile, Compiler, Program},
     core::{
         DependencyList, DynamicState, EvaluationCache, Expression, ExpressionFactory, GraphNode,
         HeapAllocator, Reducible, Rewritable, ScopeOffset, SerializeJson, StackOffset,
@@ -191,19 +191,16 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Compile<T>> Compile<T> for L
         factory: &impl ExpressionFactory<T>,
         allocator: &impl HeapAllocator<T>,
         compiler: &mut Compiler,
-    ) -> Result<(Program, NativeFunctionRegistry<T>), String> {
-        let (compiled_initializer, initializer_native_functions) =
+    ) -> Result<Program, String> {
+        let compiled_initializer =
             self.initializer
                 .compile(eager, stack_offset, factory, allocator, compiler)?;
-        let (compiled_body, body_native_functions) =
-            self.body
-                .compile(eager, stack_offset, factory, allocator, compiler)?;
+        let compiled_body = self
+            .body
+            .compile(eager, stack_offset, factory, allocator, compiler)?;
         let mut program = compiled_initializer;
         program.extend(compiled_body);
-        Ok((
-            program,
-            initializer_native_functions.union(body_native_functions),
-        ))
+        Ok(program)
     }
 }
 

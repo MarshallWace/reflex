@@ -1514,30 +1514,20 @@ fn create_try_catch_expression<T: Expression>(
     factory.create_let_term(
         handler,
         factory.create_application_term(
-            factory.create_signal_transformer_term(factory.create_lambda_term(
-                1,
-                factory.create_application_term(
-                    factory.create_builtin_term(BuiltinTerm::IfError),
-                    allocator.create_pair(
-                        factory.create_static_variable_term(0),
-                        factory.create_lambda_term(
-                            1,
-                            factory.create_application_term(
-                                factory.create_static_variable_term(2),
-                                allocator.create_unit_list(
-                                    factory.create_application_term(
-                                        global_aggregate_error(factory, allocator),
-                                        allocator.create_unit_list(
-                                            factory.create_static_variable_term(0),
-                                        ),
-                                    ),
-                                ),
-                            ),
-                        ),
+            factory.create_builtin_term(BuiltinTerm::IfError),
+            allocator.create_pair(
+                body,
+                factory.create_lambda_term(
+                    1,
+                    factory.create_application_term(
+                        factory.create_static_variable_term(1),
+                        allocator.create_unit_list(factory.create_application_term(
+                            global_aggregate_error(factory, allocator),
+                            allocator.create_unit_list(factory.create_static_variable_term(0)),
+                        )),
                     ),
                 ),
-            )),
-            allocator.create_unit_list(body),
+            ),
         ),
     )
 }
@@ -5088,19 +5078,15 @@ mod tests {
             const greet = (user) => `Hello, ${fullName(user.first, user.last)}!`;
             greet({ first: 'John', last: 'Doe' })";
         let expression = parse(input, &env, &factory, &allocator).unwrap();
-        let compiled = Compiler::new(CompilerOptions::unoptimized(), None)
-            .compile(
-                &expression,
-                CompilerMode::Expression,
-                true,
-                builtin_plugins(),
-                &factory,
-                &allocator,
-            )
+        let program = Compiler::new(CompilerOptions::unoptimized(), None)
+            .compile(&expression, CompilerMode::Expression, &factory, &allocator)
             .unwrap();
-        let (program, builtins, plugins) = compiled.into_parts();
         let state = StateCache::default();
         let mut cache = DefaultInterpreterCache::default();
+        let plugins = builtin_plugins()
+            .into_iter()
+            .map(|plugin| (plugin.uid(), factory.create_native_function_term(plugin)))
+            .collect::<Vec<_>>();
         let entry_point = InstructionPointer::default();
         let cache_key = hash_program_root(&program, &entry_point);
         let (result, _) = execute(
@@ -5110,7 +5096,6 @@ mod tests {
             &state,
             &factory,
             &allocator,
-            &builtins,
             &plugins,
             &InterpreterOptions::default(),
             &mut cache,

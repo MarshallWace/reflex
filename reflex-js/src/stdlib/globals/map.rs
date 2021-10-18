@@ -6,8 +6,8 @@ use std::str::FromStr;
 
 use reflex::{
     core::{
-        Arity, Expression, ExpressionFactory, ExpressionList, HeapAllocator, NativeAllocator,
-        VarArgs,
+        ArgType, Arity, Expression, ExpressionFactory, ExpressionList, FunctionArity,
+        HeapAllocator, NativeAllocator,
     },
     lang::{deduplicate_hashmap_entries, BuiltinTerm, NativeFunction, ValueTerm},
 };
@@ -27,14 +27,21 @@ pub fn map_constructor<T: Expression>() -> NativeFunction<T> {
 }
 struct MapConstructor {}
 impl MapConstructor {
+    const NAME: &'static str = "MapConstructor";
+    const UUID: &'static str = "81fae6f8-9557-4784-998a-13ebfbf289ef";
+    const ARITY: FunctionArity<0, 1> = FunctionArity {
+        required: [],
+        optional: [ArgType::Strict],
+        variadic: None,
+    };
     fn uid() -> Uuid {
-        Uuid::from_str("81fae6f8-9557-4784-998a-13ebfbf289ef").expect("Hardcoded Uuid value")
+        Uuid::from_str(Self::UUID).unwrap()
     }
     fn name() -> Option<&'static str> {
-        Some("MapConstructor")
+        Some(Self::NAME)
     }
     fn arity() -> Arity {
-        Arity::from(0, 0, Some(VarArgs::Eager))
+        Arity::from(&Self::ARITY)
     }
     fn apply<T: Expression>(
         args: ExpressionList<T>,
@@ -42,62 +49,59 @@ impl MapConstructor {
         allocator: &dyn NativeAllocator<T>,
     ) -> Result<T, String> {
         let mut args = args.into_iter();
-        if args.len() == 0 {
+        let entries = args.next().unwrap();
+        if is_null_value_term(&entries, &factory) {
             Ok(factory
                 .create_hashmap_term(allocator.create_empty_list(), allocator.create_empty_list()))
-        } else {
-            let entries = args.next().unwrap();
-            if let Some(entries) = factory.match_vector_term(&entries) {
-                let entries = entries
-                    .items()
-                    .iter()
-                    .map(|entry| {
-                        match get_indexed_field(entry, 0, &factory, &allocator).and_then(|key| {
-                            get_indexed_field(entry, 1, &factory, &allocator)
-                                .map(|value| (key, value))
-                        }) {
-                            Some((key, value)) => Ok((key, value)),
-                            None => Err(format!(
-                                "Invalid Map constructor: Expected [key, value] pair, received {}",
-                                entry
-                            )),
-                        }
-                    })
-                    .collect::<Result<Vec<_>, _>>();
-                match entries {
-                    Err(error) => Err(error),
-                    Ok(entries) => {
-                        let (keys, values): (Vec<_>, Vec<_>) = entries.into_iter().unzip();
-                        let has_dynamic_keys = keys.iter().any(|key| !key.is_static());
-                        if has_dynamic_keys {
-                            Ok(factory.create_application_term(
-                                factory.create_builtin_term(BuiltinTerm::ConstructHashMap),
-                                allocator.create_pair(
-                                    factory.create_application_term(
-                                        factory.create_builtin_term(BuiltinTerm::CollectVector),
-                                        allocator.create_list(keys),
-                                    ),
-                                    factory.create_vector_term(allocator.create_list(values)),
+        } else if let Some(entries) = factory.match_vector_term(&entries) {
+            let entries = entries
+                .items()
+                .iter()
+                .map(|entry| {
+                    match get_indexed_field(entry, 0, &factory, &allocator).and_then(|key| {
+                        get_indexed_field(entry, 1, &factory, &allocator).map(|value| (key, value))
+                    }) {
+                        Some((key, value)) => Ok((key, value)),
+                        None => Err(format!(
+                            "Invalid Map constructor: Expected [key, value] pair, received {}",
+                            entry
+                        )),
+                    }
+                })
+                .collect::<Result<Vec<_>, _>>();
+            match entries {
+                Err(error) => Err(error),
+                Ok(entries) => {
+                    let (keys, values): (Vec<_>, Vec<_>) = entries.into_iter().unzip();
+                    let has_dynamic_keys = keys.iter().any(|key| !key.is_static());
+                    if has_dynamic_keys {
+                        Ok(factory.create_application_term(
+                            factory.create_builtin_term(BuiltinTerm::ConstructHashMap),
+                            allocator.create_pair(
+                                factory.create_application_term(
+                                    factory.create_builtin_term(BuiltinTerm::CollectVector),
+                                    allocator.create_list(keys),
                                 ),
-                            ))
-                        } else {
-                            let (keys, values) = match deduplicate_hashmap_entries(&keys, &values) {
-                                Some((keys, values)) => (keys, values),
-                                None => (keys, values),
-                            };
-                            Ok(factory.create_hashmap_term(
-                                allocator.create_list(keys),
-                                allocator.create_list(values),
-                            ))
-                        }
+                                factory.create_vector_term(allocator.create_list(values)),
+                            ),
+                        ))
+                    } else {
+                        let (keys, values) = match deduplicate_hashmap_entries(&keys, &values) {
+                            Some((keys, values)) => (keys, values),
+                            None => (keys, values),
+                        };
+                        Ok(factory.create_hashmap_term(
+                            allocator.create_list(keys),
+                            allocator.create_list(values),
+                        ))
                     }
                 }
-            } else {
-                Err(format!(
-                    "Invalid Map constructor: Expected [key, value] pairs, received {}",
-                    entries
-                ))
             }
+        } else {
+            Err(format!(
+                "Invalid Map constructor: Expected [key, value] pairs, received {}",
+                entries
+            ))
         }
     }
 }
@@ -123,6 +127,13 @@ fn get_indexed_field<T: Expression>(
             ),
         ))
     }
+}
+
+fn is_null_value_term<T: Expression>(expression: &T, factory: &impl ExpressionFactory<T>) -> bool {
+    factory
+        .match_value_term(expression)
+        .and_then(|value| value.match_null())
+        .is_some()
 }
 
 #[cfg(test)]

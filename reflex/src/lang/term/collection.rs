@@ -9,7 +9,7 @@ pub use hashset::*;
 pub use vector::*;
 
 use crate::{
-    compiler::{Compile, Compiler, NativeFunctionRegistry, Program},
+    compiler::{Compile, Compiler, Program},
     core::{
         DependencyList, DynamicState, EvaluationCache, Expression, ExpressionFactory, GraphNode,
         HeapAllocator, Iterable, Rewritable, SerializeJson, StackOffset, Substitutions, VarArgs,
@@ -138,7 +138,7 @@ impl<T: Expression + Compile<T>> Compile<T> for CollectionTerm<T> {
         factory: &impl ExpressionFactory<T>,
         allocator: &impl HeapAllocator<T>,
         compiler: &mut Compiler,
-    ) -> Result<(Program, NativeFunctionRegistry<T>), String> {
+    ) -> Result<Program, String> {
         match self {
             Self::Vector(term) => term.compile(eager, stack_offset, factory, allocator, compiler),
             Self::HashMap(term) => term.compile(eager, stack_offset, factory, allocator, compiler),

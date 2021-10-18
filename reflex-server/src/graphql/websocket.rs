@@ -28,7 +28,7 @@ use reflex_json::{json_array, json_object, sanitize, JsonMap, JsonValue};
 use reflex_runtime::{AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator, Runtime};
 use std::{
     collections::HashMap,
-    iter::{empty, once},
+    iter::once,
     sync::{Arc, Mutex},
 };
 use tokio::sync::mpsc;
@@ -185,8 +185,6 @@ where
                                 match Compiler::new(*compiler_options, Some(prelude)).compile(
                                     &query,
                                     CompilerMode::Expression,
-                                    false,
-                                    empty(),
                                     &factory,
                                     &allocator,
                                 ) {
@@ -201,9 +199,8 @@ where
                                             ))
                                             .await;
                                     }
-                                    Ok(compiled) => {
+                                    Ok(program) => {
                                         // TODO: Error if runtime expression depends on unrecognized native functions
-                                        let (program, _, _) = compiled.into_parts();
                                         match runtime.subscribe(program, entry_point).await {
                                             Err(error) => {
                                                 let _ = messages_tx

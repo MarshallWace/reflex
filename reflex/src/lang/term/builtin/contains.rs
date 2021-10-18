@@ -4,16 +4,23 @@
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use crate::{
     core::{
-        Applicable, Arity, EvaluationCache, Expression, ExpressionFactory, HeapAllocator,
-        StringValue,
+        Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory, FunctionArity,
+        HeapAllocator, StringValue,
     },
     lang::ValueTerm,
 };
 
 pub struct Contains {}
+impl Contains {
+    const ARITY: FunctionArity<2, 0> = FunctionArity {
+        required: [ArgType::Strict, ArgType::Strict],
+        optional: [],
+        variadic: None,
+    };
+}
 impl<T: Expression> Applicable<T> for Contains {
     fn arity(&self) -> Option<Arity> {
-        Some(Arity::from(2, 0, None))
+        Some(Arity::from(&Self::ARITY))
     }
     fn apply(
         &self,
@@ -23,9 +30,6 @@ impl<T: Expression> Applicable<T> for Contains {
         _cache: &mut impl EvaluationCache<T>,
     ) -> Result<T, String> {
         let mut args = args.into_iter();
-        if args.len() != 2 {
-            return Err(format!("Expected 2 arguments, received {}", args.len()));
-        }
         let target = args.next().unwrap();
         let key = args.next().unwrap();
         let result = if let Some(target) = factory.match_struct_term(&target) {

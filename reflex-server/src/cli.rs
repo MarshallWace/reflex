@@ -9,13 +9,10 @@ use anyhow::{anyhow, Context, Result};
 use clap::Parser;
 use hyper::{server::conn::AddrStream, service::make_service_fn, Server};
 use reflex::{
-    compiler::{
-        serialization::SerializableCompilerOutput, Compile, CompilerMode, CompilerOptions,
-        CompilerOutput, Program,
-    },
+    compiler::{Compile, CompilerMode, CompilerOptions, Program},
     core::{Applicable, Expression, Reducible, Rewritable, Signal, StringValue},
     interpreter::InterpreterOptions,
-    lang::{NativeFunction, WithCompiledBuiltins},
+    lang::NativeFunction,
 };
 use reflex_compiler::js::compile_js_source_with_customisation;
 use reflex_handlers::debug_signal_handler;
@@ -86,7 +83,7 @@ pub async fn cli<
         + Sync
         + 'static,
     custom_loader: Option<impl Fn(&str, &Path) -> Option<Result<T, String>> + 'static>,
-    factory: &(impl AsyncExpressionFactory<T> + WithCompiledBuiltins),
+    factory: &impl AsyncExpressionFactory<T>,
     allocator: &impl AsyncHeapAllocator<T>,
     plugins: impl IntoIterator<Item = NativeFunction<T>>,
     compiler_options: Option<CompilerOptions>,
@@ -95,22 +92,23 @@ pub async fn cli<
 where
     T::String: StringValue + Send + Sync,
 {
-    // let plugins: Vec<NativeFunction<T>> = plugins.into_iter().collect();
-    // plugins.iter().for_each(|func| println!("func id: {}", func.uid()));
     let args: Opts = Opts::parse();
     let root_module_path = &args.entry_point;
     let compiler_options = compiler_options.unwrap_or_else(|| CompilerOptions {
         debug: args.debug_compiler,
         ..CompilerOptions::default()
     });
-    let compiled_root = match args.syntax {
-        Syntax::ByteCode => deserialize_compiler_output(root_module_path, plugins)?,
+    let plugins = plugins
+        .into_iter()
+        .map(|plugin| (plugin.uid(), factory.create_native_function_term(plugin)));
+    // TODO: Error if runtime expression depends on unrecognized native functions
+    let program = match args.syntax {
+        Syntax::ByteCode => deserialize_compiler_output(root_module_path)?,
         Syntax::JavaScript => compile_js_source_with_customisation(
             root_module_path,
             custom_loader,
             factory,
             allocator,
-            plugins,
             compiler_options,
             CompilerMode::Thunk,
             env::vars(),
@@ -122,13 +120,11 @@ where
         debug_stack: args.debug_stack,
         ..InterpreterOptions::default()
     });
-    let (program, builtins, plugins) = compiled_root.into_parts();
     let state = RuntimeState::default();
     let cache = RuntimeCache::default();
     let runtime = if args.debug_signals {
         Runtime::new(
             state,
-            builtins,
             plugins,
             debug_signal_handler(signal_handler),
             cache,
@@ -140,7 +136,6 @@ where
     } else {
         Runtime::new(
             state,
-            builtins,
             plugins,
             signal_handler,
             cache,
@@ -170,20 +165,12 @@ where
     }
 }
 
-fn deserialize_compiler_output<T>(
+fn deserialize_compiler_output(
     bytecode_file: impl AsRef<Path> + std::fmt::Display,
-    plugins: impl IntoIterator<Item = NativeFunction<T>>,
-) -> Result<CompilerOutput<T>>
-where
-    T: Expression,
-{
+) -> Result<Program> {
     let bytecode_file = fs::File::open(&bytecode_file)
         .with_context(|| format!("Failed to open {}", bytecode_file))?;
-    let serialized_output: SerializableCompilerOutput = serde_json::from_reader(bytecode_file)?;
-    let plugins = plugins.into_iter().map(|func| (func.uid(), func)).collect();
-    serialized_output
-        .to_compiler_output(plugins)
-        .map_err(|err| anyhow!(err))
+    serde_json::from_reader(bytecode_file).map_err(|err| anyhow!(err))
 }
 
 async fn create_server<

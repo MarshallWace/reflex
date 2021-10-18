@@ -9,9 +9,7 @@ use std::{
 };
 
 use crate::{
-    compiler::{
-        compile_expressions, Compile, Compiler, Instruction, NativeFunctionRegistry, Program,
-    },
+    compiler::{compile_expressions, Compile, Compiler, Instruction, Program},
     core::{
         transform_expression_list, DependencyList, DynamicState, EvaluationCache, Expression,
         ExpressionFactory, ExpressionList, GraphNode, HeapAllocator, Iterable, Rewritable,
@@ -250,36 +248,29 @@ impl<T: Expression + Compile<T>> Compile<T> for HashMapTerm<T> {
         factory: &impl ExpressionFactory<T>,
         allocator: &impl HeapAllocator<T>,
         compiler: &mut Compiler,
-    ) -> Result<(Program, NativeFunctionRegistry<T>), String> {
-        compile_expressions(
+    ) -> Result<Program, String> {
+        let keys_chunk = compile_expressions(
             self.keys.iter(),
             VarArgs::Eager,
             stack_offset,
             factory,
             allocator,
             compiler,
-        )
-        .and_then(|(keys_chunk, keys_native_functions)| {
-            compile_expressions(
-                self.values.iter(),
-                VarArgs::Lazy,
-                stack_offset,
-                factory,
-                allocator,
-                compiler,
-            )
-            .map(|(values_chunk, values_native_functions)| {
-                let mut program = keys_chunk;
-                program.extend(values_chunk);
-                program.push(Instruction::ConstructHashMap {
-                    size: self.keys.len(),
-                });
-                (
-                    program,
-                    keys_native_functions.union(values_native_functions),
-                )
-            })
-        })
+        )?;
+        let values_chunk = compile_expressions(
+            self.values.iter(),
+            VarArgs::Lazy,
+            stack_offset,
+            factory,
+            allocator,
+            compiler,
+        )?;
+        let mut program = keys_chunk;
+        program.extend(values_chunk);
+        program.push(Instruction::ConstructHashMap {
+            size: self.keys.len(),
+        });
+        Ok(program)
     }
 }
 impl<T: Expression> std::fmt::Display for HashMapTerm<T> {

@@ -56,15 +56,12 @@ where
             match Compiler::new(compiler_options, Some(prelude)).compile(
                 &query,
                 CompilerMode::Expression,
-                false,
-                empty(),
                 factory,
                 allocator,
             ) {
                 Err(error) => Err(error),
-                Ok(compiled) => {
+                Ok(program) => {
                     // TODO: Error if runtime expression depends on unrecognized native functions
-                    let (program, _, _) = compiled.into_parts();
                     match runtime.subscribe(program, entry_point).await {
                         Err(error) => Err(error),
                         Ok(mut results) => match results.next().await {

@@ -2,18 +2,15 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
-use std::{
-    collections::{HashMap, HashSet},
-    sync::Arc,
-};
+use std::{collections::HashSet, sync::Arc};
 
 use crate::{
-    compiler::{Compile, Compiler, InstructionPointer, NativeFunctionRegistry, Program},
+    compiler::{Compile, Compiler, InstructionPointer, Program},
     core::{
-        Applicable, Arity, DependencyList, DynamicState, Evaluate, EvaluationCache,
-        EvaluationResult, Expression, ExpressionFactory, GraphNode, HeapAllocator, Reducible,
-        Rewritable, SerializeJson, SignalList, StackOffset, StateToken, StructPrototype,
-        Substitutions, VarArgs,
+        Applicable, DependencyList, DynamicState, Evaluate, EvaluationCache, EvaluationResult,
+        Expression, ExpressionFactory, GraphNode, HeapAllocator, Reducible, Rewritable,
+        SerializeJson, SignalList, StackOffset, StateToken, StructPrototype, Substitutions,
+        VarArgs,
     },
     hash::{hash_object, HashId},
 };
@@ -189,7 +186,7 @@ impl Compile<CachedTerm<SharedTerm>> for SharedTerm {
         factory: &impl ExpressionFactory<CachedTerm<SharedTerm>>,
         allocator: &impl HeapAllocator<CachedTerm<SharedTerm>>,
         compiler: &mut Compiler,
-    ) -> Result<(Program, NativeFunctionRegistry<CachedTerm<SharedTerm>>), String> {
+    ) -> Result<Program, String> {
         self.value
             .compile(eager, stack_offset, factory, allocator, compiler)
     }
@@ -211,62 +208,11 @@ impl SerializeJson for SharedTerm {
     }
 }
 
-pub trait WithCompiledBuiltins {
-    fn with_compiled_builtins(
-        &self,
-        builtins: &[(BuiltinTerm, InstructionPointer)],
-        plugins: &[(NativeFunctionId, Arity, InstructionPointer)],
-    ) -> Self;
-}
-
-struct BuiltinMappings {
-    builtins: HashMap<BuiltinTerm, CachedTerm<SharedTerm>>,
-    plugins: HashMap<NativeFunctionId, CachedTerm<SharedTerm>>,
-}
 #[derive(Clone, Default)]
-pub struct TermFactory {
-    compiled_builtins: Option<Arc<BuiltinMappings>>,
-}
+pub struct TermFactory {}
 impl TermFactory {
     fn create_expression(&self, value: Term<CachedTerm<SharedTerm>>) -> CachedTerm<SharedTerm> {
         CachedTerm::new(SharedTerm::new(value))
-    }
-}
-impl WithCompiledBuiltins for TermFactory {
-    fn with_compiled_builtins(
-        &self,
-        builtins: &[(BuiltinTerm, InstructionPointer)],
-        plugins: &[(NativeFunctionId, Arity, InstructionPointer)],
-    ) -> Self {
-        let builtins = builtins
-            .into_iter()
-            .map(|(target, address)| {
-                let hash = hash_object(target);
-                let arity = Applicable::<CachedTerm<SharedTerm>>::arity(target).unwrap();
-                let compiled_target = self.create_compiled_function_term(
-                    hash,
-                    *address,
-                    arity.required(),
-                    arity.variadic().is_some(),
-                );
-                (*target, compiled_target)
-            })
-            .collect();
-        let plugins = plugins
-            .iter()
-            .map(|(uid, arity, address)| {
-                let compiled_target = self.create_compiled_function_term(
-                    hash_object(uid),
-                    *address,
-                    arity.required(),
-                    arity.variadic().is_some(),
-                );
-                (*uid, compiled_target)
-            })
-            .collect();
-        Self {
-            compiled_builtins: Some(Arc::new(BuiltinMappings { builtins, plugins })),
-        }
     }
 }
 impl ExpressionFactory<CachedTerm<SharedTerm>> for TermFactory {
@@ -321,31 +267,26 @@ impl ExpressionFactory<CachedTerm<SharedTerm>> for TermFactory {
         self.create_expression(Term::Recursive(RecursiveTerm::new(factory)))
     }
     fn create_builtin_term(&self, target: BuiltinTerm) -> CachedTerm<SharedTerm> {
-        self.compiled_builtins
-            .as_ref()
-            .and_then(|mappings| mappings.builtins.get(&target).cloned())
-            .unwrap_or_else(|| self.create_expression(Term::Builtin(target)))
+        self.create_expression(Term::Builtin(target))
     }
     fn create_native_function_term(
         &self,
         target: NativeFunction<CachedTerm<SharedTerm>>,
     ) -> CachedTerm<SharedTerm> {
-        self.compiled_builtins
-            .as_ref()
-            .and_then(|mappings| mappings.plugins.get(&target.uid()).cloned())
-            .unwrap_or_else(|| {
-                self.create_expression(Term::Native(NativeFunctionTerm::new(target)))
-            })
+        self.create_expression(Term::Native(NativeFunctionTerm::new(target)))
     }
     fn create_compiled_function_term(
         &self,
-        hash: HashId,
         address: InstructionPointer,
-        num_args: StackOffset,
-        variadic: bool,
+        hash: HashId,
+        required_args: StackOffset,
+        optional_args: StackOffset,
     ) -> CachedTerm<SharedTerm> {
         self.create_expression(Term::CompiledFunction(CompiledFunctionTerm::new(
-            hash, address, num_args, variadic,
+            address,
+            hash,
+            required_args,
+            optional_args,
         )))
     }
     fn create_tuple_term(&self, fields: CachedList<SharedTerm>) -> CachedTerm<SharedTerm> {
@@ -385,14 +326,6 @@ impl ExpressionFactory<CachedTerm<SharedTerm>> for TermFactory {
         signals: SignalList<CachedTerm<SharedTerm>>,
     ) -> CachedTerm<SharedTerm> {
         self.create_expression(Term::Signal(SignalTerm::new(signals)))
-    }
-    fn create_signal_transformer_term(
-        &self,
-        transform: CachedTerm<SharedTerm>,
-    ) -> CachedTerm<SharedTerm> {
-        self.create_expression(Term::SignalTransformer(SignalTransformerTerm::new(
-            transform,
-        )))
     }
 
     fn match_value_term<'a>(
@@ -554,15 +487,6 @@ impl ExpressionFactory<CachedTerm<SharedTerm>> for TermFactory {
     ) -> Option<&'a SignalTerm<CachedTerm<SharedTerm>>> {
         match expression.value().value.as_ref() {
             Term::Signal(term) => Some(term),
-            _ => None,
-        }
-    }
-    fn match_signal_transformer_term<'a>(
-        &self,
-        expression: &'a CachedTerm<SharedTerm>,
-    ) -> Option<&'a SignalTransformerTerm<CachedTerm<SharedTerm>>> {
-        match expression.value().value.as_ref() {
-            Term::SignalTransformer(term) => Some(term),
             _ => None,
         }
     }

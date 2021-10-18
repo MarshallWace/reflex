@@ -2,14 +2,24 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use crate::{
-    core::{Applicable, Arity, EvaluationCache, Expression, ExpressionFactory, HeapAllocator},
+    core::{
+        Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory, FunctionArity,
+        HeapAllocator,
+    },
     lang::ValueTerm,
 };
 
 pub struct If {}
+impl If {
+    const ARITY: FunctionArity<3, 0> = FunctionArity {
+        required: [ArgType::Strict, ArgType::Lazy, ArgType::Lazy],
+        optional: [],
+        variadic: None,
+    };
+}
 impl<T: Expression> Applicable<T> for If {
     fn arity(&self) -> Option<Arity> {
-        Some(Arity::from(1, 2, None))
+        Some(Arity::from(&Self::ARITY))
     }
     fn apply(
         &self,
@@ -19,9 +29,6 @@ impl<T: Expression> Applicable<T> for If {
         _cache: &mut impl EvaluationCache<T>,
     ) -> Result<T, String> {
         let mut args = args.into_iter();
-        if args.len() != 3 {
-            return Err(format!("Expected 3 arguments, received {}", args.len()));
-        }
         let condition = args.next().unwrap();
         let consequent = args.next().unwrap();
         let alternate = args.next().unwrap();

@@ -4,14 +4,24 @@
 use std::iter::once;
 
 use crate::{
-    core::{Applicable, Arity, EvaluationCache, Expression, ExpressionFactory, HeapAllocator},
+    core::{
+        Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory, FunctionArity,
+        HeapAllocator,
+    },
     lang::{is_truthy, BuiltinTerm},
 };
 
 pub struct Filter {}
+impl Filter {
+    const ARITY: FunctionArity<2, 0> = FunctionArity {
+        required: [ArgType::Strict, ArgType::Strict],
+        optional: [],
+        variadic: None,
+    };
+}
 impl<T: Expression> Applicable<T> for Filter {
     fn arity(&self) -> Option<Arity> {
-        Some(Arity::from(2, 0, None))
+        Some(Arity::from(&Self::ARITY))
     }
     fn apply(
         &self,
@@ -21,9 +31,6 @@ impl<T: Expression> Applicable<T> for Filter {
         _cache: &mut impl EvaluationCache<T>,
     ) -> Result<T, String> {
         let mut args = args.into_iter();
-        if args.len() != 2 {
-            return Err(format!("Expected 2 arguments, received {}", args.len()));
-        }
         let target = args.next().unwrap();
         let predicate = args.next().unwrap();
         let result = if let Some(target) = factory.match_vector_term(&target) {
@@ -94,9 +101,16 @@ fn collect_filter_results<T: Expression>(
 }
 
 pub struct CollectFilterResults {}
+impl CollectFilterResults {
+    const ARITY: FunctionArity<3, 0> = FunctionArity {
+        required: [ArgType::Strict, ArgType::Strict, ArgType::Strict],
+        optional: [],
+        variadic: None,
+    };
+}
 impl<T: Expression> Applicable<T> for CollectFilterResults {
     fn arity(&self) -> Option<Arity> {
-        Some(Arity::from(3, 0, None))
+        Some(Arity::from(&Self::ARITY))
     }
     fn apply(
         &self,
@@ -106,9 +120,6 @@ impl<T: Expression> Applicable<T> for CollectFilterResults {
         _cache: &mut impl EvaluationCache<T>,
     ) -> Result<T, String> {
         let mut args = args.into_iter();
-        if args.len() != 3 {
-            return Err(format!("Expected 3 arguments, received {}", args.len()));
-        }
         let items = args.next().unwrap();
         let results = args.next().unwrap();
         let combine = args.next().unwrap();

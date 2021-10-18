@@ -34,7 +34,7 @@ mod variable;
 pub use variable::*;
 
 use crate::{
-    compiler::{Compile, Compiler, NativeFunctionRegistry, Program},
+    compiler::{Compile, Compiler, Program},
     core::{
         Applicable, Arity, DependencyList, DynamicState, Evaluate, EvaluationCache,
         EvaluationResult, Expression, ExpressionFactory, ExpressionList, GraphNode, HeapAllocator,
@@ -215,7 +215,7 @@ impl<T: Expression + Rewritable<CachedTerm<T>> + Compile<CachedTerm<T>>> Compile
         factory: &impl ExpressionFactory<CachedTerm<T>>,
         allocator: &impl HeapAllocator<CachedTerm<T>>,
         compiler: &mut Compiler,
-    ) -> Result<(Program, NativeFunctionRegistry<CachedTerm<T>>), String> {
+    ) -> Result<Program, String> {
         self.value
             .compile(eager, stack_offset, factory, allocator, compiler)
     }
@@ -306,7 +306,6 @@ pub enum Term<T: Expression + Compile<T>> {
     Constructor(ConstructorTerm),
     Collection(CollectionTerm<T>),
     Signal(SignalTerm<T>),
-    SignalTransformer(SignalTransformerTerm<T>),
 }
 impl<T: Expression + Applicable<T> + Compile<T>> GraphNode for Term<T> {
     fn capture_depth(&self) -> StackOffset {
@@ -326,7 +325,6 @@ impl<T: Expression + Applicable<T> + Compile<T>> GraphNode for Term<T> {
             Self::Constructor(term) => term.capture_depth(),
             Self::Collection(term) => term.capture_depth(),
             Self::Signal(term) => term.capture_depth(),
-            Self::SignalTransformer(term) => term.capture_depth(),
         }
     }
     fn free_variables(&self) -> HashSet<StackOffset> {
@@ -346,7 +344,6 @@ impl<T: Expression + Applicable<T> + Compile<T>> GraphNode for Term<T> {
             Self::Constructor(term) => term.free_variables(),
             Self::Collection(term) => term.free_variables(),
             Self::Signal(term) => term.free_variables(),
-            Self::SignalTransformer(term) => term.free_variables(),
         }
     }
     fn dynamic_dependencies(&self) -> DependencyList {
@@ -366,7 +363,6 @@ impl<T: Expression + Applicable<T> + Compile<T>> GraphNode for Term<T> {
             Self::Constructor(term) => term.dynamic_dependencies(),
             Self::Collection(term) => term.dynamic_dependencies(),
             Self::Signal(term) => term.dynamic_dependencies(),
-            Self::SignalTransformer(term) => term.dynamic_dependencies(),
         }
     }
     fn is_static(&self) -> bool {
@@ -386,7 +382,6 @@ impl<T: Expression + Applicable<T> + Compile<T>> GraphNode for Term<T> {
             Self::Constructor(term) => term.is_static(),
             Self::Collection(term) => term.is_static(),
             Self::Signal(term) => term.is_static(),
-            Self::SignalTransformer(term) => term.is_static(),
         }
     }
     fn is_atomic(&self) -> bool {
@@ -406,7 +401,6 @@ impl<T: Expression + Applicable<T> + Compile<T>> GraphNode for Term<T> {
             Self::Constructor(term) => term.is_atomic(),
             Self::Collection(term) => term.is_atomic(),
             Self::Signal(term) => term.is_atomic(),
-            Self::SignalTransformer(term) => term.is_atomic(),
         }
     }
 }
@@ -424,7 +418,6 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Evaluate<T> 
             Self::Tuple(term) => term.subexpressions(),
             Self::Struct(term) => term.subexpressions(),
             Self::Collection(term) => term.subexpressions(),
-            Self::SignalTransformer(term) => term.subexpressions(),
             _ => Vec::new(),
         }
     }
@@ -455,9 +448,6 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Evaluate<T> 
             Self::Collection(term) => {
                 term.substitute_static(substitutions, factory, allocator, cache)
             }
-            Self::SignalTransformer(term) => {
-                term.substitute_static(substitutions, factory, allocator, cache)
-            }
             _ => None,
         }
     }
@@ -480,9 +470,6 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Evaluate<T> 
             Self::Tuple(term) => term.substitute_dynamic(state, factory, allocator, cache),
             Self::Struct(term) => term.substitute_dynamic(state, factory, allocator, cache),
             Self::Collection(term) => term.substitute_dynamic(state, factory, allocator, cache),
-            Self::SignalTransformer(term) => {
-                term.substitute_dynamic(state, factory, allocator, cache)
-            }
             _ => None,
         }
     }
@@ -502,7 +489,6 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Evaluate<T> 
             Self::Tuple(term) => term.normalize(factory, allocator, cache),
             Self::Struct(term) => term.normalize(factory, allocator, cache),
             Self::Collection(term) => term.normalize(factory, allocator, cache),
-            Self::SignalTransformer(term) => term.normalize(factory, allocator, cache),
             _ => None,
         }
     }
@@ -521,7 +507,6 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Evaluate<T> 
             Self::Tuple(term) => term.hoist_free_variables(factory, allocator),
             Self::Struct(term) => term.hoist_free_variables(factory, allocator),
             Self::Collection(term) => term.hoist_free_variables(factory, allocator),
-            Self::SignalTransformer(term) => term.hoist_free_variables(factory, allocator),
             _ => None,
         }
     }
@@ -562,7 +547,6 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>> 
             Self::Native(term) => Applicable::<T>::arity(term),
             Self::CompiledFunction(term) => Applicable::<T>::arity(term),
             Self::Constructor(term) => Applicable::<T>::arity(term),
-            Self::SignalTransformer(term) => term.arity(),
             _ => None,
         }
     }
@@ -580,7 +564,6 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>> 
             Self::Native(term) => term.apply(args, factory, allocator, cache),
             Self::CompiledFunction(term) => term.apply(args, factory, allocator, cache),
             Self::Constructor(term) => term.apply(args, factory, allocator, cache),
-            Self::SignalTransformer(term) => term.apply(args, factory, allocator, cache),
             _ => Err(format!("Invalid function application target: {}", self)),
         }
     }
@@ -600,7 +583,7 @@ impl<
         factory: &impl ExpressionFactory<T>,
         allocator: &impl HeapAllocator<T>,
         compiler: &mut Compiler,
-    ) -> Result<(Program, NativeFunctionRegistry<T>), String> {
+    ) -> Result<Program, String> {
         match self {
             Self::Value(term) => term.compile(eager, stack_offset, factory, allocator, compiler),
             Self::Variable(term) => term.compile(eager, stack_offset, factory, allocator, compiler),
@@ -629,9 +612,6 @@ impl<
                 term.compile(eager, stack_offset, factory, allocator, compiler)
             }
             Self::Signal(term) => term.compile(eager, stack_offset, factory, allocator, compiler),
-            Self::SignalTransformer(term) => {
-                term.compile(eager, stack_offset, factory, allocator, compiler)
-            }
         }
     }
 }
@@ -653,7 +633,6 @@ impl<T: Expression + Compile<T>> std::fmt::Display for Term<T> {
             Self::Constructor(term) => std::fmt::Display::fmt(term, f),
             Self::Collection(term) => std::fmt::Display::fmt(term, f),
             Self::Signal(term) => std::fmt::Display::fmt(term, f),
-            Self::SignalTransformer(term) => std::fmt::Display::fmt(term, f),
         }
     }
 }
@@ -676,7 +655,6 @@ impl<'a, T: Expression + Compile<T>> SerializeJson for Term<T> {
             Term::Constructor(term) => term.to_json(),
             Term::Collection(term) => term.to_json(),
             Term::Signal(term) => term.to_json(),
-            Term::SignalTransformer(term) => term.to_json(),
         }
     }
 }

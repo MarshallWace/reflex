@@ -6,8 +6,8 @@ use std::{iter::once, str::FromStr};
 
 use reflex::{
     core::{
-        Arity, Expression, ExpressionFactory, ExpressionList, HeapAllocator, NativeAllocator,
-        Signal, SignalType, StringValue, VarArgs,
+        ArgType, Arity, Expression, ExpressionFactory, ExpressionList, FunctionArity,
+        HeapAllocator, NativeAllocator, Signal, SignalType, StringValue,
     },
     lang::{BuiltinTerm, NativeFunction, ValueTerm},
 };
@@ -47,14 +47,21 @@ pub fn throw<T: Expression>() -> NativeFunction<T> {
 }
 struct Throw {}
 impl Throw {
+    const NAME: &'static str = "Throw";
+    const UUID: &'static str = "fb9bef4b-da7a-46ef-af03-50ed2984274c";
+    const ARITY: FunctionArity<1, 0> = FunctionArity {
+        required: [ArgType::Strict],
+        optional: [],
+        variadic: None,
+    };
     fn uid() -> Uuid {
-        Uuid::from_str("fb9bef4b-da7a-46ef-af03-50ed2984274c").expect("Hardcoded uuid value")
+        Uuid::from_str(Self::UUID).unwrap()
     }
     fn name() -> Option<&'static str> {
-        Some("Throw")
+        Some(Self::NAME)
     }
     fn arity() -> Arity {
-        Arity::from(1, 0, None)
+        Arity::from(&Self::ARITY)
     }
     fn apply<T: Expression>(
         args: ExpressionList<T>,
@@ -118,14 +125,21 @@ pub fn construct<T: Expression>() -> NativeFunction<T> {
 }
 struct Construct {}
 impl Construct {
+    const NAME: &'static str = "Construct";
+    const UUID: &'static str = "5a68dc6b-71fa-407f-8039-bcd87323f2bf";
+    const ARITY: FunctionArity<1, 0> = FunctionArity {
+        required: [ArgType::Strict],
+        optional: [],
+        variadic: Some(ArgType::Lazy),
+    };
     fn uid() -> Uuid {
-        Uuid::from_str("5a68dc6b-71fa-407f-8039-bcd87323f2bf").expect("Hardcoded uuid valued")
+        Uuid::from_str(Self::UUID).unwrap()
     }
     fn name() -> Option<&'static str> {
-        Some("Construct")
+        Some(Self::NAME)
     }
     fn arity() -> Arity {
-        Arity::from(1, 0, Some(VarArgs::Lazy))
+        Arity::from(&Self::ARITY)
     }
     fn apply<T: Expression>(
         args: ExpressionList<T>,
@@ -156,14 +170,21 @@ pub fn dispatch<T: Expression>() -> NativeFunction<T> {
 }
 struct Dispatch {}
 impl Dispatch {
+    const NAME: &'static str = "Dispatch";
+    const UUID: &'static str = "f37c66ee-cd73-496d-8420-1ce83ab924ad";
+    const ARITY: FunctionArity<3, 0> = FunctionArity {
+        required: [ArgType::Strict, ArgType::Strict, ArgType::Lazy],
+        optional: [],
+        variadic: Some(ArgType::Lazy),
+    };
     fn uid() -> Uuid {
-        Uuid::from_str("f37c66ee-cd73-496d-8420-1ce83ab924ad").expect("Hardcoded uuid value")
+        Uuid::from_str(Self::UUID).unwrap()
     }
     fn name() -> Option<&'static str> {
-        Some("Dispatch")
+        Some(Self::NAME)
     }
     fn arity() -> Arity {
-        Arity::from(2, 1, Some(VarArgs::Lazy))
+        Arity::from(&Self::ARITY)
     }
     fn apply<T: Expression>(
         args: ExpressionList<T>,
@@ -200,14 +221,21 @@ pub fn to_string<T: Expression>() -> NativeFunction<T> {
 }
 struct ToString {}
 impl ToString {
+    const NAME: &'static str = "ToString";
+    const UUID: &'static str = "7f651286-8d00-4854-a956-0a54dfe662d0";
+    const ARITY: FunctionArity<1, 0> = FunctionArity {
+        required: [ArgType::Strict],
+        optional: [],
+        variadic: Some(ArgType::Lazy),
+    };
     fn uid() -> Uuid {
-        Uuid::from_str("7f651286-8d00-4854-a956-0a54dfe662d0").expect("Hardcoded uuid value")
+        Uuid::from_str(Self::UUID).unwrap()
     }
     fn name() -> Option<&'static str> {
-        Some("ToString")
+        Some(Self::NAME)
     }
     fn arity() -> Arity {
-        Arity::from(1, 0, None)
+        Arity::from(&Self::ARITY)
     }
     fn apply<T: Expression>(
         args: ExpressionList<T>,
@@ -240,14 +268,21 @@ pub fn format_error_message<T: Expression>() -> NativeFunction<T> {
 const UNKNOWN_ERROR_MESSAGE: &'static str = "Unknown error";
 struct FormatErrorMessage {}
 impl FormatErrorMessage {
+    const NAME: &'static str = "FormatErrorMessage";
+    const UUID: &'static str = "3f88d05d-47f1-4b49-b16e-b8dc2f4ee61c";
+    const ARITY: FunctionArity<1, 0> = FunctionArity {
+        required: [ArgType::Strict],
+        optional: [],
+        variadic: Some(ArgType::Lazy),
+    };
     fn uid() -> Uuid {
-        Uuid::from_str("3f88d05d-47f1-4b49-b16e-b8dc2f4ee61c").expect("Hardcoded uuid valued")
+        Uuid::from_str(Self::UUID).unwrap()
     }
     fn name() -> Option<&'static str> {
-        Some("FormatErrorMessage")
+        Some(Self::NAME)
     }
     fn arity() -> Arity {
-        Arity::from(1, 0, None)
+        Arity::from(&Self::ARITY)
     }
     fn apply<T: Expression>(
         args: ExpressionList<T>,

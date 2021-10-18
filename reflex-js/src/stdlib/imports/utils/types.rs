@@ -5,7 +5,10 @@
 use std::str::FromStr;
 
 use reflex::{
-    core::{Arity, Expression, ExpressionFactory, ExpressionList, HeapAllocator, NativeAllocator},
+    core::{
+        ArgType, Arity, Expression, ExpressionFactory, ExpressionList, FunctionArity,
+        HeapAllocator, NativeAllocator,
+    },
     lang::{create_struct, NativeFunction, ValueTerm},
 };
 use uuid::Uuid;
@@ -53,14 +56,21 @@ pub fn struct_type_factory<T: Expression>() -> NativeFunction<T> {
 }
 struct StructTypeFactory {}
 impl StructTypeFactory {
+    const NAME: &'static str = "StructTypeFactory";
+    const UUID: &'static str = "69fdfb4f-7a4a-4414-8140-ededbdc9368c";
+    const ARITY: FunctionArity<1, 0> = FunctionArity {
+        required: [ArgType::Strict],
+        optional: [],
+        variadic: None,
+    };
     fn uid() -> Uuid {
-        Uuid::from_str("69fdfb4f-7a4a-4414-8140-ededbdc9368c").expect("Hardcoded Uuid value")
+        Uuid::from_str(Self::UUID).unwrap()
     }
     fn name() -> Option<&'static str> {
-        Some("StructTypeFactory")
+        Some(Self::NAME)
     }
     fn arity() -> Arity {
-        Arity::from(1, 0, None)
+        Arity::from(&Self::ARITY)
     }
     fn apply<T: Expression>(
         args: ExpressionList<T>,
@@ -68,9 +78,6 @@ impl StructTypeFactory {
         allocator: &dyn NativeAllocator<T>,
     ) -> Result<T, String> {
         let mut args = args.into_iter();
-        if args.len() != 1 {
-            return Err(format!("Expected 1 argument, received {}", args.len(),));
-        }
         let shape = args.next().unwrap();
         if let Some(shape) = factory.match_struct_term(&shape) {
             Ok(

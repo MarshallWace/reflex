@@ -5,7 +5,7 @@
 use std::{cmp::Eq, collections::HashSet, hash::Hash, iter::once};
 
 use crate::{
-    compiler::{Compile, Compiler, Instruction, NativeFunctionRegistry, Program},
+    compiler::{Compile, Compiler, Instruction, Program},
     core::{
         DependencyList, Expression, ExpressionFactory, GraphNode, HeapAllocator, SerializeJson,
         StackOffset, StringValue, VarArgs,
@@ -128,21 +128,18 @@ impl<T: Expression + Compile<T>> Compile<T> for ValueTerm<T::String> {
         _factory: &impl ExpressionFactory<T>,
         _allocator: &impl HeapAllocator<T>,
         _compiler: &mut Compiler,
-    ) -> Result<(Program, NativeFunctionRegistry<T>), String> {
-        Ok((
-            Program::new(once(match self {
-                Self::Hash(value) => Instruction::PushHash { value: *value },
-                Self::Symbol(value) => Instruction::PushSymbol { value: *value },
-                Self::Null => Instruction::PushNull,
-                Self::Boolean(value) => Instruction::PushBoolean { value: *value },
-                Self::Int(value) => Instruction::PushInt { value: *value },
-                Self::Float(value) => Instruction::PushFloat { value: *value },
-                Self::String(value) => Instruction::PushString {
-                    value: value.as_str().into(),
-                },
-            })),
-            NativeFunctionRegistry::default(),
-        ))
+    ) -> Result<Program, String> {
+        Ok(Program::new(once(match self {
+            Self::Hash(value) => Instruction::PushHash { value: *value },
+            Self::Symbol(value) => Instruction::PushSymbol { value: *value },
+            Self::Null => Instruction::PushNull,
+            Self::Boolean(value) => Instruction::PushBoolean { value: *value },
+            Self::Int(value) => Instruction::PushInt { value: *value },
+            Self::Float(value) => Instruction::PushFloat { value: *value },
+            Self::String(value) => Instruction::PushString {
+                value: value.as_str().into(),
+            },
+        })))
     }
 }
 impl<TString: StringValue> std::fmt::Display for ValueTerm<TString> {

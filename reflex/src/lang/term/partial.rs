@@ -5,15 +5,15 @@
 use std::{collections::HashSet, iter::once};
 
 use crate::{
-    compiler::{Compile, Compiler, Instruction, NativeFunctionRegistry, Program},
+    compiler::{Compile, Compiler, Instruction, Program},
     core::{
-        transform_expression_list, Applicable, Arity, DependencyList, DynamicState,
+        transform_expression_list, Applicable, ArgType, Arity, DependencyList, DynamicState,
         EvaluationCache, Expression, ExpressionFactory, ExpressionList, GraphNode, HeapAllocator,
         Reducible, Rewritable, SerializeJson, StackOffset, Substitutions, VarArgs,
     },
 };
 
-use super::application::{compile_args, with_eagerness};
+use super::application::compile_args;
 
 #[derive(Hash, Eq, PartialEq, Debug)]
 pub struct PartialApplicationTerm<T: Expression> {
@@ -52,11 +52,12 @@ impl<T: Expression + Applicable<T>> GraphNode for PartialApplicationTerm<T> {
     fn dynamic_dependencies(&self) -> DependencyList {
         let target_dependencies = self.target.dynamic_dependencies();
         let eager_args = self.target.arity().map(|arity| {
-            with_eagerness(self.args.iter(), &arity)
-                .into_iter()
-                .filter_map(|(arg, eager)| match eager {
-                    VarArgs::Eager => Some(arg),
-                    VarArgs::Lazy => None,
+            self.args
+                .iter()
+                .zip(arity.iter())
+                .filter_map(|(arg, arg_type)| match arg_type {
+                    ArgType::Strict | ArgType::Eager => Some(arg),
+                    ArgType::Lazy => None,
                 })
         });
         match eager_args {
@@ -123,16 +124,18 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T>> Rewritable<T>
             .any(|arg| !arg.dynamic_dependencies().is_empty());
         let args = if has_dynamic_args {
             self.target.arity().map(|arity| {
-                allocator.create_list(with_eagerness(self.args.iter(), &arity).into_iter().map(
-                    |(arg, eager)| {
-                        match eager {
-                            VarArgs::Eager => arg
+                allocator.create_sized_list(
+                    self.args.len(),
+                    self.args
+                        .iter()
+                        .zip(arity.iter())
+                        .map(|(arg, arg_type)| match arg_type {
+                            ArgType::Strict | ArgType::Eager => arg
                                 .substitute_dynamic(state, factory, allocator, cache)
                                 .unwrap_or(arg.clone()),
-                            VarArgs::Lazy => arg.clone(),
-                        }
-                    },
-                ))
+                            ArgType::Lazy => arg.clone(),
+                        }),
+                )
             })
         } else {
             None
@@ -184,13 +187,10 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T>> Rewritable<T>
 }
 impl<T: Expression + Rewritable<T> + Applicable<T>> Applicable<T> for PartialApplicationTerm<T> {
     fn arity(&self) -> Option<Arity> {
-        self.target.arity().map(|arity| {
-            let partial_args = self.args.len();
-            let remaining_eager_args = arity.eager().saturating_sub(partial_args);
-            let partial_args = partial_args.saturating_sub(arity.eager());
-            let remaining_lazy_args = arity.lazy().saturating_sub(partial_args);
-            Arity::from(remaining_eager_args, remaining_lazy_args, arity.variadic())
-        })
+        match self.target.arity() {
+            None => None,
+            Some(arity) => Some(arity.partial(self.args.len())),
+        }
     }
     fn apply(
         &self,
@@ -221,49 +221,28 @@ impl<T: Expression + Applicable<T> + Rewritable<T> + Reducible<T> + Compile<T>> 
         factory: &impl ExpressionFactory<T>,
         allocator: &impl HeapAllocator<T>,
         compiler: &mut Compiler,
-    ) -> Result<(Program, NativeFunctionRegistry<T>), String> {
+    ) -> Result<Program, String> {
         let target = &self.target;
         let args = &self.args;
         let num_args = args.len();
-        let eager_arity = match eager {
-            VarArgs::Lazy => None,
+        let arity = match eager {
             VarArgs::Eager => target.arity(),
-            // VarArgs::Eager => {
-            //     let precompiled_target_instruction = factory
-            //         .match_compiled_function_term(target)
-            //         .and_then(|target| {
-            //             compiler.retrieve_compiled_instruction(target.address(), None)
-            //         });
-            //     match precompiled_target_instruction {
-            //         Some(Instruction::Function { arity, .. }) => Some(Arity::from(0, *arity, None)),
-            //         _ => target.arity(),
-            //     }
-            // }
-        };
-        let (compiled_target, target_native_functions) =
+            VarArgs::Lazy => None,
+        }
+        .unwrap_or_else(|| Arity::lazy(num_args, 0, false));
+        let compiled_target =
             target.compile(eager, stack_offset + num_args, factory, allocator, compiler)?;
-        let (compiled_args, arg_native_functions) = match eager_arity {
-            Some(arity) => compile_args(
-                with_eagerness(args.iter(), &arity),
-                stack_offset,
-                factory,
-                allocator,
-                compiler,
-            ),
-            None => compile_args(
-                args.iter().map(|arg| (arg, VarArgs::Lazy)),
-                stack_offset,
-                factory,
-                allocator,
-                compiler,
-            ),
-        }?;
-        let mut combined_native_functions = target_native_functions;
-        combined_native_functions.extend(arg_native_functions);
+        let compiled_args = compile_args(
+            args.iter().zip(arity.iter()),
+            stack_offset,
+            factory,
+            allocator,
+            compiler,
+        )?;
         let mut result = compiled_args;
         result.extend(compiled_target);
         result.push(Instruction::ConstructPartialApplication { num_args });
-        Ok((result, combined_native_functions))
+        Ok(result)
     }
 }
 impl<T: Expression> std::fmt::Display for PartialApplicationTerm<T> {

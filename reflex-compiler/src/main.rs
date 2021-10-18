@@ -1,9 +1,10 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
+// SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use anyhow::{anyhow, Result};
 use clap::Parser;
-use reflex::compiler::{serialization::SerializableCompilerOutput, CompilerMode, CompilerOptions};
+use reflex::compiler::{CompilerMode, CompilerOptions};
 
 use reflex_compiler::js::compile_js_source;
 // use reflex_server::cli::{compile_root, create_graph_root};
@@ -54,8 +55,8 @@ fn main() -> Result<()> {
         CompilerMode::Thunk
     };
 
-    let compiler_output: SerializableCompilerOutput = match args.syntax {
-        Syntax::JavaScript => compile_js_source(path, compiler_options, compiler_mode)?.into(),
+    let compiler_output = match args.syntax {
+        Syntax::JavaScript => compile_js_source(path, compiler_options, compiler_mode)?,
     };
 
     let stdout = std::io::stdout();
