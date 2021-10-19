@@ -43,7 +43,7 @@ use tokio::{
     pin,
     sync::{broadcast, mpsc, oneshot, watch},
 };
-use tokio_stream::wrappers::WatchStream;
+use tokio_stream::wrappers::{BroadcastStream, WatchStream};
 pub use tokio_stream::{Stream, StreamExt};
 
 pub type SignalResult<T> = (T, Option<RuntimeEffect<T>>);
@@ -413,7 +413,17 @@ impl<T: Expression> RuntimeCommand<T> {
 
 pub struct Runtime<T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>> {
     commands: RuntimeCommandChannel<T>,
-    _flush: broadcast::Receiver<FlushPayload<T>>,
+    commands_handler: tokio::task::JoinHandle<()>,
+    // Retain a reference to prevent broadcast channel closing immediately due to lack of listeners
+    flush_keepalive: tokio::task::JoinHandle<()>,
+}
+impl<T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>> Drop
+    for Runtime<T>
+{
+    fn drop(&mut self) {
+        self.commands_handler.abort();
+        self.flush_keepalive.abort();
+    }
 }
 impl<T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>> Runtime<T> {
     pub fn new<THandler>(
@@ -436,7 +446,7 @@ impl<T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile
         // TODO: Establish sensible defaults for channel buffer sizes
         let (commands_tx, mut commands_rx) = mpsc::channel(1024);
         let (flush_tx, flush_rx) = broadcast::channel(1024);
-        tokio::spawn({
+        let commands_handler = tokio::spawn({
             let plugins = Arc::new(plugins.into_iter().collect::<Vec<_>>());
             let mut store = Mutex::new(RuntimeStore::new(state));
             let factory = factory.clone();
@@ -548,7 +558,8 @@ impl<T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile
         });
         Self {
             commands: commands_tx,
-            _flush: flush_rx,
+            commands_handler,
+            flush_keepalive: tokio::spawn(drain_stream(BroadcastStream::new(flush_rx))),
         }
     }
     pub async fn subscribe<'a>(
@@ -1692,4 +1703,8 @@ fn next_queued_item<T>(target: &mut tokio::sync::mpsc::Receiver<T>) -> Option<T>
         Poll::Ready(Some(value)) => Some(value),
         _ => None,
     }
+}
+
+fn drain_stream<T>(stream: impl Stream<Item = T>) -> impl Future<Output = ()> {
+    futures::StreamExt::for_each(stream, |_| futures::future::ready(()))
 }
