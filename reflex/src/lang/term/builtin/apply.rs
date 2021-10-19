@@ -20,12 +20,11 @@ impl<T: Expression + Applicable<T>> Applicable<T> for Apply {
     }
     fn apply(
         &self,
-        args: impl IntoIterator<Item = T, IntoIter = impl ExactSizeIterator<Item = T>>,
+        mut args: impl ExactSizeIterator<Item = T>,
         factory: &impl ExpressionFactory<T>,
         allocator: &impl HeapAllocator<T>,
         _cache: &mut impl EvaluationCache<T>,
     ) -> Result<T, String> {
-        let mut args = args.into_iter();
         let target = args.next().unwrap();
         let args = args.next().unwrap();
         let result = if target.arity().is_some() {

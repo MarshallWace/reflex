@@ -193,10 +193,7 @@ impl<T: Expression + Applicable<CachedTerm<T>>> Applicable<CachedTerm<T>> for Ca
     }
     fn apply(
         &self,
-        args: impl IntoIterator<
-            Item = CachedTerm<T>,
-            IntoIter = impl ExactSizeIterator<Item = CachedTerm<T>>,
-        >,
+        args: impl ExactSizeIterator<Item = CachedTerm<T>>,
         factory: &impl ExpressionFactory<CachedTerm<T>>,
         allocator: &impl HeapAllocator<CachedTerm<T>>,
         cache: &mut impl EvaluationCache<CachedTerm<T>>,
@@ -552,7 +549,7 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>> 
     }
     fn apply(
         &self,
-        args: impl IntoIterator<Item = T, IntoIter = impl ExactSizeIterator<Item = T>>,
+        args: impl ExactSizeIterator<Item = T>,
         factory: &impl ExpressionFactory<T>,
         allocator: &impl HeapAllocator<T>,
         cache: &mut impl EvaluationCache<T>,

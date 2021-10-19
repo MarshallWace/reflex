@@ -216,14 +216,14 @@ impl<T: Expression> Applicable<T> for ConstructorTerm {
     }
     fn apply(
         &self,
-        args: impl IntoIterator<Item = T, IntoIter = impl ExactSizeIterator<Item = T>>,
+        args: impl ExactSizeIterator<Item = T>,
         factory: &impl ExpressionFactory<T>,
         allocator: &impl HeapAllocator<T>,
         _cache: &mut impl EvaluationCache<T>,
     ) -> Result<T, String> {
         Ok(factory.create_struct_term(
             allocator.clone_struct_prototype(&self.prototype),
-            allocator.create_list(args.into_iter()),
+            allocator.create_list(args),
         ))
     }
 }

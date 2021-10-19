@@ -341,7 +341,7 @@ pub trait Applicable<T: Expression> {
     fn arity(&self) -> Option<Arity>;
     fn apply(
         &self,
-        args: impl IntoIterator<Item = T, IntoIter = impl ExactSizeIterator<Item = T>>,
+        args: impl ExactSizeIterator<Item = T>,
         factory: &impl ExpressionFactory<T>,
         allocator: &impl HeapAllocator<T>,
         cache: &mut impl EvaluationCache<T>,

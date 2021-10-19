@@ -197,12 +197,6 @@ impl ToRequest {
         allocator: &dyn NativeAllocator<T>,
     ) -> Result<T, String> {
         let mut args = args.into_iter();
-        if args.len() != 1 {
-            return Err(format!(
-                "Invalid Request constructor call: Expected 1 argument, received {}",
-                args.len()
-            ));
-        }
         let target = args.next().unwrap();
         let result = match factory.match_value_term(&target) {
             Some(ValueTerm::String(_)) => {

@@ -25,12 +25,11 @@ impl<T: Expression> Applicable<T> for Collect {
     }
     fn apply(
         &self,
-        args: impl IntoIterator<Item = T, IntoIter = impl ExactSizeIterator<Item = T>>,
+        mut args: impl ExactSizeIterator<Item = T>,
         factory: &impl ExpressionFactory<T>,
         allocator: &impl HeapAllocator<T>,
         _cache: &mut impl EvaluationCache<T>,
     ) -> Result<T, String> {
-        let mut args = args.into_iter();
         let target = args.next().unwrap();
         if let Some(collection) = factory.match_vector_term(&target) {
             Ok(if collection.is_static() {
@@ -80,12 +79,12 @@ impl<T: Expression> Applicable<T> for CollectTuple {
     }
     fn apply(
         &self,
-        args: impl IntoIterator<Item = T, IntoIter = impl ExactSizeIterator<Item = T>>,
+        args: impl ExactSizeIterator<Item = T>,
         factory: &impl ExpressionFactory<T>,
         allocator: &impl HeapAllocator<T>,
         _cache: &mut impl EvaluationCache<T>,
     ) -> Result<T, String> {
-        Ok(factory.create_tuple_term(allocator.create_list(args.into_iter())))
+        Ok(factory.create_tuple_term(allocator.create_list(args)))
     }
 }
 
@@ -103,12 +102,11 @@ impl<T: Expression> Applicable<T> for CollectStruct {
     }
     fn apply(
         &self,
-        args: impl IntoIterator<Item = T, IntoIter = impl ExactSizeIterator<Item = T>>,
+        mut args: impl ExactSizeIterator<Item = T>,
         factory: &impl ExpressionFactory<T>,
         allocator: &impl HeapAllocator<T>,
         _cache: &mut impl EvaluationCache<T>,
     ) -> Result<T, String> {
-        let mut args = args.into_iter();
         let prototype = args.next().unwrap();
         match factory.match_constructor_term(&prototype) {
             Some(constructor) if constructor.prototype().keys().len() == args.len() => Ok(factory
@@ -139,12 +137,12 @@ impl<T: Expression> Applicable<T> for CollectVector {
     }
     fn apply(
         &self,
-        args: impl IntoIterator<Item = T, IntoIter = impl ExactSizeIterator<Item = T>>,
+        args: impl ExactSizeIterator<Item = T>,
         factory: &impl ExpressionFactory<T>,
         allocator: &impl HeapAllocator<T>,
         _cache: &mut impl EvaluationCache<T>,
     ) -> Result<T, String> {
-        Ok(factory.create_vector_term(allocator.create_list(args.into_iter())))
+        Ok(factory.create_vector_term(allocator.create_list(args)))
     }
 }
 
@@ -162,12 +160,12 @@ impl<T: Expression> Applicable<T> for CollectHashSet {
     }
     fn apply(
         &self,
-        args: impl IntoIterator<Item = T, IntoIter = impl ExactSizeIterator<Item = T>>,
+        args: impl ExactSizeIterator<Item = T>,
         factory: &impl ExpressionFactory<T>,
         allocator: &impl HeapAllocator<T>,
         _cache: &mut impl EvaluationCache<T>,
     ) -> Result<T, String> {
-        let values = args.into_iter().collect::<Vec<_>>();
+        let values = args.collect::<Vec<_>>();
         let deduplicated_values = match deduplicate_hashset_entries(&values) {
             Some(values) => values,
             None => values,
@@ -190,13 +188,13 @@ impl<T: Expression> Applicable<T> for CollectHashMap {
     }
     fn apply(
         &self,
-        args: impl IntoIterator<Item = T, IntoIter = impl ExactSizeIterator<Item = T>>,
+        args: impl ExactSizeIterator<Item = T>,
         factory: &impl ExpressionFactory<T>,
         allocator: &impl HeapAllocator<T>,
         _cache: &mut impl EvaluationCache<T>,
     ) -> Result<T, String> {
         let (keys, values): (Vec<_>, Vec<_>) = {
-            args.into_iter().map(|arg| {
+            args.map(|arg| {
                 let static_entry = if let Some(entry) = factory.match_tuple_term(&arg) {
                     match (entry.get(0), entry.get(1)) {
                         (Some(key), Some(value)) if entry.size() == 0 => {

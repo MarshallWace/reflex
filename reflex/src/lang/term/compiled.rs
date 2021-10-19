@@ -67,7 +67,7 @@ impl<T: Expression> Applicable<T> for CompiledFunctionTerm {
     }
     fn apply(
         &self,
-        _args: impl IntoIterator<Item = T, IntoIter = impl ExactSizeIterator<Item = T>>,
+        _args: impl ExactSizeIterator<Item = T>,
         _factory: &impl ExpressionFactory<T>,
         _allocator: &impl HeapAllocator<T>,
         _cache: &mut impl EvaluationCache<T>,

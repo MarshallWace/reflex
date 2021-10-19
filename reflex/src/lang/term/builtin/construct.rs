@@ -23,7 +23,7 @@ impl<T: Expression> Applicable<T> for ConstructTuple {
     }
     fn apply(
         &self,
-        args: impl IntoIterator<Item = T, IntoIter = impl ExactSizeIterator<Item = T>>,
+        args: impl ExactSizeIterator<Item = T>,
         factory: &impl ExpressionFactory<T>,
         allocator: &impl HeapAllocator<T>,
         _cache: &mut impl EvaluationCache<T>,
@@ -46,15 +46,11 @@ impl<T: Expression> Applicable<T> for ConstructStruct {
     }
     fn apply(
         &self,
-        args: impl IntoIterator<Item = T, IntoIter = impl ExactSizeIterator<Item = T>>,
+        mut args: impl ExactSizeIterator<Item = T>,
         factory: &impl ExpressionFactory<T>,
         allocator: &impl HeapAllocator<T>,
         _cache: &mut impl EvaluationCache<T>,
     ) -> Result<T, String> {
-        let mut args = args.into_iter();
-        if args.len() != 2 {
-            return Err(format!("Expected 2 arguments, received {}", args.len()));
-        }
         let keys = args.next().unwrap();
         let values = args.next().unwrap();
         let (num_keys, keys) = match factory.match_vector_term(&keys) {
@@ -110,15 +106,11 @@ impl<T: Expression> Applicable<T> for ConstructHashMap {
     }
     fn apply(
         &self,
-        args: impl IntoIterator<Item = T, IntoIter = impl ExactSizeIterator<Item = T>>,
+        mut args: impl ExactSizeIterator<Item = T>,
         factory: &impl ExpressionFactory<T>,
         allocator: &impl HeapAllocator<T>,
         _cache: &mut impl EvaluationCache<T>,
     ) -> Result<T, String> {
-        let mut args = args.into_iter();
-        if args.len() != 2 {
-            return Err(format!("Expected 2 arguments, received {}", args.len()));
-        }
         let keys = args.next().unwrap();
         let values = args.next().unwrap();
         let keys = match factory.match_vector_term(&keys) {
@@ -174,12 +166,12 @@ impl<T: Expression> Applicable<T> for ConstructHashSet {
     }
     fn apply(
         &self,
-        args: impl IntoIterator<Item = T, IntoIter = impl ExactSizeIterator<Item = T>>,
+        args: impl ExactSizeIterator<Item = T>,
         factory: &impl ExpressionFactory<T>,
         allocator: &impl HeapAllocator<T>,
         _cache: &mut impl EvaluationCache<T>,
     ) -> Result<T, String> {
-        let values = args.into_iter().collect::<Vec<_>>();
+        let values = args.collect::<Vec<_>>();
         let deduplicated_values = match deduplicate_hashset_entries(&values) {
             Some(values) => values,
             None => values,
@@ -202,7 +194,7 @@ impl<T: Expression> Applicable<T> for ConstructVector {
     }
     fn apply(
         &self,
-        args: impl IntoIterator<Item = T, IntoIter = impl ExactSizeIterator<Item = T>>,
+        args: impl ExactSizeIterator<Item = T>,
         factory: &impl ExpressionFactory<T>,
         allocator: &impl HeapAllocator<T>,
         _cache: &mut impl EvaluationCache<T>,

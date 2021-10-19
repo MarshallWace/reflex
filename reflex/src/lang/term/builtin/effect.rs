@@ -25,12 +25,11 @@ impl<T: Expression> Applicable<T> for Effect {
     }
     fn apply(
         &self,
-        args: impl IntoIterator<Item = T, IntoIter = impl ExactSizeIterator<Item = T>>,
+        mut args: impl ExactSizeIterator<Item = T>,
         factory: &impl ExpressionFactory<T>,
         allocator: &impl HeapAllocator<T>,
         _cache: &mut impl EvaluationCache<T>,
     ) -> Result<T, String> {
-        let mut args = args.into_iter();
         let signal_type = args.next().unwrap();
         if let Some(ValueTerm::String(signal_type)) = factory.match_value_term(&signal_type) {
             let signal = allocator.create_signal(

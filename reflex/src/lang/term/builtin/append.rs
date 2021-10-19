@@ -25,12 +25,11 @@ impl<T: Expression> Applicable<T> for Append {
     }
     fn apply(
         &self,
-        args: impl IntoIterator<Item = T, IntoIter = impl ExactSizeIterator<Item = T>>,
+        mut args: impl ExactSizeIterator<Item = T>,
         factory: &impl ExpressionFactory<T>,
         allocator: &impl HeapAllocator<T>,
         _cache: &mut impl EvaluationCache<T>,
     ) -> Result<T, String> {
-        let mut args = args.into_iter();
         let target = args.next().unwrap();
         if let Some(collection) = factory.match_vector_term(&target) {
             let args = args.collect::<Vec<_>>();

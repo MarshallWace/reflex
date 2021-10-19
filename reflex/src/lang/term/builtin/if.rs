@@ -23,12 +23,11 @@ impl<T: Expression> Applicable<T> for If {
     }
     fn apply(
         &self,
-        args: impl IntoIterator<Item = T, IntoIter = impl ExactSizeIterator<Item = T>>,
+        mut args: impl ExactSizeIterator<Item = T>,
         factory: &impl ExpressionFactory<T>,
         _allocator: &impl HeapAllocator<T>,
         _cache: &mut impl EvaluationCache<T>,
     ) -> Result<T, String> {
-        let mut args = args.into_iter();
         let condition = args.next().unwrap();
         let consequent = args.next().unwrap();
         let alternate = args.next().unwrap();

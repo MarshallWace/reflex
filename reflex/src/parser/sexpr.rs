@@ -2,7 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
-use std::{collections::HashMap, fmt, iter::once};
+use std::{
+    collections::HashMap,
+    fmt,
+    iter::{empty, once},
+};
 
 use crate::{
     cache::SubstitutionCache,
@@ -409,7 +413,7 @@ fn parse_quoted_list<'src, T: Expression + Rewritable<T> + Reducible<T>>(
     allocator: &impl HeapAllocator<T>,
 ) -> T {
     match values.len() {
-        0 => create_enum(0, Vec::new(), factory, allocator),
+        0 => create_enum(0, empty(), factory, allocator),
         _ => {
             let value = values.iter().next().unwrap();
             create_enum(
@@ -417,7 +421,8 @@ fn parse_quoted_list<'src, T: Expression + Rewritable<T> + Reducible<T>>(
                 vec![
                     parse_quoted_value(value, symbol_cache, factory, allocator),
                     parse_quoted_list(&values[1..], symbol_cache, factory, allocator),
-                ],
+                ]
+                .into_iter(),
                 factory,
                 allocator,
             )
@@ -427,7 +432,7 @@ fn parse_quoted_list<'src, T: Expression + Rewritable<T> + Reducible<T>>(
 
 fn create_enum<'src, T: Expression + Rewritable<T> + Reducible<T>>(
     discriminant: StructFieldOffset,
-    args: impl IntoIterator<Item = T, IntoIter = impl ExactSizeIterator<Item = T>>,
+    args: impl ExactSizeIterator<Item = T>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
 ) -> T {

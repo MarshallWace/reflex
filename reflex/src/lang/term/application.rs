@@ -227,72 +227,76 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T>> Reducible<T>
         match target.arity() {
             None => None,
             Some(arity) => {
-                if self.args.len() < arity.required().len() {
-                    return Some(create_error_signal_term(
-                        factory.create_value_term(ValueTerm::String(allocator.create_string(
-                            format!(
-                                "{}: Expected {} {}, received {}",
-                                target,
-                                arity.required().len(),
-                                if arity.optional().len() > 0 || arity.variadic().is_some() {
-                                    "or more arguments"
-                                } else if arity.required().len() != 1 {
-                                    "arguments"
-                                } else {
-                                    "argument"
-                                },
-                                self.args.len(),
-                            ),
-                        ))),
+                let num_required_args = arity.required().len();
+                let num_optional_args = arity.optional().len();
+                match validate_function_args(target, &arity, self.args.iter()) {
+                    Err(err) => Some(create_error_signal_term(
+                        factory.create_value_term(ValueTerm::String(allocator.create_string(err))),
                         factory,
                         allocator,
-                    ));
-                }
-                let result = match reduce_function_args(
-                    self.args.iter(),
-                    arity,
-                    factory,
-                    allocator,
-                    cache,
-                ) {
-                    Err(args) => Err(args),
-                    Ok((resolved_args, short_circuit_signal)) => {
-                        if let Some(signal) = short_circuit_signal {
-                            Ok(signal)
-                        } else if is_compiled_application_target(target, factory) {
-                            Err(resolved_args)
-                        } else {
-                            target
-                                .apply(resolved_args, factory, allocator, cache)
-                                .or_else(|error| {
-                                    Ok(create_error_signal_term(
-                                        factory.create_value_term(ValueTerm::String(
-                                            allocator.create_string(error),
-                                        )),
-                                        factory,
-                                        allocator,
+                    )),
+                    Ok(args) => {
+                        let num_args = args.len();
+                        let result =
+                            match reduce_function_args(args, arity, factory, allocator, cache) {
+                                Err(args) => Err(args),
+                                Ok((mut resolved_args, short_circuit_signal)) => {
+                                    let num_positional_args = num_required_args + num_optional_args;
+                                    let num_unspecified_optional_args =
+                                        num_positional_args.saturating_sub(num_args);
+                                    if num_unspecified_optional_args > 0 {
+                                        resolved_args.extend(
+                                            (0..num_unspecified_optional_args).map(|_| {
+                                                factory.create_value_term(ValueTerm::Null)
+                                            }),
+                                        )
+                                    }
+                                    if let Some(signal) = short_circuit_signal {
+                                        Ok(signal)
+                                    } else if is_compiled_application_target(target, factory) {
+                                        Err(resolved_args)
+                                    } else {
+                                        target
+                                            .apply(
+                                                resolved_args.into_iter(),
+                                                factory,
+                                                allocator,
+                                                cache,
+                                            )
+                                            .or_else(|error| {
+                                                Ok(create_error_signal_term(
+                                                    factory.create_value_term(ValueTerm::String(
+                                                        allocator.create_string(error),
+                                                    )),
+                                                    factory,
+                                                    allocator,
+                                                ))
+                                            })
+                                    }
+                                }
+                            };
+                        match result {
+                            Ok(result) => {
+                                Some(result.reduce(factory, allocator, cache).unwrap_or(result))
+                            }
+                            Err(args) => {
+                                if reduced_target.is_none()
+                                    && self
+                                        .args
+                                        .iter()
+                                        .zip(args.iter())
+                                        .all(|(arg, evaluated_arg)| arg.id() == evaluated_arg.id())
+                                {
+                                    None
+                                } else {
+                                    let target =
+                                        reduced_target.unwrap_or_else(|| self.target.clone());
+                                    Some(factory.create_application_term(
+                                        target,
+                                        allocator.create_list(args),
                                     ))
-                                })
-                        }
-                    }
-                };
-                match result {
-                    Ok(result) => Some(result.reduce(factory, allocator, cache).unwrap_or(result)),
-                    Err(args) => {
-                        if reduced_target.is_none()
-                            && self
-                                .args
-                                .iter()
-                                .zip(args.iter())
-                                .all(|(arg, evaluated_arg)| arg.id() == evaluated_arg.id())
-                        {
-                            None
-                        } else {
-                            let target = reduced_target.unwrap_or_else(|| self.target.clone());
-                            Some(
-                                factory
-                                    .create_application_term(target, allocator.create_list(args)),
-                            )
+                                }
+                            }
                         }
                     }
                 }
@@ -387,10 +391,75 @@ impl<T: Expression> std::fmt::Display for ApplicationTerm<T> {
         )
     }
 }
-
 impl<T: Expression> SerializeJson for ApplicationTerm<T> {
     fn to_json(&self) -> Result<serde_json::Value, String> {
         Err(format!("Unable to serialize term: {}", self))
+    }
+}
+
+pub fn validate_function_args<T: Expression + Applicable<T>, V>(
+    target: &T,
+    arity: &Arity,
+    args: impl ExactSizeIterator<Item = V>,
+) -> Result<impl ExactSizeIterator<Item = V>, String> {
+    let num_args = args.len();
+    let num_required_args = arity.required().len();
+    let num_optional_args = arity.optional().len();
+    if num_args < num_required_args {
+        Err(format!(
+            "{}: Expected {} {}, received {}",
+            target,
+            num_required_args,
+            if num_optional_args > 0 || arity.variadic().is_some() {
+                "or more arguments"
+            } else if num_required_args != 1 {
+                "arguments"
+            } else {
+                "argument"
+            },
+            num_args,
+        ))
+    } else {
+        let num_args = match arity.variadic() {
+            Some(_) => num_args,
+            None => num_args.min(num_required_args + num_optional_args),
+        };
+        Ok(WithExactSizeIterator::new(num_args, args.take(num_args)))
+    }
+}
+
+pub(crate) struct WithExactSizeIterator<T: Iterator> {
+    remaining: usize,
+    iter: T,
+}
+impl<T: Iterator> WithExactSizeIterator<T> {
+    pub fn new(remaining: usize, iter: T) -> Self {
+        Self { remaining, iter }
+    }
+}
+impl<T: Iterator> Iterator for WithExactSizeIterator<T> {
+    type Item = T::Item;
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.remaining == 0 {
+            None
+        } else {
+            self.remaining -= 1;
+            self.iter.next()
+        }
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.remaining, Some(self.remaining))
+    }
+    fn count(self) -> usize
+    where
+        Self: Sized,
+    {
+        self.remaining
+    }
+}
+impl<T: Iterator> ExactSizeIterator for WithExactSizeIterator<T> {
+    fn len(&self) -> usize {
+        self.remaining
     }
 }
 

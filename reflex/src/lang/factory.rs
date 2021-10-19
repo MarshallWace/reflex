@@ -110,10 +110,7 @@ impl Applicable<CachedTerm<SharedTerm>> for SharedTerm {
     }
     fn apply(
         &self,
-        args: impl IntoIterator<
-            Item = CachedTerm<SharedTerm>,
-            IntoIter = impl ExactSizeIterator<Item = CachedTerm<SharedTerm>>,
-        >,
+        args: impl ExactSizeIterator<Item = CachedTerm<SharedTerm>>,
         factory: &impl ExpressionFactory<CachedTerm<SharedTerm>>,
         allocator: &impl HeapAllocator<CachedTerm<SharedTerm>>,
         cache: &mut impl EvaluationCache<CachedTerm<SharedTerm>>,

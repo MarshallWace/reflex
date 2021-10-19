@@ -23,12 +23,11 @@ impl<T: Expression> Applicable<T> for Slice {
     }
     fn apply(
         &self,
-        args: impl IntoIterator<Item = T, IntoIter = impl ExactSizeIterator<Item = T>>,
+        mut args: impl ExactSizeIterator<Item = T>,
         factory: &impl ExpressionFactory<T>,
         allocator: &impl HeapAllocator<T>,
         _cache: &mut impl EvaluationCache<T>,
     ) -> Result<T, String> {
-        let mut args = args.into_iter();
         let target = args.next().unwrap();
         let start_index = args.next().unwrap();
         let end_index = args.next().unwrap();

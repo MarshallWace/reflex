@@ -23,12 +23,11 @@ impl<T: Expression> Applicable<T> for Concat {
     }
     fn apply(
         &self,
-        args: impl IntoIterator<Item = T, IntoIter = impl ExactSizeIterator<Item = T>>,
+        args: impl ExactSizeIterator<Item = T>,
         factory: &impl ExpressionFactory<T>,
         allocator: &impl HeapAllocator<T>,
         _cache: &mut impl EvaluationCache<T>,
     ) -> Result<T, String> {
-        let args = args.into_iter();
         let args = args.collect::<Vec<_>>();
         let value = match_typed_expression_list(
             args.iter(),

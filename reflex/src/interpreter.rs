@@ -25,7 +25,8 @@ use crate::{
     hash::HashId,
     lang::{
         get_combined_short_circuit_signal, get_num_short_circuit_signals, get_short_circuit_signal,
-        CompiledFunctionTerm, NativeFunctionId, ValueTerm,
+        validate_function_args, CompiledFunctionTerm, NativeFunctionId, ValueTerm,
+        WithExactSizeIterator,
     },
 };
 
@@ -330,16 +331,17 @@ fn evaluate_program_loop<T: Expression + Rewritable<T> + Reducible<T> + Applicab
                         caller_address,
                         resume_address,
                     } => {
-                        if let Some((target_hash, required_args, optional_args)) = call_stack
-                            .lookup_instruction(target_address)
-                            .and_then(|target| match target {
-                                &Instruction::Function {
-                                    hash,
-                                    required_args,
-                                    optional_args,
-                                } => Some((hash, required_args, optional_args)),
-                                _ => None,
-                            })
+                        if let Some((target_hash, num_required_args, num_optional_args)) =
+                            call_stack
+                                .lookup_instruction(target_address)
+                                .and_then(|target| match target {
+                                    &Instruction::Function {
+                                        hash,
+                                        required_args,
+                                        optional_args,
+                                    } => Some((hash, required_args, optional_args)),
+                                    _ => None,
+                                })
                         {
                             let hash =
                                 generate_function_call_hash(&target_hash, stack.slice(num_args));
@@ -365,8 +367,9 @@ fn evaluate_program_loop<T: Expression + Rewritable<T> + Reducible<T> + Applicab
                                     continue;
                                 }
                             } else {
+                                let num_positional_args = num_required_args + num_optional_args;
                                 let num_unspecified_optional_args =
-                                    required_args + optional_args - num_args;
+                                    num_positional_args.saturating_sub(num_args);
                                 stack.push_multiple(
                                     (0..num_unspecified_optional_args)
                                         .map(|_| factory.create_value_term(ValueTerm::Null)),
@@ -963,21 +966,18 @@ fn apply_function<T: Expression + Applicable<T>>(
     allocator: &impl HeapAllocator<T>,
 ) -> Result<T, String> {
     let arity = get_function_arity(target)?;
-    if args.len() < arity.required().len() {
-        return Err(format!(
-            "{}: Expected {} {}, received {}",
-            target,
-            arity.required().len(),
-            if arity.optional().len() > 0 || arity.variadic().is_some() {
-                "or more arguments"
-            } else if arity.required().len() != 1 {
-                "arguments"
-            } else {
-                "argument"
-            },
-            args.len(),
-        ));
-    }
+    let args = validate_function_args(target, &arity, args)?;
+    let num_args = args.len();
+    let num_required_args = arity.required().len();
+    let num_optional_args = arity.optional().len();
+    let num_positional_args = num_required_args + num_optional_args;
+    let num_unspecified_optional_args = num_positional_args.saturating_sub(num_args);
+    let args = WithExactSizeIterator::new(
+        args.len() + num_unspecified_optional_args,
+        args.chain(
+            (0..num_unspecified_optional_args).map(|_| factory.create_value_term(ValueTerm::Null)),
+        ),
+    );
     // TODO: distinguish between type errors vs runtime errors, and wrap runtime errors as signals
     target.apply(args, factory, allocator, &mut NoopCache::default())
 }

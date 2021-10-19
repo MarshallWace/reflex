@@ -576,9 +576,6 @@ impl FlattenDeep {
         allocator: &dyn NativeAllocator<T>,
     ) -> Result<T, String> {
         let mut args = args.into_iter();
-        if args.len() != 1 {
-            return Err(format!("Expected 1 argument, received {}", args.len()));
-        }
         let target = args.next().unwrap();
         if let Some(ValueTerm::Null) = factory.match_value_term(&target) {
             Ok(target)
@@ -635,9 +632,6 @@ impl DynamicQueryBranch {
         allocator: &dyn NativeAllocator<T>,
     ) -> Result<T, String> {
         let mut args = args.into_iter();
-        if args.len() != 2 {
-            return Err(format!("Expected 2 arguments, received {}", args.len()));
-        }
         let target = args.next().unwrap();
         let shape = args.next().unwrap();
         if let Some(ValueTerm::Null) = factory.match_value_term(&target) {

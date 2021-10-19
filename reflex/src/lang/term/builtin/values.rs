@@ -21,12 +21,11 @@ impl<T: Expression> Applicable<T> for Values {
     }
     fn apply(
         &self,
-        args: impl IntoIterator<Item = T, IntoIter = impl ExactSizeIterator<Item = T>>,
+        mut args: impl ExactSizeIterator<Item = T>,
         factory: &impl ExpressionFactory<T>,
         allocator: &impl HeapAllocator<T>,
         _cache: &mut impl EvaluationCache<T>,
     ) -> Result<T, String> {
-        let mut args = args.into_iter();
         if args.len() != 1 {
             return Err(format!("Expected 1 argument, received {}", args.len()));
         }

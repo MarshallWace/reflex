@@ -25,12 +25,11 @@ impl<T: Expression> Applicable<T> for Filter {
     }
     fn apply(
         &self,
-        args: impl IntoIterator<Item = T, IntoIter = impl ExactSizeIterator<Item = T>>,
+        mut args: impl ExactSizeIterator<Item = T>,
         factory: &impl ExpressionFactory<T>,
         allocator: &impl HeapAllocator<T>,
         _cache: &mut impl EvaluationCache<T>,
     ) -> Result<T, String> {
-        let mut args = args.into_iter();
         let target = args.next().unwrap();
         let predicate = args.next().unwrap();
         let result = if let Some(target) = factory.match_vector_term(&target) {
@@ -114,12 +113,11 @@ impl<T: Expression> Applicable<T> for CollectFilterResults {
     }
     fn apply(
         &self,
-        args: impl IntoIterator<Item = T, IntoIter = impl ExactSizeIterator<Item = T>>,
+        mut args: impl ExactSizeIterator<Item = T>,
         factory: &impl ExpressionFactory<T>,
         allocator: &impl HeapAllocator<T>,
         _cache: &mut impl EvaluationCache<T>,
     ) -> Result<T, String> {
-        let mut args = args.into_iter();
         let items = args.next().unwrap();
         let results = args.next().unwrap();
         let combine = args.next().unwrap();

@@ -194,7 +194,7 @@ impl<T: Expression + Rewritable<T> + Applicable<T>> Applicable<T> for PartialApp
     }
     fn apply(
         &self,
-        args: impl IntoIterator<Item = T, IntoIter = impl ExactSizeIterator<Item = T>>,
+        args: impl ExactSizeIterator<Item = T>,
         factory: &impl ExpressionFactory<T>,
         allocator: &impl HeapAllocator<T>,
         cache: &mut impl EvaluationCache<T>,
@@ -204,7 +204,8 @@ impl<T: Expression + Rewritable<T> + Applicable<T>> Applicable<T> for PartialApp
                 .iter()
                 .cloned()
                 .chain(args.into_iter())
-                .collect::<Vec<_>>(),
+                .collect::<Vec<_>>() // Required to prevent infinite type recursion
+                .into_iter(),
             factory,
             allocator,
             cache,
