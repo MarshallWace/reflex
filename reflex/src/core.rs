@@ -113,17 +113,36 @@ impl<const REQUIRED: usize, const OPTIONAL: usize> FunctionArity<REQUIRED, OPTIO
 
 #[derive(Hash, Eq, PartialEq, Clone, Copy, Debug)]
 pub enum Arity {
-    Implicit(ImplicitArity),
-    Explicit(ExplicitArity),
+    /** Homogeneous arity arguments all have the same eagerness requirements */
+    Homogeneous(HomogeneousArity),
+    /** Heterogeneous arity arguments can specify a mixture of eagerness requirements */
+    Heterogeneous(HeterogeneousArity),
 }
 impl<const R: usize, const O: usize> From<&'static FunctionArity<R, O>> for Arity {
     fn from(definition: &'static FunctionArity<R, O>) -> Self {
-        Self::Explicit(ExplicitArity::from(definition))
+        Self::Heterogeneous(HeterogeneousArity::from(definition))
     }
 }
 impl Arity {
+    pub fn strict(required: usize, optional: usize, variadic: bool) -> Self {
+        Self::Homogeneous(HomogeneousArity {
+            arity_type: ArgType::Strict,
+            required,
+            optional,
+            variadic,
+        })
+    }
+    pub fn eager(required: usize, optional: usize, variadic: bool) -> Self {
+        Self::Homogeneous(HomogeneousArity {
+            arity_type: ArgType::Eager,
+            required,
+            optional,
+            variadic,
+        })
+    }
     pub fn lazy(required: usize, optional: usize, variadic: bool) -> Self {
-        Self::Implicit(ImplicitArity {
+        Self::Homogeneous(HomogeneousArity {
+            arity_type: ArgType::Lazy,
             required,
             optional,
             variadic,
@@ -131,26 +150,26 @@ impl Arity {
     }
     pub fn required(&self) -> impl ExactSizeIterator<Item = ArgType> {
         match self {
-            Self::Implicit(arity) => ArityIterator::Implicit(arity.required()),
-            Self::Explicit(arity) => ArityIterator::Explicit(arity.required()),
+            Self::Homogeneous(arity) => ArityIterator::Homogeneous(arity.required()),
+            Self::Heterogeneous(arity) => ArityIterator::Heterogeneous(arity.required()),
         }
     }
     pub fn optional(&self) -> impl ExactSizeIterator<Item = ArgType> {
         match self {
-            Self::Implicit(arity) => ArityIterator::Implicit(arity.optional()),
-            Self::Explicit(arity) => ArityIterator::Explicit(arity.optional()),
+            Self::Homogeneous(arity) => ArityIterator::Homogeneous(arity.optional()),
+            Self::Heterogeneous(arity) => ArityIterator::Heterogeneous(arity.optional()),
         }
     }
     pub fn variadic(&self) -> Option<ArgType> {
         match self {
-            Self::Implicit(arity) => arity.variadic(),
-            Self::Explicit(arity) => arity.variadic(),
+            Self::Homogeneous(arity) => arity.variadic(),
+            Self::Heterogeneous(arity) => arity.variadic(),
         }
     }
     pub fn partial(&self, offset: usize) -> Self {
         match self {
-            Self::Implicit(arity) => Self::Implicit(arity.partial(offset)),
-            Self::Explicit(arity) => Self::Explicit(arity.partial(offset)),
+            Self::Homogeneous(arity) => Self::Homogeneous(arity.partial(offset)),
+            Self::Heterogeneous(arity) => Self::Heterogeneous(arity.partial(offset)),
         }
     }
     pub fn iter(&self) -> impl Iterator<Item = ArgType> {
@@ -162,32 +181,34 @@ impl Arity {
 impl std::fmt::Display for Arity {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Implicit(arity) => std::fmt::Display::fmt(arity, f),
-            Self::Explicit(arity) => std::fmt::Display::fmt(arity, f),
+            Self::Homogeneous(arity) => std::fmt::Display::fmt(arity, f),
+            Self::Heterogeneous(arity) => std::fmt::Display::fmt(arity, f),
         }
     }
 }
 #[derive(Hash, Eq, PartialEq, Clone, Copy, Debug)]
-pub struct ImplicitArity {
+pub struct HomogeneousArity {
+    arity_type: ArgType,
     required: usize,
     optional: usize,
     variadic: bool,
 }
-impl ImplicitArity {
-    fn required(&self) -> ImplicitArityIterator {
-        ImplicitArityIterator(self.required)
+impl HomogeneousArity {
+    fn required(&self) -> HomogeneousArityIterator {
+        HomogeneousArityIterator(self.required)
     }
-    fn optional(&self) -> ImplicitArityIterator {
-        ImplicitArityIterator(self.optional)
+    fn optional(&self) -> HomogeneousArityIterator {
+        HomogeneousArityIterator(self.optional)
     }
     fn variadic(&self) -> Option<ArgType> {
         match self.variadic {
-            true => Some(ArgType::Lazy),
+            true => Some(self.arity_type),
             false => None,
         }
     }
     fn partial(&self, offset: usize) -> Self {
         Self {
+            arity_type: self.arity_type,
             required: self.required.saturating_sub(offset),
             optional: self
                 .optional
@@ -196,7 +217,7 @@ impl ImplicitArity {
         }
     }
 }
-impl std::fmt::Display for ImplicitArity {
+impl std::fmt::Display for HomogeneousArity {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
@@ -211,12 +232,12 @@ impl std::fmt::Display for ImplicitArity {
     }
 }
 #[derive(Hash, Eq, PartialEq, Clone, Copy, Debug)]
-pub struct ExplicitArity {
+pub struct HeterogeneousArity {
     required: &'static [ArgType],
     optional: &'static [ArgType],
     variadic: Option<ArgType>,
 }
-impl<'a, const R: usize, const O: usize> From<&'static FunctionArity<R, O>> for ExplicitArity {
+impl<'a, const R: usize, const O: usize> From<&'static FunctionArity<R, O>> for HeterogeneousArity {
     fn from(definition: &'static FunctionArity<R, O>) -> Self {
         Self {
             required: definition.required(),
@@ -225,12 +246,12 @@ impl<'a, const R: usize, const O: usize> From<&'static FunctionArity<R, O>> for 
         }
     }
 }
-impl ExplicitArity {
-    fn required(&self) -> ExplicitArityIterator {
-        ExplicitArityIterator(self.required, 0)
+impl HeterogeneousArity {
+    fn required(&self) -> HeterogeneousArityIterator {
+        HeterogeneousArityIterator(self.required, 0)
     }
-    fn optional(&self) -> ExplicitArityIterator {
-        ExplicitArityIterator(self.optional, 0)
+    fn optional(&self) -> HeterogeneousArityIterator {
+        HeterogeneousArityIterator(self.optional, 0)
     }
     fn variadic(&self) -> Option<ArgType> {
         self.variadic
@@ -243,7 +264,7 @@ impl ExplicitArity {
         }
     }
 }
-impl std::fmt::Display for ExplicitArity {
+impl std::fmt::Display for HeterogeneousArity {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
@@ -258,28 +279,28 @@ impl std::fmt::Display for ExplicitArity {
     }
 }
 pub enum ArityIterator {
-    Implicit(ImplicitArityIterator),
-    Explicit(ExplicitArityIterator),
+    Homogeneous(HomogeneousArityIterator),
+    Heterogeneous(HeterogeneousArityIterator),
 }
 impl Iterator for ArityIterator {
     type Item = ArgType;
     fn next(&mut self) -> Option<Self::Item> {
         match self {
-            Self::Implicit(iter) => iter.next(),
-            Self::Explicit(iter) => iter.next(),
+            Self::Homogeneous(iter) => iter.next(),
+            Self::Heterogeneous(iter) => iter.next(),
         }
     }
 }
 impl ExactSizeIterator for ArityIterator {
     fn len(&self) -> usize {
         match self {
-            Self::Implicit(iter) => iter.len(),
-            Self::Explicit(iter) => iter.len(),
+            Self::Homogeneous(iter) => iter.len(),
+            Self::Heterogeneous(iter) => iter.len(),
         }
     }
 }
-pub struct ImplicitArityIterator(usize);
-impl Iterator for ImplicitArityIterator {
+pub struct HomogeneousArityIterator(usize);
+impl Iterator for HomogeneousArityIterator {
     type Item = ArgType;
     fn next(&mut self) -> Option<Self::Item> {
         let remaining = self.0;
@@ -291,14 +312,14 @@ impl Iterator for ImplicitArityIterator {
         }
     }
 }
-impl ExactSizeIterator for ImplicitArityIterator {
+impl ExactSizeIterator for HomogeneousArityIterator {
     fn len(&self) -> usize {
         let remaining = self.0;
         remaining
     }
 }
-pub struct ExplicitArityIterator(&'static [ArgType], usize);
-impl Iterator for ExplicitArityIterator {
+pub struct HeterogeneousArityIterator(&'static [ArgType], usize);
+impl Iterator for HeterogeneousArityIterator {
     type Item = ArgType;
     fn next(&mut self) -> Option<Self::Item> {
         let args = self.0;
@@ -308,7 +329,7 @@ impl Iterator for ExplicitArityIterator {
         Some(*arg)
     }
 }
-impl ExactSizeIterator for ExplicitArityIterator {
+impl ExactSizeIterator for HeterogeneousArityIterator {
     fn len(&self) -> usize {
         let args = self.0;
         let index = self.1;
