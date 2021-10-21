@@ -33,6 +33,7 @@ struct Opts {
 enum OutputFormat {
     Json,
     Rmp,
+    Debug,
 }
 
 impl FromStr for OutputFormat {
@@ -43,6 +44,8 @@ impl FromStr for OutputFormat {
             Ok(Self::Json)
         } else if s.to_ascii_lowercase() == "rmp" {
             Ok(Self::Rmp)
+        } else if s.to_ascii_lowercase() == "debug" {
+            Ok(Self::Debug)
         } else {
             Err(anyhow!("Unknown syntax {}", s))
         }
@@ -79,6 +82,7 @@ fn main() -> Result<()> {
     match args.output_format {
         OutputFormat::Json => serde_json::to_writer(stdout_handle, &compiler_output)?,
         OutputFormat::Rmp => rmp_serde::encode::write(&mut stdout_handle, &compiler_output)?,
+        OutputFormat::Debug => println!("{}", &compiler_output),
     }
 
     Ok(())

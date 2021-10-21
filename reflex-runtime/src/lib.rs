@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use futures::{
     future::{AbortHandle, Abortable},
     stream, FutureExt,
@@ -93,6 +94,11 @@ pub struct StateUpdate<T: Expression> {
     state_token: StateToken,
     update: StateUpdateType<T>,
 }
+impl<T: Expression> StateUpdate<T> {
+    pub fn update(&self) -> &StateUpdateType<T> {
+        &self.update
+    }
+}
 pub enum StateUpdateType<T: Expression> {
     Value(T),
     Patch(Box<dyn Fn(Option<&T>) -> T + Send + Sync + 'static>),
@@ -103,6 +109,9 @@ impl<T: Expression> StateUpdate<T> {
             state_token,
             update: StateUpdateType::Value(value),
         }
+    }
+    pub fn state_token(&self) -> StateToken {
+        self.state_token
     }
     pub fn patch(
         state_token: StateToken,
@@ -1689,7 +1698,7 @@ fn create_pending_result<T: Expression>(
     )
 }
 
-fn create_pending_expression<T: Expression>(
+pub fn create_pending_expression<T: Expression>(
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
 ) -> T {

@@ -13,9 +13,12 @@ reflex-graphql = { path = "../reflex-graphql" }
 reflex-json = { path = "../reflex-json" }
 reflex-runtime = { path = "../reflex-runtime" }
 futures-util = "0.3"
+futures = "0.3"
 hyper = { version = "0.14", features = ["full"] }
 hyper-tls = "0.5.0"
 tokio = { version = "1", features = ["full"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
 tokio-tungstenite = { version = "0.14" }
 uuid = { version = "0.8", features = ["v4"] }
+serde_json = "^1.0"
+serde = { version = "^1.0", features = ["derive"] }

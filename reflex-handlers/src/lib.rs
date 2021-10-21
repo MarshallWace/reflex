@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 pub mod date;
 pub mod graphql;
 pub mod http;
@@ -15,10 +16,11 @@ use reflex_runtime::{
     SignalHelpers, SignalResult,
 };
 
-pub(crate) mod utils {
+pub mod utils {
     mod fetch;
     pub(crate) use fetch::fetch;
     pub(crate) mod graphql;
+    pub mod signal_capture;
 }
 
 pub fn builtin_signal_handler<

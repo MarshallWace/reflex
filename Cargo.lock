@@ -977,6 +977,7 @@ dependencies = [
 name = "reflex-handlers"
 version = "0.1.0"
 dependencies = [
+ "futures",
  "futures-util",
  "hyper",
  "hyper-tls",
@@ -984,6 +985,8 @@ dependencies = [
  "reflex-graphql",
  "reflex-json",
  "reflex-runtime",
+ "serde",
+ "serde_json",
  "tokio",
  "tokio-stream",
  "tokio-tungstenite",
