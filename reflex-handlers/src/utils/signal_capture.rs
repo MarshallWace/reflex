@@ -21,6 +21,8 @@ use reflex_runtime::{
 };
 use serde::{Deserialize, Serialize};
 
+use self::serialization::{to_signal_result, SignalCaptureRecord};
+
 /// This will record signals for playback in a later run through of a program.
 struct SignalRecorderActor<T>
 where
@@ -232,69 +234,65 @@ where
 }
 
 #[derive(Clone)]
-struct SignalCapture<T>
-where
-    T: AsyncExpression,
-{
-    recorded_signals: Arc<Mutex<HashMap<SignalId, SignalResult<T>>>>,
+struct SignalCapture {
+    recorded_signals: Arc<Mutex<HashMap<SignalId, Vec<SignalCaptureRecord>>>>,
 }
-impl<T> SignalCapture<T>
-where
-    T: AsyncExpression + Compile<T>,
-    T::String: StringValue + Send + Sync,
-{
-    fn from_file(
-        capture_file_name: String,
-        factory: &impl ExpressionFactory<T>,
-        allocator: &impl HeapAllocator<T>,
-    ) -> Result<Self, String> {
-        let signal_results =
-            serialization::from_capture_file(capture_file_name, factory, allocator)?;
+impl SignalCapture {
+    fn from_file(capture_file_name: String) -> Result<Self, String> {
+        let signal_results = serialization::from_capture_file(capture_file_name)?;
         Ok(Self {
             recorded_signals: Arc::new(Mutex::new(signal_results)),
         })
     }
 
-    fn return_capture(&self, signal_id: SignalId) -> Option<SignalResult<T>> {
+    fn return_capture<T>(
+        &self,
+        signal_id: SignalId,
+        factory: &impl ExpressionFactory<T>,
+        allocator: &impl HeapAllocator<T>,
+    ) -> Option<SignalResult<T>>
+    where
+        T: AsyncExpression + Compile<T>,
+        T::String: StringValue + Send + Sync,
+    {
         match self.recorded_signals.lock() {
-            Ok(mut map) => map.remove(&signal_id),
+            Ok(captured_records) => captured_records
+                .get(&signal_id)
+                .map(|capture_record| capture_record.to_vec())
+                .map(|record| to_signal_result(record, factory, allocator).unwrap()),
+
             Err(err) => {
                 panic!("Unable to read poisoned mutex: {}", err);
             }
         }
     }
 }
-pub struct SignalPlayback<T>
-where
-    T: AsyncExpression,
-{
+pub struct SignalPlayback {
     recorded_signal_types: std::collections::HashSet<String>,
-    capture: SignalCapture<T>,
+    capture: SignalCapture,
 }
 
-impl<T> SignalPlayback<T>
-where
-    T: AsyncExpression + Compile<T>,
-    T::String: StringValue + Send + Sync,
-{
+impl SignalPlayback {
     pub fn new(
         recorded_signal_types: std::collections::HashSet<String>,
         capture_file: String,
-        factory: &impl AsyncExpressionFactory<T>,
-        allocator: &impl AsyncHeapAllocator<T>,
     ) -> Result<Self, String> {
-        let capture = SignalCapture::from_file(capture_file, factory, allocator)?;
+        let capture = SignalCapture::from_file(capture_file)?;
         Ok(Self {
             recorded_signal_types,
             capture,
         })
     }
 
-    pub fn playback_signal_handler<THandler>(
+    pub fn playback_signal_handler<THandler, T>(
         &self,
         handler: THandler,
+        factory: &impl AsyncExpressionFactory<T>,
+        allocator: &impl AsyncHeapAllocator<T>,
     ) -> impl Fn(&str, &[&Signal<T>], &SignalHelpers<T>) -> SignalHandlerResult<T> + Send + Sync + 'static
     where
+        T: AsyncExpression + Compile<T>,
+        T::String: StringValue + Send + Sync,
         THandler: Fn(&str, &[&Signal<T>], &SignalHelpers<T>) -> SignalHandlerResult<T>
             + Send
             + Sync
@@ -302,14 +300,23 @@ where
     {
         let recorded_signal_types = self.recorded_signal_types.clone();
         let capture = self.capture.clone();
+        let factory = factory.clone();
+        let allocator = allocator.clone();
         move |signal_type, signals, helpers| {
             if recorded_signal_types.contains(signal_type) {
+                println!("{} is a captured signal_type", signal_type);
                 Some(
                     signals
                         .iter()
-                        .map(|signal| match capture.return_capture(signal.id()) {
-                            Some(result) => Ok(result),
-                            None => Err(format!("Failed to find signal id in captured data")),
+                        .map(|signal| match capture.return_capture(signal.id(), &factory, &allocator) {
+                            Some(result) => {
+                                eprintln!("Reloaded signal result for id {} with expression {} and with an effect: {}", signal.id(), result.0, result.1.is_some());
+                                Ok(result)
+                            }
+                            None => {
+                                eprintln!("{} was not found in the captured data", signal.id());
+                                Err(format!("Failed to find signal id in captured data"))
+                            }
                         })
                         .collect::<Vec<Result<SignalResult<T>, String>>>(),
                 )
@@ -328,7 +335,7 @@ mod serialization {
 
     use super::*;
 
-    #[derive(Serialize, Deserialize)]
+    #[derive(Serialize, Deserialize, Clone)]
     pub(super) enum SignalCaptureRecord {
         PendingSignal(SignalId),
         Expression(SerializableSignalExpressionRecord),
@@ -347,7 +354,7 @@ mod serialization {
             }
         }
     }
-    #[derive(Serialize, Deserialize)]
+    #[derive(Serialize, Deserialize, Clone)]
     pub(super) struct SerializableSignalExpressionRecord {
         signal_id: SignalId,
         serialized_expression: String,
@@ -384,7 +391,7 @@ mod serialization {
             })
         }
     }
-    #[derive(Serialize, Deserialize)]
+    #[derive(Serialize, Deserialize, Clone)]
     pub(super) struct SerializableSyncRecord {
         signal_id: SignalId,
         serialized_updates: Vec<(StateToken, String)>,
@@ -405,7 +412,7 @@ mod serialization {
             })
         }
     }
-    #[derive(Serialize, Deserialize)]
+    #[derive(Serialize, Deserialize, Clone)]
     pub(super) struct SerializableAsyncRecord {
         signal_id: SignalId,
         serialized_updates: Vec<(StateToken, String)>,
@@ -426,7 +433,7 @@ mod serialization {
             })
         }
     }
-    #[derive(Serialize, Deserialize)]
+    #[derive(Serialize, Deserialize, Clone)]
     pub(super) struct SerializableStreamRecord {
         signal_id: SignalId,
         serialized_updates: Vec<(StateToken, String)>,
@@ -529,7 +536,7 @@ mod serialization {
         RuntimeEffect::Sync(updates)
     }
 
-    fn to_signal_result<T>(
+    pub(super) fn to_signal_result<T>(
         serialized: Vec<SignalCaptureRecord>,
         factory: &impl ExpressionFactory<T>,
         allocator: &impl HeapAllocator<T>,
@@ -600,14 +607,9 @@ mod serialization {
         Ok((expression, effect))
     }
 
-    pub(super) fn from_capture_file<T>(
+    pub(super) fn from_capture_file(
         capture_file_name: String,
-        factory: &impl ExpressionFactory<T>,
-        allocator: &impl HeapAllocator<T>,
-    ) -> Result<HashMap<SignalId, SignalResult<T>>, String>
-    where
-        T: AsyncExpression,
-    {
+    ) -> Result<HashMap<SignalId, Vec<SignalCaptureRecord>>, String> {
         let mut deserialized = HashMap::new();
         let capture_file = std::fs::File::open(&capture_file_name)
             .map_err(|err| format!("Failed to open {}: {}", capture_file_name, err))?;
@@ -622,12 +624,6 @@ mod serialization {
                 .or_insert(vec![])
                 .push(record);
         }
-        deserialized
-            .into_iter()
-            .map(|(id, records)| {
-                to_signal_result(records, factory, allocator)
-                    .map(|signal_result| (id, signal_result))
-            })
-            .collect()
+        Ok(deserialized)
     }
 }
