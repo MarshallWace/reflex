@@ -1034,12 +1034,19 @@ where
                 Some(result) => result,
                 None => Err(format!("Unhandled signal: {}", signal)),
             };
-            let (result, effect) = handler_result.unwrap_or_else(|error| {
-                (
-                    factory.create_value_term(ValueTerm::String(allocator.create_string(error))),
-                    None,
-                )
-            });
+            let (result, effect) =
+                handler_result.unwrap_or_else(|error| {
+                    (
+                        create_error_expression(
+                            once(factory.create_value_term(ValueTerm::String(
+                                allocator.create_string(error),
+                            ))),
+                            factory,
+                            allocator,
+                        ),
+                        None,
+                    )
+                });
             (signal_id, result, effect)
         })
         .fold(
