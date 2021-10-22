@@ -5,7 +5,7 @@
 use std::{collections::HashSet, iter::once};
 
 use crate::{
-    compiler::{Compile, Compiler, Program},
+    compiler::{Compile, Compiler, Instruction, Program},
     core::{
         DependencyList, DynamicState, EvaluationCache, Expression, ExpressionFactory, GraphNode,
         HeapAllocator, Reducible, Rewritable, ScopeOffset, SerializeJson, StackOffset,
@@ -195,11 +195,10 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Compile<T>> Compile<T> for L
         let compiled_initializer =
             self.initializer
                 .compile(eager, stack_offset, factory, allocator, compiler)?;
-        let compiled_body = self
-            .body
-            .compile(eager, stack_offset, factory, allocator, compiler)?;
+        let compiled_body = self.body.compile(eager, 0, factory, allocator, compiler)?;
         let mut program = compiled_initializer;
         program.extend(compiled_body);
+        program.push(Instruction::Squash { depth: 1 });
         Ok(program)
     }
 }
