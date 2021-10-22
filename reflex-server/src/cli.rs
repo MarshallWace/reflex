@@ -40,6 +40,8 @@ struct Opts {
         default_value = "javascript"
     )]
     syntax: Syntax,
+    #[clap(long, about = "Prevent static optimizations")]
+    unoptimized: bool,
     #[clap(long, about = "Add debug printing of signal handlers")]
     debug_signals: bool,
     #[clap(long, about = "Add debug printing of bytecode output from compiler")]
@@ -77,6 +79,7 @@ where
     let root_module_path = &args.entry_point;
     let compiler_options = compiler_options.unwrap_or_else(|| CompilerOptions {
         debug: args.debug_compiler,
+        normalize: !args.unoptimized,
         ..CompilerOptions::default()
     });
     let plugins = plugins

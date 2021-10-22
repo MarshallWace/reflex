@@ -45,6 +45,8 @@ struct Opts {
         default_value = "javascript"
     )]
     syntax: Syntax,
+    #[clap(long, about = "Prevent static optimizations")]
+    unoptimized: bool,
     #[clap(long, about = "Add debug printing of signal handlers")]
     debug_signals: bool,
     #[clap(long, about = "Add debug printing of bytecode output from compiler")]
@@ -58,6 +60,7 @@ struct Opts {
 #[tokio::main]
 pub async fn main() -> Result<()> {
     let args = Opts::parse();
+    let unoptimized = args.unoptimized;
     let debug_signals = args.debug_signals;
     let debug_compiler = args.debug_compiler;
     let debug_interpreter = args.debug_interpreter;
@@ -79,6 +82,7 @@ pub async fn main() -> Result<()> {
         Some(input_path) => {
             let compiler_options = CompilerOptions {
                 debug: debug_compiler,
+                normalize: !unoptimized,
                 ..CompilerOptions::default()
             };
             let source = read_file(&input_path)?;
