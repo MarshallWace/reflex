@@ -214,7 +214,7 @@ fn find_expression_plugins<T: Expression + Rewritable<T>>(
     }
 }
 
-fn create_js_script_parser<T: Expression + 'static>(
+fn create_js_script_parser<T: Expression + Rewritable<T> + 'static>(
     factory: &(impl ExpressionFactory<T> + Clone + 'static),
     allocator: &(impl HeapAllocator<T> + Clone + 'static),
 ) -> ReplParser<T> {
@@ -225,7 +225,7 @@ fn create_js_script_parser<T: Expression + 'static>(
     Box::new(move |input: &str| reflex_js::parse(input, &env, &factory, &allocator))
 }
 
-fn create_js_module_parser<T: Expression + 'static>(
+fn create_js_module_parser<T: Expression + Rewritable<T> + 'static>(
     path: &str,
     env_vars: impl IntoIterator<Item = (String, String)>,
     factory: &(impl ExpressionFactory<T> + Clone + 'static),

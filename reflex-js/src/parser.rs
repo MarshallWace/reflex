@@ -8,7 +8,8 @@ use std::{
 };
 
 use reflex::{
-    core::{Expression, ExpressionFactory, HeapAllocator, StringValue},
+    cache::NoopCache,
+    core::{Expression, ExpressionFactory, HeapAllocator, Rewritable, StringValue, Substitutions},
     lang::{as_integer, BuiltinTerm, ValueTerm},
 };
 use resast::prelude::*;
@@ -81,7 +82,7 @@ impl<'src> LexicalScope<'src> {
     }
 }
 
-pub fn parse<'src, T: Expression>(
+pub fn parse<'src, T: Expression + Rewritable<T>>(
     input: &'src str,
     env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
@@ -91,7 +92,7 @@ pub fn parse<'src, T: Expression>(
     parse_script_contents(program.into_iter(), env, factory, allocator)
 }
 
-pub fn parse_module<'src, T: Expression>(
+pub fn parse_module<'src, T: Expression + Rewritable<T>>(
     input: &'src str,
     env: &Env<T>,
     path: &Path,
@@ -112,7 +113,7 @@ fn parse_ast(input: &str) -> ParserResult<Vec<ProgramPart>> {
         .or_else(|error| Err(format!("Parse error: {}", error)))
 }
 
-fn parse_script_contents<'src, T: Expression>(
+fn parse_script_contents<'src, T: Expression + Rewritable<T>>(
     program: impl IntoIterator<Item = ProgramPart<'src>> + ExactSizeIterator,
     env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
@@ -134,7 +135,7 @@ fn parse_script_contents<'src, T: Expression>(
     }
 }
 
-fn parse_module_contents<'src, T: Expression>(
+fn parse_module_contents<'src, T: Expression + Rewritable<T>>(
     program: impl IntoIterator<Item = ProgramPart<'src>> + ExactSizeIterator,
     env: &Env<T>,
     path: &Path,
@@ -199,7 +200,7 @@ fn parse_module_contents<'src, T: Expression>(
     }
 }
 
-fn parse_module_import<'src, T: Expression>(
+fn parse_module_import<'src, T: Expression + Rewritable<T>>(
     node: &ModImport<'src>,
     path: &Path,
     loader: &impl Fn(&str, &Path) -> Option<Result<T, String>>,
@@ -247,7 +248,7 @@ fn parse_module_import<'src, T: Expression>(
         })
 }
 
-fn parse_block<'src: 'temp, 'temp, T: Expression>(
+fn parse_block<'src: 'temp, 'temp, T: Expression + Rewritable<T>>(
     body: impl IntoIterator<Item = &'temp ProgramPart<'src>>,
     scope: &LexicalScope,
     env: &Env<T>,
@@ -257,7 +258,7 @@ fn parse_block<'src: 'temp, 'temp, T: Expression>(
     parse_block_statements(body, None, scope, env, factory, allocator)
 }
 
-fn parse_block_statements<'src: 'temp, 'temp, T: Expression>(
+fn parse_block_statements<'src: 'temp, 'temp, T: Expression + Rewritable<T>>(
     remaining: impl IntoIterator<Item = &'temp ProgramPart<'src>>,
     result: Option<T>,
     scope: &LexicalScope,
@@ -401,7 +402,7 @@ fn parse_block_statements<'src: 'temp, 'temp, T: Expression>(
     }
 }
 
-fn create_declaration_block<T: Expression>(
+fn create_declaration_block<T: Expression + Rewritable<T>>(
     initializers: impl IntoIterator<Item = T, IntoIter = impl DoubleEndedIterator<Item = T>>,
     body: T,
     factory: &impl ExpressionFactory<T>,
@@ -414,7 +415,7 @@ fn create_declaration_block<T: Expression>(
         })
 }
 
-fn parse_variable_declarators<'src, T: Expression>(
+fn parse_variable_declarators<'src, T: Expression + Rewritable<T>>(
     declarators: &[VarDecl<'src>],
     scope: &LexicalScope<'src>,
     env: &Env<T>,
@@ -436,7 +437,7 @@ fn parse_variable_declarators<'src, T: Expression>(
         })
 }
 
-fn parse_variable_declarator<'src, T: Expression>(
+fn parse_variable_declarator<'src, T: Expression + Rewritable<T>>(
     node: &VarDecl<'src>,
     scope: &LexicalScope<'src>,
     env: &Env<T>,
@@ -473,7 +474,7 @@ fn parse_variable_declarator<'src, T: Expression>(
     }
 }
 
-fn parse_object_destructuring_pattern_bindings<'src, T: Expression>(
+fn parse_object_destructuring_pattern_bindings<'src, T: Expression + Rewritable<T>>(
     target: T,
     properties: &[ObjPatPart<'src>],
     scope: &LexicalScope<'src>,
@@ -544,7 +545,7 @@ fn parse_object_destructuring_pattern_bindings<'src, T: Expression>(
     }
 }
 
-fn parse_destructuring_pattern_property_field_name<'src, T: Expression>(
+fn parse_destructuring_pattern_property_field_name<'src, T: Expression + Rewritable<T>>(
     node: &Prop<'src>,
     scope: &LexicalScope,
     env: &Env<T>,
@@ -598,7 +599,7 @@ fn parse_destructuring_pattern_property_identifier<'src>(
     }
 }
 
-fn parse_array_destructuring_pattern_bindings<'src, T: Expression>(
+fn parse_array_destructuring_pattern_bindings<'src, T: Expression + Rewritable<T>>(
     target: T,
     accessors: &[Option<ArrayPatPart<'src>>],
     scope: &LexicalScope<'src>,
@@ -668,7 +669,7 @@ fn parse_identifier<'src>(node: &Ident<'src>) -> ParserResult<&'src str> {
     }
 }
 
-fn parse_throw_statement<'src, T: Expression>(
+fn parse_throw_statement<'src, T: Expression + Rewritable<T>>(
     value: &Expr<'src>,
     scope: &LexicalScope,
     env: &Env<T>,
@@ -685,7 +686,7 @@ fn parse_throw_statement<'src, T: Expression>(
     ))
 }
 
-fn parse_if_branch<'src, T: Expression>(
+fn parse_if_branch<'src, T: Expression + Rewritable<T>>(
     node: &Stmt<'src>,
     scope: &LexicalScope,
     env: &Env<T>,
@@ -708,7 +709,7 @@ fn parse_if_branch<'src, T: Expression>(
     }
 }
 
-fn parse_branch<'src: 'temp, 'temp, T: Expression>(
+fn parse_branch<'src: 'temp, 'temp, T: Expression + Rewritable<T>>(
     node: &Stmt<'src>,
     body: impl IntoIterator<Item = &'temp ProgramPart<'src>>,
     scope: &LexicalScope,
@@ -723,7 +724,7 @@ fn parse_branch<'src: 'temp, 'temp, T: Expression>(
     }
 }
 
-fn parse_expression<'src, T: Expression>(
+fn parse_expression<'src, T: Expression + Rewritable<T>>(
     node: &Expr<'src>,
     scope: &LexicalScope,
     env: &Env<T>,
@@ -752,7 +753,7 @@ fn parse_expression<'src, T: Expression>(
     }
 }
 
-fn parse_expressions<'src: 'temp, 'temp, T: Expression>(
+fn parse_expressions<'src: 'temp, 'temp, T: Expression + Rewritable<T>>(
     expressions: impl IntoIterator<Item = &'temp Expr<'src>>,
     scope: &LexicalScope,
     env: &Env<T>,
@@ -765,7 +766,7 @@ fn parse_expressions<'src: 'temp, 'temp, T: Expression>(
         .collect::<Result<Vec<_>, _>>()
 }
 
-fn parse_variable_reference<'src, T: Expression>(
+fn parse_variable_reference<'src, T: Expression + Rewritable<T>>(
     node: &Ident<'src>,
     scope: &LexicalScope,
     env: &Env<T>,
@@ -782,7 +783,7 @@ fn parse_variable_reference<'src, T: Expression>(
     }
 }
 
-fn parse_literal<'src, T: Expression>(
+fn parse_literal<'src, T: Expression + Rewritable<T>>(
     node: &Lit<'src>,
     scope: &LexicalScope,
     env: &Env<T>,
@@ -799,18 +800,20 @@ fn parse_literal<'src, T: Expression>(
     }
 }
 
-fn parse_null_literal<T: Expression>(factory: &impl ExpressionFactory<T>) -> ParserResult<T> {
+fn parse_null_literal<T: Expression + Rewritable<T>>(
+    factory: &impl ExpressionFactory<T>,
+) -> ParserResult<T> {
     Ok(factory.create_value_term(ValueTerm::Null))
 }
 
-fn parse_boolean_literal<T: Expression>(
+fn parse_boolean_literal<T: Expression + Rewritable<T>>(
     node: &bool,
     factory: &impl ExpressionFactory<T>,
 ) -> ParserResult<T> {
     Ok(factory.create_value_term(ValueTerm::Boolean(*node)))
 }
 
-fn parse_number_literal<T: Expression>(
+fn parse_number_literal<T: Expression + Rewritable<T>>(
     node: &Cow<str>,
     factory: &impl ExpressionFactory<T>,
 ) -> ParserResult<T> {
@@ -827,7 +830,7 @@ fn parse_number(node: &Cow<str>) -> ParserResult<f64> {
     }
 }
 
-fn parse_string_literal<T: Expression>(
+fn parse_string_literal<T: Expression + Rewritable<T>>(
     node: &StringLit,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
@@ -864,7 +867,7 @@ fn parse_escaped_string(value: &str) -> String {
         .0
 }
 
-fn parse_template_literal<'src, T: Expression>(
+fn parse_template_literal<'src, T: Expression + Rewritable<T>>(
     node: &TemplateLit<'src>,
     scope: &LexicalScope,
     env: &Env<T>,
@@ -918,7 +921,7 @@ fn parse_template_element<'src>(node: &TemplateElement<'src>) -> ParserResult<&'
     }
 }
 
-fn parse_tagged_template<'src, T: Expression>(
+fn parse_tagged_template<'src, T: Expression + Rewritable<T>>(
     node: &TaggedTemplateExpr<'src>,
     scope: &LexicalScope,
     env: &Env<T>,
@@ -928,7 +931,7 @@ fn parse_tagged_template<'src, T: Expression>(
     parse_template_literal(&node.quasi, scope, env, factory, allocator)
 }
 
-fn parse_object_literal<'src, T: Expression>(
+fn parse_object_literal<'src, T: Expression + Rewritable<T>>(
     node: &ObjExpr<'src>,
     scope: &LexicalScope,
     env: &Env<T>,
@@ -1066,7 +1069,7 @@ fn parse_object_literal<'src, T: Expression>(
     })
 }
 
-fn parse_array_literal<'src, T: Expression>(
+fn parse_array_literal<'src, T: Expression + Rewritable<T>>(
     node: &ArrayExpr<'src>,
     scope: &LexicalScope,
     env: &Env<T>,
@@ -1154,7 +1157,7 @@ fn parse_array_literal<'src, T: Expression>(
     })
 }
 
-fn parse_unary_expression<'src, T: Expression>(
+fn parse_unary_expression<'src, T: Expression + Rewritable<T>>(
     node: &UnaryExpr<'src>,
     scope: &LexicalScope,
     env: &Env<T>,
@@ -1169,7 +1172,7 @@ fn parse_unary_expression<'src, T: Expression>(
     }
 }
 
-fn parse_binary_expression<'src, T: Expression>(
+fn parse_binary_expression<'src, T: Expression + Rewritable<T>>(
     node: &BinaryExpr<'src>,
     scope: &LexicalScope,
     env: &Env<T>,
@@ -1205,7 +1208,7 @@ fn parse_binary_expression<'src, T: Expression>(
     }
 }
 
-fn parse_logical_expression<'src, T: Expression>(
+fn parse_logical_expression<'src, T: Expression + Rewritable<T>>(
     node: &LogicalExpr<'src>,
     scope: &LexicalScope,
     env: &Env<T>,
@@ -1218,7 +1221,7 @@ fn parse_logical_expression<'src, T: Expression>(
     }
 }
 
-fn parse_unary_minus_expression<'src, T: Expression>(
+fn parse_unary_minus_expression<'src, T: Expression + Rewritable<T>>(
     node: &UnaryExpr<'src>,
     scope: &LexicalScope,
     env: &Env<T>,
@@ -1236,7 +1239,7 @@ fn parse_unary_minus_expression<'src, T: Expression>(
     })
 }
 
-fn parse_unary_plus_expression<'src, T: Expression>(
+fn parse_unary_plus_expression<'src, T: Expression + Rewritable<T>>(
     node: &UnaryExpr<'src>,
     scope: &LexicalScope,
     env: &Env<T>,
@@ -1254,7 +1257,7 @@ fn parse_unary_plus_expression<'src, T: Expression>(
     })
 }
 
-fn parse_unary_not_expression<'src, T: Expression>(
+fn parse_unary_not_expression<'src, T: Expression + Rewritable<T>>(
     node: &UnaryExpr<'src>,
     scope: &LexicalScope,
     env: &Env<T>,
@@ -1268,7 +1271,7 @@ fn parse_unary_not_expression<'src, T: Expression>(
     ))
 }
 
-fn parse_binary_add_expression<'src, T: Expression>(
+fn parse_binary_add_expression<'src, T: Expression + Rewritable<T>>(
     node: &BinaryExpr<'src>,
     scope: &LexicalScope,
     env: &Env<T>,
@@ -1283,7 +1286,7 @@ fn parse_binary_add_expression<'src, T: Expression>(
     ))
 }
 
-fn parse_binary_subtract_expression<'src, T: Expression>(
+fn parse_binary_subtract_expression<'src, T: Expression + Rewritable<T>>(
     node: &BinaryExpr<'src>,
     scope: &LexicalScope,
     env: &Env<T>,
@@ -1298,7 +1301,7 @@ fn parse_binary_subtract_expression<'src, T: Expression>(
     ))
 }
 
-fn parse_binary_multiply_expression<'src, T: Expression>(
+fn parse_binary_multiply_expression<'src, T: Expression + Rewritable<T>>(
     node: &BinaryExpr<'src>,
     scope: &LexicalScope,
     env: &Env<T>,
@@ -1313,7 +1316,7 @@ fn parse_binary_multiply_expression<'src, T: Expression>(
     ))
 }
 
-fn parse_binary_divide_expression<'src, T: Expression>(
+fn parse_binary_divide_expression<'src, T: Expression + Rewritable<T>>(
     node: &BinaryExpr<'src>,
     scope: &LexicalScope,
     env: &Env<T>,
@@ -1328,7 +1331,7 @@ fn parse_binary_divide_expression<'src, T: Expression>(
     ))
 }
 
-fn parse_binary_remainder_expression<'src, T: Expression>(
+fn parse_binary_remainder_expression<'src, T: Expression + Rewritable<T>>(
     node: &BinaryExpr<'src>,
     scope: &LexicalScope,
     env: &Env<T>,
@@ -1343,7 +1346,7 @@ fn parse_binary_remainder_expression<'src, T: Expression>(
     ))
 }
 
-fn parse_binary_pow_expression<'src, T: Expression>(
+fn parse_binary_pow_expression<'src, T: Expression + Rewritable<T>>(
     node: &BinaryExpr<'src>,
     scope: &LexicalScope,
     env: &Env<T>,
@@ -1358,7 +1361,7 @@ fn parse_binary_pow_expression<'src, T: Expression>(
     ))
 }
 
-fn parse_binary_lt_expression<'src, T: Expression>(
+fn parse_binary_lt_expression<'src, T: Expression + Rewritable<T>>(
     node: &BinaryExpr<'src>,
     scope: &LexicalScope,
     env: &Env<T>,
@@ -1373,7 +1376,7 @@ fn parse_binary_lt_expression<'src, T: Expression>(
     ))
 }
 
-fn parse_binary_gt_expression<'src, T: Expression>(
+fn parse_binary_gt_expression<'src, T: Expression + Rewritable<T>>(
     node: &BinaryExpr<'src>,
     scope: &LexicalScope,
     env: &Env<T>,
@@ -1388,7 +1391,7 @@ fn parse_binary_gt_expression<'src, T: Expression>(
     ))
 }
 
-fn parse_binary_lte_expression<'src, T: Expression>(
+fn parse_binary_lte_expression<'src, T: Expression + Rewritable<T>>(
     node: &BinaryExpr<'src>,
     scope: &LexicalScope,
     env: &Env<T>,
@@ -1403,7 +1406,7 @@ fn parse_binary_lte_expression<'src, T: Expression>(
     ))
 }
 
-fn parse_binary_gte_expression<'src, T: Expression>(
+fn parse_binary_gte_expression<'src, T: Expression + Rewritable<T>>(
     node: &BinaryExpr<'src>,
     scope: &LexicalScope,
     env: &Env<T>,
@@ -1418,7 +1421,7 @@ fn parse_binary_gte_expression<'src, T: Expression>(
     ))
 }
 
-fn parse_binary_equal_expression<'src, T: Expression>(
+fn parse_binary_equal_expression<'src, T: Expression + Rewritable<T>>(
     node: &BinaryExpr<'src>,
     scope: &LexicalScope,
     env: &Env<T>,
@@ -1433,7 +1436,7 @@ fn parse_binary_equal_expression<'src, T: Expression>(
     ))
 }
 
-fn parse_binary_not_equal_expression<'src, T: Expression>(
+fn parse_binary_not_equal_expression<'src, T: Expression + Rewritable<T>>(
     node: &BinaryExpr<'src>,
     scope: &LexicalScope,
     env: &Env<T>,
@@ -1447,7 +1450,7 @@ fn parse_binary_not_equal_expression<'src, T: Expression>(
     ))
 }
 
-fn parse_logical_and_expression<'src, T: Expression>(
+fn parse_logical_and_expression<'src, T: Expression + Rewritable<T>>(
     node: &LogicalExpr<'src>,
     scope: &LexicalScope,
     env: &Env<T>,
@@ -1462,7 +1465,7 @@ fn parse_logical_and_expression<'src, T: Expression>(
     ))
 }
 
-fn parse_logical_or_expression<'src, T: Expression>(
+fn parse_logical_or_expression<'src, T: Expression + Rewritable<T>>(
     node: &LogicalExpr<'src>,
     scope: &LexicalScope,
     env: &Env<T>,
@@ -1477,7 +1480,7 @@ fn parse_logical_or_expression<'src, T: Expression>(
     ))
 }
 
-fn parse_conditional_expression<'src, T: Expression>(
+fn parse_conditional_expression<'src, T: Expression + Rewritable<T>>(
     node: &ConditionalExpr<'src>,
     scope: &LexicalScope,
     env: &Env<T>,
@@ -1492,7 +1495,7 @@ fn parse_conditional_expression<'src, T: Expression>(
     ))
 }
 
-fn create_if_expression<T: Expression>(
+fn create_if_expression<T: Expression + Rewritable<T>>(
     condition: T,
     consequent: T,
     alternate: T,
@@ -1505,34 +1508,38 @@ fn create_if_expression<T: Expression>(
     )
 }
 
-fn create_try_catch_expression<T: Expression>(
+fn create_try_catch_expression<T: Expression + Rewritable<T>>(
     body: T,
     handler: T,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
 ) -> T {
-    factory.create_let_term(
-        handler,
-        factory.create_application_term(
-            factory.create_builtin_term(BuiltinTerm::IfError),
-            allocator.create_pair(
-                body,
-                factory.create_lambda_term(
-                    1,
-                    factory.create_application_term(
-                        factory.create_static_variable_term(1),
-                        allocator.create_unit_list(factory.create_application_term(
-                            global_aggregate_error(factory, allocator),
-                            allocator.create_unit_list(factory.create_static_variable_term(0)),
-                        )),
-                    ),
+    factory.create_application_term(
+        factory.create_builtin_term(BuiltinTerm::IfError),
+        allocator.create_pair(
+            body,
+            factory.create_lambda_term(
+                1,
+                factory.create_application_term(
+                    handler
+                        .substitute_static(
+                            &Substitutions::increase_scope_offset(1),
+                            factory,
+                            allocator,
+                            &mut NoopCache::default(),
+                        )
+                        .unwrap_or(handler),
+                    allocator.create_unit_list(factory.create_application_term(
+                        global_aggregate_error(factory, allocator),
+                        allocator.create_unit_list(factory.create_static_variable_term(0)),
+                    )),
                 ),
             ),
         ),
     )
 }
 
-fn parse_arrow_function_expression<'src, T: Expression>(
+fn parse_arrow_function_expression<'src, T: Expression + Rewritable<T>>(
     node: &ArrowFuncExpr<'src>,
     scope: &LexicalScope,
     env: &Env<T>,
@@ -1631,7 +1638,7 @@ fn parse_arrow_function_expression<'src, T: Expression>(
     }
 }
 
-fn parse_member_expression<'src, T: Expression>(
+fn parse_member_expression<'src, T: Expression + Rewritable<T>>(
     node: &MemberExpr<'src>,
     scope: &LexicalScope,
     env: &Env<T>,
@@ -1660,7 +1667,7 @@ fn parse_static_member_field_name(node: &MemberExpr) -> ParserResult<Option<Stri
     })
 }
 
-fn get_static_field<T: Expression>(
+fn get_static_field<T: Expression + Rewritable<T>>(
     target: T,
     field: &str,
     factory: &impl ExpressionFactory<T>,
@@ -1670,7 +1677,7 @@ fn get_static_field<T: Expression>(
     get_dynamic_field(target, field, factory, allocator)
 }
 
-fn get_dynamic_field<T: Expression>(
+fn get_dynamic_field<T: Expression + Rewritable<T>>(
     target: T,
     field: T,
     factory: &impl ExpressionFactory<T>,
@@ -1682,7 +1689,7 @@ fn get_dynamic_field<T: Expression>(
     )
 }
 
-fn get_indexed_field<T: Expression>(
+fn get_indexed_field<T: Expression + Rewritable<T>>(
     target: T,
     index: usize,
     factory: &impl ExpressionFactory<T>,
@@ -1696,7 +1703,7 @@ fn get_indexed_field<T: Expression>(
     )
 }
 
-fn parse_call_expression<'src, T: Expression>(
+fn parse_call_expression<'src, T: Expression + Rewritable<T>>(
     node: &CallExpr<'src>,
     scope: &LexicalScope,
     env: &Env<T>,
@@ -1737,7 +1744,7 @@ fn parse_call_expression<'src, T: Expression>(
     }
 }
 
-fn parse_static_method_call_expression<'src: 'temp, 'temp, T: Expression>(
+fn parse_static_method_call_expression<'src: 'temp, 'temp, T: Expression + Rewritable<T>>(
     target: &Expr<'src>,
     method_name: &'src str,
     args: impl IntoIterator<Item = &'temp Expr<'src>> + ExactSizeIterator,
@@ -1784,7 +1791,7 @@ fn parse_static_method_call_expression<'src: 'temp, 'temp, T: Expression>(
     }
 }
 
-fn parse_function_application_expression<'src: 'temp, 'temp, T: Expression>(
+fn parse_function_application_expression<'src: 'temp, 'temp, T: Expression + Rewritable<T>>(
     target: T,
     args: impl IntoIterator<Item = &'temp Expr<'src>> + ExactSizeIterator,
     scope: &LexicalScope,
@@ -1823,7 +1830,7 @@ fn parse_function_application_expression<'src: 'temp, 'temp, T: Expression>(
     }
 }
 
-fn parse_constructor_expression<'src, T: Expression>(
+fn parse_constructor_expression<'src, T: Expression + Rewritable<T>>(
     node: &NewExpr<'src>,
     scope: &LexicalScope,
     env: &Env<T>,
@@ -4173,6 +4180,33 @@ mod tests {
                     return 4;
                 }
             })()",
+            &env,
+            &factory,
+            &allocator,
+        )
+        .unwrap();
+        let result = evaluate(
+            &expression,
+            &StateCache::default(),
+            &factory,
+            &allocator,
+            &mut SubstitutionCache::new(),
+        );
+        assert_eq!(
+            result,
+            EvaluationResult::new(
+                factory.create_value_term(ValueTerm::Float(3.0)),
+                DependencyList::empty(),
+            ),
+        );
+        let expression = parse(
+            "((x) => {
+                try {
+                    return x;
+                } catch (error) {
+                    return 4;
+                }
+            })(3)",
             &env,
             &factory,
             &allocator,

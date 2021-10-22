@@ -1154,7 +1154,7 @@ impl<'a, T: Expression + Rewritable<T>> Substitutions<'a, T> {
             offset: 0,
         }
     }
-    pub(crate) fn wrap(depth: StackOffset) -> Self {
+    pub fn increase_scope_offset(depth: StackOffset) -> Self {
         Self {
             entries: None,
             scope_offset: Some(ScopeOffset::Wrap(depth)),
@@ -1162,8 +1162,7 @@ impl<'a, T: Expression + Rewritable<T>> Substitutions<'a, T> {
             offset: 0,
         }
     }
-    #[allow(dead_code)]
-    pub(crate) fn unwrap(depth: StackOffset) -> Self {
+    pub fn decrease_scope_offset(depth: StackOffset) -> Self {
         Self {
             entries: None,
             scope_offset: Some(ScopeOffset::Unwrap(depth)),
@@ -1210,7 +1209,12 @@ impl<'a, T: Expression + Rewritable<T>> Substitutions<'a, T> {
         match replacement {
             Some(replacement) => Some(
                 replacement
-                    .substitute_static(&Substitutions::wrap(self.offset), factory, allocator, cache)
+                    .substitute_static(
+                        &Substitutions::increase_scope_offset(self.offset),
+                        factory,
+                        allocator,
+                        cache,
+                    )
                     .unwrap_or_else(|| replacement.clone()),
             ),
             None => match &self.scope_offset {

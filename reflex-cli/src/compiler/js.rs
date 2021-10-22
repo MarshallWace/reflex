@@ -100,7 +100,7 @@ where
     compile_root(root, factory, allocator, compiler_options, compiler_mode)
 }
 
-fn create_graph_root<T: Expression + 'static>(
+fn create_graph_root<T: Expression + Rewritable<T> + 'static>(
     root_module_path: impl AsRef<Path>,
     root_module_source: &str,
     env_args: impl IntoIterator<Item = (String, String)>,

@@ -16,11 +16,11 @@ use crate::{
     Env,
 };
 use reflex::{
-    core::{Expression, ExpressionFactory, HeapAllocator},
+    core::{Expression, ExpressionFactory, HeapAllocator, Rewritable},
     lang::ValueTerm,
 };
 
-pub fn create_module_loader<T: Expression + 'static>(
+pub fn create_module_loader<T: Expression + Rewritable<T> + 'static>(
     env: Env<T>,
     custom_loader: Option<impl Fn(&str, &Path) -> Option<Result<T, String>> + 'static>,
     factory: &(impl ExpressionFactory<T> + Clone + 'static),
@@ -104,7 +104,7 @@ pub fn compose_module_loaders<T: Expression>(
     }
 }
 
-pub fn create_js_loader<T: Expression + 'static>(
+pub fn create_js_loader<T: Expression + Rewritable<T> + 'static>(
     env: Env<T>,
     module_loader: impl Fn(&str, &Path) -> Option<Result<T, String>>,
     factory: &(impl ExpressionFactory<T> + Clone),
