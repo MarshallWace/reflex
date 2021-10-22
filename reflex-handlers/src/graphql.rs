@@ -64,9 +64,9 @@ fn handle_graphql_execute_signal<T: AsyncExpression>(
     factory: &impl AsyncExpressionFactory<T>,
     allocator: &impl AsyncHeapAllocator<T>,
 ) -> Result<SignalResult<T>, String> {
-    if args.len() != 5 {
+    if args.len() != 6 {
         return Err(format!(
-            "Invalid GraphQL signal: Expected 5 arguments, received {}",
+            "Invalid GraphQL signal: Expected 6 arguments, received {}",
             args.len()
         ));
     }

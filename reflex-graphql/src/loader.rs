@@ -113,6 +113,13 @@ fn create_graphql_client_instance<'a: 'src, 'src, T: Expression>(
                                 )]),
                             ),
                             create_struct(empty(), factory, allocator),
+                            get_optional_struct_field(
+                                factory.create_static_variable_term(0),
+                                String::from("token"),
+                                factory.create_value_term(ValueTerm::Null),
+                                factory,
+                                allocator,
+                            ),
                         ]),
                     ),
                 ),
@@ -142,6 +149,37 @@ fn get_struct_field<T: Expression>(
         allocator.create_pair(
             target,
             factory.create_value_term(ValueTerm::String(allocator.create_string(field))),
+        ),
+    )
+}
+
+fn get_optional_struct_field<T: Expression>(
+    target: T,
+    field: String,
+    fallback: T,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> T {
+    factory.create_application_term(
+        factory.create_builtin_term(BuiltinTerm::If),
+        allocator.create_triple(
+            factory.create_application_term(
+                factory.create_builtin_term(BuiltinTerm::Contains),
+                allocator.create_pair(
+                    target.clone(),
+                    factory.create_value_term(ValueTerm::String(
+                        allocator.create_string(field.clone()),
+                    )),
+                ),
+            ),
+            factory.create_application_term(
+                factory.create_builtin_term(BuiltinTerm::Get),
+                allocator.create_pair(
+                    target,
+                    factory.create_value_term(ValueTerm::String(allocator.create_string(field))),
+                ),
+            ),
+            fallback,
         ),
     )
 }
