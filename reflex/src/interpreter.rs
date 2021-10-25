@@ -1,18 +1,20 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use std::{
     collections::{hash_map::DefaultHasher, HashMap},
     hash::Hasher,
     iter::once,
 };
 
-mod cache;
+use tracing::info_span;
+use tracing::{debug, info, trace};
+
 pub use cache::{
     CacheEntries, DefaultInterpreterCache, GcMetrics, InterpreterCache, InterpreterCacheEntry,
     InterpreterCacheKey,
 };
-mod stack;
 pub use stack::{CallStack, VariableStack};
 
 use crate::{
@@ -29,6 +31,9 @@ use crate::{
         WithExactSizeIterator,
     },
 };
+
+mod cache;
+mod stack;
 
 #[derive(Debug)]
 enum ExecutionResult<T: Expression> {
@@ -92,6 +97,9 @@ pub fn execute<'a, T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> 
     options: &InterpreterOptions,
     cache: &impl InterpreterCache<T>,
 ) -> Result<(EvaluationResult<T>, CacheEntries<T>), String> {
+    let execution_span = info_span!("interpreter::execute");
+    let _span_guard = execution_span.enter();
+    info!("Starting execution");
     let mut stack = VariableStack::new(options.variable_stack_size);
     let mut call_stack = CallStack::new(program, entry_point, options.call_stack_size);
     let mut cache_entries = CacheEntries::default();
@@ -143,10 +151,10 @@ fn evaluate_program_loop<T: Expression + Rewritable<T> + Reducible<T> + Applicab
             )),
             Some(instruction) => {
                 if debug_instructions {
-                    println!("> {:x} {:?}", call_stack.program_counter(), instruction);
+                    debug!("> {:x} {:?}", call_stack.program_counter(), instruction);
                 }
                 if debug_stack {
-                    println!(
+                    debug!(
                         "{}",
                         stack
                             .values()
@@ -458,6 +466,7 @@ fn evaluate_instruction<T: Expression + Rewritable<T> + Reducible<T> + Applicabl
 ) -> Result<(ExecutionResult<T>, DependencyList), String> {
     match instruction {
         Instruction::PushStatic { offset } => {
+            trace!(instruction = "Instruction::PushStatic");
             let value = stack.get(*offset).cloned();
             match value {
                 None => Err(format!("Invalid stack offset: {}", offset)),
@@ -468,6 +477,7 @@ fn evaluate_instruction<T: Expression + Rewritable<T> + Reducible<T> + Applicabl
             }
         }
         Instruction::PushDynamic { state_token } => {
+            trace!(instruction = "Instruction::PushDynamic");
             let fallback = stack.pop();
             match fallback {
                 None => Err(format!(
@@ -482,36 +492,44 @@ fn evaluate_instruction<T: Expression + Rewritable<T> + Reducible<T> + Applicabl
             }
         }
         Instruction::PushNull => {
+            trace!(instruction = "Instruction::PushNull");
             stack.push(factory.create_value_term(ValueTerm::Null));
             Ok((ExecutionResult::Advance, DependencyList::empty()))
         }
         Instruction::PushBoolean { value } => {
+            trace!(instruction = "Instruction::PushBoolean");
             stack.push(factory.create_value_term(ValueTerm::Boolean(*value)));
             Ok((ExecutionResult::Advance, DependencyList::empty()))
         }
         Instruction::PushInt { value } => {
+            trace!(instruction = "Instruction::PushInt");
             stack.push(factory.create_value_term(ValueTerm::Int(*value)));
             Ok((ExecutionResult::Advance, DependencyList::empty()))
         }
         Instruction::PushFloat { value } => {
+            trace!(instruction = "Instruction::PushFloat");
             stack.push(factory.create_value_term(ValueTerm::Float(*value)));
             Ok((ExecutionResult::Advance, DependencyList::empty()))
         }
         Instruction::PushString { value } => {
+            trace!(instruction = "Instruction::PushString");
             stack.push(factory.create_value_term(ValueTerm::String(
                 allocator.create_string(String::from(value)),
             )));
             Ok((ExecutionResult::Advance, DependencyList::empty()))
         }
         Instruction::PushSymbol { value } => {
+            trace!(instruction = "Instruction::PushSymbol");
             stack.push(factory.create_value_term(ValueTerm::Symbol(*value)));
             Ok((ExecutionResult::Advance, DependencyList::empty()))
         }
         Instruction::PushHash { value } => {
+            trace!(instruction = "Instruction::PushHash");
             stack.push(factory.create_value_term(ValueTerm::Hash(*value)));
             Ok((ExecutionResult::Advance, DependencyList::empty()))
         }
         Instruction::PushFunction { target } => {
+            trace!(instruction = "Instruction::PushFunction");
             let target_address = *target;
             match call_stack.lookup_instruction(target_address) {
                 Some(&Instruction::Function {
@@ -534,10 +552,12 @@ fn evaluate_instruction<T: Expression + Rewritable<T> + Reducible<T> + Applicabl
             }
         }
         Instruction::PushBuiltin { target } => {
+            trace!(instruction = "Instruction::PushBuiltin");
             stack.push(factory.create_builtin_term(*target));
             Ok((ExecutionResult::Advance, DependencyList::empty()))
         }
         Instruction::PushNative { target } => {
+            trace!(instruction = "Instruction::PushNative");
             let uid = *target;
             match plugins.get(&uid) {
                 Some(target) => {
@@ -551,6 +571,7 @@ fn evaluate_instruction<T: Expression + Rewritable<T> + Reducible<T> + Applicabl
             signal_type,
             num_args,
         } => {
+            trace!(instruction = "Instruction::PushSignal");
             let num_args = *num_args;
             if stack.len() < num_args {
                 Err(format!(
@@ -567,6 +588,7 @@ fn evaluate_instruction<T: Expression + Rewritable<T> + Reducible<T> + Applicabl
             }
         }
         Instruction::Pop { count } => {
+            trace!(instruction = "Instruction::Pop");
             let count = *count;
             if stack.len() < count {
                 Err(format!(
@@ -579,6 +601,7 @@ fn evaluate_instruction<T: Expression + Rewritable<T> + Reducible<T> + Applicabl
             }
         }
         Instruction::Squash { depth } => {
+            trace!(instruction = "Instruction::Squash");
             let depth = *depth;
             if stack.len() < depth + 1 {
                 Err(String::from(
@@ -592,6 +615,7 @@ fn evaluate_instruction<T: Expression + Rewritable<T> + Reducible<T> + Applicabl
             }
         }
         Instruction::Move { offset } => {
+            trace!(instruction = "Instruction::Move");
             let offset = *offset;
             if stack.len() < offset + 1 {
                 Err(String::from(
@@ -606,6 +630,7 @@ fn evaluate_instruction<T: Expression + Rewritable<T> + Reducible<T> + Applicabl
             }
         }
         Instruction::Jump { target } => {
+            trace!(instruction = "Instruction::Jump");
             let target_address = *target;
             Ok((
                 ExecutionResult::Jump(target_address),
@@ -613,6 +638,7 @@ fn evaluate_instruction<T: Expression + Rewritable<T> + Reducible<T> + Applicabl
             ))
         }
         Instruction::Call { target, num_args } => {
+            trace!(instruction = "Instruction::Call");
             let target_address = *target;
             let num_args = *num_args;
             let caller_address = call_stack.program_counter();
@@ -628,6 +654,7 @@ fn evaluate_instruction<T: Expression + Rewritable<T> + Reducible<T> + Applicabl
             ))
         }
         Instruction::Apply { num_args } => {
+            trace!(instruction = "Instruction::Apply");
             let num_args = *num_args;
             if stack.len() < num_args {
                 Err(String::from(
@@ -681,26 +708,36 @@ fn evaluate_instruction<T: Expression + Rewritable<T> + Reducible<T> + Applicabl
                 }
             }
         }
-        Instruction::Function { .. } => Ok((ExecutionResult::Advance, DependencyList::empty())),
-        Instruction::Return => Ok((ExecutionResult::Return, DependencyList::empty())),
-        Instruction::Evaluate => match stack.peek().map(|target| target.is_static()) {
-            None => Err(String::from("Missing evaluation target")),
-            Some(true) => Ok((ExecutionResult::Advance, DependencyList::empty())),
-            Some(false) => {
-                let expression = stack.pop().unwrap();
-                evaluate_expression(
-                    &expression,
-                    state,
-                    stack,
-                    call_stack,
-                    factory,
-                    allocator,
-                    cache,
-                    cache_entries,
-                )
+        Instruction::Function { .. } => {
+            trace!(instruction = "Instruction::Function");
+            Ok((ExecutionResult::Advance, DependencyList::empty()))
+        }
+        Instruction::Return => {
+            trace!(instruction = "Instruction::Return");
+            Ok((ExecutionResult::Return, DependencyList::empty()))
+        }
+        Instruction::Evaluate => {
+            trace!(instruction = "Instruction::Evaluate");
+            match stack.peek().map(|target| target.is_static()) {
+                None => Err(String::from("Missing evaluation target")),
+                Some(true) => Ok((ExecutionResult::Advance, DependencyList::empty())),
+                Some(false) => {
+                    let expression = stack.pop().unwrap();
+                    evaluate_expression(
+                        &expression,
+                        state,
+                        stack,
+                        call_stack,
+                        factory,
+                        allocator,
+                        cache,
+                        cache_entries,
+                    )
+                }
             }
-        },
+        }
         Instruction::ConstructApplication { num_args } => {
+            trace!(instruction = "Instruction::ConstructApplication");
             let num_args = *num_args;
             if stack.len() < (1 + num_args) {
                 Err(String::from(
@@ -714,6 +751,7 @@ fn evaluate_instruction<T: Expression + Rewritable<T> + Reducible<T> + Applicabl
             }
         }
         Instruction::ConstructPartialApplication { num_args } => {
+            trace!(instruction = "Instruction::ConstructPartialApplication");
             let num_args = *num_args;
             if stack.len() < (1 + num_args) {
                 Err(String::from(
@@ -729,6 +767,7 @@ fn evaluate_instruction<T: Expression + Rewritable<T> + Reducible<T> + Applicabl
             }
         }
         Instruction::ConstructTuple { size } => {
+            trace!(instruction = "Instruction::ConstructTuple");
             let size = *size;
             if stack.len() < size {
                 Err(format!(
@@ -742,10 +781,12 @@ fn evaluate_instruction<T: Expression + Rewritable<T> + Reducible<T> + Applicabl
             }
         }
         Instruction::PushConstructor { prototype } => {
+            trace!(instruction = "Instruction::PushConstructor");
             stack.push(factory.create_constructor_term(prototype.clone()));
             Ok((ExecutionResult::Advance, DependencyList::empty()))
         }
         Instruction::ConstructVector { size } => {
+            trace!(instruction = "Instruction::ConstructVector");
             let size = *size;
             if stack.len() < size {
                 Err(format!(
@@ -759,6 +800,7 @@ fn evaluate_instruction<T: Expression + Rewritable<T> + Reducible<T> + Applicabl
             }
         }
         Instruction::ConstructHashMap { size } => {
+            trace!(instruction = "Instruction::ConstructHashMap");
             let size = *size;
             if stack.len() < size * 2 {
                 Err(format!(
@@ -773,6 +815,7 @@ fn evaluate_instruction<T: Expression + Rewritable<T> + Reducible<T> + Applicabl
             }
         }
         Instruction::ConstructHashSet { size } => {
+            trace!(instruction = "Instruction::ConstructHashSet");
             let size = *size;
             if stack.len() < size {
                 Err(format!(
@@ -786,6 +829,7 @@ fn evaluate_instruction<T: Expression + Rewritable<T> + Reducible<T> + Applicabl
             }
         }
         Instruction::CombineSignals { count } => {
+            trace!(instruction = "Instruction::CombineSignals");
             let count = *count;
             if stack.len() < count {
                 Err(format!(
@@ -1174,8 +1218,6 @@ impl<'a, T> ExactSizeIterator for CombinedSliceIterator<'a, T> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     use crate::{
         allocator::DefaultAllocator,
         compiler::{hash_program_root, Compiler, CompilerMode, CompilerOptions},
@@ -1183,6 +1225,8 @@ mod tests {
         lang::*,
         parser::sexpr::parse,
     };
+
+    use super::*;
 
     #[test]
     fn compiled_functions() {
@@ -1483,7 +1527,7 @@ mod tests {
             result,
             EvaluationResult::new(
                 factory.create_value_term(ValueTerm::Int(3)),
-                DependencyList::empty()
+                DependencyList::empty(),
             ),
         );
 

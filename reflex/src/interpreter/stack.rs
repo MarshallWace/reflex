@@ -3,6 +3,7 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use std::collections::HashSet;
+use tracing::trace_span;
 
 use crate::{
     compiler::{Instruction, InstructionPointer, Program},
@@ -15,6 +16,7 @@ struct StackEntry<T: Expression> {
     context: StackFrame<T>,
     parent_state_dependencies: DependencyList,
     parent_subexpressions: Vec<HashId>,
+    span: Option<tracing::span::EnteredSpan>,
 }
 
 #[derive(PartialEq, Eq, Debug)]
@@ -341,6 +343,10 @@ impl<'src, T: Expression> CallStack<'src, T> {
         if let Some(hash) = hash {
             self.add_subexpression(hash);
         }
+        let span_guard = hash.map(|hash| {
+            let span = trace_span!("stack_frame_enter", hash);
+            span.entered()
+        });
         let parent_state_dependencies = self.replace_state_dependencies(DependencyList::empty());
         let parent_subexpressions = self.replace_subexpressions(Vec::new());
         self.call_stack.push(StackEntry {
@@ -348,6 +354,7 @@ impl<'src, T: Expression> CallStack<'src, T> {
             context: frame,
             parent_state_dependencies,
             parent_subexpressions,
+            span: span_guard,
         });
     }
     fn pop_call_stack(
@@ -358,6 +365,9 @@ impl<'src, T: Expression> CallStack<'src, T> {
                 let child_state_dependencies =
                     self.replace_state_dependencies(entry.parent_state_dependencies);
                 let child_subexpressions = self.replace_subexpressions(entry.parent_subexpressions);
+                if let Some(guard) = entry.span {
+                    guard.exit();
+                }
                 Some((
                     entry.hash,
                     child_state_dependencies,
