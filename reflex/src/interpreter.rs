@@ -9,7 +9,7 @@ use std::{
 };
 
 use tracing::info_span;
-use tracing::{debug, info, trace};
+use tracing::{debug, trace};
 
 pub use cache::{
     CacheEntries, DefaultInterpreterCache, GcMetrics, InterpreterCache, InterpreterCacheEntry,
@@ -99,7 +99,7 @@ pub fn execute<'a, T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> 
 ) -> Result<(EvaluationResult<T>, CacheEntries<T>), String> {
     let execution_span = info_span!("interpreter::execute");
     let _span_guard = execution_span.enter();
-    info!("Starting execution");
+    trace!("Starting execution");
     let mut stack = VariableStack::new(options.variable_stack_size);
     let mut call_stack = CallStack::new(program, entry_point, options.call_stack_size);
     let mut cache_entries = CacheEntries::default();
@@ -552,12 +552,12 @@ fn evaluate_instruction<T: Expression + Rewritable<T> + Reducible<T> + Applicabl
             }
         }
         Instruction::PushBuiltin { target } => {
-            trace!(instruction = "Instruction::PushBuiltin");
+            trace!(instruction = "Instruction::PushBuiltin", builtin_target = %target);
             stack.push(factory.create_builtin_term(*target));
             Ok((ExecutionResult::Advance, DependencyList::empty()))
         }
         Instruction::PushNative { target } => {
-            trace!(instruction = "Instruction::PushNative");
+            trace!(instruction = "Instruction::PushNative", native_target = %target);
             let uid = *target;
             match plugins.get(&uid) {
                 Some(target) => {
@@ -739,7 +739,10 @@ fn evaluate_instruction<T: Expression + Rewritable<T> + Reducible<T> + Applicabl
             }
             Some(false) => {
                 let expression = stack.pop().unwrap();
-                trace!(instruction = "Instruction::Evaluate", evaluate_metadata = %expression);
+                trace!(
+                    instruction = "Instruction::Evaluate",
+                    evaluate_metadata = "Expression"
+                );
                 evaluate_expression(
                     &expression,
                     state,
