@@ -654,7 +654,6 @@ fn evaluate_instruction<T: Expression + Rewritable<T> + Reducible<T> + Applicabl
             ))
         }
         Instruction::Apply { num_args } => {
-            trace!(instruction = "Instruction::Apply");
             let num_args = *num_args;
             if stack.len() < num_args {
                 Err(String::from(
@@ -670,7 +669,16 @@ fn evaluate_instruction<T: Expression + Rewritable<T> + Reducible<T> + Applicabl
                     let resume_address = call_stack.next_program_counter();
                     let num_combined_args = num_args + partial_args.len();
                     if !partial_args.is_empty() {
+                        trace!(
+                            instruction = "Instruction::Apply",
+                            apply_metadata = "Partial"
+                        );
                         stack.splice(num_args, partial_args);
+                    } else {
+                        trace!(
+                            instruction = "Instruction::Apply",
+                            apply_metadata = "Static"
+                        );
                     }
                     Ok((
                         ExecutionResult::CallFunction {
@@ -683,6 +691,10 @@ fn evaluate_instruction<T: Expression + Rewritable<T> + Reducible<T> + Applicabl
                     ))
                 } else {
                     let arity = get_function_arity(&target)?;
+                    trace!(
+                        instruction = "Instruction::Apply",
+                        apply_metadata =  %target,
+                    );
                     if has_unresolved_args(&arity, stack.slice(num_args)) {
                         let args = stack.pop_multiple(num_args);
                         Ok((
@@ -716,26 +728,30 @@ fn evaluate_instruction<T: Expression + Rewritable<T> + Reducible<T> + Applicabl
             trace!(instruction = "Instruction::Return");
             Ok((ExecutionResult::Return, DependencyList::empty()))
         }
-        Instruction::Evaluate => {
-            trace!(instruction = "Instruction::Evaluate");
-            match stack.peek().map(|target| target.is_static()) {
-                None => Err(String::from("Missing evaluation target")),
-                Some(true) => Ok((ExecutionResult::Advance, DependencyList::empty())),
-                Some(false) => {
-                    let expression = stack.pop().unwrap();
-                    evaluate_expression(
-                        &expression,
-                        state,
-                        stack,
-                        call_stack,
-                        factory,
-                        allocator,
-                        cache,
-                        cache_entries,
-                    )
-                }
+        Instruction::Evaluate => match stack.peek().map(|target| target.is_static()) {
+            None => Err(String::from("Missing evaluation target")),
+            Some(true) => {
+                trace!(
+                    instruction = "Instruction::Evaluate",
+                    evaluate_metadata = "Static"
+                );
+                Ok((ExecutionResult::Advance, DependencyList::empty()))
             }
-        }
+            Some(false) => {
+                let expression = stack.pop().unwrap();
+                trace!(instruction = "Instruction::Evaluate", evaluate_metadata = %expression);
+                evaluate_expression(
+                    &expression,
+                    state,
+                    stack,
+                    call_stack,
+                    factory,
+                    allocator,
+                    cache,
+                    cache_entries,
+                )
+            }
+        },
         Instruction::ConstructApplication { num_args } => {
             trace!(instruction = "Instruction::ConstructApplication");
             let num_args = *num_args;
