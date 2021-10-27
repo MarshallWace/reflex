@@ -3,6 +3,7 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use std::{collections::HashSet, sync::Arc};
+use tracing::trace;
 
 use crate::{
     compiler::{Compile, Compiler, InstructionPointer, Program},
@@ -214,9 +215,11 @@ impl TermFactory {
 }
 impl ExpressionFactory<CachedTerm<SharedTerm>> for TermFactory {
     fn create_value_term(&self, value: ValueTerm<StringPrimitive>) -> CachedTerm<SharedTerm> {
+        trace!(factory_create = "value_term");
         self.create_expression(Term::Value(value))
     }
     fn create_static_variable_term(&self, offset: StackOffset) -> CachedTerm<SharedTerm> {
+        trace!(factory_create = "static_variable");
         self.create_expression(Term::Variable(VariableTerm::Static(
             StaticVariableTerm::new(offset),
         )))
@@ -226,6 +229,7 @@ impl ExpressionFactory<CachedTerm<SharedTerm>> for TermFactory {
         state_token: StateToken,
         fallback: CachedTerm<SharedTerm>,
     ) -> CachedTerm<SharedTerm> {
+        trace!(factory_create = "dynamic_variable");
         self.create_expression(Term::Variable(VariableTerm::Dynamic(
             DynamicVariableTerm::new(state_token, fallback),
         )))
@@ -235,6 +239,7 @@ impl ExpressionFactory<CachedTerm<SharedTerm>> for TermFactory {
         initializer: CachedTerm<SharedTerm>,
         body: CachedTerm<SharedTerm>,
     ) -> CachedTerm<SharedTerm> {
+        trace!(factory_create = "let");
         self.create_expression(Term::Let(LetTerm::new(initializer, body)))
     }
     fn create_lambda_term(
@@ -242,6 +247,7 @@ impl ExpressionFactory<CachedTerm<SharedTerm>> for TermFactory {
         num_args: StackOffset,
         body: CachedTerm<SharedTerm>,
     ) -> CachedTerm<SharedTerm> {
+        trace!(factory_create = "lambda");
         self.create_expression(Term::Lambda(LambdaTerm::new(num_args, body)))
     }
     fn create_application_term(
@@ -249,6 +255,7 @@ impl ExpressionFactory<CachedTerm<SharedTerm>> for TermFactory {
         target: CachedTerm<SharedTerm>,
         args: CachedList<SharedTerm>,
     ) -> CachedTerm<SharedTerm> {
+        trace!(factory_create = "application");
         self.create_expression(Term::Application(ApplicationTerm::new(target, args)))
     }
     fn create_partial_application_term(
@@ -256,20 +263,24 @@ impl ExpressionFactory<CachedTerm<SharedTerm>> for TermFactory {
         target: CachedTerm<SharedTerm>,
         args: CachedList<SharedTerm>,
     ) -> CachedTerm<SharedTerm> {
+        trace!(factory_create = "partial_application");
         self.create_expression(Term::PartialApplication(PartialApplicationTerm::new(
             target, args,
         )))
     }
     fn create_recursive_term(&self, factory: CachedTerm<SharedTerm>) -> CachedTerm<SharedTerm> {
+        trace!(factory_create = "recursive");
         self.create_expression(Term::Recursive(RecursiveTerm::new(factory)))
     }
     fn create_builtin_term(&self, target: BuiltinTerm) -> CachedTerm<SharedTerm> {
+        trace!(factory_create = "builtin");
         self.create_expression(Term::Builtin(target))
     }
     fn create_native_function_term(
         &self,
         target: NativeFunction<CachedTerm<SharedTerm>>,
     ) -> CachedTerm<SharedTerm> {
+        trace!(factory_create = "native_function");
         self.create_expression(Term::Native(NativeFunctionTerm::new(target)))
     }
     fn create_compiled_function_term(
@@ -279,6 +290,7 @@ impl ExpressionFactory<CachedTerm<SharedTerm>> for TermFactory {
         required_args: StackOffset,
         optional_args: StackOffset,
     ) -> CachedTerm<SharedTerm> {
+        trace!(factory_create = "compiled_function");
         self.create_expression(Term::CompiledFunction(CompiledFunctionTerm::new(
             address,
             hash,
@@ -287,6 +299,7 @@ impl ExpressionFactory<CachedTerm<SharedTerm>> for TermFactory {
         )))
     }
     fn create_tuple_term(&self, fields: CachedList<SharedTerm>) -> CachedTerm<SharedTerm> {
+        trace!(factory_create = "tuple");
         self.create_expression(Term::Tuple(TupleTerm::new(fields)))
     }
     fn create_struct_term(
@@ -294,12 +307,15 @@ impl ExpressionFactory<CachedTerm<SharedTerm>> for TermFactory {
         prototype: StructPrototype,
         fields: CachedList<SharedTerm>,
     ) -> CachedTerm<SharedTerm> {
+        trace!(factory_create = "struct");
         self.create_expression(Term::Struct(StructTerm::new(prototype, fields)))
     }
     fn create_constructor_term(&self, prototype: StructPrototype) -> CachedTerm<SharedTerm> {
+        trace!(factory_create = "constructor");
         self.create_expression(Term::Constructor(ConstructorTerm::new(prototype)))
     }
     fn create_vector_term(&self, items: CachedList<SharedTerm>) -> CachedTerm<SharedTerm> {
+        trace!(factory_create = "vector");
         self.create_expression(Term::Collection(CollectionTerm::Vector(VectorTerm::new(
             items,
         ))))
@@ -309,11 +325,13 @@ impl ExpressionFactory<CachedTerm<SharedTerm>> for TermFactory {
         keys: CachedList<SharedTerm>,
         values: CachedList<SharedTerm>,
     ) -> CachedTerm<SharedTerm> {
+        trace!(factory_create = "hashmap");
         self.create_expression(Term::Collection(CollectionTerm::HashMap(HashMapTerm::new(
             keys, values,
         ))))
     }
     fn create_hashset_term(&self, values: CachedList<SharedTerm>) -> CachedTerm<SharedTerm> {
+        trace!(factory_create = "hashset");
         self.create_expression(Term::Collection(CollectionTerm::HashSet(HashSetTerm::new(
             values,
         ))))
@@ -322,6 +340,7 @@ impl ExpressionFactory<CachedTerm<SharedTerm>> for TermFactory {
         &self,
         signals: SignalList<CachedTerm<SharedTerm>>,
     ) -> CachedTerm<SharedTerm> {
+        trace!(factory_create = "signal");
         self.create_expression(Term::Signal(SignalTerm::new(signals)))
     }
 
