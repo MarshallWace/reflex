@@ -23,15 +23,18 @@ use reflex_graphql::{
         deserialize_graphql_client_message, GraphQlSubscriptionClientMessage,
         GraphQlSubscriptionServerMessage, GraphQlSubscriptionStartMessage, SubscriptionId,
     },
+    AsyncGraphQlQueryTransform,
 };
 use reflex_json::{json_array, json_object, sanitize, JsonMap, JsonValue};
 use reflex_runtime::{AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator, Runtime};
 use std::{
     collections::HashMap,
-    iter::once,
+    iter::{empty, once},
     sync::{Arc, Mutex},
 };
 use tokio::sync::mpsc;
+
+use crate::{create_http_response, GraphQlHttpQueryTransform};
 
 pub(crate) async fn handle_graphql_ws_request<
     T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
@@ -43,10 +46,15 @@ pub(crate) async fn handle_graphql_ws_request<
     factory: &impl AsyncExpressionFactory<T>,
     allocator: &impl AsyncHeapAllocator<T>,
     compiler_options: CompilerOptions,
+    transform: Arc<impl GraphQlHttpQueryTransform + Send + Sync + 'static>,
 ) -> Result<Response<Body>, ProtocolError>
 where
     T::String: StringValue + Send + Sync,
 {
+    let transform = match transform.factory(&req) {
+        Err((status, error)) => return Ok(create_http_response(status, empty(), Some(error))),
+        Ok(transform) => transform,
+    };
     let (mut response, websocket) = hyper_tungstenite::upgrade(req, None)?;
     tokio::spawn({
         let root = root.clone();
@@ -66,6 +74,7 @@ where
                         &factory,
                         &allocator,
                         &compiler_options,
+                        &transform,
                     )
                     .await
                     {
@@ -95,6 +104,7 @@ async fn handle_websocket_connection<
     factory: &impl AsyncExpressionFactory<T>,
     allocator: &impl AsyncHeapAllocator<T>,
     compiler_options: &CompilerOptions,
+    transform: &impl AsyncGraphQlQueryTransform,
 ) -> Result<(), Box<dyn std::error::Error>>
 where
     T::String: StringValue + Send + Sync,
@@ -164,6 +174,7 @@ where
                             &root,
                             &factory,
                             &allocator,
+                            transform,
                         ) {
                             Err(error) => {
                                 let _ = messages_tx

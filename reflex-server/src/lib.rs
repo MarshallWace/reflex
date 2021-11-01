@@ -5,6 +5,7 @@ use graphql::{
     http::handle_graphql_http_request, playground::handle_playground_http_request,
     websocket::handle_graphql_ws_request,
 };
+use reflex_graphql::{AsyncGraphQlQueryTransform, NoopGraphQlQueryTransform};
 use std::{convert::Infallible, future::Future, iter::once, sync::Arc};
 
 use hyper::{
@@ -27,6 +28,36 @@ mod graphql {
     pub(crate) mod websocket;
 }
 
+pub type GraphQlRequest = Request<Body>;
+
+pub trait GraphQlHttpQueryTransform: Send + Sync + 'static {
+    type T: AsyncGraphQlQueryTransform;
+    fn factory(&self, request: &GraphQlRequest) -> Result<Self::T, (StatusCode, String)>;
+}
+impl<T, T2> GraphQlHttpQueryTransform for T
+where
+    T: Fn(&Request<Body>) -> Result<T2, (StatusCode, String)> + Send + Sync + 'static,
+    T2: AsyncGraphQlQueryTransform,
+{
+    type T = T2;
+    fn factory(&self, request: &GraphQlRequest) -> Result<Self::T, (StatusCode, String)> {
+        self(request)
+    }
+}
+
+pub struct NoopGraphQlHttpQueryTransform {}
+impl Default for NoopGraphQlHttpQueryTransform {
+    fn default() -> Self {
+        Self {}
+    }
+}
+impl GraphQlHttpQueryTransform for NoopGraphQlHttpQueryTransform {
+    type T = NoopGraphQlQueryTransform;
+    fn factory(&self, _request: &GraphQlRequest) -> Result<Self::T, (StatusCode, String)> {
+        Ok(NoopGraphQlQueryTransform::default())
+    }
+}
+
 pub fn graphql_service<
     T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
 >(
@@ -35,6 +66,7 @@ pub fn graphql_service<
     factory: &impl AsyncExpressionFactory<T>,
     allocator: &impl AsyncHeapAllocator<T>,
     compiler_options: CompilerOptions,
+    transform: Arc<impl GraphQlHttpQueryTransform + Send + Sync + 'static>,
 ) -> impl Service<
     Request<Body>,
     Response = Response<Body>,
@@ -50,6 +82,7 @@ where
         move |req| {
             let runtime = Arc::clone(&runtime);
             let program = Arc::clone(&program);
+            let transform = Arc::clone(&transform);
             let factory = factory.clone();
             let allocator = allocator.clone();
             let root = factory.create_application_term(
@@ -67,6 +100,7 @@ where
                             &factory,
                             &allocator,
                             compiler_options,
+                            transform,
                         )
                         .await
                     }
@@ -80,6 +114,7 @@ where
                                 &factory,
                                 &allocator,
                                 compiler_options,
+                                transform,
                             )
                             .await
                         } else {
@@ -112,6 +147,7 @@ async fn handle_graphql_upgrade_request<
     factory: &impl AsyncExpressionFactory<T>,
     allocator: &impl AsyncHeapAllocator<T>,
     compiler_options: CompilerOptions,
+    transform: Arc<impl GraphQlHttpQueryTransform + Send + Sync + 'static>,
 ) -> Result<Response<Body>, Infallible>
 where
     T::String: StringValue + Send + Sync,
@@ -125,6 +161,7 @@ where
             factory,
             allocator,
             compiler_options,
+            transform,
         )
         .await
         {
@@ -192,10 +229,17 @@ fn create_http_response(
     res
 }
 
-fn method_not_allowed() -> Response<Body> {
+fn create_http_error_response(status: StatusCode, message: String) -> Response<Body> {
     create_http_response(
-        StatusCode::METHOD_NOT_ALLOWED,
+        status,
         vec![(header::CONTENT_TYPE, String::from("text/plain"))],
-        Some(String::from("Method not allowed")),
+        Some(message),
+    )
+}
+
+fn method_not_allowed() -> Response<Body> {
+    create_http_error_response(
+        StatusCode::METHOD_NOT_ALLOWED,
+        String::from("Method not allowed"),
     )
 }

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
-use std::{collections::HashMap, iter::once, str::FromStr};
+use std::{borrow::Cow, collections::HashMap, iter::once, str::FromStr};
 
 use either::Either;
 use graphql_parser::{parse_query, query::*};
@@ -22,10 +22,14 @@ use reflex_json::{json_array, json_object, sanitize, JsonValue};
 use uuid::Uuid;
 
 pub mod subscriptions;
+pub use graphql_parser::query as graphql;
+pub type GraphQlAst<'a> = Document<'a, GraphQlText<'a>>;
+pub type GraphQlText<'a> = std::borrow::Cow<'a, str>;
 
 #[allow(type_alias_bounds)]
-type QueryVariables<'a, T: Expression> = HashMap<&'a str, T>;
-type QueryFragments<'a> = HashMap<&'a str, &'a FragmentDefinition<'a, &'a str>>;
+type QueryVariables<'a, T: Expression> = HashMap<GraphQlText<'a>, T>;
+type QueryFragments<'src, 'a> =
+    HashMap<GraphQlText<'src>, &'a FragmentDefinition<'src, GraphQlText<'src>>>;
 
 pub fn graphql_plugins<T: Expression>() -> impl IntoIterator<Item = NativeFunction<T>> {
     vec![dynamic_query_branch(), flatten_deep()]
@@ -94,11 +98,39 @@ pub fn sanitize_signal_errors<T: Expression>(signal: &SignalTerm<T>) -> Vec<Json
 
 const DEFAULT_OPERATION_TYPE: &str = "query";
 
-pub fn parse_graphql_operation<'a, T: Expression + 'a>(
+pub trait GraphQlQueryTransform {
+    fn transform<'a>(&self, document: GraphQlAst<'a>) -> Result<GraphQlAst<'a>, String>;
+}
+impl<T> GraphQlQueryTransform for T
+where
+    T: for<'a> Fn(GraphQlAst<'a>) -> Result<GraphQlAst<'a>, String>,
+{
+    fn transform<'a>(&self, document: GraphQlAst<'a>) -> Result<GraphQlAst<'a>, String> {
+        self(document)
+    }
+}
+
+pub trait AsyncGraphQlQueryTransform: GraphQlQueryTransform + Send + Sync + 'static {}
+impl<T> AsyncGraphQlQueryTransform for T where T: GraphQlQueryTransform + Send + Sync + 'static {}
+
+pub struct NoopGraphQlQueryTransform {}
+impl GraphQlQueryTransform for NoopGraphQlQueryTransform {
+    fn transform<'a>(&self, document: GraphQlAst<'a>) -> Result<GraphQlAst<'a>, String> {
+        Ok(document)
+    }
+}
+impl Default for NoopGraphQlQueryTransform {
+    fn default() -> Self {
+        Self {}
+    }
+}
+
+pub fn parse_graphql_operation<T: Expression>(
     operation: &GraphQlOperationPayload,
     root: &T,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
+    transform: &impl GraphQlQueryTransform,
 ) -> Result<T, String> {
     let variables = operation
         .variables()
@@ -107,7 +139,7 @@ pub fn parse_graphql_operation<'a, T: Expression + 'a>(
             reflex_json::hydrate(value.clone(), factory, allocator).map(|value| (key, value))
         })
         .collect::<Result<Vec<_>, _>>()?;
-    let query = parse(operation.query(), variables, factory, allocator)?;
+    let query = parse(operation.query(), variables, factory, allocator, transform)?;
     Ok(factory.create_application_term(query, allocator.create_unit_list(root.clone())))
 }
 
@@ -116,15 +148,20 @@ pub fn parse<'vars, T: Expression>(
     variables: impl IntoIterator<Item = (&'vars str, T)>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
+    transform: &impl GraphQlQueryTransform,
 ) -> Result<T, String> {
-    let variables = &variables.into_iter().collect::<QueryVariables<T>>();
-    match parse_query::<&str>(source) {
+    let variables = &variables
+        .into_iter()
+        .map(|(key, value)| (Cow::Owned(String::from(key)), value))
+        .collect::<QueryVariables<T>>();
+    match parse_query::<GraphQlText>(source) {
         Ok(document) => {
+            let document = transform.transform(document)?;
             let fragments = document
                 .definitions
                 .iter()
                 .filter_map(|definition| match definition {
-                    Definition::Fragment(fragment) => Some((fragment.name, fragment)),
+                    Definition::Fragment(fragment) => Some((fragment.name.clone(), fragment)),
                     _ => None,
                 })
                 .collect::<QueryFragments>();
@@ -148,9 +185,9 @@ pub fn parse<'vars, T: Expression>(
     }
 }
 
-fn get_root_operation<'src, 'a>(
-    document: &'a Document<'src, &'src str>,
-) -> Result<&'a OperationDefinition<'src, &'src str>, String> {
+fn get_root_operation<'src, 'a, TText: Text<'src>>(
+    document: &'a Document<'src, TText>,
+) -> Result<&'a OperationDefinition<'src, TText>, String> {
     let operations = document
         .definitions
         .iter()
@@ -167,9 +204,9 @@ fn get_root_operation<'src, 'a>(
 }
 
 fn parse_operation<'src, T: Expression>(
-    operation: &OperationDefinition<'src, &'src str>,
-    variables: &QueryVariables<T>,
-    fragments: &QueryFragments,
+    operation: &OperationDefinition<'src, GraphQlText<'src>>,
+    variables: &QueryVariables<'src, T>,
+    fragments: &QueryFragments<'src, '_>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
 ) -> Result<T, String> {
@@ -190,9 +227,9 @@ fn parse_operation<'src, T: Expression>(
 }
 
 fn parse_query_operation<'src, T: Expression>(
-    operation: &Query<'src, &'src str>,
-    variables: &QueryVariables<T>,
-    fragments: &QueryFragments,
+    operation: &Query<'src, GraphQlText<'src>>,
+    variables: &QueryVariables<'src, T>,
+    fragments: &QueryFragments<'src, '_>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
 ) -> Result<T, String> {
@@ -208,9 +245,9 @@ fn parse_query_operation<'src, T: Expression>(
 }
 
 fn parse_mutation_operation<'src, T: Expression>(
-    operation: &Mutation<'src, &'src str>,
-    variables: &QueryVariables<T>,
-    fragments: &QueryFragments,
+    operation: &Mutation<'src, GraphQlText<'src>>,
+    variables: &QueryVariables<'src, T>,
+    fragments: &QueryFragments<'src, '_>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
 ) -> Result<T, String> {
@@ -226,9 +263,9 @@ fn parse_mutation_operation<'src, T: Expression>(
 }
 
 fn parse_subscription_operation<'src, T: Expression>(
-    operation: &Subscription<'src, &'src str>,
-    variables: &QueryVariables<T>,
-    fragments: &QueryFragments,
+    operation: &Subscription<'src, GraphQlText<'src>>,
+    variables: &QueryVariables<'src, T>,
+    fragments: &QueryFragments<'src, '_>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
 ) -> Result<T, String> {
@@ -245,10 +282,10 @@ fn parse_subscription_operation<'src, T: Expression>(
 
 fn parse_root_operation<'src, T: Expression>(
     operation_type: &str,
-    selection_set: &SelectionSet<'src, &'src str>,
-    variable_definitions: &[VariableDefinition<'src, &'src str>],
-    variables: &QueryVariables<T>,
-    fragments: &QueryFragments,
+    selection_set: &SelectionSet<'src, GraphQlText<'src>>,
+    variable_definitions: &[VariableDefinition<'src, GraphQlText<'src>>],
+    variables: &QueryVariables<'src, T>,
+    fragments: &QueryFragments<'src, '_>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
 ) -> Result<T, String> {
@@ -272,15 +309,15 @@ fn parse_root_operation<'src, T: Expression>(
 }
 
 fn parse_operation_variables<'src, T: Expression>(
-    variable_definitions: &[VariableDefinition<'src, &'src str>],
-    variables: &QueryVariables<T>,
+    variable_definitions: &[VariableDefinition<'src, GraphQlText<'src>>],
+    variables: &QueryVariables<'src, T>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
 ) -> Result<QueryVariables<'src, T>, String> {
     variable_definitions
         .iter()
         .map(|definition| {
-            let value = variables.get(definition.name).cloned();
+            let value = variables.get(&definition.name).cloned();
             let value = match value {
                 Some(value) => Some(value),
                 None => match &definition.default_value {
@@ -295,8 +332,8 @@ fn parse_operation_variables<'src, T: Expression>(
                 },
             };
             Ok((
-                definition.name,
-                validate_variable(value, definition.name, &definition.var_type, factory)?,
+                definition.name.clone(),
+                validate_variable(value, &definition.name, &definition.var_type, factory)?,
             ))
         })
         .collect::<Result<QueryVariables<T>, _>>()
@@ -304,8 +341,8 @@ fn parse_operation_variables<'src, T: Expression>(
 
 fn validate_variable<'src, T: Expression>(
     value: Option<T>,
-    name: &'src str,
-    var_type: &Type<'src, &'src str>,
+    name: &GraphQlText<'src>,
+    var_type: &Type<'src, GraphQlText<'src>>,
     factory: &impl ExpressionFactory<T>,
 ) -> Result<T, String> {
     match var_type {
@@ -319,9 +356,9 @@ fn validate_variable<'src, T: Expression>(
 }
 
 fn parse_selection_set<'src, T: Expression>(
-    selection_set: &SelectionSet<'src, &'src str>,
-    variables: &QueryVariables<T>,
-    fragments: &QueryFragments,
+    selection_set: &SelectionSet<'src, GraphQlText<'src>>,
+    variables: &QueryVariables<'src, T>,
+    fragments: &QueryFragments<'src, '_>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
 ) -> Result<T, String> {
@@ -362,9 +399,9 @@ fn parse_leaf<T: Expression>(factory: &impl ExpressionFactory<T>) -> Result<T, S
 }
 
 fn parse_selection_set_fields<'src, T: Expression>(
-    selection_set: &SelectionSet<'src, &'src str>,
-    variables: &QueryVariables<T>,
-    fragments: &QueryFragments,
+    selection_set: &SelectionSet<'src, GraphQlText<'src>>,
+    variables: &QueryVariables<'src, T>,
+    fragments: &QueryFragments<'src, '_>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
 ) -> Result<Vec<(String, T)>, String> {
@@ -375,13 +412,16 @@ fn parse_selection_set_fields<'src, T: Expression>(
             Selection::Field(field) => {
                 match parse_field(field, variables, fragments, factory, allocator) {
                     Ok(result) => {
-                        let key = field.alias.unwrap_or(field.name);
-                        Either::Left(once(Ok((String::from(key), result))))
+                        let key = match field.alias.as_ref().unwrap_or(&field.name) {
+                            Cow::Owned(value) => String::from(value),
+                            Cow::Borrowed(value) => String::from(*value),
+                        };
+                        Either::Left(once(Ok((key, result))))
                     }
                     Err(error) => Either::Left(once(Err(error))),
                 }
             }
-            Selection::FragmentSpread(fragment) => match fragments.get(fragment.fragment_name) {
+            Selection::FragmentSpread(fragment) => match fragments.get(&fragment.fragment_name) {
                 Some(fragment) => {
                     let fields =
                         parse_fragment_fields(fragment, variables, fragments, factory, allocator);
@@ -400,9 +440,9 @@ fn parse_selection_set_fields<'src, T: Expression>(
 }
 
 fn parse_fragment_fields<'src, T: Expression>(
-    fragment: &FragmentDefinition<'src, &'src str>,
-    variables: &QueryVariables<T>,
-    fragments: &QueryFragments,
+    fragment: &FragmentDefinition<'src, GraphQlText<'src>>,
+    variables: &QueryVariables<'src, T>,
+    fragments: &QueryFragments<'src, '_>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
 ) -> impl IntoIterator<Item = Result<(String, T), String>> {
@@ -419,9 +459,9 @@ fn parse_fragment_fields<'src, T: Expression>(
 }
 
 fn parse_field<'src, T: Expression>(
-    field: &Field<'src, &'src str>,
-    variables: &QueryVariables<T>,
-    fragments: &QueryFragments,
+    field: &Field<'src, GraphQlText<'src>>,
+    variables: &QueryVariables<'src, T>,
+    fragments: &QueryFragments<'src, '_>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
 ) -> Result<T, String> {
@@ -452,9 +492,12 @@ fn parse_field<'src, T: Expression>(
                     factory.create_builtin_term(BuiltinTerm::Get),
                     allocator.create_pair(
                         factory.create_static_variable_term(0),
-                        factory.create_value_term(ValueTerm::String(
-                            allocator.create_string(field.name.into()),
-                        )),
+                        factory.create_value_term(ValueTerm::String(allocator.create_string(
+                            match &field.name {
+                                Cow::Owned(value) => String::from(value),
+                                Cow::Borrowed(value) => String::from(*value),
+                            },
+                        ))),
                     ),
                 );
                 match field_args {
@@ -467,9 +510,9 @@ fn parse_field<'src, T: Expression>(
 }
 
 fn parse_field_arguments<'src, T: Expression>(
-    args: &Vec<(&'src str, Value<'src, &'src str>)>,
-    variables: &QueryVariables<T>,
-    fragments: &QueryFragments,
+    args: &Vec<(GraphQlText<'src>, Value<'src, GraphQlText<'src>>)>,
+    variables: &QueryVariables<'src, T>,
+    fragments: &QueryFragments<'src, '_>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
 ) -> Result<ExpressionList<T>, String> {
@@ -477,7 +520,13 @@ fn parse_field_arguments<'src, T: Expression>(
         .iter()
         .map(
             |(key, value)| match parse_value(value, variables, fragments, factory, allocator) {
-                Ok(value) => Ok((String::from(*key), value)),
+                Ok(value) => Ok((
+                    match key {
+                        Cow::Owned(value) => String::from(value),
+                        Cow::Borrowed(value) => String::from(*value),
+                    },
+                    value,
+                )),
                 Err(error) => Err(error),
             },
         )
@@ -487,14 +536,14 @@ fn parse_field_arguments<'src, T: Expression>(
 }
 
 fn parse_value<'src, T: Expression>(
-    value: &Value<'src, &'src str>,
-    variables: &QueryVariables<T>,
-    fragments: &QueryFragments,
+    value: &Value<'src, GraphQlText<'src>>,
+    variables: &QueryVariables<'src, T>,
+    fragments: &QueryFragments<'src, '_>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
 ) -> Result<T, String> {
     match value {
-        Value::Variable(name) => match variables.get(*name) {
+        Value::Variable(name) => match variables.get(name) {
             Some(value) => Ok(value.clone()),
             None => Err(format!("Undeclared query variable: {}", name)),
         },
@@ -510,10 +559,12 @@ fn parse_value<'src, T: Expression>(
         }
         Value::Boolean(value) => Ok(factory.create_value_term(ValueTerm::Boolean(*value))),
         Value::Null => Ok(factory.create_value_term(ValueTerm::Null)),
-        Value::Enum(value) => {
-            Ok(factory
-                .create_value_term(ValueTerm::String(allocator.create_string((*value).into()))))
-        }
+        Value::Enum(value) => Ok(factory.create_value_term(ValueTerm::String(
+            allocator.create_string(match value {
+                Cow::Owned(value) => String::from(value),
+                Cow::Borrowed(value) => String::from(*value),
+            }),
+        ))),
         Value::List(value) => {
             let values = value
                 .iter()
@@ -526,7 +577,13 @@ fn parse_value<'src, T: Expression>(
                 .iter()
                 .map(|(key, value)| {
                     match parse_value(value, variables, fragments, factory, allocator) {
-                        Ok(value) => Ok((String::from(*key), value)),
+                        Ok(value) => Ok((
+                            match key {
+                                Cow::Owned(value) => String::from(value),
+                                Cow::Borrowed(value) => String::from(*value),
+                            },
+                            value,
+                        )),
                         Err(error) => Err(error),
                     }
                 })
@@ -675,7 +732,7 @@ mod tests {
         lang::{create_struct, BuiltinTerm, TermFactory, ValueTerm},
     };
 
-    use super::parse;
+    use super::{parse, NoopGraphQlQueryTransform};
 
     #[test]
     fn leaf_queries() {
@@ -727,6 +784,7 @@ mod tests {
             variables,
             &factory,
             &allocator,
+            &NoopGraphQlQueryTransform::default(),
         )
         .unwrap();
         let result = apply_query(query, root, &factory, &allocator);
@@ -826,6 +884,7 @@ mod tests {
             variables,
             &factory,
             &allocator,
+            &NoopGraphQlQueryTransform::default(),
         )
         .unwrap();
         let result = apply_query(query, root, &factory, &allocator);
@@ -904,6 +963,7 @@ mod tests {
             variables,
             &factory,
             &allocator,
+            &NoopGraphQlQueryTransform::default(),
         )
         .unwrap();
         let result = apply_query(query, root, &factory, &allocator);
@@ -1028,6 +1088,7 @@ mod tests {
             variables,
             &factory,
             &allocator,
+            &NoopGraphQlQueryTransform::default(),
         )
         .unwrap();
         let result = apply_query(query, root, &factory, &allocator);

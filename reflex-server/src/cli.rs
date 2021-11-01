@@ -4,7 +4,7 @@
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use std::{convert::Infallible, env, fs, net::SocketAddr, path::Path, sync::Arc};
 
-use crate::graphql_service;
+use crate::{graphql_service, GraphQlHttpQueryTransform};
 use anyhow::{anyhow, Context, Result};
 use clap::Parser;
 use hyper::{server::conn::AddrStream, service::make_service_fn, Server};
@@ -71,6 +71,7 @@ pub async fn cli<
     plugins: impl IntoIterator<Item = NativeFunction<T>>,
     compiler_options: Option<CompilerOptions>,
     interpreter_options: Option<InterpreterOptions>,
+    transform: impl GraphQlHttpQueryTransform,
 ) -> Result<()>
 where
     T::String: StringValue + Send + Sync,
@@ -137,6 +138,7 @@ where
         factory,
         allocator,
         compiler_options,
+        transform,
         &address,
     );
     println!(
@@ -166,6 +168,7 @@ async fn create_server<
     factory: &impl AsyncExpressionFactory<T>,
     allocator: &impl AsyncHeapAllocator<T>,
     compiler_options: CompilerOptions,
+    transform: impl GraphQlHttpQueryTransform,
     address: &SocketAddr,
 ) -> Result<(), String>
 where
@@ -173,10 +176,19 @@ where
 {
     let runtime = Arc::new(runtime);
     let program = Arc::new(program);
+    let transform = Arc::new(transform);
     let server = Server::bind(&address).serve(make_service_fn(|_socket: &AddrStream| {
         let runtime = Arc::clone(&runtime);
         let program = Arc::clone(&program);
-        let service = graphql_service(runtime, program, factory, allocator, compiler_options);
+        let transform = Arc::clone(&transform);
+        let service = graphql_service(
+            runtime,
+            program,
+            factory,
+            allocator,
+            compiler_options,
+            transform,
+        );
         async { Ok::<_, Infallible>(service) }
     }));
     match server.await {

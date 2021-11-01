@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use crate::{create_http_response, get_cors_headers};
+use crate::{create_http_response, get_cors_headers, GraphQlHttpQueryTransform};
 use hyper::{header, Body, Request, Response, StatusCode};
 use reflex::{
     compiler::{
@@ -17,6 +17,7 @@ use reflex_graphql::{
     create_graphql_error_response, create_graphql_success_response,
     create_introspection_query_response, create_json_error_object, deserialize_graphql_operation,
     parse_graphql_operation, sanitize_signal_errors, GraphQlOperationPayload,
+    GraphQlQueryTransform,
 };
 use reflex_json::{json_object, JsonValue};
 use reflex_runtime::{
@@ -39,13 +40,18 @@ pub(crate) async fn handle_graphql_http_request<
     factory: &impl AsyncExpressionFactory<T>,
     allocator: &impl AsyncHeapAllocator<T>,
     compiler_options: CompilerOptions,
+    transform: Arc<impl GraphQlHttpQueryTransform + Send + Sync + 'static>,
 ) -> Result<Response<Body>, Infallible>
 where
     T::String: StringValue + Send + Sync,
 {
     let cors_headers = get_cors_headers(&req);
+    let transform = match transform.factory(&req) {
+        Err((status, error)) => return Ok(create_http_response(status, cors_headers, Some(error))),
+        Ok(transform) => transform,
+    };
     let request_etag = parse_request_etag(&req);
-    let response = match parse_graphql_request(req, root, factory, allocator).await {
+    let response = match parse_graphql_request(req, root, factory, allocator, &transform).await {
         Err(response) => Ok(response),
         Ok(query) => {
             let mut prelude = program.clone();
@@ -138,6 +144,7 @@ async fn parse_graphql_request<T: Expression>(
     root: &T,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
+    transform: &impl GraphQlQueryTransform,
 ) -> Result<T, HttpResult<T>> {
     let content_type = match req.headers().get(header::CONTENT_TYPE) {
         Some(value) => match value.to_str() {
@@ -157,11 +164,11 @@ async fn parse_graphql_request<T: Expression>(
     let result = content_type.and_then(|content_type| match content_type.as_str() {
         "application/graphql" => body.and_then(|body| {
             let operation = GraphQlOperationPayload::new(body, None, Some(empty()), Some(empty()));
-            parse_graphql_operation(&operation, root, factory, allocator)
+            parse_graphql_operation(&operation, root, factory, allocator, transform)
         }),
-        "application/json" => {
-            body.and_then(|body| parse_request_body_graphql_json(&body, root, factory, allocator))
-        }
+        "application/json" => body.and_then(|body| {
+            parse_request_body_graphql_json(&body, root, factory, allocator, transform)
+        }),
         _ => Err(String::from("Unsupported Content-Type header")),
     });
     result.or_else(|error| Err(HttpResult::error(StatusCode::BAD_REQUEST, error)))
@@ -172,6 +179,7 @@ fn parse_request_body_graphql_json<T: Expression>(
     root: &T,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
+    transform: &impl GraphQlQueryTransform,
 ) -> Result<T, String> {
     match deserialize_graphql_operation(&body) {
         Err(error) => Err(error),
@@ -179,7 +187,7 @@ fn parse_request_body_graphql_json<T: Expression>(
             Some("IntrospectionQuery") => {
                 Ok(create_introspection_query_response(factory, allocator))
             }
-            _ => parse_graphql_operation(&operation, root, factory, allocator),
+            _ => parse_graphql_operation(&operation, root, factory, allocator, transform),
         },
     }
 }

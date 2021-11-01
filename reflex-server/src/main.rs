@@ -6,7 +6,10 @@ use std::process;
 
 use reflex::{allocator::DefaultAllocator, lang::TermFactory};
 use reflex_cli::compiler::js::{standard_js_loaders, standard_js_plugins};
-use reflex_server::cli::{builtin_signal_handler, cli};
+use reflex_server::{
+    cli::{builtin_signal_handler, cli},
+    NoopGraphQlHttpQueryTransform,
+};
 
 #[tokio::main]
 pub async fn main() {
@@ -21,6 +24,7 @@ pub async fn main() {
             standard_js_plugins(),
             None,
             None,
+            NoopGraphQlHttpQueryTransform::default(),
         )
         .await
         {
