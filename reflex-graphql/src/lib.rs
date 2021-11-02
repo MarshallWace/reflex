@@ -21,6 +21,7 @@ pub use operation::{deserialize_graphql_operation, GraphQlOperationPayload};
 use reflex_json::{json_array, json_object, sanitize, JsonValue};
 use uuid::Uuid;
 
+pub mod inject_args;
 pub mod subscriptions;
 pub use graphql_parser::query as graphql;
 pub type GraphQlAst<'a> = Document<'a, GraphQlText<'a>>;
