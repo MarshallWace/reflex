@@ -46,7 +46,7 @@ where
     T::String: StringValue + Send + Sync,
 {
     let cors_headers = get_cors_headers(&req);
-    let transform = match transform.factory(&req) {
+    let transform = match transform.factory(req.headers(), None) {
         Err((status, error)) => return Ok(create_http_response(status, cors_headers, Some(error))),
         Ok(transform) => transform,
     };

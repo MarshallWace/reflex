@@ -114,15 +114,11 @@ where
 pub trait AsyncGraphQlQueryTransform: GraphQlQueryTransform + Send + Sync + 'static {}
 impl<T> AsyncGraphQlQueryTransform for T where T: GraphQlQueryTransform + Send + Sync + 'static {}
 
+#[derive(Default)]
 pub struct NoopGraphQlQueryTransform {}
 impl GraphQlQueryTransform for NoopGraphQlQueryTransform {
     fn transform<'a>(&self, document: GraphQlAst<'a>) -> Result<GraphQlAst<'a>, String> {
         Ok(document)
-    }
-}
-impl Default for NoopGraphQlQueryTransform {
-    fn default() -> Self {
-        Self {}
     }
 }
 

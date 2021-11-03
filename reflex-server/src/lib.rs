@@ -6,12 +6,13 @@ use graphql::{
     websocket::handle_graphql_ws_request,
 };
 use reflex_graphql::{AsyncGraphQlQueryTransform, NoopGraphQlQueryTransform};
+use reflex_json::JsonValue;
 use std::{convert::Infallible, future::Future, iter::once, sync::Arc};
 
 use hyper::{
     header::{self, HeaderName, HeaderValue, ACCESS_CONTROL_ALLOW_CREDENTIALS},
     service::{service_fn, Service},
-    Body, Method, Request, Response, StatusCode,
+    Body, HeaderMap, Method, Request, Response, StatusCode,
 };
 
 use reflex::{
@@ -28,20 +29,31 @@ mod graphql {
     pub(crate) mod websocket;
 }
 
-pub type GraphQlRequest = Request<Body>;
+pub type RequestHeaders = HeaderMap<HeaderValue>;
 
 pub trait GraphQlHttpQueryTransform: Send + Sync + 'static {
     type T: AsyncGraphQlQueryTransform;
-    fn factory(&self, request: &GraphQlRequest) -> Result<Self::T, (StatusCode, String)>;
+    fn factory(
+        &self,
+        headers: &RequestHeaders,
+        connection_params: Option<&JsonValue>,
+    ) -> Result<Self::T, (StatusCode, String)>;
 }
 impl<T, T2> GraphQlHttpQueryTransform for T
 where
-    T: Fn(&Request<Body>) -> Result<T2, (StatusCode, String)> + Send + Sync + 'static,
+    T: Fn(&RequestHeaders, Option<&JsonValue>) -> Result<T2, (StatusCode, String)>
+        + Send
+        + Sync
+        + 'static,
     T2: AsyncGraphQlQueryTransform,
 {
     type T = T2;
-    fn factory(&self, request: &GraphQlRequest) -> Result<Self::T, (StatusCode, String)> {
-        self(request)
+    fn factory(
+        &self,
+        headers: &RequestHeaders,
+        connection_params: Option<&JsonValue>,
+    ) -> Result<Self::T, (StatusCode, String)> {
+        self(headers, connection_params)
     }
 }
 
@@ -53,7 +65,11 @@ impl Default for NoopGraphQlHttpQueryTransform {
 }
 impl GraphQlHttpQueryTransform for NoopGraphQlHttpQueryTransform {
     type T = NoopGraphQlQueryTransform;
-    fn factory(&self, _request: &GraphQlRequest) -> Result<Self::T, (StatusCode, String)> {
+    fn factory(
+        &self,
+        _headers: &RequestHeaders,
+        _connection_params: Option<&JsonValue>,
+    ) -> Result<Self::T, (StatusCode, String)> {
         Ok(NoopGraphQlQueryTransform::default())
     }
 }

@@ -9,14 +9,16 @@ use crate::operation::{parse_graphql_operation_payload, GraphQlOperationPayload}
 
 #[derive(Clone, Debug)]
 pub enum GraphQlSubscriptionClientMessage {
-    ConnectionInit,
+    ConnectionInit(GraphQlSubscriptionConnectionInitMessage),
     Start(GraphQlSubscriptionStartMessage),
     Stop(GraphQlSubscriptionStopMessage),
     ConnectionTerminate,
 }
 impl GraphQlSubscriptionClientMessage {
-    pub fn connection_init() -> Self {
-        GraphQlSubscriptionClientMessage::ConnectionInit
+    pub fn connection_init(payload: Option<JsonValue>) -> Self {
+        GraphQlSubscriptionClientMessage::ConnectionInit(GraphQlSubscriptionConnectionInitMessage {
+            payload,
+        })
     }
     pub fn start(subscription_id: String, payload: GraphQlOperationPayload) -> Self {
         GraphQlSubscriptionClientMessage::Start(GraphQlSubscriptionStartMessage {
@@ -34,7 +36,11 @@ impl GraphQlSubscriptionClientMessage {
     }
     pub fn into_serialized(self) -> Result<String, String> {
         match self {
-            Self::ConnectionInit => Ok(serialize_message("connection_init", None, None)),
+            Self::ConnectionInit(message) => Ok(serialize_message(
+                "connection_init",
+                None,
+                message.into_payload(),
+            )),
             Self::Start(message) => Ok(serialize_message(
                 "start",
                 Some(message.id),
@@ -43,6 +49,19 @@ impl GraphQlSubscriptionClientMessage {
             Self::Stop(message) => Ok(serialize_message("stop", Some(message.id), None)),
             Self::ConnectionTerminate => Ok(serialize_message("connection_terminate", None, None)),
         }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct GraphQlSubscriptionConnectionInitMessage {
+    payload: Option<JsonValue>,
+}
+impl GraphQlSubscriptionConnectionInitMessage {
+    pub fn payload(&self) -> Option<&JsonValue> {
+        self.payload.as_ref()
+    }
+    pub fn into_payload(self) -> Option<JsonValue> {
+        self.payload
     }
 }
 
@@ -186,16 +205,21 @@ fn deserialize_message_id(message: &JsonMap<String, JsonValue>) -> Result<String
 }
 
 fn deserialize_message_payload(message: JsonMap<String, JsonValue>) -> Result<JsonValue, String> {
-    message
-        .into_iter()
-        .find_map(|(key, value)| if key == "payload" { Some(value) } else { None })
+    deserialize_optional_message_payload(message)
         .ok_or_else(|| String::from("Missing message payload"))
 }
 
+fn deserialize_optional_message_payload(message: JsonMap<String, JsonValue>) -> Option<JsonValue> {
+    message
+        .into_iter()
+        .find_map(|(key, value)| if key == "payload" { Some(value) } else { None })
+}
+
 fn deserialize_client_connection_init_message(
-    _message: JsonMap<String, JsonValue>,
+    message: JsonMap<String, JsonValue>,
 ) -> Result<GraphQlSubscriptionClientMessage, String> {
-    Ok(GraphQlSubscriptionClientMessage::connection_init())
+    let payload = deserialize_optional_message_payload(message);
+    Ok(GraphQlSubscriptionClientMessage::connection_init(payload))
 }
 
 fn deserialize_client_start_message(
