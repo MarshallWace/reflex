@@ -864,9 +864,9 @@ dependencies = [
 
 [[package]]
 name = "quote"
-version = "1.0.9"
+version = "1.0.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c3d0b9745dc2debf507c8422de05d7226cc1f0644216dfdfead988f9b1ab32a7"
+checksum = "38bc8cc6a5f2e3655e0899c1b848643b2562f853f114bfec7be120678e3ace05"
 dependencies = [
  "proc-macro2",
 ]
@@ -943,8 +943,10 @@ dependencies = [
  "im",
  "serde",
  "serde_json",
+ "strum",
+ "strum_macros",
  "tracing",
- "uuid",
+ "uuid 0.8.1",
 ]
 
 [[package]]
@@ -971,7 +973,9 @@ dependencies = [
  "graphql-parser",
  "reflex",
  "reflex-json",
- "uuid",
+ "serde",
+ "strum",
+ "strum_macros",
 ]
 
 [[package]]
@@ -991,7 +995,7 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tokio-tungstenite",
- "uuid",
+ "uuid 0.8.2",
 ]
 
 [[package]]
@@ -1002,8 +1006,10 @@ dependencies = [
  "reflex-json",
  "resast",
  "ressa",
+ "serde",
+ "strum",
+ "strum_macros",
  "urlencoding",
- "uuid",
 ]
 
 [[package]]
@@ -1259,6 +1265,24 @@ name = "strsim"
 version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "73473c0e59e6d5812c5dfe2a064a6444949f089e20eec9a2e5506596494e4623"
+
+[[package]]
+name = "strum"
+version = "0.22.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f7ac893c7d471c8a21f31cfe213ec4f6d9afeed25537c772e08ef3f005f8729e"
+
+[[package]]
+name = "strum_macros"
+version = "0.22.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "339f799d8b549e3744c7ac7feb216383e4005d94bdb22561b3ab8f3b808ae9fb"
+dependencies = [
+ "heck",
+ "proc-macro2",
+ "quote",
+ "syn",
+]
 
 [[package]]
 name = "syn"
@@ -1609,12 +1633,30 @@ checksum = "09cc8ee72d2a9becf2f2febe0205bbed8fc6615b7cb429ad062dc7b7ddd036a9"
 
 [[package]]
 name = "uuid"
+version = "0.8.1"
+source = "git+https://github.com/uuid-rs/uuid?rev=e6a6dbd07d3e6385870becd63ce5787ab042c058#e6a6dbd07d3e6385870becd63ce5787ab042c058"
+dependencies = [
+ "serde",
+ "uuid_macro",
+]
+
+[[package]]
+name = "uuid"
 version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bc5cf98d8186244414c848017f0e2676b3fcb46807f6668a97dfe67359a3c4b7"
 dependencies = [
  "getrandom",
- "serde",
+]
+
+[[package]]
+name = "uuid_macro"
+version = "0.0.0"
+source = "git+https://github.com/uuid-rs/uuid?rev=e6a6dbd07d3e6385870becd63ce5787ab042c058#e6a6dbd07d3e6385870becd63ce5787ab042c058"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]

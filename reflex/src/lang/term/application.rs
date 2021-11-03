@@ -17,7 +17,7 @@ use crate::{
     lang::{SignalTerm, ValueTerm},
 };
 
-#[derive(Hash, Eq, PartialEq, Debug)]
+#[derive(Hash, Eq, PartialEq, Clone, Debug)]
 pub struct ApplicationTerm<T: Expression> {
     target: T,
     args: ExpressionList<T>,

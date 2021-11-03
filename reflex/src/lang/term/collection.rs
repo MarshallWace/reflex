@@ -20,7 +20,7 @@ mod hashmap;
 mod hashset;
 mod vector;
 
-#[derive(Hash, Eq, PartialEq, Debug)]
+#[derive(Hash, Eq, PartialEq, Clone, Debug)]
 pub enum CollectionTerm<T: Expression> {
     Vector(VectorTerm<T>),
     HashMap(HashMapTerm<T>),

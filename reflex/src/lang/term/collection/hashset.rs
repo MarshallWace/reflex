@@ -14,7 +14,7 @@ use crate::{
     hash::HashId,
 };
 
-#[derive(Eq, PartialEq, Debug)]
+#[derive(Eq, PartialEq, Clone, Debug)]
 pub struct HashSetTerm<T: Expression> {
     values: ExpressionList<T>,
     lookup: HashSet<HashId>,

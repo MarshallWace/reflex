@@ -9,8 +9,7 @@ use std::{
 use tracing::trace;
 
 use crate::core::{
-    Expression, ExpressionList, HeapAllocator, NativeAllocator, Signal, SignalList, SignalType,
-    StructPrototype,
+    Expression, ExpressionList, HeapAllocator, Signal, SignalList, SignalType, StructPrototype,
 };
 
 #[derive(Copy, Clone)]
@@ -102,55 +101,5 @@ impl<T: Expression<String = String>> HeapAllocator<T> for DefaultAllocator<T> {
     fn clone_string(&self, value: &T::String) -> T::String {
         trace!(alloc = "clone_string");
         String::from(value)
-    }
-    fn as_object(&self) -> &dyn NativeAllocator<T> {
-        self
-    }
-}
-impl<T: Expression<String = String>> NativeAllocator<T> for DefaultAllocator<T> {
-    fn create_list(&self, expressions: Vec<T>) -> ExpressionList<T> {
-        HeapAllocator::<T>::create_list(self, expressions)
-    }
-    fn create_sized_list(&self, length: usize, expressions: Vec<T>) -> ExpressionList<T> {
-        HeapAllocator::<T>::create_sized_list(self, length, expressions)
-    }
-    fn create_unsized_list(&self, expressions: Vec<T>) -> ExpressionList<T> {
-        HeapAllocator::<T>::create_unsized_list(self, expressions)
-    }
-    fn create_empty_list(&self) -> ExpressionList<T> {
-        HeapAllocator::<T>::create_empty_list(self)
-    }
-    fn create_unit_list(&self, value: T) -> ExpressionList<T> {
-        HeapAllocator::<T>::create_unit_list(self, value)
-    }
-    fn create_pair(&self, left: T, right: T) -> ExpressionList<T> {
-        HeapAllocator::<T>::create_pair(self, left, right)
-    }
-    fn clone_list(&self, expressions: &ExpressionList<T>) -> ExpressionList<T> {
-        HeapAllocator::<T>::clone_list(self, expressions)
-    }
-    fn create_triple(&self, first: T, second: T, third: T) -> ExpressionList<T> {
-        HeapAllocator::<T>::create_triple(self, first, second, third)
-    }
-    fn create_signal_list(&self, signals: Vec<Signal<T>>) -> SignalList<T> {
-        HeapAllocator::<T>::create_signal_list(self, signals)
-    }
-    fn create_struct_prototype(&self, keys: Vec<String>) -> StructPrototype {
-        HeapAllocator::<T>::create_struct_prototype(self, keys)
-    }
-    fn clone_struct_prototype(&self, prototype: &StructPrototype) -> StructPrototype {
-        HeapAllocator::<T>::clone_struct_prototype(self, prototype)
-    }
-    fn create_signal(&self, signal_type: SignalType, args: ExpressionList<T>) -> Signal<T> {
-        HeapAllocator::<T>::create_signal(self, signal_type, args)
-    }
-    fn clone_signal(&self, signal: &Signal<T>) -> Signal<T> {
-        HeapAllocator::<T>::clone_signal(self, signal)
-    }
-    fn create_string(&self, value: String) -> T::String {
-        HeapAllocator::<T>::create_string(self, value)
-    }
-    fn clone_string(&self, value: &T::String) -> T::String {
-        HeapAllocator::<T>::clone_string(self, value)
     }
 }

@@ -104,13 +104,14 @@ mod tests {
         allocator::DefaultAllocator,
         core::{ExpressionFactory, HeapAllocator},
         lang::{create_struct, TermFactory, ValueTerm},
+        stdlib::Stdlib,
     };
 
     use super::{parse, stringify};
 
     #[test]
     fn stringify_primitives() {
-        let factory = TermFactory::default();
+        let factory = TermFactory::<Stdlib>::default();
         assert_eq!(
             stringify(&factory.create_value_term(ValueTerm::Symbol(3))),
             Err(String::from(
@@ -185,7 +186,7 @@ mod tests {
 
     #[test]
     fn stringify_lists() {
-        let factory = TermFactory::default();
+        let factory = TermFactory::<Stdlib>::default();
         let allocator = DefaultAllocator::default();
         assert_eq!(
             stringify(&factory.create_vector_term(allocator.create_empty_list())),
@@ -203,7 +204,7 @@ mod tests {
 
     #[test]
     fn stringify_objects() {
-        let factory = TermFactory::default();
+        let factory = TermFactory::<Stdlib>::default();
         let allocator = DefaultAllocator::default();
         assert_eq!(
             stringify(&create_struct(empty(), &factory, &allocator)),
@@ -245,7 +246,7 @@ mod tests {
 
     #[test]
     fn parse_numbers() {
-        let factory = TermFactory::default();
+        let factory = TermFactory::<Stdlib>::default();
         let allocator = DefaultAllocator::default();
         assert_eq!(
             parse("3", &factory, &allocator),

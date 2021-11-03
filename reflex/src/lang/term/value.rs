@@ -17,7 +17,7 @@ pub type SymbolId = usize;
 pub type IntValue = i32;
 pub type FloatValue = f64;
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Clone)]
 pub enum ValueTerm<TString: StringValue> {
     Null,
     Boolean(bool),

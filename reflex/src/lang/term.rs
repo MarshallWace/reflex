@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
-mod application;
 use std::collections::HashSet;
 
+mod application;
 pub use application::*;
 mod builtin;
 pub use builtin::*;
@@ -16,8 +16,6 @@ mod lambda;
 pub use lambda::*;
 mod r#let;
 pub use r#let::*;
-mod native;
-pub use native::*;
 mod partial;
 pub use partial::*;
 mod recursive;
@@ -36,11 +34,11 @@ pub use variable::*;
 use crate::{
     compiler::{Compile, Compiler, Program},
     core::{
-        Applicable, Arity, DependencyList, DynamicState, Evaluate, EvaluationCache,
-        EvaluationResult, Expression, ExpressionFactory, ExpressionList, GraphNode, HeapAllocator,
-        Reducible, Rewritable, SerializeJson, StackOffset, StringValue, Substitutions, VarArgs,
+        Applicable, Arity, DependencyList, DynamicState, EvaluationCache, Expression,
+        ExpressionFactory, GraphNode, HeapAllocator, Reducible, Rewritable, SerializeJson,
+        StackOffset, StringValue, Substitutions, VarArgs,
     },
-    hash::HashId,
+    hash::{hash_object, HashId},
 };
 
 pub type StringPrimitive = String;
@@ -50,253 +48,16 @@ impl StringValue for StringPrimitive {
     }
 }
 
-pub type CachedList<TValue> = ExpressionList<CachedTerm<TValue>>;
-
-#[derive(Eq, Clone, Copy)]
-pub struct CachedTerm<TValue: Expression> {
-    hash: HashId,
-    capture_depth: StackOffset,
-    value: TValue,
-}
-impl<T: Expression> CachedTerm<T> {
-    pub fn new(value: T) -> Self {
-        Self {
-            hash: value.id(),
-            capture_depth: value.capture_depth(),
-            value,
-        }
-    }
-    pub fn value(&self) -> &T {
-        &self.value
-    }
-}
-impl<T: Expression> Expression for CachedTerm<T> {
-    type String = StringPrimitive;
-    fn id(&self) -> HashId {
-        self.hash
-    }
-}
-impl<T: Expression> std::hash::Hash for CachedTerm<T> {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        state.write_u64(self.hash);
-    }
-}
-impl<T: Expression> PartialEq for CachedTerm<T> {
-    fn eq(&self, other: &Self) -> bool {
-        self.value.eq(&other.value)
-    }
-}
-impl<T: Expression> GraphNode for CachedTerm<T> {
-    fn capture_depth(&self) -> StackOffset {
-        self.capture_depth
-    }
-    fn free_variables(&self) -> HashSet<StackOffset> {
-        self.value.free_variables()
-    }
-    fn dynamic_dependencies(&self) -> DependencyList {
-        self.value.dynamic_dependencies()
-    }
-    fn is_static(&self) -> bool {
-        self.value.is_static()
-    }
-    fn is_atomic(&self) -> bool {
-        self.value.is_atomic()
-    }
-}
-impl<T: Expression + Rewritable<CachedTerm<T>>> Rewritable<CachedTerm<T>> for CachedTerm<T> {
-    fn subexpressions(&self) -> Vec<&CachedTerm<T>> {
-        self.value.subexpressions()
-    }
-    fn substitute_static(
-        &self,
-        substitutions: &Substitutions<CachedTerm<T>>,
-        factory: &impl ExpressionFactory<CachedTerm<T>>,
-        allocator: &impl HeapAllocator<CachedTerm<T>>,
-        cache: &mut impl EvaluationCache<CachedTerm<T>>,
-    ) -> Option<CachedTerm<T>> {
-        if substitutions.can_skip(self) {
-            return None;
-        }
-        match cache.retrieve_static_substitution(self, substitutions) {
-            Some(result) => result,
-            None => {
-                let result = self
-                    .value
-                    .substitute_static(substitutions, factory, allocator, cache);
-                cache.store_static_substitution(self, substitutions, result.as_ref().cloned());
-                result
-            }
-        }
-    }
-    fn substitute_dynamic(
-        &self,
-        state: &impl DynamicState<CachedTerm<T>>,
-        factory: &impl ExpressionFactory<CachedTerm<T>>,
-        allocator: &impl HeapAllocator<CachedTerm<T>>,
-        cache: &mut impl EvaluationCache<CachedTerm<T>>,
-    ) -> Option<CachedTerm<T>> {
-        if self.dynamic_dependencies().is_empty() {
-            return None;
-        }
-        match cache.retrieve_dynamic_substitution(self, state) {
-            Some(result) => result,
-            None => {
-                let result = self
-                    .value
-                    .substitute_dynamic(state, factory, allocator, cache);
-                cache.store_dynamic_substitution(self, state, result.as_ref().cloned());
-                result
-            }
-        }
-    }
-    fn normalize(
-        &self,
-        factory: &impl ExpressionFactory<CachedTerm<T>>,
-        allocator: &impl HeapAllocator<CachedTerm<T>>,
-        cache: &mut impl EvaluationCache<CachedTerm<T>>,
-    ) -> Option<CachedTerm<T>> {
-        self.value.normalize(factory, allocator, cache)
-    }
-    fn hoist_free_variables(
-        &self,
-        factory: &impl ExpressionFactory<CachedTerm<T>>,
-        allocator: &impl HeapAllocator<CachedTerm<T>>,
-    ) -> Option<CachedTerm<T>> {
-        self.value.hoist_free_variables(factory, allocator)
-    }
-}
-impl<T: Expression + Rewritable<CachedTerm<T>> + Reducible<CachedTerm<T>>> Reducible<CachedTerm<T>>
-    for CachedTerm<T>
-{
-    fn is_reducible(&self) -> bool {
-        self.value.is_reducible()
-    }
-    fn reduce(
-        &self,
-        factory: &impl ExpressionFactory<CachedTerm<T>>,
-        allocator: &impl HeapAllocator<CachedTerm<T>>,
-        cache: &mut impl EvaluationCache<CachedTerm<T>>,
-    ) -> Option<CachedTerm<T>> {
-        match cache.retrieve_reduction(self) {
-            Some(result) => result,
-            None => {
-                let result = self.value.reduce(factory, allocator, cache);
-                cache.store_reduction(self, result.as_ref().cloned());
-                result
-            }
-        }
-    }
-}
-impl<T: Expression + Applicable<CachedTerm<T>>> Applicable<CachedTerm<T>> for CachedTerm<T> {
-    fn arity(&self) -> Option<Arity> {
-        self.value.arity()
-    }
-    fn apply(
-        &self,
-        args: impl ExactSizeIterator<Item = CachedTerm<T>>,
-        factory: &impl ExpressionFactory<CachedTerm<T>>,
-        allocator: &impl HeapAllocator<CachedTerm<T>>,
-        cache: &mut impl EvaluationCache<CachedTerm<T>>,
-    ) -> Result<CachedTerm<T>, String> {
-        // TODO: Memoize function applications based on arg list hash
-        self.value.apply(args, factory, allocator, cache)
-    }
-}
-impl<T: Expression + Rewritable<CachedTerm<T>> + Compile<CachedTerm<T>>> Compile<CachedTerm<T>>
-    for CachedTerm<T>
-{
-    fn compile(
-        &self,
-        eager: VarArgs,
-        stack_offset: StackOffset,
-        factory: &impl ExpressionFactory<CachedTerm<T>>,
-        allocator: &impl HeapAllocator<CachedTerm<T>>,
-        compiler: &mut Compiler,
-    ) -> Result<Program, String> {
-        self.value
-            .compile(eager, stack_offset, factory, allocator, compiler)
-    }
-}
-impl<T: Expression + Rewritable<CachedTerm<T>> + Reducible<CachedTerm<T>>> Evaluate<CachedTerm<T>>
-    for CachedTerm<T>
-{
-    fn evaluate(
-        &self,
-        state: &impl DynamicState<CachedTerm<T>>,
-        factory: &impl ExpressionFactory<CachedTerm<T>>,
-        allocator: &impl HeapAllocator<CachedTerm<T>>,
-        cache: &mut impl EvaluationCache<CachedTerm<T>>,
-    ) -> Option<EvaluationResult<CachedTerm<T>>> {
-        fn evaluate_recursive<T: Expression + Rewritable<T> + Reducible<T>>(
-            expression: &T,
-            state: &impl DynamicState<T>,
-            factory: &impl ExpressionFactory<T>,
-            allocator: &impl HeapAllocator<T>,
-            cache: &mut impl EvaluationCache<T>,
-            dependencies: DependencyList,
-        ) -> EvaluationResult<T> {
-            let dependencies = dependencies.union(expression.dynamic_dependencies());
-            match expression.substitute_dynamic(state, factory, allocator, cache) {
-                Some(expression) => {
-                    evaluate_recursive(&expression, state, factory, allocator, cache, dependencies)
-                }
-                None => match expression.reduce(factory, allocator, cache) {
-                    Some(expression) => evaluate_recursive(
-                        &expression,
-                        state,
-                        factory,
-                        allocator,
-                        cache,
-                        dependencies,
-                    ),
-                    None => EvaluationResult::new(expression.clone(), dependencies),
-                },
-            }
-        }
-
-        let result = evaluate_recursive(
-            self,
-            state,
-            factory,
-            allocator,
-            cache,
-            DependencyList::empty(),
-        );
-        if result.result().id() == self.id() {
-            None
-        } else {
-            Some(result)
-        }
-    }
-}
-impl<T: Expression> std::fmt::Display for CachedTerm<T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        std::fmt::Display::fmt(&self.value, f)
-    }
-}
-impl<T: Expression> std::fmt::Debug for CachedTerm<T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        std::fmt::Debug::fmt(&self.value, f)
-    }
-}
-
-impl<T: Expression> SerializeJson for CachedTerm<T> {
-    fn to_json(&self) -> Result<serde_json::Value, String> {
-        self.value().to_json()
-    }
-}
-
-#[derive(Hash, Eq, PartialEq, Debug)]
-pub enum Term<T: Expression + Compile<T>> {
-    Value(ValueTerm<StringPrimitive>),
+#[derive(Hash, Eq, PartialEq, Clone, Debug)]
+pub enum Term<T: Expression> {
+    Value(ValueTerm<T::String>),
     Variable(VariableTerm<T>),
     Let(LetTerm<T>),
     Lambda(LambdaTerm<T>),
     Application(ApplicationTerm<T>),
     PartialApplication(PartialApplicationTerm<T>),
     Recursive(RecursiveTerm<T>),
-    Builtin(BuiltinTerm),
-    Native(NativeFunctionTerm<T>),
+    Builtin(BuiltinTerm<T>),
     CompiledFunction(CompiledFunctionTerm),
     Tuple(TupleTerm<T>),
     Struct(StructTerm<T>),
@@ -304,7 +65,14 @@ pub enum Term<T: Expression + Compile<T>> {
     Collection(CollectionTerm<T>),
     Signal(SignalTerm<T>),
 }
-impl<T: Expression + Applicable<T> + Compile<T>> GraphNode for Term<T> {
+impl<T: Expression + Applicable<T>> Expression for Term<T> {
+    type String = T::String;
+    type Builtin = T::Builtin;
+    fn id(&self) -> HashId {
+        hash_object(self)
+    }
+}
+impl<T: Expression + Applicable<T>> GraphNode for Term<T> {
     fn capture_depth(&self) -> StackOffset {
         match self {
             Self::Value(term) => term.capture_depth(),
@@ -315,7 +83,6 @@ impl<T: Expression + Applicable<T> + Compile<T>> GraphNode for Term<T> {
             Self::PartialApplication(term) => term.capture_depth(),
             Self::Recursive(term) => term.capture_depth(),
             Self::Builtin(term) => term.capture_depth(),
-            Self::Native(term) => term.capture_depth(),
             Self::CompiledFunction(term) => term.capture_depth(),
             Self::Tuple(term) => term.capture_depth(),
             Self::Struct(term) => term.capture_depth(),
@@ -334,7 +101,6 @@ impl<T: Expression + Applicable<T> + Compile<T>> GraphNode for Term<T> {
             Self::PartialApplication(term) => term.free_variables(),
             Self::Recursive(term) => term.free_variables(),
             Self::Builtin(term) => term.free_variables(),
-            Self::Native(term) => term.free_variables(),
             Self::CompiledFunction(term) => term.free_variables(),
             Self::Tuple(term) => term.free_variables(),
             Self::Struct(term) => term.free_variables(),
@@ -353,7 +119,6 @@ impl<T: Expression + Applicable<T> + Compile<T>> GraphNode for Term<T> {
             Self::PartialApplication(term) => term.dynamic_dependencies(),
             Self::Recursive(term) => term.dynamic_dependencies(),
             Self::Builtin(term) => term.dynamic_dependencies(),
-            Self::Native(term) => term.dynamic_dependencies(),
             Self::CompiledFunction(term) => term.dynamic_dependencies(),
             Self::Tuple(term) => term.dynamic_dependencies(),
             Self::Struct(term) => term.dynamic_dependencies(),
@@ -372,7 +137,6 @@ impl<T: Expression + Applicable<T> + Compile<T>> GraphNode for Term<T> {
             Self::PartialApplication(term) => term.is_static(),
             Self::Recursive(term) => term.is_static(),
             Self::Builtin(term) => term.is_static(),
-            Self::Native(term) => term.is_static(),
             Self::CompiledFunction(term) => term.is_static(),
             Self::Tuple(term) => term.is_static(),
             Self::Struct(term) => term.is_static(),
@@ -391,7 +155,6 @@ impl<T: Expression + Applicable<T> + Compile<T>> GraphNode for Term<T> {
             Self::PartialApplication(term) => term.is_atomic(),
             Self::Recursive(term) => term.is_atomic(),
             Self::Builtin(term) => term.is_atomic(),
-            Self::Native(term) => term.is_atomic(),
             Self::CompiledFunction(term) => term.is_atomic(),
             Self::Tuple(term) => term.is_atomic(),
             Self::Struct(term) => term.is_atomic(),
@@ -401,8 +164,8 @@ impl<T: Expression + Applicable<T> + Compile<T>> GraphNode for Term<T> {
         }
     }
 }
-impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Evaluate<T> + Compile<T>>
-    Rewritable<T> for Term<T>
+impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>> Rewritable<T>
+    for Term<T>
 {
     fn subexpressions(&self) -> Vec<&T> {
         match self {
@@ -508,8 +271,8 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Evaluate<T> 
         }
     }
 }
-impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Evaluate<T> + Compile<T>>
-    Reducible<T> for Term<T>
+impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>> Reducible<T>
+    for Term<T>
 {
     fn is_reducible(&self) -> bool {
         match self {
@@ -541,7 +304,6 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>> 
             Self::Lambda(term) => term.arity(),
             Self::PartialApplication(term) => term.arity(),
             Self::Builtin(term) => Applicable::<T>::arity(term),
-            Self::Native(term) => Applicable::<T>::arity(term),
             Self::CompiledFunction(term) => Applicable::<T>::arity(term),
             Self::Constructor(term) => Applicable::<T>::arity(term),
             _ => None,
@@ -558,20 +320,14 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>> 
             Self::Lambda(term) => term.apply(args, factory, allocator, cache),
             Self::PartialApplication(term) => term.apply(args, factory, allocator, cache),
             Self::Builtin(term) => Applicable::<T>::apply(term, args, factory, allocator, cache),
-            Self::Native(term) => term.apply(args, factory, allocator, cache),
             Self::CompiledFunction(term) => term.apply(args, factory, allocator, cache),
             Self::Constructor(term) => term.apply(args, factory, allocator, cache),
             _ => Err(format!("Invalid function application target: {}", self)),
         }
     }
 }
-impl<
-        T: Expression<String = StringPrimitive>
-            + Rewritable<T>
-            + Reducible<T>
-            + Applicable<T>
-            + Compile<T>,
-    > Compile<T> for Term<T>
+impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>> Compile<T>
+    for Term<T>
 {
     fn compile(
         &self,
@@ -599,7 +355,6 @@ impl<
                 term.compile(eager, stack_offset, factory, allocator, compiler)
             }
             Self::Builtin(term) => term.compile(eager, stack_offset, factory, allocator, compiler),
-            Self::Native(term) => term.compile(eager, stack_offset, factory, allocator, compiler),
             Self::Tuple(term) => term.compile(eager, stack_offset, factory, allocator, compiler),
             Self::Struct(term) => term.compile(eager, stack_offset, factory, allocator, compiler),
             Self::Constructor(term) => {
@@ -612,7 +367,7 @@ impl<
         }
     }
 }
-impl<T: Expression + Compile<T>> std::fmt::Display for Term<T> {
+impl<T: Expression> std::fmt::Display for Term<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Value(term) => std::fmt::Display::fmt(term, f),
@@ -624,7 +379,6 @@ impl<T: Expression + Compile<T>> std::fmt::Display for Term<T> {
             Self::Recursive(term) => std::fmt::Display::fmt(term, f),
             Self::CompiledFunction(term) => std::fmt::Display::fmt(term, f),
             Self::Builtin(term) => std::fmt::Display::fmt(term, f),
-            Self::Native(term) => std::fmt::Display::fmt(term, f),
             Self::Tuple(term) => std::fmt::Display::fmt(term, f),
             Self::Struct(term) => std::fmt::Display::fmt(term, f),
             Self::Constructor(term) => std::fmt::Display::fmt(term, f),
@@ -633,8 +387,7 @@ impl<T: Expression + Compile<T>> std::fmt::Display for Term<T> {
         }
     }
 }
-
-impl<'a, T: Expression + Compile<T>> SerializeJson for Term<T> {
+impl<T: Expression> SerializeJson for Term<T> {
     fn to_json(&self) -> Result<serde_json::Value, String> {
         match self {
             Term::Value(term) => term.to_json(),
@@ -646,7 +399,6 @@ impl<'a, T: Expression + Compile<T>> SerializeJson for Term<T> {
             Term::Recursive(term) => term.to_json(),
             Term::CompiledFunction(term) => term.to_json(),
             Term::Builtin(term) => term.to_json(),
-            Term::Native(term) => term.to_json(),
             Term::Tuple(term) => term.to_json(),
             Term::Struct(term) => term.to_json(),
             Term::Constructor(term) => term.to_json(),

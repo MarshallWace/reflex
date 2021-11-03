@@ -15,7 +15,7 @@ use crate::{
 
 use super::application::compile_args;
 
-#[derive(Hash, Eq, PartialEq, Debug)]
+#[derive(Hash, Eq, PartialEq, Clone, Debug)]
 pub struct PartialApplicationTerm<T: Expression> {
     target: T,
     args: ExpressionList<T>,

@@ -10,13 +10,17 @@ use std::{
 use graphql_parser::schema::Document;
 use reflex::{
     core::{Expression, ExpressionFactory, HeapAllocator},
-    lang::{create_struct, BuiltinTerm, ValueTerm},
+    lang::{create_struct, ValueTerm},
+    stdlib::Stdlib,
 };
 
 pub fn graphql_loader<T: Expression>(
     factory: &(impl ExpressionFactory<T> + Clone + 'static),
     allocator: &(impl HeapAllocator<T> + Clone + 'static),
-) -> impl Fn(&str, &Path) -> Option<Result<T, String>> {
+) -> impl Fn(&str, &Path) -> Option<Result<T, String>>
+where
+    T::Builtin: From<Stdlib>,
+{
     let factory = factory.clone();
     let allocator = allocator.clone();
     move |import_path: &str, module_path: &Path| {
@@ -35,7 +39,10 @@ fn load_graphql_module<T: Expression>(
     path: &Path,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> Result<T, String> {
+) -> Result<T, String>
+where
+    T::Builtin: From<Stdlib>,
+{
     let source = match fs::read_to_string(path) {
         Ok(source) => Ok(source),
         Err(error) => Err(format!("{}", error)),
@@ -50,7 +57,10 @@ fn create_graphql_module<'a: 'src, 'src, T: Expression>(
     schema: &'a Document<&'src str>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> T {
+) -> T
+where
+    T::Builtin: From<Stdlib>,
+{
     create_default_export(
         create_graphql_client_constructor(schema, factory, allocator),
         factory,
@@ -62,7 +72,10 @@ fn create_graphql_client_constructor<'a: 'src, 'src, T: Expression>(
     schema: &'a Document<&'src str>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> T {
+) -> T
+where
+    T::Builtin: From<Stdlib>,
+{
     factory.create_lambda_term(
         1,
         factory.create_application_term(
@@ -81,7 +94,10 @@ fn create_graphql_client_instance<'a: 'src, 'src, T: Expression>(
     _schema: &'a Document<&'src str>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> T {
+) -> T
+where
+    T::Builtin: From<Stdlib>,
+{
     factory.create_lambda_term(
         1,
         create_struct(
@@ -90,7 +106,7 @@ fn create_graphql_client_instance<'a: 'src, 'src, T: Expression>(
                 factory.create_lambda_term(
                     1,
                     factory.create_application_term(
-                        factory.create_builtin_term(BuiltinTerm::Effect),
+                        factory.create_builtin_term(Stdlib::Effect),
                         allocator.create_list(vec![
                             factory.create_value_term(ValueTerm::String(
                                 allocator.create_string(String::from("reflex::graphql::execute")),
@@ -104,7 +120,7 @@ fn create_graphql_client_instance<'a: 'src, 'src, T: Expression>(
                             ),
                             factory.create_value_term(ValueTerm::Null),
                             factory.create_application_term(
-                                factory.create_builtin_term(BuiltinTerm::ResolveDeep),
+                                factory.create_builtin_term(Stdlib::ResolveDeep),
                                 allocator.create_list([get_struct_field(
                                     factory.create_static_variable_term(0),
                                     String::from("variables"),
@@ -143,9 +159,12 @@ fn get_struct_field<T: Expression>(
     field: String,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> T {
+) -> T
+where
+    T::Builtin: From<Stdlib>,
+{
     factory.create_application_term(
-        factory.create_builtin_term(BuiltinTerm::Get),
+        factory.create_builtin_term(Stdlib::Get),
         allocator.create_pair(
             target,
             factory.create_value_term(ValueTerm::String(allocator.create_string(field))),
@@ -159,12 +178,15 @@ fn get_optional_struct_field<T: Expression>(
     fallback: T,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> T {
+) -> T
+where
+    T::Builtin: From<Stdlib>,
+{
     factory.create_application_term(
-        factory.create_builtin_term(BuiltinTerm::If),
+        factory.create_builtin_term(Stdlib::If),
         allocator.create_triple(
             factory.create_application_term(
-                factory.create_builtin_term(BuiltinTerm::Contains),
+                factory.create_builtin_term(Stdlib::Contains),
                 allocator.create_pair(
                     target.clone(),
                     factory.create_value_term(ValueTerm::String(
@@ -173,7 +195,7 @@ fn get_optional_struct_field<T: Expression>(
                 ),
             ),
             factory.create_application_term(
-                factory.create_builtin_term(BuiltinTerm::Get),
+                factory.create_builtin_term(Stdlib::Get),
                 allocator.create_pair(
                     target,
                     factory.create_value_term(ValueTerm::String(allocator.create_string(field))),

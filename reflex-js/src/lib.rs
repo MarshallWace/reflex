@@ -3,7 +3,6 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use std::collections::HashMap;
 
-pub mod builtins;
 mod loader;
 pub use loader::{
     compose_module_loaders, create_js_env, create_module_loader, static_module_loader,
@@ -12,13 +11,13 @@ mod parser;
 pub use parser::{parse, parse_module};
 use reflex::core::Expression;
 
-pub mod stdlib {
-    pub mod globals;
-    pub mod imports;
-    pub use globals::{builtin_globals, global_process};
-    pub use imports::builtin_imports;
-}
-pub use crate::builtins::builtin_plugins;
+pub mod builtins;
+pub mod globals;
+pub mod imports;
+pub use globals::{builtin_globals, global_process};
+pub use imports::builtin_imports;
+
+pub mod stdlib;
 
 #[derive(Clone)]
 pub struct Env<T: Expression> {

@@ -7,7 +7,6 @@ use clap::Parser;
 use std::{
     env, fs,
     io::{self, Write},
-    iter::once,
     path::PathBuf,
     str::FromStr,
     sync::Mutex,
@@ -17,18 +16,17 @@ use reflex::{
     allocator::DefaultAllocator,
     cache::SubstitutionCache,
     compiler::{hash_program_root, Compiler, CompilerMode, CompilerOptions, InstructionPointer},
-    core::{Expression, ExpressionFactory, HeapAllocator, Reducible, Rewritable, StateCache},
+    core::{Expression, ExpressionFactory, HeapAllocator, Reducible, Rewritable, StateCache, Uid},
     interpreter::{execute, DefaultInterpreterCache, InterpreterOptions},
-    lang::{
-        term::{NativeFunctionId, SignalTerm},
-        TermFactory, ValueTerm,
-    },
+    lang::{term::SignalTerm, TermFactory, ValueTerm},
+    stdlib::Stdlib,
 };
 
 use reflex_cli::Syntax;
 use reflex_handlers::{builtin_signal_handler, debug_signal_handler};
 use reflex_js::{
-    self, create_js_env, create_module_loader, stdlib::imports::builtin_imports_loader,
+    self, builtins::JsBuiltins, create_js_env, create_module_loader,
+    imports::builtin_imports_loader, stdlib::Stdlib as JsStdlib,
 };
 use reflex_runtime::{Runtime, RuntimeCache, RuntimeState, StreamExt};
 use repl::ReplParser;
@@ -65,7 +63,11 @@ pub async fn main() -> Result<()> {
     let debug_compiler = args.debug_compiler;
     let debug_interpreter = args.debug_interpreter;
     let debug_stack = args.debug_stack;
-    let factory = TermFactory::default();
+    let factory = TermFactory::<JsBuiltins>::default();
+    let builtins = JsBuiltins::entries()
+        .into_iter()
+        .map(|builtin| (builtin.uid(), factory.create_builtin_term(builtin)))
+        .collect::<Vec<_>>();
     let allocator = DefaultAllocator::default();
     let input_path = args.entry_point;
     let syntax = args.syntax;
@@ -89,7 +91,6 @@ pub async fn main() -> Result<()> {
             let parser = create_parser(syntax, Some(input_path.to_owned()), &factory, &allocator);
             let expression = parser(&source)
                 .map_err(|err| anyhow!("Failed to parse source at {}: {}", input_path, err))?;
-            let plugins = find_expression_plugins(&expression, &factory);
             let program = Compiler::new(compiler_options, None)
                 .compile(&expression, CompilerMode::Expression, &factory, &allocator)
                 .map_err(|err| anyhow!("Failed to compile source at {}: {}", input_path, err))?;
@@ -112,7 +113,7 @@ pub async fn main() -> Result<()> {
                 &state,
                 &factory,
                 &allocator,
-                &plugins,
+                &builtins,
                 &interpreter_options,
                 &mut interpreter_cache,
             )
@@ -128,7 +129,7 @@ pub async fn main() -> Result<()> {
                 let runtime = if debug_signals {
                     Runtime::new(
                         state,
-                        plugins,
+                        builtins,
                         debug_signal_handler(signal_handler),
                         cache,
                         &factory,
@@ -139,7 +140,7 @@ pub async fn main() -> Result<()> {
                 } else {
                     Runtime::new(
                         state,
-                        plugins,
+                        builtins,
                         debug_signal_handler(signal_handler),
                         cache,
                         &factory,
@@ -192,6 +193,7 @@ fn create_parser<T>(
 ) -> Box<dyn Fn(&str) -> Result<T, String>>
 where
     T: Expression + Reducible<T> + Rewritable<T> + 'static,
+    T::Builtin: From<Stdlib> + From<JsStdlib>,
 {
     match (syntax, entry_path) {
         (Syntax::JavaScript, None) => create_js_script_parser(factory, allocator),
@@ -203,27 +205,15 @@ where
     }
 }
 
-fn find_expression_plugins<T: Expression + Rewritable<T>>(
-    expression: &T,
-    factory: &impl ExpressionFactory<T>,
-) -> Vec<(NativeFunctionId, T)> {
-    if let Some(term) = factory.match_native_function_term(expression) {
-        once((term.uid(), expression.clone())).collect::<Vec<_>>()
-    } else {
-        expression
-            .subexpressions()
-            .into_iter()
-            .flat_map(|expression| find_expression_plugins(expression, factory))
-            .collect::<Vec<_>>()
-    }
-}
-
 fn create_js_script_parser<T: Expression + Rewritable<T> + 'static>(
     factory: &(impl ExpressionFactory<T> + Clone + 'static),
     allocator: &(impl HeapAllocator<T> + Clone + 'static),
-) -> ReplParser<T> {
+) -> ReplParser<T>
+where
+    T::Builtin: From<Stdlib> + From<JsStdlib>,
+{
     let env =
-        reflex_js::Env::new().with_globals(reflex_js::stdlib::builtin_globals(factory, allocator));
+        reflex_js::Env::new().with_globals(reflex_js::globals::builtin_globals(factory, allocator));
     let factory = factory.clone();
     let allocator = allocator.clone();
     Box::new(move |input: &str| reflex_js::parse(input, &env, &factory, &allocator))
@@ -234,7 +224,10 @@ fn create_js_module_parser<T: Expression + Rewritable<T> + 'static>(
     env_vars: impl IntoIterator<Item = (String, String)>,
     factory: &(impl ExpressionFactory<T> + Clone + 'static),
     allocator: &(impl HeapAllocator<T> + Clone + 'static),
-) -> ReplParser<T> {
+) -> ReplParser<T>
+where
+    T::Builtin: From<Stdlib> + From<JsStdlib>,
+{
     let path = PathBuf::from_str(&path).unwrap();
     let env = create_js_env(env_vars, factory, allocator);
     let loader = create_module_loader(
@@ -253,7 +246,10 @@ fn create_js_module_parser<T: Expression + Rewritable<T> + 'static>(
 fn create_sexpr_parser<T: Expression + Rewritable<T> + Reducible<T>>(
     factory: &(impl ExpressionFactory<T> + Clone + 'static),
     allocator: &(impl HeapAllocator<T> + Clone + 'static),
-) -> ReplParser<T> {
+) -> ReplParser<T>
+where
+    T::Builtin: From<Stdlib>,
+{
     let factory = factory.clone();
     let allocator = allocator.clone();
     Box::new(

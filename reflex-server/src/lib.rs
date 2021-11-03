@@ -5,7 +5,9 @@ use graphql::{
     http::handle_graphql_http_request, playground::handle_playground_http_request,
     websocket::handle_graphql_ws_request,
 };
-use reflex_graphql::{AsyncGraphQlQueryTransform, NoopGraphQlQueryTransform};
+use reflex_graphql::{
+    stdlib::Stdlib as GraphQlStdlib, AsyncGraphQlQueryTransform, NoopGraphQlQueryTransform,
+};
 use reflex_json::JsonValue;
 use std::{convert::Infallible, future::Future, iter::once, sync::Arc};
 
@@ -18,9 +20,11 @@ use hyper::{
 use reflex::{
     compiler::{Compile, CompilerOptions, Program},
     core::{Applicable, Reducible, Rewritable, StringValue},
+    stdlib::Stdlib,
 };
 use reflex_runtime::{AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator, Runtime};
 
+pub mod builtins;
 pub mod cli;
 
 mod graphql {
@@ -91,6 +95,7 @@ pub fn graphql_service<
 >
 where
     T::String: StringValue + Send + Sync,
+    T::Builtin: From<Stdlib> + From<GraphQlStdlib>,
 {
     service_fn({
         let factory = factory.clone();
@@ -167,6 +172,7 @@ async fn handle_graphql_upgrade_request<
 ) -> Result<Response<Body>, Infallible>
 where
     T::String: StringValue + Send + Sync,
+    T::Builtin: From<Stdlib> + From<GraphQlStdlib>,
 {
     Ok(if hyper_tungstenite::is_upgrade_request(&req) {
         match handle_graphql_ws_request(

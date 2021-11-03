@@ -13,7 +13,7 @@ use crate::{
     hash::HashId,
 };
 
-#[derive(Hash, Eq, PartialEq, Debug)]
+#[derive(Hash, Eq, PartialEq, Clone, Debug)]
 pub struct CompiledFunctionTerm {
     address: InstructionPointer,
     hash: HashId,

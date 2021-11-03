@@ -18,7 +18,7 @@ use crate::{
     hash::HashId,
 };
 
-#[derive(Eq, PartialEq, Debug)]
+#[derive(Eq, PartialEq, Clone, Debug)]
 pub struct HashMapTerm<T: Expression> {
     keys: ExpressionList<T>,
     values: ExpressionList<T>,

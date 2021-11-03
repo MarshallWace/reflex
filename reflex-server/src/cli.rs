@@ -10,12 +10,14 @@ use clap::Parser;
 use hyper::{server::conn::AddrStream, service::make_service_fn, Server};
 use reflex::{
     compiler::{Compile, CompilerMode, CompilerOptions, Program},
-    core::{Applicable, Expression, Reducible, Rewritable, Signal, StringValue},
+    core::{Applicable, Expression, Reducible, Rewritable, Signal, StringValue, Uuid},
     interpreter::InterpreterOptions,
-    lang::NativeFunction,
+    stdlib::Stdlib,
 };
 use reflex_cli::{compiler::js::compile_js_source_with_customisation, Syntax};
+use reflex_graphql::stdlib::Stdlib as GraphQlStdlib;
 use reflex_handlers::debug_signal_handler;
+use reflex_js::stdlib::Stdlib as JsStdlib;
 use reflex_runtime::{
     AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator, Runtime, RuntimeCache,
     RuntimeState, SignalHelpers,
@@ -24,7 +26,7 @@ use reflex_runtime::{
 pub use reflex;
 pub use reflex_handlers::builtin_signal_handler;
 pub use reflex_js::{
-    compose_module_loaders, create_module_loader, static_module_loader, stdlib::builtin_imports,
+    compose_module_loaders, create_module_loader, imports::builtin_imports, static_module_loader,
 };
 pub use reflex_runtime::{SignalHandlerResult, SignalResult};
 
@@ -68,13 +70,14 @@ pub async fn cli<
     custom_loader: Option<impl Fn(&str, &Path) -> Option<Result<T, String>> + 'static>,
     factory: &impl AsyncExpressionFactory<T>,
     allocator: &impl AsyncHeapAllocator<T>,
-    plugins: impl IntoIterator<Item = NativeFunction<T>>,
+    builtins: impl IntoIterator<Item = (Uuid, T)>,
     compiler_options: Option<CompilerOptions>,
     interpreter_options: Option<InterpreterOptions>,
     transform: impl GraphQlHttpQueryTransform,
 ) -> Result<()>
 where
     T::String: StringValue + Send + Sync,
+    T::Builtin: From<Stdlib> + From<JsStdlib> + From<GraphQlStdlib>,
 {
     let args: Opts = Opts::parse();
     let root_module_path = &args.entry_point;
@@ -83,9 +86,6 @@ where
         normalize: !args.unoptimized,
         ..CompilerOptions::default()
     });
-    let plugins = plugins
-        .into_iter()
-        .map(|plugin| (plugin.uid(), factory.create_native_function_term(plugin)));
     // TODO: Error if runtime expression depends on unrecognized native functions
     let program = match args.syntax {
         Syntax::ByteCode => deserialize_compiler_output(root_module_path)?,
@@ -111,7 +111,7 @@ where
     let runtime = if args.debug_signals {
         Runtime::new(
             state,
-            plugins,
+            builtins,
             debug_signal_handler(signal_handler),
             cache,
             factory,
@@ -122,7 +122,7 @@ where
     } else {
         Runtime::new(
             state,
-            plugins,
+            builtins,
             signal_handler,
             cache,
             factory,
@@ -173,6 +173,7 @@ async fn create_server<
 ) -> Result<(), String>
 where
     T::String: StringValue + Send + Sync,
+    T::Builtin: From<Stdlib> + From<GraphQlStdlib>,
 {
     let runtime = Arc::new(runtime);
     let program = Arc::new(program);

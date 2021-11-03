@@ -10,6 +10,7 @@ pub mod loader;
 use reflex::{
     compiler::Compile,
     core::{Applicable, Reducible, Rewritable, Signal, StringValue},
+    stdlib::Stdlib,
 };
 use reflex_runtime::{
     AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator, SignalHandlerResult,
@@ -31,6 +32,7 @@ pub fn builtin_signal_handler<
 ) -> impl Fn(&str, &[&Signal<T>], &SignalHelpers<T>) -> SignalHandlerResult<T> + Send + Sync + 'static
 where
     T::String: StringValue + Send + Sync,
+    T::Builtin: From<Stdlib>,
 {
     compose_signal_handlers(
         date::date_timestamp_handler(factory, allocator),

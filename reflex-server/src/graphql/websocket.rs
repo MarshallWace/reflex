@@ -16,9 +16,11 @@ use reflex::{
         Compile, Compiler, CompilerMode, CompilerOptions, Instruction, InstructionPointer, Program,
     },
     core::{Applicable, Reducible, Rewritable, StringValue},
+    stdlib::Stdlib,
 };
 use reflex_graphql::{
     create_json_error_object, parse_graphql_operation, sanitize_signal_errors,
+    stdlib::Stdlib as GraphQlStdlib,
     subscriptions::{
         deserialize_graphql_client_message, GraphQlSubscriptionClientMessage,
         GraphQlSubscriptionServerMessage, GraphQlSubscriptionStartMessage, SubscriptionId,
@@ -49,6 +51,7 @@ pub(crate) async fn handle_graphql_ws_request<
 ) -> Result<Response<Body>, ProtocolError>
 where
     T::String: StringValue + Send + Sync,
+    T::Builtin: From<Stdlib> + From<GraphQlStdlib>,
 {
     let headers = req.headers().clone();
     let (mut response, websocket) = hyper_tungstenite::upgrade(req, None)?;
@@ -106,6 +109,7 @@ async fn handle_websocket_connection<
 ) -> Result<(), Box<dyn std::error::Error>>
 where
     T::String: StringValue + Send + Sync,
+    T::Builtin: From<Stdlib> + From<GraphQlStdlib>,
 {
     let output_buffer_size = 32;
     let (messages_tx, mut messages_rx) =

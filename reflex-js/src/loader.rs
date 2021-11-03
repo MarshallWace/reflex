@@ -11,13 +11,15 @@ use std::{
 };
 
 use crate::{
+    globals::{builtin_globals, global_process},
     parse_module,
-    stdlib::{builtin_globals, global_process},
+    stdlib::Stdlib as JsStdlib,
     Env,
 };
 use reflex::{
     core::{Expression, ExpressionFactory, HeapAllocator, Rewritable},
     lang::ValueTerm,
+    stdlib::Stdlib,
 };
 
 pub fn create_module_loader<T: Expression + Rewritable<T> + 'static>(
@@ -25,7 +27,10 @@ pub fn create_module_loader<T: Expression + Rewritable<T> + 'static>(
     custom_loader: Option<impl Fn(&str, &Path) -> Option<Result<T, String>> + 'static>,
     factory: &(impl ExpressionFactory<T> + Clone + 'static),
     allocator: &(impl HeapAllocator<T> + Clone + 'static),
-) -> impl Fn(&str, &Path) -> Option<Result<T, String>> {
+) -> impl Fn(&str, &Path) -> Option<Result<T, String>>
+where
+    T::Builtin: From<Stdlib> + From<JsStdlib>,
+{
     let factory = factory.clone();
     let allocator = allocator.clone();
     recursive_module_loader(move |loader| {
@@ -109,7 +114,10 @@ pub fn create_js_loader<T: Expression + Rewritable<T> + 'static>(
     module_loader: impl Fn(&str, &Path) -> Option<Result<T, String>>,
     factory: &(impl ExpressionFactory<T> + Clone),
     allocator: &(impl HeapAllocator<T> + Clone),
-) -> impl Fn(&str, &Path) -> Option<Result<T, String>> {
+) -> impl Fn(&str, &Path) -> Option<Result<T, String>>
+where
+    T::Builtin: From<Stdlib> + From<JsStdlib>,
+{
     let factory = factory.clone();
     let allocator = allocator.clone();
     move |import_path: &str, module_path: &Path| {
@@ -143,7 +151,10 @@ pub fn create_js_env<T: Expression>(
     env_vars: impl IntoIterator<Item = (String, String)>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> Env<T> {
+) -> Env<T>
+where
+    T::Builtin: From<Stdlib> + From<JsStdlib>,
+{
     Env::new()
         .with_globals(builtin_globals(factory, allocator))
         .with_global(

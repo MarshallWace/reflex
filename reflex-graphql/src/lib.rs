@@ -2,28 +2,27 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
-use std::{borrow::Cow, collections::HashMap, iter::once, str::FromStr};
+use std::{borrow::Cow, collections::HashMap, iter::once};
 
 use either::Either;
 use graphql_parser::{parse_query, query::*};
 use reflex::{
-    core::{
-        ArgType, Arity, Expression, ExpressionFactory, ExpressionList, FunctionArity,
-        HeapAllocator, NativeAllocator, SignalType,
-    },
-    lang::{create_struct, term::SignalTerm, BuiltinTerm, NativeFunction, ValueTerm},
+    core::{Expression, ExpressionFactory, ExpressionList, HeapAllocator, SignalType},
+    lang::{create_struct, term::SignalTerm, ValueTerm},
+    stdlib::Stdlib,
 };
+use reflex_json::{json_array, json_object, sanitize, JsonValue};
+
+pub use graphql_parser::query as graphql;
 
 mod loader;
 pub use loader::graphql_loader;
 mod operation;
 pub use operation::{deserialize_graphql_operation, GraphQlOperationPayload};
-use reflex_json::{json_array, json_object, sanitize, JsonValue};
-use uuid::Uuid;
-
 pub mod inject_args;
+pub mod stdlib;
+use stdlib::Stdlib as GraphQlStdlib;
 pub mod subscriptions;
-pub use graphql_parser::query as graphql;
 pub type GraphQlAst<'a> = Document<'a, GraphQlText<'a>>;
 pub type GraphQlText<'a> = std::borrow::Cow<'a, str>;
 
@@ -31,10 +30,6 @@ pub type GraphQlText<'a> = std::borrow::Cow<'a, str>;
 type QueryVariables<'a, T: Expression> = HashMap<GraphQlText<'a>, T>;
 type QueryFragments<'src, 'a> =
     HashMap<GraphQlText<'src>, &'a FragmentDefinition<'src, GraphQlText<'src>>>;
-
-pub fn graphql_plugins<T: Expression>() -> impl IntoIterator<Item = NativeFunction<T>> {
-    vec![dynamic_query_branch(), flatten_deep()]
-}
 
 pub fn create_introspection_query_response<T: Expression>(
     factory: &impl ExpressionFactory<T>,
@@ -128,7 +123,10 @@ pub fn parse_graphql_operation<T: Expression>(
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
     transform: &impl GraphQlQueryTransform,
-) -> Result<T, String> {
+) -> Result<T, String>
+where
+    T::Builtin: From<Stdlib> + From<GraphQlStdlib>,
+{
     let variables = operation
         .variables()
         .into_iter()
@@ -146,7 +144,10 @@ pub fn parse<'vars, T: Expression>(
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
     transform: &impl GraphQlQueryTransform,
-) -> Result<T, String> {
+) -> Result<T, String>
+where
+    T::Builtin: From<Stdlib> + From<GraphQlStdlib>,
+{
     let variables = &variables
         .into_iter()
         .map(|(key, value)| (Cow::Owned(String::from(key)), value))
@@ -206,7 +207,10 @@ fn parse_operation<'src, T: Expression>(
     fragments: &QueryFragments<'src, '_>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> Result<T, String> {
+) -> Result<T, String>
+where
+    T::Builtin: From<Stdlib> + From<GraphQlStdlib>,
+{
     match operation {
         OperationDefinition::Query(operation) => {
             parse_query_operation(operation, variables, fragments, factory, allocator)
@@ -229,7 +233,10 @@ fn parse_query_operation<'src, T: Expression>(
     fragments: &QueryFragments<'src, '_>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> Result<T, String> {
+) -> Result<T, String>
+where
+    T::Builtin: From<Stdlib> + From<GraphQlStdlib>,
+{
     parse_root_operation(
         "query",
         &operation.selection_set,
@@ -247,7 +254,10 @@ fn parse_mutation_operation<'src, T: Expression>(
     fragments: &QueryFragments<'src, '_>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> Result<T, String> {
+) -> Result<T, String>
+where
+    T::Builtin: From<Stdlib> + From<GraphQlStdlib>,
+{
     parse_root_operation(
         "mutation",
         &operation.selection_set,
@@ -265,7 +275,10 @@ fn parse_subscription_operation<'src, T: Expression>(
     fragments: &QueryFragments<'src, '_>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> Result<T, String> {
+) -> Result<T, String>
+where
+    T::Builtin: From<Stdlib> + From<GraphQlStdlib>,
+{
     parse_root_operation(
         "subscription",
         &operation.selection_set,
@@ -285,7 +298,10 @@ fn parse_root_operation<'src, T: Expression>(
     fragments: &QueryFragments<'src, '_>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> Result<T, String> {
+) -> Result<T, String>
+where
+    T::Builtin: From<Stdlib> + From<GraphQlStdlib>,
+{
     let variables = parse_operation_variables(variable_definitions, variables, factory, allocator)?;
     let query = parse_selection_set(selection_set, &variables, fragments, factory, allocator)?;
     Ok(factory.create_lambda_term(
@@ -293,7 +309,7 @@ fn parse_root_operation<'src, T: Expression>(
         factory.create_application_term(
             query,
             allocator.create_unit_list(factory.create_application_term(
-                factory.create_builtin_term(BuiltinTerm::Get),
+                factory.create_builtin_term(Stdlib::Get),
                 allocator.create_pair(
                     factory.create_static_variable_term(0),
                     factory.create_value_term(ValueTerm::String(
@@ -358,7 +374,10 @@ fn parse_selection_set<'src, T: Expression>(
     fragments: &QueryFragments<'src, '_>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> Result<T, String> {
+) -> Result<T, String>
+where
+    T::Builtin: From<Stdlib> + From<GraphQlStdlib>,
+{
     if selection_set.items.is_empty() {
         parse_leaf(factory)
     } else {
@@ -369,7 +388,7 @@ fn parse_selection_set<'src, T: Expression>(
             factory.create_lambda_term(
                 1,
                 factory.create_application_term(
-                    factory.create_builtin_term(BuiltinTerm::CollectStruct),
+                    factory.create_builtin_term(Stdlib::CollectStruct),
                     allocator.create_sized_list(
                         values.len() + 1,
                         once(
@@ -391,8 +410,11 @@ fn parse_selection_set<'src, T: Expression>(
     }
 }
 
-fn parse_leaf<T: Expression>(factory: &impl ExpressionFactory<T>) -> Result<T, String> {
-    Ok(factory.create_native_function_term(flatten_deep()))
+fn parse_leaf<T: Expression>(factory: &impl ExpressionFactory<T>) -> Result<T, String>
+where
+    T::Builtin: From<GraphQlStdlib>,
+{
+    Ok(factory.create_builtin_term(GraphQlStdlib::FlattenDeep))
 }
 
 fn parse_selection_set_fields<'src, T: Expression>(
@@ -401,7 +423,10 @@ fn parse_selection_set_fields<'src, T: Expression>(
     fragments: &QueryFragments<'src, '_>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> Result<Vec<(String, T)>, String> {
+) -> Result<Vec<(String, T)>, String>
+where
+    T::Builtin: From<Stdlib> + From<GraphQlStdlib>,
+{
     selection_set
         .items
         .iter()
@@ -442,7 +467,10 @@ fn parse_fragment_fields<'src, T: Expression>(
     fragments: &QueryFragments<'src, '_>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> impl IntoIterator<Item = Result<(String, T), String>> {
+) -> impl IntoIterator<Item = Result<(String, T), String>>
+where
+    T::Builtin: From<Stdlib> + From<GraphQlStdlib>,
+{
     match parse_selection_set_fields(
         &fragment.selection_set,
         variables,
@@ -461,7 +489,10 @@ fn parse_field<'src, T: Expression>(
     fragments: &QueryFragments<'src, '_>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> Result<T, String> {
+) -> Result<T, String>
+where
+    T::Builtin: From<Stdlib> + From<GraphQlStdlib>,
+{
     let field_args = if field.arguments.is_empty() {
         None
     } else {
@@ -486,7 +517,7 @@ fn parse_field<'src, T: Expression>(
             body,
             allocator.create_unit_list({
                 let field = factory.create_application_term(
-                    factory.create_builtin_term(BuiltinTerm::Get),
+                    factory.create_builtin_term(Stdlib::Get),
                     allocator.create_pair(
                         factory.create_static_variable_term(0),
                         factory.create_value_term(ValueTerm::String(allocator.create_string(
@@ -594,127 +625,17 @@ fn create_query_branch<T: Expression>(
     shape: T,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> T {
+) -> T
+where
+    T::Builtin: From<GraphQlStdlib>,
+{
     factory.create_lambda_term(
         1,
         factory.create_application_term(
-            factory.create_native_function_term(dynamic_query_branch()),
+            factory.create_builtin_term(GraphQlStdlib::DynamicQueryBranch),
             allocator.create_pair(factory.create_static_variable_term(0), shape),
         ),
     )
-}
-
-fn flatten_deep<T: Expression>() -> NativeFunction<T> {
-    NativeFunction::new_with_uuid(
-        FlattenDeep::uid(),
-        FlattenDeep::name(),
-        FlattenDeep::arity(),
-        FlattenDeep::apply,
-    )
-}
-struct FlattenDeep {}
-impl FlattenDeep {
-    const NAME: &'static str = "FlattenDeep";
-    const UUID: &'static str = "52299fbb-a84b-488e-81ef-98c439869f74";
-    const ARITY: FunctionArity<1, 0> = FunctionArity {
-        required: [ArgType::Strict],
-        optional: [],
-        variadic: None,
-    };
-    fn uid() -> Uuid {
-        Uuid::from_str(Self::UUID).unwrap()
-    }
-    fn name() -> Option<&'static str> {
-        Some(Self::NAME)
-    }
-    fn arity() -> Arity {
-        Arity::from(&Self::ARITY)
-    }
-    fn apply<T: Expression>(
-        args: ExpressionList<T>,
-        factory: &dyn ExpressionFactory<T>,
-        allocator: &dyn NativeAllocator<T>,
-    ) -> Result<T, String> {
-        let mut args = args.into_iter();
-        let target = args.next().unwrap();
-        if let Some(ValueTerm::Null) = factory.match_value_term(&target) {
-            Ok(target)
-        } else if let Some(list) = factory.match_vector_term(&target) {
-            Ok(factory.create_application_term(
-                factory.create_builtin_term(BuiltinTerm::CollectVector),
-                allocator.create_list(
-                    list.items()
-                        .iter()
-                        .map(|item| {
-                            factory.create_application_term(
-                                factory.create_native_function_term(flatten_deep()),
-                                allocator.create_unit_list(item.clone()),
-                            )
-                        })
-                        .collect(),
-                ),
-            ))
-        } else {
-            Ok(target)
-        }
-    }
-}
-
-fn dynamic_query_branch<T: Expression>() -> NativeFunction<T> {
-    NativeFunction::new_with_uuid(
-        DynamicQueryBranch::uid(),
-        DynamicQueryBranch::name(),
-        DynamicQueryBranch::arity(),
-        DynamicQueryBranch::apply,
-    )
-}
-struct DynamicQueryBranch {}
-impl DynamicQueryBranch {
-    const NAME: &'static str = "DynamicQueryBranch";
-    const UUID: &'static str = "58dd19b7-c9f0-473b-84c5-34af607c176b";
-    const ARITY: FunctionArity<2, 0> = FunctionArity {
-        required: [ArgType::Strict, ArgType::Strict],
-        optional: [],
-        variadic: None,
-    };
-    fn uid() -> Uuid {
-        Uuid::from_str(Self::UUID).unwrap()
-    }
-    fn name() -> Option<&'static str> {
-        Some(Self::NAME)
-    }
-    fn arity() -> Arity {
-        Arity::from(&Self::ARITY)
-    }
-    fn apply<T: Expression>(
-        args: ExpressionList<T>,
-        factory: &dyn ExpressionFactory<T>,
-        allocator: &dyn NativeAllocator<T>,
-    ) -> Result<T, String> {
-        let mut args = args.into_iter();
-        let target = args.next().unwrap();
-        let shape = args.next().unwrap();
-        if let Some(ValueTerm::Null) = factory.match_value_term(&target) {
-            Ok(target)
-        } else if let Some(list) = factory.match_vector_term(&target) {
-            Ok(factory.create_application_term(
-                factory.create_builtin_term(BuiltinTerm::CollectVector),
-                allocator.create_list(
-                    list.items()
-                        .iter()
-                        .map(|item| {
-                            factory.create_application_term(
-                                factory.create_native_function_term(dynamic_query_branch()),
-                                allocator.create_pair(item.clone(), shape.clone()),
-                            )
-                        })
-                        .collect(),
-                ),
-            ))
-        } else {
-            Ok(factory.create_application_term(shape, allocator.create_unit_list(target)))
-        }
-    }
 }
 
 #[cfg(test)]
@@ -723,17 +644,71 @@ mod tests {
         allocator::DefaultAllocator,
         cache::SubstitutionCache,
         core::{
-            evaluate, DependencyList, Evaluate, EvaluationResult, Expression, ExpressionFactory,
-            HeapAllocator, Reducible, Rewritable, StateCache,
+            evaluate, Applicable, Arity, Builtin, DependencyList, Evaluate, EvaluationCache,
+            EvaluationResult, Expression, ExpressionFactory, HeapAllocator, Reducible, Rewritable,
+            StateCache, Uid,
         },
-        lang::{create_struct, BuiltinTerm, TermFactory, ValueTerm},
+        lang::{create_struct, TermFactory, ValueTerm},
+        stdlib::Stdlib,
     };
 
-    use super::{parse, NoopGraphQlQueryTransform};
+    use super::{parse, stdlib::Stdlib as GraphQlStdlib, NoopGraphQlQueryTransform};
+
+    #[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
+    enum GraphQlTestBuiltins {
+        Stdlib(Stdlib),
+        GraphQl(GraphQlStdlib),
+    }
+    impl From<Stdlib> for GraphQlTestBuiltins {
+        fn from(target: Stdlib) -> Self {
+            GraphQlTestBuiltins::Stdlib(target)
+        }
+    }
+    impl From<GraphQlStdlib> for GraphQlTestBuiltins {
+        fn from(target: GraphQlStdlib) -> Self {
+            GraphQlTestBuiltins::GraphQl(target)
+        }
+    }
+    impl Uid for GraphQlTestBuiltins {
+        fn uid(&self) -> reflex::core::Uuid {
+            match self {
+                GraphQlTestBuiltins::Stdlib(term) => term.uid(),
+                GraphQlTestBuiltins::GraphQl(term) => term.uid(),
+            }
+        }
+    }
+    impl Builtin for GraphQlTestBuiltins {
+        fn arity<T: Expression<Builtin = Self> + Applicable<T>>(&self) -> Option<Arity> {
+            match self {
+                GraphQlTestBuiltins::Stdlib(term) => term.arity::<T>(),
+                GraphQlTestBuiltins::GraphQl(term) => term.arity::<T>(),
+            }
+        }
+        fn apply<T: Expression<Builtin = Self> + Applicable<T>>(
+            &self,
+            args: impl ExactSizeIterator<Item = T>,
+            factory: &impl ExpressionFactory<T>,
+            allocator: &impl HeapAllocator<T>,
+            cache: &mut impl EvaluationCache<T>,
+        ) -> Result<T, String> {
+            match self {
+                GraphQlTestBuiltins::Stdlib(term) => term.apply(args, factory, allocator, cache),
+                GraphQlTestBuiltins::GraphQl(term) => term.apply(args, factory, allocator, cache),
+            }
+        }
+    }
+    impl std::fmt::Display for GraphQlTestBuiltins {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            match self {
+                Self::Stdlib(target) => std::fmt::Display::fmt(target, f),
+                Self::GraphQl(target) => std::fmt::Display::fmt(target, f),
+            }
+        }
+    }
 
     #[test]
     fn leaf_queries() {
-        let factory = TermFactory::default();
+        let factory = TermFactory::<GraphQlTestBuiltins>::default();
         let allocator = DefaultAllocator::default();
         let root = create_struct(
             vec![
@@ -809,7 +784,7 @@ mod tests {
 
     #[test]
     fn computed_leaf_queries() {
-        let factory = TermFactory::default();
+        let factory = TermFactory::<GraphQlTestBuiltins>::default();
         let allocator = DefaultAllocator::default();
         let root = create_struct(
             vec![
@@ -823,7 +798,7 @@ mod tests {
                                     (
                                         String::from("first"),
                                         factory.create_application_term(
-                                            factory.create_builtin_term(BuiltinTerm::Add),
+                                            factory.create_builtin_term(Stdlib::Add),
                                             allocator.create_pair(
                                                 factory.create_value_term(ValueTerm::Int(3)),
                                                 factory.create_static_variable_term(0),
@@ -833,7 +808,7 @@ mod tests {
                                     (
                                         String::from("second"),
                                         factory.create_application_term(
-                                            factory.create_builtin_term(BuiltinTerm::Add),
+                                            factory.create_builtin_term(Stdlib::Add),
                                             allocator.create_pair(
                                                 factory.create_value_term(ValueTerm::Int(4)),
                                                 factory.create_static_variable_term(0),
@@ -843,7 +818,7 @@ mod tests {
                                     (
                                         String::from("third"),
                                         factory.create_application_term(
-                                            factory.create_builtin_term(BuiltinTerm::Add),
+                                            factory.create_builtin_term(Stdlib::Add),
                                             allocator.create_pair(
                                                 factory.create_value_term(ValueTerm::Int(5)),
                                                 factory.create_static_variable_term(0),
@@ -909,7 +884,7 @@ mod tests {
 
     #[test]
     fn list_leaf_queries() {
-        let factory = TermFactory::default();
+        let factory = TermFactory::<GraphQlTestBuiltins>::default();
         let allocator = DefaultAllocator::default();
         let root = create_struct(
             vec![
@@ -986,7 +961,7 @@ mod tests {
 
     #[test]
     fn deeply_nested_list_leaf_queries() {
-        let factory = TermFactory::default();
+        let factory = TermFactory::<GraphQlTestBuiltins>::default();
         let allocator = DefaultAllocator::default();
         let root = create_struct(
             vec![

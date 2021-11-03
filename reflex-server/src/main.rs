@@ -4,16 +4,21 @@
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use std::process;
 
-use reflex::{allocator::DefaultAllocator, lang::TermFactory};
-use reflex_cli::compiler::js::{standard_js_loaders, standard_js_plugins};
+use reflex::{
+    allocator::DefaultAllocator,
+    core::{ExpressionFactory, Uid},
+    lang::TermFactory,
+};
+use reflex_cli::compiler::js::standard_js_loaders;
 use reflex_server::{
+    builtins::ServerBuiltins,
     cli::{builtin_signal_handler, cli},
     NoopGraphQlHttpQueryTransform,
 };
 
 #[tokio::main]
 pub async fn main() {
-    let factory = TermFactory::default();
+    let factory = TermFactory::<ServerBuiltins>::default();
     let allocator = DefaultAllocator::default();
     process::exit(
         match cli(
@@ -21,7 +26,8 @@ pub async fn main() {
             Some(standard_js_loaders(&factory, &allocator)),
             &factory,
             &allocator,
-            standard_js_plugins(),
+            ServerBuiltins::entries()
+                .map(|builtin| (builtin.uid(), factory.create_builtin_term(builtin))),
             None,
             None,
             NoopGraphQlHttpQueryTransform::default(),

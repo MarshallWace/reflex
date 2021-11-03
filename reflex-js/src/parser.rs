@@ -10,14 +10,15 @@ use std::{
 use reflex::{
     cache::NoopCache,
     core::{Expression, ExpressionFactory, HeapAllocator, Rewritable, StringValue, Substitutions},
-    lang::{as_integer, BuiltinTerm, ValueTerm},
+    lang::{as_integer, ValueTerm},
+    stdlib::Stdlib,
 };
 use resast::prelude::*;
 use ressa::Builder;
 
 use crate::{
-    builtins::{construct, dispatch, get_builtin_field, throw, to_string},
-    stdlib::globals::global_aggregate_error,
+    globals::global_aggregate_error,
+    stdlib::{get_builtin_field, Stdlib as JsStdlib},
     Env,
 };
 
@@ -87,7 +88,10 @@ pub fn parse<'src, T: Expression + Rewritable<T>>(
     env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> ParserResult<T> {
+) -> ParserResult<T>
+where
+    T::Builtin: From<Stdlib> + From<JsStdlib>,
+{
     let program = parse_ast(input)?;
     parse_script_contents(program.into_iter(), env, factory, allocator)
 }
@@ -99,7 +103,10 @@ pub fn parse_module<'src, T: Expression + Rewritable<T>>(
     loader: &impl Fn(&str, &Path) -> Option<Result<T, String>>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> ParserResult<T> {
+) -> ParserResult<T>
+where
+    T::Builtin: From<Stdlib> + From<JsStdlib>,
+{
     let program = parse_ast(input)?;
     parse_module_contents(program.into_iter(), env, path, loader, factory, allocator)
 }
@@ -118,7 +125,10 @@ fn parse_script_contents<'src, T: Expression + Rewritable<T>>(
     env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> ParserResult<T> {
+) -> ParserResult<T>
+where
+    T::Builtin: From<Stdlib> + From<JsStdlib>,
+{
     let body = program
         .into_iter()
         .map(|node| match node {
@@ -142,7 +152,10 @@ fn parse_module_contents<'src, T: Expression + Rewritable<T>>(
     loader: &impl Fn(&str, &Path) -> Option<Result<T, String>>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> ParserResult<T> {
+) -> ParserResult<T>
+where
+    T::Builtin: From<Stdlib> + From<JsStdlib>,
+{
     let num_statements = program.len();
     let (body, import_bindings) = program.into_iter().fold(
         Ok((Vec::with_capacity(num_statements), Vec::new())),
@@ -206,7 +219,10 @@ fn parse_module_import<'src, T: Expression + Rewritable<T>>(
     loader: &impl Fn(&str, &Path) -> Option<Result<T, String>>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> ParserResult<Vec<(&'src str, T)>> {
+) -> ParserResult<Vec<(&'src str, T)>>
+where
+    T::Builtin: From<Stdlib>,
+{
     let module_path = match &node.source {
         Lit::String(node) => Ok(parse_string(node)),
         _ => Err(err_unimplemented(node)),
@@ -254,7 +270,10 @@ fn parse_block<'src: 'temp, 'temp, T: Expression + Rewritable<T>>(
     env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> ParserResult<Option<T>> {
+) -> ParserResult<Option<T>>
+where
+    T::Builtin: From<Stdlib> + From<JsStdlib>,
+{
     parse_block_statements(body, None, scope, env, factory, allocator)
 }
 
@@ -265,7 +284,10 @@ fn parse_block_statements<'src: 'temp, 'temp, T: Expression + Rewritable<T>>(
     env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> ParserResult<Option<T>> {
+) -> ParserResult<Option<T>>
+where
+    T::Builtin: From<Stdlib> + From<JsStdlib>,
+{
     let mut remaining = remaining.into_iter();
     let node = remaining.next();
     match node {
@@ -424,7 +446,10 @@ fn parse_variable_declarators<'src, T: Expression + Rewritable<T>>(
 ) -> ParserResult<(
     impl IntoIterator<Item = T, IntoIter = impl DoubleEndedIterator<Item = T>>,
     Option<LexicalScope<'src>>,
-)> {
+)>
+where
+    T::Builtin: From<Stdlib> + From<JsStdlib>,
+{
     declarators
         .iter()
         .fold(Ok((Vec::new(), None)), |results, node| {
@@ -443,7 +468,10 @@ fn parse_variable_declarator<'src, T: Expression + Rewritable<T>>(
     env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> ParserResult<(impl IntoIterator<Item = T>, Option<LexicalScope<'src>>)> {
+) -> ParserResult<(impl IntoIterator<Item = T>, Option<LexicalScope<'src>>)>
+where
+    T::Builtin: From<Stdlib> + From<JsStdlib>,
+{
     let VarDecl { id, init } = node;
     let init = init
         .as_ref()
@@ -481,7 +509,10 @@ fn parse_object_destructuring_pattern_bindings<'src, T: Expression + Rewritable<
     env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> ParserResult<(Vec<T>, Option<LexicalScope<'src>>)> {
+) -> ParserResult<(Vec<T>, Option<LexicalScope<'src>>)>
+where
+    T::Builtin: From<Stdlib> + From<JsStdlib>,
+{
     let properties = properties
         .iter()
         .map(|property| match property {
@@ -551,7 +582,10 @@ fn parse_destructuring_pattern_property_field_name<'src, T: Expression + Rewrita
     env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> ParserResult<T> {
+) -> ParserResult<T>
+where
+    T::Builtin: From<Stdlib> + From<JsStdlib>,
+{
     match &node.key {
         PropKey::Lit(key) => match key {
             Lit::String(key) => {
@@ -606,7 +640,10 @@ fn parse_array_destructuring_pattern_bindings<'src, T: Expression + Rewritable<T
     _env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> ParserResult<(impl IntoIterator<Item = T>, Option<LexicalScope<'src>>)> {
+) -> ParserResult<(impl IntoIterator<Item = T>, Option<LexicalScope<'src>>)>
+where
+    T::Builtin: From<Stdlib>,
+{
     let accessors = accessors
         .iter()
         .enumerate()
@@ -675,12 +712,15 @@ fn parse_throw_statement<'src, T: Expression + Rewritable<T>>(
     env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> ParserResult<T> {
+) -> ParserResult<T>
+where
+    T::Builtin: From<Stdlib> + From<JsStdlib>,
+{
     let error = parse_expression(value, scope, env, factory, allocator)?;
     Ok(factory.create_application_term(
-        factory.create_native_function_term(throw()),
+        factory.create_builtin_term(JsStdlib::Throw),
         allocator.create_unit_list(factory.create_application_term(
-            factory.create_builtin_term(BuiltinTerm::ResolveDeep),
+            factory.create_builtin_term(Stdlib::ResolveDeep),
             allocator.create_unit_list(error),
         )),
     ))
@@ -692,7 +732,10 @@ fn parse_if_branch<'src, T: Expression + Rewritable<T>>(
     env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> ParserResult<T> {
+) -> ParserResult<T>
+where
+    T::Builtin: From<Stdlib> + From<JsStdlib>,
+{
     match node {
         Stmt::Block(block) => {
             let BlockStmt(body) = block;
@@ -716,7 +759,10 @@ fn parse_branch<'src: 'temp, 'temp, T: Expression + Rewritable<T>>(
     env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> ParserResult<T> {
+) -> ParserResult<T>
+where
+    T::Builtin: From<Stdlib> + From<JsStdlib>,
+{
     let expression = parse_block(body, scope, env, factory, allocator)?;
     match expression {
         None => Err(err("Unterminated branch", node)),
@@ -730,7 +776,10 @@ fn parse_expression<'src, T: Expression + Rewritable<T>>(
     env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> ParserResult<T> {
+) -> ParserResult<T>
+where
+    T::Builtin: From<Stdlib> + From<JsStdlib>,
+{
     match node {
         Expr::Ident(node) => parse_variable_reference(node, scope, env, factory),
         Expr::Lit(node) => parse_literal(node, scope, env, factory, allocator),
@@ -759,7 +808,10 @@ fn parse_expressions<'src: 'temp, 'temp, T: Expression + Rewritable<T>>(
     env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> ParserResult<Vec<T>> {
+) -> ParserResult<Vec<T>>
+where
+    T::Builtin: From<Stdlib> + From<JsStdlib>,
+{
     expressions
         .into_iter()
         .map(|node| parse_expression(node, scope, env, factory, allocator))
@@ -789,7 +841,10 @@ fn parse_literal<'src, T: Expression + Rewritable<T>>(
     env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> ParserResult<T> {
+) -> ParserResult<T>
+where
+    T::Builtin: From<Stdlib> + From<JsStdlib>,
+{
     match node {
         Lit::Null => parse_null_literal(factory),
         Lit::Boolean(node) => parse_boolean_literal(node, factory),
@@ -873,7 +928,10 @@ fn parse_template_literal<'src, T: Expression + Rewritable<T>>(
     env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> ParserResult<T> {
+) -> ParserResult<T>
+where
+    T::Builtin: From<Stdlib> + From<JsStdlib>,
+{
     let args = node
         .quasis
         .iter()
@@ -889,7 +947,7 @@ fn parse_template_literal<'src, T: Expression + Rewritable<T>>(
                 .map(|expression| {
                     let value = parse_expression(expression, scope, env, factory, allocator)?;
                     Ok(Some(factory.create_application_term(
-                        factory.create_native_function_term(to_string()),
+                        factory.create_builtin_term(JsStdlib::ToString),
                         allocator.create_unit_list(value),
                     )))
                 })
@@ -908,7 +966,7 @@ fn parse_template_literal<'src, T: Expression + Rewritable<T>>(
         }
         1 => args.into_iter().next().unwrap(),
         _ => factory.create_application_term(
-            factory.create_builtin_term(BuiltinTerm::Concat),
+            factory.create_builtin_term(Stdlib::Concat),
             allocator.create_list(args),
         ),
     })
@@ -927,7 +985,10 @@ fn parse_tagged_template<'src, T: Expression + Rewritable<T>>(
     env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> ParserResult<T> {
+) -> ParserResult<T>
+where
+    T::Builtin: From<Stdlib> + From<JsStdlib>,
+{
     parse_template_literal(&node.quasi, scope, env, factory, allocator)
 }
 
@@ -937,7 +998,10 @@ fn parse_object_literal<'src, T: Expression + Rewritable<T>>(
     env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> ParserResult<T> {
+) -> ParserResult<T>
+where
+    T::Builtin: From<Stdlib> + From<JsStdlib>,
+{
     enum ObjectLiteralFields<T> {
         Properties(Vec<(String, T)>),
         Spread(T),
@@ -1055,7 +1119,7 @@ fn parse_object_literal<'src, T: Expression + Rewritable<T>>(
     });
     Ok(if field_sets.len() >= 2 {
         factory.create_application_term(
-            factory.create_builtin_term(BuiltinTerm::Merge),
+            factory.create_builtin_term(Stdlib::Merge),
             allocator.create_list(field_sets),
         )
     } else {
@@ -1075,7 +1139,10 @@ fn parse_array_literal<'src, T: Expression + Rewritable<T>>(
     env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> ParserResult<T> {
+) -> ParserResult<T>
+where
+    T::Builtin: From<Stdlib> + From<JsStdlib>,
+{
     enum ArrayLiteralFields<T> {
         Items(Vec<T>),
         Spread(T),
@@ -1120,7 +1187,7 @@ fn parse_array_literal<'src, T: Expression + Rewritable<T>>(
                 if items.len() == 1 =>
             {
                 return Ok(factory.create_application_term(
-                    factory.create_builtin_term(BuiltinTerm::Push),
+                    factory.create_builtin_term(Stdlib::Push),
                     allocator
                         .create_pair(target.clone(), items.into_iter().next().cloned().unwrap()),
                 ))
@@ -1129,7 +1196,7 @@ fn parse_array_literal<'src, T: Expression + Rewritable<T>>(
                 if items.len() == 1 =>
             {
                 return Ok(factory.create_application_term(
-                    factory.create_builtin_term(BuiltinTerm::PushFront),
+                    factory.create_builtin_term(Stdlib::PushFront),
                     allocator
                         .create_pair(target.clone(), items.into_iter().next().cloned().unwrap()),
                 ))
@@ -1146,7 +1213,7 @@ fn parse_array_literal<'src, T: Expression + Rewritable<T>>(
     });
     Ok(if item_sets.len() >= 2 {
         factory.create_application_term(
-            factory.create_builtin_term(BuiltinTerm::Append),
+            factory.create_builtin_term(Stdlib::Append),
             allocator.create_list(item_sets),
         )
     } else {
@@ -1163,7 +1230,10 @@ fn parse_unary_expression<'src, T: Expression + Rewritable<T>>(
     env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> ParserResult<T> {
+) -> ParserResult<T>
+where
+    T::Builtin: From<Stdlib> + From<JsStdlib>,
+{
     match node.operator {
         UnaryOp::Minus => parse_unary_minus_expression(node, scope, env, factory, allocator),
         UnaryOp::Plus => parse_unary_plus_expression(node, scope, env, factory, allocator),
@@ -1178,7 +1248,10 @@ fn parse_binary_expression<'src, T: Expression + Rewritable<T>>(
     env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> ParserResult<T> {
+) -> ParserResult<T>
+where
+    T::Builtin: From<Stdlib> + From<JsStdlib>,
+{
     match node.operator {
         BinaryOp::Plus => parse_binary_add_expression(node, scope, env, factory, allocator),
         BinaryOp::Minus => parse_binary_subtract_expression(node, scope, env, factory, allocator),
@@ -1214,7 +1287,10 @@ fn parse_logical_expression<'src, T: Expression + Rewritable<T>>(
     env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> ParserResult<T> {
+) -> ParserResult<T>
+where
+    T::Builtin: From<Stdlib> + From<JsStdlib>,
+{
     match node.operator {
         LogicalOp::And => parse_logical_and_expression(node, scope, env, factory, allocator),
         LogicalOp::Or => parse_logical_or_expression(node, scope, env, factory, allocator),
@@ -1227,13 +1303,16 @@ fn parse_unary_minus_expression<'src, T: Expression + Rewritable<T>>(
     env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> ParserResult<T> {
+) -> ParserResult<T>
+where
+    T::Builtin: From<Stdlib> + From<JsStdlib>,
+{
     let operand = parse_expression(&node.argument, scope, env, factory, allocator)?;
     Ok(match factory.match_value_term(&operand) {
         Some(ValueTerm::Int(value)) => factory.create_value_term(ValueTerm::Int(-*value)),
         Some(ValueTerm::Float(value)) => factory.create_value_term(ValueTerm::Float(-*value)),
         _ => factory.create_application_term(
-            factory.create_builtin_term(BuiltinTerm::Subtract),
+            factory.create_builtin_term(Stdlib::Subtract),
             allocator.create_pair(factory.create_value_term(ValueTerm::Float(0.0)), operand),
         ),
     })
@@ -1245,13 +1324,16 @@ fn parse_unary_plus_expression<'src, T: Expression + Rewritable<T>>(
     env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> ParserResult<T> {
+) -> ParserResult<T>
+where
+    T::Builtin: From<Stdlib> + From<JsStdlib>,
+{
     let operand = parse_expression(&node.argument, scope, env, factory, allocator)?;
     Ok(match factory.match_value_term(&operand) {
         Some(ValueTerm::Int(_)) => operand,
         Some(ValueTerm::Float(_)) => operand,
         _ => factory.create_application_term(
-            factory.create_builtin_term(BuiltinTerm::Add),
+            factory.create_builtin_term(Stdlib::Add),
             allocator.create_pair(factory.create_value_term(ValueTerm::Float(0.0)), operand),
         ),
     })
@@ -1263,10 +1345,13 @@ fn parse_unary_not_expression<'src, T: Expression + Rewritable<T>>(
     env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> ParserResult<T> {
+) -> ParserResult<T>
+where
+    T::Builtin: From<Stdlib> + From<JsStdlib>,
+{
     let operand = parse_expression(&node.argument, scope, env, factory, allocator)?;
     Ok(factory.create_application_term(
-        factory.create_builtin_term(BuiltinTerm::Not),
+        factory.create_builtin_term(Stdlib::Not),
         allocator.create_unit_list(operand),
     ))
 }
@@ -1277,11 +1362,14 @@ fn parse_binary_add_expression<'src, T: Expression + Rewritable<T>>(
     env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> ParserResult<T> {
+) -> ParserResult<T>
+where
+    T::Builtin: From<Stdlib> + From<JsStdlib>,
+{
     let left = parse_expression(&node.left, scope, env, factory, allocator)?;
     let right = parse_expression(&node.right, scope, env, factory, allocator)?;
     Ok(factory.create_application_term(
-        factory.create_builtin_term(BuiltinTerm::Add),
+        factory.create_builtin_term(Stdlib::Add),
         allocator.create_pair(left, right),
     ))
 }
@@ -1292,11 +1380,14 @@ fn parse_binary_subtract_expression<'src, T: Expression + Rewritable<T>>(
     env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> ParserResult<T> {
+) -> ParserResult<T>
+where
+    T::Builtin: From<Stdlib> + From<JsStdlib>,
+{
     let left = parse_expression(&node.left, scope, env, factory, allocator)?;
     let right = parse_expression(&node.right, scope, env, factory, allocator)?;
     Ok(factory.create_application_term(
-        factory.create_builtin_term(BuiltinTerm::Subtract),
+        factory.create_builtin_term(Stdlib::Subtract),
         allocator.create_pair(left, right),
     ))
 }
@@ -1307,11 +1398,14 @@ fn parse_binary_multiply_expression<'src, T: Expression + Rewritable<T>>(
     env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> ParserResult<T> {
+) -> ParserResult<T>
+where
+    T::Builtin: From<Stdlib> + From<JsStdlib>,
+{
     let left = parse_expression(&node.left, scope, env, factory, allocator)?;
     let right = parse_expression(&node.right, scope, env, factory, allocator)?;
     Ok(factory.create_application_term(
-        factory.create_builtin_term(BuiltinTerm::Multiply),
+        factory.create_builtin_term(Stdlib::Multiply),
         allocator.create_pair(left, right),
     ))
 }
@@ -1322,11 +1416,14 @@ fn parse_binary_divide_expression<'src, T: Expression + Rewritable<T>>(
     env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> ParserResult<T> {
+) -> ParserResult<T>
+where
+    T::Builtin: From<Stdlib> + From<JsStdlib>,
+{
     let left = parse_expression(&node.left, scope, env, factory, allocator)?;
     let right = parse_expression(&node.right, scope, env, factory, allocator)?;
     Ok(factory.create_application_term(
-        factory.create_builtin_term(BuiltinTerm::Divide),
+        factory.create_builtin_term(Stdlib::Divide),
         allocator.create_pair(left, right),
     ))
 }
@@ -1337,11 +1434,14 @@ fn parse_binary_remainder_expression<'src, T: Expression + Rewritable<T>>(
     env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> ParserResult<T> {
+) -> ParserResult<T>
+where
+    T::Builtin: From<Stdlib> + From<JsStdlib>,
+{
     let left = parse_expression(&node.left, scope, env, factory, allocator)?;
     let right = parse_expression(&node.right, scope, env, factory, allocator)?;
     Ok(factory.create_application_term(
-        factory.create_builtin_term(BuiltinTerm::Remainder),
+        factory.create_builtin_term(Stdlib::Remainder),
         allocator.create_pair(left, right),
     ))
 }
@@ -1352,11 +1452,14 @@ fn parse_binary_pow_expression<'src, T: Expression + Rewritable<T>>(
     env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> ParserResult<T> {
+) -> ParserResult<T>
+where
+    T::Builtin: From<Stdlib> + From<JsStdlib>,
+{
     let left = parse_expression(&node.left, scope, env, factory, allocator)?;
     let right = parse_expression(&node.right, scope, env, factory, allocator)?;
     Ok(factory.create_application_term(
-        factory.create_builtin_term(BuiltinTerm::Pow),
+        factory.create_builtin_term(Stdlib::Pow),
         allocator.create_pair(left, right),
     ))
 }
@@ -1367,11 +1470,14 @@ fn parse_binary_lt_expression<'src, T: Expression + Rewritable<T>>(
     env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> ParserResult<T> {
+) -> ParserResult<T>
+where
+    T::Builtin: From<Stdlib> + From<JsStdlib>,
+{
     let left = parse_expression(&node.left, scope, env, factory, allocator)?;
     let right = parse_expression(&node.right, scope, env, factory, allocator)?;
     Ok(factory.create_application_term(
-        factory.create_builtin_term(BuiltinTerm::Lt),
+        factory.create_builtin_term(Stdlib::Lt),
         allocator.create_pair(left, right),
     ))
 }
@@ -1382,11 +1488,14 @@ fn parse_binary_gt_expression<'src, T: Expression + Rewritable<T>>(
     env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> ParserResult<T> {
+) -> ParserResult<T>
+where
+    T::Builtin: From<Stdlib> + From<JsStdlib>,
+{
     let left = parse_expression(&node.left, scope, env, factory, allocator)?;
     let right = parse_expression(&node.right, scope, env, factory, allocator)?;
     Ok(factory.create_application_term(
-        factory.create_builtin_term(BuiltinTerm::Gt),
+        factory.create_builtin_term(Stdlib::Gt),
         allocator.create_pair(left, right),
     ))
 }
@@ -1397,11 +1506,14 @@ fn parse_binary_lte_expression<'src, T: Expression + Rewritable<T>>(
     env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> ParserResult<T> {
+) -> ParserResult<T>
+where
+    T::Builtin: From<Stdlib> + From<JsStdlib>,
+{
     let left = parse_expression(&node.left, scope, env, factory, allocator)?;
     let right = parse_expression(&node.right, scope, env, factory, allocator)?;
     Ok(factory.create_application_term(
-        factory.create_builtin_term(BuiltinTerm::Lte),
+        factory.create_builtin_term(Stdlib::Lte),
         allocator.create_pair(left, right),
     ))
 }
@@ -1412,11 +1524,14 @@ fn parse_binary_gte_expression<'src, T: Expression + Rewritable<T>>(
     env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> ParserResult<T> {
+) -> ParserResult<T>
+where
+    T::Builtin: From<Stdlib> + From<JsStdlib>,
+{
     let left = parse_expression(&node.left, scope, env, factory, allocator)?;
     let right = parse_expression(&node.right, scope, env, factory, allocator)?;
     Ok(factory.create_application_term(
-        factory.create_builtin_term(BuiltinTerm::Gte),
+        factory.create_builtin_term(Stdlib::Gte),
         allocator.create_pair(left, right),
     ))
 }
@@ -1427,11 +1542,14 @@ fn parse_binary_equal_expression<'src, T: Expression + Rewritable<T>>(
     env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> ParserResult<T> {
+) -> ParserResult<T>
+where
+    T::Builtin: From<Stdlib> + From<JsStdlib>,
+{
     let left = parse_expression(&node.left, scope, env, factory, allocator)?;
     let right = parse_expression(&node.right, scope, env, factory, allocator)?;
     Ok(factory.create_application_term(
-        factory.create_builtin_term(BuiltinTerm::Eq),
+        factory.create_builtin_term(Stdlib::Eq),
         allocator.create_pair(left, right),
     ))
 }
@@ -1442,10 +1560,13 @@ fn parse_binary_not_equal_expression<'src, T: Expression + Rewritable<T>>(
     env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> ParserResult<T> {
+) -> ParserResult<T>
+where
+    T::Builtin: From<Stdlib> + From<JsStdlib>,
+{
     let expression = parse_binary_equal_expression(node, scope, env, factory, allocator)?;
     Ok(factory.create_application_term(
-        factory.create_builtin_term(BuiltinTerm::Not),
+        factory.create_builtin_term(Stdlib::Not),
         allocator.create_unit_list(expression),
     ))
 }
@@ -1456,11 +1577,14 @@ fn parse_logical_and_expression<'src, T: Expression + Rewritable<T>>(
     env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> ParserResult<T> {
+) -> ParserResult<T>
+where
+    T::Builtin: From<Stdlib> + From<JsStdlib>,
+{
     let left = parse_expression(&node.left, scope, env, factory, allocator)?;
     let right = parse_expression(&node.right, scope, env, factory, allocator)?;
     Ok(factory.create_application_term(
-        factory.create_builtin_term(BuiltinTerm::And),
+        factory.create_builtin_term(Stdlib::And),
         allocator.create_pair(left, right),
     ))
 }
@@ -1471,11 +1595,14 @@ fn parse_logical_or_expression<'src, T: Expression + Rewritable<T>>(
     env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> ParserResult<T> {
+) -> ParserResult<T>
+where
+    T::Builtin: From<Stdlib> + From<JsStdlib>,
+{
     let left = parse_expression(&node.left, scope, env, factory, allocator)?;
     let right = parse_expression(&node.right, scope, env, factory, allocator)?;
     Ok(factory.create_application_term(
-        factory.create_builtin_term(BuiltinTerm::Or),
+        factory.create_builtin_term(Stdlib::Or),
         allocator.create_pair(left, right),
     ))
 }
@@ -1486,7 +1613,10 @@ fn parse_conditional_expression<'src, T: Expression + Rewritable<T>>(
     env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> ParserResult<T> {
+) -> ParserResult<T>
+where
+    T::Builtin: From<Stdlib> + From<JsStdlib>,
+{
     let condition = parse_expression(&node.test, scope, env, factory, allocator)?;
     let consequent = parse_expression(&node.consequent, scope, env, factory, allocator)?;
     let alternate = parse_expression(&node.alternate, scope, env, factory, allocator)?;
@@ -1501,9 +1631,12 @@ fn create_if_expression<T: Expression + Rewritable<T>>(
     alternate: T,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> T {
+) -> T
+where
+    T::Builtin: From<Stdlib>,
+{
     factory.create_application_term(
-        factory.create_builtin_term(BuiltinTerm::If),
+        factory.create_builtin_term(Stdlib::If),
         allocator.create_triple(condition, consequent, alternate),
     )
 }
@@ -1513,9 +1646,12 @@ fn create_try_catch_expression<T: Expression + Rewritable<T>>(
     handler: T,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> T {
+) -> T
+where
+    T::Builtin: From<Stdlib> + From<JsStdlib>,
+{
     factory.create_application_term(
-        factory.create_builtin_term(BuiltinTerm::IfError),
+        factory.create_builtin_term(Stdlib::IfError),
         allocator.create_pair(
             body,
             factory.create_lambda_term(
@@ -1545,7 +1681,10 @@ fn parse_arrow_function_expression<'src, T: Expression + Rewritable<T>>(
     env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> ParserResult<T> {
+) -> ParserResult<T>
+where
+    T::Builtin: From<Stdlib> + From<JsStdlib>,
+{
     if node.generator || node.is_async {
         Err(err_unimplemented(node))
     } else {
@@ -1644,7 +1783,10 @@ fn parse_member_expression<'src, T: Expression + Rewritable<T>>(
     env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> ParserResult<T> {
+) -> ParserResult<T>
+where
+    T::Builtin: From<Stdlib> + From<JsStdlib>,
+{
     let target = parse_expression(&node.object, scope, env, factory, allocator)?;
     let field_name = parse_static_member_field_name(node)?;
     match field_name {
@@ -1672,7 +1814,10 @@ fn get_static_field<T: Expression + Rewritable<T>>(
     field: &str,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> T {
+) -> T
+where
+    T::Builtin: From<Stdlib>,
+{
     let field = factory.create_value_term(ValueTerm::String(allocator.create_string(field.into())));
     get_dynamic_field(target, field, factory, allocator)
 }
@@ -1682,9 +1827,12 @@ fn get_dynamic_field<T: Expression + Rewritable<T>>(
     field: T,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> T {
+) -> T
+where
+    T::Builtin: From<Stdlib>,
+{
     factory.create_application_term(
-        factory.create_builtin_term(BuiltinTerm::Get),
+        factory.create_builtin_term(Stdlib::Get),
         allocator.create_pair(target, field),
     )
 }
@@ -1694,7 +1842,10 @@ fn get_indexed_field<T: Expression + Rewritable<T>>(
     index: usize,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> T {
+) -> T
+where
+    T::Builtin: From<Stdlib>,
+{
     get_dynamic_field(
         target,
         factory.create_value_term(ValueTerm::Int(index as i32)),
@@ -1709,7 +1860,10 @@ fn parse_call_expression<'src, T: Expression + Rewritable<T>>(
     env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> ParserResult<T> {
+) -> ParserResult<T>
+where
+    T::Builtin: From<Stdlib> + From<JsStdlib>,
+{
     let static_dispatch = match &*node.callee {
         Expr::Member(callee) => {
             let method_name = parse_static_member_field_name(callee)?;
@@ -1752,7 +1906,10 @@ fn parse_static_method_call_expression<'src: 'temp, 'temp, T: Expression + Rewri
     env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> ParserResult<T> {
+) -> ParserResult<T>
+where
+    T::Builtin: From<Stdlib> + From<JsStdlib>,
+{
     let target = parse_expression(target, scope, env, factory, allocator)?;
     let is_potential_builtin_method = get_builtin_field(None, method_name, factory).is_some();
     if is_potential_builtin_method {
@@ -1776,7 +1933,7 @@ fn parse_static_method_call_expression<'src: 'temp, 'temp, T: Expression + Rewri
         combined_args.push(dynamic_fallback);
         combined_args.extend(method_args);
         Ok(factory.create_application_term(
-            factory.create_native_function_term(dispatch()),
+            factory.create_builtin_term(JsStdlib::Dispatch),
             allocator.create_list(combined_args),
         ))
     } else {
@@ -1798,7 +1955,10 @@ fn parse_function_application_expression<'src: 'temp, 'temp, T: Expression + Rew
     env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> ParserResult<T> {
+) -> ParserResult<T>
+where
+    T::Builtin: From<Stdlib> + From<JsStdlib>,
+{
     let num_args = args.len();
     let (args, spread) = args.into_iter().fold(
         (Vec::with_capacity(num_args), None),
@@ -1822,7 +1982,7 @@ fn parse_function_application_expression<'src: 'temp, 'temp, T: Expression + Rew
             factory.create_partial_application_term(target, allocator.create_list(args))
         };
         Ok(factory.create_application_term(
-            factory.create_builtin_term(BuiltinTerm::Apply),
+            factory.create_builtin_term(Stdlib::Apply),
             allocator.create_pair(target, spread),
         ))
     } else {
@@ -1836,14 +1996,17 @@ fn parse_constructor_expression<'src, T: Expression + Rewritable<T>>(
     env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> ParserResult<T> {
+) -> ParserResult<T>
+where
+    T::Builtin: From<Stdlib> + From<JsStdlib>,
+{
     let target = parse_expression(&node.callee, scope, env, factory, allocator);
     let args = node
         .arguments
         .iter()
         .map(|arg| parse_expression(arg, scope, env, factory, allocator));
     Ok(factory.create_application_term(
-        factory.create_native_function_term(construct()),
+        factory.create_builtin_term(JsStdlib::Construct),
         allocator.create_list(once(target).chain(args).collect::<ParserResult<Vec<_>>>()?),
     ))
 }
@@ -1857,10 +2020,11 @@ mod tests {
 
     use super::{parse, parse_module};
     use crate::{
-        builtin_plugins,
-        builtins::{construct, dispatch, throw, to_string},
+        builtins::JsBuiltins,
+        globals::{builtin_globals, global_error},
+        imports::builtin_imports,
         static_module_loader,
-        stdlib::{builtin_globals, builtin_imports, globals::global_error},
+        stdlib::Stdlib as JsStdlib,
         Env,
     };
     use reflex::{
@@ -1871,10 +2035,11 @@ mod tests {
         },
         core::{
             evaluate, DependencyList, EvaluationResult, Expression, ExpressionFactory,
-            HeapAllocator, SignalType, StateCache, StringValue,
+            HeapAllocator, SignalType, StateCache, StringValue, Uid,
         },
         interpreter::{execute, DefaultInterpreterCache, InterpreterOptions},
-        lang::{create_struct, BuiltinTerm, TermFactory, ValueTerm},
+        lang::{create_struct, TermFactory, ValueTerm},
+        stdlib::Stdlib,
     };
 
     fn get_combined_errors<T: Expression>(
@@ -1932,11 +2097,14 @@ mod tests {
         payload: T,
         factory: &impl ExpressionFactory<T>,
         allocator: &impl HeapAllocator<T>,
-    ) -> T {
+    ) -> T
+    where
+        T::Builtin: From<Stdlib> + From<JsStdlib>,
+    {
         factory.create_application_term(
-            factory.create_builtin_term(BuiltinTerm::ResolveDeep),
+            factory.create_builtin_term(Stdlib::ResolveDeep),
             allocator.create_unit_list(factory.create_application_term(
-                factory.create_native_function_term(construct()),
+                factory.create_builtin_term(JsStdlib::Construct),
                 allocator.create_pair(global_error(factory, allocator), payload),
             )),
         )
@@ -1944,7 +2112,7 @@ mod tests {
 
     #[test]
     fn null_literals() {
-        let factory = TermFactory::default();
+        let factory = TermFactory::<JsBuiltins>::default();
         let allocator = DefaultAllocator::default();
         let env = Env::new();
         assert_eq!(
@@ -1955,7 +2123,7 @@ mod tests {
 
     #[test]
     fn boolean_literals() {
-        let factory = TermFactory::default();
+        let factory = TermFactory::<JsBuiltins>::default();
         let allocator = DefaultAllocator::default();
         let env = Env::new();
         assert_eq!(
@@ -1970,7 +2138,7 @@ mod tests {
 
     #[test]
     fn string_literals() {
-        let factory = TermFactory::default();
+        let factory = TermFactory::<JsBuiltins>::default();
         let allocator = DefaultAllocator::default();
         let env = Env::new();
         assert_eq!(
@@ -2017,7 +2185,7 @@ mod tests {
 
     #[test]
     fn numeric_literals() {
-        let factory = TermFactory::default();
+        let factory = TermFactory::<JsBuiltins>::default();
         let allocator = DefaultAllocator::default();
         let env = Env::new();
         assert_eq!(
@@ -2076,7 +2244,7 @@ mod tests {
 
     #[test]
     fn template_literals() {
-        let factory = TermFactory::default();
+        let factory = TermFactory::<JsBuiltins>::default();
         let allocator = DefaultAllocator::default();
         let env = Env::new();
         assert_eq!(
@@ -2105,7 +2273,7 @@ mod tests {
         assert_eq!(
             parse("`${'foo'}`", &env, &factory, &allocator),
             Ok(factory.create_application_term(
-                factory.create_native_function_term(to_string()),
+                factory.create_builtin_term(JsStdlib::ToString),
                 allocator.create_list(allocator.create_unit_list(factory.create_value_term(
                     ValueTerm::String(allocator.create_string(String::from("foo")))
                 ))),
@@ -2114,13 +2282,13 @@ mod tests {
         assert_eq!(
             parse("`foo${'bar'}`", &env, &factory, &allocator),
             Ok(factory.create_application_term(
-                factory.create_builtin_term(BuiltinTerm::Concat),
+                factory.create_builtin_term(Stdlib::Concat),
                 allocator.create_list(vec![
                     factory.create_value_term(ValueTerm::String(
                         allocator.create_string(String::from("foo"))
                     )),
                     factory.create_application_term(
-                        factory.create_native_function_term(to_string()),
+                        factory.create_builtin_term(JsStdlib::ToString),
                         allocator.create_unit_list(factory.create_value_term(ValueTerm::String(
                             allocator.create_string(String::from("bar"))
                         ))),
@@ -2131,10 +2299,10 @@ mod tests {
         assert_eq!(
             parse("`${'foo'}bar`", &env, &factory, &allocator),
             Ok(factory.create_application_term(
-                factory.create_builtin_term(BuiltinTerm::Concat),
+                factory.create_builtin_term(Stdlib::Concat),
                 allocator.create_list(vec![
                     factory.create_application_term(
-                        factory.create_native_function_term(to_string()),
+                        factory.create_builtin_term(JsStdlib::ToString),
                         allocator.create_unit_list(factory.create_value_term(ValueTerm::String(
                             allocator.create_string(String::from("foo"))
                         ))),
@@ -2148,16 +2316,16 @@ mod tests {
         assert_eq!(
             parse("`${'foo'}${'bar'}`", &env, &factory, &allocator),
             Ok(factory.create_application_term(
-                factory.create_builtin_term(BuiltinTerm::Concat),
+                factory.create_builtin_term(Stdlib::Concat),
                 allocator.create_list(vec![
                     factory.create_application_term(
-                        factory.create_native_function_term(to_string()),
+                        factory.create_builtin_term(JsStdlib::ToString),
                         allocator.create_unit_list(factory.create_value_term(ValueTerm::String(
                             allocator.create_string(String::from("foo"))
                         ))),
                     ),
                     factory.create_application_term(
-                        factory.create_native_function_term(to_string()),
+                        factory.create_builtin_term(JsStdlib::ToString),
                         allocator.create_unit_list(factory.create_value_term(ValueTerm::String(
                             allocator.create_string(String::from("bar"))
                         ))),
@@ -2168,13 +2336,13 @@ mod tests {
         assert_eq!(
             parse("`foo${'bar'}baz`", &env, &factory, &allocator),
             Ok(factory.create_application_term(
-                factory.create_builtin_term(BuiltinTerm::Concat),
+                factory.create_builtin_term(Stdlib::Concat),
                 allocator.create_list(vec![
                     factory.create_value_term(ValueTerm::String(
                         allocator.create_string(String::from("foo"))
                     )),
                     factory.create_application_term(
-                        factory.create_native_function_term(to_string()),
+                        factory.create_builtin_term(JsStdlib::ToString),
                         allocator.create_unit_list(factory.create_value_term(ValueTerm::String(
                             allocator.create_string(String::from("bar"))
                         ))),
@@ -2188,10 +2356,10 @@ mod tests {
         assert_eq!(
             parse("`${'foo'}bar${'baz'}`", &env, &factory, &allocator),
             Ok(factory.create_application_term(
-                factory.create_builtin_term(BuiltinTerm::Concat),
+                factory.create_builtin_term(Stdlib::Concat),
                 allocator.create_list(vec![
                     factory.create_application_term(
-                        factory.create_native_function_term(to_string()),
+                        factory.create_builtin_term(JsStdlib::ToString),
                         allocator.create_unit_list(factory.create_value_term(ValueTerm::String(
                             allocator.create_string(String::from("foo"))
                         ))),
@@ -2200,7 +2368,7 @@ mod tests {
                         allocator.create_string(String::from("bar"))
                     )),
                     factory.create_application_term(
-                        factory.create_native_function_term(to_string()),
+                        factory.create_builtin_term(JsStdlib::ToString),
                         allocator.create_unit_list(factory.create_value_term(ValueTerm::String(
                             allocator.create_string(String::from("baz"))
                         ))),
@@ -2211,22 +2379,22 @@ mod tests {
         assert_eq!(
             parse("`${'foo'}${'bar'}${'baz'}`", &env, &factory, &allocator),
             Ok(factory.create_application_term(
-                factory.create_builtin_term(BuiltinTerm::Concat),
+                factory.create_builtin_term(Stdlib::Concat),
                 allocator.create_list(vec![
                     factory.create_application_term(
-                        factory.create_native_function_term(to_string()),
+                        factory.create_builtin_term(JsStdlib::ToString),
                         allocator.create_unit_list(factory.create_value_term(ValueTerm::String(
                             allocator.create_string(String::from("foo"))
                         ))),
                     ),
                     factory.create_application_term(
-                        factory.create_native_function_term(to_string()),
+                        factory.create_builtin_term(JsStdlib::ToString),
                         allocator.create_unit_list(factory.create_value_term(ValueTerm::String(
                             allocator.create_string(String::from("bar"))
                         ))),
                     ),
                     factory.create_application_term(
-                        factory.create_native_function_term(to_string()),
+                        factory.create_builtin_term(JsStdlib::ToString),
                         allocator.create_unit_list(factory.create_value_term(ValueTerm::String(
                             allocator.create_string(String::from("baz"))
                         ))),
@@ -2242,13 +2410,13 @@ mod tests {
                 &allocator
             ),
             Ok(factory.create_application_term(
-                factory.create_builtin_term(BuiltinTerm::Concat),
+                factory.create_builtin_term(Stdlib::Concat),
                 allocator.create_list(vec![
                     factory.create_value_term(ValueTerm::String(
                         allocator.create_string(String::from("foo"))
                     )),
                     factory.create_application_term(
-                        factory.create_native_function_term(to_string()),
+                        factory.create_builtin_term(JsStdlib::ToString),
                         allocator.create_unit_list(factory.create_value_term(ValueTerm::String(
                             allocator.create_string(String::from("one"))
                         ))),
@@ -2257,7 +2425,7 @@ mod tests {
                         allocator.create_string(String::from("bar"))
                     )),
                     factory.create_application_term(
-                        factory.create_native_function_term(to_string()),
+                        factory.create_builtin_term(JsStdlib::ToString),
                         allocator.create_unit_list(factory.create_value_term(ValueTerm::String(
                             allocator.create_string(String::from("two"))
                         ))),
@@ -2266,7 +2434,7 @@ mod tests {
                         allocator.create_string(String::from("baz"))
                     )),
                     factory.create_application_term(
-                        factory.create_native_function_term(to_string()),
+                        factory.create_builtin_term(JsStdlib::ToString),
                         allocator.create_unit_list(factory.create_value_term(ValueTerm::String(
                             allocator.create_string(String::from("three"))
                         ))),
@@ -2278,7 +2446,7 @@ mod tests {
 
     #[test]
     fn object_literals() {
-        let factory = TermFactory::default();
+        let factory = TermFactory::<JsBuiltins>::default();
         let allocator = DefaultAllocator::default();
         let env = Env::new();
         assert_eq!(
@@ -2477,7 +2645,7 @@ mod tests {
 
     #[test]
     fn object_spread() {
-        let factory = TermFactory::default();
+        let factory = TermFactory::<JsBuiltins>::default();
         let allocator = DefaultAllocator::default();
         let env = Env::new();
         let expression = parse(
@@ -2488,10 +2656,10 @@ mod tests {
         )
         .unwrap();
         let query = factory.create_application_term(
-            factory.create_builtin_term(BuiltinTerm::CollectVector),
+            factory.create_builtin_term(Stdlib::CollectVector),
             allocator.create_list(vec![
                 factory.create_application_term(
-                    factory.create_builtin_term(BuiltinTerm::Get),
+                    factory.create_builtin_term(Stdlib::Get),
                     allocator.create_pair(
                         expression.clone(),
                         factory.create_value_term(ValueTerm::String(
@@ -2500,7 +2668,7 @@ mod tests {
                     ),
                 ),
                 factory.create_application_term(
-                    factory.create_builtin_term(BuiltinTerm::Get),
+                    factory.create_builtin_term(Stdlib::Get),
                     allocator.create_pair(
                         expression.clone(),
                         factory.create_value_term(ValueTerm::String(
@@ -2509,7 +2677,7 @@ mod tests {
                     ),
                 ),
                 factory.create_application_term(
-                    factory.create_builtin_term(BuiltinTerm::Get),
+                    factory.create_builtin_term(Stdlib::Get),
                     allocator.create_pair(
                         expression.clone(),
                         factory.create_value_term(ValueTerm::String(
@@ -2518,7 +2686,7 @@ mod tests {
                     ),
                 ),
                 factory.create_application_term(
-                    factory.create_builtin_term(BuiltinTerm::Get),
+                    factory.create_builtin_term(Stdlib::Get),
                     allocator.create_pair(
                         expression.clone(),
                         factory.create_value_term(ValueTerm::String(
@@ -2527,7 +2695,7 @@ mod tests {
                     ),
                 ),
                 factory.create_application_term(
-                    factory.create_builtin_term(BuiltinTerm::Get),
+                    factory.create_builtin_term(Stdlib::Get),
                     allocator.create_pair(
                         expression.clone(),
                         factory.create_value_term(ValueTerm::String(
@@ -2565,10 +2733,10 @@ mod tests {
         )
         .unwrap();
         let query = factory.create_application_term(
-            factory.create_builtin_term(BuiltinTerm::CollectVector),
+            factory.create_builtin_term(Stdlib::CollectVector),
             allocator.create_list(vec![
                 factory.create_application_term(
-                    factory.create_builtin_term(BuiltinTerm::Get),
+                    factory.create_builtin_term(Stdlib::Get),
                     allocator.create_pair(
                         expression.clone(),
                         factory.create_value_term(ValueTerm::String(
@@ -2577,7 +2745,7 @@ mod tests {
                     ),
                 ),
                 factory.create_application_term(
-                    factory.create_builtin_term(BuiltinTerm::Get),
+                    factory.create_builtin_term(Stdlib::Get),
                     allocator.create_pair(
                         expression.clone(),
                         factory.create_value_term(ValueTerm::String(
@@ -2586,7 +2754,7 @@ mod tests {
                     ),
                 ),
                 factory.create_application_term(
-                    factory.create_builtin_term(BuiltinTerm::Get),
+                    factory.create_builtin_term(Stdlib::Get),
                     allocator.create_pair(
                         expression.clone(),
                         factory.create_value_term(ValueTerm::String(
@@ -2618,7 +2786,7 @@ mod tests {
 
     #[test]
     fn array_literals() {
-        let factory = TermFactory::default();
+        let factory = TermFactory::<JsBuiltins>::default();
         let allocator = DefaultAllocator::default();
         let env = Env::new();
         assert_eq!(
@@ -2637,7 +2805,7 @@ mod tests {
 
     #[test]
     fn array_access() {
-        let factory = TermFactory::default();
+        let factory = TermFactory::<JsBuiltins>::default();
         let allocator = DefaultAllocator::default();
         let env = Env::new();
         let expression = parse(
@@ -2665,13 +2833,13 @@ mod tests {
 
     #[test]
     fn array_spread() {
-        let factory = TermFactory::default();
+        let factory = TermFactory::<JsBuiltins>::default();
         let allocator = DefaultAllocator::default();
         let env = Env::new();
         assert_eq!(
             parse("[...[3, 4, 5], 6]", &env, &factory, &allocator),
             Ok(factory.create_application_term(
-                factory.create_builtin_term(BuiltinTerm::Push),
+                factory.create_builtin_term(Stdlib::Push),
                 allocator.create_pair(
                     factory.create_vector_term(allocator.create_list(vec![
                         factory.create_value_term(ValueTerm::Float(3.0)),
@@ -2685,7 +2853,7 @@ mod tests {
         assert_eq!(
             parse("[3, ...[4, 5, 6]]", &env, &factory, &allocator),
             Ok(factory.create_application_term(
-                factory.create_builtin_term(BuiltinTerm::PushFront),
+                factory.create_builtin_term(Stdlib::PushFront),
                 allocator.create_pair(
                     factory.create_vector_term(allocator.create_list(vec![
                         factory.create_value_term(ValueTerm::Float(4.0)),
@@ -2704,7 +2872,7 @@ mod tests {
         )
         .unwrap();
         let query = factory.create_application_term(
-            factory.create_builtin_term(BuiltinTerm::Collect),
+            factory.create_builtin_term(Stdlib::Collect),
             allocator.create_unit_list(expression),
         );
         let result = evaluate(
@@ -2737,7 +2905,7 @@ mod tests {
         )
         .unwrap();
         let query = factory.create_application_term(
-            factory.create_builtin_term(BuiltinTerm::Collect),
+            factory.create_builtin_term(Stdlib::Collect),
             allocator.create_unit_list(expression),
         );
         let result = evaluate(
@@ -2762,7 +2930,7 @@ mod tests {
 
     #[test]
     fn array_methods() {
-        let factory = TermFactory::default();
+        let factory = TermFactory::<JsBuiltins>::default();
         let allocator = DefaultAllocator::default();
         let env = Env::new();
         assert_eq!(
@@ -2773,7 +2941,7 @@ mod tests {
                 &allocator
             ),
             Ok(factory.create_application_term(
-                factory.create_native_function_term(dispatch()),
+                factory.create_builtin_term(JsStdlib::Dispatch),
                 allocator.create_list(vec![
                     factory.create_vector_term(allocator.create_list(vec![
                         factory.create_value_term(ValueTerm::Float(3.0)),
@@ -2785,7 +2953,7 @@ mod tests {
                     )),
                     factory.create_application_term(
                         factory.create_application_term(
-                            factory.create_builtin_term(BuiltinTerm::Get),
+                            factory.create_builtin_term(Stdlib::Get),
                             allocator.create_pair(
                                 factory.create_vector_term(allocator.create_list(vec![
                                     factory.create_value_term(ValueTerm::Float(3.0)),
@@ -2800,7 +2968,7 @@ mod tests {
                         allocator.create_unit_list(factory.create_lambda_term(
                             1,
                             factory.create_application_term(
-                                factory.create_builtin_term(BuiltinTerm::Multiply),
+                                factory.create_builtin_term(Stdlib::Multiply),
                                 allocator.create_pair(
                                     factory.create_static_variable_term(0),
                                     factory.create_value_term(ValueTerm::Float(2.0)),
@@ -2811,7 +2979,7 @@ mod tests {
                     factory.create_lambda_term(
                         1,
                         factory.create_application_term(
-                            factory.create_builtin_term(BuiltinTerm::Multiply),
+                            factory.create_builtin_term(Stdlib::Multiply),
                             allocator.create_pair(
                                 factory.create_static_variable_term(0),
                                 factory.create_value_term(ValueTerm::Float(2.0)),
@@ -2825,7 +2993,7 @@ mod tests {
 
     #[test]
     fn parenthesized_expressions() {
-        let factory = TermFactory::default();
+        let factory = TermFactory::<JsBuiltins>::default();
         let allocator = DefaultAllocator::default();
         let env = Env::new();
         assert_eq!(
@@ -2840,7 +3008,7 @@ mod tests {
 
     #[test]
     fn modules() {
-        let factory = TermFactory::default();
+        let factory = TermFactory::<JsBuiltins>::default();
         let allocator = DefaultAllocator::default();
         let env = Env::new();
         let loader = static_module_loader(Vec::new());
@@ -2860,7 +3028,7 @@ mod tests {
 
     #[test]
     fn variable_declarations() {
-        let factory = TermFactory::default();
+        let factory = TermFactory::<JsBuiltins>::default();
         let allocator = DefaultAllocator::default();
         let env = Env::new();
         assert_eq!(
@@ -2904,7 +3072,7 @@ mod tests {
 
     #[test]
     fn variable_declaration_object_destructuring() {
-        let factory = TermFactory::default();
+        let factory = TermFactory::<JsBuiltins>::default();
         let allocator = DefaultAllocator::default();
         let env = Env::new();
         assert_eq!(
@@ -2929,7 +3097,7 @@ mod tests {
             ),
             Ok(factory.create_let_term(
                 factory.create_application_term(
-                    factory.create_builtin_term(BuiltinTerm::Get),
+                    factory.create_builtin_term(Stdlib::Get),
                     allocator.create_pair(
                         factory.create_struct_term(
                             allocator.create_struct_prototype(vec![
@@ -2973,7 +3141,7 @@ mod tests {
                 ),
                 factory.create_let_term(
                     factory.create_application_term(
-                        factory.create_builtin_term(BuiltinTerm::Get),
+                        factory.create_builtin_term(Stdlib::Get),
                         allocator.create_pair(
                             factory.create_static_variable_term(0),
                             factory.create_value_term(ValueTerm::String(
@@ -2983,7 +3151,7 @@ mod tests {
                     ),
                     factory.create_let_term(
                         factory.create_application_term(
-                            factory.create_builtin_term(BuiltinTerm::Get),
+                            factory.create_builtin_term(Stdlib::Get),
                             allocator.create_pair(
                                 factory.create_static_variable_term(1),
                                 factory.create_value_term(ValueTerm::String(
@@ -3018,7 +3186,7 @@ mod tests {
                 ),
                 factory.create_let_term(
                     factory.create_application_term(
-                        factory.create_builtin_term(BuiltinTerm::Get),
+                        factory.create_builtin_term(Stdlib::Get),
                         allocator.create_pair(
                             factory.create_static_variable_term(0),
                             factory.create_value_term(ValueTerm::String(
@@ -3028,7 +3196,7 @@ mod tests {
                     ),
                     factory.create_let_term(
                         factory.create_application_term(
-                            factory.create_builtin_term(BuiltinTerm::Get),
+                            factory.create_builtin_term(Stdlib::Get),
                             allocator.create_pair(
                                 factory.create_static_variable_term(1),
                                 factory.create_value_term(ValueTerm::String(
@@ -3063,7 +3231,7 @@ mod tests {
                 ),
                 factory.create_let_term(
                     factory.create_application_term(
-                        factory.create_builtin_term(BuiltinTerm::Get),
+                        factory.create_builtin_term(Stdlib::Get),
                         allocator.create_pair(
                             factory.create_static_variable_term(0),
                             factory.create_value_term(ValueTerm::String(
@@ -3073,7 +3241,7 @@ mod tests {
                     ),
                     factory.create_let_term(
                         factory.create_application_term(
-                            factory.create_builtin_term(BuiltinTerm::Get),
+                            factory.create_builtin_term(Stdlib::Get),
                             allocator.create_pair(
                                 factory.create_static_variable_term(1),
                                 factory.create_value_term(ValueTerm::String(
@@ -3108,7 +3276,7 @@ mod tests {
                 ),
                 factory.create_let_term(
                     factory.create_application_term(
-                        factory.create_builtin_term(BuiltinTerm::Get),
+                        factory.create_builtin_term(Stdlib::Get),
                         allocator.create_pair(
                             factory.create_static_variable_term(0),
                             factory.create_value_term(ValueTerm::String(
@@ -3118,7 +3286,7 @@ mod tests {
                     ),
                     factory.create_let_term(
                         factory.create_application_term(
-                            factory.create_builtin_term(BuiltinTerm::Get),
+                            factory.create_builtin_term(Stdlib::Get),
                             allocator.create_pair(
                                 factory.create_static_variable_term(1),
                                 factory.create_value_term(ValueTerm::String(
@@ -3155,7 +3323,7 @@ mod tests {
                     factory.create_static_variable_term(0),
                     factory.create_let_term(
                         factory.create_application_term(
-                            factory.create_builtin_term(BuiltinTerm::Get),
+                            factory.create_builtin_term(Stdlib::Get),
                             allocator.create_pair(
                                 factory.create_static_variable_term(0),
                                 factory.create_value_term(ValueTerm::String(
@@ -3165,7 +3333,7 @@ mod tests {
                         ),
                         factory.create_let_term(
                             factory.create_application_term(
-                                factory.create_builtin_term(BuiltinTerm::Get),
+                                factory.create_builtin_term(Stdlib::Get),
                                 allocator.create_pair(
                                     factory.create_static_variable_term(1),
                                     factory.create_value_term(ValueTerm::String(
@@ -3205,7 +3373,7 @@ mod tests {
                         factory.create_static_variable_term(1),
                         factory.create_let_term(
                             factory.create_application_term(
-                                factory.create_builtin_term(BuiltinTerm::Get),
+                                factory.create_builtin_term(Stdlib::Get),
                                 allocator.create_pair(
                                     factory.create_static_variable_term(0),
                                     factory.create_value_term(ValueTerm::String(
@@ -3215,7 +3383,7 @@ mod tests {
                             ),
                             factory.create_let_term(
                                 factory.create_application_term(
-                                    factory.create_builtin_term(BuiltinTerm::Get),
+                                    factory.create_builtin_term(Stdlib::Get),
                                     allocator.create_pair(
                                         factory.create_static_variable_term(1),
                                         factory.create_value_term(ValueTerm::String(
@@ -3268,7 +3436,7 @@ mod tests {
                 ),
                 factory.create_let_term(
                     factory.create_application_term(
-                        factory.create_builtin_term(BuiltinTerm::Get),
+                        factory.create_builtin_term(Stdlib::Get),
                         allocator.create_pair(
                             factory.create_static_variable_term(0),
                             factory.create_value_term(ValueTerm::String(allocator.create_string(String::from(
@@ -3278,7 +3446,7 @@ mod tests {
                     ),
                     factory.create_let_term(
                         factory.create_application_term(
-                            factory.create_builtin_term(BuiltinTerm::Get),
+                            factory.create_builtin_term(Stdlib::Get),
                             allocator.create_pair(
                                 factory.create_static_variable_term(1),
                                 factory.create_value_term(ValueTerm::String(allocator.create_string(String::from(
@@ -3290,7 +3458,7 @@ mod tests {
                             factory.create_static_variable_term(1),
                             factory.create_let_term(
                                 factory.create_application_term(
-                                    factory.create_builtin_term(BuiltinTerm::Get),
+                                    factory.create_builtin_term(Stdlib::Get),
                                     allocator.create_pair(
                                         factory.create_static_variable_term(0),
                                         factory.create_value_term(ValueTerm::String(allocator.create_string(String::from("a")))),
@@ -3298,7 +3466,7 @@ mod tests {
                                 ),
                                 factory.create_let_term(
                                     factory.create_application_term(
-                                        factory.create_builtin_term(BuiltinTerm::Get),
+                                        factory.create_builtin_term(Stdlib::Get),
                                         allocator.create_pair(
                                             factory.create_static_variable_term(1),
                                             factory.create_value_term(ValueTerm::String(allocator.create_string(String::from("b")))),
@@ -3308,7 +3476,7 @@ mod tests {
                                         factory.create_static_variable_term(3),
                                         factory.create_let_term(
                                             factory.create_application_term(
-                                                factory.create_builtin_term(BuiltinTerm::Get),
+                                                factory.create_builtin_term(Stdlib::Get),
                                                 allocator.create_pair(
                                                     factory.create_static_variable_term(0),
                                                     factory.create_value_term(ValueTerm::String(allocator.create_string(String::from("c")))),
@@ -3316,7 +3484,7 @@ mod tests {
                                             ),
                                             factory.create_let_term(
                                                 factory.create_application_term(
-                                                    factory.create_builtin_term(BuiltinTerm::Get),
+                                                    factory.create_builtin_term(Stdlib::Get),
                                                     allocator.create_pair(
                                                         factory.create_static_variable_term(1),
                                                         factory.create_value_term(ValueTerm::String(allocator.create_string(String::from("d")))),
@@ -3342,7 +3510,7 @@ mod tests {
                         factory.create_static_variable_term(0),
                         factory.create_let_term(
                             factory.create_application_term(
-                                factory.create_builtin_term(BuiltinTerm::Get),
+                                factory.create_builtin_term(Stdlib::Get),
                                 allocator.create_pair(
                                     factory.create_static_variable_term(0),
                                     factory.create_value_term(ValueTerm::String(allocator.create_string(String::from("foo")))),
@@ -3350,7 +3518,7 @@ mod tests {
                             ),
                             factory.create_let_term(
                                 factory.create_application_term(
-                                    factory.create_builtin_term(BuiltinTerm::Get),
+                                    factory.create_builtin_term(Stdlib::Get),
                                     allocator.create_pair(
                                         factory.create_static_variable_term(1),
                                         factory.create_value_term(ValueTerm::String(allocator.create_string(String::from("bar")))),
@@ -3377,7 +3545,7 @@ mod tests {
 
     #[test]
     fn variable_declaration_array_destructuring() {
-        let factory = TermFactory::default();
+        let factory = TermFactory::<JsBuiltins>::default();
         let allocator = DefaultAllocator::default();
         let env = Env::new();
         assert_eq!(
@@ -3388,7 +3556,7 @@ mod tests {
             parse("const [foo] = [3, 4, 5]; foo;", &env, &factory, &allocator),
             Ok(factory.create_let_term(
                 factory.create_application_term(
-                    factory.create_builtin_term(BuiltinTerm::Get),
+                    factory.create_builtin_term(Stdlib::Get),
                     allocator.create_pair(
                         factory.create_vector_term(allocator.create_list(vec![
                             factory.create_value_term(ValueTerm::Float(3.0)),
@@ -3416,7 +3584,7 @@ mod tests {
                 ])),
                 factory.create_let_term(
                     factory.create_application_term(
-                        factory.create_builtin_term(BuiltinTerm::Get),
+                        factory.create_builtin_term(Stdlib::Get),
                         allocator.create_pair(
                             factory.create_static_variable_term(0),
                             factory.create_value_term(ValueTerm::Int(0)),
@@ -3424,7 +3592,7 @@ mod tests {
                     ),
                     factory.create_let_term(
                         factory.create_application_term(
-                            factory.create_builtin_term(BuiltinTerm::Get),
+                            factory.create_builtin_term(Stdlib::Get),
                             allocator.create_pair(
                                 factory.create_static_variable_term(1),
                                 factory.create_value_term(ValueTerm::Int(1)),
@@ -3444,7 +3612,7 @@ mod tests {
             ),
             Ok(factory.create_let_term(
                 factory.create_application_term(
-                    factory.create_builtin_term(BuiltinTerm::Get),
+                    factory.create_builtin_term(Stdlib::Get),
                     allocator.create_pair(
                         factory.create_vector_term(allocator.create_list(vec![
                             factory.create_value_term(ValueTerm::Float(3.0)),
@@ -3472,7 +3640,7 @@ mod tests {
                 ])),
                 factory.create_let_term(
                     factory.create_application_term(
-                        factory.create_builtin_term(BuiltinTerm::Get),
+                        factory.create_builtin_term(Stdlib::Get),
                         allocator.create_pair(
                             factory.create_static_variable_term(0),
                             factory.create_value_term(ValueTerm::Int(1)),
@@ -3480,7 +3648,7 @@ mod tests {
                     ),
                     factory.create_let_term(
                         factory.create_application_term(
-                            factory.create_builtin_term(BuiltinTerm::Get),
+                            factory.create_builtin_term(Stdlib::Get),
                             allocator.create_pair(
                                 factory.create_static_variable_term(1),
                                 factory.create_value_term(ValueTerm::Int(2)),
@@ -3502,7 +3670,7 @@ mod tests {
                 factory.create_value_term(ValueTerm::Boolean(true)),
                 factory.create_let_term(
                     factory.create_application_term(
-                        factory.create_builtin_term(BuiltinTerm::Get),
+                        factory.create_builtin_term(Stdlib::Get),
                         allocator.create_pair(
                             factory.create_vector_term(allocator.create_list(vec![
                                 factory.create_value_term(ValueTerm::Float(3.0)),
@@ -3533,7 +3701,7 @@ mod tests {
                     ])),
                     factory.create_let_term(
                         factory.create_application_term(
-                            factory.create_builtin_term(BuiltinTerm::Get),
+                            factory.create_builtin_term(Stdlib::Get),
                             allocator.create_pair(
                                 factory.create_static_variable_term(0),
                                 factory.create_value_term(ValueTerm::Int(0)),
@@ -3541,7 +3709,7 @@ mod tests {
                         ),
                         factory.create_let_term(
                             factory.create_application_term(
-                                factory.create_builtin_term(BuiltinTerm::Get),
+                                factory.create_builtin_term(Stdlib::Get),
                                 allocator.create_pair(
                                     factory.create_static_variable_term(1),
                                     factory.create_value_term(ValueTerm::Int(1)),
@@ -3557,7 +3725,7 @@ mod tests {
 
     #[test]
     fn variable_scoping() {
-        let factory = TermFactory::default();
+        let factory = TermFactory::<JsBuiltins>::default();
         let allocator = DefaultAllocator::default();
         let env = Env::new();
         let expression = parse(
@@ -3618,7 +3786,7 @@ mod tests {
 
     #[test]
     fn variable_dependencies() {
-        let factory = TermFactory::default();
+        let factory = TermFactory::<JsBuiltins>::default();
         let allocator = DefaultAllocator::default();
         let env = Env::new();
         let expression = parse(
@@ -3677,27 +3845,27 @@ mod tests {
 
     #[test]
     fn not_expressions() {
-        let factory = TermFactory::default();
+        let factory = TermFactory::<JsBuiltins>::default();
         let allocator = DefaultAllocator::default();
         let env = Env::new();
         assert_eq!(
             parse("!true", &env, &factory, &allocator),
             Ok(factory.create_application_term(
-                factory.create_builtin_term(BuiltinTerm::Not),
+                factory.create_builtin_term(Stdlib::Not),
                 allocator.create_unit_list(factory.create_value_term(ValueTerm::Boolean(true))),
             )),
         );
         assert_eq!(
             parse("!false", &env, &factory, &allocator),
             Ok(factory.create_application_term(
-                factory.create_builtin_term(BuiltinTerm::Not),
+                factory.create_builtin_term(Stdlib::Not),
                 allocator.create_unit_list(factory.create_value_term(ValueTerm::Boolean(false))),
             )),
         );
         assert_eq!(
             parse("!3", &env, &factory, &allocator),
             Ok(factory.create_application_term(
-                factory.create_builtin_term(BuiltinTerm::Not),
+                factory.create_builtin_term(Stdlib::Not),
                 allocator.create_unit_list(factory.create_value_term(ValueTerm::Float(3.0))),
             )),
         );
@@ -3705,13 +3873,13 @@ mod tests {
 
     #[test]
     fn arithmetic_expressions() {
-        let factory = TermFactory::default();
+        let factory = TermFactory::<JsBuiltins>::default();
         let allocator = DefaultAllocator::default();
         let env = Env::new();
         assert_eq!(
             parse("3 + 4", &env, &factory, &allocator),
             Ok(factory.create_application_term(
-                factory.create_builtin_term(BuiltinTerm::Add),
+                factory.create_builtin_term(Stdlib::Add),
                 allocator.create_pair(
                     factory.create_value_term(ValueTerm::Float(3.0)),
                     factory.create_value_term(ValueTerm::Float(4.0)),
@@ -3721,7 +3889,7 @@ mod tests {
         assert_eq!(
             parse("3 - 4", &env, &factory, &allocator),
             Ok(factory.create_application_term(
-                factory.create_builtin_term(BuiltinTerm::Subtract),
+                factory.create_builtin_term(Stdlib::Subtract),
                 allocator.create_pair(
                     factory.create_value_term(ValueTerm::Float(3.0)),
                     factory.create_value_term(ValueTerm::Float(4.0)),
@@ -3731,7 +3899,7 @@ mod tests {
         assert_eq!(
             parse("3 * 4", &env, &factory, &allocator),
             Ok(factory.create_application_term(
-                factory.create_builtin_term(BuiltinTerm::Multiply),
+                factory.create_builtin_term(Stdlib::Multiply),
                 allocator.create_pair(
                     factory.create_value_term(ValueTerm::Float(3.0)),
                     factory.create_value_term(ValueTerm::Float(4.0)),
@@ -3741,7 +3909,7 @@ mod tests {
         assert_eq!(
             parse("3 / 4", &env, &factory, &allocator),
             Ok(factory.create_application_term(
-                factory.create_builtin_term(BuiltinTerm::Divide),
+                factory.create_builtin_term(Stdlib::Divide),
                 allocator.create_pair(
                     factory.create_value_term(ValueTerm::Float(3.0)),
                     factory.create_value_term(ValueTerm::Float(4.0)),
@@ -3751,7 +3919,7 @@ mod tests {
         assert_eq!(
             parse("3 % 4", &env, &factory, &allocator),
             Ok(factory.create_application_term(
-                factory.create_builtin_term(BuiltinTerm::Remainder),
+                factory.create_builtin_term(Stdlib::Remainder),
                 allocator.create_pair(
                     factory.create_value_term(ValueTerm::Float(3.0)),
                     factory.create_value_term(ValueTerm::Float(4.0)),
@@ -3761,7 +3929,7 @@ mod tests {
         assert_eq!(
             parse("3 ** 4", &env, &factory, &allocator),
             Ok(factory.create_application_term(
-                factory.create_builtin_term(BuiltinTerm::Pow),
+                factory.create_builtin_term(Stdlib::Pow),
                 allocator.create_pair(
                     factory.create_value_term(ValueTerm::Float(3.0)),
                     factory.create_value_term(ValueTerm::Float(4.0)),
@@ -3771,7 +3939,7 @@ mod tests {
         assert_eq!(
             parse("3 < 4", &env, &factory, &allocator),
             Ok(factory.create_application_term(
-                factory.create_builtin_term(BuiltinTerm::Lt),
+                factory.create_builtin_term(Stdlib::Lt),
                 allocator.create_pair(
                     factory.create_value_term(ValueTerm::Float(3.0)),
                     factory.create_value_term(ValueTerm::Float(4.0)),
@@ -3781,7 +3949,7 @@ mod tests {
         assert_eq!(
             parse("3 <= 4", &env, &factory, &allocator),
             Ok(factory.create_application_term(
-                factory.create_builtin_term(BuiltinTerm::Lte),
+                factory.create_builtin_term(Stdlib::Lte),
                 allocator.create_pair(
                     factory.create_value_term(ValueTerm::Float(3.0)),
                     factory.create_value_term(ValueTerm::Float(4.0)),
@@ -3791,7 +3959,7 @@ mod tests {
         assert_eq!(
             parse("3 > 4", &env, &factory, &allocator),
             Ok(factory.create_application_term(
-                factory.create_builtin_term(BuiltinTerm::Gt),
+                factory.create_builtin_term(Stdlib::Gt),
                 allocator.create_pair(
                     factory.create_value_term(ValueTerm::Float(3.0)),
                     factory.create_value_term(ValueTerm::Float(4.0)),
@@ -3801,7 +3969,7 @@ mod tests {
         assert_eq!(
             parse("3 >= 4", &env, &factory, &allocator),
             Ok(factory.create_application_term(
-                factory.create_builtin_term(BuiltinTerm::Gte),
+                factory.create_builtin_term(Stdlib::Gte),
                 allocator.create_pair(
                     factory.create_value_term(ValueTerm::Float(3.0)),
                     factory.create_value_term(ValueTerm::Float(4.0)),
@@ -3812,13 +3980,13 @@ mod tests {
 
     #[test]
     fn equality_expression() {
-        let factory = TermFactory::default();
+        let factory = TermFactory::<JsBuiltins>::default();
         let allocator = DefaultAllocator::default();
         let env = Env::new();
         assert_eq!(
             parse("true === false", &env, &factory, &allocator),
             Ok(factory.create_application_term(
-                factory.create_builtin_term(BuiltinTerm::Eq),
+                factory.create_builtin_term(Stdlib::Eq),
                 allocator.create_pair(
                     factory.create_value_term(ValueTerm::Boolean(true)),
                     factory.create_value_term(ValueTerm::Boolean(false)),
@@ -3828,9 +3996,9 @@ mod tests {
         assert_eq!(
             parse("true !== false", &env, &factory, &allocator),
             Ok(factory.create_application_term(
-                factory.create_builtin_term(BuiltinTerm::Not),
+                factory.create_builtin_term(Stdlib::Not),
                 allocator.create_unit_list(factory.create_application_term(
-                    factory.create_builtin_term(BuiltinTerm::Eq),
+                    factory.create_builtin_term(Stdlib::Eq),
                     allocator.create_pair(
                         factory.create_value_term(ValueTerm::Boolean(true)),
                         factory.create_value_term(ValueTerm::Boolean(false)),
@@ -3842,13 +4010,13 @@ mod tests {
 
     #[test]
     fn logical_expression() {
-        let factory = TermFactory::default();
+        let factory = TermFactory::<JsBuiltins>::default();
         let allocator = DefaultAllocator::default();
         let env = Env::new();
         assert_eq!(
             parse("true && false", &env, &factory, &allocator),
             Ok(factory.create_application_term(
-                factory.create_builtin_term(BuiltinTerm::And),
+                factory.create_builtin_term(Stdlib::And),
                 allocator.create_pair(
                     factory.create_value_term(ValueTerm::Boolean(true)),
                     factory.create_value_term(ValueTerm::Boolean(false)),
@@ -3858,7 +4026,7 @@ mod tests {
         assert_eq!(
             parse("true || false", &env, &factory, &allocator),
             Ok(factory.create_application_term(
-                factory.create_builtin_term(BuiltinTerm::Or),
+                factory.create_builtin_term(Stdlib::Or),
                 allocator.create_pair(
                     factory.create_value_term(ValueTerm::Boolean(true)),
                     factory.create_value_term(ValueTerm::Boolean(false)),
@@ -3869,13 +4037,13 @@ mod tests {
 
     #[test]
     fn conditional_expression() {
-        let factory = TermFactory::default();
+        let factory = TermFactory::<JsBuiltins>::default();
         let allocator = DefaultAllocator::default();
         let env = Env::new();
         assert_eq!(
             parse("true ? 3 : 4", &env, &factory, &allocator),
             Ok(factory.create_application_term(
-                factory.create_builtin_term(BuiltinTerm::If),
+                factory.create_builtin_term(Stdlib::If),
                 allocator.create_triple(
                     factory.create_value_term(ValueTerm::Boolean(true)),
                     factory.create_value_term(ValueTerm::Float(3.0)),
@@ -3887,7 +4055,7 @@ mod tests {
 
     #[test]
     fn if_statements() {
-        let factory = TermFactory::default();
+        let factory = TermFactory::<JsBuiltins>::default();
         let allocator = DefaultAllocator::default();
         let env = Env::new().with_globals(builtin_globals(&factory, &allocator));
         assert_eq!(
@@ -3901,7 +4069,7 @@ mod tests {
                 factory.create_lambda_term(
                     0,
                     factory.create_application_term(
-                        factory.create_builtin_term(BuiltinTerm::If),
+                        factory.create_builtin_term(Stdlib::If),
                         allocator.create_triple(
                             factory.create_value_term(ValueTerm::Boolean(true)),
                             factory.create_value_term(ValueTerm::Float(3.0)),
@@ -3918,11 +4086,11 @@ mod tests {
                 factory.create_lambda_term(
                     0,
                     factory.create_application_term(
-                        factory.create_builtin_term(BuiltinTerm::If),
+                        factory.create_builtin_term(Stdlib::If),
                         allocator.create_triple(
                             factory.create_value_term(ValueTerm::Boolean(true)),
                             factory.create_application_term(
-                                factory.create_native_function_term(throw()),
+                                factory.create_builtin_term(JsStdlib::Throw),
                                 allocator.create_unit_list(
                                     create_error_instance(
                                         factory.create_value_term(ValueTerm::String(allocator.create_string(String::from("foo")))),
@@ -3932,7 +4100,7 @@ mod tests {
                                 ),
                             ),
                             factory.create_application_term(
-                                factory.create_native_function_term(throw()),
+                                factory.create_builtin_term(JsStdlib::Throw),
                                 allocator.create_unit_list(
                                     create_error_instance(
                                         factory.create_value_term(ValueTerm::String(allocator.create_string(String::from("bar")))),
@@ -3953,7 +4121,7 @@ mod tests {
                 factory.create_lambda_term(
                     0,
                     factory.create_application_term(
-                        factory.create_builtin_term(BuiltinTerm::If),
+                        factory.create_builtin_term(Stdlib::If),
                         allocator.create_triple(
                             factory.create_value_term(ValueTerm::Boolean(true)),
                             factory.create_let_term(
@@ -3961,7 +4129,7 @@ mod tests {
                                 factory.create_let_term(
                                     factory.create_value_term(ValueTerm::Float(4.0)),
                                     factory.create_application_term(
-                                        factory.create_builtin_term(BuiltinTerm::Add),
+                                        factory.create_builtin_term(Stdlib::Add),
                                         allocator.create_pair(
                                             factory.create_static_variable_term(1),
                                             factory.create_static_variable_term(0),
@@ -3974,7 +4142,7 @@ mod tests {
                                 factory.create_let_term(
                                     factory.create_value_term(ValueTerm::Float(3.0)),
                                     factory.create_application_term(
-                                        factory.create_builtin_term(BuiltinTerm::Add),
+                                        factory.create_builtin_term(Stdlib::Add),
                                         allocator.create_pair(
                                             factory.create_static_variable_term(1),
                                             factory.create_static_variable_term(0),
@@ -3994,7 +4162,7 @@ mod tests {
                 factory.create_lambda_term(
                     0,
                     factory.create_application_term(
-                        factory.create_builtin_term(BuiltinTerm::If),
+                        factory.create_builtin_term(Stdlib::If),
                         allocator.create_triple(
                             factory.create_value_term(ValueTerm::Boolean(true)),
                             factory.create_let_term(
@@ -4002,7 +4170,7 @@ mod tests {
                                 factory.create_let_term(
                                     factory.create_value_term(ValueTerm::Float(4.0)),
                                     factory.create_application_term(
-                                        factory.create_builtin_term(BuiltinTerm::Add),
+                                        factory.create_builtin_term(Stdlib::Add),
                                         allocator.create_pair(
                                             factory.create_static_variable_term(1),
                                             factory.create_static_variable_term(0),
@@ -4015,7 +4183,7 @@ mod tests {
                                 factory.create_let_term(
                                     factory.create_value_term(ValueTerm::Float(3.0)),
                                     factory.create_application_term(
-                                        factory.create_builtin_term(BuiltinTerm::Add),
+                                        factory.create_builtin_term(Stdlib::Add),
                                         allocator.create_pair(
                                             factory.create_static_variable_term(1),
                                             factory.create_static_variable_term(0),
@@ -4035,11 +4203,11 @@ mod tests {
                 factory.create_lambda_term(
                     0,
                     factory.create_application_term(
-                        factory.create_builtin_term(BuiltinTerm::If),
+                        factory.create_builtin_term(Stdlib::If),
                         allocator.create_triple(
                             factory.create_value_term(ValueTerm::Boolean(true)),
                             factory.create_application_term(
-                                factory.create_native_function_term(throw()),
+                                factory.create_builtin_term(JsStdlib::Throw),
                                 allocator.create_unit_list(
                                     create_error_instance(
                                         factory.create_value_term(ValueTerm::String(allocator.create_string(String::from("foo")))),
@@ -4053,7 +4221,7 @@ mod tests {
                                 factory.create_let_term(
                                     factory.create_value_term(ValueTerm::Float(4.0)),
                                     factory.create_application_term(
-                                        factory.create_builtin_term(BuiltinTerm::Add),
+                                        factory.create_builtin_term(Stdlib::Add),
                                         allocator.create_pair(
                                             factory.create_static_variable_term(1),
                                             factory.create_static_variable_term(0),
@@ -4071,13 +4239,13 @@ mod tests {
 
     #[test]
     fn throw_statements() {
-        let factory = TermFactory::default();
+        let factory = TermFactory::<JsBuiltins>::default();
         let allocator = DefaultAllocator::default();
         let env = Env::new().with_globals(builtin_globals(&factory, &allocator));
         assert_eq!(
             parse("throw new Error(\"foo\")", &env, &factory, &allocator),
             Ok(factory.create_application_term(
-                factory.create_native_function_term(throw()),
+                factory.create_builtin_term(JsStdlib::Throw),
                 allocator.create_unit_list(create_error_instance(
                     factory.create_value_term(ValueTerm::String(
                         allocator.create_string(String::from("foo"))
@@ -4090,16 +4258,16 @@ mod tests {
         assert_eq!(
             parse("throw new Error(`foo${'bar'}`)", &env, &factory, &allocator),
             Ok(factory.create_application_term(
-                factory.create_native_function_term(throw()),
+                factory.create_builtin_term(JsStdlib::Throw),
                 allocator.create_unit_list(create_error_instance(
                     factory.create_application_term(
-                        factory.create_builtin_term(BuiltinTerm::Concat),
+                        factory.create_builtin_term(Stdlib::Concat),
                         allocator.create_pair(
                             factory.create_value_term(ValueTerm::String(
                                 allocator.create_string(String::from("foo"))
                             )),
                             factory.create_application_term(
-                                factory.create_native_function_term(to_string()),
+                                factory.create_builtin_term(JsStdlib::ToString),
                                 allocator.create_unit_list(factory.create_value_term(
                                     ValueTerm::String(allocator.create_string(String::from("bar")))
                                 )),
@@ -4115,7 +4283,7 @@ mod tests {
 
     #[test]
     fn try_catch_statements() {
-        let factory = TermFactory::default();
+        let factory = TermFactory::<JsBuiltins>::default();
         let allocator = DefaultAllocator::default();
         let env = Env::new().with_globals(builtin_globals(&factory, &allocator));
         let expression = parse(
@@ -4488,7 +4656,7 @@ mod tests {
 
     #[test]
     fn arrow_function_expressions() {
-        let factory = TermFactory::default();
+        let factory = TermFactory::<JsBuiltins>::default();
         let allocator = DefaultAllocator::default();
         let env = Env::new();
         assert_eq!(
@@ -4508,7 +4676,7 @@ mod tests {
             Ok(factory.create_lambda_term(
                 1,
                 factory.create_application_term(
-                    factory.create_builtin_term(BuiltinTerm::Add),
+                    factory.create_builtin_term(Stdlib::Add),
                     allocator.create_pair(
                         factory.create_static_variable_term(0),
                         factory.create_static_variable_term(0),
@@ -4521,7 +4689,7 @@ mod tests {
             Ok(factory.create_lambda_term(
                 3,
                 factory.create_application_term(
-                    factory.create_builtin_term(BuiltinTerm::Add),
+                    factory.create_builtin_term(Stdlib::Add),
                     allocator.create_pair(
                         factory.create_static_variable_term(2),
                         factory.create_static_variable_term(1),
@@ -4543,7 +4711,7 @@ mod tests {
                     factory.create_lambda_term(
                         1,
                         factory.create_application_term(
-                            factory.create_builtin_term(BuiltinTerm::Add),
+                            factory.create_builtin_term(Stdlib::Add),
                             allocator.create_pair(
                                 factory.create_static_variable_term(2),
                                 factory.create_static_variable_term(1),
@@ -4557,7 +4725,7 @@ mod tests {
 
     #[test]
     fn arrow_function_object_destructuring() {
-        let factory = TermFactory::default();
+        let factory = TermFactory::<JsBuiltins>::default();
         let allocator = DefaultAllocator::default();
         let env = Env::new();
         assert_eq!(
@@ -4570,7 +4738,7 @@ mod tests {
                 1,
                 factory.create_let_term(
                     factory.create_application_term(
-                        factory.create_builtin_term(BuiltinTerm::Get),
+                        factory.create_builtin_term(Stdlib::Get),
                         allocator.create_pair(
                             factory.create_static_variable_term(0),
                             factory.create_value_term(ValueTerm::String(
@@ -4590,7 +4758,7 @@ mod tests {
                     factory.create_static_variable_term(0),
                     factory.create_let_term(
                         factory.create_application_term(
-                            factory.create_builtin_term(BuiltinTerm::Get),
+                            factory.create_builtin_term(Stdlib::Get),
                             allocator.create_pair(
                                 factory.create_static_variable_term(0),
                                 factory.create_value_term(ValueTerm::String(
@@ -4600,7 +4768,7 @@ mod tests {
                         ),
                         factory.create_let_term(
                             factory.create_application_term(
-                                factory.create_builtin_term(BuiltinTerm::Get),
+                                factory.create_builtin_term(Stdlib::Get),
                                 allocator.create_pair(
                                     factory.create_static_variable_term(1),
                                     factory.create_value_term(ValueTerm::String(
@@ -4609,7 +4777,7 @@ mod tests {
                                 ),
                             ),
                             factory.create_application_term(
-                                factory.create_builtin_term(BuiltinTerm::Add),
+                                factory.create_builtin_term(Stdlib::Add),
                                 allocator.create_pair(
                                     factory.create_static_variable_term(1),
                                     factory.create_static_variable_term(0),
@@ -4633,7 +4801,7 @@ mod tests {
                     factory.create_static_variable_term(2),
                     factory.create_let_term(
                         factory.create_application_term(
-                            factory.create_builtin_term(BuiltinTerm::Get),
+                            factory.create_builtin_term(Stdlib::Get),
                             allocator.create_pair(
                                 factory.create_static_variable_term(0),
                                 factory.create_value_term(ValueTerm::String(
@@ -4643,7 +4811,7 @@ mod tests {
                         ),
                         factory.create_let_term(
                             factory.create_application_term(
-                                factory.create_builtin_term(BuiltinTerm::Get),
+                                factory.create_builtin_term(Stdlib::Get),
                                 allocator.create_pair(
                                     factory.create_static_variable_term(1),
                                     factory.create_value_term(ValueTerm::String(
@@ -4652,13 +4820,13 @@ mod tests {
                                 ),
                             ),
                             factory.create_application_term(
-                                factory.create_builtin_term(BuiltinTerm::Add),
+                                factory.create_builtin_term(Stdlib::Add),
                                 allocator.create_pair(
                                     factory.create_application_term(
-                                        factory.create_builtin_term(BuiltinTerm::Add),
+                                        factory.create_builtin_term(Stdlib::Add),
                                         allocator.create_pair(
                                             factory.create_application_term(
-                                                factory.create_builtin_term(BuiltinTerm::Add),
+                                                factory.create_builtin_term(Stdlib::Add),
                                                 allocator.create_pair(
                                                     factory.create_static_variable_term(6),
                                                     factory.create_static_variable_term(1),
@@ -4679,7 +4847,7 @@ mod tests {
 
     #[test]
     fn arrow_function_array_destructuring() {
-        let factory = TermFactory::default();
+        let factory = TermFactory::<JsBuiltins>::default();
         let allocator = DefaultAllocator::default();
         let env = Env::new();
         assert_eq!(
@@ -4692,7 +4860,7 @@ mod tests {
                 1,
                 factory.create_let_term(
                     factory.create_application_term(
-                        factory.create_builtin_term(BuiltinTerm::Get),
+                        factory.create_builtin_term(Stdlib::Get),
                         allocator.create_pair(
                             factory.create_static_variable_term(0),
                             factory.create_value_term(ValueTerm::Int(0)),
@@ -4710,7 +4878,7 @@ mod tests {
                     factory.create_static_variable_term(0),
                     factory.create_let_term(
                         factory.create_application_term(
-                            factory.create_builtin_term(BuiltinTerm::Get),
+                            factory.create_builtin_term(Stdlib::Get),
                             allocator.create_pair(
                                 factory.create_static_variable_term(0),
                                 factory.create_value_term(ValueTerm::Int(0)),
@@ -4718,14 +4886,14 @@ mod tests {
                         ),
                         factory.create_let_term(
                             factory.create_application_term(
-                                factory.create_builtin_term(BuiltinTerm::Get),
+                                factory.create_builtin_term(Stdlib::Get),
                                 allocator.create_pair(
                                     factory.create_static_variable_term(1),
                                     factory.create_value_term(ValueTerm::Int(1)),
                                 ),
                             ),
                             factory.create_application_term(
-                                factory.create_builtin_term(BuiltinTerm::Add),
+                                factory.create_builtin_term(Stdlib::Add),
                                 allocator.create_pair(
                                     factory.create_static_variable_term(1),
                                     factory.create_static_variable_term(0),
@@ -4742,7 +4910,7 @@ mod tests {
                 1,
                 factory.create_let_term(
                     factory.create_application_term(
-                        factory.create_builtin_term(BuiltinTerm::Get),
+                        factory.create_builtin_term(Stdlib::Get),
                         allocator.create_pair(
                             factory.create_static_variable_term(0),
                             factory.create_value_term(ValueTerm::Int(2)),
@@ -4760,7 +4928,7 @@ mod tests {
                     factory.create_static_variable_term(0),
                     factory.create_let_term(
                         factory.create_application_term(
-                            factory.create_builtin_term(BuiltinTerm::Get),
+                            factory.create_builtin_term(Stdlib::Get),
                             allocator.create_pair(
                                 factory.create_static_variable_term(0),
                                 factory.create_value_term(ValueTerm::Int(1)),
@@ -4768,7 +4936,7 @@ mod tests {
                         ),
                         factory.create_let_term(
                             factory.create_application_term(
-                                factory.create_builtin_term(BuiltinTerm::Get),
+                                factory.create_builtin_term(Stdlib::Get),
                                 allocator.create_pair(
                                     factory.create_static_variable_term(1),
                                     factory.create_value_term(ValueTerm::Int(2)),
@@ -4793,7 +4961,7 @@ mod tests {
                     factory.create_static_variable_term(2),
                     factory.create_let_term(
                         factory.create_application_term(
-                            factory.create_builtin_term(BuiltinTerm::Get),
+                            factory.create_builtin_term(Stdlib::Get),
                             allocator.create_pair(
                                 factory.create_static_variable_term(0),
                                 factory.create_value_term(ValueTerm::Int(0)),
@@ -4801,20 +4969,20 @@ mod tests {
                         ),
                         factory.create_let_term(
                             factory.create_application_term(
-                                factory.create_builtin_term(BuiltinTerm::Get),
+                                factory.create_builtin_term(Stdlib::Get),
                                 allocator.create_pair(
                                     factory.create_static_variable_term(1),
                                     factory.create_value_term(ValueTerm::Int(1)),
                                 ),
                             ),
                             factory.create_application_term(
-                                factory.create_builtin_term(BuiltinTerm::Add),
+                                factory.create_builtin_term(Stdlib::Add),
                                 allocator.create_pair(
                                     factory.create_application_term(
-                                        factory.create_builtin_term(BuiltinTerm::Add),
+                                        factory.create_builtin_term(Stdlib::Add),
                                         allocator.create_pair(
                                             factory.create_application_term(
-                                                factory.create_builtin_term(BuiltinTerm::Add),
+                                                factory.create_builtin_term(Stdlib::Add),
                                                 allocator.create_pair(
                                                     factory.create_static_variable_term(6),
                                                     factory.create_static_variable_term(1),
@@ -4835,7 +5003,7 @@ mod tests {
 
     #[test]
     fn function_application_expressions() {
-        let factory = TermFactory::default();
+        let factory = TermFactory::<JsBuiltins>::default();
         let allocator = DefaultAllocator::default();
         let env = Env::new();
         assert_eq!(
@@ -4863,7 +5031,7 @@ mod tests {
                 factory.create_lambda_term(
                     3,
                     factory.create_application_term(
-                        factory.create_builtin_term(BuiltinTerm::Add),
+                        factory.create_builtin_term(Stdlib::Add),
                         allocator.create_pair(
                             factory.create_static_variable_term(2),
                             factory.create_static_variable_term(1),
@@ -4894,7 +5062,7 @@ mod tests {
                                 factory.create_lambda_term(
                                     1,
                                     factory.create_application_term(
-                                        factory.create_builtin_term(BuiltinTerm::Add),
+                                        factory.create_builtin_term(Stdlib::Add),
                                         allocator.create_pair(
                                             factory.create_static_variable_term(2),
                                             factory.create_static_variable_term(1),
@@ -4915,18 +5083,18 @@ mod tests {
 
     #[test]
     fn function_arg_spreading() {
-        let factory = TermFactory::default();
+        let factory = TermFactory::<JsBuiltins>::default();
         let allocator = DefaultAllocator::default();
         let env = Env::new();
         assert_eq!(
             parse("((x, y) => x + y)(...[3, 4])", &env, &factory, &allocator),
             Ok(factory.create_application_term(
-                factory.create_builtin_term(BuiltinTerm::Apply),
+                factory.create_builtin_term(Stdlib::Apply),
                 allocator.create_pair(
                     factory.create_lambda_term(
                         2,
                         factory.create_application_term(
-                            factory.create_builtin_term(BuiltinTerm::Add),
+                            factory.create_builtin_term(Stdlib::Add),
                             allocator.create_pair(
                                 factory.create_static_variable_term(1),
                                 factory.create_static_variable_term(0)
@@ -4948,13 +5116,13 @@ mod tests {
                 &allocator
             ),
             Ok(factory.create_application_term(
-                factory.create_builtin_term(BuiltinTerm::Apply),
+                factory.create_builtin_term(Stdlib::Apply),
                 allocator.create_pair(
                     factory.create_partial_application_term(
                         factory.create_lambda_term(
                             2,
                             factory.create_application_term(
-                                factory.create_builtin_term(BuiltinTerm::Add),
+                                factory.create_builtin_term(Stdlib::Add),
                                 allocator.create_pair(
                                     factory.create_static_variable_term(1),
                                     factory.create_static_variable_term(0)
@@ -4977,7 +5145,7 @@ mod tests {
 
     #[test]
     fn recursive_expressions() {
-        let factory = TermFactory::default();
+        let factory = TermFactory::<JsBuiltins>::default();
         let allocator = DefaultAllocator::default();
         let env = Env::new();
         let path = Path::new("./foo.js");
@@ -5042,7 +5210,7 @@ mod tests {
 
     #[test]
     fn import_scoping() {
-        let factory = TermFactory::default();
+        let factory = TermFactory::<JsBuiltins>::default();
         let allocator = DefaultAllocator::default();
         let env = Env::new();
         let path = Path::new("./foo.js");
@@ -5080,7 +5248,7 @@ mod tests {
 
     #[test]
     fn js_interpreted() {
-        let factory = TermFactory::default();
+        let factory = TermFactory::<JsBuiltins>::default();
         let allocator = DefaultAllocator::default();
         let env = Env::new();
         let input = "
@@ -5104,7 +5272,7 @@ mod tests {
 
     #[test]
     fn js_compiled() {
-        let factory = TermFactory::default();
+        let factory = TermFactory::<JsBuiltins>::default();
         let allocator = DefaultAllocator::default();
         let env = Env::new();
         let input = "
@@ -5117,9 +5285,9 @@ mod tests {
             .unwrap();
         let state = StateCache::default();
         let mut cache = DefaultInterpreterCache::default();
-        let plugins = builtin_plugins()
+        let builtins = JsBuiltins::entries()
             .into_iter()
-            .map(|plugin| (plugin.uid(), factory.create_native_function_term(plugin)))
+            .map(|builtin| (builtin.uid(), factory.create_builtin_term(builtin)))
             .collect::<Vec<_>>();
         let entry_point = InstructionPointer::default();
         let cache_key = hash_program_root(&program, &entry_point);
@@ -5130,7 +5298,7 @@ mod tests {
             &state,
             &factory,
             &allocator,
-            &plugins,
+            &builtins,
             &InterpreterOptions::default(),
             &mut cache,
         )

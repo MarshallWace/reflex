@@ -15,7 +15,7 @@ use crate::{
     hash::hash_object,
 };
 
-#[derive(Hash, Eq, PartialEq, Debug)]
+#[derive(Hash, Eq, PartialEq, Clone, Debug)]
 pub struct LambdaTerm<T: Expression> {
     num_args: StackOffset,
     body: T,
@@ -266,13 +266,14 @@ mod tests {
             DependencyList, Evaluate, EvaluationResult, ExpressionFactory, HeapAllocator,
             Rewritable, StateCache,
         },
-        lang::{BuiltinTerm, TermFactory, ValueTerm},
+        lang::{TermFactory, ValueTerm},
         parser::sexpr::parse,
+        stdlib::Stdlib,
     };
 
     #[test]
     fn hoist_lambda_variables() {
-        let factory = TermFactory::default();
+        let factory = TermFactory::<Stdlib>::default();
         let allocator = DefaultAllocator::default();
 
         let input = "
@@ -289,10 +290,10 @@ mod tests {
                     factory.create_lambda_term(
                         3,
                         factory.create_application_term(
-                            factory.create_builtin_term(BuiltinTerm::Add),
+                            factory.create_builtin_term(Stdlib::Add),
                             allocator.create_pair(
                                 factory.create_application_term(
-                                    factory.create_builtin_term(BuiltinTerm::Add),
+                                    factory.create_builtin_term(Stdlib::Add),
                                     allocator.create_pair(
                                         factory.create_static_variable_term(0),
                                         factory.create_static_variable_term(1),
@@ -348,13 +349,13 @@ mod tests {
                     factory.create_lambda_term(
                         4,
                         factory.create_application_term(
-                            factory.create_builtin_term(BuiltinTerm::Add),
+                            factory.create_builtin_term(Stdlib::Add),
                             allocator.create_pair(
                                 factory.create_application_term(
-                                    factory.create_builtin_term(BuiltinTerm::Add),
+                                    factory.create_builtin_term(Stdlib::Add),
                                     allocator.create_pair(
                                         factory.create_application_term(
-                                            factory.create_builtin_term(BuiltinTerm::Add),
+                                            factory.create_builtin_term(Stdlib::Add),
                                             allocator.create_pair(
                                                 factory.create_static_variable_term(0),
                                                 factory.create_static_variable_term(1),
@@ -417,19 +418,19 @@ mod tests {
                             factory.create_lambda_term(
                                 6,
                                 factory.create_application_term(
-                                    factory.create_builtin_term(BuiltinTerm::Add),
+                                    factory.create_builtin_term(Stdlib::Add),
                                     allocator.create_pair(
                                         factory.create_application_term(
-                                            factory.create_builtin_term(BuiltinTerm::Add),
+                                            factory.create_builtin_term(Stdlib::Add),
                                             allocator.create_pair(
                                                 factory.create_application_term(
-                                                    factory.create_builtin_term(BuiltinTerm::Add),
+                                                    factory.create_builtin_term(Stdlib::Add),
                                                     allocator.create_pair(
                                                         factory.create_application_term(
-                                                            factory.create_builtin_term(BuiltinTerm::Add),
+                                                            factory.create_builtin_term(Stdlib::Add),
                                                             allocator.create_pair(
                                                                 factory.create_application_term(
-                                                                    factory.create_builtin_term(BuiltinTerm::Add),
+                                                                    factory.create_builtin_term(Stdlib::Add),
                                                                     allocator.create_pair(
                                                                         factory.create_static_variable_term(0),
                                                                         factory.create_static_variable_term(1),

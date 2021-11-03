@@ -15,7 +15,7 @@ use crate::{
     },
 };
 
-#[derive(Hash, Eq, PartialEq, Debug)]
+#[derive(Hash, Eq, PartialEq, Clone, Debug)]
 pub enum VariableTerm<T: Expression> {
     Static(StaticVariableTerm),
     Dynamic(DynamicVariableTerm<T>),
@@ -138,7 +138,7 @@ impl<T: Expression> SerializeJson for VariableTerm<T> {
     }
 }
 
-#[derive(Hash, Eq, PartialEq, Debug)]
+#[derive(Hash, Eq, PartialEq, Clone, Debug)]
 pub struct StaticVariableTerm {
     offset: StackOffset,
 }
@@ -230,7 +230,7 @@ impl SerializeJson for StaticVariableTerm {
     }
 }
 
-#[derive(Hash, Eq, PartialEq, Debug)]
+#[derive(Hash, Eq, PartialEq, Clone, Debug)]
 pub struct DynamicVariableTerm<T: Expression> {
     state_token: StateToken,
     fallback: T,

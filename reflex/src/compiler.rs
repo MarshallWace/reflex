@@ -13,10 +13,10 @@ use crate::{
     cache::SubstitutionCache,
     core::{
         Applicable, Expression, ExpressionFactory, HeapAllocator, Reducible, Rewritable,
-        SignalType, StackOffset, StateToken, StructPrototype, VarArgs,
+        SignalType, StackOffset, StateToken, StructPrototype, Uuid, VarArgs,
     },
     hash::{combine_hashes, hash_object, HashId},
-    lang::{BuiltinTerm, FloatValue, IntValue, NativeFunctionId, SymbolId},
+    lang::{FloatValue, IntValue, SymbolId},
 };
 use serde::{Deserialize, Serialize};
 
@@ -119,10 +119,7 @@ pub enum Instruction {
         target: InstructionPointer,
     },
     PushBuiltin {
-        target: BuiltinTerm,
-    },
-    PushNative {
-        target: NativeFunctionId,
+        target: Uuid,
     },
     PushConstructor {
         prototype: StructPrototype,
@@ -223,10 +220,6 @@ impl std::hash::Hash for Instruction {
             }
             Self::PushBuiltin { target } => {
                 state.write_u8(10);
-                target.hash(state);
-            }
-            Self::PushNative { target } => {
-                state.write_u8(11);
                 target.hash(state);
             }
             Self::PushConstructor { prototype } => {

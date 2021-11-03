@@ -22,13 +22,12 @@ use crate::{
     compiler::{Instruction, InstructionPointer, Program},
     core::{
         Applicable, ArgType, Arity, DependencyList, DynamicState, EvaluationResult, Expression,
-        ExpressionFactory, ExpressionList, HeapAllocator, Reducible, Rewritable,
+        ExpressionFactory, ExpressionList, HeapAllocator, Reducible, Rewritable, Uuid,
     },
     hash::HashId,
     lang::{
         get_combined_short_circuit_signal, get_num_short_circuit_signals, get_short_circuit_signal,
-        validate_function_args, CompiledFunctionTerm, NativeFunctionId, ValueTerm,
-        WithExactSizeIterator,
+        validate_function_args, CompiledFunctionTerm, ValueTerm, WithExactSizeIterator,
     },
 };
 
@@ -93,7 +92,7 @@ pub fn execute<'a, T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> 
     state: &impl DynamicState<T>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-    plugins: impl IntoIterator<Item = &'a (NativeFunctionId, T)>,
+    builtins: impl IntoIterator<Item = &'a (Uuid, T)>,
     options: &InterpreterOptions,
     cache: &impl InterpreterCache<T>,
 ) -> Result<(EvaluationResult<T>, CacheEntries<T>), String> {
@@ -109,7 +108,7 @@ pub fn execute<'a, T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> 
         &mut call_stack,
         factory,
         allocator,
-        &plugins.into_iter().cloned().collect(),
+        &builtins.into_iter().cloned().collect(),
         cache,
         &mut cache_entries,
         options.debug_instructions,
@@ -137,7 +136,7 @@ fn evaluate_program_loop<T: Expression + Rewritable<T> + Reducible<T> + Applicab
     call_stack: &mut CallStack<T>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-    plugins: &HashMap<NativeFunctionId, T>,
+    plugins: &HashMap<Uuid, T>,
     cache: &impl InterpreterCache<T>,
     cache_entries: &mut CacheEntries<T>,
     debug_instructions: bool,
@@ -460,7 +459,7 @@ fn evaluate_instruction<T: Expression + Rewritable<T> + Reducible<T> + Applicabl
     call_stack: &CallStack<T>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-    plugins: &HashMap<NativeFunctionId, T>,
+    plugins: &HashMap<Uuid, T>,
     cache: &impl InterpreterCache<T>,
     cache_entries: &mut CacheEntries<T>,
 ) -> Result<(ExecutionResult<T>, DependencyList), String> {
@@ -552,19 +551,14 @@ fn evaluate_instruction<T: Expression + Rewritable<T> + Reducible<T> + Applicabl
             }
         }
         Instruction::PushBuiltin { target } => {
-            trace!(instruction = "Instruction::PushBuiltin", builtin_target = %target);
-            stack.push(factory.create_builtin_term(*target));
-            Ok((ExecutionResult::Advance, DependencyList::empty()))
-        }
-        Instruction::PushNative { target } => {
-            trace!(instruction = "Instruction::PushNative", native_target = %target);
+            trace!(instruction = "Instruction::PushBuiltin", native_target = %target);
             let uid = *target;
             match plugins.get(&uid) {
                 Some(target) => {
                     stack.push(target.clone());
                     Ok((ExecutionResult::Advance, DependencyList::empty()))
                 }
-                None => Err(format!("Invalid native function id: {}", uid)),
+                None => Err(format!("Invalid builtin function id: {}", uid)),
             }
         }
         Instruction::PushSignal {
@@ -1240,17 +1234,22 @@ mod tests {
     use crate::{
         allocator::DefaultAllocator,
         compiler::{hash_program_root, Compiler, CompilerMode, CompilerOptions},
-        core::{DependencyList, SignalType, StateCache},
+        core::{DependencyList, SignalType, StateCache, Uid},
         lang::*,
         parser::sexpr::parse,
+        stdlib::Stdlib,
     };
 
     use super::*;
 
     #[test]
     fn compiled_functions() {
-        let factory = TermFactory::default();
+        let factory = TermFactory::<Stdlib>::default();
         let allocator = DefaultAllocator::default();
+        let builtins = Stdlib::entries()
+            .into_iter()
+            .map(|builtin| (builtin.uid(), factory.create_builtin_term(builtin)))
+            .collect::<Vec<_>>();
         let mut cache = DefaultInterpreterCache::default();
         let target = parse("(lambda (foo bar) (+ foo bar))", &factory, &allocator).unwrap();
         let state_token = 345;
@@ -1280,7 +1279,7 @@ mod tests {
             &state,
             &factory,
             &allocator,
-            Vec::new(),
+            &builtins,
             &InterpreterOptions::default(),
             &mut cache,
         )
@@ -1303,7 +1302,7 @@ mod tests {
             &state,
             &factory,
             &allocator,
-            Vec::new(),
+            &builtins,
             &InterpreterOptions::default(),
             &mut cache,
         )
@@ -1319,8 +1318,12 @@ mod tests {
 
     #[test]
     fn compiled_tail_calls() {
-        let factory = TermFactory::default();
+        let factory = TermFactory::<Stdlib>::default();
         let allocator = DefaultAllocator::default();
+        let builtins = Stdlib::entries()
+            .into_iter()
+            .map(|builtin| (builtin.uid(), factory.create_builtin_term(builtin)))
+            .collect::<Vec<_>>();
         let mut cache = DefaultInterpreterCache::default();
         let expression = parse(
             "((lambda (foo bar) ((lambda (baz) (+ foo baz)) bar)) 3 4)",
@@ -1341,7 +1344,7 @@ mod tests {
             &mut StateCache::default(),
             &factory,
             &allocator,
-            Vec::new(),
+            &builtins,
             &InterpreterOptions::default(),
             &mut cache,
         )
@@ -1357,8 +1360,12 @@ mod tests {
 
     #[test]
     fn compiled_closures() {
-        let factory = TermFactory::default();
+        let factory = TermFactory::<Stdlib>::default();
         let allocator = DefaultAllocator::default();
+        let builtins = Stdlib::entries()
+            .into_iter()
+            .map(|builtin| (builtin.uid(), factory.create_builtin_term(builtin)))
+            .collect::<Vec<_>>();
         let mut cache = DefaultInterpreterCache::default();
         let expression = parse(
             "(((lambda (foo) (lambda (bar) (+ foo bar))) 3) 4)",
@@ -1379,7 +1386,7 @@ mod tests {
             &mut StateCache::default(),
             &factory,
             &allocator,
-            Vec::new(),
+            &builtins,
             &InterpreterOptions::default(),
             &mut cache,
         )
@@ -1395,8 +1402,12 @@ mod tests {
 
     #[test]
     fn basic_operation() {
-        let factory = TermFactory::default();
+        let factory = TermFactory::<Stdlib>::default();
         let allocator = DefaultAllocator::default();
+        let builtins = Stdlib::entries()
+            .into_iter()
+            .map(|builtin| (builtin.uid(), factory.create_builtin_term(builtin)))
+            .collect::<Vec<_>>();
         let mut cache = DefaultInterpreterCache::default();
         let program = Program::new(vec![
             Instruction::PushInt { value: 3 },
@@ -1413,7 +1424,7 @@ mod tests {
             &state,
             &factory,
             &allocator,
-            Vec::new(),
+            &builtins,
             &InterpreterOptions::default(),
             &mut cache,
         )
@@ -1429,25 +1440,29 @@ mod tests {
 
     #[test]
     fn nested_expressions() {
-        let factory = TermFactory::default();
+        let factory = TermFactory::<Stdlib>::default();
         let allocator = DefaultAllocator::default();
+        let builtins = Stdlib::entries()
+            .into_iter()
+            .map(|builtin| (builtin.uid(), factory.create_builtin_term(builtin)))
+            .collect::<Vec<_>>();
         let mut cache = DefaultInterpreterCache::default();
         let program = Program::new(vec![
             Instruction::PushInt { value: 5 },
             Instruction::PushInt { value: 4 },
             Instruction::PushInt { value: -3 },
             Instruction::PushBuiltin {
-                target: BuiltinTerm::Abs,
+                target: Uid::uid(&Stdlib::Abs {}),
             },
             Instruction::Apply { num_args: 1 },
             Instruction::Evaluate,
             Instruction::PushBuiltin {
-                target: BuiltinTerm::Add,
+                target: Uid::uid(&Stdlib::Add {}),
             },
             Instruction::Apply { num_args: 2 },
             Instruction::Evaluate,
             Instruction::PushBuiltin {
-                target: BuiltinTerm::Add,
+                target: Uid::uid(&Stdlib::Add {}),
             },
             Instruction::Apply { num_args: 2 },
             Instruction::Evaluate,
@@ -1463,7 +1478,7 @@ mod tests {
             &state,
             &factory,
             &allocator,
-            Vec::new(),
+            &builtins,
             &InterpreterOptions::default(),
             &mut cache,
         )
@@ -1479,11 +1494,15 @@ mod tests {
 
     #[test]
     fn builtin_function_applications() {
-        let factory = TermFactory::default();
+        let factory = TermFactory::<Stdlib>::default();
         let allocator = DefaultAllocator::default();
+        let builtins = Stdlib::entries()
+            .into_iter()
+            .map(|builtin| (builtin.uid(), factory.create_builtin_term(builtin)))
+            .collect::<Vec<_>>();
         let mut cache = DefaultInterpreterCache::default();
         let expression = factory.create_application_term(
-            factory.create_builtin_term(BuiltinTerm::Add),
+            factory.create_builtin_term(Stdlib::Add),
             allocator.create_pair(
                 factory.create_value_term(ValueTerm::Int(3)),
                 factory.create_value_term(ValueTerm::Int(4)),
@@ -1502,7 +1521,7 @@ mod tests {
             &state,
             &factory,
             &allocator,
-            Vec::new(),
+            &builtins,
             &InterpreterOptions::default(),
             &mut cache,
         )
@@ -1515,11 +1534,15 @@ mod tests {
             ),
         );
 
-        let factory = TermFactory::default();
+        let factory = TermFactory::<Stdlib>::default();
         let allocator = DefaultAllocator::default();
+        let builtins = Stdlib::entries()
+            .into_iter()
+            .map(|builtin| (builtin.uid(), factory.create_builtin_term(builtin)))
+            .collect::<Vec<_>>();
         let mut cache = DefaultInterpreterCache::default();
         let expression = factory.create_application_term(
-            factory.create_builtin_term(BuiltinTerm::If),
+            factory.create_builtin_term(Stdlib::If),
             allocator.create_triple(
                 factory.create_value_term(ValueTerm::Boolean(true)),
                 factory.create_value_term(ValueTerm::Int(3)),
@@ -1537,7 +1560,7 @@ mod tests {
             &state,
             &factory,
             &allocator,
-            Vec::new(),
+            &builtins,
             &InterpreterOptions::default(),
             &mut cache,
         )
@@ -1550,11 +1573,15 @@ mod tests {
             ),
         );
 
-        let factory = TermFactory::default();
+        let factory = TermFactory::<Stdlib>::default();
         let allocator = DefaultAllocator::default();
+        let builtins = Stdlib::entries()
+            .into_iter()
+            .map(|builtin| (builtin.uid(), factory.create_builtin_term(builtin)))
+            .collect::<Vec<_>>();
         let mut cache = DefaultInterpreterCache::default();
         let expression = factory.create_application_term(
-            factory.create_builtin_term(BuiltinTerm::If),
+            factory.create_builtin_term(Stdlib::If),
             allocator.create_triple(
                 factory.create_value_term(ValueTerm::Boolean(false)),
                 factory.create_value_term(ValueTerm::Int(3)),
@@ -1574,7 +1601,7 @@ mod tests {
             &state,
             &factory,
             &allocator,
-            Vec::new(),
+            &builtins,
             &InterpreterOptions::default(),
             &mut cache,
         )
@@ -1587,14 +1614,18 @@ mod tests {
             ),
         );
 
-        let factory = TermFactory::default();
+        let factory = TermFactory::<Stdlib>::default();
         let allocator = DefaultAllocator::default();
+        let builtins = Stdlib::entries()
+            .into_iter()
+            .map(|builtin| (builtin.uid(), factory.create_builtin_term(builtin)))
+            .collect::<Vec<_>>();
         let mut cache = DefaultInterpreterCache::default();
         let expression = factory.create_application_term(
-            factory.create_builtin_term(BuiltinTerm::If),
+            factory.create_builtin_term(Stdlib::If),
             allocator.create_triple(
                 factory.create_application_term(
-                    factory.create_builtin_term(BuiltinTerm::And),
+                    factory.create_builtin_term(Stdlib::And),
                     allocator.create_pair(
                         factory.create_value_term(ValueTerm::Boolean(true)),
                         factory.create_value_term(ValueTerm::Boolean(true)),
@@ -1617,7 +1648,7 @@ mod tests {
             &state,
             &factory,
             &allocator,
-            Vec::new(),
+            &builtins,
             &InterpreterOptions::default(),
             &mut cache,
         )
@@ -1630,14 +1661,18 @@ mod tests {
             ),
         );
 
-        let factory = TermFactory::default();
+        let factory = TermFactory::<Stdlib>::default();
         let allocator = DefaultAllocator::default();
+        let builtins = Stdlib::entries()
+            .into_iter()
+            .map(|builtin| (builtin.uid(), factory.create_builtin_term(builtin)))
+            .collect::<Vec<_>>();
         let mut cache = DefaultInterpreterCache::default();
         let expression = factory.create_application_term(
-            factory.create_builtin_term(BuiltinTerm::If),
+            factory.create_builtin_term(Stdlib::If),
             allocator.create_triple(
                 factory.create_application_term(
-                    factory.create_builtin_term(BuiltinTerm::And),
+                    factory.create_builtin_term(Stdlib::And),
                     allocator.create_pair(
                         factory.create_value_term(ValueTerm::Boolean(true)),
                         factory.create_value_term(ValueTerm::Boolean(false)),
@@ -1660,7 +1695,7 @@ mod tests {
             &state,
             &factory,
             &allocator,
-            Vec::new(),
+            &builtins,
             &InterpreterOptions::default(),
             &mut cache,
         )
@@ -1676,14 +1711,18 @@ mod tests {
 
     #[test]
     fn chained_functions() {
-        let factory = TermFactory::default();
+        let factory = TermFactory::<Stdlib>::default();
         let allocator = DefaultAllocator::default();
+        let builtins = Stdlib::entries()
+            .into_iter()
+            .map(|builtin| (builtin.uid(), factory.create_builtin_term(builtin)))
+            .collect::<Vec<_>>();
         let mut cache = DefaultInterpreterCache::default();
         let expression = factory.create_application_term(
-            factory.create_builtin_term(BuiltinTerm::Add),
+            factory.create_builtin_term(Stdlib::Add),
             allocator.create_pair(
                 factory.create_application_term(
-                    factory.create_builtin_term(BuiltinTerm::Add),
+                    factory.create_builtin_term(Stdlib::Add),
                     allocator.create_pair(
                         factory.create_value_term(ValueTerm::Int(3)),
                         factory.create_value_term(ValueTerm::Int(4)),
@@ -1705,7 +1744,7 @@ mod tests {
             &state,
             &factory,
             &allocator,
-            Vec::new(),
+            &builtins,
             &InterpreterOptions::default(),
             &mut cache,
         )
@@ -1718,14 +1757,18 @@ mod tests {
             ),
         );
 
-        let factory = TermFactory::default();
+        let factory = TermFactory::<Stdlib>::default();
         let allocator = DefaultAllocator::default();
+        let builtins = Stdlib::entries()
+            .into_iter()
+            .map(|builtin| (builtin.uid(), factory.create_builtin_term(builtin)))
+            .collect::<Vec<_>>();
         let mut cache = DefaultInterpreterCache::default();
         let expression = factory.create_application_term(
-            factory.create_builtin_term(BuiltinTerm::If),
+            factory.create_builtin_term(Stdlib::If),
             allocator.create_triple(
                 factory.create_application_term(
-                    factory.create_builtin_term(BuiltinTerm::And),
+                    factory.create_builtin_term(Stdlib::And),
                     allocator.create_pair(
                         factory.create_value_term(ValueTerm::Boolean(true)),
                         factory.create_value_term(ValueTerm::Boolean(false)),
@@ -1748,7 +1791,7 @@ mod tests {
             &state,
             &factory,
             &allocator,
-            Vec::new(),
+            &builtins,
             &InterpreterOptions::default(),
             &mut cache,
         )
@@ -1764,11 +1807,15 @@ mod tests {
 
     #[test]
     fn variadic_functions() {
-        let factory = TermFactory::default();
+        let factory = TermFactory::<Stdlib>::default();
         let allocator = DefaultAllocator::default();
+        let builtins = Stdlib::entries()
+            .into_iter()
+            .map(|builtin| (builtin.uid(), factory.create_builtin_term(builtin)))
+            .collect::<Vec<_>>();
         let mut cache = DefaultInterpreterCache::default();
         let expression = factory.create_application_term(
-            factory.create_builtin_term(BuiltinTerm::Append),
+            factory.create_builtin_term(Stdlib::Append),
             allocator.create_triple(
                 factory.create_vector_term(allocator.create_list(vec![
                     factory.create_value_term(ValueTerm::Int(1)),
@@ -1800,7 +1847,7 @@ mod tests {
             &state,
             &factory,
             &allocator,
-            Vec::new(),
+            &builtins,
             &InterpreterOptions::default(),
             &mut cache,
         )
@@ -1823,11 +1870,15 @@ mod tests {
             ),
         );
 
-        let factory = TermFactory::default();
+        let factory = TermFactory::<Stdlib>::default();
         let allocator = DefaultAllocator::default();
+        let builtins = Stdlib::entries()
+            .into_iter()
+            .map(|builtin| (builtin.uid(), factory.create_builtin_term(builtin)))
+            .collect::<Vec<_>>();
         let mut cache = DefaultInterpreterCache::default();
         let expression = factory.create_application_term(
-            factory.create_builtin_term(BuiltinTerm::Append),
+            factory.create_builtin_term(Stdlib::Append),
             allocator.create_triple(
                 factory.create_application_term(
                     factory.create_lambda_term(
@@ -1877,7 +1928,7 @@ mod tests {
             &state,
             &factory,
             &allocator,
-            Vec::new(),
+            &builtins,
             &InterpreterOptions::default(),
             &mut cache,
         )
@@ -1903,8 +1954,12 @@ mod tests {
 
     #[test]
     fn let_expression_scoping() {
-        let factory = TermFactory::default();
+        let factory = TermFactory::<Stdlib>::default();
         let allocator = DefaultAllocator::default();
+        let builtins = Stdlib::entries()
+            .into_iter()
+            .map(|builtin| (builtin.uid(), factory.create_builtin_term(builtin)))
+            .collect::<Vec<_>>();
         let mut cache = DefaultInterpreterCache::default();
         let expression = factory.create_application_term(
             factory.create_let_term(
@@ -1912,7 +1967,7 @@ mod tests {
                 factory.create_lambda_term(
                     1,
                     factory.create_application_term(
-                        factory.create_builtin_term(BuiltinTerm::Abs),
+                        factory.create_builtin_term(Stdlib::Abs),
                         allocator.create_unit_list(factory.create_application_term(
                             factory.create_static_variable_term(1),
                             allocator.create_unit_list(factory.create_static_variable_term(0)),
@@ -1922,15 +1977,9 @@ mod tests {
             ),
             allocator.create_unit_list(factory.create_value_term(ValueTerm::Int(3))),
         );
-        let program = Compiler::new(
-            CompilerOptions {
-                debug: true,
-                ..CompilerOptions::unoptimized()
-            },
-            None,
-        )
-        .compile(&expression, CompilerMode::Expression, &factory, &allocator)
-        .unwrap();
+        let program = Compiler::new(CompilerOptions::unoptimized(), None)
+            .compile(&expression, CompilerMode::Expression, &factory, &allocator)
+            .unwrap();
         let state = StateCache::default();
         let entry_point = InstructionPointer::default();
         let cache_key = hash_program_root(&program, &entry_point);
@@ -1941,8 +1990,8 @@ mod tests {
             &state,
             &factory,
             &allocator,
-            Vec::new(),
-            &InterpreterOptions::debug(),
+            &builtins,
+            &InterpreterOptions::default(),
             &mut cache,
         )
         .unwrap();

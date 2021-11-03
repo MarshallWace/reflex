@@ -14,7 +14,8 @@ use crate::{
         EvaluationCache, Expression, ExpressionFactory, ExpressionList, HeapAllocator, Reducible,
         Rewritable, StructFieldOffset, Substitutions,
     },
-    lang::{BuiltinTerm, SymbolId, ValueTerm},
+    lang::{SymbolId, ValueTerm},
+    stdlib::Stdlib,
 };
 
 mod lexer;
@@ -101,7 +102,10 @@ pub fn parse<'src, T: Expression + Rewritable<T> + Reducible<T>>(
     input: &'src str,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> ParserResult<'src, T> {
+) -> ParserResult<'src, T>
+where
+    T::Builtin: From<Stdlib>,
+{
     let syntax = match parse_syntax(input) {
         Ok(syntax) => Ok(syntax),
         Err(message) => Err(ParserError {
@@ -129,7 +133,10 @@ fn parse_expression<'src, T: Expression + Rewritable<T> + Reducible<T>>(
     evaluation_cache: &mut impl EvaluationCache<T>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> ParserResult<'src, T> {
+) -> ParserResult<'src, T>
+where
+    T::Builtin: From<Stdlib>,
+{
     match input {
         SyntaxDatum::IntegerLiteral(value) => Ok(parse_integer_literal(input, *value, factory)),
         SyntaxDatum::FloatLiteral(value) => Ok(parse_float_literal(input, *value, factory)),
@@ -171,7 +178,10 @@ fn parse_boolean_literal<'src, T: Expression + Rewritable<T> + Reducible<T>>(
     _input: &SyntaxDatum,
     value: bool,
     factory: &impl ExpressionFactory<T>,
-) -> T {
+) -> T
+where
+    T::Builtin: From<Stdlib>,
+{
     factory.create_value_term(ValueTerm::Boolean(value))
 }
 
@@ -179,7 +189,10 @@ fn parse_integer_literal<'src, T: Expression + Rewritable<T> + Reducible<T>>(
     _input: &SyntaxDatum,
     value: i32,
     factory: &impl ExpressionFactory<T>,
-) -> T {
+) -> T
+where
+    T::Builtin: From<Stdlib>,
+{
     factory.create_value_term(ValueTerm::Int(value))
 }
 
@@ -187,7 +200,10 @@ fn parse_float_literal<'src, T: Expression + Rewritable<T> + Reducible<T>>(
     _input: &SyntaxDatum,
     value: f64,
     factory: &impl ExpressionFactory<T>,
-) -> T {
+) -> T
+where
+    T::Builtin: From<Stdlib>,
+{
     factory.create_value_term(ValueTerm::Float(value))
 }
 
@@ -196,7 +212,10 @@ fn parse_string_literal<'src, T: Expression + Rewritable<T> + Reducible<T>>(
     value: &str,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> T {
+) -> T
+where
+    T::Builtin: From<Stdlib>,
+{
     factory.create_value_term(ValueTerm::String(allocator.create_string(value.into())))
 }
 
@@ -205,7 +224,10 @@ fn parse_symbol_literal<'src, T: Expression + Rewritable<T> + Reducible<T>>(
     symbol: &'src str,
     symbol_cache: &mut SymbolCache<'src>,
     factory: &impl ExpressionFactory<T>,
-) -> T {
+) -> T
+where
+    T::Builtin: From<Stdlib>,
+{
     factory.create_value_term(ValueTerm::Symbol(symbol_cache.get(symbol)))
 }
 
@@ -214,7 +236,10 @@ fn parse_variable<'src, T: Expression + Rewritable<T> + Reducible<T>>(
     identifier: &'src str,
     scope: &LexicalScope<'src>,
     factory: &impl ExpressionFactory<T>,
-) -> ParserResult<'src, T> {
+) -> ParserResult<'src, T>
+where
+    T::Builtin: From<Stdlib>,
+{
     match scope.get(identifier) {
         None => match parse_global(input, identifier, factory) {
             Some(result) => Ok(result),
@@ -231,7 +256,10 @@ fn parse_global<'src, T: Expression + Rewritable<T> + Reducible<T>>(
     input: &SyntaxDatum<'src>,
     identifier: &'src str,
     factory: &impl ExpressionFactory<T>,
-) -> Option<T> {
+) -> Option<T>
+where
+    T::Builtin: From<Stdlib>,
+{
     match identifier {
         "#t" => Some(parse_boolean_literal(input, true, factory)),
         "#f" => Some(parse_boolean_literal(input, false, factory)),
@@ -240,29 +268,29 @@ fn parse_global<'src, T: Expression + Rewritable<T> + Reducible<T>>(
     }
 }
 
-fn parse_builtin_procedure(name: &str) -> Option<BuiltinTerm> {
+fn parse_builtin_procedure(name: &str) -> Option<Stdlib> {
     match name {
-        "+" => Some(BuiltinTerm::Add),
-        "-" => Some(BuiltinTerm::Subtract),
-        "*" => Some(BuiltinTerm::Multiply),
-        "/" => Some(BuiltinTerm::Divide),
-        "=" => Some(BuiltinTerm::Equal),
-        "abs" => Some(BuiltinTerm::Abs),
-        "and" => Some(BuiltinTerm::And),
-        "car" => Some(BuiltinTerm::Car),
-        "cdr" => Some(BuiltinTerm::Cdr),
-        "concat" => Some(BuiltinTerm::Concat),
-        "cons" => Some(BuiltinTerm::Cons),
-        "eq" => Some(BuiltinTerm::Eq),
-        "gt" => Some(BuiltinTerm::Gt),
-        "gte" => Some(BuiltinTerm::Gte),
-        "if" => Some(BuiltinTerm::If),
-        "lt" => Some(BuiltinTerm::Lt),
-        "lte" => Some(BuiltinTerm::Lte),
-        "not" => Some(BuiltinTerm::Not),
-        "or" => Some(BuiltinTerm::Or),
-        "pow" => Some(BuiltinTerm::Pow),
-        "remainder" => Some(BuiltinTerm::Remainder),
+        "+" => Some(Stdlib::Add),
+        "-" => Some(Stdlib::Subtract),
+        "*" => Some(Stdlib::Multiply),
+        "/" => Some(Stdlib::Divide),
+        "=" => Some(Stdlib::Equal),
+        "abs" => Some(Stdlib::Abs),
+        "and" => Some(Stdlib::And),
+        "car" => Some(Stdlib::Car),
+        "cdr" => Some(Stdlib::Cdr),
+        "concat" => Some(Stdlib::Concat),
+        "cons" => Some(Stdlib::Cons),
+        "eq" => Some(Stdlib::Eq),
+        "gt" => Some(Stdlib::Gt),
+        "gte" => Some(Stdlib::Gte),
+        "if" => Some(Stdlib::If),
+        "lt" => Some(Stdlib::Lt),
+        "lte" => Some(Stdlib::Lte),
+        "not" => Some(Stdlib::Not),
+        "or" => Some(Stdlib::Or),
+        "pow" => Some(Stdlib::Pow),
+        "remainder" => Some(Stdlib::Remainder),
         _ => None,
     }
 }
@@ -276,7 +304,10 @@ fn parse_special_form<'src, T: Expression + Rewritable<T> + Reducible<T>>(
     evaluation_cache: &mut impl EvaluationCache<T>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> ParserResult<'src, Option<T>> {
+) -> ParserResult<'src, Option<T>>
+where
+    T::Builtin: From<Stdlib>,
+{
     match target {
         SyntaxDatum::Symbol(identifier) => match *identifier {
             "quote" => {
@@ -327,7 +358,10 @@ fn parse_function_application<'src, T: Expression + Rewritable<T> + Reducible<T>
     evaluation_cache: &mut impl EvaluationCache<T>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> ParserResult<'src, T> {
+) -> ParserResult<'src, T>
+where
+    T::Builtin: From<Stdlib>,
+{
     Ok(factory.create_application_term(
         parse_expression(
             target,
@@ -355,7 +389,10 @@ fn parse_function_arguments<'src, T: Expression + Rewritable<T> + Reducible<T>>(
     evaluation_cache: &mut impl EvaluationCache<T>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> ParserResult<'src, ExpressionList<T>> {
+) -> ParserResult<'src, ExpressionList<T>>
+where
+    T::Builtin: From<Stdlib>,
+{
     Ok(allocator.create_list(
         items
             .iter()
@@ -379,7 +416,10 @@ fn parse_quote_expression<'src, T: Expression + Rewritable<T> + Reducible<T>>(
     symbol_cache: &mut SymbolCache<'src>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> ParserResult<'src, T> {
+) -> ParserResult<'src, T>
+where
+    T::Builtin: From<Stdlib>,
+{
     if args.len() != 1 {
         return Err(ParserError::new(
             String::from("Invalid quote expression"),
@@ -396,7 +436,10 @@ fn parse_quoted_value<'src, T: Expression + Rewritable<T> + Reducible<T>>(
     symbol_cache: &mut SymbolCache<'src>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> T {
+) -> T
+where
+    T::Builtin: From<Stdlib>,
+{
     match input {
         SyntaxDatum::IntegerLiteral(value) => parse_integer_literal(input, *value, factory),
         SyntaxDatum::FloatLiteral(value) => parse_float_literal(input, *value, factory),
@@ -411,7 +454,10 @@ fn parse_quoted_list<'src, T: Expression + Rewritable<T> + Reducible<T>>(
     symbol_cache: &mut SymbolCache<'src>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> T {
+) -> T
+where
+    T::Builtin: From<Stdlib>,
+{
     match values.len() {
         0 => create_enum(0, empty(), factory, allocator),
         _ => {
@@ -435,7 +481,10 @@ fn create_enum<'src, T: Expression + Rewritable<T> + Reducible<T>>(
     args: impl ExactSizeIterator<Item = T>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> T {
+) -> T
+where
+    T::Builtin: From<Stdlib>,
+{
     factory.create_tuple_term({
         let args = args.into_iter();
         allocator.create_sized_list(
@@ -453,7 +502,10 @@ fn parse_lambda_expression<'src, T: Expression + Rewritable<T> + Reducible<T>>(
     evaluation_cache: &mut impl EvaluationCache<T>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> ParserResult<'src, T> {
+) -> ParserResult<'src, T>
+where
+    T::Builtin: From<Stdlib>,
+{
     let mut args = args.iter();
     let arg_list = match args.next() {
         Some(arg_list) => Ok(arg_list),
@@ -512,7 +564,10 @@ fn parse_let_expression<'src, T: Expression + Rewritable<T> + Reducible<T>>(
     evaluation_cache: &mut impl EvaluationCache<T>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> ParserResult<'src, T> {
+) -> ParserResult<'src, T>
+where
+    T::Builtin: From<Stdlib>,
+{
     parse_binding_expression(
         &BindingExpressionType::Let,
         input,
@@ -533,7 +588,10 @@ fn parse_letrec_expression<'src, T: Expression + Rewritable<T> + Reducible<T>>(
     evaluation_cache: &mut impl EvaluationCache<T>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> ParserResult<'src, T> {
+) -> ParserResult<'src, T>
+where
+    T::Builtin: From<Stdlib>,
+{
     parse_binding_expression(
         &BindingExpressionType::LetRec,
         input,
@@ -567,7 +625,10 @@ fn parse_binding_expression<'src, T: Expression + Rewritable<T> + Reducible<T>>(
     evaluation_cache: &mut impl EvaluationCache<T>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> ParserResult<'src, T> {
+) -> ParserResult<'src, T>
+where
+    T::Builtin: From<Stdlib>,
+{
     let mut args = args.iter();
     let binding_definitions = match args.next() {
         Some(binding_definitions) => Ok(binding_definitions),
@@ -647,7 +708,7 @@ fn parse_binding_expression<'src, T: Expression + Rewritable<T> + Reducible<T>>(
                                 (
                                     (num_bindings - index - 1),
                                     factory.create_application_term(
-                                        factory.create_builtin_term(BuiltinTerm::Get),
+                                        factory.create_builtin_term(Stdlib::Get),
                                         allocator.create_pair(
                                             factory.create_static_variable_term(0),
                                             factory.create_value_term(ValueTerm::Int(index as i32)),
@@ -677,7 +738,7 @@ fn parse_binding_expression<'src, T: Expression + Rewritable<T> + Reducible<T>>(
                             factory.create_lambda_term(num_bindings, body),
                             allocator.create_list((0..num_bindings).map(|index| {
                                 factory.create_application_term(
-                                    factory.create_builtin_term(BuiltinTerm::Get),
+                                    factory.create_builtin_term(Stdlib::Get),
                                     allocator.create_pair(
                                         bindings.clone(),
                                         factory.create_value_term(ValueTerm::Int(index as i32)),
@@ -700,7 +761,10 @@ fn parse_binding_initializers<'src, T: Expression + Rewritable<T> + Reducible<T>
     evaluation_cache: &mut impl EvaluationCache<T>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> ParserResult<'src, ExpressionList<T>> {
+) -> ParserResult<'src, ExpressionList<T>>
+where
+    T::Builtin: From<Stdlib>,
+{
     match binding_type {
         BindingExpressionType::Let => Ok(allocator.create_list(
             binding_definitions
@@ -774,7 +838,8 @@ mod tests {
     use crate::{
         allocator::DefaultAllocator,
         core::{ExpressionFactory, HeapAllocator},
-        lang::{BuiltinTerm, TermFactory, ValueTerm},
+        lang::{TermFactory, ValueTerm},
+        stdlib::Stdlib,
     };
 
     use super::parse;
@@ -938,7 +1003,7 @@ mod tests {
     //         assert_eq!(
     //             parse("(+ 'foo 'foo)"),
     //             Ok(Expression::new(Term::Application(ApplicationTerm::new(
-    //                 Expression::new(Term::Builtin(BuiltinTerm::Add)),
+    //                 Expression::new(Term::Builtin(Stdlib::Add)),
     //                 vec![
     //                     Expression::new(Term::Value(ValueTerm::Symbol(0))),
     //                     Expression::new(Term::Value(ValueTerm::Symbol(0))),
@@ -948,7 +1013,7 @@ mod tests {
     //         assert_eq!(
     //             parse("(+ 'foo 'bar)"),
     //             Ok(Expression::new(Term::Application(ApplicationTerm::new(
-    //                 Expression::new(Term::Builtin(BuiltinTerm::Add)),
+    //                 Expression::new(Term::Builtin(Stdlib::Add)),
     //                 vec![
     //                     Expression::new(Term::Value(ValueTerm::Symbol(0))),
     //                     Expression::new(Term::Value(ValueTerm::Symbol(1))),
@@ -1173,7 +1238,7 @@ mod tests {
     //                 vec![Expression::new(Term::Lambda(LambdaTerm::new(
     //                     Arity::from(0, 2, None),
     //                     Expression::new(Term::Application(ApplicationTerm::new(
-    //                         Expression::new(Term::Builtin(BuiltinTerm::Add)),
+    //                         Expression::new(Term::Builtin(Stdlib::Add)),
     //                         vec![
     //                             Expression::new(Term::Variable(VariableTerm::scoped(1))),
     //                             Expression::new(Term::Variable(VariableTerm::scoped(0))),
@@ -1202,7 +1267,7 @@ mod tests {
 
     #[test]
     fn letrec_bindings() {
-        let factory = TermFactory::default();
+        let factory = TermFactory::<Stdlib>::default();
         let allocator = DefaultAllocator::default();
         assert_eq!(
             parse("(letrec () 3)", &factory, &allocator),
@@ -1223,7 +1288,7 @@ mod tests {
                 factory.create_lambda_term(2, factory.create_static_variable_term(1)),
                 allocator.create_pair(
                     factory.create_application_term(
-                        factory.create_builtin_term(BuiltinTerm::Get),
+                        factory.create_builtin_term(Stdlib::Get),
                         allocator.create_pair(
                             factory.create_recursive_term(factory.create_lambda_term(
                                 1,
@@ -1236,7 +1301,7 @@ mod tests {
                         ),
                     ),
                     factory.create_application_term(
-                        factory.create_builtin_term(BuiltinTerm::Get),
+                        factory.create_builtin_term(Stdlib::Get),
                         allocator.create_pair(
                             factory.create_recursive_term(factory.create_lambda_term(
                                 1,
@@ -1257,7 +1322,7 @@ mod tests {
                 factory.create_lambda_term(2, factory.create_static_variable_term(0)),
                 allocator.create_pair(
                     factory.create_application_term(
-                        factory.create_builtin_term(BuiltinTerm::Get),
+                        factory.create_builtin_term(Stdlib::Get),
                         allocator.create_pair(
                             factory.create_recursive_term(factory.create_lambda_term(
                                 1,
@@ -1270,7 +1335,7 @@ mod tests {
                         ),
                     ),
                     factory.create_application_term(
-                        factory.create_builtin_term(BuiltinTerm::Get),
+                        factory.create_builtin_term(Stdlib::Get),
                         allocator.create_pair(
                             factory.create_recursive_term(factory.create_lambda_term(
                                 1,
@@ -1313,7 +1378,7 @@ mod tests {
                     factory.create_lambda_term(2, factory.create_static_variable_term(2)),
                     allocator.create_pair(
                         factory.create_application_term(
-                            factory.create_builtin_term(BuiltinTerm::Get),
+                            factory.create_builtin_term(Stdlib::Get),
                             allocator.create_pair(
                                 factory.create_recursive_term(factory.create_lambda_term(
                                     1,
@@ -1326,7 +1391,7 @@ mod tests {
                             ),
                         ),
                         factory.create_application_term(
-                            factory.create_builtin_term(BuiltinTerm::Get),
+                            factory.create_builtin_term(Stdlib::Get),
                             allocator.create_pair(
                                 factory.create_recursive_term(factory.create_lambda_term(
                                     1,
@@ -1348,14 +1413,14 @@ mod tests {
                 factory.create_lambda_term(2, factory.create_static_variable_term(1)),
                 allocator.create_pair(
                     factory.create_application_term(
-                        factory.create_builtin_term(BuiltinTerm::Get),
+                        factory.create_builtin_term(Stdlib::Get),
                         allocator.create_pair(
                             factory.create_recursive_term(factory.create_lambda_term(
                                 1,
                                 factory.create_tuple_term(allocator.create_pair(
                                     factory.create_value_term(ValueTerm::Int(3)),
                                     factory.create_application_term(
-                                        factory.create_builtin_term(BuiltinTerm::Get),
+                                        factory.create_builtin_term(Stdlib::Get),
                                         allocator.create_pair(
                                             factory.create_static_variable_term(0),
                                             factory.create_value_term(ValueTerm::Int(0)),
@@ -1367,14 +1432,14 @@ mod tests {
                         ),
                     ),
                     factory.create_application_term(
-                        factory.create_builtin_term(BuiltinTerm::Get),
+                        factory.create_builtin_term(Stdlib::Get),
                         allocator.create_pair(
                             factory.create_recursive_term(factory.create_lambda_term(
                                 1,
                                 factory.create_tuple_term(allocator.create_pair(
                                     factory.create_value_term(ValueTerm::Int(3)),
                                     factory.create_application_term(
-                                        factory.create_builtin_term(BuiltinTerm::Get),
+                                        factory.create_builtin_term(Stdlib::Get),
                                         allocator.create_pair(
                                             factory.create_static_variable_term(0),
                                             factory.create_value_term(ValueTerm::Int(0)),
@@ -1394,14 +1459,14 @@ mod tests {
                 factory.create_lambda_term(2, factory.create_static_variable_term(0)),
                 allocator.create_pair(
                     factory.create_application_term(
-                        factory.create_builtin_term(BuiltinTerm::Get),
+                        factory.create_builtin_term(Stdlib::Get),
                         allocator.create_pair(
                             factory.create_recursive_term(factory.create_lambda_term(
                                 1,
                                 factory.create_tuple_term(allocator.create_pair(
                                     factory.create_value_term(ValueTerm::Int(3)),
                                     factory.create_application_term(
-                                        factory.create_builtin_term(BuiltinTerm::Get),
+                                        factory.create_builtin_term(Stdlib::Get),
                                         allocator.create_pair(
                                             factory.create_static_variable_term(0),
                                             factory.create_value_term(ValueTerm::Int(0)),
@@ -1413,14 +1478,14 @@ mod tests {
                         ),
                     ),
                     factory.create_application_term(
-                        factory.create_builtin_term(BuiltinTerm::Get),
+                        factory.create_builtin_term(Stdlib::Get),
                         allocator.create_pair(
                             factory.create_recursive_term(factory.create_lambda_term(
                                 1,
                                 factory.create_tuple_term(allocator.create_pair(
                                     factory.create_value_term(ValueTerm::Int(3)),
                                     factory.create_application_term(
-                                        factory.create_builtin_term(BuiltinTerm::Get),
+                                        factory.create_builtin_term(Stdlib::Get),
                                         allocator.create_pair(
                                             factory.create_static_variable_term(0),
                                             factory.create_value_term(ValueTerm::Int(0)),
@@ -1444,7 +1509,7 @@ mod tests {
                 factory.create_lambda_term(
                     2,
                     factory.create_application_term(
-                        factory.create_builtin_term(BuiltinTerm::Add),
+                        factory.create_builtin_term(Stdlib::Add),
                         allocator.create_pair(
                             factory.create_static_variable_term(1),
                             factory.create_static_variable_term(0),
@@ -1453,14 +1518,14 @@ mod tests {
                 ),
                 allocator.create_pair(
                     factory.create_application_term(
-                        factory.create_builtin_term(BuiltinTerm::Get),
+                        factory.create_builtin_term(Stdlib::Get),
                         allocator.create_pair(
                             factory.create_recursive_term(factory.create_lambda_term(
                                 1,
                                 factory.create_tuple_term(allocator.create_pair(
                                     factory.create_value_term(ValueTerm::Int(3)),
                                     factory.create_application_term(
-                                        factory.create_builtin_term(BuiltinTerm::Get),
+                                        factory.create_builtin_term(Stdlib::Get),
                                         allocator.create_pair(
                                             factory.create_static_variable_term(0),
                                             factory.create_value_term(ValueTerm::Int(0)),
@@ -1472,14 +1537,14 @@ mod tests {
                         ),
                     ),
                     factory.create_application_term(
-                        factory.create_builtin_term(BuiltinTerm::Get),
+                        factory.create_builtin_term(Stdlib::Get),
                         allocator.create_pair(
                             factory.create_recursive_term(factory.create_lambda_term(
                                 1,
                                 factory.create_tuple_term(allocator.create_pair(
                                     factory.create_value_term(ValueTerm::Int(3)),
                                     factory.create_application_term(
-                                        factory.create_builtin_term(BuiltinTerm::Get),
+                                        factory.create_builtin_term(Stdlib::Get),
                                         allocator.create_pair(
                                             factory.create_static_variable_term(0),
                                             factory.create_value_term(ValueTerm::Int(0)),
@@ -1499,13 +1564,13 @@ mod tests {
                 factory.create_lambda_term(2, factory.create_static_variable_term(1)),
                 allocator.create_pair(
                     factory.create_application_term(
-                        factory.create_builtin_term(BuiltinTerm::Get),
+                        factory.create_builtin_term(Stdlib::Get),
                         allocator.create_pair(
                             factory.create_recursive_term(factory.create_lambda_term(
                                 1,
                                 factory.create_tuple_term(allocator.create_pair(
                                     factory.create_application_term(
-                                        factory.create_builtin_term(BuiltinTerm::Get),
+                                        factory.create_builtin_term(Stdlib::Get),
                                         allocator.create_pair(
                                             factory.create_static_variable_term(0),
                                             factory.create_value_term(ValueTerm::Int(1)),
@@ -1518,13 +1583,13 @@ mod tests {
                         ),
                     ),
                     factory.create_application_term(
-                        factory.create_builtin_term(BuiltinTerm::Get),
+                        factory.create_builtin_term(Stdlib::Get),
                         allocator.create_pair(
                             factory.create_recursive_term(factory.create_lambda_term(
                                 1,
                                 factory.create_tuple_term(allocator.create_pair(
                                     factory.create_application_term(
-                                        factory.create_builtin_term(BuiltinTerm::Get),
+                                        factory.create_builtin_term(Stdlib::Get),
                                         allocator.create_pair(
                                             factory.create_static_variable_term(0),
                                             factory.create_value_term(ValueTerm::Int(1)),
@@ -1545,13 +1610,13 @@ mod tests {
                 factory.create_lambda_term(2, factory.create_static_variable_term(0)),
                 allocator.create_pair(
                     factory.create_application_term(
-                        factory.create_builtin_term(BuiltinTerm::Get),
+                        factory.create_builtin_term(Stdlib::Get),
                         allocator.create_pair(
                             factory.create_recursive_term(factory.create_lambda_term(
                                 1,
                                 factory.create_tuple_term(allocator.create_pair(
                                     factory.create_application_term(
-                                        factory.create_builtin_term(BuiltinTerm::Get),
+                                        factory.create_builtin_term(Stdlib::Get),
                                         allocator.create_pair(
                                             factory.create_static_variable_term(0),
                                             factory.create_value_term(ValueTerm::Int(1)),
@@ -1564,13 +1629,13 @@ mod tests {
                         ),
                     ),
                     factory.create_application_term(
-                        factory.create_builtin_term(BuiltinTerm::Get),
+                        factory.create_builtin_term(Stdlib::Get),
                         allocator.create_pair(
                             factory.create_recursive_term(factory.create_lambda_term(
                                 1,
                                 factory.create_tuple_term(allocator.create_pair(
                                     factory.create_application_term(
-                                        factory.create_builtin_term(BuiltinTerm::Get),
+                                        factory.create_builtin_term(Stdlib::Get),
                                         allocator.create_pair(
                                             factory.create_static_variable_term(0),
                                             factory.create_value_term(ValueTerm::Int(1)),
@@ -1597,19 +1662,19 @@ mod tests {
             )),
             allocator.create_triple(
                 factory.create_application_term(
-                    factory.create_builtin_term(BuiltinTerm::Get),
+                    factory.create_builtin_term(Stdlib::Get),
                     allocator.create_pair(
                         factory.create_recursive_term(
                             factory.create_lambda_term(1, factory.create_tuple_term(
                                 allocator.create_triple(
                                     factory.create_lambda_term(2, factory.create_application_term(
-                                        factory.create_builtin_term(BuiltinTerm::Add),
+                                        factory.create_builtin_term(Stdlib::Add),
                                         allocator.create_pair(
                                             factory.create_application_term(
-                                                factory.create_builtin_term(BuiltinTerm::Add),
+                                                factory.create_builtin_term(Stdlib::Add),
                                                 allocator.create_pair(
                                                     factory.create_application_term(
-                                                        factory.create_builtin_term(BuiltinTerm::Get),
+                                                        factory.create_builtin_term(Stdlib::Get),
                                                         allocator.create_pair(
                                                             factory.create_static_variable_term(2),
                                                             factory.create_value_term(ValueTerm::Int(1)),
@@ -1619,10 +1684,10 @@ mod tests {
                                                 ),
                                             ),
                                             factory.create_application_term(
-                                                factory.create_builtin_term(BuiltinTerm::Add),
+                                                factory.create_builtin_term(Stdlib::Add),
                                                 allocator.create_pair(
                                                     factory.create_application_term(
-                                                        factory.create_builtin_term(BuiltinTerm::Get),
+                                                        factory.create_builtin_term(Stdlib::Get),
                                                         allocator.create_pair(
                                                             factory.create_static_variable_term(2),
                                                             factory.create_value_term(ValueTerm::Int(2)),
@@ -1642,19 +1707,19 @@ mod tests {
                     ),
                 ),
                 factory.create_application_term(
-                    factory.create_builtin_term(BuiltinTerm::Get),
+                    factory.create_builtin_term(Stdlib::Get),
                     allocator.create_pair(
                         factory.create_recursive_term(
                             factory.create_lambda_term(1, factory.create_tuple_term(
                                 allocator.create_triple(
                                     factory.create_lambda_term(2, factory.create_application_term(
-                                        factory.create_builtin_term(BuiltinTerm::Add),
+                                        factory.create_builtin_term(Stdlib::Add),
                                         allocator.create_pair(
                                             factory.create_application_term(
-                                                factory.create_builtin_term(BuiltinTerm::Add),
+                                                factory.create_builtin_term(Stdlib::Add),
                                                 allocator.create_pair(
                                                     factory.create_application_term(
-                                                        factory.create_builtin_term(BuiltinTerm::Get),
+                                                        factory.create_builtin_term(Stdlib::Get),
                                                         allocator.create_pair(
                                                             factory.create_static_variable_term(2),
                                                             factory.create_value_term(ValueTerm::Int(1)),
@@ -1664,10 +1729,10 @@ mod tests {
                                                 ),
                                             ),
                                             factory.create_application_term(
-                                                factory.create_builtin_term(BuiltinTerm::Add),
+                                                factory.create_builtin_term(Stdlib::Add),
                                                 allocator.create_pair(
                                                     factory.create_application_term(
-                                                        factory.create_builtin_term(BuiltinTerm::Get),
+                                                        factory.create_builtin_term(Stdlib::Get),
                                                         allocator.create_pair(
                                                             factory.create_static_variable_term(2),
                                                             factory.create_value_term(ValueTerm::Int(2)),
@@ -1687,19 +1752,19 @@ mod tests {
                     ),
                 ),
                 factory.create_application_term(
-                    factory.create_builtin_term(BuiltinTerm::Get),
+                    factory.create_builtin_term(Stdlib::Get),
                     allocator.create_pair(
                         factory.create_recursive_term(
                             factory.create_lambda_term(1, factory.create_tuple_term(
                                 allocator.create_triple(
                                     factory.create_lambda_term(2, factory.create_application_term(
-                                        factory.create_builtin_term(BuiltinTerm::Add),
+                                        factory.create_builtin_term(Stdlib::Add),
                                         allocator.create_pair(
                                             factory.create_application_term(
-                                                factory.create_builtin_term(BuiltinTerm::Add),
+                                                factory.create_builtin_term(Stdlib::Add),
                                                 allocator.create_pair(
                                                     factory.create_application_term(
-                                                        factory.create_builtin_term(BuiltinTerm::Get),
+                                                        factory.create_builtin_term(Stdlib::Get),
                                                         allocator.create_pair(
                                                             factory.create_static_variable_term(2),
                                                             factory.create_value_term(ValueTerm::Int(1)),
@@ -1709,10 +1774,10 @@ mod tests {
                                                 ),
                                             ),
                                             factory.create_application_term(
-                                                factory.create_builtin_term(BuiltinTerm::Add),
+                                                factory.create_builtin_term(Stdlib::Add),
                                                 allocator.create_pair(
                                                     factory.create_application_term(
-                                                        factory.create_builtin_term(BuiltinTerm::Get),
+                                                        factory.create_builtin_term(Stdlib::Get),
                                                         allocator.create_pair(
                                                             factory.create_static_variable_term(2),
                                                             factory.create_value_term(ValueTerm::Int(2)),
@@ -1748,37 +1813,40 @@ mod tests {
                         allocator.create_unit_list(factory.create_value_term(ValueTerm::Int(5))),
                     )
                 ),
-                allocator.create_unit_list(factory.create_recursive_term(
-                    factory.create_lambda_term(
-                        1,
+                allocator.create_unit_list(
+                    factory.create_recursive_term(
                         factory.create_lambda_term(
                             1,
-                            factory.create_application_term(
-                                factory.create_builtin_term(BuiltinTerm::If),
-                                allocator.create_triple(
-                                    factory.create_application_term(
-                                        factory.create_builtin_term(BuiltinTerm::Equal),
-                                        allocator.create_pair(
-                                            factory.create_static_variable_term(0),
-                                            factory.create_value_term(ValueTerm::Int(1)),
+                            factory.create_lambda_term(
+                                1,
+                                factory.create_application_term(
+                                    factory.create_builtin_term(Stdlib::If),
+                                    allocator.create_triple(
+                                        factory.create_application_term(
+                                            factory.create_builtin_term(Stdlib::Equal),
+                                            allocator.create_pair(
+                                                factory.create_static_variable_term(0),
+                                                factory.create_value_term(ValueTerm::Int(1)),
+                                            ),
                                         ),
-                                    ),
-                                    factory.create_static_variable_term(0),
-                                    factory.create_application_term(
-                                        factory.create_builtin_term(BuiltinTerm::Multiply),
-                                        allocator.create_pair(
-                                            factory.create_static_variable_term(0),
-                                            factory.create_application_term(
-                                                factory.create_static_variable_term(1),
-                                                allocator.create_unit_list(
-                                                    factory.create_application_term(
-                                                        factory.create_builtin_term(
-                                                            BuiltinTerm::Subtract
-                                                        ),
-                                                        allocator.create_pair(
-                                                            factory.create_static_variable_term(0),
-                                                            factory.create_value_term(
-                                                                ValueTerm::Int(1)
+                                        factory.create_static_variable_term(0),
+                                        factory.create_application_term(
+                                            factory.create_builtin_term(Stdlib::Multiply),
+                                            allocator.create_pair(
+                                                factory.create_static_variable_term(0),
+                                                factory.create_application_term(
+                                                    factory.create_static_variable_term(1),
+                                                    allocator.create_unit_list(
+                                                        factory.create_application_term(
+                                                            factory.create_builtin_term(
+                                                                Stdlib::Subtract
+                                                            ),
+                                                            allocator.create_pair(
+                                                                factory
+                                                                    .create_static_variable_term(0),
+                                                                factory.create_value_term(
+                                                                    ValueTerm::Int(1)
+                                                                ),
                                                             ),
                                                         ),
                                                     ),
@@ -1787,10 +1855,10 @@ mod tests {
                                         ),
                                     ),
                                 ),
-                            ),
-                        )
-                    ),
-                )),
+                            )
+                        ),
+                    )
+                ),
             )),
         );
     }
@@ -1802,7 +1870,7 @@ mod tests {
     //             Ok(Expression::new(Term::Lambda(LambdaTerm::new(
     //                 Arity::from(0, 0, None),
     //                 Expression::new(Term::Application(ApplicationTerm::new(
-    //                     Expression::new(Term::Builtin(BuiltinTerm::Add)),
+    //                     Expression::new(Term::Builtin(Stdlib::Add)),
     //                     vec![
     //                         Expression::new(Term::Value(ValueTerm::Int(3))),
     //                         Expression::new(Term::Value(ValueTerm::Int(4))),
@@ -1815,7 +1883,7 @@ mod tests {
     //             Ok(Expression::new(Term::Lambda(LambdaTerm::new(
     //                 Arity::from(0, 1, None),
     //                 Expression::new(Term::Application(ApplicationTerm::new(
-    //                     Expression::new(Term::Builtin(BuiltinTerm::Add)),
+    //                     Expression::new(Term::Builtin(Stdlib::Add)),
     //                     vec![
     //                         Expression::new(Term::Variable(VariableTerm::scoped(0))),
     //                         Expression::new(Term::Value(ValueTerm::Int(4)))
@@ -1828,7 +1896,7 @@ mod tests {
     //             Ok(Expression::new(Term::Lambda(LambdaTerm::new(
     //                 Arity::from(0, 2, None),
     //                 Expression::new(Term::Application(ApplicationTerm::new(
-    //                     Expression::new(Term::Builtin(BuiltinTerm::Add)),
+    //                     Expression::new(Term::Builtin(Stdlib::Add)),
     //                     vec![
     //                         Expression::new(Term::Variable(VariableTerm::scoped(1))),
     //                         Expression::new(Term::Variable(VariableTerm::scoped(0)))
@@ -1845,7 +1913,7 @@ mod tests {
     //                     Expression::new(Term::Lambda(LambdaTerm::new(
     //                         Arity::from(0, 2, None),
     //                         Expression::new(Term::Application(ApplicationTerm::new(
-    //                             Expression::new(Term::Builtin(BuiltinTerm::Add)),
+    //                             Expression::new(Term::Builtin(Stdlib::Add)),
     //                             vec![
     //                                 Expression::new(Term::Variable(VariableTerm::scoped(1))),
     //                                 Expression::new(Term::Variable(VariableTerm::scoped(0)))
@@ -1896,7 +1964,7 @@ mod tests {
     //                 Expression::new(Term::Lambda(LambdaTerm::new(
     //                     Arity::from(0, 1, None),
     //                     Expression::new(Term::Application(ApplicationTerm::new(
-    //                         Expression::new(Term::Builtin(BuiltinTerm::Add)),
+    //                         Expression::new(Term::Builtin(Stdlib::Add)),
     //                         vec![
     //                             Expression::new(Term::Variable(VariableTerm::scoped(2))),
     //                             Expression::new(Term::Variable(VariableTerm::scoped(0))),
@@ -1915,15 +1983,15 @@ mod tests {
     //                         Expression::new(Term::Lambda(
     //                             LambdaTerm::new(
     //                                 Arity::from(0, 1, None),
-    //                                 Expression::new(Term::Application(ApplicationTerm::new(Expression::new(Term::Builtin(BuiltinTerm::Add)), vec![
+    //                                 Expression::new(Term::Application(ApplicationTerm::new(Expression::new(Term::Builtin(Stdlib::Add)), vec![
     //                                     Expression::new(Term::Variable(VariableTerm::scoped(5))),
-    //                                     Expression::new(Term::Application(ApplicationTerm::new(Expression::new(Term::Builtin(BuiltinTerm::Add)), vec![
+    //                                     Expression::new(Term::Application(ApplicationTerm::new(Expression::new(Term::Builtin(Stdlib::Add)), vec![
     //                                         Expression::new(Term::Variable(VariableTerm::scoped(4))),
-    //                                         Expression::new(Term::Application(ApplicationTerm::new(Expression::new(Term::Builtin(BuiltinTerm::Add)), vec![
+    //                                         Expression::new(Term::Application(ApplicationTerm::new(Expression::new(Term::Builtin(Stdlib::Add)), vec![
     //                                             Expression::new(Term::Variable(VariableTerm::scoped(3))),
-    //                                             Expression::new(Term::Application(ApplicationTerm::new(Expression::new(Term::Builtin(BuiltinTerm::Add)), vec![
+    //                                             Expression::new(Term::Application(ApplicationTerm::new(Expression::new(Term::Builtin(Stdlib::Add)), vec![
     //                                                 Expression::new(Term::Variable(VariableTerm::scoped(2))),
-    //                                                 Expression::new(Term::Application(ApplicationTerm::new(Expression::new(Term::Builtin(BuiltinTerm::Add)), vec![
+    //                                                 Expression::new(Term::Application(ApplicationTerm::new(Expression::new(Term::Builtin(Stdlib::Add)), vec![
     //                                                     Expression::new(Term::Variable(VariableTerm::scoped(1))),
     //                                                     Expression::new(Term::Variable(VariableTerm::scoped(0))),
     //                                                 ]))),
@@ -1993,7 +2061,7 @@ mod tests {
     //                 vec![Expression::new(Term::Lambda(LambdaTerm::new(
     //                     Arity::from(0, 2, None),
     //                     Expression::new(Term::Application(ApplicationTerm::new(
-    //                         Expression::new(Term::Builtin(BuiltinTerm::Add)),
+    //                         Expression::new(Term::Builtin(Stdlib::Add)),
     //                         vec![
     //                             Expression::new(Term::Variable(VariableTerm::scoped(1))),
     //                             Expression::new(Term::Variable(VariableTerm::scoped(0))),
@@ -2009,7 +2077,7 @@ mod tests {
     //         assert_eq!(
     //             parse("(+ 3 4)"),
     //             Ok(Expression::new(Term::Application(ApplicationTerm::new(
-    //                 Expression::new(Term::Builtin(BuiltinTerm::Add)),
+    //                 Expression::new(Term::Builtin(Stdlib::Add)),
     //                 vec![
     //                     Expression::new(Term::Value(ValueTerm::Int(3))),
     //                     Expression::new(Term::Value(ValueTerm::Int(4))),

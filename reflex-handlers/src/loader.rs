@@ -18,7 +18,8 @@ use reflex::{
         Signal, SignalId, SignalType, StateToken,
     },
     hash::{hash_object, HashId},
-    lang::{BuiltinTerm, ValueTerm},
+    lang::ValueTerm,
+    stdlib::Stdlib,
 };
 use reflex_runtime::{
     AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator, RuntimeEffect,
@@ -37,6 +38,7 @@ pub fn load_signal_handler<
 ) -> impl Fn(&str, &[&Signal<T>], &SignalHelpers<T>) -> SignalHandlerResult<T>
 where
     T::String: Send + Sync,
+    T::Builtin: From<Stdlib>,
 {
     let factory = factory.clone();
     let allocator = allocator.clone();
@@ -303,9 +305,12 @@ fn create_property_accessor<T: Expression>(
     key: T,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> T {
+) -> T
+where
+    T::Builtin: From<Stdlib>,
+{
     factory.create_application_term(
-        factory.create_builtin_term(BuiltinTerm::Get),
+        factory.create_builtin_term(Stdlib::Get),
         allocator.create_pair(target, key),
     )
 }

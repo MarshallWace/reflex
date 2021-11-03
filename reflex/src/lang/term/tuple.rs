@@ -13,7 +13,7 @@ use crate::{
     },
 };
 
-#[derive(Hash, Eq, PartialEq, Debug)]
+#[derive(Hash, Eq, PartialEq, Clone, Debug)]
 pub struct TupleTerm<T: Expression> {
     fields: ExpressionList<T>,
 }

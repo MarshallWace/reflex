@@ -12,12 +12,13 @@ use reflex::{
         StringValue,
     },
     hash::hash_object,
+    stdlib::Stdlib,
 };
 use reflex_graphql::{
     create_graphql_error_response, create_graphql_success_response,
     create_introspection_query_response, create_json_error_object, deserialize_graphql_operation,
-    parse_graphql_operation, sanitize_signal_errors, GraphQlOperationPayload,
-    GraphQlQueryTransform,
+    parse_graphql_operation, sanitize_signal_errors, stdlib::Stdlib as GraphQlStdlib,
+    GraphQlOperationPayload, GraphQlQueryTransform,
 };
 use reflex_json::{json_object, JsonValue};
 use reflex_runtime::{
@@ -44,6 +45,7 @@ pub(crate) async fn handle_graphql_http_request<
 ) -> Result<Response<Body>, Infallible>
 where
     T::String: StringValue + Send + Sync,
+    T::Builtin: From<Stdlib> + From<GraphQlStdlib>,
 {
     let cors_headers = get_cors_headers(&req);
     let transform = match transform.factory(req.headers(), None) {
@@ -145,7 +147,10 @@ async fn parse_graphql_request<T: Expression>(
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
     transform: &impl GraphQlQueryTransform,
-) -> Result<T, HttpResult<T>> {
+) -> Result<T, HttpResult<T>>
+where
+    T::Builtin: From<Stdlib> + From<GraphQlStdlib>,
+{
     let content_type = match req.headers().get(header::CONTENT_TYPE) {
         Some(value) => match value.to_str() {
             Ok(value) => Ok(String::from(value)),
@@ -180,7 +185,10 @@ fn parse_request_body_graphql_json<T: Expression>(
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
     transform: &impl GraphQlQueryTransform,
-) -> Result<T, String> {
+) -> Result<T, String>
+where
+    T::Builtin: From<Stdlib> + From<GraphQlStdlib>,
+{
     match deserialize_graphql_operation(&body) {
         Err(error) => Err(error),
         Ok(operation) => match operation.operation_name() {

@@ -12,7 +12,7 @@ use crate::{
     },
 };
 
-#[derive(Hash, Eq, PartialEq, Debug)]
+#[derive(Hash, Eq, PartialEq, Clone, Debug)]
 pub struct RecursiveTerm<T: Expression> {
     factory: T,
 }

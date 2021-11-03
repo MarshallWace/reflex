@@ -15,13 +15,14 @@ use reflex::{
     allocator::DefaultAllocator,
     compiler::{Compile, Compiler, CompilerMode, CompilerOptions, Program},
     core::{Applicable, Expression, ExpressionFactory, HeapAllocator, Reducible, Rewritable},
-    lang::{NativeFunction, TermFactory},
+    lang::TermFactory,
+    stdlib::Stdlib,
 };
 
-use reflex_graphql::{graphql_loader, graphql_plugins};
+use reflex_graphql::graphql_loader;
 use reflex_js::{
-    builtin_plugins, compose_module_loaders, create_js_env, parse_module,
-    stdlib::imports::builtin_imports_loader,
+    builtins::JsBuiltins, compose_module_loaders, create_js_env, imports::builtin_imports_loader,
+    parse_module, stdlib::Stdlib as JsStdlib,
 };
 
 use reflex;
@@ -34,18 +35,12 @@ pub fn standard_js_loaders<T: Expression + 'static>(
 ) -> impl Fn(&str, &Path) -> Option<Result<T, String>> + 'static
 where
     T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
+    T::Builtin: From<Stdlib> + From<JsStdlib>,
 {
     compose_module_loaders(
         builtin_imports_loader(factory, allocator),
         graphql_loader(factory, allocator),
     )
-}
-
-pub fn standard_js_plugins<T>() -> impl IntoIterator<Item = NativeFunction<T>>
-where
-    T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
-{
-    builtin_plugins().into_iter().chain(graphql_plugins())
 }
 
 /**
@@ -59,7 +54,7 @@ pub fn compile_js_source(
     compiler_options: CompilerOptions,
     compiler_mode: CompilerMode,
 ) -> Result<Program> {
-    let factory = &TermFactory::default();
+    let factory = &TermFactory::<JsBuiltins>::default();
     let allocator = &DefaultAllocator::default();
     let env_vars = env::vars();
     let module_loaders = standard_js_loaders(factory, allocator);
@@ -86,6 +81,7 @@ pub fn compile_js_source_with_customisation<T: Expression + 'static>(
 ) -> Result<Program>
 where
     T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
+    T::Builtin: From<Stdlib> + From<JsStdlib>,
 {
     let root_module_source = fs::read_to_string(&root_module_path)
         .with_context(|| format!("Failed to load {}", root_module_path))?;
@@ -107,7 +103,10 @@ fn create_graph_root<T: Expression + Rewritable<T> + 'static>(
     custom_loader: Option<impl Fn(&str, &Path) -> Option<Result<T, String>> + 'static>,
     factory: &(impl ExpressionFactory<T> + Clone + 'static),
     allocator: &(impl HeapAllocator<T> + Clone + 'static),
-) -> Result<T> {
+) -> Result<T>
+where
+    T::Builtin: From<Stdlib> + From<JsStdlib>,
+{
     let env = create_js_env(env_args, factory, allocator);
     let module_loader = create_module_loader(env.clone(), custom_loader, factory, allocator);
     parse_module(

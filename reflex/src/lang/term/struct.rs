@@ -13,7 +13,7 @@ use crate::{
     },
 };
 
-#[derive(Hash, Eq, PartialEq, Debug)]
+#[derive(Hash, Eq, PartialEq, Clone, Debug)]
 pub struct StructTerm<T: Expression> {
     prototype: StructPrototype,
     fields: ExpressionList<T>,
@@ -181,7 +181,7 @@ impl<T: Expression> SerializeJson for StructTerm<T> {
     }
 }
 
-#[derive(Hash, Eq, PartialEq, Debug)]
+#[derive(Hash, Eq, PartialEq, Clone, Debug)]
 pub struct ConstructorTerm {
     prototype: StructPrototype,
 }

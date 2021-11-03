@@ -8,16 +8,17 @@ use reflex::{
     allocator::DefaultAllocator,
     cache::SubstitutionCache,
     compiler::{hash_program_root, Compiler, CompilerMode, CompilerOptions, InstructionPointer},
-    core::{evaluate, StateCache},
+    core::{evaluate, ExpressionFactory, StateCache, Uid},
     interpreter::{execute, DefaultInterpreterCache, InterpreterOptions},
     lang::TermFactory,
+    stdlib::Stdlib,
 };
-use reflex_js::{parse, Env};
+use reflex_js::{builtins::JsBuiltins, parse, Env};
 use test::Bencher;
 
 #[bench]
 fn js_interpreted(b: &mut Bencher) {
-    let factory = TermFactory::default();
+    let factory = TermFactory::<JsBuiltins>::default();
     let allocator = DefaultAllocator::default();
     let env = Env::new();
     let input = "
@@ -34,8 +35,12 @@ fn js_interpreted(b: &mut Bencher) {
 
 #[bench]
 fn js_compiled(b: &mut Bencher) {
-    let factory = TermFactory::default();
+    let factory = TermFactory::<JsBuiltins>::default();
     let allocator = DefaultAllocator::default();
+    let builtins = Stdlib::entries()
+        .into_iter()
+        .map(|builtin| (builtin.uid(), factory.create_builtin_term(builtin)))
+        .collect::<Vec<_>>();
     let env = Env::new();
     let input = "
         const fullName = (first, last) => `${first} ${last}`;
@@ -58,7 +63,6 @@ fn js_compiled(b: &mut Bencher) {
         let mut cache = DefaultInterpreterCache::default();
         let entry_point = InstructionPointer::default();
         let cache_key = hash_program_root(&program, &entry_point);
-        let plugins = Vec::new();
         execute(
             cache_key,
             &program,
@@ -66,7 +70,7 @@ fn js_compiled(b: &mut Bencher) {
             &state,
             &factory,
             &allocator,
-            &plugins,
+            &builtins,
             &options,
             &mut cache,
         )

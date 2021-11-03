@@ -19,15 +19,17 @@ pub mod compiler;
 pub mod interpreter;
 
 pub mod lang {
+    mod expression;
     mod factory;
     pub use factory::*;
     pub mod term;
     pub(crate) use term::*;
     pub use term::{
         as_integer, create_struct, deduplicate_hashmap_entries, deduplicate_hashset_entries,
-        is_integer, is_truthy, BuiltinTerm, NativeFunction, ValueTerm,
+        is_integer, ValueTerm,
     };
 }
+pub mod stdlib;
 
 pub mod parser {
     pub mod sexpr;
