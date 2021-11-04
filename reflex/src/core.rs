@@ -54,42 +54,6 @@ pub trait Builtin:
         cache: &mut impl EvaluationCache<T>,
     ) -> Result<T, String>;
 }
-// impl<B: Builtin> GraphNode for B {
-//     fn capture_depth(&self) -> StackOffset {
-//         0
-//     }
-//     fn free_variables(&self) -> HashSet<StackOffset> {
-//         HashSet::new()
-//     }
-//     fn dynamic_dependencies(&self) -> crate::core::DependencyList {
-//         DependencyList::empty()
-//     }
-//     fn is_static(&self) -> bool {
-//         true
-//     }
-//     fn is_atomic(&self) -> bool {
-//         true
-//     }
-// }
-// impl<B: Builtin> SerializeJson for B {
-//     fn to_json(&self) -> Result<serde_json::Value, String> {
-//         Err(format!("Unable to serialize term: {}", self))
-//     }
-// }
-// impl<T: Expression<Builtin = Self> + Applicable<T>, B: Builtin> Applicable<T> for B {
-//     fn arity(&self) -> Option<Arity> {
-//         self.arity::<T>()
-//     }
-//     fn apply(
-//         &self,
-//         args: impl ExactSizeIterator<Item = T>,
-//         factory: &impl ExpressionFactory<T>,
-//         allocator: &impl HeapAllocator<T>,
-//         cache: &mut impl EvaluationCache<T>,
-//     ) -> Result<T, String> {
-//         self.apply(args, factory, allocator, cache)
-//     }
-// }
 
 pub trait Uid {
     fn uid(&self) -> Uuid;
