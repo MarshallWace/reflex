@@ -141,7 +141,7 @@ mod tests {
             evaluate, DependencyList, EvaluationResult, Expression, ExpressionFactory,
             HeapAllocator, StateCache,
         },
-        lang::{TermFactory, ValueTerm},
+        lang::{SharedTermFactory, ValueTerm},
     };
 
     fn create_hashmap_term<T: Expression>(
@@ -155,7 +155,7 @@ mod tests {
 
     #[test]
     fn map_constructor() {
-        let factory = TermFactory::<JsBuiltins>::default();
+        let factory = SharedTermFactory::<JsBuiltins>::default();
         let allocator = DefaultAllocator::default();
         let env = Env::new().with_globals(builtin_globals(&factory, &allocator));
         let mut cache = SubstitutionCache::new();
@@ -258,7 +258,7 @@ mod tests {
 
     #[test]
     fn map_constructor_entries() {
-        let factory = TermFactory::<JsBuiltins>::default();
+        let factory = SharedTermFactory::<JsBuiltins>::default();
         let allocator = DefaultAllocator::default();
         let env = Env::new().with_globals(builtin_globals(&factory, &allocator));
         let mut cache = SubstitutionCache::new();
@@ -344,7 +344,7 @@ mod tests {
 
     #[test]
     fn map_constructor_keys() {
-        let factory = TermFactory::<JsBuiltins>::default();
+        let factory = SharedTermFactory::<JsBuiltins>::default();
         let allocator = DefaultAllocator::default();
         let env = Env::new().with_globals(builtin_globals(&factory, &allocator));
         let mut cache = SubstitutionCache::new();
@@ -412,7 +412,7 @@ mod tests {
 
     #[test]
     fn map_constructor_values() {
-        let factory = TermFactory::<JsBuiltins>::default();
+        let factory = SharedTermFactory::<JsBuiltins>::default();
         let allocator = DefaultAllocator::default();
         let env = Env::new().with_globals(builtin_globals(&factory, &allocator));
         let mut cache = SubstitutionCache::new();

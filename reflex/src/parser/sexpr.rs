@@ -838,7 +838,7 @@ mod tests {
     use crate::{
         allocator::DefaultAllocator,
         core::{ExpressionFactory, HeapAllocator},
-        lang::{TermFactory, ValueTerm},
+        lang::{SharedTermFactory, ValueTerm},
         stdlib::Stdlib,
     };
 
@@ -1267,7 +1267,7 @@ mod tests {
 
     #[test]
     fn letrec_bindings() {
-        let factory = TermFactory::<Stdlib>::default();
+        let factory = SharedTermFactory::<Stdlib>::default();
         let allocator = DefaultAllocator::default();
         assert_eq!(
             parse("(letrec () 3)", &factory, &allocator),

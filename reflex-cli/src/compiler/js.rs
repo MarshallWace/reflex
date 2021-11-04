@@ -15,7 +15,7 @@ use reflex::{
     allocator::DefaultAllocator,
     compiler::{Compile, Compiler, CompilerMode, CompilerOptions, Program},
     core::{Applicable, Expression, ExpressionFactory, HeapAllocator, Reducible, Rewritable},
-    lang::TermFactory,
+    lang::SharedTermFactory,
     stdlib::Stdlib,
 };
 
@@ -54,7 +54,7 @@ pub fn compile_js_source(
     compiler_options: CompilerOptions,
     compiler_mode: CompilerMode,
 ) -> Result<Program> {
-    let factory = &TermFactory::<JsBuiltins>::default();
+    let factory = &SharedTermFactory::<JsBuiltins>::default();
     let allocator = &DefaultAllocator::default();
     let env_vars = env::vars();
     let module_loaders = standard_js_loaders(factory, allocator);

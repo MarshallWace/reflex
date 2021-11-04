@@ -1342,7 +1342,7 @@ mod tests {
             evaluate, ArgType, DependencyList, EvaluationResult, Expression, ExpressionFactory,
             FunctionArity, GraphNode, HeapAllocator, Rewritable, Signal, SignalType, StateCache,
         },
-        lang::{TermFactory, ValueTerm},
+        lang::{SharedTermFactory, ValueTerm},
         parser::sexpr::parse,
         stdlib::Stdlib,
     };
@@ -1375,7 +1375,7 @@ mod tests {
     fn value_expressions() {
         let state = StateCache::default();
         let mut cache = SubstitutionCache::new();
-        let factory = TermFactory::<Stdlib>::default();
+        let factory = SharedTermFactory::<Stdlib>::default();
         let allocator = DefaultAllocator::default();
         let expression = parse("3", &factory, &allocator).unwrap();
         let result = evaluate(&expression, &state, &factory, &allocator, &mut cache);
@@ -1391,7 +1391,7 @@ mod tests {
     #[test]
     fn lambda_optimizations() {
         let mut cache = SubstitutionCache::new();
-        let factory = TermFactory::<Stdlib>::default();
+        let factory = SharedTermFactory::<Stdlib>::default();
         let allocator = DefaultAllocator::default();
         let expression = parse("(lambda (foo) foo)", &factory, &allocator).unwrap();
         let result = expression.normalize(&factory, &allocator, &mut cache);
@@ -1413,7 +1413,7 @@ mod tests {
     fn lambda_application_expressions() {
         let state = StateCache::default();
         let mut cache = SubstitutionCache::new();
-        let factory = TermFactory::<Stdlib>::default();
+        let factory = SharedTermFactory::<Stdlib>::default();
         let allocator = DefaultAllocator::default();
         let expression = parse("((lambda (foo) foo) 3)", &factory, &allocator).unwrap();
         let result = evaluate(&expression, &state, &factory, &allocator, &mut cache);
@@ -1451,7 +1451,7 @@ mod tests {
     fn invalid_function_applications() {
         let state = StateCache::default();
         let mut cache = SubstitutionCache::new();
-        let factory = TermFactory::<Stdlib>::default();
+        let factory = SharedTermFactory::<Stdlib>::default();
         let allocator = DefaultAllocator::default();
         let expression = parse("((lambda (foo) foo))", &factory, &allocator).unwrap();
         let result = evaluate(&expression, &state, &factory, &allocator, &mut cache);
@@ -1508,7 +1508,7 @@ mod tests {
     fn builtin_expressions() {
         let state = StateCache::default();
         let mut cache = SubstitutionCache::new();
-        let factory = TermFactory::<Stdlib>::default();
+        let factory = SharedTermFactory::<Stdlib>::default();
         let allocator = DefaultAllocator::default();
         let expression = parse("+", &factory, &allocator).unwrap();
         let result = evaluate(&expression, &state, &factory, &allocator, &mut cache);
@@ -1525,7 +1525,7 @@ mod tests {
     fn builtin_application_expressions() {
         let state = StateCache::default();
         let mut cache = SubstitutionCache::new();
-        let factory = TermFactory::<Stdlib>::default();
+        let factory = SharedTermFactory::<Stdlib>::default();
         let allocator = DefaultAllocator::default();
         let expression = parse("(+ 1 2)", &factory, &allocator).unwrap();
         let result = evaluate(&expression, &state, &factory, &allocator, &mut cache);
@@ -1542,7 +1542,7 @@ mod tests {
     fn nested_expressions() {
         let state = StateCache::default();
         let mut cache = SubstitutionCache::new();
-        let factory = TermFactory::<Stdlib>::default();
+        let factory = SharedTermFactory::<Stdlib>::default();
         let allocator = DefaultAllocator::default();
         let expression = parse("(+ (+ (abs -3) 4) 5)", &factory, &allocator).unwrap();
         let result = evaluate(&expression, &state, &factory, &allocator, &mut cache);
@@ -1559,7 +1559,7 @@ mod tests {
     fn signal_short_circuiting() {
         let state = StateCache::default();
         let mut cache = SubstitutionCache::new();
-        let factory = TermFactory::<Stdlib>::default();
+        let factory = SharedTermFactory::<Stdlib>::default();
         let allocator = DefaultAllocator::default();
         let expression = parse("((/ 3 0) 4 5)", &factory, &allocator).unwrap();
         let result = evaluate(&expression, &state, &factory, &allocator, &mut cache);
@@ -1655,7 +1655,7 @@ mod tests {
     fn let_expressions() {
         let state = StateCache::default();
         let mut cache = SubstitutionCache::new();
-        let factory = TermFactory::<Stdlib>::default();
+        let factory = SharedTermFactory::<Stdlib>::default();
         let allocator = DefaultAllocator::default();
         let expression = parse("(let () 3)", &factory, &allocator).unwrap();
         let result = evaluate(&expression, &state, &factory, &allocator, &mut cache);
@@ -1714,7 +1714,7 @@ mod tests {
     fn letrec_expressions() {
         let state = StateCache::default();
         let mut cache = SubstitutionCache::new();
-        let factory = TermFactory::<Stdlib>::default();
+        let factory = SharedTermFactory::<Stdlib>::default();
         let allocator = DefaultAllocator::default();
         let expression = parse("(letrec () 3)", &factory, &allocator).unwrap();
         let result = evaluate(&expression, &state, &factory, &allocator, &mut cache);
@@ -1892,7 +1892,7 @@ mod tests {
 
     #[test]
     fn partial_evaluation() {
-        let factory = TermFactory::<Stdlib>::default();
+        let factory = SharedTermFactory::<Stdlib>::default();
         let allocator = DefaultAllocator::default();
         let expression = parse(
             "((lambda (foo) ((lambda (bar) (foo 3)) #f)) (lambda (foo) #t))",

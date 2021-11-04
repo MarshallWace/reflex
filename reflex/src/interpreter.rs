@@ -1244,7 +1244,7 @@ mod tests {
 
     #[test]
     fn compiled_functions() {
-        let factory = TermFactory::<Stdlib>::default();
+        let factory = SharedTermFactory::<Stdlib>::default();
         let allocator = DefaultAllocator::default();
         let builtins = Stdlib::entries()
             .into_iter()
@@ -1318,7 +1318,7 @@ mod tests {
 
     #[test]
     fn compiled_tail_calls() {
-        let factory = TermFactory::<Stdlib>::default();
+        let factory = SharedTermFactory::<Stdlib>::default();
         let allocator = DefaultAllocator::default();
         let builtins = Stdlib::entries()
             .into_iter()
@@ -1360,7 +1360,7 @@ mod tests {
 
     #[test]
     fn compiled_closures() {
-        let factory = TermFactory::<Stdlib>::default();
+        let factory = SharedTermFactory::<Stdlib>::default();
         let allocator = DefaultAllocator::default();
         let builtins = Stdlib::entries()
             .into_iter()
@@ -1402,7 +1402,7 @@ mod tests {
 
     #[test]
     fn basic_operation() {
-        let factory = TermFactory::<Stdlib>::default();
+        let factory = SharedTermFactory::<Stdlib>::default();
         let allocator = DefaultAllocator::default();
         let builtins = Stdlib::entries()
             .into_iter()
@@ -1440,7 +1440,7 @@ mod tests {
 
     #[test]
     fn nested_expressions() {
-        let factory = TermFactory::<Stdlib>::default();
+        let factory = SharedTermFactory::<Stdlib>::default();
         let allocator = DefaultAllocator::default();
         let builtins = Stdlib::entries()
             .into_iter()
@@ -1494,7 +1494,7 @@ mod tests {
 
     #[test]
     fn builtin_function_applications() {
-        let factory = TermFactory::<Stdlib>::default();
+        let factory = SharedTermFactory::<Stdlib>::default();
         let allocator = DefaultAllocator::default();
         let builtins = Stdlib::entries()
             .into_iter()
@@ -1534,7 +1534,7 @@ mod tests {
             ),
         );
 
-        let factory = TermFactory::<Stdlib>::default();
+        let factory = SharedTermFactory::<Stdlib>::default();
         let allocator = DefaultAllocator::default();
         let builtins = Stdlib::entries()
             .into_iter()
@@ -1573,7 +1573,7 @@ mod tests {
             ),
         );
 
-        let factory = TermFactory::<Stdlib>::default();
+        let factory = SharedTermFactory::<Stdlib>::default();
         let allocator = DefaultAllocator::default();
         let builtins = Stdlib::entries()
             .into_iter()
@@ -1614,7 +1614,7 @@ mod tests {
             ),
         );
 
-        let factory = TermFactory::<Stdlib>::default();
+        let factory = SharedTermFactory::<Stdlib>::default();
         let allocator = DefaultAllocator::default();
         let builtins = Stdlib::entries()
             .into_iter()
@@ -1661,7 +1661,7 @@ mod tests {
             ),
         );
 
-        let factory = TermFactory::<Stdlib>::default();
+        let factory = SharedTermFactory::<Stdlib>::default();
         let allocator = DefaultAllocator::default();
         let builtins = Stdlib::entries()
             .into_iter()
@@ -1711,7 +1711,7 @@ mod tests {
 
     #[test]
     fn chained_functions() {
-        let factory = TermFactory::<Stdlib>::default();
+        let factory = SharedTermFactory::<Stdlib>::default();
         let allocator = DefaultAllocator::default();
         let builtins = Stdlib::entries()
             .into_iter()
@@ -1757,7 +1757,7 @@ mod tests {
             ),
         );
 
-        let factory = TermFactory::<Stdlib>::default();
+        let factory = SharedTermFactory::<Stdlib>::default();
         let allocator = DefaultAllocator::default();
         let builtins = Stdlib::entries()
             .into_iter()
@@ -1807,7 +1807,7 @@ mod tests {
 
     #[test]
     fn variadic_functions() {
-        let factory = TermFactory::<Stdlib>::default();
+        let factory = SharedTermFactory::<Stdlib>::default();
         let allocator = DefaultAllocator::default();
         let builtins = Stdlib::entries()
             .into_iter()
@@ -1870,7 +1870,7 @@ mod tests {
             ),
         );
 
-        let factory = TermFactory::<Stdlib>::default();
+        let factory = SharedTermFactory::<Stdlib>::default();
         let allocator = DefaultAllocator::default();
         let builtins = Stdlib::entries()
             .into_iter()
@@ -1954,7 +1954,7 @@ mod tests {
 
     #[test]
     fn let_expression_scoping() {
-        let factory = TermFactory::<Stdlib>::default();
+        let factory = SharedTermFactory::<Stdlib>::default();
         let allocator = DefaultAllocator::default();
         let builtins = Stdlib::entries()
             .into_iter()

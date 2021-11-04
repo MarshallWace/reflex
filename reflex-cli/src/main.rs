@@ -18,7 +18,7 @@ use reflex::{
     compiler::{hash_program_root, Compiler, CompilerMode, CompilerOptions, InstructionPointer},
     core::{Expression, ExpressionFactory, HeapAllocator, Reducible, Rewritable, StateCache, Uid},
     interpreter::{execute, DefaultInterpreterCache, InterpreterOptions},
-    lang::{term::SignalTerm, TermFactory, ValueTerm},
+    lang::{term::SignalTerm, SharedTermFactory, ValueTerm},
     stdlib::Stdlib,
 };
 
@@ -63,7 +63,7 @@ pub async fn main() -> Result<()> {
     let debug_compiler = args.debug_compiler;
     let debug_interpreter = args.debug_interpreter;
     let debug_stack = args.debug_stack;
-    let factory = TermFactory::<JsBuiltins>::default();
+    let factory = SharedTermFactory::<JsBuiltins>::default();
     let builtins = JsBuiltins::entries()
         .into_iter()
         .map(|builtin| (builtin.uid(), factory.create_builtin_term(builtin)))

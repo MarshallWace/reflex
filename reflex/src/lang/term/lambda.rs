@@ -266,14 +266,14 @@ mod tests {
             DependencyList, Evaluate, EvaluationResult, ExpressionFactory, HeapAllocator,
             Rewritable, StateCache,
         },
-        lang::{TermFactory, ValueTerm},
+        lang::{SharedTermFactory, ValueTerm},
         parser::sexpr::parse,
         stdlib::Stdlib,
     };
 
     #[test]
     fn hoist_lambda_variables() {
-        let factory = TermFactory::<Stdlib>::default();
+        let factory = SharedTermFactory::<Stdlib>::default();
         let allocator = DefaultAllocator::default();
 
         let input = "

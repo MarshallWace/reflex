@@ -83,12 +83,12 @@ mod tests {
             evaluate, DependencyList, EvaluationResult, ExpressionFactory, HeapAllocator,
             StateCache,
         },
-        lang::{TermFactory, ValueTerm},
+        lang::{SharedTermFactory, ValueTerm},
     };
 
     #[test]
     fn set_constructor() {
-        let factory = TermFactory::<JsBuiltins>::default();
+        let factory = SharedTermFactory::<JsBuiltins>::default();
         let allocator = DefaultAllocator::default();
         let env = Env::new().with_globals(builtin_globals(&factory, &allocator));
         let mut cache = SubstitutionCache::new();
@@ -165,7 +165,7 @@ mod tests {
 
     #[test]
     fn set_constructor_values() {
-        let factory = TermFactory::<JsBuiltins>::default();
+        let factory = SharedTermFactory::<JsBuiltins>::default();
         let allocator = DefaultAllocator::default();
         let env = Env::new().with_globals(builtin_globals(&factory, &allocator));
         let mut cache = SubstitutionCache::new();
@@ -233,7 +233,7 @@ mod tests {
 
     #[test]
     fn set_constructor_entries() {
-        let factory = TermFactory::<JsBuiltins>::default();
+        let factory = SharedTermFactory::<JsBuiltins>::default();
         let allocator = DefaultAllocator::default();
         let env = Env::new().with_globals(builtin_globals(&factory, &allocator));
         let mut cache = SubstitutionCache::new();

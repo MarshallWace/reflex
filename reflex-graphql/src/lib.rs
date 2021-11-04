@@ -648,7 +648,7 @@ mod tests {
             EvaluationResult, Expression, ExpressionFactory, HeapAllocator, Reducible, Rewritable,
             StateCache, Uid,
         },
-        lang::{create_struct, TermFactory, ValueTerm},
+        lang::{create_struct, SharedTermFactory, ValueTerm},
         stdlib::Stdlib,
     };
 
@@ -708,7 +708,7 @@ mod tests {
 
     #[test]
     fn leaf_queries() {
-        let factory = TermFactory::<GraphQlTestBuiltins>::default();
+        let factory = SharedTermFactory::<GraphQlTestBuiltins>::default();
         let allocator = DefaultAllocator::default();
         let root = create_struct(
             vec![
@@ -784,7 +784,7 @@ mod tests {
 
     #[test]
     fn computed_leaf_queries() {
-        let factory = TermFactory::<GraphQlTestBuiltins>::default();
+        let factory = SharedTermFactory::<GraphQlTestBuiltins>::default();
         let allocator = DefaultAllocator::default();
         let root = create_struct(
             vec![
@@ -884,7 +884,7 @@ mod tests {
 
     #[test]
     fn list_leaf_queries() {
-        let factory = TermFactory::<GraphQlTestBuiltins>::default();
+        let factory = SharedTermFactory::<GraphQlTestBuiltins>::default();
         let allocator = DefaultAllocator::default();
         let root = create_struct(
             vec![
@@ -961,7 +961,7 @@ mod tests {
 
     #[test]
     fn deeply_nested_list_leaf_queries() {
-        let factory = TermFactory::<GraphQlTestBuiltins>::default();
+        let factory = SharedTermFactory::<GraphQlTestBuiltins>::default();
         let allocator = DefaultAllocator::default();
         let root = create_struct(
             vec![

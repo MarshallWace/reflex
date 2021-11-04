@@ -7,7 +7,7 @@ use std::process;
 use reflex::{
     allocator::DefaultAllocator,
     core::{ExpressionFactory, Uid},
-    lang::TermFactory,
+    lang::SharedTermFactory,
 };
 use reflex_cli::compiler::js::standard_js_loaders;
 use reflex_server::{
@@ -18,7 +18,7 @@ use reflex_server::{
 
 #[tokio::main]
 pub async fn main() {
-    let factory = TermFactory::<ServerBuiltins>::default();
+    let factory = SharedTermFactory::<ServerBuiltins>::default();
     let allocator = DefaultAllocator::default();
     process::exit(
         match cli(

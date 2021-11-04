@@ -17,7 +17,7 @@ use reflex::{
     },
     core::{evaluate, ExpressionFactory, HeapAllocator, StateCache, Uid},
     interpreter::{execute, DefaultInterpreterCache, InterpreterOptions},
-    lang::{TermFactory, ValueTerm},
+    lang::{SharedTermFactory, ValueTerm},
     parser::sexpr::parse,
     stdlib::Stdlib,
 };
@@ -25,7 +25,7 @@ use reflex::{
 #[bench]
 fn nested_expressions(b: &mut Bencher) {
     let state = StateCache::default();
-    let factory = TermFactory::<Stdlib>::default();
+    let factory = SharedTermFactory::<Stdlib>::default();
     let allocator = DefaultAllocator::default();
     let expression = parse("(+ (+ (abs -3) 4) 5)", &factory, &allocator).unwrap();
     b.iter(|| {
@@ -36,7 +36,7 @@ fn nested_expressions(b: &mut Bencher) {
 
 #[bench]
 fn nested_expressions_bytecode(b: &mut Bencher) {
-    let factory = TermFactory::<Stdlib>::default();
+    let factory = SharedTermFactory::<Stdlib>::default();
     let allocator = DefaultAllocator::default();
     let builtins = Stdlib::entries()
         .into_iter()
@@ -85,7 +85,7 @@ fn nested_expressions_bytecode(b: &mut Bencher) {
 
 #[bench]
 fn nested_expressions_compiled(b: &mut Bencher) {
-    let factory = TermFactory::<Stdlib>::default();
+    let factory = SharedTermFactory::<Stdlib>::default();
     let allocator = DefaultAllocator::default();
     let builtins = Stdlib::entries()
         .into_iter()
@@ -118,7 +118,7 @@ fn nested_expressions_compiled(b: &mut Bencher) {
 #[bench]
 fn function_application_nullary(b: &mut Bencher) {
     let state = StateCache::default();
-    let factory = TermFactory::<Stdlib>::default();
+    let factory = SharedTermFactory::<Stdlib>::default();
     let allocator = DefaultAllocator::default();
     let expression = parse("((lambda () 3))", &factory, &allocator).unwrap();
     b.iter(|| {
@@ -130,7 +130,7 @@ fn function_application_nullary(b: &mut Bencher) {
 #[bench]
 fn function_application_unary(b: &mut Bencher) {
     let state = StateCache::default();
-    let factory = TermFactory::<Stdlib>::default();
+    let factory = SharedTermFactory::<Stdlib>::default();
     let allocator = DefaultAllocator::default();
     let expression = parse("((lambda (foo) foo) 3)", &factory, &allocator).unwrap();
     b.iter(|| {
@@ -142,7 +142,7 @@ fn function_application_unary(b: &mut Bencher) {
 #[bench]
 fn function_application_binary(b: &mut Bencher) {
     let state = StateCache::default();
-    let factory = TermFactory::<Stdlib>::default();
+    let factory = SharedTermFactory::<Stdlib>::default();
     let allocator = DefaultAllocator::default();
     let expression = parse("((lambda (foo bar) foo) 3 4)", &factory, &allocator).unwrap();
     b.iter(|| {
@@ -154,7 +154,7 @@ fn function_application_binary(b: &mut Bencher) {
 #[bench]
 fn function_application_ternary(b: &mut Bencher) {
     let state = StateCache::default();
-    let factory = TermFactory::<Stdlib>::default();
+    let factory = SharedTermFactory::<Stdlib>::default();
     let allocator = DefaultAllocator::default();
     let expression = parse("((lambda (foo bar baz) foo) 3 4 5)", &factory, &allocator).unwrap();
     b.iter(|| {
@@ -166,7 +166,7 @@ fn function_application_ternary(b: &mut Bencher) {
 #[bench]
 fn function_application_unused_args(b: &mut Bencher) {
     let state = StateCache::default();
-    let factory = TermFactory::<Stdlib>::default();
+    let factory = SharedTermFactory::<Stdlib>::default();
     let allocator = DefaultAllocator::default();
     let expression = parse("((lambda (foo bar baz) 2) 3 4 5)", &factory, &allocator).unwrap();
     b.iter(|| {
@@ -178,7 +178,7 @@ fn function_application_unused_args(b: &mut Bencher) {
 #[bench]
 fn function_application_argument_scope(b: &mut Bencher) {
     let state = StateCache::default();
-    let factory = TermFactory::<Stdlib>::default();
+    let factory = SharedTermFactory::<Stdlib>::default();
     let allocator = DefaultAllocator::default();
     let expression = parse(
             "((lambda (first second third) ((lambda (one two) ((lambda (foo bar) (+ foo bar)) one two)) first third)) 3 4 5)",
@@ -195,7 +195,7 @@ fn function_application_argument_scope(b: &mut Bencher) {
 #[bench]
 fn deeply_nested_function_application(b: &mut Bencher) {
     let state = StateCache::default();
-    let factory = TermFactory::<Stdlib>::default();
+    let factory = SharedTermFactory::<Stdlib>::default();
     let allocator = DefaultAllocator::default();
     let expression = (1..=100).fold(factory.create_value_term(ValueTerm::Int(0)), |acc, i| {
         factory.create_application_term(
@@ -218,7 +218,7 @@ fn deeply_nested_function_application(b: &mut Bencher) {
 #[bench]
 fn function_application_closure(b: &mut Bencher) {
     let state = StateCache::default();
-    let factory = TermFactory::<Stdlib>::default();
+    let factory = SharedTermFactory::<Stdlib>::default();
     let allocator = DefaultAllocator::default();
     let expression = parse("(((lambda (foo) (lambda () foo)) 3))", &factory, &allocator).unwrap();
     b.iter(|| {
@@ -230,7 +230,7 @@ fn function_application_closure(b: &mut Bencher) {
 #[bench]
 fn conditional_expressions(b: &mut Bencher) {
     let state = StateCache::default();
-    let factory = TermFactory::<Stdlib>::default();
+    let factory = SharedTermFactory::<Stdlib>::default();
     let allocator = DefaultAllocator::default();
     let expression = parse("(if #t 3 4)", &factory, &allocator).unwrap();
     b.iter(|| {
@@ -242,7 +242,7 @@ fn conditional_expressions(b: &mut Bencher) {
 #[bench]
 fn list_transforms(b: &mut Bencher) {
     let state = StateCache::default();
-    let factory = TermFactory::<Stdlib>::default();
+    let factory = SharedTermFactory::<Stdlib>::default();
     let allocator = DefaultAllocator::default();
     let collection = factory.create_vector_term(allocator.create_list((0..1000).map(|index| {
         factory.create_application_term(

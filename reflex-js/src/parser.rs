@@ -2038,7 +2038,7 @@ mod tests {
             HeapAllocator, SignalType, StateCache, StringValue, Uid,
         },
         interpreter::{execute, DefaultInterpreterCache, InterpreterOptions},
-        lang::{create_struct, TermFactory, ValueTerm},
+        lang::{create_struct, SharedTermFactory, ValueTerm},
         stdlib::Stdlib,
     };
 
@@ -2112,7 +2112,7 @@ mod tests {
 
     #[test]
     fn null_literals() {
-        let factory = TermFactory::<JsBuiltins>::default();
+        let factory = SharedTermFactory::<JsBuiltins>::default();
         let allocator = DefaultAllocator::default();
         let env = Env::new();
         assert_eq!(
@@ -2123,7 +2123,7 @@ mod tests {
 
     #[test]
     fn boolean_literals() {
-        let factory = TermFactory::<JsBuiltins>::default();
+        let factory = SharedTermFactory::<JsBuiltins>::default();
         let allocator = DefaultAllocator::default();
         let env = Env::new();
         assert_eq!(
@@ -2138,7 +2138,7 @@ mod tests {
 
     #[test]
     fn string_literals() {
-        let factory = TermFactory::<JsBuiltins>::default();
+        let factory = SharedTermFactory::<JsBuiltins>::default();
         let allocator = DefaultAllocator::default();
         let env = Env::new();
         assert_eq!(
@@ -2185,7 +2185,7 @@ mod tests {
 
     #[test]
     fn numeric_literals() {
-        let factory = TermFactory::<JsBuiltins>::default();
+        let factory = SharedTermFactory::<JsBuiltins>::default();
         let allocator = DefaultAllocator::default();
         let env = Env::new();
         assert_eq!(
@@ -2244,7 +2244,7 @@ mod tests {
 
     #[test]
     fn template_literals() {
-        let factory = TermFactory::<JsBuiltins>::default();
+        let factory = SharedTermFactory::<JsBuiltins>::default();
         let allocator = DefaultAllocator::default();
         let env = Env::new();
         assert_eq!(
@@ -2446,7 +2446,7 @@ mod tests {
 
     #[test]
     fn object_literals() {
-        let factory = TermFactory::<JsBuiltins>::default();
+        let factory = SharedTermFactory::<JsBuiltins>::default();
         let allocator = DefaultAllocator::default();
         let env = Env::new();
         assert_eq!(
@@ -2645,7 +2645,7 @@ mod tests {
 
     #[test]
     fn object_spread() {
-        let factory = TermFactory::<JsBuiltins>::default();
+        let factory = SharedTermFactory::<JsBuiltins>::default();
         let allocator = DefaultAllocator::default();
         let env = Env::new();
         let expression = parse(
@@ -2786,7 +2786,7 @@ mod tests {
 
     #[test]
     fn array_literals() {
-        let factory = TermFactory::<JsBuiltins>::default();
+        let factory = SharedTermFactory::<JsBuiltins>::default();
         let allocator = DefaultAllocator::default();
         let env = Env::new();
         assert_eq!(
@@ -2805,7 +2805,7 @@ mod tests {
 
     #[test]
     fn array_access() {
-        let factory = TermFactory::<JsBuiltins>::default();
+        let factory = SharedTermFactory::<JsBuiltins>::default();
         let allocator = DefaultAllocator::default();
         let env = Env::new();
         let expression = parse(
@@ -2833,7 +2833,7 @@ mod tests {
 
     #[test]
     fn array_spread() {
-        let factory = TermFactory::<JsBuiltins>::default();
+        let factory = SharedTermFactory::<JsBuiltins>::default();
         let allocator = DefaultAllocator::default();
         let env = Env::new();
         assert_eq!(
@@ -2930,7 +2930,7 @@ mod tests {
 
     #[test]
     fn array_methods() {
-        let factory = TermFactory::<JsBuiltins>::default();
+        let factory = SharedTermFactory::<JsBuiltins>::default();
         let allocator = DefaultAllocator::default();
         let env = Env::new();
         assert_eq!(
@@ -2993,7 +2993,7 @@ mod tests {
 
     #[test]
     fn parenthesized_expressions() {
-        let factory = TermFactory::<JsBuiltins>::default();
+        let factory = SharedTermFactory::<JsBuiltins>::default();
         let allocator = DefaultAllocator::default();
         let env = Env::new();
         assert_eq!(
@@ -3008,7 +3008,7 @@ mod tests {
 
     #[test]
     fn modules() {
-        let factory = TermFactory::<JsBuiltins>::default();
+        let factory = SharedTermFactory::<JsBuiltins>::default();
         let allocator = DefaultAllocator::default();
         let env = Env::new();
         let loader = static_module_loader(Vec::new());
@@ -3028,7 +3028,7 @@ mod tests {
 
     #[test]
     fn variable_declarations() {
-        let factory = TermFactory::<JsBuiltins>::default();
+        let factory = SharedTermFactory::<JsBuiltins>::default();
         let allocator = DefaultAllocator::default();
         let env = Env::new();
         assert_eq!(
@@ -3072,7 +3072,7 @@ mod tests {
 
     #[test]
     fn variable_declaration_object_destructuring() {
-        let factory = TermFactory::<JsBuiltins>::default();
+        let factory = SharedTermFactory::<JsBuiltins>::default();
         let allocator = DefaultAllocator::default();
         let env = Env::new();
         assert_eq!(
@@ -3545,7 +3545,7 @@ mod tests {
 
     #[test]
     fn variable_declaration_array_destructuring() {
-        let factory = TermFactory::<JsBuiltins>::default();
+        let factory = SharedTermFactory::<JsBuiltins>::default();
         let allocator = DefaultAllocator::default();
         let env = Env::new();
         assert_eq!(
@@ -3725,7 +3725,7 @@ mod tests {
 
     #[test]
     fn variable_scoping() {
-        let factory = TermFactory::<JsBuiltins>::default();
+        let factory = SharedTermFactory::<JsBuiltins>::default();
         let allocator = DefaultAllocator::default();
         let env = Env::new();
         let expression = parse(
@@ -3786,7 +3786,7 @@ mod tests {
 
     #[test]
     fn variable_dependencies() {
-        let factory = TermFactory::<JsBuiltins>::default();
+        let factory = SharedTermFactory::<JsBuiltins>::default();
         let allocator = DefaultAllocator::default();
         let env = Env::new();
         let expression = parse(
@@ -3845,7 +3845,7 @@ mod tests {
 
     #[test]
     fn not_expressions() {
-        let factory = TermFactory::<JsBuiltins>::default();
+        let factory = SharedTermFactory::<JsBuiltins>::default();
         let allocator = DefaultAllocator::default();
         let env = Env::new();
         assert_eq!(
@@ -3873,7 +3873,7 @@ mod tests {
 
     #[test]
     fn arithmetic_expressions() {
-        let factory = TermFactory::<JsBuiltins>::default();
+        let factory = SharedTermFactory::<JsBuiltins>::default();
         let allocator = DefaultAllocator::default();
         let env = Env::new();
         assert_eq!(
@@ -3980,7 +3980,7 @@ mod tests {
 
     #[test]
     fn equality_expression() {
-        let factory = TermFactory::<JsBuiltins>::default();
+        let factory = SharedTermFactory::<JsBuiltins>::default();
         let allocator = DefaultAllocator::default();
         let env = Env::new();
         assert_eq!(
@@ -4010,7 +4010,7 @@ mod tests {
 
     #[test]
     fn logical_expression() {
-        let factory = TermFactory::<JsBuiltins>::default();
+        let factory = SharedTermFactory::<JsBuiltins>::default();
         let allocator = DefaultAllocator::default();
         let env = Env::new();
         assert_eq!(
@@ -4037,7 +4037,7 @@ mod tests {
 
     #[test]
     fn conditional_expression() {
-        let factory = TermFactory::<JsBuiltins>::default();
+        let factory = SharedTermFactory::<JsBuiltins>::default();
         let allocator = DefaultAllocator::default();
         let env = Env::new();
         assert_eq!(
@@ -4055,7 +4055,7 @@ mod tests {
 
     #[test]
     fn if_statements() {
-        let factory = TermFactory::<JsBuiltins>::default();
+        let factory = SharedTermFactory::<JsBuiltins>::default();
         let allocator = DefaultAllocator::default();
         let env = Env::new().with_globals(builtin_globals(&factory, &allocator));
         assert_eq!(
@@ -4239,7 +4239,7 @@ mod tests {
 
     #[test]
     fn throw_statements() {
-        let factory = TermFactory::<JsBuiltins>::default();
+        let factory = SharedTermFactory::<JsBuiltins>::default();
         let allocator = DefaultAllocator::default();
         let env = Env::new().with_globals(builtin_globals(&factory, &allocator));
         assert_eq!(
@@ -4283,7 +4283,7 @@ mod tests {
 
     #[test]
     fn try_catch_statements() {
-        let factory = TermFactory::<JsBuiltins>::default();
+        let factory = SharedTermFactory::<JsBuiltins>::default();
         let allocator = DefaultAllocator::default();
         let env = Env::new().with_globals(builtin_globals(&factory, &allocator));
         let expression = parse(
@@ -4656,7 +4656,7 @@ mod tests {
 
     #[test]
     fn arrow_function_expressions() {
-        let factory = TermFactory::<JsBuiltins>::default();
+        let factory = SharedTermFactory::<JsBuiltins>::default();
         let allocator = DefaultAllocator::default();
         let env = Env::new();
         assert_eq!(
@@ -4725,7 +4725,7 @@ mod tests {
 
     #[test]
     fn arrow_function_object_destructuring() {
-        let factory = TermFactory::<JsBuiltins>::default();
+        let factory = SharedTermFactory::<JsBuiltins>::default();
         let allocator = DefaultAllocator::default();
         let env = Env::new();
         assert_eq!(
@@ -4847,7 +4847,7 @@ mod tests {
 
     #[test]
     fn arrow_function_array_destructuring() {
-        let factory = TermFactory::<JsBuiltins>::default();
+        let factory = SharedTermFactory::<JsBuiltins>::default();
         let allocator = DefaultAllocator::default();
         let env = Env::new();
         assert_eq!(
@@ -5003,7 +5003,7 @@ mod tests {
 
     #[test]
     fn function_application_expressions() {
-        let factory = TermFactory::<JsBuiltins>::default();
+        let factory = SharedTermFactory::<JsBuiltins>::default();
         let allocator = DefaultAllocator::default();
         let env = Env::new();
         assert_eq!(
@@ -5083,7 +5083,7 @@ mod tests {
 
     #[test]
     fn function_arg_spreading() {
-        let factory = TermFactory::<JsBuiltins>::default();
+        let factory = SharedTermFactory::<JsBuiltins>::default();
         let allocator = DefaultAllocator::default();
         let env = Env::new();
         assert_eq!(
@@ -5145,7 +5145,7 @@ mod tests {
 
     #[test]
     fn recursive_expressions() {
-        let factory = TermFactory::<JsBuiltins>::default();
+        let factory = SharedTermFactory::<JsBuiltins>::default();
         let allocator = DefaultAllocator::default();
         let env = Env::new();
         let path = Path::new("./foo.js");
@@ -5210,7 +5210,7 @@ mod tests {
 
     #[test]
     fn import_scoping() {
-        let factory = TermFactory::<JsBuiltins>::default();
+        let factory = SharedTermFactory::<JsBuiltins>::default();
         let allocator = DefaultAllocator::default();
         let env = Env::new();
         let path = Path::new("./foo.js");
@@ -5248,7 +5248,7 @@ mod tests {
 
     #[test]
     fn js_interpreted() {
-        let factory = TermFactory::<JsBuiltins>::default();
+        let factory = SharedTermFactory::<JsBuiltins>::default();
         let allocator = DefaultAllocator::default();
         let env = Env::new();
         let input = "
@@ -5272,7 +5272,7 @@ mod tests {
 
     #[test]
     fn js_compiled() {
-        let factory = TermFactory::<JsBuiltins>::default();
+        let factory = SharedTermFactory::<JsBuiltins>::default();
         let allocator = DefaultAllocator::default();
         let env = Env::new();
         let input = "

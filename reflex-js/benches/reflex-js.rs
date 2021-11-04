@@ -10,7 +10,7 @@ use reflex::{
     compiler::{hash_program_root, Compiler, CompilerMode, CompilerOptions, InstructionPointer},
     core::{evaluate, ExpressionFactory, StateCache, Uid},
     interpreter::{execute, DefaultInterpreterCache, InterpreterOptions},
-    lang::TermFactory,
+    lang::SharedTermFactory,
     stdlib::Stdlib,
 };
 use reflex_js::{builtins::JsBuiltins, parse, Env};
@@ -18,7 +18,7 @@ use test::Bencher;
 
 #[bench]
 fn js_interpreted(b: &mut Bencher) {
-    let factory = TermFactory::<JsBuiltins>::default();
+    let factory = SharedTermFactory::<JsBuiltins>::default();
     let allocator = DefaultAllocator::default();
     let env = Env::new();
     let input = "
@@ -35,7 +35,7 @@ fn js_interpreted(b: &mut Bencher) {
 
 #[bench]
 fn js_compiled(b: &mut Bencher) {
-    let factory = TermFactory::<JsBuiltins>::default();
+    let factory = SharedTermFactory::<JsBuiltins>::default();
     let allocator = DefaultAllocator::default();
     let builtins = Stdlib::entries()
         .into_iter()

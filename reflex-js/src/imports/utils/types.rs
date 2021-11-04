@@ -57,13 +57,13 @@ mod tests {
             evaluate, DependencyList, EvaluationResult, ExpressionFactory, HeapAllocator,
             StateCache,
         },
-        lang::{TermFactory, ValueTerm},
+        lang::{SharedTermFactory, ValueTerm},
         stdlib::Stdlib,
     };
 
     #[test]
     fn struct_types() {
-        let factory = TermFactory::<JsBuiltins>::default();
+        let factory = SharedTermFactory::<JsBuiltins>::default();
         let allocator = DefaultAllocator::default();
         let env = Env::new();
         let path = Path::new("./foo.js");
