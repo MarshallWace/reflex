@@ -221,7 +221,7 @@ where
                 )
             })
         });
-        if let Some(true) = is_pending {
+        if let Some(false) = is_pending {
             let expression_record = SignalExpressionRecord {
                 signal_id,
                 expression: expression.clone(),
@@ -315,7 +315,7 @@ impl SignalPlayback {
                             }
                             None => {
                                 eprintln!("{} was not found in the captured data", signal.id());
-                                Err(format!("Failed to find signal id in captured data"))
+                                Err(format!("Failed to find signal id {} in captured data", signal.id()))
                             }
                         })
                         .collect::<Vec<Result<SignalResult<T>, String>>>(),
