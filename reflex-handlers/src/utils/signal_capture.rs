@@ -147,6 +147,7 @@ where
                                 signal.id(),
                                 runtime_effect,
                                 sender.clone(),
+                                &factory,
                             );
                             Ok((expr, transformed_effect))
                         })
@@ -162,43 +163,59 @@ where
         signal_id: SignalId,
         result: Option<RuntimeEffect<T>>,
         sender: tokio::sync::mpsc::UnboundedSender<SignalRecorderMessage<T>>,
+        factory: &impl AsyncExpressionFactory<T>,
     ) -> Option<RuntimeEffect<T>> {
-        result.map(move |runtime_effect| match runtime_effect {
-            RuntimeEffect::Sync(updates) => {
-                let update_records = Self::to_update_records(&updates);
-                let effect_record = SyncEffectRecord {
-                    signal_id,
-                    updates: update_records,
-                };
-                let _ = sender.send(SignalRecorderMessage::SyncEffect(effect_record));
-                RuntimeEffect::Sync(updates)
-            }
-            RuntimeEffect::Async((effect, callback)) => RuntimeEffect::Async((
-                Box::pin(effect.inspect(move |updates| {
-                    let updates = Self::to_update_records(updates);
-                    let effect_record = AsyncEffectRecord { signal_id, updates };
-                    let _ = sender.send(SignalRecorderMessage::AsyncEffect(effect_record));
-                })),
-                callback,
-            )),
-            RuntimeEffect::Stream((effect, _callback)) => {
-                let transformed = effect.map(move |updates| {
-                    let update_records = Self::to_update_records(&updates);
-                    let effect_record = StreamEffectRecord {
+        result.map(move |runtime_effect| {
+            let factory = factory.clone();
+            match runtime_effect {
+                RuntimeEffect::Sync(updates) => {
+                    let update_records = Self::to_update_records(&updates, &factory);
+                    let effect_record = SyncEffectRecord {
                         signal_id,
                         updates: update_records,
                     };
-                    let _ = sender.send(SignalRecorderMessage::StreamEffect(effect_record));
-                    updates
-                });
-                RuntimeEffect::Stream((Box::pin(transformed), _callback))
+                    let _ = sender.send(SignalRecorderMessage::SyncEffect(effect_record));
+                    RuntimeEffect::Sync(updates)
+                }
+                RuntimeEffect::Async((effect, callback)) => RuntimeEffect::Async((
+                    Box::pin(effect.inspect(move |updates| {
+                        let updates = Self::to_update_records(updates, &factory);
+                        let effect_record = AsyncEffectRecord { signal_id, updates };
+                        let _ = sender.send(SignalRecorderMessage::AsyncEffect(effect_record));
+                    })),
+                    callback,
+                )),
+                RuntimeEffect::Stream((effect, _callback)) => {
+                    let transformed = effect.map(move |updates| {
+                        let update_records = Self::to_update_records(&updates, &factory);
+                        if !update_records.is_empty() {
+                            let effect_record = StreamEffectRecord {
+                                signal_id,
+                                updates: update_records,
+                            };
+                            let _ = sender.send(SignalRecorderMessage::StreamEffect(effect_record));
+                        }
+                        updates
+                    });
+                    RuntimeEffect::Stream((Box::pin(transformed), _callback))
+                }
             }
         })
     }
 
-    fn to_update_records(updates: &Vec<StateUpdate<T>>) -> Vec<UpdateRecord<T>> {
+    fn to_update_records(
+        updates: &Vec<StateUpdate<T>>,
+        factory: &impl ExpressionFactory<T>,
+    ) -> Vec<UpdateRecord<T>> {
         updates
             .iter()
+            .filter(|update| {
+                if let StateUpdateType::Value(expr) = update.update() {
+                    !Self::is_pending_or_error_signal(expr, factory)
+                } else {
+                    true
+                }
+            })
             .map(|update| match update.update() {
                 StateUpdateType::Value(expr) => UpdateRecord(update.state_token(), expr.clone()),
                 StateUpdateType::Patch(_) => todo!(),
@@ -212,16 +229,7 @@ where
         sender: tokio::sync::mpsc::UnboundedSender<SignalRecorderMessage<T>>,
         factory: &impl AsyncExpressionFactory<T>,
     ) {
-        // if this is a pending signal we don't want to record it.
-        let is_pending = factory.match_signal_term(expression).map(|signal| {
-            signal.signals().iter().any(|signal| {
-                matches!(
-                    signal.signal_type(),
-                    SignalType::Pending | SignalType::Error
-                )
-            })
-        });
-        if let Some(false) = is_pending {
+        if !Self::is_pending_or_error_signal(expression, factory) {
             let expression_record = SignalExpressionRecord {
                 signal_id,
                 expression: expression.clone(),
@@ -230,6 +238,31 @@ where
         } else {
             let _ = sender.send(SignalRecorderMessage::PendingSignal(signal_id));
         }
+    }
+    fn is_pending_or_error_signal(expression: &T, factory: &impl ExpressionFactory<T>) -> bool {
+        let is_pending = factory
+            .match_signal_term(expression)
+            .map(|signal| {
+                signal
+                    .signals()
+                    .iter()
+                    .any(|signal| matches!(signal.signal_type(), SignalType::Pending))
+            })
+            .unwrap_or(false);
+
+        let is_error = factory
+            .match_signal_term(expression)
+            .map(|signal| {
+                signal
+                    .signals()
+                    .iter()
+                    .any(|signal| matches!(signal.signal_type(), SignalType::Error))
+            })
+            .unwrap_or(false);
+        if is_error {
+            eprintln!("Received error signal during capture: {}", expression);
+        }
+        is_pending || is_error
     }
 }
 
