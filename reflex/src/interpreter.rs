@@ -551,7 +551,7 @@ fn evaluate_instruction<T: Expression + Rewritable<T> + Reducible<T> + Applicabl
             }
         }
         Instruction::PushBuiltin { target } => {
-            trace!(instruction = "Instruction::PushBuiltin", native_target = %target);
+            trace!(instruction = "Instruction::PushBuiltin", builtin_target = %target);
             let uid = *target;
             match plugins.get(&uid) {
                 Some(target) => {
