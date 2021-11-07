@@ -3,7 +3,6 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use std::{
-    borrow::Cow,
     iter::{empty, once},
     path::Path,
 };
@@ -11,11 +10,18 @@ use std::{
 use reflex::{
     cache::NoopCache,
     core::{Expression, ExpressionFactory, HeapAllocator, Rewritable, StringValue, Substitutions},
-    lang::{as_integer, ValueTerm},
+    lang::{as_integer, create_struct, ValueTerm},
     stdlib::Stdlib,
 };
-use resast::prelude::*;
-use ressa::Builder;
+use swc_common::{source_map::Pos, sync::Lrc, FileName, SourceMap, Span, Spanned};
+use swc_ecma_ast::{
+    ArrayLit, ArrowExpr, BinExpr, BinaryOp, BlockStmt, BlockStmtOrExpr, Bool, CallExpr, CondExpr,
+    Decl, EsVersion, Expr, ExprOrSpread, ExprOrSuper, ExprStmt, Ident, ImportDecl, ImportSpecifier,
+    Lit, MemberExpr, Module, ModuleDecl, ModuleItem, NewExpr, Null, Number, ObjectLit,
+    ObjectPatProp, Pat, Prop, PropName, PropOrSpread, Stmt, Str, TaggedTpl, Tpl, TplElement,
+    UnaryExpr, UnaryOp, VarDeclKind, VarDeclarator,
+};
+use swc_ecma_parser::{lexer::Lexer, Parser, StringInput, Syntax};
 
 use crate::{
     globals::global_aggregate_error,
@@ -39,16 +45,16 @@ fn err_unreachable<T: std::fmt::Debug>(node: T) -> String {
 }
 
 #[derive(Clone)]
-struct LexicalScope<'src> {
-    bindings: Vec<Option<&'src str>>,
+struct LexicalScope {
+    bindings: Vec<Option<String>>,
 }
-impl<'src> LexicalScope<'src> {
+impl LexicalScope {
     fn new() -> Self {
         Self {
             bindings: Vec::new(),
         }
     }
-    fn from(identifiers: impl IntoIterator<Item = Option<&'src str>>) -> Self {
+    fn from(identifiers: impl IntoIterator<Item = Option<String>>) -> Self {
         Self {
             bindings: identifiers.into_iter().collect(),
         }
@@ -56,20 +62,12 @@ impl<'src> LexicalScope<'src> {
     fn depth(&self) -> usize {
         self.bindings.len()
     }
-    fn create_child(
-        &self,
-        identifiers: impl IntoIterator<Item = Option<&'src str>>,
-    ) -> LexicalScope<'src> {
+    fn create_child(&self, identifiers: impl IntoIterator<Item = Option<String>>) -> LexicalScope {
         LexicalScope {
-            bindings: self
-                .bindings
-                .iter()
-                .cloned()
-                .chain(identifiers.into_iter())
-                .collect(),
+            bindings: self.bindings.iter().cloned().chain(identifiers).collect(),
         }
     }
-    fn get(&self, identifier: &'src str) -> Option<usize> {
+    fn get(&self, identifier: &str) -> Option<usize> {
         Some(
             self.bindings
                 .iter()
@@ -84,8 +82,8 @@ impl<'src> LexicalScope<'src> {
     }
 }
 
-pub fn parse<'src, T: Expression + Rewritable<T>>(
-    input: &'src str,
+pub fn parse<T: Expression + Rewritable<T>>(
+    input: &str,
     env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
@@ -93,12 +91,12 @@ pub fn parse<'src, T: Expression + Rewritable<T>>(
 where
     T::Builtin: From<Stdlib> + From<JsStdlib>,
 {
-    let program = parse_ast(input)?;
-    parse_script_contents(program.into_iter(), env, factory, allocator)
+    let program = parse_ast(input, None)?;
+    parse_script_contents(program.body.into_iter(), env, factory, allocator)
 }
 
-pub fn parse_module<'src, T: Expression + Rewritable<T>>(
-    input: &'src str,
+pub fn parse_module<T: Expression + Rewritable<T>>(
+    input: &str,
     env: &Env<T>,
     path: &Path,
     loader: &impl Fn(&str, &Path) -> Option<Result<T, String>>,
@@ -108,21 +106,81 @@ pub fn parse_module<'src, T: Expression + Rewritable<T>>(
 where
     T::Builtin: From<Stdlib> + From<JsStdlib>,
 {
-    let program = parse_ast(input)?;
-    parse_module_contents(program.into_iter(), env, path, loader, factory, allocator)
+    let program = parse_ast(input, Some(path))?;
+    parse_module_contents(
+        program.body.into_iter(),
+        env,
+        path,
+        loader,
+        factory,
+        allocator,
+    )
 }
 
-fn parse_ast(input: &str) -> ParserResult<Vec<ProgramPart>> {
-    Builder::new()
-        .module(true)
-        .js(input)
-        .build()
-        .and_then(|parser| parser.collect::<Result<Vec<_>, ressa::Error>>())
-        .or_else(|error| Err(format!("Parse error: {}", error)))
+fn format_source_error(location: Span, message: &str, source_map: &SourceMap) -> String {
+    let location = match source_map.span_to_lines(location) {
+        Ok(regions) => match regions.lines.len() {
+            0 => format!("{}", regions.file.name),
+            1 => {
+                let line = regions.lines.first().unwrap();
+                format!(
+                    "{}:{}:{}-{}",
+                    regions.file.name,
+                    line.line_index + 1,
+                    line.start_col.to_usize() + 1,
+                    line.end_col.to_usize() + 1
+                )
+            }
+            _ => {
+                let first = regions.lines.first().unwrap();
+                let last = regions.lines.last().unwrap();
+                format!(
+                    "{}:{}:{}-{}:{}",
+                    regions.file.name,
+                    first.line_index + 1,
+                    first.start_col.to_usize() + 1,
+                    last.line_index + 1,
+                    last.end_col.to_usize() + 1
+                )
+            }
+        },
+        Err(_) => format!("{}", source_map.span_to_filename(location)),
+    };
+    format!("{}: {}", location, message)
 }
 
-fn parse_script_contents<'src, T: Expression + Rewritable<T>>(
-    program: impl IntoIterator<Item = ProgramPart<'src>> + ExactSizeIterator,
+fn parse_ast(input: &str, path: Option<&Path>) -> ParserResult<Module> {
+    let source_map: Lrc<SourceMap> = Default::default();
+    let source = source_map.new_source_file(
+        match path {
+            Some(path) => FileName::Real(path.to_path_buf()),
+            None => FileName::Anon,
+        },
+        String::from(input),
+    );
+    let lexer = Lexer::new(
+        Syntax::Es(Default::default()),
+        EsVersion::latest(),
+        StringInput::from(&*source),
+        None,
+    );
+    let mut parser = Parser::new_from(lexer);
+    let syntax_errors = parser.take_errors();
+    if !syntax_errors.is_empty() {
+        return Err(syntax_errors
+            .into_iter()
+            .map(|error| format_source_error(error.span(), &error.into_kind().msg(), &source_map))
+            .collect::<Vec<_>>()
+            .join("\n"));
+    }
+
+    parser
+        .parse_module()
+        .map_err(|err| format_source_error(err.span(), &err.into_kind().msg(), &source_map))
+}
+
+fn parse_script_contents<T: Expression + Rewritable<T>>(
+    program: impl IntoIterator<Item = ModuleItem> + ExactSizeIterator,
     env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
@@ -133,21 +191,18 @@ where
     let body = program
         .into_iter()
         .map(|node| match node {
-            ProgramPart::Stmt(node) => match node {
-                Stmt::Expr(node) => ProgramPart::Stmt(Stmt::Return(Some(node))),
-                _ => ProgramPart::Stmt(node),
-            },
-            _ => node,
+            ModuleItem::Stmt(node) => Ok(node),
+            _ => Err(err_unimplemented(node)),
         })
-        .collect::<Vec<_>>();
+        .collect::<ParserResult<Vec<_>>>()?;
     match parse_block(&body, &LexicalScope::new(), &env, factory, allocator)? {
         None => Err(String::from("No expression to evaluate")),
         Some(expression) => Ok(expression),
     }
 }
 
-fn parse_module_contents<'src, T: Expression + Rewritable<T>>(
-    program: impl IntoIterator<Item = ProgramPart<'src>> + ExactSizeIterator,
+fn parse_module_contents<T: Expression + Rewritable<T>>(
+    program: impl IntoIterator<Item = ModuleItem> + ExactSizeIterator,
     env: &Env<T>,
     path: &Path,
     loader: &impl Fn(&str, &Path) -> Option<Result<T, String>>,
@@ -163,39 +218,27 @@ where
         |results, node| {
             let (mut body, mut import_bindings) = results?;
             match node {
-                ProgramPart::Decl(node) => match node {
-                    Decl::Import(node) => {
+                ModuleItem::ModuleDecl(node) => match node {
+                    ModuleDecl::Import(node) => {
                         let bindings =
                             parse_module_import(&node, path, loader, factory, allocator)?;
                         import_bindings.extend(bindings);
                         Ok((body, import_bindings))
                     }
-                    Decl::Export(node) => match *node {
-                        ModExport::Default(node) => match node {
-                            DefaultExportDecl::Decl(node) => Err(err_unimplemented(node)),
-                            DefaultExportDecl::Expr(node) => {
-                                body.push(ProgramPart::Stmt(Stmt::Return(Some(node))));
-                                Ok((body, import_bindings))
-                            }
-                        },
-                        ModExport::Named(node) => match node {
-                            NamedExportDecl::Decl(node) => match node {
-                                Decl::Var(_, _) => {
-                                    body.push(ProgramPart::Decl(node));
-                                    Ok((body, import_bindings))
-                                }
-                                _ => Err(err_unimplemented(node)),
-                            },
-                            NamedExportDecl::Specifier(_, _) => Err(err_unimplemented(node)),
-                        },
-                        ModExport::All(_) => Err(err_unimplemented(node)),
-                    },
-                    _ => {
-                        body.push(ProgramPart::Decl(node));
+                    ModuleDecl::ExportDecl(node) => Err(err_unimplemented(node)),
+                    ModuleDecl::ExportNamed(node) => Err(err_unimplemented(node)),
+                    ModuleDecl::ExportDefaultDecl(node) => Err(err_unimplemented(node)),
+                    ModuleDecl::ExportDefaultExpr(node) => {
+                        body.push(Stmt::Expr(ExprStmt {
+                            span: node.span,
+                            expr: node.expr,
+                        }));
                         Ok((body, import_bindings))
                     }
+                    ModuleDecl::ExportAll(_) => Err(err_unimplemented(node)),
+                    _ => Err(err_unimplemented(node)),
                 },
-                _ => {
+                ModuleItem::Stmt(node) => {
                     body.push(node);
                     Ok((body, import_bindings))
                 }
@@ -214,20 +257,17 @@ where
     }
 }
 
-fn parse_module_import<'src, T: Expression + Rewritable<T>>(
-    node: &ModImport<'src>,
+fn parse_module_import<T: Expression + Rewritable<T>>(
+    node: &ImportDecl,
     path: &Path,
     loader: &impl Fn(&str, &Path) -> Option<Result<T, String>>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> ParserResult<Vec<(&'src str, T)>>
+) -> ParserResult<Vec<(String, T)>>
 where
     T::Builtin: From<Stdlib>,
 {
-    let module_path = match &node.source {
-        Lit::String(node) => Ok(parse_string(node)),
-        _ => Err(err_unimplemented(node)),
-    }?;
+    let module_path = parse_string(&node.src);
     let module = match loader(&module_path, path)
         .unwrap_or_else(|| Err(String::from("No compatible loaders registered")))
     {
@@ -237,36 +277,40 @@ where
             node,
         )),
     }?;
-    node.specifiers
+    Ok(node
+        .specifiers
         .iter()
-        .fold(Ok(Vec::new()), |bindings, specifier| {
-            let mut bindings = bindings?;
-            let binding = match specifier {
+        .map(|specifier| {
+            let (identifier, value) = match specifier {
                 ImportSpecifier::Default(node) => {
-                    let identifier = parse_identifier(node)?;
+                    let identifier = parse_identifier(&node.local);
                     let value = get_static_field(module.clone(), "default", factory, allocator);
                     (identifier, value)
                 }
                 ImportSpecifier::Namespace(node) => {
-                    let identifier = parse_identifier(node)?;
+                    let identifier = parse_identifier(&node.local);
                     let value = module.clone();
                     (identifier, value)
                 }
-                ImportSpecifier::Normal(node) => {
-                    let imported_field = parse_identifier(&node.imported)?;
-                    let identifier = parse_identifier(&node.local)?;
+                ImportSpecifier::Named(node) => {
+                    let identifier = parse_identifier(&node.local);
+                    let imported_field = node
+                        .imported
+                        .as_ref()
+                        .map(parse_identifier)
+                        .unwrap_or(identifier);
                     let value =
                         get_static_field(module.clone(), imported_field, factory, allocator);
                     (identifier, value)
                 }
             };
-            bindings.push(binding);
-            Ok(bindings)
+            (String::from(identifier), value)
         })
+        .collect())
 }
 
-fn parse_block<'src: 'temp, 'temp, T: Expression + Rewritable<T>>(
-    body: impl IntoIterator<Item = &'temp ProgramPart<'src>>,
+fn parse_block<'a, T: Expression + Rewritable<T>>(
+    body: impl IntoIterator<Item = &'a Stmt>,
     scope: &LexicalScope,
     env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
@@ -278,8 +322,8 @@ where
     parse_block_statements(body, None, scope, env, factory, allocator)
 }
 
-fn parse_block_statements<'src: 'temp, 'temp, T: Expression + Rewritable<T>>(
-    remaining: impl IntoIterator<Item = &'temp ProgramPart<'src>>,
+fn parse_block_statements<'a, T: Expression + Rewritable<T>>(
+    remaining: impl IntoIterator<Item = &'a Stmt>,
     result: Option<T>,
     scope: &LexicalScope,
     env: &Env<T>,
@@ -293,22 +337,16 @@ where
     let node = remaining.next();
     match node {
         None => Ok(result),
-        Some(node) => {
+        Some(statement) => {
             if result.is_some() {
-                return Err(err_unreachable(node));
+                return Err(err_unreachable(statement));
             }
-            match node {
-                ProgramPart::Dir(node) => {
-                    let value = Expr::Lit(node.expr.clone());
-                    let expression = parse_expression(&value, &scope, env, factory, allocator)?;
-                    let result = Some(expression);
-                    parse_block_statements(remaining, result, scope, env, factory, allocator)
-                }
-                ProgramPart::Decl(node) => match node {
-                    Decl::Var(kind, declarators) => match kind {
-                        VarKind::Const => {
+            match statement {
+                Stmt::Decl(node) => match node {
+                    Decl::Var(node) => match node.kind {
+                        VarDeclKind::Const => {
                             let (initializers, child_scope) = parse_variable_declarators(
-                                declarators,
+                                &node.decls,
                                 &scope,
                                 env,
                                 factory,
@@ -327,99 +365,95 @@ where
                         }
                         _ => Err(err_unimplemented(node)),
                     },
+                    Decl::Fn(node) => Err(err_unimplemented(node)),
+                    Decl::Class(node) => Err(err_unimplemented(node)),
                     _ => Err(err_unimplemented(node)),
                 },
-                ProgramPart::Stmt(statement) => match statement {
-                    Stmt::Expr(node) => Err(err("Unexpected expression statement", node)),
-                    Stmt::Return(node) => match node {
-                        None => Err(err("Missing return value", node)),
-                        Some(node) => {
-                            let expression =
-                                parse_expression(node, &scope, env, factory, allocator)?;
-                            let result = Some(expression);
-                            parse_block_statements(
-                                remaining, result, scope, env, factory, allocator,
-                            )
-                        }
-                    },
-                    Stmt::Throw(node) => {
-                        let expression =
-                            parse_throw_statement(node, &scope, env, factory, allocator)?;
+                Stmt::Expr(node) => {
+                    let expression = parse_expression(&node.expr, &scope, env, factory, allocator)?;
+                    let result = Some(expression);
+                    parse_block_statements(remaining, result, scope, env, factory, allocator)
+                }
+                Stmt::Return(node) => match &node.arg {
+                    None => Err(err("Missing return value", node)),
+                    Some(node) => {
+                        let expression = parse_expression(node, &scope, env, factory, allocator)?;
                         let result = Some(expression);
                         parse_block_statements(remaining, result, scope, env, factory, allocator)
                     }
-                    Stmt::If(node) => {
-                        let condition =
-                            parse_expression(&node.test, scope, env, factory, allocator)?;
-                        let consequent =
-                            parse_if_branch(&node.consequent, scope, env, factory, allocator)?;
-                        match &node.alternate {
-                            Some(node) => {
-                                let alternate =
-                                    parse_if_branch(&node, scope, env, factory, allocator)?;
-                                let expression = create_if_expression(
-                                    condition, consequent, alternate, factory, allocator,
-                                );
-                                let result = Some(expression);
-                                parse_block_statements(
-                                    remaining, result, scope, env, factory, allocator,
-                                )
-                            }
-                            None => {
-                                let alternate = parse_branch(
-                                    &statement, remaining, scope, env, factory, allocator,
-                                )?;
-                                let result = create_if_expression(
-                                    condition, consequent, alternate, factory, allocator,
-                                );
-                                Ok(Some(result))
-                            }
-                        }
-                    }
-                    Stmt::Try(node) => {
-                        let BlockStmt(body) = &node.block;
-                        let body = parse_branch(&statement, body, scope, env, factory, allocator)?;
-                        if let Some(node) = &node.finalizer {
-                            Err(err_unimplemented(node))
-                        } else if let Some(handler) = &node.handler {
-                            let identifier = match &handler.param {
-                                Some(pattern) => match pattern {
-                                    Pat::Ident(identifier) => {
-                                        parse_identifier(&identifier).map(Some)
-                                    }
-                                    // TODO: Support destructuring patterns in catch variable assignment
-                                    _ => Err(err_unimplemented(pattern)),
-                                },
-                                None => Ok(None),
-                            }?;
-                            let BlockStmt(handler) = &handler.body;
-                            let handler = factory.create_lambda_term(
-                                1,
-                                parse_branch(
-                                    &statement,
-                                    handler,
-                                    &scope.create_child(once(identifier)),
-                                    env,
-                                    factory,
-                                    allocator,
-                                )?,
+                },
+                Stmt::Throw(node) => {
+                    let expression =
+                        parse_throw_statement(&node.arg, &scope, env, factory, allocator)?;
+                    let result = Some(expression);
+                    parse_block_statements(remaining, result, scope, env, factory, allocator)
+                }
+                Stmt::If(node) => {
+                    let condition = parse_expression(&node.test, scope, env, factory, allocator)?;
+                    let consequent = parse_if_branch(&node.cons, scope, env, factory, allocator)?;
+                    match &node.alt {
+                        Some(node) => {
+                            let alternate = parse_if_branch(&node, scope, env, factory, allocator)?;
+                            let expression = create_if_expression(
+                                condition, consequent, alternate, factory, allocator,
                             );
-                            let expression =
-                                create_try_catch_expression(body, handler, factory, allocator);
                             let result = Some(expression);
                             parse_block_statements(
                                 remaining, result, scope, env, factory, allocator,
                             )
-                        } else {
-                            Err(err_unimplemented(node))
+                        }
+                        None => {
+                            let alternate = parse_branch(
+                                &statement, remaining, scope, env, factory, allocator,
+                            )?;
+                            let result = create_if_expression(
+                                condition, consequent, alternate, factory, allocator,
+                            );
+                            Ok(Some(result))
                         }
                     }
-                    Stmt::Switch(_) => Err(err_unimplemented(statement)),
-                    Stmt::Empty => {
+                }
+                Stmt::Try(node) => {
+                    let BlockStmt { stmts: body, .. } = &node.block;
+                    let body = parse_branch(&statement, body, scope, env, factory, allocator)?;
+                    if let Some(node) = &node.finalizer {
+                        Err(err_unimplemented(node))
+                    } else if let Some(handler) = &node.handler {
+                        let identifier = match &handler.param {
+                            Some(pattern) => match pattern {
+                                Pat::Ident(identifier) => {
+                                    Ok(Some(String::from(parse_identifier(&identifier.id))))
+                                }
+                                // TODO: Support destructuring patterns in catch variable assignment
+                                _ => Err(err_unimplemented(pattern)),
+                            },
+                            None => Ok(None),
+                        }?;
+                        let BlockStmt { stmts: handler, .. } = &handler.body;
+                        let handler = factory.create_lambda_term(
+                            1,
+                            parse_branch(
+                                &statement,
+                                handler,
+                                &scope.create_child(once(identifier)),
+                                env,
+                                factory,
+                                allocator,
+                            )?,
+                        );
+                        let expression =
+                            create_try_catch_expression(body, handler, factory, allocator);
+                        let result = Some(expression);
                         parse_block_statements(remaining, result, scope, env, factory, allocator)
+                    } else {
+                        Err(err_unimplemented(node))
                     }
-                    _ => Err(err_unimplemented(statement)),
-                },
+                }
+                Stmt::Switch(_) => Err(err_unimplemented(statement)),
+                Stmt::Empty(_) => {
+                    parse_block_statements(remaining, result, scope, env, factory, allocator)
+                }
+                _ => Err(err_unimplemented(statement)),
             }
         }
     }
@@ -438,15 +472,15 @@ fn create_declaration_block<T: Expression + Rewritable<T>>(
         })
 }
 
-fn parse_variable_declarators<'src, T: Expression + Rewritable<T>>(
-    declarators: &[VarDecl<'src>],
-    scope: &LexicalScope<'src>,
+fn parse_variable_declarators<T: Expression + Rewritable<T>>(
+    declarators: &[VarDeclarator],
+    scope: &LexicalScope,
     env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
 ) -> ParserResult<(
     impl IntoIterator<Item = T, IntoIter = impl DoubleEndedIterator<Item = T>>,
-    Option<LexicalScope<'src>>,
+    Option<LexicalScope>,
 )>
 where
     T::Builtin: From<Stdlib> + From<JsStdlib>,
@@ -463,82 +497,107 @@ where
         })
 }
 
-fn parse_variable_declarator<'src, T: Expression + Rewritable<T>>(
-    node: &VarDecl<'src>,
-    scope: &LexicalScope<'src>,
+fn parse_variable_declarator<T: Expression + Rewritable<T>>(
+    node: &VarDeclarator,
+    scope: &LexicalScope,
     env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> ParserResult<(impl IntoIterator<Item = T>, Option<LexicalScope<'src>>)>
+) -> ParserResult<(impl IntoIterator<Item = T>, Option<LexicalScope>)>
 where
     T::Builtin: From<Stdlib> + From<JsStdlib>,
 {
-    let VarDecl { id, init } = node;
-    let init = init
+    let init = node
+        .init
         .as_ref()
         .ok_or_else(|| err("Missing variable initializer", node))?;
-    let value = parse_expression(init, scope, env, factory, allocator)?;
-    match id {
+    let value = parse_expression(&init, scope, env, factory, allocator)?;
+    match &node.name {
         Pat::Ident(node) => {
-            let identifier = parse_identifier(node)?;
+            let identifier = parse_identifier(&node.id);
             Ok((
                 vec![value],
-                Some(scope.create_child(once(Some(identifier)))),
+                Some(scope.create_child(once(Some(String::from(identifier))))),
             ))
         }
-        Pat::Obj(properties) => {
+        Pat::Object(node) => {
             let (initializers, child_scope) = parse_object_destructuring_pattern_bindings(
-                value, properties, scope, env, factory, allocator,
+                value,
+                &node.props,
+                scope,
+                env,
+                factory,
+                allocator,
             )?;
             Ok((initializers.into_iter().collect::<Vec<_>>(), child_scope))
         }
-        Pat::Array(accessors) => {
+        Pat::Array(node) => {
             let (initializers, child_scope) = parse_array_destructuring_pattern_bindings(
-                value, accessors, scope, env, factory, allocator,
+                value,
+                &node.elems,
+                scope,
+                env,
+                factory,
+                allocator,
             )?;
             Ok((initializers.into_iter().collect::<Vec<_>>(), child_scope))
         }
-        Pat::RestElement(_) => Err(err_unimplemented(node)),
+        Pat::Rest(_) => Err(err_unimplemented(node)),
         Pat::Assign(_) => Err(err_unimplemented(node)),
+        _ => Err(err_unimplemented(node)),
     }
 }
 
-fn parse_object_destructuring_pattern_bindings<'src, T: Expression + Rewritable<T>>(
+fn parse_object_destructuring_pattern_bindings<T: Expression + Rewritable<T>>(
     target: T,
-    properties: &[ObjPatPart<'src>],
-    scope: &LexicalScope<'src>,
+    properties: &[ObjectPatProp],
+    scope: &LexicalScope,
     env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> ParserResult<(Vec<T>, Option<LexicalScope<'src>>)>
+) -> ParserResult<(Vec<T>, Option<LexicalScope>)>
 where
     T::Builtin: From<Stdlib> + From<JsStdlib>,
 {
     let properties = properties
         .iter()
         .map(|property| match property {
-            ObjPatPart::Assign(node) => {
-                if node.computed {
+            ObjectPatProp::KeyValue(node) => {
+                let identifier = match &*node.value {
+                    Pat::Ident(node) => Ok(parse_identifier(&node.id)),
+                    Pat::Object(_) => Err(err_unimplemented(node)),
+                    Pat::Array(_) => Err(err_unimplemented(node)),
+                    Pat::Rest(_) => Err(err_unimplemented(node)),
+                    Pat::Assign(_) => Err(err_unimplemented(node)),
+                    _ => Err(err_unimplemented(node)),
+                }?;
+                let field_name = parse_prop_name(&node.key, scope, env, factory, allocator)?;
+                let field_accessor = factory
+                    .create_value_term(ValueTerm::String(allocator.create_string(field_name)));
+                Ok((identifier, field_accessor))
+            }
+            ObjectPatProp::Assign(node) => {
+                if node.value.is_some() {
                     Err(err_unimplemented(node))
                 } else {
-                    let identifier = parse_destructuring_pattern_property_identifier(node)?;
-                    Ok((identifier, node))
+                    let identifier = parse_identifier(&node.key);
+                    let field_accessor = factory.create_value_term(ValueTerm::String(
+                        allocator.create_string(String::from(identifier)),
+                    ));
+                    Ok((identifier, field_accessor))
                 }
             }
-            ObjPatPart::Rest(node) => Err(err_unimplemented(node)),
+            ObjectPatProp::Rest(node) => Err(err_unimplemented(node)),
         })
         .collect::<Result<Vec<_>, _>>()?;
     match properties.len() {
         0 => Ok((Vec::new(), None)),
         1 => {
-            let (identifier, node) = properties.into_iter().next().unwrap();
-            let field_name = parse_destructuring_pattern_property_field_name(
-                node, scope, env, factory, allocator,
-            )?;
-            let initializer = get_dynamic_field(target, field_name, factory, allocator);
+            let (identifier, field_accessor) = properties.into_iter().next().unwrap();
+            let initializer = get_dynamic_field(target, field_accessor, factory, allocator);
             Ok((
                 vec![initializer],
-                Some(scope.create_child(once(Some(identifier)))),
+                Some(scope.create_child(once(Some(String::from(identifier))))),
             ))
         }
         _ => {
@@ -552,23 +611,17 @@ where
                     Ok((initializers, scope.create_child(once(None)))),
                     |result, property| {
                         let (mut initializers, existing_scope) = result?;
-                        let (identifier, node) = property;
-                        let field_name = parse_destructuring_pattern_property_field_name(
-                            node,
-                            &existing_scope,
-                            env,
-                            factory,
-                            allocator,
-                        )?;
+                        let (identifier, field_accessor) = property;
                         let scope_offset = existing_scope.depth() - initializer_depth;
                         let initializer = get_dynamic_field(
                             factory.create_static_variable_term(scope_offset),
-                            field_name,
+                            field_accessor,
                             factory,
                             allocator,
                         );
                         initializers.push(initializer);
-                        let next_scope = existing_scope.create_child(once(Some(identifier)));
+                        let next_scope =
+                            existing_scope.create_child(once(Some(String::from(identifier))));
                         Ok((initializers, next_scope))
                     },
                 )
@@ -577,70 +630,14 @@ where
     }
 }
 
-fn parse_destructuring_pattern_property_field_name<'src, T: Expression + Rewritable<T>>(
-    node: &Prop<'src>,
-    scope: &LexicalScope,
-    env: &Env<T>,
-    factory: &impl ExpressionFactory<T>,
-    allocator: &impl HeapAllocator<T>,
-) -> ParserResult<T>
-where
-    T::Builtin: From<Stdlib> + From<JsStdlib>,
-{
-    match &node.key {
-        PropKey::Lit(key) => match key {
-            Lit::String(key) => {
-                let field_name = parse_string(key);
-                Ok(factory
-                    .create_value_term(ValueTerm::String(allocator.create_string(field_name))))
-            }
-            _ => parse_literal(key, scope, env, factory, allocator),
-        },
-        PropKey::Pat(node) => match node {
-            Pat::Ident(node) => {
-                let field_name = parse_identifier(node)?;
-                Ok(factory
-                    .create_value_term(ValueTerm::String(allocator.create_string(field_name))))
-            }
-            Pat::Obj(node) => Err(err_unimplemented(node)),
-            Pat::Array(node) => Err(err_unimplemented(node)),
-            Pat::RestElement(node) => Err(err_unimplemented(node)),
-            Pat::Assign(node) => Err(err_unimplemented(node)),
-        },
-        PropKey::Expr(node) => Err(err_unimplemented(node)),
-    }
-}
-
-fn parse_destructuring_pattern_property_identifier<'src>(
-    node: &Prop<'src>,
-) -> ParserResult<&'src str> {
-    match &node.value {
-        PropValue::Pat(node) => match node {
-            Pat::Ident(node) => parse_identifier(node),
-            Pat::Obj(_) => Err(err_unimplemented(node)),
-            Pat::Array(_) => Err(err_unimplemented(node)),
-            Pat::RestElement(_) => Err(err_unimplemented(node)),
-            Pat::Assign(_) => Err(err_unimplemented(node)),
-        },
-        PropValue::Expr(node) => Err(err_unimplemented(node)),
-        PropValue::None => match &node.key {
-            PropKey::Pat(key) => match key {
-                Pat::Ident(key) => parse_identifier(key),
-                _ => Err(err_unimplemented(key)),
-            },
-            _ => Err(err_unimplemented(&node.key)),
-        },
-    }
-}
-
-fn parse_array_destructuring_pattern_bindings<'src, T: Expression + Rewritable<T>>(
+fn parse_array_destructuring_pattern_bindings<T: Expression + Rewritable<T>>(
     target: T,
-    accessors: &[Option<ArrayPatPart<'src>>],
-    scope: &LexicalScope<'src>,
+    accessors: &[Option<Pat>],
+    scope: &LexicalScope,
     _env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> ParserResult<(impl IntoIterator<Item = T>, Option<LexicalScope<'src>>)>
+) -> ParserResult<(impl IntoIterator<Item = T>, Option<LexicalScope>)>
 where
     T::Builtin: From<Stdlib>,
 {
@@ -652,15 +649,12 @@ where
             None => None,
         })
         .map(|(index, accessor)| match accessor {
-            ArrayPatPart::Pat(pattern) => match pattern {
-                Pat::Ident(identifier) => {
-                    let identifier = parse_identifier(identifier)?;
-                    Ok((identifier, index))
-                }
-                Pat::RestElement(_) => Err(err_unimplemented(pattern)),
-                _ => Err(err_unimplemented(pattern)),
-            },
-            ArrayPatPart::Expr(node) => Err(err_unimplemented(node)),
+            Pat::Ident(identifier) => {
+                let identifier = parse_identifier(&identifier.id);
+                Ok((identifier, index))
+            }
+            Pat::Rest(_) => Err(err_unimplemented(accessor)),
+            _ => Err(err_unimplemented(accessor)),
         })
         .collect::<Result<Vec<_>, _>>()?;
     match accessors.len() {
@@ -670,7 +664,7 @@ where
             let initializer = get_indexed_field(target, index, factory, allocator);
             Ok((
                 vec![initializer],
-                Some(scope.create_child(once(Some(identifier)))),
+                Some(scope.create_child(once(Some(String::from(identifier))))),
             ))
         }
         _ => {
@@ -691,7 +685,8 @@ where
                         allocator,
                     );
                     initializers.push(initializer);
-                    let next_scope = existing_scope.create_child(once(Some(identifier)));
+                    let next_scope =
+                        existing_scope.create_child(once(Some(String::from(identifier))));
                     Ok((initializers, next_scope))
                 })
                 .map(|(initializers, scope)| (initializers, Some(scope)))
@@ -699,15 +694,51 @@ where
     }
 }
 
-fn parse_identifier<'src>(node: &Ident<'src>) -> ParserResult<&'src str> {
-    match node.name {
-        Cow::Borrowed(value) => Ok(value),
-        Cow::Owned(_) => Err(err("Invalid identifier", node)),
+fn parse_identifier(node: &Ident) -> &str {
+    &node.sym
+}
+
+fn parse_prop_name<T: Expression + Rewritable<T>>(
+    node: &PropName,
+    scope: &LexicalScope,
+    env: &Env<T>,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> ParserResult<String>
+where
+    T::Builtin: From<Stdlib> + From<JsStdlib>,
+{
+    match node {
+        PropName::Ident(key) => Ok(String::from(parse_identifier(key))),
+        PropName::Str(key) => Ok(parse_string(key)),
+        PropName::Num(key) => {
+            let key = key.value;
+            match as_integer(key) {
+                Some(key) => Ok(format!("{}", key)),
+                _ => Ok(format!("{}", key)),
+            }
+        }
+        PropName::BigInt(key) => Err(err_unimplemented(key)),
+        PropName::Computed(key) => {
+            let dynamic_key = parse_expression(&key.expr, scope, env, factory, allocator)?;
+            match factory.match_value_term(&dynamic_key) {
+                Some(ValueTerm::String(value)) => Ok(String::from(value.as_str())),
+                Some(ValueTerm::Null) => Ok(format!("{}", dynamic_key)),
+                Some(ValueTerm::Boolean(_)) => Ok(format!("{}", dynamic_key)),
+                Some(ValueTerm::Int(_)) => Ok(format!("{}", dynamic_key)),
+                Some(ValueTerm::Float(value)) => Ok(if let Some(value) = as_integer(*value) {
+                    format!("{}", value)
+                } else {
+                    format!("{}", dynamic_key)
+                }),
+                _ => Err(err_unimplemented(dynamic_key)),
+            }
+        }
     }
 }
 
-fn parse_throw_statement<'src, T: Expression + Rewritable<T>>(
-    value: &Expr<'src>,
+fn parse_throw_statement<T: Expression + Rewritable<T>>(
+    value: &Expr,
     scope: &LexicalScope,
     env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
@@ -726,8 +757,8 @@ where
     ))
 }
 
-fn parse_if_branch<'src, T: Expression + Rewritable<T>>(
-    node: &Stmt<'src>,
+fn parse_if_branch<T: Expression + Rewritable<T>>(
+    node: &Stmt,
     scope: &LexicalScope,
     env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
@@ -738,23 +769,16 @@ where
 {
     match node {
         Stmt::Block(block) => {
-            let BlockStmt(body) = block;
+            let BlockStmt { stmts: body, .. } = block;
             parse_branch(node, body, scope, env, factory, allocator)
         }
-        _ => parse_branch(
-            node,
-            &vec![ProgramPart::Stmt(node.clone())],
-            scope,
-            env,
-            factory,
-            allocator,
-        ),
+        _ => parse_branch(node, &vec![node.clone()], scope, env, factory, allocator),
     }
 }
 
-fn parse_branch<'src: 'temp, 'temp, T: Expression + Rewritable<T>>(
-    node: &Stmt<'src>,
-    body: impl IntoIterator<Item = &'temp ProgramPart<'src>>,
+fn parse_branch<'a, T: Expression + Rewritable<T>>(
+    node: &Stmt,
+    body: impl IntoIterator<Item = &'a Stmt>,
     scope: &LexicalScope,
     env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
@@ -770,8 +794,8 @@ where
     }
 }
 
-fn parse_expression<'src, T: Expression + Rewritable<T>>(
-    node: &Expr<'src>,
+fn parse_expression<T: Expression + Rewritable<T>>(
+    node: &Expr,
     scope: &LexicalScope,
     env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
@@ -781,29 +805,26 @@ where
     T::Builtin: From<Stdlib> + From<JsStdlib>,
 {
     match node {
+        Expr::Paren(node) => parse_expression(&node.expr, scope, env, factory, allocator),
         Expr::Ident(node) => parse_variable_reference(node, scope, env, factory),
-        Expr::Lit(node) => parse_literal(node, scope, env, factory, allocator),
-        Expr::TaggedTemplate(node) => parse_tagged_template(node, scope, env, factory, allocator),
+        Expr::Lit(node) => parse_literal(node, factory, allocator),
+        Expr::Tpl(node) => parse_template_literal(node, scope, env, factory, allocator),
+        Expr::TaggedTpl(node) => parse_tagged_template(node, scope, env, factory, allocator),
         Expr::Unary(node) => parse_unary_expression(node, scope, env, factory, allocator),
-        Expr::Binary(node) => parse_binary_expression(node, scope, env, factory, allocator),
-        Expr::Logical(node) => parse_logical_expression(node, scope, env, factory, allocator),
-        Expr::Conditional(node) => {
-            parse_conditional_expression(node, scope, env, factory, allocator)
-        }
-        Expr::ArrowFunc(node) => {
-            parse_arrow_function_expression(node, scope, env, factory, allocator)
-        }
+        Expr::Bin(node) => parse_binary_expression(node, scope, env, factory, allocator),
+        Expr::Cond(node) => parse_conditional_expression(node, scope, env, factory, allocator),
+        Expr::Arrow(node) => parse_arrow_function_expression(node, scope, env, factory, allocator),
         Expr::Member(node) => parse_member_expression(node, scope, env, factory, allocator),
         Expr::Call(node) => parse_call_expression(node, scope, env, factory, allocator),
         Expr::New(node) => parse_constructor_expression(node, scope, env, factory, allocator),
-        Expr::Obj(node) => parse_object_literal(node, scope, env, factory, allocator),
+        Expr::Object(node) => parse_object_literal(node, scope, env, factory, allocator),
         Expr::Array(node) => parse_array_literal(node, scope, env, factory, allocator),
         _ => Err(err_unimplemented(node)),
     }
 }
 
-fn parse_expressions<'src: 'temp, 'temp, T: Expression + Rewritable<T>>(
-    expressions: impl IntoIterator<Item = &'temp Expr<'src>>,
+fn parse_expressions<'a, T: Expression + Rewritable<T>>(
+    expressions: impl IntoIterator<Item = &'a Expr>,
     scope: &LexicalScope,
     env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
@@ -818,13 +839,13 @@ where
         .collect::<Result<Vec<_>, _>>()
 }
 
-fn parse_variable_reference<'src, T: Expression + Rewritable<T>>(
-    node: &Ident<'src>,
+fn parse_variable_reference<T: Expression + Rewritable<T>>(
+    node: &Ident,
     scope: &LexicalScope,
     env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
 ) -> ParserResult<T> {
-    let name = parse_identifier(node)?;
+    let name = parse_identifier(node);
     let offset = scope.get(name);
     match offset {
         Some(offset) => Ok(factory.create_static_variable_term(offset)),
@@ -835,58 +856,43 @@ fn parse_variable_reference<'src, T: Expression + Rewritable<T>>(
     }
 }
 
-fn parse_literal<'src, T: Expression + Rewritable<T>>(
-    node: &Lit<'src>,
-    scope: &LexicalScope,
-    env: &Env<T>,
+fn parse_literal<T: Expression + Rewritable<T>>(
+    node: &Lit,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> ParserResult<T>
-where
-    T::Builtin: From<Stdlib> + From<JsStdlib>,
-{
+) -> ParserResult<T> {
     match node {
-        Lit::Null => parse_null_literal(factory),
-        Lit::Boolean(node) => parse_boolean_literal(node, factory),
-        Lit::Number(node) => parse_number_literal(node, factory),
-        Lit::String(node) => parse_string_literal(node, factory, allocator),
-        Lit::Template(node) => parse_template_literal(node, scope, env, factory, allocator),
-        Lit::RegEx(_) => Err(err_unimplemented(node)),
+        Lit::Null(node) => parse_null_literal(node, factory),
+        Lit::Bool(node) => parse_boolean_literal(node, factory),
+        Lit::Num(node) => parse_number_literal(node, factory),
+        Lit::Str(node) => parse_string_literal(node, factory, allocator),
+        _ => Err(err_unimplemented(node)),
     }
 }
 
 fn parse_null_literal<T: Expression + Rewritable<T>>(
+    _node: &Null,
     factory: &impl ExpressionFactory<T>,
 ) -> ParserResult<T> {
     Ok(factory.create_value_term(ValueTerm::Null))
 }
 
 fn parse_boolean_literal<T: Expression + Rewritable<T>>(
-    node: &bool,
+    node: &Bool,
     factory: &impl ExpressionFactory<T>,
 ) -> ParserResult<T> {
-    Ok(factory.create_value_term(ValueTerm::Boolean(*node)))
+    Ok(factory.create_value_term(ValueTerm::Boolean(node.value)))
 }
 
 fn parse_number_literal<T: Expression + Rewritable<T>>(
-    node: &Cow<str>,
+    node: &Number,
     factory: &impl ExpressionFactory<T>,
 ) -> ParserResult<T> {
-    match parse_number(node) {
-        Ok(value) => Ok(factory.create_value_term(ValueTerm::Float(value))),
-        Err(error) => Err(error),
-    }
-}
-
-fn parse_number(node: &Cow<str>) -> ParserResult<f64> {
-    match node.parse::<f64>() {
-        Ok(value) => Ok(value),
-        Err(_) => Err(err("Invalid number literal", node)),
-    }
+    Ok(factory.create_value_term(ValueTerm::Float(node.value)))
 }
 
 fn parse_string_literal<T: Expression + Rewritable<T>>(
-    node: &StringLit,
+    node: &Str,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
 ) -> ParserResult<T> {
@@ -894,15 +900,8 @@ fn parse_string_literal<T: Expression + Rewritable<T>>(
     Ok(factory.create_value_term(ValueTerm::String(allocator.create_string(value))))
 }
 
-fn parse_string(node: &StringLit) -> String {
-    let value = match node {
-        StringLit::Double(value) => value,
-        StringLit::Single(value) => value,
-    };
-    match value {
-        Cow::Borrowed(value) => parse_escaped_string(value),
-        Cow::Owned(value) => parse_escaped_string(value),
-    }
+fn parse_string(node: &Str) -> String {
+    parse_escaped_string(&node.value)
 }
 
 fn parse_escaped_string(value: &str) -> String {
@@ -922,8 +921,8 @@ fn parse_escaped_string(value: &str) -> String {
         .0
 }
 
-fn parse_template_literal<'src, T: Expression + Rewritable<T>>(
-    node: &TemplateLit<'src>,
+fn parse_template_literal<T: Expression + Rewritable<T>>(
+    node: &Tpl,
     scope: &LexicalScope,
     env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
@@ -935,14 +934,16 @@ where
     let args = node
         .quasis
         .iter()
-        .map(|quasi| match parse_template_element(quasi)? {
-            "" => Ok(None),
-            value => Ok(Some(factory.create_value_term(ValueTerm::String(
-                allocator.create_string(value),
-            )))),
+        .map(|quasi| {
+            let value = parse_template_element(quasi);
+            if value.is_empty() {
+                None
+            } else {
+                Some(factory.create_value_term(ValueTerm::String(allocator.create_string(value))))
+            }
         })
         .zip(
-            node.expressions
+            node.exprs
                 .iter()
                 .map(|expression| {
                     let value = parse_expression(expression, scope, env, factory, allocator)?;
@@ -953,7 +954,7 @@ where
                 })
                 .chain(once(Ok(None))),
         )
-        .flat_map(|(quasi, expression)| once(quasi).chain(once(expression)))
+        .flat_map(|(quasi, expression)| once(Ok(quasi)).chain(once(expression)))
         .filter_map(|arg| match arg {
             Err(error) => Some(Err(error)),
             Ok(Some(arg)) => Some(Ok(arg)),
@@ -970,15 +971,18 @@ where
     })
 }
 
-fn parse_template_element<'src>(node: &TemplateElement<'src>) -> ParserResult<&'src str> {
-    match node.cooked {
-        Cow::Borrowed(value) => Ok(value),
-        Cow::Owned(_) => Err(err("Invalid template string", node)),
-    }
+fn parse_template_element(node: &TplElement) -> String {
+    node.cooked
+        .as_ref()
+        .map(|value| {
+            let value: &str = &value.value;
+            String::from(value)
+        })
+        .unwrap_or_else(|| parse_string(&node.raw))
 }
 
-fn parse_tagged_template<'src, T: Expression + Rewritable<T>>(
-    node: &TaggedTemplateExpr<'src>,
+fn parse_tagged_template<T: Expression + Rewritable<T>>(
+    node: &TaggedTpl,
     scope: &LexicalScope,
     env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
@@ -987,11 +991,11 @@ fn parse_tagged_template<'src, T: Expression + Rewritable<T>>(
 where
     T::Builtin: From<Stdlib> + From<JsStdlib>,
 {
-    parse_template_literal(&node.quasi, scope, env, factory, allocator)
+    parse_template_literal(&node.tpl, scope, env, factory, allocator)
 }
 
-fn parse_object_literal<'src, T: Expression + Rewritable<T>>(
-    node: &ObjExpr<'src>,
+fn parse_object_literal<T: Expression + Rewritable<T>>(
+    node: &ObjectLit,
     scope: &LexicalScope,
     env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
@@ -1000,139 +1004,93 @@ fn parse_object_literal<'src, T: Expression + Rewritable<T>>(
 where
     T::Builtin: From<Stdlib> + From<JsStdlib>,
 {
-    enum ObjectLiteralFields<T> {
-        Properties(Vec<(String, T)>),
+    enum ObjectLiteralField<T> {
+        Property(String, T),
         Spread(T),
     }
-    let elements = node
-        .iter()
-        .fold(Ok(Vec::with_capacity(node.len())), |results, node| {
-            let mut elements = results?;
-            match node {
-                ObjProp::Prop(prop) => match prop.kind {
-                    PropKind::Init => {
-                        let key = match &prop.key {
-                            PropKey::Lit(key) => match key {
-                                Lit::String(key) => Ok(parse_string(key)),
-                                Lit::Null => Ok(String::from("null")),
-                                Lit::Boolean(value) => Ok(format!("{}", value)),
-                                Lit::Number(key) => {
-                                    let key = parse_number(key)?;
-                                    match as_integer(key) {
-                                        Some(key) => Ok(format!("{}", key)),
-                                        _ => Ok(format!("{}", key)),
-                                    }
-                                }
-                                _ => Err(err_unimplemented(key)),
-                            },
-                            PropKey::Expr(key) => match key {
-                                Expr::Ident(key) if !prop.computed => {
-                                    let field_name = parse_identifier(key)?;
-                                    Ok(String::from(field_name))
-                                }
-                                _ => {
-                                    let dynamic_key =
-                                        parse_expression(key, scope, env, factory, allocator)?;
-                                    match factory.match_value_term(&dynamic_key) {
-                                        Some(ValueTerm::String(value)) => {
-                                            Ok(String::from(value.as_str()))
-                                        }
-                                        Some(ValueTerm::Null) => Ok(format!("{}", dynamic_key)),
-                                        Some(ValueTerm::Boolean(_)) => {
-                                            Ok(format!("{}", dynamic_key))
-                                        }
-                                        Some(ValueTerm::Int(_)) => Ok(format!("{}", dynamic_key)),
-                                        Some(ValueTerm::Float(value)) => {
-                                            Ok(if let Some(value) = as_integer(*value) {
-                                                format!("{}", value)
-                                            } else {
-                                                format!("{}", dynamic_key)
-                                            })
-                                        }
-                                        _ => Err(err_unimplemented(dynamic_key)),
-                                    }
-                                }
-                            },
-                            PropKey::Pat(key) => match key {
-                                Pat::Ident(key) if !prop.computed => {
-                                    let field_name = parse_identifier(key)?;
-                                    Ok(String::from(field_name))
-                                }
-                                _ => Err(err_unimplemented(node)),
-                            },
-                        }?;
-                        let value = match &prop.value {
-                            PropValue::Expr(node) => {
-                                parse_expression(node, scope, env, factory, allocator)
-                            }
-                            PropValue::None => match prop.short_hand {
-                                true => match &prop.key {
-                                    PropKey::Pat(node) => match node {
-                                        Pat::Ident(node) => {
-                                            parse_variable_reference(&node, scope, env, factory)
-                                        }
-                                        _ => Err(err_unimplemented(node)),
-                                    },
-                                    _ => Err(err_unimplemented(prop)),
-                                },
-                                _ => Err(err_unimplemented(prop)),
-                            },
-                            PropValue::Pat(node) => Err(err_unimplemented(node)),
-                        }?;
-                        if let Some(ObjectLiteralFields::Properties(_)) = elements.last() {
-                            match elements.pop() {
-                                Some(ObjectLiteralFields::Properties(mut properties)) => {
-                                    properties.push((key, value));
-                                    elements.push(ObjectLiteralFields::Properties(properties));
-                                }
-                                _ => {}
-                            }
-                        } else {
-                            elements.push(ObjectLiteralFields::Properties(vec![(key, value)]))
+    let elements =
+        node.props
+            .iter()
+            .fold(Ok(Vec::with_capacity(node.props.len())), |results, node| {
+                let mut elements = results?;
+                match node {
+                    PropOrSpread::Prop(prop) => match &**prop {
+                        Prop::KeyValue(prop) => {
+                            let key = parse_prop_name(&prop.key, scope, env, factory, allocator)?;
+                            let value =
+                                parse_expression(&prop.value, scope, env, factory, allocator)?;
+                            elements.push(ObjectLiteralField::Property(key, value));
+                            Ok(elements)
                         }
+                        Prop::Shorthand(prop) => {
+                            let key = String::from(parse_identifier(&prop));
+                            let value = parse_variable_reference(&prop, scope, env, factory)?;
+                            elements.push(ObjectLiteralField::Property(key, value));
+                            Ok(elements)
+                        }
+                        Prop::Method(_) => Err(err_unimplemented(prop)),
+                        Prop::Getter(_) => Err(err_unimplemented(prop)),
+                        Prop::Setter(_) => Err(err_unimplemented(prop)),
+                        _ => Err(err_unimplemented(prop)),
+                    },
+                    PropOrSpread::Spread(node) => {
+                        let value = parse_expression(&node.expr, scope, env, factory, allocator)?;
+                        elements.push(ObjectLiteralField::Spread(value));
                         Ok(elements)
                     }
-                    PropKind::Method => Err(err_unimplemented(prop)),
-                    PropKind::Ctor => Err(err_unimplemented(prop)),
-                    PropKind::Get => Err(err_unimplemented(prop)),
-                    PropKind::Set => Err(err_unimplemented(prop)),
-                },
-                ObjProp::Spread(Expr::Spread(node)) => {
-                    let value = parse_expression(node, scope, env, factory, allocator)?;
-                    elements.push(ObjectLiteralFields::Spread(value));
-                    Ok(elements)
                 }
-                _ => Err(err_unimplemented(node)),
+            })?;
+
+    let field_sets = elements
+        .into_iter()
+        .flat_map(|element| {
+            let spread_delimiter: Option<Option<ObjectLiteralField<T>>> =
+                if matches!(&element, ObjectLiteralField::Spread(_)) {
+                    Some(None)
+                } else {
+                    None
+                };
+            spread_delimiter.into_iter().chain(once(Some(element)))
+        })
+        .chain(once(None))
+        .fold((Vec::new(), Vec::new()), |results, property| {
+            let (mut field_sets, mut current_set) = results;
+            match property {
+                Some(ObjectLiteralField::Spread(value)) => {
+                    field_sets.push(value);
+                    (field_sets, Vec::new())
+                }
+                Some(ObjectLiteralField::Property(key, value)) => {
+                    current_set.push((key, value));
+                    (field_sets, current_set)
+                }
+                None => {
+                    if !current_set.is_empty() {
+                        field_sets.push(create_struct(current_set, factory, allocator));
+                    }
+                    (field_sets, Vec::new())
+                }
             }
-        })?;
-    let field_sets = elements.into_iter().map(|properties| match properties {
-        ObjectLiteralFields::Spread(value) => value,
-        ObjectLiteralFields::Properties(properties) => {
-            let (keys, values): (Vec<_>, Vec<_>) = properties.into_iter().unzip();
-            factory.create_struct_term(
-                allocator.create_struct_prototype(keys),
-                allocator.create_list(values),
-            )
-        }
-    });
+        })
+        .0;
+
     Ok(if field_sets.len() >= 2 {
         factory.create_application_term(
             factory.create_builtin_term(Stdlib::Merge),
             allocator.create_list(field_sets),
         )
     } else {
-        match field_sets.into_iter().next() {
-            Some(value) => value,
-            None => factory.create_struct_term(
+        field_sets.into_iter().next().unwrap_or_else(|| {
+            factory.create_struct_term(
                 allocator.create_struct_prototype(empty()),
                 allocator.create_empty_list(),
-            ),
-        }
+            )
+        })
     })
 }
 
-fn parse_array_literal<'src, T: Expression + Rewritable<T>>(
-    node: &ArrayExpr<'src>,
+fn parse_array_literal<T: Expression + Rewritable<T>>(
+    node: &ArrayLit,
     scope: &LexicalScope,
     env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
@@ -1145,21 +1103,22 @@ where
         Items(Vec<T>),
         Spread(T),
     }
-    let elements = node
-        .iter()
-        .fold(Ok(Vec::with_capacity(node.len())), |results, node| {
-            let mut elements = results?;
-            match node {
-                None => Err(err("Missing array item", node)),
-                Some(node) => match node {
-                    Expr::Spread(node) => {
-                        let value = parse_expression(node, scope, env, factory, allocator)?;
-                        elements.push(ArrayLiteralFields::Spread(value));
-                        Ok(elements)
-                    }
-                    _ => match parse_expression(node, scope, env, factory, allocator) {
-                        Err(error) => Err(error),
-                        Ok(value) => {
+    let elements =
+        node.elems
+            .iter()
+            .fold(Ok(Vec::with_capacity(node.elems.len())), |results, node| {
+                let mut elements = results?;
+                match node {
+                    None => Err(err("Missing array item", node)),
+                    Some(node) => {
+                        if node.spread.is_some() {
+                            let value =
+                                parse_expression(&node.expr, scope, env, factory, allocator)?;
+                            elements.push(ArrayLiteralFields::Spread(value));
+                            Ok(elements)
+                        } else {
+                            let value =
+                                parse_expression(&node.expr, scope, env, factory, allocator)?;
                             if let Some(ArrayLiteralFields::Items(_)) = elements.last() {
                                 match elements.pop() {
                                     Some(ArrayLiteralFields::Items(mut items)) => {
@@ -1173,10 +1132,9 @@ where
                             }
                             Ok(elements)
                         }
-                    },
-                },
-            }
-        })?;
+                    }
+                }
+            })?;
     if elements.len() == 2 {
         let left = elements.first().unwrap();
         let right = elements.last().unwrap();
@@ -1222,8 +1180,8 @@ where
     })
 }
 
-fn parse_unary_expression<'src, T: Expression + Rewritable<T>>(
-    node: &UnaryExpr<'src>,
+fn parse_unary_expression<T: Expression + Rewritable<T>>(
+    node: &UnaryExpr,
     scope: &LexicalScope,
     env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
@@ -1232,16 +1190,16 @@ fn parse_unary_expression<'src, T: Expression + Rewritable<T>>(
 where
     T::Builtin: From<Stdlib> + From<JsStdlib>,
 {
-    match node.operator {
+    match node.op {
         UnaryOp::Minus => parse_unary_minus_expression(node, scope, env, factory, allocator),
         UnaryOp::Plus => parse_unary_plus_expression(node, scope, env, factory, allocator),
-        UnaryOp::Not => parse_unary_not_expression(node, scope, env, factory, allocator),
+        UnaryOp::Bang => parse_unary_not_expression(node, scope, env, factory, allocator),
         _ => Err(err_unimplemented(node)),
     }
 }
 
-fn parse_binary_expression<'src, T: Expression + Rewritable<T>>(
-    node: &BinaryExpr<'src>,
+fn parse_binary_expression<T: Expression + Rewritable<T>>(
+    node: &BinExpr,
     scope: &LexicalScope,
     env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
@@ -1250,37 +1208,35 @@ fn parse_binary_expression<'src, T: Expression + Rewritable<T>>(
 where
     T::Builtin: From<Stdlib> + From<JsStdlib>,
 {
-    match node.operator {
-        BinaryOp::Plus => parse_binary_add_expression(node, scope, env, factory, allocator),
-        BinaryOp::Minus => parse_binary_subtract_expression(node, scope, env, factory, allocator),
-        BinaryOp::Times => parse_binary_multiply_expression(node, scope, env, factory, allocator),
-        BinaryOp::Over => parse_binary_divide_expression(node, scope, env, factory, allocator),
+    match node.op {
+        BinaryOp::Add => parse_binary_add_expression(node, scope, env, factory, allocator),
+        BinaryOp::Sub => parse_binary_subtract_expression(node, scope, env, factory, allocator),
+        BinaryOp::Mul => parse_binary_multiply_expression(node, scope, env, factory, allocator),
+        BinaryOp::Div => parse_binary_divide_expression(node, scope, env, factory, allocator),
         BinaryOp::Mod => parse_binary_remainder_expression(node, scope, env, factory, allocator),
-        BinaryOp::PowerOf => parse_binary_pow_expression(node, scope, env, factory, allocator),
-        BinaryOp::LessThan => parse_binary_lt_expression(node, scope, env, factory, allocator),
-        BinaryOp::GreaterThan => parse_binary_gt_expression(node, scope, env, factory, allocator),
-        BinaryOp::LessThanEqual => {
-            parse_binary_lte_expression(node, scope, env, factory, allocator)
-        }
-        BinaryOp::GreaterThanEqual => {
-            parse_binary_gte_expression(node, scope, env, factory, allocator)
-        }
-        BinaryOp::Equal => parse_binary_equal_expression(node, scope, env, factory, allocator),
-        BinaryOp::StrictEqual => {
+        BinaryOp::Exp => parse_binary_pow_expression(node, scope, env, factory, allocator),
+        BinaryOp::Lt => parse_binary_lt_expression(node, scope, env, factory, allocator),
+        BinaryOp::Gt => parse_binary_gt_expression(node, scope, env, factory, allocator),
+        BinaryOp::LtEq => parse_binary_lte_expression(node, scope, env, factory, allocator),
+        BinaryOp::GtEq => parse_binary_gte_expression(node, scope, env, factory, allocator),
+        BinaryOp::EqEq | BinaryOp::EqEqEq => {
             parse_binary_equal_expression(node, scope, env, factory, allocator)
         }
-        BinaryOp::NotEqual => {
+        BinaryOp::NotEq | BinaryOp::NotEqEq => {
             parse_binary_not_equal_expression(node, scope, env, factory, allocator)
         }
-        BinaryOp::StrictNotEqual => {
-            parse_binary_not_equal_expression(node, scope, env, factory, allocator)
+        BinaryOp::LogicalAnd => {
+            parse_binary_logical_and_expression(node, scope, env, factory, allocator)
+        }
+        BinaryOp::LogicalOr => {
+            parse_binary_logical_or_expression(node, scope, env, factory, allocator)
         }
         _ => Err(err_unimplemented(node)),
     }
 }
 
-fn parse_logical_expression<'src, T: Expression + Rewritable<T>>(
-    node: &LogicalExpr<'src>,
+fn parse_unary_minus_expression<T: Expression + Rewritable<T>>(
+    node: &UnaryExpr,
     scope: &LexicalScope,
     env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
@@ -1289,23 +1245,7 @@ fn parse_logical_expression<'src, T: Expression + Rewritable<T>>(
 where
     T::Builtin: From<Stdlib> + From<JsStdlib>,
 {
-    match node.operator {
-        LogicalOp::And => parse_logical_and_expression(node, scope, env, factory, allocator),
-        LogicalOp::Or => parse_logical_or_expression(node, scope, env, factory, allocator),
-    }
-}
-
-fn parse_unary_minus_expression<'src, T: Expression + Rewritable<T>>(
-    node: &UnaryExpr<'src>,
-    scope: &LexicalScope,
-    env: &Env<T>,
-    factory: &impl ExpressionFactory<T>,
-    allocator: &impl HeapAllocator<T>,
-) -> ParserResult<T>
-where
-    T::Builtin: From<Stdlib> + From<JsStdlib>,
-{
-    let operand = parse_expression(&node.argument, scope, env, factory, allocator)?;
+    let operand = parse_expression(&node.arg, scope, env, factory, allocator)?;
     Ok(match factory.match_value_term(&operand) {
         Some(ValueTerm::Int(value)) => factory.create_value_term(ValueTerm::Int(-*value)),
         Some(ValueTerm::Float(value)) => factory.create_value_term(ValueTerm::Float(-*value)),
@@ -1316,8 +1256,8 @@ where
     })
 }
 
-fn parse_unary_plus_expression<'src, T: Expression + Rewritable<T>>(
-    node: &UnaryExpr<'src>,
+fn parse_unary_plus_expression<T: Expression + Rewritable<T>>(
+    node: &UnaryExpr,
     scope: &LexicalScope,
     env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
@@ -1326,7 +1266,7 @@ fn parse_unary_plus_expression<'src, T: Expression + Rewritable<T>>(
 where
     T::Builtin: From<Stdlib> + From<JsStdlib>,
 {
-    let operand = parse_expression(&node.argument, scope, env, factory, allocator)?;
+    let operand = parse_expression(&node.arg, scope, env, factory, allocator)?;
     Ok(match factory.match_value_term(&operand) {
         Some(ValueTerm::Int(_)) => operand,
         Some(ValueTerm::Float(_)) => operand,
@@ -1337,8 +1277,8 @@ where
     })
 }
 
-fn parse_unary_not_expression<'src, T: Expression + Rewritable<T>>(
-    node: &UnaryExpr<'src>,
+fn parse_unary_not_expression<T: Expression + Rewritable<T>>(
+    node: &UnaryExpr,
     scope: &LexicalScope,
     env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
@@ -1347,15 +1287,15 @@ fn parse_unary_not_expression<'src, T: Expression + Rewritable<T>>(
 where
     T::Builtin: From<Stdlib> + From<JsStdlib>,
 {
-    let operand = parse_expression(&node.argument, scope, env, factory, allocator)?;
+    let operand = parse_expression(&node.arg, scope, env, factory, allocator)?;
     Ok(factory.create_application_term(
         factory.create_builtin_term(Stdlib::Not),
         allocator.create_unit_list(operand),
     ))
 }
 
-fn parse_binary_add_expression<'src, T: Expression + Rewritable<T>>(
-    node: &BinaryExpr<'src>,
+fn parse_binary_add_expression<T: Expression + Rewritable<T>>(
+    node: &BinExpr,
     scope: &LexicalScope,
     env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
@@ -1372,8 +1312,8 @@ where
     ))
 }
 
-fn parse_binary_subtract_expression<'src, T: Expression + Rewritable<T>>(
-    node: &BinaryExpr<'src>,
+fn parse_binary_subtract_expression<T: Expression + Rewritable<T>>(
+    node: &BinExpr,
     scope: &LexicalScope,
     env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
@@ -1390,8 +1330,8 @@ where
     ))
 }
 
-fn parse_binary_multiply_expression<'src, T: Expression + Rewritable<T>>(
-    node: &BinaryExpr<'src>,
+fn parse_binary_multiply_expression<T: Expression + Rewritable<T>>(
+    node: &BinExpr,
     scope: &LexicalScope,
     env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
@@ -1408,8 +1348,8 @@ where
     ))
 }
 
-fn parse_binary_divide_expression<'src, T: Expression + Rewritable<T>>(
-    node: &BinaryExpr<'src>,
+fn parse_binary_divide_expression<T: Expression + Rewritable<T>>(
+    node: &BinExpr,
     scope: &LexicalScope,
     env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
@@ -1426,8 +1366,8 @@ where
     ))
 }
 
-fn parse_binary_remainder_expression<'src, T: Expression + Rewritable<T>>(
-    node: &BinaryExpr<'src>,
+fn parse_binary_remainder_expression<T: Expression + Rewritable<T>>(
+    node: &BinExpr,
     scope: &LexicalScope,
     env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
@@ -1444,8 +1384,8 @@ where
     ))
 }
 
-fn parse_binary_pow_expression<'src, T: Expression + Rewritable<T>>(
-    node: &BinaryExpr<'src>,
+fn parse_binary_pow_expression<T: Expression + Rewritable<T>>(
+    node: &BinExpr,
     scope: &LexicalScope,
     env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
@@ -1462,8 +1402,8 @@ where
     ))
 }
 
-fn parse_binary_lt_expression<'src, T: Expression + Rewritable<T>>(
-    node: &BinaryExpr<'src>,
+fn parse_binary_lt_expression<T: Expression + Rewritable<T>>(
+    node: &BinExpr,
     scope: &LexicalScope,
     env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
@@ -1480,8 +1420,8 @@ where
     ))
 }
 
-fn parse_binary_gt_expression<'src, T: Expression + Rewritable<T>>(
-    node: &BinaryExpr<'src>,
+fn parse_binary_gt_expression<T: Expression + Rewritable<T>>(
+    node: &BinExpr,
     scope: &LexicalScope,
     env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
@@ -1498,8 +1438,8 @@ where
     ))
 }
 
-fn parse_binary_lte_expression<'src, T: Expression + Rewritable<T>>(
-    node: &BinaryExpr<'src>,
+fn parse_binary_lte_expression<T: Expression + Rewritable<T>>(
+    node: &BinExpr,
     scope: &LexicalScope,
     env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
@@ -1516,8 +1456,8 @@ where
     ))
 }
 
-fn parse_binary_gte_expression<'src, T: Expression + Rewritable<T>>(
-    node: &BinaryExpr<'src>,
+fn parse_binary_gte_expression<T: Expression + Rewritable<T>>(
+    node: &BinExpr,
     scope: &LexicalScope,
     env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
@@ -1534,8 +1474,8 @@ where
     ))
 }
 
-fn parse_binary_equal_expression<'src, T: Expression + Rewritable<T>>(
-    node: &BinaryExpr<'src>,
+fn parse_binary_equal_expression<T: Expression + Rewritable<T>>(
+    node: &BinExpr,
     scope: &LexicalScope,
     env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
@@ -1552,8 +1492,8 @@ where
     ))
 }
 
-fn parse_binary_not_equal_expression<'src, T: Expression + Rewritable<T>>(
-    node: &BinaryExpr<'src>,
+fn parse_binary_not_equal_expression<T: Expression + Rewritable<T>>(
+    node: &BinExpr,
     scope: &LexicalScope,
     env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
@@ -1569,8 +1509,8 @@ where
     ))
 }
 
-fn parse_logical_and_expression<'src, T: Expression + Rewritable<T>>(
-    node: &LogicalExpr<'src>,
+fn parse_binary_logical_and_expression<T: Expression + Rewritable<T>>(
+    node: &BinExpr,
     scope: &LexicalScope,
     env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
@@ -1587,8 +1527,8 @@ where
     ))
 }
 
-fn parse_logical_or_expression<'src, T: Expression + Rewritable<T>>(
-    node: &LogicalExpr<'src>,
+fn parse_binary_logical_or_expression<T: Expression + Rewritable<T>>(
+    node: &BinExpr,
     scope: &LexicalScope,
     env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
@@ -1605,8 +1545,8 @@ where
     ))
 }
 
-fn parse_conditional_expression<'src, T: Expression + Rewritable<T>>(
-    node: &ConditionalExpr<'src>,
+fn parse_conditional_expression<T: Expression + Rewritable<T>>(
+    node: &CondExpr,
     scope: &LexicalScope,
     env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
@@ -1616,8 +1556,8 @@ where
     T::Builtin: From<Stdlib> + From<JsStdlib>,
 {
     let condition = parse_expression(&node.test, scope, env, factory, allocator)?;
-    let consequent = parse_expression(&node.consequent, scope, env, factory, allocator)?;
-    let alternate = parse_expression(&node.alternate, scope, env, factory, allocator)?;
+    let consequent = parse_expression(&node.cons, scope, env, factory, allocator)?;
+    let alternate = parse_expression(&node.alt, scope, env, factory, allocator)?;
     Ok(create_if_expression(
         condition, consequent, alternate, factory, allocator,
     ))
@@ -1673,8 +1613,8 @@ where
     )
 }
 
-fn parse_arrow_function_expression<'src, T: Expression + Rewritable<T>>(
-    node: &ArrowFuncExpr<'src>,
+fn parse_arrow_function_expression<T: Expression + Rewritable<T>>(
+    node: &ArrowExpr,
     scope: &LexicalScope,
     env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
@@ -1683,21 +1623,14 @@ fn parse_arrow_function_expression<'src, T: Expression + Rewritable<T>>(
 where
     T::Builtin: From<Stdlib> + From<JsStdlib>,
 {
-    if node.generator || node.is_async {
+    if node.is_generator || node.is_async {
         Err(err_unimplemented(node))
     } else {
         let num_args = node.params.len();
-        let arg_names = node
-            .params
-            .iter()
-            .map(|node| match node {
-                FuncArg::Pat(node) => match node {
-                    Pat::Ident(node) => parse_identifier(node).map(Some),
-                    _ => Ok(None),
-                },
-                _ => Ok(None),
-            })
-            .collect::<Result<Vec<_>, _>>()?;
+        let arg_names = node.params.iter().map(|node| match node {
+            Pat::Ident(node) => Some(String::from(parse_identifier(&node.id))),
+            _ => None,
+        });
         let inner_scope = scope.create_child(arg_names);
         let inner_depth = inner_scope.depth();
         let (initializers, body_scope) = node.params.iter().enumerate().fold(
@@ -1705,59 +1638,57 @@ where
             |result, (arg_index, node)| {
                 let (mut combined_initializers, existing_scope) = result?;
                 match node {
-                    FuncArg::Pat(node) => match node {
-                        Pat::Ident(_) => Ok((combined_initializers, existing_scope)),
-                        Pat::Obj(properties) => {
-                            let scope_offset = existing_scope.depth() - inner_depth;
-                            let arg = factory.create_static_variable_term(
-                                num_args - arg_index - 1 + scope_offset,
-                            );
-                            let (initializers, child_scope) =
-                                parse_object_destructuring_pattern_bindings(
-                                    arg,
-                                    properties,
-                                    &existing_scope,
-                                    env,
-                                    factory,
-                                    allocator,
-                                )?;
-                            let next_scope = child_scope.unwrap_or(existing_scope);
-                            combined_initializers.extend(initializers);
-                            Ok((combined_initializers, next_scope))
-                        }
-                        Pat::Array(accessors) => {
-                            let scope_offset = existing_scope.depth() - inner_depth;
-                            let arg = factory.create_static_variable_term(
-                                num_args - arg_index - 1 + scope_offset,
-                            );
-                            let (initializers, child_scope) =
-                                parse_array_destructuring_pattern_bindings(
-                                    arg,
-                                    accessors,
-                                    &existing_scope,
-                                    env,
-                                    factory,
-                                    allocator,
-                                )?;
-                            let next_scope = child_scope.unwrap_or(existing_scope);
-                            combined_initializers.extend(initializers);
-                            Ok((combined_initializers, next_scope))
-                        }
-                        Pat::RestElement(_) => Err(err_unimplemented(node)),
-                        Pat::Assign(_) => Err(err_unimplemented(node)),
-                    },
+                    Pat::Ident(_) => Ok((combined_initializers, existing_scope)),
+                    Pat::Object(pattern) => {
+                        let scope_offset = existing_scope.depth() - inner_depth;
+                        let arg = factory
+                            .create_static_variable_term(num_args - arg_index - 1 + scope_offset);
+                        let (initializers, child_scope) =
+                            parse_object_destructuring_pattern_bindings(
+                                arg,
+                                &pattern.props,
+                                &existing_scope,
+                                env,
+                                factory,
+                                allocator,
+                            )?;
+                        let next_scope = child_scope.unwrap_or(existing_scope);
+                        combined_initializers.extend(initializers);
+                        Ok((combined_initializers, next_scope))
+                    }
+                    Pat::Array(node) => {
+                        let scope_offset = existing_scope.depth() - inner_depth;
+                        let arg = factory
+                            .create_static_variable_term(num_args - arg_index - 1 + scope_offset);
+                        let (initializers, child_scope) =
+                            parse_array_destructuring_pattern_bindings(
+                                arg,
+                                &node.elems,
+                                &existing_scope,
+                                env,
+                                factory,
+                                allocator,
+                            )?;
+                        let next_scope = child_scope.unwrap_or(existing_scope);
+                        combined_initializers.extend(initializers);
+                        Ok((combined_initializers, next_scope))
+                    }
+                    Pat::Rest(_) => Err(err_unimplemented(node)),
+                    Pat::Assign(_) => Err(err_unimplemented(node)),
                     _ => Err(err_unimplemented(node)),
                 }
             },
         )?;
         let body = match &node.body {
-            ArrowFuncBody::Expr(node) => {
-                let body = &vec![ProgramPart::Stmt(Stmt::Return(Some(*node.clone())))];
-                parse_block(body, &body_scope, env, factory, allocator)
+            BlockStmtOrExpr::Expr(expression) => {
+                let body = vec![Stmt::Expr(ExprStmt {
+                    span: node.span,
+                    expr: expression.clone(),
+                })];
+                parse_block(&body, &body_scope, env, factory, allocator)
             }
-            ArrowFuncBody::FuncBody(node) => {
-                let FuncBody(body) = node;
-                parse_block(body, &body_scope, env, factory, allocator)
+            BlockStmtOrExpr::BlockStmt(node) => {
+                parse_block(&node.stmts, &body_scope, env, factory, allocator)
             }
         }?;
         match body {
@@ -1775,8 +1706,8 @@ where
     }
 }
 
-fn parse_member_expression<'src, T: Expression + Rewritable<T>>(
-    node: &MemberExpr<'src>,
+fn parse_member_expression<T: Expression + Rewritable<T>>(
+    node: &MemberExpr,
     scope: &LexicalScope,
     env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
@@ -1785,22 +1716,27 @@ fn parse_member_expression<'src, T: Expression + Rewritable<T>>(
 where
     T::Builtin: From<Stdlib> + From<JsStdlib>,
 {
-    let target = parse_expression(&node.object, scope, env, factory, allocator)?;
-    let field_name = parse_static_member_field_name(node)?;
-    match field_name {
-        Some(field_name) => Ok(get_static_field(target, &field_name, factory, allocator)),
-        None => {
-            let field = parse_expression(&node.property, scope, env, factory, allocator)?;
-            Ok(get_dynamic_field(target, field, factory, allocator))
+    match &node.obj {
+        ExprOrSuper::Expr(target) => {
+            let target = parse_expression(target, scope, env, factory, allocator)?;
+            let field_name = parse_static_member_field_name(node)?;
+            match field_name {
+                Some(field_name) => Ok(get_static_field(target, &field_name, factory, allocator)),
+                None => {
+                    let field = parse_expression(&node.prop, scope, env, factory, allocator)?;
+                    Ok(get_dynamic_field(target, field, factory, allocator))
+                }
+            }
         }
+        ExprOrSuper::Super(_) => Err(err_unimplemented(node)),
     }
 }
 
 fn parse_static_member_field_name(node: &MemberExpr) -> ParserResult<Option<String>> {
-    Ok(match &*node.property {
-        Expr::Ident(name) => Some(String::from(parse_identifier(&name)?)),
+    Ok(match &*node.prop {
+        Expr::Ident(name) => Some(String::from(parse_identifier(&name))),
         Expr::Lit(name) => match name {
-            Lit::String(name) => Some(parse_string(&name)),
+            Lit::Str(name) => Some(parse_string(&name)),
             _ => None,
         },
         _ => None,
@@ -1852,8 +1788,8 @@ where
     )
 }
 
-fn parse_call_expression<'src, T: Expression + Rewritable<T>>(
-    node: &CallExpr<'src>,
+fn parse_call_expression<T: Expression + Rewritable<T>>(
+    node: &CallExpr,
     scope: &LexicalScope,
     env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
@@ -1862,44 +1798,48 @@ fn parse_call_expression<'src, T: Expression + Rewritable<T>>(
 where
     T::Builtin: From<Stdlib> + From<JsStdlib>,
 {
-    let static_dispatch = match &*node.callee {
-        Expr::Member(callee) => {
-            let method_name = parse_static_member_field_name(callee)?;
-            match method_name {
-                Some(method_name) => Some(parse_static_method_call_expression(
-                    &callee.object,
-                    &method_name,
-                    node.arguments.iter(),
-                    scope,
-                    env,
-                    factory,
-                    allocator,
-                )?),
-                None => None,
-            }
-        }
+    let static_dispatch = match &node.callee {
+        ExprOrSuper::Expr(callee) => match &**callee {
+            Expr::Member(callee) => match &callee.obj {
+                ExprOrSuper::Expr(target) => {
+                    let method_name = parse_static_member_field_name(callee)?;
+                    match method_name {
+                        Some(method_name) => Some(parse_static_method_call_expression(
+                            target,
+                            &method_name,
+                            &node.args,
+                            scope,
+                            env,
+                            factory,
+                            allocator,
+                        )?),
+                        None => None,
+                    }
+                }
+                _ => None,
+            },
+            _ => None,
+        },
         _ => None,
     };
     match static_dispatch {
         Some(expression) => Ok(expression),
-        None => {
-            let callee = parse_expression(&node.callee, scope, env, factory, allocator)?;
-            parse_function_application_expression(
-                callee,
-                node.arguments.iter(),
-                scope,
-                env,
-                factory,
-                allocator,
-            )
-        }
+        None => match &node.callee {
+            ExprOrSuper::Expr(callee) => {
+                let callee = parse_expression(callee, scope, env, factory, allocator)?;
+                parse_function_application_expression(
+                    callee, &node.args, scope, env, factory, allocator,
+                )
+            }
+            ExprOrSuper::Super(_) => Err(err_unimplemented(node)),
+        },
     }
 }
 
-fn parse_static_method_call_expression<'src: 'temp, 'temp, T: Expression + Rewritable<T>>(
-    target: &Expr<'src>,
-    method_name: &'src str,
-    args: impl IntoIterator<Item = &'temp Expr<'src>> + ExactSizeIterator,
+fn parse_static_method_call_expression<T: Expression + Rewritable<T>>(
+    target: &Expr,
+    method_name: &str,
+    args: &[ExprOrSpread],
     scope: &LexicalScope,
     env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
@@ -1914,11 +1854,16 @@ where
         let method =
             factory.create_value_term(ValueTerm::String(allocator.create_string(method_name)));
         let num_args = args.len();
-        let args = args.into_iter().collect::<Vec<_>>();
-        let method_args = parse_expressions(args.iter().cloned(), scope, env, factory, allocator)?;
+        let method_args = parse_expressions(
+            args.iter().map(|arg| &*arg.expr),
+            scope,
+            env,
+            factory,
+            allocator,
+        )?;
         let dynamic_fallback = parse_function_application_expression(
             get_static_field(target.clone(), method_name, factory, allocator),
-            args.iter().cloned(),
+            args,
             scope,
             env,
             factory,
@@ -1945,9 +1890,9 @@ where
     }
 }
 
-fn parse_function_application_expression<'src: 'temp, 'temp, T: Expression + Rewritable<T>>(
+fn parse_function_application_expression<T: Expression + Rewritable<T>>(
     target: T,
-    args: impl IntoIterator<Item = &'temp Expr<'src>> + ExactSizeIterator,
+    args: &[ExprOrSpread],
     scope: &LexicalScope,
     env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
@@ -1959,10 +1904,11 @@ where
     let num_args = args.len();
     let (args, spread) = args.into_iter().fold(
         (Vec::with_capacity(num_args), None),
-        |(mut args, spread), node| match node {
-            Expr::Spread(node) => (args, Some(node)),
-            _ => {
-                args.push(node);
+        |(mut args, spread), node| {
+            if node.spread.is_some() {
+                (args, Some(&*node.expr))
+            } else {
+                args.push(&*node.expr);
                 (args, spread)
             }
         },
@@ -1987,8 +1933,8 @@ where
     }
 }
 
-fn parse_constructor_expression<'src, T: Expression + Rewritable<T>>(
-    node: &NewExpr<'src>,
+fn parse_constructor_expression<T: Expression + Rewritable<T>>(
+    node: &NewExpr,
     scope: &LexicalScope,
     env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
@@ -1998,10 +1944,15 @@ where
     T::Builtin: From<Stdlib> + From<JsStdlib>,
 {
     let target = parse_expression(&node.callee, scope, env, factory, allocator);
-    let args = node
-        .arguments
-        .iter()
-        .map(|arg| parse_expression(arg, scope, env, factory, allocator));
+    let args = (&node.args).iter().flat_map(|args| {
+        args.iter().map(|arg| {
+            if arg.spread.is_some() {
+                Err(err_unimplemented(arg))
+            } else {
+                parse_expression(&arg.expr, scope, env, factory, allocator)
+            }
+        })
+    });
     Ok(factory.create_application_term(
         factory.create_builtin_term(JsStdlib::Construct),
         allocator.create_list(once(target).chain(args).collect::<ParserResult<Vec<_>>>()?),
@@ -2247,8 +2198,15 @@ mod tests {
         );
         assert_eq!(
             parse("`\\\"`", &env, &factory, &allocator),
-            Ok(factory
-                .create_value_term(ValueTerm::String(allocator.create_static_string("\\\"")))),
+            Ok(factory.create_value_term(ValueTerm::String(
+                allocator.create_string(String::from("\""))
+            ))),
+        );
+        assert_eq!(
+            parse("`\\\\\"`", &env, &factory, &allocator),
+            Ok(factory.create_value_term(ValueTerm::String(
+                allocator.create_string(String::from("\\\""))
+            ))),
         );
         assert_eq!(
             parse("`${'foo'}`", &env, &factory, &allocator),
