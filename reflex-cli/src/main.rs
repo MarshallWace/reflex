@@ -18,7 +18,7 @@ use reflex::{
     compiler::{hash_program_root, Compiler, CompilerMode, CompilerOptions, InstructionPointer},
     core::{Expression, ExpressionFactory, HeapAllocator, Reducible, Rewritable, StateCache, Uid},
     interpreter::{execute, DefaultInterpreterCache, InterpreterOptions},
-    lang::{term::SignalTerm, SharedTermFactory, ValueTerm},
+    lang::{create_struct, term::SignalTerm, SharedTermFactory, ValueTerm},
     stdlib::Stdlib,
 };
 
@@ -94,6 +94,17 @@ pub async fn main() -> Result<()> {
             let program = Compiler::new(compiler_options, None)
                 .compile(&expression, CompilerMode::Expression, &factory, &allocator)
                 .map_err(|err| anyhow!("Failed to compile source at {}: {}", input_path, err))?;
+            let env = create_struct(
+                env::vars().into_iter().map(|(key, value)| {
+                    (
+                        key,
+                        factory
+                            .create_value_term(ValueTerm::String(allocator.create_string(value))),
+                    )
+                }),
+                &factory,
+                &allocator,
+            );
 
             let mut stdout = io::stdout();
             let state = StateCache::default();
@@ -110,6 +121,7 @@ pub async fn main() -> Result<()> {
                 cache_key,
                 &program,
                 entry_point,
+                &env,
                 &state,
                 &factory,
                 &allocator,
@@ -131,6 +143,7 @@ pub async fn main() -> Result<()> {
                         state,
                         builtins,
                         debug_signal_handler(signal_handler),
+                        env,
                         cache,
                         &factory,
                         &allocator,
@@ -142,6 +155,7 @@ pub async fn main() -> Result<()> {
                         state,
                         builtins,
                         debug_signal_handler(signal_handler),
+                        env,
                         cache,
                         &factory,
                         &allocator,
@@ -198,7 +212,7 @@ where
     match (syntax, entry_path) {
         (Syntax::JavaScript, None) => create_js_script_parser(factory, allocator),
         (Syntax::JavaScript, Some(entry_path)) => {
-            create_js_module_parser(&entry_path, env::vars(), factory, allocator)
+            create_js_module_parser(&entry_path, factory, allocator)
         }
         (Syntax::Lisp, _) => create_sexpr_parser(factory, allocator),
         (Syntax::ByteCode, _) => todo!(),
@@ -212,8 +226,7 @@ fn create_js_script_parser<T: Expression + Rewritable<T> + 'static>(
 where
     T::Builtin: From<Stdlib> + From<JsStdlib>,
 {
-    let env =
-        reflex_js::Env::new().with_globals(reflex_js::globals::builtin_globals(factory, allocator));
+    let env = create_js_env(factory, allocator);
     let factory = factory.clone();
     let allocator = allocator.clone();
     Box::new(move |input: &str| reflex_js::parse(input, &env, &factory, &allocator))
@@ -221,7 +234,6 @@ where
 
 fn create_js_module_parser<T: Expression + Rewritable<T> + 'static>(
     path: &str,
-    env_vars: impl IntoIterator<Item = (String, String)>,
     factory: &(impl ExpressionFactory<T> + Clone + 'static),
     allocator: &(impl HeapAllocator<T> + Clone + 'static),
 ) -> ReplParser<T>
@@ -229,7 +241,7 @@ where
     T::Builtin: From<Stdlib> + From<JsStdlib>,
 {
     let path = PathBuf::from_str(&path).unwrap();
-    let env = create_js_env(env_vars, factory, allocator);
+    let env = create_js_env(factory, allocator);
     let loader = create_module_loader(
         env.clone(),
         Some(builtin_imports_loader(factory, allocator)),

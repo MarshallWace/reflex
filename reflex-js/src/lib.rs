@@ -9,12 +9,15 @@ pub use loader::{
 };
 mod parser;
 pub use parser::{parse, parse_module};
-use reflex::core::Expression;
+use reflex::{
+    cache::NoopCache,
+    core::{Expression, ExpressionFactory, HeapAllocator, Rewritable, StackOffset, Substitutions},
+};
 
 pub mod builtins;
 pub mod globals;
 pub mod imports;
-pub use globals::{builtin_globals, global_process};
+pub use globals::builtin_globals;
 pub use imports::builtin_imports;
 
 pub mod stdlib;
@@ -23,7 +26,7 @@ pub mod stdlib;
 pub struct Env<T: Expression> {
     globals: HashMap<&'static str, T>,
 }
-impl<T: Expression> Env<T> {
+impl<T: Expression + Rewritable<T>> Env<T> {
     pub fn new() -> Self {
         Self {
             globals: HashMap::new(),
@@ -37,7 +40,22 @@ impl<T: Expression> Env<T> {
         self.globals.insert(key, value);
         self
     }
-    pub fn global(&self, name: &str) -> Option<T> {
-        self.globals.get(name).cloned()
+    pub fn global(
+        &self,
+        name: &str,
+        scope_depth: StackOffset,
+        factory: &impl ExpressionFactory<T>,
+        allocator: &impl HeapAllocator<T>,
+    ) -> Option<T> {
+        self.globals.get(name).map(|value| {
+            value
+                .substitute_static(
+                    &Substitutions::increase_scope_offset(scope_depth),
+                    factory,
+                    allocator,
+                    &mut NoopCache::default(),
+                )
+                .unwrap_or_else(|| value.clone())
+        })
     }
 }

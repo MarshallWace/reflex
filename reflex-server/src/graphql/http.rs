@@ -1,12 +1,16 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use crate::{create_http_response, get_cors_headers, GraphQlHttpQueryTransform};
+use std::{
+    convert::Infallible,
+    hash::Hash,
+    iter::{empty, once},
+    sync::Arc,
+};
+
 use hyper::{header, Body, Request, Response, StatusCode};
 use reflex::{
-    compiler::{
-        Compile, Compiler, CompilerMode, CompilerOptions, Instruction, InstructionPointer, Program,
-    },
+    compiler::{Compile, CompilerOptions, Program},
     core::{
         Applicable, Expression, ExpressionFactory, HeapAllocator, Reducible, Rewritable,
         StringValue,
@@ -24,11 +28,10 @@ use reflex_json::{json_object, JsonValue};
 use reflex_runtime::{
     AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator, Runtime, StreamExt,
 };
-use std::{
-    convert::Infallible,
-    hash::Hash,
-    iter::{empty, once},
-    sync::Arc,
+
+use crate::{
+    create_http_response, get_cors_headers, graphql::compile_graphql_query,
+    GraphQlHttpQueryTransform,
 };
 
 pub(crate) async fn handle_graphql_http_request<
@@ -37,7 +40,6 @@ pub(crate) async fn handle_graphql_http_request<
     req: Request<Body>,
     runtime: Arc<Runtime<T>>,
     program: &Program,
-    root: &T,
     factory: &impl AsyncExpressionFactory<T>,
     allocator: &impl AsyncHeapAllocator<T>,
     compiler_options: CompilerOptions,
@@ -53,34 +55,22 @@ where
         Ok(transform) => transform,
     };
     let request_etag = parse_request_etag(&req);
-    let response = match parse_graphql_request(req, root, factory, allocator, &transform).await {
+    let root = factory.create_static_variable_term(0);
+    let response = match parse_graphql_request(req, &root, factory, allocator, &transform).await {
         Err(response) => Ok(response),
         Ok(query) => {
-            let mut prelude = program.clone();
-            let entry_point = InstructionPointer::new(prelude.len());
-            prelude.push(Instruction::PushFunction {
-                target: InstructionPointer::default(),
-            });
-            match Compiler::new(compiler_options, Some(prelude)).compile(
-                &query,
-                CompilerMode::Expression,
-                factory,
-                allocator,
-            ) {
+            match compile_graphql_query(query, &program, &compiler_options, factory, allocator) {
                 Err(error) => Err(error),
-                Ok(program) => {
-                    // TODO: Error if runtime expression depends on unrecognized native functions
-                    match runtime.subscribe(program, entry_point).await {
-                        Err(error) => Err(error),
-                        Ok(mut results) => match results.next().await {
-                            None => Err(String::from("Empty result stream")),
-                            Some(result) => match results.unsubscribe().await {
-                                Ok(_) => Ok(format_http_response(result, factory)),
-                                Err(error) => Err(error),
-                            },
+                Ok((program, entry_point)) => match runtime.subscribe(program, entry_point).await {
+                    Err(error) => Err(error),
+                    Ok(mut results) => match results.next().await {
+                        None => Err(String::from("Empty result stream")),
+                        Some(result) => match results.unsubscribe().await {
+                            Ok(_) => Ok(format_http_response(result, factory)),
+                            Err(error) => Err(error),
                         },
-                    }
-                }
+                    },
+                },
             }
         }
     }

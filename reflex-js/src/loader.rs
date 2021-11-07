@@ -10,15 +10,10 @@ use std::{
     rc::Rc,
 };
 
-use crate::{
-    globals::{builtin_globals, global_process},
-    parse_module,
-    stdlib::Stdlib as JsStdlib,
-    Env,
-};
+use crate::{globals::builtin_globals, parse_module, stdlib::Stdlib as JsStdlib, Env};
 use reflex::{
     core::{Expression, ExpressionFactory, HeapAllocator, Rewritable},
-    lang::ValueTerm,
+    lang::create_struct,
     stdlib::Stdlib,
 };
 
@@ -147,8 +142,7 @@ pub fn get_module_filesystem_path(import_path: &str, module_path: &Path) -> Path
         .unwrap_or_else(|| Path::new(import_path).to_path_buf())
 }
 
-pub fn create_js_env<T: Expression>(
-    env_vars: impl IntoIterator<Item = (String, String)>,
+pub fn create_js_env<T: Expression + Rewritable<T>>(
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
 ) -> Env<T>
@@ -159,14 +153,8 @@ where
         .with_globals(builtin_globals(factory, allocator))
         .with_global(
             "process",
-            global_process(
-                env_vars.into_iter().map(|(key, value)| {
-                    (
-                        key,
-                        factory
-                            .create_value_term(ValueTerm::String(allocator.create_string(value))),
-                    )
-                }),
+            create_struct(
+                vec![(String::from("env"), factory.create_static_variable_term(0))],
                 factory,
                 allocator,
             ),

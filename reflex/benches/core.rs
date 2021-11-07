@@ -4,7 +4,7 @@
 #![feature(test)]
 extern crate test;
 
-use std::iter::once;
+use std::iter::{empty, once};
 
 use test::Bencher;
 
@@ -17,7 +17,7 @@ use reflex::{
     },
     core::{evaluate, ExpressionFactory, HeapAllocator, StateCache, Uid},
     interpreter::{execute, DefaultInterpreterCache, InterpreterOptions},
-    lang::{SharedTermFactory, ValueTerm},
+    lang::{create_struct, SharedTermFactory, ValueTerm},
     parser::sexpr::parse,
     stdlib::Stdlib,
 };
@@ -43,6 +43,11 @@ fn nested_expressions_bytecode(b: &mut Bencher) {
         .map(|builtin| (builtin.uid(), factory.create_builtin_term(builtin)))
         .collect::<Vec<_>>();
     let program = Program::new(vec![
+        Instruction::Function {
+            hash: 0,
+            required_args: 1,
+            optional_args: 0,
+        },
         Instruction::PushInt { value: 5 },
         Instruction::PushInt { value: 4 },
         Instruction::PushInt { value: -3 },
@@ -61,9 +66,12 @@ fn nested_expressions_bytecode(b: &mut Bencher) {
         },
         Instruction::Apply { num_args: 2 },
         Instruction::Evaluate,
+        Instruction::Squash { depth: 1 },
         Instruction::Return,
     ]);
     let mut cache = DefaultInterpreterCache::default();
+    let entry_point = InstructionPointer::default();
+    let env = create_struct(empty(), &factory, &allocator);
     let state = StateCache::default();
     let entry_point = InstructionPointer::default();
     let options = InterpreterOptions::default();
@@ -73,6 +81,7 @@ fn nested_expressions_bytecode(b: &mut Bencher) {
             cache_key,
             &program,
             entry_point,
+            &env,
             &state,
             &factory,
             &allocator,
@@ -93,18 +102,20 @@ fn nested_expressions_compiled(b: &mut Bencher) {
         .collect::<Vec<_>>();
     let expression = parse("(+ (+ (abs -3) 4) 5)", &factory, &allocator).unwrap();
     let program = Compiler::new(CompilerOptions::unoptimized(), None)
-        .compile(&expression, CompilerMode::Expression, &factory, &allocator)
+        .compile(&expression, CompilerMode::Function, &factory, &allocator)
         .unwrap();
     let entry_point = InstructionPointer::default();
+    let env = create_struct(empty(), &factory, &allocator);
+    let mut cache = DefaultInterpreterCache::default();
     let state = StateCache::default();
     let options = InterpreterOptions::default();
-    let mut cache = DefaultInterpreterCache::default();
     let cache_key = hash_program_root(&program, &entry_point);
     b.iter(|| {
         execute(
             cache_key,
             &program,
             entry_point,
+            &env,
             &state,
             &factory,
             &allocator,

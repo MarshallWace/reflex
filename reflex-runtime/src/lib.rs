@@ -439,6 +439,7 @@ impl<T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile
         state: RuntimeState<T>,
         builtins: impl IntoIterator<Item = (Uuid, T)>,
         signal_handler: THandler,
+        env: T,
         cache: RuntimeCache<T>,
         factory: &impl AsyncExpressionFactory<T>,
         allocator: &impl AsyncHeapAllocator<T>,
@@ -458,6 +459,7 @@ impl<T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile
         let commands_handler = tokio::spawn({
             let builtins = Arc::new(builtins.into_iter().collect::<Vec<_>>());
             let mut store = Mutex::new(RuntimeStore::new(state));
+            let env = env.clone();
             let factory = factory.clone();
             let allocator = allocator.clone();
             let commands = commands_tx.clone();
@@ -477,6 +479,7 @@ impl<T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile
                                 let (subscription_id, cache_key) = process_subscribe_command(
                                     command,
                                     &mut store,
+                                    &env,
                                     &mut cache,
                                     &commands,
                                     &flush_tx,
@@ -626,6 +629,7 @@ async fn create_subscription<
 fn process_subscribe_command<T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T>>(
     command: StreamOperation<SubscribeCommand, SubscriptionId, T>,
     store: &mut Mutex<RuntimeStore<T>>,
+    env: &T,
     cache: &mut RuntimeCache<T>,
     commands: &RuntimeCommandChannel<T>,
     flush: &broadcast::Sender<FlushPayload<T>>,
@@ -648,6 +652,7 @@ where
     let _ = command.response.send(subscription_id);
     tokio::spawn(Abortable::new(
         {
+            let env = env.clone();
             let flush = flush.clone();
             let factory = factory.clone();
             let allocator = allocator.clone();
@@ -667,6 +672,7 @@ where
                     cache_key,
                     &program,
                     entry_point,
+                    &env,
                     &state,
                     &factory,
                     &allocator,
@@ -721,6 +727,7 @@ where
                         cache_key,
                         &program,
                         entry_point,
+                        &env,
                         &state,
                         &factory,
                         &allocator,
@@ -763,6 +770,7 @@ fn evaluate_subscription<T: Expression + Rewritable<T> + Reducible<T> + Applicab
     cache_key: HashId,
     program: &Program,
     entry_point: InstructionPointer,
+    env: &T,
     state: &impl DynamicState<T>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
@@ -776,6 +784,7 @@ fn evaluate_subscription<T: Expression + Rewritable<T> + Reducible<T> + Applicab
         cache_key,
         program,
         entry_point,
+        env,
         state,
         factory,
         allocator,
@@ -1238,7 +1247,7 @@ where
         let entry_point = InstructionPointer::new(self.program.len());
         let prelude = (*self.program).clone();
         Compiler::new(self.compiler_options, Some(prelude))
-            .compile(&expression, CompilerMode::Expression, factory, allocator)
+            .compile(&expression, CompilerMode::Function, factory, allocator)
             .map(|program| {
                 // TODO: Error if runtime expression depends on unrecognized native functions
                 self.watch_compiled_expression(program, entry_point, initiators, factory, allocator)
@@ -1252,15 +1261,7 @@ where
         allocator: &impl AsyncHeapAllocator<T>,
     ) -> impl Stream<Item = T> + Send + 'static {
         let initiators = initiators.into_iter().collect::<Vec<_>>();
-        let program = Program::new(vec![
-            Instruction::PushSignal {
-                signal_type: SignalType::Pending,
-                num_args: 0,
-            },
-            Instruction::PushDynamic { state_token },
-            Instruction::Evaluate,
-            Instruction::Return,
-        ]);
+        let program = compile_state_subscription_expression(state_token, factory, allocator);
         self.watch_compiled_expression(
             program,
             InstructionPointer::default(),
@@ -1308,6 +1309,38 @@ where
             .into_stream(),
         )
     }
+}
+
+fn compile_state_subscription_expression<T: Expression>(
+    state_token: StateToken,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> Program {
+    let hash = factory
+        .create_lambda_term(
+            1,
+            factory.create_dynamic_variable_term(
+                state_token,
+                factory.create_signal_term(allocator.create_signal_list(once(
+                    allocator.create_signal(SignalType::Pending, allocator.create_empty_list()),
+                ))),
+            ),
+        )
+        .id();
+    Program::new(vec![
+        Instruction::Function {
+            hash,
+            required_args: 1,
+            optional_args: 0,
+        },
+        Instruction::PushSignal {
+            signal_type: SignalType::Pending,
+            num_args: 0,
+        },
+        Instruction::PushDynamic { state_token },
+        Instruction::Evaluate,
+        Instruction::Return,
+    ])
 }
 
 #[derive(Clone)]

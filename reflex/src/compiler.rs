@@ -373,8 +373,10 @@ impl Default for CompilerOptions {
 
 #[derive(Clone, Copy, Debug)]
 pub enum CompilerMode {
+    /// Wraps the compiled expression in a 'main function' that takes a single environment argument and evaluates the expression before returning
+    Function,
+    /// Compiles the expression without any wrapping
     Expression,
-    Thunk,
 }
 
 pub struct Compiler {
@@ -433,21 +435,18 @@ impl Compiler {
             .unwrap_or(expression)
             .compile(VarArgs::Eager, 0, factory, allocator, &mut self)?;
         let program = match mode {
-            CompilerMode::Thunk => Program::new(
+            CompilerMode::Expression => compiled_expression,
+            CompilerMode::Function => Program::new(
                 once(Instruction::Function {
                     hash: hash_object(&compiled_expression),
-                    required_args: 0,
+                    required_args: 1,
                     optional_args: 0,
                 })
                 .chain(compiled_expression)
+                .chain(once(Instruction::Evaluate))
+                .chain(once(Instruction::Squash { depth: 1 }))
                 .chain(once(Instruction::Return)),
             ),
-            CompilerMode::Expression => {
-                let mut program = compiled_expression;
-                program.push(Instruction::Evaluate);
-                program.push(Instruction::Return);
-                program
-            }
         };
         let compiled_chunks = std::mem::replace(&mut self.compiled_chunks, HashMap::new());
         let compiled_program = link_compiled_chunks(program, self.prelude, compiled_chunks)?;

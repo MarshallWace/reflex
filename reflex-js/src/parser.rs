@@ -780,7 +780,7 @@ where
     T::Builtin: From<Stdlib> + From<JsStdlib>,
 {
     match node {
-        Expr::Ident(node) => parse_variable_reference(node, scope, env, factory),
+        Expr::Ident(node) => parse_variable_reference(node, scope, env, factory, allocator),
         Expr::Lit(node) => parse_literal(node, scope, env, factory, allocator),
         Expr::TaggedTemplate(node) => parse_tagged_template(node, scope, env, factory, allocator),
         Expr::Unary(node) => parse_unary_expression(node, scope, env, factory, allocator),
@@ -822,12 +822,13 @@ fn parse_variable_reference<'src, T: Expression + Rewritable<T>>(
     scope: &LexicalScope,
     env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
 ) -> ParserResult<T> {
     let name = parse_identifier(node)?;
     let offset = scope.get(name);
     match offset {
         Some(offset) => Ok(factory.create_static_variable_term(offset)),
-        None => match env.global(name) {
+        None => match env.global(name, scope.depth(), factory, allocator) {
             Some(value) => Ok(value),
             None => Err(err(&format!("Invalid reference: '{}'", name), node)),
         },
@@ -1067,9 +1068,9 @@ where
                             PropValue::None => match prop.short_hand {
                                 true => match &prop.key {
                                     PropKey::Pat(node) => match node {
-                                        Pat::Ident(node) => {
-                                            parse_variable_reference(&node, scope, env, factory)
-                                        }
+                                        Pat::Ident(node) => parse_variable_reference(
+                                            &node, scope, env, factory, allocator,
+                                        ),
                                         _ => Err(err_unimplemented(node)),
                                     },
                                     _ => Err(err_unimplemented(prop)),
@@ -5259,8 +5260,9 @@ mod tests {
             greet({ first: 'John', last: 'Doe' })";
         let expression = parse(input, &env, &factory, &allocator).unwrap();
         let program = Compiler::new(CompilerOptions::unoptimized(), None)
-            .compile(&expression, CompilerMode::Expression, &factory, &allocator)
+            .compile(&expression, CompilerMode::Function, &factory, &allocator)
             .unwrap();
+        let env = create_struct(empty(), &factory, &allocator);
         let state = StateCache::default();
         let mut cache = DefaultInterpreterCache::default();
         let builtins = JsBuiltins::entries()
@@ -5273,6 +5275,7 @@ mod tests {
             cache_key,
             &program,
             entry_point,
+            &env,
             &state,
             &factory,
             &allocator,

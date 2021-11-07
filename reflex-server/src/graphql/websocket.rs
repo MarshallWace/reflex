@@ -12,9 +12,7 @@ use hyper_tungstenite::{
     WebSocketStream,
 };
 use reflex::{
-    compiler::{
-        Compile, Compiler, CompilerMode, CompilerOptions, Instruction, InstructionPointer, Program,
-    },
+    compiler::{Compile, CompilerOptions, Program},
     core::{Applicable, Reducible, Rewritable, StringValue},
     stdlib::Stdlib,
 };
@@ -35,7 +33,7 @@ use std::{
 };
 use tokio::sync::mpsc;
 
-use crate::{GraphQlHttpQueryTransform, RequestHeaders};
+use crate::{graphql::compile_graphql_query, GraphQlHttpQueryTransform, RequestHeaders};
 
 pub(crate) async fn handle_graphql_ws_request<
     T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
@@ -43,7 +41,6 @@ pub(crate) async fn handle_graphql_ws_request<
     req: Request<Body>,
     runtime: Arc<Runtime<T>>,
     program: Arc<Program>,
-    root: &T,
     factory: &impl AsyncExpressionFactory<T>,
     allocator: &impl AsyncHeapAllocator<T>,
     compiler_options: CompilerOptions,
@@ -56,7 +53,6 @@ where
     let headers = req.headers().clone();
     let (mut response, websocket) = hyper_tungstenite::upgrade(req, None)?;
     tokio::spawn({
-        let root = root.clone();
         let factory = factory.clone();
         let allocator = allocator.clone();
         async move {
@@ -70,7 +66,6 @@ where
                         websocket,
                         runtime,
                         &program,
-                        &root,
                         &factory,
                         &allocator,
                         &compiler_options,
@@ -101,7 +96,6 @@ async fn handle_websocket_connection<
     websocket: WebSocketStream<Upgraded>,
     runtime: Arc<Runtime<T>>,
     program: &Program,
-    root: &T,
     factory: &impl AsyncExpressionFactory<T>,
     allocator: &impl AsyncHeapAllocator<T>,
     compiler_options: &CompilerOptions,
@@ -137,7 +131,6 @@ where
             }
         }
     });
-    let root = root.clone();
     let factory = factory.clone();
     let allocator = allocator.clone();
     let headers = Arc::new(headers);
@@ -184,6 +177,7 @@ where
                                     ))
                                     .await;
                             } else {
+                                let root = factory.create_static_variable_term(0);
                                 match parse_graphql_operation(
                                     message.payload(),
                                     &root,
@@ -203,18 +197,13 @@ where
                                             .await;
                                     }
                                     Ok(query) => {
-                                        let mut prelude = program.clone();
-                                        let entry_point = InstructionPointer::new(prelude.len());
-                                        prelude.push(Instruction::PushFunction {
-                                            target: InstructionPointer::default(),
-                                        });
-                                        match Compiler::new(*compiler_options, Some(prelude))
-                                            .compile(
-                                                &query,
-                                                CompilerMode::Expression,
-                                                &factory,
-                                                &allocator,
-                                            ) {
+                                        match compile_graphql_query(
+                                            query,
+                                            &program,
+                                            compiler_options,
+                                            &factory,
+                                            &allocator,
+                                        ) {
                                             Err(error) => {
                                                 let _ = messages_tx
                                                     .send(GraphQlSubscriptionServerMessage::Error(
@@ -226,8 +215,7 @@ where
                                                     ))
                                                     .await;
                                             }
-                                            Ok(program) => {
-                                                // TODO: Error if runtime expression depends on unrecognized native functions
+                                            Ok((program, entry_point)) => {
                                                 match runtime.subscribe(program, entry_point).await
                                                 {
                                                     Err(error) => {

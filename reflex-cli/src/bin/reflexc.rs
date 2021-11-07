@@ -25,7 +25,7 @@ struct Opts {
     #[clap(
         long,
         about = "Mode to run the compiler in",
-        default_value = "expression"
+        default_value = "function"
     )]
     compiler_mode: String,
 }
@@ -64,7 +64,7 @@ fn main() -> Result<()> {
     let compiler_mode = if args.compiler_mode.to_lowercase() == "expression" {
         CompilerMode::Expression
     } else {
-        CompilerMode::Thunk
+        CompilerMode::Function
     };
 
     let compiler_output = match args.syntax {

@@ -89,6 +89,7 @@ pub fn execute<'a, T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> 
     cache_key: HashId,
     program: &Program,
     entry_point: InstructionPointer,
+    env: &T,
     state: &impl DynamicState<T>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
@@ -96,12 +97,25 @@ pub fn execute<'a, T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> 
     options: &InterpreterOptions,
     cache: &impl InterpreterCache<T>,
 ) -> Result<(EvaluationResult<T>, CacheEntries<T>), String> {
+    let mut cache_entries = CacheEntries::default();
+    match program.get(entry_point) {
+        Some(&Instruction::Function {
+            required_args,
+            optional_args,
+            ..
+        }) if required_args + optional_args == 1 => Ok(()),
+        Some(instruction) => Err(format!(
+            "Invalid entry point function: {:x} {:?}",
+            entry_point, instruction
+        )),
+        _ => Err(format!("Invalid entry point address: {:x}", entry_point)),
+    }?;
     let execution_span = info_span!("interpreter::execute");
-    let _span_guard = execution_span.enter();
+    let execution_span = execution_span.enter();
     trace!("Starting execution");
     let mut stack = VariableStack::new(options.variable_stack_size);
+    stack.push(env.clone());
     let mut call_stack = CallStack::new(program, entry_point, options.call_stack_size);
-    let mut cache_entries = CacheEntries::default();
     let result = evaluate_program_loop(
         state,
         &mut stack,
@@ -114,10 +128,20 @@ pub fn execute<'a, T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> 
         options.debug_instructions,
         options.debug_stack,
     );
+    std::mem::drop(execution_span);
     match result {
         Err(error) => Err(error),
         Ok(value) => {
-            assert_eq!(call_stack.call_stack_depth(), 0);
+            assert!(
+                call_stack.call_stack_depth() == 0,
+                "{} frames remaining on call stack",
+                call_stack.call_stack_depth(),
+            );
+            assert!(
+                stack.len() == 0,
+                "{} values remaining on variable stack",
+                stack.len()
+            );
             let (dependencies, subexpressions) = call_stack.drain();
             let result = EvaluationResult::new(value, dependencies);
             cache_entries.insert(
@@ -704,6 +728,7 @@ fn evaluate_instruction<T: Expression + Rewritable<T> + Reducible<T> + Applicabl
                     } else if let Some(signal) =
                         get_short_circuit_signal(stack.slice(num_args), &arity, factory, allocator)
                     {
+                        stack.pop_multiple(num_args);
                         stack.push(signal);
                         Ok((ExecutionResult::Advance, DependencyList::empty()))
                     } else {
@@ -1232,6 +1257,8 @@ impl<'a, T> ExactSizeIterator for CombinedSliceIterator<'a, T> {
 
 #[cfg(test)]
 mod tests {
+    use std::iter::empty;
+
     use crate::{
         allocator::DefaultAllocator,
         compiler::{hash_program_root, Compiler, CompilerMode, CompilerOptions},
@@ -1268,8 +1295,9 @@ mod tests {
         );
         let compiler = Compiler::new(CompilerOptions::unoptimized(), None);
         let program = compiler
-            .compile(&expression, CompilerMode::Expression, &factory, &allocator)
+            .compile(&expression, CompilerMode::Function, &factory, &allocator)
             .unwrap();
+        let env = create_struct(empty(), &factory, &allocator);
         let mut state = StateCache::default();
         let entry_point = InstructionPointer::default();
         let cache_key = hash_program_root(&program, &entry_point);
@@ -1277,6 +1305,7 @@ mod tests {
             cache_key,
             &program,
             entry_point,
+            &env,
             &state,
             &factory,
             &allocator,
@@ -1300,6 +1329,7 @@ mod tests {
             cache_key,
             &program,
             InstructionPointer::default(),
+            &env,
             &state,
             &factory,
             &allocator,
@@ -1334,14 +1364,16 @@ mod tests {
         .unwrap();
         let compiler = Compiler::new(CompilerOptions::unoptimized(), None);
         let program = compiler
-            .compile(&expression, CompilerMode::Expression, &factory, &allocator)
+            .compile(&expression, CompilerMode::Function, &factory, &allocator)
             .unwrap();
+        let env = create_struct(empty(), &factory, &allocator);
         let entry_point = InstructionPointer::default();
         let cache_key = hash_program_root(&program, &entry_point);
         let (result, _) = execute(
             cache_key,
             &program,
             entry_point,
+            &env,
             &mut StateCache::default(),
             &factory,
             &allocator,
@@ -1376,14 +1408,16 @@ mod tests {
         .unwrap();
         let compiler = Compiler::new(CompilerOptions::unoptimized(), None);
         let program = compiler
-            .compile(&expression, CompilerMode::Expression, &factory, &allocator)
+            .compile(&expression, CompilerMode::Function, &factory, &allocator)
             .unwrap();
+        let env = create_struct(empty(), &factory, &allocator);
         let entry_point = InstructionPointer::default();
         let cache_key = hash_program_root(&program, &entry_point);
         let (result, _) = execute(
             cache_key,
             &program,
             entry_point,
+            &env,
             &mut StateCache::default(),
             &factory,
             &allocator,
@@ -1411,10 +1445,17 @@ mod tests {
             .collect::<Vec<_>>();
         let mut cache = DefaultInterpreterCache::default();
         let program = Program::new(vec![
+            Instruction::Function {
+                hash: 0,
+                required_args: 1,
+                optional_args: 0,
+            },
             Instruction::PushInt { value: 3 },
             Instruction::Evaluate,
+            Instruction::Squash { depth: 1 },
             Instruction::Return,
         ]);
+        let env = create_struct(empty(), &factory, &allocator);
         let state = StateCache::default();
         let entry_point = InstructionPointer::default();
         let cache_key = hash_program_root(&program, &entry_point);
@@ -1422,6 +1463,7 @@ mod tests {
             cache_key,
             &program,
             InstructionPointer::default(),
+            &env,
             &state,
             &factory,
             &allocator,
@@ -1449,6 +1491,11 @@ mod tests {
             .collect::<Vec<_>>();
         let mut cache = DefaultInterpreterCache::default();
         let program = Program::new(vec![
+            Instruction::Function {
+                hash: 0,
+                required_args: 1,
+                optional_args: 0,
+            },
             Instruction::PushInt { value: 5 },
             Instruction::PushInt { value: 4 },
             Instruction::PushInt { value: -3 },
@@ -1467,8 +1514,10 @@ mod tests {
             },
             Instruction::Apply { num_args: 2 },
             Instruction::Evaluate,
+            Instruction::Squash { depth: 1 },
             Instruction::Return,
         ]);
+        let env = create_struct(empty(), &factory, &allocator);
         let state = StateCache::default();
         let entry_point = InstructionPointer::default();
         let cache_key = hash_program_root(&program, &entry_point);
@@ -1476,6 +1525,7 @@ mod tests {
             cache_key,
             &program,
             InstructionPointer::default(),
+            &env,
             &state,
             &factory,
             &allocator,
@@ -1510,8 +1560,9 @@ mod tests {
             ),
         );
         let program = Compiler::new(CompilerOptions::unoptimized(), None)
-            .compile(&expression, CompilerMode::Expression, &factory, &allocator)
+            .compile(&expression, CompilerMode::Function, &factory, &allocator)
             .unwrap();
+        let env = create_struct(empty(), &factory, &allocator);
         let state = StateCache::default();
         let entry_point = InstructionPointer::default();
         let cache_key = hash_program_root(&program, &entry_point);
@@ -1519,6 +1570,7 @@ mod tests {
             cache_key,
             &program,
             InstructionPointer::default(),
+            &env,
             &state,
             &factory,
             &allocator,
@@ -1551,13 +1603,15 @@ mod tests {
             ),
         );
         let program = Compiler::new(CompilerOptions::unoptimized(), None)
-            .compile(&expression, CompilerMode::Expression, &factory, &allocator)
+            .compile(&expression, CompilerMode::Function, &factory, &allocator)
             .unwrap();
+        let env = create_struct(empty(), &factory, &allocator);
         let state = StateCache::default();
         let (result, _) = execute(
             cache_key,
             &program,
             InstructionPointer::default(),
+            &env,
             &state,
             &factory,
             &allocator,
@@ -1590,8 +1644,9 @@ mod tests {
             ),
         );
         let program = Compiler::new(CompilerOptions::unoptimized(), None)
-            .compile(&expression, CompilerMode::Expression, &factory, &allocator)
+            .compile(&expression, CompilerMode::Function, &factory, &allocator)
             .unwrap();
+        let env = create_struct(empty(), &factory, &allocator);
         let state = StateCache::default();
         let entry_point = InstructionPointer::default();
         let cache_key = hash_program_root(&program, &entry_point);
@@ -1599,6 +1654,7 @@ mod tests {
             cache_key,
             &program,
             InstructionPointer::default(),
+            &env,
             &state,
             &factory,
             &allocator,
@@ -1637,8 +1693,9 @@ mod tests {
             ),
         );
         let program = Compiler::new(CompilerOptions::unoptimized(), None)
-            .compile(&expression, CompilerMode::Expression, &factory, &allocator)
+            .compile(&expression, CompilerMode::Function, &factory, &allocator)
             .unwrap();
+        let env = create_struct(empty(), &factory, &allocator);
         let state = StateCache::default();
         let entry_point = InstructionPointer::default();
         let cache_key = hash_program_root(&program, &entry_point);
@@ -1646,6 +1703,7 @@ mod tests {
             cache_key,
             &program,
             InstructionPointer::default(),
+            &env,
             &state,
             &factory,
             &allocator,
@@ -1684,8 +1742,9 @@ mod tests {
             ),
         );
         let program = Compiler::new(CompilerOptions::unoptimized(), None)
-            .compile(&expression, CompilerMode::Expression, &factory, &allocator)
+            .compile(&expression, CompilerMode::Function, &factory, &allocator)
             .unwrap();
+        let env = create_struct(empty(), &factory, &allocator);
         let state = StateCache::default();
         let entry_point = InstructionPointer::default();
         let cache_key = hash_program_root(&program, &entry_point);
@@ -1693,6 +1752,7 @@ mod tests {
             cache_key,
             &program,
             InstructionPointer::default(),
+            &env,
             &state,
             &factory,
             &allocator,
@@ -1733,8 +1793,9 @@ mod tests {
             ),
         );
         let program = Compiler::new(CompilerOptions::unoptimized(), None)
-            .compile(&expression, CompilerMode::Expression, &factory, &allocator)
+            .compile(&expression, CompilerMode::Function, &factory, &allocator)
             .unwrap();
+        let env = create_struct(empty(), &factory, &allocator);
         let state = StateCache::default();
         let entry_point = InstructionPointer::default();
         let cache_key = hash_program_root(&program, &entry_point);
@@ -1742,6 +1803,7 @@ mod tests {
             cache_key,
             &program,
             InstructionPointer::default(),
+            &env,
             &state,
             &factory,
             &allocator,
@@ -1780,8 +1842,9 @@ mod tests {
             ),
         );
         let program = Compiler::new(CompilerOptions::unoptimized(), None)
-            .compile(&expression, CompilerMode::Expression, &factory, &allocator)
+            .compile(&expression, CompilerMode::Function, &factory, &allocator)
             .unwrap();
+        let env = create_struct(empty(), &factory, &allocator);
         let state = StateCache::default();
         let entry_point = InstructionPointer::default();
         let cache_key = hash_program_root(&program, &entry_point);
@@ -1789,6 +1852,7 @@ mod tests {
             cache_key,
             &program,
             InstructionPointer::default(),
+            &env,
             &state,
             &factory,
             &allocator,
@@ -1836,8 +1900,9 @@ mod tests {
             ),
         );
         let program = Compiler::new(CompilerOptions::unoptimized(), None)
-            .compile(&expression, CompilerMode::Expression, &factory, &allocator)
+            .compile(&expression, CompilerMode::Function, &factory, &allocator)
             .unwrap();
+        let env = create_struct(empty(), &factory, &allocator);
         let state = StateCache::default();
         let entry_point = InstructionPointer::default();
         let cache_key = hash_program_root(&program, &entry_point);
@@ -1845,6 +1910,7 @@ mod tests {
             cache_key,
             &program,
             InstructionPointer::default(),
+            &env,
             &state,
             &factory,
             &allocator,
@@ -1917,8 +1983,9 @@ mod tests {
             ),
         );
         let program = Compiler::new(CompilerOptions::unoptimized(), None)
-            .compile(&expression, CompilerMode::Expression, &factory, &allocator)
+            .compile(&expression, CompilerMode::Function, &factory, &allocator)
             .unwrap();
+        let env = create_struct(empty(), &factory, &allocator);
         let state = StateCache::default();
         let entry_point = InstructionPointer::default();
         let cache_key = hash_program_root(&program, &entry_point);
@@ -1926,6 +1993,7 @@ mod tests {
             cache_key,
             &program,
             InstructionPointer::default(),
+            &env,
             &state,
             &factory,
             &allocator,
@@ -1979,8 +2047,9 @@ mod tests {
             allocator.create_unit_list(factory.create_value_term(ValueTerm::Int(3))),
         );
         let program = Compiler::new(CompilerOptions::unoptimized(), None)
-            .compile(&expression, CompilerMode::Expression, &factory, &allocator)
+            .compile(&expression, CompilerMode::Function, &factory, &allocator)
             .unwrap();
+        let env = create_struct(empty(), &factory, &allocator);
         let state = StateCache::default();
         let entry_point = InstructionPointer::default();
         let cache_key = hash_program_root(&program, &entry_point);
@@ -1988,6 +2057,7 @@ mod tests {
             cache_key,
             &program,
             InstructionPointer::default(),
+            &env,
             &state,
             &factory,
             &allocator,

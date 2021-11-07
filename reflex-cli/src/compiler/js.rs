@@ -1,14 +1,8 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
-// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use std::{
-    env::{self, Vars},
-    fs,
-    io::Write,
-    path::Path,
-    time::Instant,
-};
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
+use std::{fs, io::Write, path::Path, time::Instant};
 
 use anyhow::{anyhow, Context, Result};
 use reflex::{
@@ -56,7 +50,6 @@ pub fn compile_js_source(
 ) -> Result<Program> {
     let factory = &SharedTermFactory::<JsBuiltins>::default();
     let allocator = &DefaultAllocator::default();
-    let env_vars = env::vars();
     let module_loaders = standard_js_loaders(factory, allocator);
 
     compile_js_source_with_customisation(
@@ -66,7 +59,6 @@ pub fn compile_js_source(
         allocator,
         compiler_options,
         compiler_mode,
-        env_vars,
     )
 }
 
@@ -77,7 +69,6 @@ pub fn compile_js_source_with_customisation<T: Expression + 'static>(
     allocator: &(impl HeapAllocator<T> + Clone + 'static),
     compiler_options: CompilerOptions,
     compiler_mode: CompilerMode,
-    env_vars: Vars,
 ) -> Result<Program>
 where
     T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
@@ -88,7 +79,6 @@ where
     let root = create_graph_root(
         root_module_path,
         &root_module_source,
-        env_vars,
         custom_loader,
         factory,
         allocator,
@@ -99,7 +89,6 @@ where
 fn create_graph_root<T: Expression + Rewritable<T> + 'static>(
     root_module_path: impl AsRef<Path>,
     root_module_source: &str,
-    env_args: impl IntoIterator<Item = (String, String)>,
     custom_loader: Option<impl Fn(&str, &Path) -> Option<Result<T, String>> + 'static>,
     factory: &(impl ExpressionFactory<T> + Clone + 'static),
     allocator: &(impl HeapAllocator<T> + Clone + 'static),
@@ -107,7 +96,7 @@ fn create_graph_root<T: Expression + Rewritable<T> + 'static>(
 where
     T::Builtin: From<Stdlib> + From<JsStdlib>,
 {
-    let env = create_js_env(env_args, factory, allocator);
+    let env = create_js_env(factory, allocator);
     let module_loader = create_module_loader(env.clone(), custom_loader, factory, allocator);
     parse_module(
         root_module_source,

@@ -1,14 +1,6 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use graphql::{
-    http::handle_graphql_http_request, playground::handle_playground_http_request,
-    websocket::handle_graphql_ws_request,
-};
-use reflex_graphql::{
-    stdlib::Stdlib as GraphQlStdlib, AsyncGraphQlQueryTransform, NoopGraphQlQueryTransform,
-};
-use reflex_json::JsonValue;
 use std::{convert::Infallible, future::Future, iter::once, sync::Arc};
 
 use hyper::{
@@ -16,22 +8,25 @@ use hyper::{
     service::{service_fn, Service},
     Body, HeaderMap, Method, Request, Response, StatusCode,
 };
-
 use reflex::{
     compiler::{Compile, CompilerOptions, Program},
     core::{Applicable, Reducible, Rewritable, StringValue},
     stdlib::Stdlib,
 };
+use reflex_graphql::{
+    stdlib::Stdlib as GraphQlStdlib, AsyncGraphQlQueryTransform, NoopGraphQlQueryTransform,
+};
+use reflex_json::JsonValue;
 use reflex_runtime::{AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator, Runtime};
 
 pub mod builtins;
 pub mod cli;
 
-mod graphql {
-    pub(crate) mod http;
-    pub(crate) mod playground;
-    pub(crate) mod websocket;
-}
+mod graphql;
+use graphql::{
+    http::handle_graphql_http_request, playground::handle_playground_http_request,
+    websocket::handle_graphql_ws_request,
+};
 
 pub type RequestHeaders = HeaderMap<HeaderValue>;
 
@@ -106,10 +101,6 @@ where
             let transform = Arc::clone(&transform);
             let factory = factory.clone();
             let allocator = allocator.clone();
-            let root = factory.create_application_term(
-                factory.create_static_variable_term(0),
-                allocator.create_empty_list(),
-            );
             async move {
                 match req.method() {
                     &Method::POST => {
@@ -117,7 +108,6 @@ where
                             req,
                             runtime,
                             &program,
-                            &root,
                             &factory,
                             &allocator,
                             compiler_options,
@@ -131,7 +121,6 @@ where
                                 req,
                                 runtime,
                                 program,
-                                &root,
                                 &factory,
                                 &allocator,
                                 compiler_options,
@@ -164,7 +153,6 @@ async fn handle_graphql_upgrade_request<
     req: Request<Body>,
     runtime: Arc<Runtime<T>>,
     program: Arc<Program>,
-    root: &T,
     factory: &impl AsyncExpressionFactory<T>,
     allocator: &impl AsyncHeapAllocator<T>,
     compiler_options: CompilerOptions,
@@ -179,7 +167,6 @@ where
             req,
             runtime,
             program,
-            root,
             factory,
             allocator,
             compiler_options,

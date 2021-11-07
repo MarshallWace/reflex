@@ -12,6 +12,7 @@ use reflex::{
     compiler::{Compile, CompilerMode, CompilerOptions, Program},
     core::{Applicable, Expression, Reducible, Rewritable, Signal, StringValue, Uuid},
     interpreter::InterpreterOptions,
+    lang::{create_struct, ValueTerm},
     stdlib::Stdlib,
 };
 use reflex_cli::{compiler::js::compile_js_source_with_customisation, Syntax};
@@ -95,8 +96,7 @@ where
             factory,
             allocator,
             compiler_options,
-            CompilerMode::Thunk,
-            env::vars(),
+            CompilerMode::Function,
         )?,
         _ => return Err(anyhow!("This syntax is not currently supported")),
     };
@@ -106,6 +106,16 @@ where
         debug_stack: args.debug_stack,
         ..InterpreterOptions::default()
     });
+    let env = create_struct(
+        env::vars().into_iter().map(|(key, value)| {
+            (
+                key,
+                factory.create_value_term(ValueTerm::String(allocator.create_string(value))),
+            )
+        }),
+        factory,
+        allocator,
+    );
     let state = RuntimeState::default();
     let cache = RuntimeCache::default();
     let runtime = if args.debug_signals {
@@ -113,6 +123,7 @@ where
             state,
             builtins,
             debug_signal_handler(signal_handler),
+            env,
             cache,
             factory,
             allocator,
@@ -124,6 +135,7 @@ where
             state,
             builtins,
             signal_handler,
+            env,
             cache,
             factory,
             allocator,
