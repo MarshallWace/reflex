@@ -119,7 +119,6 @@ impl GraphQlQueryTransform for NoopGraphQlQueryTransform {
 
 pub fn parse_graphql_operation<T: Expression>(
     operation: &GraphQlOperationPayload,
-    root: &T,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
     transform: &impl GraphQlQueryTransform,
@@ -134,8 +133,7 @@ where
             reflex_json::hydrate(value.clone(), factory, allocator).map(|value| (key, value))
         })
         .collect::<Result<Vec<_>, _>>()?;
-    let query = parse(operation.query(), variables, factory, allocator, transform)?;
-    Ok(factory.create_application_term(query, allocator.create_unit_list(root.clone())))
+    parse(operation.query(), variables, factory, allocator, transform)
 }
 
 pub fn parse<'vars, T: Expression>(

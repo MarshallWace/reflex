@@ -32,8 +32,19 @@ impl<T: Expression> GraphNode for VectorTerm<T> {
     fn free_variables(&self) -> HashSet<StackOffset> {
         self.items.free_variables()
     }
-    fn dynamic_dependencies(&self) -> DependencyList {
-        self.items.dynamic_dependencies()
+    fn dynamic_dependencies(&self, deep: bool) -> DependencyList {
+        if deep {
+            self.items.dynamic_dependencies(deep)
+        } else {
+            DependencyList::empty()
+        }
+    }
+    fn has_dynamic_dependencies(&self, deep: bool) -> bool {
+        if deep {
+            self.items.has_dynamic_dependencies(deep)
+        } else {
+            false
+        }
     }
     fn is_static(&self) -> bool {
         self.items.is_static()
@@ -68,15 +79,20 @@ impl<T: Expression + Rewritable<T>> Rewritable<T> for VectorTerm<T> {
     }
     fn substitute_dynamic(
         &self,
+        deep: bool,
         state: &impl DynamicState<T>,
         factory: &impl ExpressionFactory<T>,
         allocator: &impl HeapAllocator<T>,
         cache: &mut impl EvaluationCache<T>,
     ) -> Option<T> {
-        transform_expression_list(&self.items, allocator, |item| {
-            item.substitute_dynamic(state, factory, allocator, cache)
-        })
-        .map(|items| factory.create_vector_term(items))
+        if deep {
+            transform_expression_list(&self.items, allocator, |item| {
+                item.substitute_dynamic(deep, state, factory, allocator, cache)
+            })
+            .map(|items| factory.create_vector_term(items))
+        } else {
+            None
+        }
     }
     fn hoist_free_variables(
         &self,

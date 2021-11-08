@@ -780,7 +780,7 @@ where
     T::Builtin: From<Stdlib> + From<JsStdlib>,
 {
     match node {
-        Expr::Ident(node) => parse_variable_reference(node, scope, env, factory, allocator),
+        Expr::Ident(node) => parse_variable_reference(node, scope, env, factory),
         Expr::Lit(node) => parse_literal(node, scope, env, factory, allocator),
         Expr::TaggedTemplate(node) => parse_tagged_template(node, scope, env, factory, allocator),
         Expr::Unary(node) => parse_unary_expression(node, scope, env, factory, allocator),
@@ -822,13 +822,12 @@ fn parse_variable_reference<'src, T: Expression + Rewritable<T>>(
     scope: &LexicalScope,
     env: &Env<T>,
     factory: &impl ExpressionFactory<T>,
-    allocator: &impl HeapAllocator<T>,
 ) -> ParserResult<T> {
     let name = parse_identifier(node)?;
     let offset = scope.get(name);
     match offset {
         Some(offset) => Ok(factory.create_static_variable_term(offset)),
-        None => match env.global(name, scope.depth(), factory, allocator) {
+        None => match env.global(name) {
             Some(value) => Ok(value),
             None => Err(err(&format!("Invalid reference: '{}'", name), node)),
         },
@@ -1068,9 +1067,9 @@ where
                             PropValue::None => match prop.short_hand {
                                 true => match &prop.key {
                                     PropKey::Pat(node) => match node {
-                                        Pat::Ident(node) => parse_variable_reference(
-                                            &node, scope, env, factory, allocator,
-                                        ),
+                                        Pat::Ident(node) => {
+                                            parse_variable_reference(&node, scope, env, factory)
+                                        }
                                         _ => Err(err_unimplemented(node)),
                                     },
                                     _ => Err(err_unimplemented(prop)),
@@ -2034,6 +2033,7 @@ mod tests {
             evaluate, DependencyList, EvaluationResult, Expression, ExpressionFactory,
             HeapAllocator, SignalType, StateCache, StringValue, Uid,
         },
+        env::inject_env_vars,
         interpreter::{execute, DefaultInterpreterCache, InterpreterOptions},
         lang::{create_struct, SharedTermFactory, ValueTerm},
         stdlib::Stdlib,
@@ -5226,6 +5226,33 @@ mod tests {
     }
 
     #[test]
+    fn env_vars() {
+        let factory = SharedTermFactory::<JsBuiltins>::default();
+        let allocator = DefaultAllocator::default();
+        let env = Env::new().with_globals(builtin_globals(&factory, &allocator));
+        let env_vars = [(String::from("FOO"), String::from("foo"))];
+        let expression = parse("process.env.FOO;", &env, &factory, &allocator)
+            .map(|expression| inject_env_vars(expression, env_vars, &factory, &allocator))
+            .unwrap();
+        let result = evaluate(
+            &expression,
+            &StateCache::default(),
+            &factory,
+            &allocator,
+            &mut SubstitutionCache::new(),
+        );
+        assert_eq!(
+            result,
+            EvaluationResult::new(
+                factory.create_value_term(ValueTerm::String(
+                    allocator.create_string(String::from("foo"))
+                )),
+                DependencyList::empty(),
+            ),
+        );
+    }
+
+    #[test]
     fn js_interpreted() {
         let factory = SharedTermFactory::<JsBuiltins>::default();
         let allocator = DefaultAllocator::default();
@@ -5262,7 +5289,6 @@ mod tests {
         let program = Compiler::new(CompilerOptions::unoptimized(), None)
             .compile(&expression, CompilerMode::Function, &factory, &allocator)
             .unwrap();
-        let env = create_struct(empty(), &factory, &allocator);
         let state = StateCache::default();
         let mut cache = DefaultInterpreterCache::default();
         let builtins = JsBuiltins::entries()
@@ -5275,7 +5301,6 @@ mod tests {
             cache_key,
             &program,
             entry_point,
-            &env,
             &state,
             &factory,
             &allocator,

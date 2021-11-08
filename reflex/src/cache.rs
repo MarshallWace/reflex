@@ -31,6 +31,7 @@ impl<T: Expression> EvaluationCache<T> for NoopCache {
     fn retrieve_dynamic_substitution(
         &mut self,
         _expression: &T,
+        _deep: bool,
         _state: &impl DynamicState<T>,
     ) -> Option<Option<T>> {
         None
@@ -38,6 +39,7 @@ impl<T: Expression> EvaluationCache<T> for NoopCache {
     fn store_dynamic_substitution(
         &mut self,
         _expression: &T,
+        _deep: bool,
         _state: &impl DynamicState<T>,
         _result: Option<T>,
     ) {
@@ -155,9 +157,10 @@ impl<T: Expression + Rewritable<T> + Reducible<T>> EvaluationCache<T> for Substi
     fn retrieve_dynamic_substitution(
         &mut self,
         expression: &T,
+        deep: bool,
         state: &impl DynamicState<T>,
     ) -> Option<Option<T>> {
-        if expression.dynamic_dependencies().is_empty() {
+        if deep || !expression.has_dynamic_dependencies(deep) {
             return None;
         }
         let result = match self.entries.get(expression) {
@@ -180,10 +183,11 @@ impl<T: Expression + Rewritable<T> + Reducible<T>> EvaluationCache<T> for Substi
     fn store_dynamic_substitution(
         &mut self,
         expression: &T,
+        deep: bool,
         state: &impl DynamicState<T>,
         result: Option<T>,
     ) {
-        if expression.dynamic_dependencies().is_empty() {
+        if deep || !expression.has_dynamic_dependencies(deep) {
             return;
         }
         match self.entries.entry(expression.clone()) {
@@ -256,7 +260,7 @@ struct SubstitutionCacheEntry<T: Expression> {
 impl<T: Expression> SubstitutionCacheEntry<T> {
     fn new(target: &T) -> Self {
         Self {
-            state_dependencies: target.dynamic_dependencies().iter().collect(),
+            state_dependencies: target.dynamic_dependencies(false).iter().collect(),
             reduce: None,
             evaluate: HashMap::new(),
             substitute_static: HashMap::new(),
@@ -460,28 +464,32 @@ impl<T: Expression + Rewritable<T> + Reducible<T>> EvaluationCache<T>
     fn retrieve_dynamic_substitution(
         &mut self,
         expression: &T,
+        deep: bool,
         state: &impl DynamicState<T>,
     ) -> Option<Option<T>> {
         match self
             .current
-            .retrieve_dynamic_substitution(expression, state)
+            .retrieve_dynamic_substitution(expression, deep, state)
         {
             Some(result) => Some(result),
             None => match &mut self.previous {
-                Some(previous) => match previous.retrieve_dynamic_substitution(expression, state) {
-                    Some(result) => Some(match result {
-                        Some(value) => {
-                            self.current.store_dynamic_substitution(
-                                expression,
-                                state,
-                                Some(value.clone()),
-                            );
-                            Some(value)
-                        }
+                Some(previous) => {
+                    match previous.retrieve_dynamic_substitution(expression, deep, state) {
+                        Some(result) => Some(match result {
+                            Some(value) => {
+                                self.current.store_dynamic_substitution(
+                                    expression,
+                                    deep,
+                                    state,
+                                    Some(value.clone()),
+                                );
+                                Some(value)
+                            }
+                            None => None,
+                        }),
                         None => None,
-                    }),
-                    None => None,
-                },
+                    }
+                }
                 None => None,
             },
         }
@@ -489,10 +497,11 @@ impl<T: Expression + Rewritable<T> + Reducible<T>> EvaluationCache<T>
     fn store_dynamic_substitution(
         &mut self,
         expression: &T,
+        deep: bool,
         state: &impl DynamicState<T>,
         result: Option<T>,
     ) {
         self.current
-            .store_dynamic_substitution(expression, state, result);
+            .store_dynamic_substitution(expression, deep, state, result);
     }
 }

@@ -31,8 +31,11 @@ impl<T: Expression> GraphNode for SignalTerm<T> {
     fn free_variables(&self) -> HashSet<StackOffset> {
         HashSet::new()
     }
-    fn dynamic_dependencies(&self) -> DependencyList {
+    fn dynamic_dependencies(&self, _deep: bool) -> DependencyList {
         DependencyList::empty()
+    }
+    fn has_dynamic_dependencies(&self, _deep: bool) -> bool {
+        false
     }
     fn is_static(&self) -> bool {
         true

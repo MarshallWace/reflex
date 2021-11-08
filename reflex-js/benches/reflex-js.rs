@@ -4,15 +4,13 @@
 #![feature(test)]
 extern crate test;
 
-use std::iter::empty;
-
 use reflex::{
     allocator::DefaultAllocator,
     cache::SubstitutionCache,
     compiler::{hash_program_root, Compiler, CompilerMode, CompilerOptions, InstructionPointer},
     core::{evaluate, ExpressionFactory, StateCache, Uid},
     interpreter::{execute, DefaultInterpreterCache, InterpreterOptions},
-    lang::{create_struct, SharedTermFactory},
+    lang::SharedTermFactory,
     stdlib::Stdlib,
 };
 use reflex_js::{builtins::JsBuiltins, parse, Env};
@@ -59,7 +57,6 @@ fn js_compiled(b: &mut Bencher) {
     )
     .compile(&expression, CompilerMode::Function, &factory, &allocator)
     .unwrap();
-    let env = create_struct(empty(), &factory, &allocator);
     let state = StateCache::default();
     let options = InterpreterOptions::default();
     b.iter(|| {
@@ -70,7 +67,6 @@ fn js_compiled(b: &mut Bencher) {
             cache_key,
             &program,
             entry_point,
-            &env,
             &state,
             &factory,
             &allocator,

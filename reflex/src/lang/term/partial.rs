@@ -49,23 +49,46 @@ impl<T: Expression + Applicable<T>> GraphNode for PartialApplicationTerm<T> {
             target_free_variables
         }
     }
-    fn dynamic_dependencies(&self) -> DependencyList {
-        let target_dependencies = self.target.dynamic_dependencies();
-        let eager_args = self.target.arity().map(|arity| {
-            self.args
-                .iter()
-                .zip(arity.iter())
-                .filter_map(|(arg, arg_type)| match arg_type {
-                    ArgType::Strict | ArgType::Eager => Some(arg),
-                    ArgType::Lazy => None,
-                })
-        });
-        match eager_args {
-            None => target_dependencies,
-            Some(args) => args.fold(target_dependencies, |acc, arg| {
-                acc.union(arg.dynamic_dependencies())
-            }),
+    fn dynamic_dependencies(&self, deep: bool) -> DependencyList {
+        let target_dependencies = self.target.dynamic_dependencies(deep);
+        if deep {
+            target_dependencies.union(self.args.dynamic_dependencies(deep))
+        } else {
+            let eager_args = self.target.arity().map(|arity| {
+                self.args
+                    .iter()
+                    .zip(arity.iter())
+                    .filter_map(|(arg, arg_type)| match arg_type {
+                        ArgType::Strict | ArgType::Eager => Some(arg),
+                        _ => None,
+                    })
+            });
+            match eager_args {
+                None => target_dependencies,
+                Some(args) => args.fold(target_dependencies, |acc, arg| {
+                    acc.union(arg.dynamic_dependencies(deep))
+                }),
+            }
         }
+    }
+    fn has_dynamic_dependencies(&self, deep: bool) -> bool {
+        self.target.has_dynamic_dependencies(deep)
+            || (if deep {
+                self.args.has_dynamic_dependencies(deep)
+            } else {
+                let eager_args = self.target.arity().map(|arity| {
+                    self.args.iter().zip(arity.iter()).filter_map(
+                        |(arg, arg_type)| match arg_type {
+                            ArgType::Strict | ArgType::Eager => Some(arg),
+                            _ => None,
+                        },
+                    )
+                });
+                match eager_args {
+                    None => false,
+                    Some(mut args) => args.any(|arg| arg.has_dynamic_dependencies(deep)),
+                }
+            })
     }
     fn is_static(&self) -> bool {
         self.target.is_static()
@@ -110,6 +133,7 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T>> Rewritable<T>
     }
     fn substitute_dynamic(
         &self,
+        deep: bool,
         state: &impl DynamicState<T>,
         factory: &impl ExpressionFactory<T>,
         allocator: &impl HeapAllocator<T>,
@@ -117,29 +141,10 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T>> Rewritable<T>
     ) -> Option<T> {
         let target = self
             .target
-            .substitute_dynamic(state, factory, allocator, cache);
-        let has_dynamic_args = self
-            .args
-            .iter()
-            .any(|arg| !arg.dynamic_dependencies().is_empty());
-        let args = if has_dynamic_args {
-            self.target.arity().map(|arity| {
-                allocator.create_sized_list(
-                    self.args.len(),
-                    self.args
-                        .iter()
-                        .zip(arity.iter())
-                        .map(|(arg, arg_type)| match arg_type {
-                            ArgType::Strict | ArgType::Eager => arg
-                                .substitute_dynamic(state, factory, allocator, cache)
-                                .unwrap_or(arg.clone()),
-                            ArgType::Lazy => arg.clone(),
-                        }),
-                )
-            })
-        } else {
-            None
-        };
+            .substitute_dynamic(deep, state, factory, allocator, cache);
+        let args = transform_expression_list(&self.args, allocator, |arg| {
+            arg.substitute_dynamic(deep, state, factory, allocator, cache)
+        });
         if target.is_none() && args.is_none() {
             return None;
         }

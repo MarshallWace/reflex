@@ -5,28 +5,26 @@ pub(crate) mod http;
 pub(crate) mod playground;
 pub(crate) mod websocket;
 
-use std::iter::once;
-
 use reflex::{
     compiler::{
-        Compile, Compiler, CompilerMode, CompilerOptions, Instruction, InstructionPointer, Program,
+        create_main_function, Compile, Compiler, CompilerMode, CompilerOptions, Instruction,
+        InstructionPointer, Program,
     },
     core::{Applicable, Expression, ExpressionFactory, HeapAllocator, Reducible, Rewritable},
-    hash::hash_object,
 };
 
 pub(crate) fn compile_graphql_query<
     T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
 >(
     query: T,
-    graph_root: &Program,
+    graph_root: (Program, InstructionPointer),
     compiler_options: &CompilerOptions,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
 ) -> Result<(Program, InstructionPointer), String> {
-    let prelude = graph_root.clone();
-    let query_address = InstructionPointer::new(prelude.len());
-    let mut program = Compiler::new(*compiler_options, Some(prelude)).compile(
+    let (graph_factory, graph_factory_address) = graph_root;
+    let query_factory_address = InstructionPointer::new(graph_factory.len());
+    let mut program = Compiler::new(*compiler_options, Some(graph_factory)).compile(
         &query,
         CompilerMode::Function,
         factory,
@@ -34,33 +32,27 @@ pub(crate) fn compile_graphql_query<
     )?;
     let entry_point = InstructionPointer::new(program.len());
     program.extend(create_query_entry_point_function(
-        InstructionPointer::default(),
-        query_address,
+        graph_factory_address,
+        query_factory_address,
     ));
     Ok((program, entry_point))
 }
 
 fn create_query_entry_point_function(
     graph_factory_address: InstructionPointer,
-    query_address: InstructionPointer,
-) -> impl IntoIterator<Item = Instruction> {
-    let function_body = Program::new([
-        Instruction::PushStatic { offset: 0 },
+    query_factory_address: InstructionPointer,
+) -> Program {
+    create_main_function([
         Instruction::Call {
             target: graph_factory_address,
-            num_args: 1,
+            num_args: 0,
         },
         Instruction::Call {
-            target: query_address,
-            num_args: 1,
+            target: query_factory_address,
+            num_args: 0,
         },
-        Instruction::Squash { depth: 1 },
+        Instruction::Apply { num_args: 1 },
+        Instruction::Evaluate,
         Instruction::Return,
-    ]);
-    once(Instruction::Function {
-        hash: hash_object(&function_body),
-        required_args: 1,
-        optional_args: 0,
-    })
-    .chain(function_body)
+    ])
 }

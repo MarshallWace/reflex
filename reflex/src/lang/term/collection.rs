@@ -41,11 +41,18 @@ impl<T: Expression> GraphNode for CollectionTerm<T> {
             Self::HashSet(term) => term.free_variables(),
         }
     }
-    fn dynamic_dependencies(&self) -> DependencyList {
+    fn dynamic_dependencies(&self, deep: bool) -> DependencyList {
         match self {
-            Self::Vector(term) => term.dynamic_dependencies(),
-            Self::HashMap(term) => term.dynamic_dependencies(),
-            Self::HashSet(term) => term.dynamic_dependencies(),
+            Self::Vector(term) => term.dynamic_dependencies(deep),
+            Self::HashMap(term) => term.dynamic_dependencies(deep),
+            Self::HashSet(term) => term.dynamic_dependencies(deep),
+        }
+    }
+    fn has_dynamic_dependencies(&self, deep: bool) -> bool {
+        match self {
+            Self::Vector(term) => term.has_dynamic_dependencies(deep),
+            Self::HashMap(term) => term.has_dynamic_dependencies(deep),
+            Self::HashSet(term) => term.has_dynamic_dependencies(deep),
         }
     }
     fn is_static(&self) -> bool {
@@ -95,15 +102,16 @@ impl<T: Expression + Rewritable<T>> Rewritable<T> for CollectionTerm<T> {
     }
     fn substitute_dynamic(
         &self,
+        deep: bool,
         state: &impl DynamicState<T>,
         factory: &impl ExpressionFactory<T>,
         allocator: &impl HeapAllocator<T>,
         cache: &mut impl EvaluationCache<T>,
     ) -> Option<T> {
         match self {
-            Self::Vector(term) => term.substitute_dynamic(state, factory, allocator, cache),
-            Self::HashMap(term) => term.substitute_dynamic(state, factory, allocator, cache),
-            Self::HashSet(term) => term.substitute_dynamic(state, factory, allocator, cache),
+            Self::Vector(term) => term.substitute_dynamic(deep, state, factory, allocator, cache),
+            Self::HashMap(term) => term.substitute_dynamic(deep, state, factory, allocator, cache),
+            Self::HashSet(term) => term.substitute_dynamic(deep, state, factory, allocator, cache),
         }
     }
     fn hoist_free_variables(

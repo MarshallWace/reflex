@@ -17,6 +17,8 @@ use std::sync::Arc;
 pub struct CachedExpression<T: Expression> {
     hash: HashId,
     capture_depth: StackOffset,
+    has_dynamic_dependencies_shallow: bool,
+    has_dynamic_dependencies_deep: bool,
     value: T,
 }
 impl<T: Expression> CachedExpression<T> {
@@ -24,6 +26,8 @@ impl<T: Expression> CachedExpression<T> {
         Self {
             hash: value.id(),
             capture_depth: value.capture_depth(),
+            has_dynamic_dependencies_shallow: value.has_dynamic_dependencies(false),
+            has_dynamic_dependencies_deep: value.has_dynamic_dependencies(true),
             value,
         }
     }
@@ -55,8 +59,19 @@ impl<T: Expression> GraphNode for CachedExpression<T> {
     fn free_variables(&self) -> HashSet<StackOffset> {
         self.value.free_variables()
     }
-    fn dynamic_dependencies(&self) -> DependencyList {
-        self.value.dynamic_dependencies()
+    fn dynamic_dependencies(&self, deep: bool) -> DependencyList {
+        if self.has_dynamic_dependencies(deep) {
+            self.value.dynamic_dependencies(deep)
+        } else {
+            DependencyList::empty()
+        }
+    }
+    fn has_dynamic_dependencies(&self, deep: bool) -> bool {
+        if deep {
+            self.has_dynamic_dependencies_deep
+        } else {
+            self.has_dynamic_dependencies_shallow
+        }
     }
     fn is_static(&self) -> bool {
         self.value.is_static()
@@ -112,21 +127,27 @@ impl<T: Expression + Rewritable<T>> Rewritable<T> for CachedExpression<T> {
     }
     fn substitute_dynamic(
         &self,
+        deep: bool,
         state: &impl DynamicState<T>,
         factory: &impl ExpressionFactory<T>,
         allocator: &impl HeapAllocator<T>,
         cache: &mut impl EvaluationCache<T>,
     ) -> Option<T> {
-        if self.dynamic_dependencies().is_empty() {
+        if !self.has_dynamic_dependencies(deep) {
             return None;
         }
-        match cache.retrieve_dynamic_substitution(&self.value, state) {
+        match cache.retrieve_dynamic_substitution(&self.value, deep, state) {
             Some(result) => result,
             None => {
                 let result = self
                     .value
-                    .substitute_dynamic(state, factory, allocator, cache);
-                cache.store_dynamic_substitution(&self.value, state, result.as_ref().cloned());
+                    .substitute_dynamic(deep, state, factory, allocator, cache);
+                cache.store_dynamic_substitution(
+                    &self.value,
+                    deep,
+                    state,
+                    result.as_ref().cloned(),
+                );
                 result
             }
         }
@@ -242,8 +263,11 @@ impl<T: Expression> GraphNode for SharedExpression<T> {
     fn free_variables(&self) -> HashSet<StackOffset> {
         self.value.free_variables()
     }
-    fn dynamic_dependencies(&self) -> DependencyList {
-        self.value.dynamic_dependencies()
+    fn dynamic_dependencies(&self, deep: bool) -> DependencyList {
+        self.value.dynamic_dependencies(deep)
+    }
+    fn has_dynamic_dependencies(&self, deep: bool) -> bool {
+        self.value.has_dynamic_dependencies(deep)
     }
     fn is_static(&self) -> bool {
         self.value.is_static()
@@ -284,13 +308,14 @@ impl<T: Expression + Rewritable<T>> Rewritable<T> for SharedExpression<T> {
     }
     fn substitute_dynamic(
         &self,
+        deep: bool,
         state: &impl DynamicState<T>,
         factory: &impl ExpressionFactory<T>,
         allocator: &impl HeapAllocator<T>,
         cache: &mut impl EvaluationCache<T>,
     ) -> Option<T> {
         self.value
-            .substitute_dynamic(state, factory, allocator, cache)
+            .substitute_dynamic(deep, state, factory, allocator, cache)
     }
     fn normalize(
         &self,

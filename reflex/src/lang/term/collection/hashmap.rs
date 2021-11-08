@@ -131,8 +131,20 @@ impl<T: Expression> GraphNode for HashMapTerm<T> {
             combined
         }
     }
-    fn dynamic_dependencies(&self) -> DependencyList {
-        self.keys.dynamic_dependencies()
+    fn dynamic_dependencies(&self, deep: bool) -> DependencyList {
+        self.keys.dynamic_dependencies(deep).union(if deep {
+            self.values.dynamic_dependencies(deep)
+        } else {
+            DependencyList::empty()
+        })
+    }
+    fn has_dynamic_dependencies(&self, deep: bool) -> bool {
+        self.keys.has_dynamic_dependencies(deep)
+            || (if deep {
+                self.values.has_dynamic_dependencies(deep)
+            } else {
+                false
+            })
     }
     fn is_static(&self) -> bool {
         true
@@ -176,17 +188,22 @@ impl<T: Expression + Rewritable<T>> Rewritable<T> for HashMapTerm<T> {
     }
     fn substitute_dynamic(
         &self,
+        deep: bool,
         state: &impl DynamicState<T>,
         factory: &impl ExpressionFactory<T>,
         allocator: &impl HeapAllocator<T>,
         cache: &mut impl EvaluationCache<T>,
     ) -> Option<T> {
         let keys = transform_expression_list(&self.keys, allocator, |key| {
-            key.substitute_dynamic(state, factory, allocator, cache)
+            key.substitute_dynamic(deep, state, factory, allocator, cache)
         });
-        let values = transform_expression_list(&self.values, allocator, |value| {
-            value.substitute_dynamic(state, factory, allocator, cache)
-        });
+        let values = if deep {
+            transform_expression_list(&self.values, allocator, |value| {
+                value.substitute_dynamic(deep, state, factory, allocator, cache)
+            })
+        } else {
+            None
+        };
         if keys.is_none() && values.is_none() {
             return None;
         }

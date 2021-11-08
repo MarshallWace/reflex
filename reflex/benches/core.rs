@@ -4,7 +4,7 @@
 #![feature(test)]
 extern crate test;
 
-use std::iter::{empty, once};
+use std::iter::once;
 
 use test::Bencher;
 
@@ -17,7 +17,7 @@ use reflex::{
     },
     core::{evaluate, ExpressionFactory, HeapAllocator, StateCache, Uid},
     interpreter::{execute, DefaultInterpreterCache, InterpreterOptions},
-    lang::{create_struct, SharedTermFactory, ValueTerm},
+    lang::{SharedTermFactory, ValueTerm},
     parser::sexpr::parse,
     stdlib::Stdlib,
 };
@@ -45,7 +45,7 @@ fn nested_expressions_bytecode(b: &mut Bencher) {
     let program = Program::new(vec![
         Instruction::Function {
             hash: 0,
-            required_args: 1,
+            required_args: 0,
             optional_args: 0,
         },
         Instruction::PushInt { value: 5 },
@@ -71,7 +71,6 @@ fn nested_expressions_bytecode(b: &mut Bencher) {
     ]);
     let mut cache = DefaultInterpreterCache::default();
     let entry_point = InstructionPointer::default();
-    let env = create_struct(empty(), &factory, &allocator);
     let state = StateCache::default();
     let entry_point = InstructionPointer::default();
     let options = InterpreterOptions::default();
@@ -81,7 +80,6 @@ fn nested_expressions_bytecode(b: &mut Bencher) {
             cache_key,
             &program,
             entry_point,
-            &env,
             &state,
             &factory,
             &allocator,
@@ -105,7 +103,6 @@ fn nested_expressions_compiled(b: &mut Bencher) {
         .compile(&expression, CompilerMode::Function, &factory, &allocator)
         .unwrap();
     let entry_point = InstructionPointer::default();
-    let env = create_struct(empty(), &factory, &allocator);
     let mut cache = DefaultInterpreterCache::default();
     let state = StateCache::default();
     let options = InterpreterOptions::default();
@@ -115,7 +112,6 @@ fn nested_expressions_compiled(b: &mut Bencher) {
             cache_key,
             &program,
             entry_point,
-            &env,
             &state,
             &factory,
             &allocator,

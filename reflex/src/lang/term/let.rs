@@ -48,10 +48,13 @@ impl<T: Expression> GraphNode for LetTerm<T> {
             }))
             .collect()
     }
-    fn dynamic_dependencies(&self) -> DependencyList {
+    fn dynamic_dependencies(&self, deep: bool) -> DependencyList {
         self.initializer
-            .dynamic_dependencies()
-            .union(self.body.dynamic_dependencies())
+            .dynamic_dependencies(deep)
+            .union(self.body.dynamic_dependencies(deep))
+    }
+    fn has_dynamic_dependencies(&self, deep: bool) -> bool {
+        self.initializer.has_dynamic_dependencies(deep) || self.body.has_dynamic_dependencies(deep)
     }
     fn is_static(&self) -> bool {
         false
@@ -92,6 +95,7 @@ impl<T: Expression + Rewritable<T> + Reducible<T>> Rewritable<T> for LetTerm<T> 
     }
     fn substitute_dynamic(
         &self,
+        deep: bool,
         state: &impl DynamicState<T>,
         factory: &impl ExpressionFactory<T>,
         allocator: &impl HeapAllocator<T>,
@@ -99,10 +103,10 @@ impl<T: Expression + Rewritable<T> + Reducible<T>> Rewritable<T> for LetTerm<T> 
     ) -> Option<T> {
         let initializer = self
             .initializer
-            .substitute_dynamic(state, factory, allocator, cache);
+            .substitute_dynamic(deep, state, factory, allocator, cache);
         let body = self
             .body
-            .substitute_dynamic(state, factory, allocator, cache);
+            .substitute_dynamic(deep, state, factory, allocator, cache);
         if initializer.is_none() && body.is_none() {
             return None;
         } else {

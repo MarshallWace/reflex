@@ -2,17 +2,16 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
-use std::{convert::Infallible, env, fs, net::SocketAddr, path::Path, sync::Arc};
+use std::{convert::Infallible, fs, net::SocketAddr, path::Path, sync::Arc};
 
 use crate::{graphql_service, GraphQlHttpQueryTransform};
 use anyhow::{anyhow, Context, Result};
 use clap::Parser;
 use hyper::{server::conn::AddrStream, service::make_service_fn, Server};
 use reflex::{
-    compiler::{Compile, CompilerMode, CompilerOptions, Program},
+    compiler::{Compile, CompilerMode, CompilerOptions, InstructionPointer, Program},
     core::{Applicable, Expression, Reducible, Rewritable, Signal, StringValue, Uuid},
     interpreter::InterpreterOptions,
-    lang::{create_struct, ValueTerm},
     stdlib::Stdlib,
 };
 use reflex_cli::{compiler::js::compile_js_source_with_customisation, Syntax};
@@ -87,17 +86,24 @@ where
         normalize: !args.unoptimized,
         ..CompilerOptions::default()
     });
-    // TODO: Error if runtime expression depends on unrecognized native functions
-    let program = match args.syntax {
-        Syntax::ByteCode => deserialize_compiler_output(root_module_path)?,
-        Syntax::JavaScript => compile_js_source_with_customisation(
-            root_module_path,
-            custom_loader,
-            factory,
-            allocator,
-            compiler_options,
-            CompilerMode::Function,
-        )?,
+    // TODO: Error if runtime expression depends on unrecognized builtin functions
+    let graph_root = match args.syntax {
+        Syntax::ByteCode => (
+            deserialize_compiler_output(root_module_path)?,
+            InstructionPointer::default(),
+        ),
+        Syntax::JavaScript => (
+            compile_js_source_with_customisation(
+                root_module_path,
+                custom_loader,
+                std::env::vars(),
+                factory,
+                allocator,
+                compiler_options,
+                CompilerMode::Function,
+            )?,
+            InstructionPointer::default(),
+        ),
         _ => return Err(anyhow!("This syntax is not currently supported")),
     };
 
@@ -106,16 +112,6 @@ where
         debug_stack: args.debug_stack,
         ..InterpreterOptions::default()
     });
-    let env = create_struct(
-        env::vars().into_iter().map(|(key, value)| {
-            (
-                key,
-                factory.create_value_term(ValueTerm::String(allocator.create_string(value))),
-            )
-        }),
-        factory,
-        allocator,
-    );
     let state = RuntimeState::default();
     let cache = RuntimeCache::default();
     let runtime = if args.debug_signals {
@@ -123,7 +119,6 @@ where
             state,
             builtins,
             debug_signal_handler(signal_handler),
-            env,
             cache,
             factory,
             allocator,
@@ -135,7 +130,6 @@ where
             state,
             builtins,
             signal_handler,
-            env,
             cache,
             factory,
             allocator,
@@ -146,7 +140,7 @@ where
     let address = SocketAddr::from(([0, 0, 0, 0], args.port));
     let server = create_server(
         runtime,
-        program,
+        graph_root,
         factory,
         allocator,
         compiler_options,
@@ -176,7 +170,7 @@ async fn create_server<
     T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
 >(
     runtime: Runtime<T>,
-    program: Program,
+    graph_root: (Program, InstructionPointer),
     factory: &impl AsyncExpressionFactory<T>,
     allocator: &impl AsyncHeapAllocator<T>,
     compiler_options: CompilerOptions,
@@ -188,15 +182,15 @@ where
     T::Builtin: From<Stdlib> + From<GraphQlStdlib>,
 {
     let runtime = Arc::new(runtime);
-    let program = Arc::new(program);
+    let graph_root = Arc::new(graph_root);
     let transform = Arc::new(transform);
     let server = Server::bind(&address).serve(make_service_fn(|_socket: &AddrStream| {
         let runtime = Arc::clone(&runtime);
-        let program = Arc::clone(&program);
+        let graph_root = Arc::clone(&graph_root);
         let transform = Arc::clone(&transform);
         let service = graphql_service(
             runtime,
-            program,
+            graph_root,
             factory,
             allocator,
             compiler_options,

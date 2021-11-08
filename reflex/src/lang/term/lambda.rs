@@ -49,8 +49,15 @@ impl<T: Expression> GraphNode for LambdaTerm<T> {
             })
             .collect()
     }
-    fn dynamic_dependencies(&self) -> DependencyList {
-        DependencyList::empty()
+    fn dynamic_dependencies(&self, deep: bool) -> DependencyList {
+        if deep {
+            self.body.dynamic_dependencies(deep)
+        } else {
+            DependencyList::empty()
+        }
+    }
+    fn has_dynamic_dependencies(&self, deep: bool) -> bool {
+        self.body.has_dynamic_dependencies(deep)
     }
     fn is_static(&self) -> bool {
         true
@@ -81,14 +88,19 @@ impl<T: Expression + Rewritable<T>> Rewritable<T> for LambdaTerm<T> {
     }
     fn substitute_dynamic(
         &self,
+        deep: bool,
         state: &impl DynamicState<T>,
         factory: &impl ExpressionFactory<T>,
         allocator: &impl HeapAllocator<T>,
         cache: &mut impl EvaluationCache<T>,
     ) -> Option<T> {
-        self.body
-            .substitute_dynamic(state, factory, allocator, cache)
-            .map(|body| factory.create_lambda_term(self.num_args, body))
+        if deep {
+            self.body
+                .substitute_dynamic(deep, state, factory, allocator, cache)
+                .map(|body| factory.create_lambda_term(self.num_args, body))
+        } else {
+            None
+        }
     }
     fn hoist_free_variables(
         &self,

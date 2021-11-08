@@ -13,7 +13,6 @@ use std::{
 use crate::{globals::builtin_globals, parse_module, stdlib::Stdlib as JsStdlib, Env};
 use reflex::{
     core::{Expression, ExpressionFactory, HeapAllocator, Rewritable},
-    lang::create_struct,
     stdlib::Stdlib,
 };
 
@@ -149,16 +148,7 @@ pub fn create_js_env<T: Expression + Rewritable<T>>(
 where
     T::Builtin: From<Stdlib> + From<JsStdlib>,
 {
-    Env::new()
-        .with_globals(builtin_globals(factory, allocator))
-        .with_global(
-            "process",
-            create_struct(
-                vec![(String::from("env"), factory.create_static_variable_term(0))],
-                factory,
-                allocator,
-            ),
-        )
+    Env::new().with_globals(builtin_globals(factory, allocator))
 }
 
 fn create_default_module_export<T: Expression>(

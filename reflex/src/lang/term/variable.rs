@@ -33,10 +33,16 @@ impl<T: Expression> GraphNode for VariableTerm<T> {
             Self::Dynamic(term) => term.free_variables(),
         }
     }
-    fn dynamic_dependencies(&self) -> DependencyList {
+    fn dynamic_dependencies(&self, deep: bool) -> DependencyList {
         match self {
-            Self::Static(term) => term.dynamic_dependencies(),
-            Self::Dynamic(term) => term.dynamic_dependencies(),
+            Self::Static(term) => term.dynamic_dependencies(deep),
+            Self::Dynamic(term) => term.dynamic_dependencies(deep),
+        }
+    }
+    fn has_dynamic_dependencies(&self, deep: bool) -> bool {
+        match self {
+            Self::Static(term) => term.has_dynamic_dependencies(deep),
+            Self::Dynamic(term) => term.has_dynamic_dependencies(deep),
         }
     }
     fn is_static(&self) -> bool {
@@ -73,14 +79,15 @@ impl<T: Expression + Rewritable<T>> Rewritable<T> for VariableTerm<T> {
     }
     fn substitute_dynamic(
         &self,
+        deep: bool,
         state: &impl DynamicState<T>,
         factory: &impl ExpressionFactory<T>,
         allocator: &impl HeapAllocator<T>,
         cache: &mut impl EvaluationCache<T>,
     ) -> Option<T> {
         match self {
-            Self::Static(term) => term.substitute_dynamic(state, factory, allocator, cache),
-            Self::Dynamic(term) => term.substitute_dynamic(state, factory, allocator, cache),
+            Self::Static(term) => term.substitute_dynamic(deep, state, factory, allocator, cache),
+            Self::Dynamic(term) => term.substitute_dynamic(deep, state, factory, allocator, cache),
         }
     }
     fn hoist_free_variables(
@@ -157,8 +164,11 @@ impl GraphNode for StaticVariableTerm {
     fn free_variables(&self) -> HashSet<StackOffset> {
         HashSet::from_iter(once(self.offset))
     }
-    fn dynamic_dependencies(&self) -> DependencyList {
+    fn dynamic_dependencies(&self, _deep: bool) -> DependencyList {
         DependencyList::empty()
+    }
+    fn has_dynamic_dependencies(&self, _deep: bool) -> bool {
+        false
     }
     fn is_static(&self) -> bool {
         false
@@ -182,6 +192,7 @@ impl<T: Expression + Rewritable<T>> Rewritable<T> for StaticVariableTerm {
     }
     fn substitute_dynamic(
         &self,
+        _deep: bool,
         _state: &impl DynamicState<T>,
         _factory: &impl ExpressionFactory<T>,
         _allocator: &impl HeapAllocator<T>,
@@ -256,8 +267,11 @@ impl<T: Expression> GraphNode for DynamicVariableTerm<T> {
     fn free_variables(&self) -> HashSet<StackOffset> {
         HashSet::new()
     }
-    fn dynamic_dependencies(&self) -> DependencyList {
+    fn dynamic_dependencies(&self, _deep: bool) -> DependencyList {
         DependencyList::of(self.state_token)
+    }
+    fn has_dynamic_dependencies(&self, _deep: bool) -> bool {
+        true
     }
     fn is_static(&self) -> bool {
         false
@@ -281,6 +295,7 @@ impl<T: Expression + Rewritable<T>> Rewritable<T> for DynamicVariableTerm<T> {
     }
     fn substitute_dynamic(
         &self,
+        _deep: bool,
         state: &impl DynamicState<T>,
         _factory: &impl ExpressionFactory<T>,
         _allocator: &impl HeapAllocator<T>,

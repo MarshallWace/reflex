@@ -10,7 +10,7 @@ use std::{
 
 use hyper::{header, Body, Request, Response, StatusCode};
 use reflex::{
-    compiler::{Compile, CompilerOptions, Program},
+    compiler::{Compile, CompilerOptions, InstructionPointer, Program},
     core::{
         Applicable, Expression, ExpressionFactory, HeapAllocator, Reducible, Rewritable,
         StringValue,
@@ -39,7 +39,7 @@ pub(crate) async fn handle_graphql_http_request<
 >(
     req: Request<Body>,
     runtime: Arc<Runtime<T>>,
-    program: &Program,
+    graph_root: &(Program, InstructionPointer),
     factory: &impl AsyncExpressionFactory<T>,
     allocator: &impl AsyncHeapAllocator<T>,
     compiler_options: CompilerOptions,
@@ -55,11 +55,16 @@ where
         Ok(transform) => transform,
     };
     let request_etag = parse_request_etag(&req);
-    let root = factory.create_static_variable_term(0);
-    let response = match parse_graphql_request(req, &root, factory, allocator, &transform).await {
+    let response = match parse_graphql_request(req, factory, allocator, &transform).await {
         Err(response) => Ok(response),
         Ok(query) => {
-            match compile_graphql_query(query, &program, &compiler_options, factory, allocator) {
+            match compile_graphql_query(
+                query,
+                graph_root.clone(),
+                &compiler_options,
+                factory,
+                allocator,
+            ) {
                 Err(error) => Err(error),
                 Ok((program, entry_point)) => match runtime.subscribe(program, entry_point).await {
                     Err(error) => Err(error),
@@ -133,7 +138,6 @@ fn parse_response_etag<T: Hash>(response: &HttpResult<T>) -> Option<String> {
 
 async fn parse_graphql_request<T: Expression>(
     req: Request<Body>,
-    root: &T,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
     transform: &impl GraphQlQueryTransform,
@@ -159,11 +163,10 @@ where
     let result = content_type.and_then(|content_type| match content_type.as_str() {
         "application/graphql" => body.and_then(|body| {
             let operation = GraphQlOperationPayload::new(body, None, Some(empty()), Some(empty()));
-            parse_graphql_operation(&operation, root, factory, allocator, transform)
+            parse_graphql_operation(&operation, factory, allocator, transform)
         }),
-        "application/json" => body.and_then(|body| {
-            parse_request_body_graphql_json(&body, root, factory, allocator, transform)
-        }),
+        "application/json" => body
+            .and_then(|body| parse_request_body_graphql_json(&body, factory, allocator, transform)),
         _ => Err(String::from("Unsupported Content-Type header")),
     });
     result.or_else(|error| Err(HttpResult::error(StatusCode::BAD_REQUEST, error)))
@@ -171,7 +174,6 @@ where
 
 fn parse_request_body_graphql_json<T: Expression>(
     body: &str,
-    root: &T,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
     transform: &impl GraphQlQueryTransform,
@@ -185,7 +187,7 @@ where
             Some("IntrospectionQuery") => {
                 Ok(create_introspection_query_response(factory, allocator))
             }
-            _ => parse_graphql_operation(&operation, root, factory, allocator, transform),
+            _ => parse_graphql_operation(&operation, factory, allocator, transform),
         },
     }
 }

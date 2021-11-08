@@ -373,7 +373,7 @@ impl Default for CompilerOptions {
 
 #[derive(Clone, Copy, Debug)]
 pub enum CompilerMode {
-    /// Wraps the compiled expression in a 'main function' that takes a single environment argument and evaluates the expression before returning
+    /// Wraps the compiled expression in a 'main function' that evaluates the expression before returning
     Function,
     /// Compiles the expression without any wrapping
     Expression,
@@ -439,12 +439,11 @@ impl Compiler {
             CompilerMode::Function => Program::new(
                 once(Instruction::Function {
                     hash: hash_object(&compiled_expression),
-                    required_args: 1,
+                    required_args: 0,
                     optional_args: 0,
                 })
                 .chain(compiled_expression)
                 .chain(once(Instruction::Evaluate))
-                .chain(once(Instruction::Squash { depth: 1 }))
                 .chain(once(Instruction::Return)),
             ),
         };
@@ -639,6 +638,22 @@ pub fn hash_program_root(program: &Program, entry_point: &InstructionPointer) ->
     program.hash(&mut hasher);
     entry_point.hash(&mut hasher);
     hasher.finish()
+}
+
+pub fn create_main_function(instructions: impl IntoIterator<Item = Instruction>) -> Program {
+    let mut instructions = once(Instruction::Function {
+        hash: 0,
+        required_args: 0,
+        optional_args: 0,
+    })
+    .chain(instructions)
+    .collect::<Vec<_>>();
+    instructions[0] = Instruction::Function {
+        hash: hash_object(&instructions),
+        required_args: 0,
+        optional_args: 0,
+    };
+    Program::new(instructions)
 }
 
 pub(crate) fn compile_expressions<'a, T: Expression + Compile<T> + 'a>(

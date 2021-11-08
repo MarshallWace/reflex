@@ -38,8 +38,19 @@ impl<T: Expression> GraphNode for TupleTerm<T> {
     fn free_variables(&self) -> HashSet<StackOffset> {
         self.fields.free_variables()
     }
-    fn dynamic_dependencies(&self) -> DependencyList {
-        DependencyList::empty()
+    fn dynamic_dependencies(&self, deep: bool) -> DependencyList {
+        if deep {
+            self.fields.dynamic_dependencies(deep)
+        } else {
+            DependencyList::empty()
+        }
+    }
+    fn has_dynamic_dependencies(&self, deep: bool) -> bool {
+        if deep {
+            self.fields.has_dynamic_dependencies(deep)
+        } else {
+            false
+        }
     }
     fn is_static(&self) -> bool {
         true
@@ -69,15 +80,20 @@ impl<T: Expression + Rewritable<T>> Rewritable<T> for TupleTerm<T> {
     }
     fn substitute_dynamic(
         &self,
+        deep: bool,
         state: &impl DynamicState<T>,
         factory: &impl ExpressionFactory<T>,
         allocator: &impl HeapAllocator<T>,
         cache: &mut impl EvaluationCache<T>,
     ) -> Option<T> {
-        transform_expression_list(&self.fields, allocator, |expression| {
-            expression.substitute_dynamic(state, factory, allocator, cache)
-        })
-        .map(|fields| factory.create_tuple_term(fields))
+        if deep {
+            transform_expression_list(&self.fields, allocator, |expression| {
+                expression.substitute_dynamic(deep, state, factory, allocator, cache)
+            })
+            .map(|fields| factory.create_tuple_term(fields))
+        } else {
+            None
+        }
     }
     fn hoist_free_variables(
         &self,

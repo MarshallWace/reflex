@@ -13,6 +13,7 @@ use fnv::FnvHashMap;
 pub mod allocator;
 pub mod cache;
 pub mod core;
+pub mod env;
 pub mod hash;
 
 pub mod compiler;

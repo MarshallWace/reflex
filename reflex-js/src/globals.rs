@@ -19,6 +19,8 @@ pub(crate) mod math;
 pub use math::global_math;
 pub(crate) mod object;
 pub use object::global_object;
+pub(crate) mod process;
+pub use process::global_process;
 pub(crate) mod set;
 pub use set::global_set;
 pub(crate) mod string;
@@ -45,5 +47,6 @@ where
             "encodeURIComponent",
             global_encode_uri_component(factory, allocator),
         ),
+        ("process", global_process(factory, allocator)),
     ]
 }

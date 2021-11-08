@@ -5,7 +5,7 @@
 use anyhow::{anyhow, Context, Result};
 use clap::Parser;
 use std::{
-    env, fs,
+    fs,
     io::{self, Write},
     path::PathBuf,
     str::FromStr,
@@ -17,8 +17,9 @@ use reflex::{
     cache::SubstitutionCache,
     compiler::{hash_program_root, Compiler, CompilerMode, CompilerOptions, InstructionPointer},
     core::{Expression, ExpressionFactory, HeapAllocator, Reducible, Rewritable, StateCache, Uid},
+    env::inject_env_vars,
     interpreter::{execute, DefaultInterpreterCache, InterpreterOptions},
-    lang::{create_struct, term::SignalTerm, SharedTermFactory, ValueTerm},
+    lang::{term::SignalTerm, SharedTermFactory, ValueTerm},
     stdlib::Stdlib,
 };
 
@@ -90,21 +91,13 @@ pub async fn main() -> Result<()> {
             let source = read_file(&input_path)?;
             let parser = create_parser(syntax, Some(input_path.to_owned()), &factory, &allocator);
             let expression = parser(&source)
+                .map(|expression| {
+                    inject_env_vars(expression, std::env::vars(), &factory, &allocator)
+                })
                 .map_err(|err| anyhow!("Failed to parse source at {}: {}", input_path, err))?;
             let program = Compiler::new(compiler_options, None)
-                .compile(&expression, CompilerMode::Expression, &factory, &allocator)
+                .compile(&expression, CompilerMode::Function, &factory, &allocator)
                 .map_err(|err| anyhow!("Failed to compile source at {}: {}", input_path, err))?;
-            let env = create_struct(
-                env::vars().into_iter().map(|(key, value)| {
-                    (
-                        key,
-                        factory
-                            .create_value_term(ValueTerm::String(allocator.create_string(value))),
-                    )
-                }),
-                &factory,
-                &allocator,
-            );
 
             let mut stdout = io::stdout();
             let state = StateCache::default();
@@ -121,7 +114,6 @@ pub async fn main() -> Result<()> {
                 cache_key,
                 &program,
                 entry_point,
-                &env,
                 &state,
                 &factory,
                 &allocator,
@@ -143,7 +135,6 @@ pub async fn main() -> Result<()> {
                         state,
                         builtins,
                         debug_signal_handler(signal_handler),
-                        env,
                         cache,
                         &factory,
                         &allocator,
@@ -155,7 +146,6 @@ pub async fn main() -> Result<()> {
                         state,
                         builtins,
                         debug_signal_handler(signal_handler),
-                        env,
                         cache,
                         &factory,
                         &allocator,

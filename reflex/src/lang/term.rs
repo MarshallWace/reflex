@@ -102,22 +102,40 @@ impl<T: Expression + Applicable<T>> GraphNode for Term<T> {
             Self::Signal(term) => term.free_variables(),
         }
     }
-    fn dynamic_dependencies(&self) -> DependencyList {
+    fn dynamic_dependencies(&self, deep: bool) -> DependencyList {
         match self {
-            Self::Value(term) => term.dynamic_dependencies(),
-            Self::Variable(term) => term.dynamic_dependencies(),
-            Self::Let(term) => term.dynamic_dependencies(),
-            Self::Lambda(term) => term.dynamic_dependencies(),
-            Self::Application(term) => term.dynamic_dependencies(),
-            Self::PartialApplication(term) => term.dynamic_dependencies(),
-            Self::Recursive(term) => term.dynamic_dependencies(),
-            Self::Builtin(term) => term.dynamic_dependencies(),
-            Self::CompiledFunction(term) => term.dynamic_dependencies(),
-            Self::Tuple(term) => term.dynamic_dependencies(),
-            Self::Struct(term) => term.dynamic_dependencies(),
-            Self::Constructor(term) => term.dynamic_dependencies(),
-            Self::Collection(term) => term.dynamic_dependencies(),
-            Self::Signal(term) => term.dynamic_dependencies(),
+            Self::Value(term) => term.dynamic_dependencies(deep),
+            Self::Variable(term) => term.dynamic_dependencies(deep),
+            Self::Let(term) => term.dynamic_dependencies(deep),
+            Self::Lambda(term) => term.dynamic_dependencies(deep),
+            Self::Application(term) => term.dynamic_dependencies(deep),
+            Self::PartialApplication(term) => term.dynamic_dependencies(deep),
+            Self::Recursive(term) => term.dynamic_dependencies(deep),
+            Self::Builtin(term) => term.dynamic_dependencies(deep),
+            Self::CompiledFunction(term) => term.dynamic_dependencies(deep),
+            Self::Tuple(term) => term.dynamic_dependencies(deep),
+            Self::Struct(term) => term.dynamic_dependencies(deep),
+            Self::Constructor(term) => term.dynamic_dependencies(deep),
+            Self::Collection(term) => term.dynamic_dependencies(deep),
+            Self::Signal(term) => term.dynamic_dependencies(deep),
+        }
+    }
+    fn has_dynamic_dependencies(&self, deep: bool) -> bool {
+        match self {
+            Self::Value(term) => term.has_dynamic_dependencies(deep),
+            Self::Variable(term) => term.has_dynamic_dependencies(deep),
+            Self::Let(term) => term.has_dynamic_dependencies(deep),
+            Self::Lambda(term) => term.has_dynamic_dependencies(deep),
+            Self::Application(term) => term.has_dynamic_dependencies(deep),
+            Self::PartialApplication(term) => term.has_dynamic_dependencies(deep),
+            Self::Recursive(term) => term.has_dynamic_dependencies(deep),
+            Self::Builtin(term) => term.has_dynamic_dependencies(deep),
+            Self::CompiledFunction(term) => term.has_dynamic_dependencies(deep),
+            Self::Tuple(term) => term.has_dynamic_dependencies(deep),
+            Self::Struct(term) => term.has_dynamic_dependencies(deep),
+            Self::Constructor(term) => term.has_dynamic_dependencies(deep),
+            Self::Collection(term) => term.has_dynamic_dependencies(deep),
+            Self::Signal(term) => term.has_dynamic_dependencies(deep),
         }
     }
     fn is_static(&self) -> bool {
@@ -206,23 +224,30 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>> 
     }
     fn substitute_dynamic(
         &self,
+        deep: bool,
         state: &impl DynamicState<T>,
         factory: &impl ExpressionFactory<T>,
         allocator: &impl HeapAllocator<T>,
         cache: &mut impl EvaluationCache<T>,
     ) -> Option<T> {
         match self {
-            Self::Variable(term) => term.substitute_dynamic(state, factory, allocator, cache),
-            Self::Let(term) => term.substitute_dynamic(state, factory, allocator, cache),
-            Self::Lambda(term) => term.substitute_dynamic(state, factory, allocator, cache),
-            Self::Application(term) => term.substitute_dynamic(state, factory, allocator, cache),
-            Self::PartialApplication(term) => {
-                term.substitute_dynamic(state, factory, allocator, cache)
+            Self::Variable(term) => term.substitute_dynamic(deep, state, factory, allocator, cache),
+            Self::Let(term) => term.substitute_dynamic(deep, state, factory, allocator, cache),
+            Self::Lambda(term) => term.substitute_dynamic(deep, state, factory, allocator, cache),
+            Self::Application(term) => {
+                term.substitute_dynamic(deep, state, factory, allocator, cache)
             }
-            Self::Recursive(term) => term.substitute_dynamic(state, factory, allocator, cache),
-            Self::Tuple(term) => term.substitute_dynamic(state, factory, allocator, cache),
-            Self::Struct(term) => term.substitute_dynamic(state, factory, allocator, cache),
-            Self::Collection(term) => term.substitute_dynamic(state, factory, allocator, cache),
+            Self::PartialApplication(term) => {
+                term.substitute_dynamic(deep, state, factory, allocator, cache)
+            }
+            Self::Recursive(term) => {
+                term.substitute_dynamic(deep, state, factory, allocator, cache)
+            }
+            Self::Tuple(term) => term.substitute_dynamic(deep, state, factory, allocator, cache),
+            Self::Struct(term) => term.substitute_dynamic(deep, state, factory, allocator, cache),
+            Self::Collection(term) => {
+                term.substitute_dynamic(deep, state, factory, allocator, cache)
+            }
             _ => None,
         }
     }

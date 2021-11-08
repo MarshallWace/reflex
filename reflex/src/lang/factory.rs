@@ -352,8 +352,11 @@ impl<TBuiltin: Builtin> GraphNode for CachedSharedTerm<TBuiltin> {
     fn free_variables(&self) -> HashSet<StackOffset> {
         self.value.free_variables()
     }
-    fn dynamic_dependencies(&self) -> DependencyList {
-        self.value.dynamic_dependencies()
+    fn dynamic_dependencies(&self, deep: bool) -> DependencyList {
+        self.value.dynamic_dependencies(deep)
+    }
+    fn has_dynamic_dependencies(&self, deep: bool) -> bool {
+        self.value.has_dynamic_dependencies(deep)
     }
     fn is_static(&self) -> bool {
         self.value.is_static()
@@ -395,6 +398,7 @@ impl<TBuiltin: Builtin> Rewritable<CachedSharedTerm<TBuiltin>> for CachedSharedT
     }
     fn substitute_dynamic(
         &self,
+        deep: bool,
         state: &impl DynamicState<CachedSharedTerm<TBuiltin>>,
         factory: &impl ExpressionFactory<CachedSharedTerm<TBuiltin>>,
         allocator: &impl HeapAllocator<CachedSharedTerm<TBuiltin>>,
@@ -403,7 +407,7 @@ impl<TBuiltin: Builtin> Rewritable<CachedSharedTerm<TBuiltin>> for CachedSharedT
         self.value
             .value()
             .value()
-            .substitute_dynamic(state, factory, allocator, cache)
+            .substitute_dynamic(deep, state, factory, allocator, cache)
     }
     fn hoist_free_variables(
         &self,
@@ -504,8 +508,8 @@ fn evaluate_recursive<
     result: Option<T>,
     dependencies: DependencyList,
 ) -> Option<EvaluationResult<T>> {
-    let dependencies = dependencies.union(expression.dynamic_dependencies());
-    match expression.substitute_dynamic(state, factory, allocator, cache) {
+    let dependencies = dependencies.union(expression.dynamic_dependencies(false));
+    match expression.substitute_dynamic(false, state, factory, allocator, cache) {
         Some(expression) => evaluate_recursive(
             &expression,
             state,

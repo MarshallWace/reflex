@@ -9,10 +9,7 @@ pub use loader::{
 };
 mod parser;
 pub use parser::{parse, parse_module};
-use reflex::{
-    cache::NoopCache,
-    core::{Expression, ExpressionFactory, HeapAllocator, Rewritable, StackOffset, Substitutions},
-};
+use reflex::core::{Expression, Rewritable};
 
 pub mod builtins;
 pub mod globals;
@@ -40,22 +37,7 @@ impl<T: Expression + Rewritable<T>> Env<T> {
         self.globals.insert(key, value);
         self
     }
-    pub fn global(
-        &self,
-        name: &str,
-        scope_depth: StackOffset,
-        factory: &impl ExpressionFactory<T>,
-        allocator: &impl HeapAllocator<T>,
-    ) -> Option<T> {
-        self.globals.get(name).map(|value| {
-            value
-                .substitute_static(
-                    &Substitutions::increase_scope_offset(scope_depth),
-                    factory,
-                    allocator,
-                    &mut NoopCache::default(),
-                )
-                .unwrap_or_else(|| value.clone())
-        })
+    pub fn global(&self, name: &str) -> Option<T> {
+        self.globals.get(name).cloned()
     }
 }

@@ -31,8 +31,11 @@ impl<T: Expression> GraphNode for RecursiveTerm<T> {
     fn free_variables(&self) -> HashSet<StackOffset> {
         self.factory.free_variables()
     }
-    fn dynamic_dependencies(&self) -> DependencyList {
-        self.factory.dynamic_dependencies()
+    fn dynamic_dependencies(&self, deep: bool) -> DependencyList {
+        self.factory.dynamic_dependencies(deep)
+    }
+    fn has_dynamic_dependencies(&self, deep: bool) -> bool {
+        self.factory.has_dynamic_dependencies(deep)
     }
     fn is_static(&self) -> bool {
         false
@@ -60,13 +63,14 @@ impl<T: Expression + Rewritable<T>> Rewritable<T> for RecursiveTerm<T> {
     }
     fn substitute_dynamic(
         &self,
+        deep: bool,
         state: &impl DynamicState<T>,
         factory: &impl ExpressionFactory<T>,
         allocator: &impl HeapAllocator<T>,
         cache: &mut impl EvaluationCache<T>,
     ) -> Option<T> {
         self.factory
-            .substitute_dynamic(state, factory, allocator, cache)
+            .substitute_dynamic(deep, state, factory, allocator, cache)
             .map(|target| factory.create_recursive_term(target))
     }
     fn hoist_free_variables(

@@ -12,7 +12,7 @@ use hyper_tungstenite::{
     WebSocketStream,
 };
 use reflex::{
-    compiler::{Compile, CompilerOptions, Program},
+    compiler::{Compile, CompilerOptions, InstructionPointer, Program},
     core::{Applicable, Reducible, Rewritable, StringValue},
     stdlib::Stdlib,
 };
@@ -40,7 +40,7 @@ pub(crate) async fn handle_graphql_ws_request<
 >(
     req: Request<Body>,
     runtime: Arc<Runtime<T>>,
-    program: Arc<Program>,
+    graph_root: Arc<(Program, InstructionPointer)>,
     factory: &impl AsyncExpressionFactory<T>,
     allocator: &impl AsyncHeapAllocator<T>,
     compiler_options: CompilerOptions,
@@ -65,7 +65,7 @@ where
                         headers,
                         websocket,
                         runtime,
-                        &program,
+                        &graph_root,
                         &factory,
                         &allocator,
                         &compiler_options,
@@ -95,7 +95,7 @@ async fn handle_websocket_connection<
     headers: RequestHeaders,
     websocket: WebSocketStream<Upgraded>,
     runtime: Arc<Runtime<T>>,
-    program: &Program,
+    graph_root: &(Program, InstructionPointer),
     factory: &impl AsyncExpressionFactory<T>,
     allocator: &impl AsyncHeapAllocator<T>,
     compiler_options: &CompilerOptions,
@@ -177,10 +177,8 @@ where
                                     ))
                                     .await;
                             } else {
-                                let root = factory.create_static_variable_term(0);
                                 match parse_graphql_operation(
                                     message.payload(),
-                                    &root,
                                     &factory,
                                     &allocator,
                                     &transform,
@@ -199,7 +197,7 @@ where
                                     Ok(query) => {
                                         match compile_graphql_query(
                                             query,
-                                            &program,
+                                            graph_root.clone(),
                                             compiler_options,
                                             &factory,
                                             &allocator,

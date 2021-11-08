@@ -71,7 +71,8 @@ pub use uuid;
 pub trait GraphNode {
     fn capture_depth(&self) -> StackOffset;
     fn free_variables(&self) -> HashSet<StackOffset>;
-    fn dynamic_dependencies(&self) -> DependencyList;
+    fn dynamic_dependencies(&self, deep: bool) -> DependencyList;
+    fn has_dynamic_dependencies(&self, deep: bool) -> bool;
     /** Weak head normal form - outer term is fully evaluated, sub-expressions may contain dynamic values */
     fn is_static(&self) -> bool;
     /** Term is fully evaluated and contains no dynamic sub-expressions */
@@ -89,6 +90,7 @@ pub trait Rewritable<T: Expression + Rewritable<T>> {
     ) -> Option<T>;
     fn substitute_dynamic(
         &self,
+        deep: bool,
         state: &impl DynamicState<T>,
         factory: &impl ExpressionFactory<T>,
         allocator: &impl HeapAllocator<T>,
@@ -477,12 +479,17 @@ impl<T: Expression> GraphNode for ExpressionList<T> {
             results
         })
     }
-    fn dynamic_dependencies(&self) -> DependencyList {
+    fn dynamic_dependencies(&self, deep: bool) -> DependencyList {
         self.items
             .iter()
             .fold(DependencyList::empty(), |acc, term| {
-                acc.union(term.dynamic_dependencies())
+                acc.union(term.dynamic_dependencies(deep))
             })
+    }
+    fn has_dynamic_dependencies(&self, deep: bool) -> bool {
+        self.items
+            .iter()
+            .any(|term| term.has_dynamic_dependencies(deep))
     }
     fn is_static(&self) -> bool {
         true
@@ -649,11 +656,13 @@ pub trait EvaluationCache<T: Expression> {
     fn retrieve_dynamic_substitution(
         &mut self,
         expression: &T,
+        deep: bool,
         state: &impl DynamicState<T>,
     ) -> Option<Option<T>>;
     fn store_dynamic_substitution(
         &mut self,
         expression: &T,
+        deep: bool,
         state: &impl DynamicState<T>,
         result: Option<T>,
     );

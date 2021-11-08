@@ -9,7 +9,7 @@ use hyper::{
     Body, HeaderMap, Method, Request, Response, StatusCode,
 };
 use reflex::{
-    compiler::{Compile, CompilerOptions, Program},
+    compiler::{Compile, CompilerOptions, InstructionPointer, Program},
     core::{Applicable, Reducible, Rewritable, StringValue},
     stdlib::Stdlib,
 };
@@ -77,7 +77,7 @@ pub fn graphql_service<
     T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
 >(
     runtime: Arc<Runtime<T>>,
-    program: Arc<Program>,
+    graph_root: Arc<(Program, InstructionPointer)>,
     factory: &impl AsyncExpressionFactory<T>,
     allocator: &impl AsyncHeapAllocator<T>,
     compiler_options: CompilerOptions,
@@ -97,7 +97,7 @@ where
         let allocator = allocator.clone();
         move |req| {
             let runtime = Arc::clone(&runtime);
-            let program = Arc::clone(&program);
+            let graph_root = Arc::clone(&graph_root);
             let transform = Arc::clone(&transform);
             let factory = factory.clone();
             let allocator = allocator.clone();
@@ -107,7 +107,7 @@ where
                         handle_graphql_http_request(
                             req,
                             runtime,
-                            &program,
+                            &graph_root,
                             &factory,
                             &allocator,
                             compiler_options,
@@ -120,7 +120,7 @@ where
                             handle_graphql_upgrade_request(
                                 req,
                                 runtime,
-                                program,
+                                graph_root,
                                 &factory,
                                 &allocator,
                                 compiler_options,
@@ -152,7 +152,7 @@ async fn handle_graphql_upgrade_request<
 >(
     req: Request<Body>,
     runtime: Arc<Runtime<T>>,
-    program: Arc<Program>,
+    graph_root: Arc<(Program, InstructionPointer)>,
     factory: &impl AsyncExpressionFactory<T>,
     allocator: &impl AsyncHeapAllocator<T>,
     compiler_options: CompilerOptions,
@@ -166,7 +166,7 @@ where
         match handle_graphql_ws_request(
             req,
             runtime,
-            program,
+            graph_root,
             factory,
             allocator,
             compiler_options,
