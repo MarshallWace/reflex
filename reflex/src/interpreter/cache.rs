@@ -1,12 +1,14 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use std::{
     collections::hash_map::Entry,
     iter::{once, FromIterator},
 };
 
 use fnv::FnvHashMap;
+use tracing::trace;
 
 use crate::{
     core::{hash_state_values, DynamicState, EvaluationResult, Expression},
@@ -90,7 +92,9 @@ impl<T: Expression> CacheEntries<T> {
         &self,
         key: &InterpreterCacheKey,
     ) -> Option<&(InterpreterCacheEntry<T>, Vec<InterpreterCacheKey>)> {
-        self.entries.get(key)
+        let entry = self.entries.get(key);
+        trace!(cache_entries = if entry.is_some() { "hit" } else { "miss" });
+        entry
     }
     pub fn len(&self) -> usize {
         self.entries.len()
@@ -181,7 +185,7 @@ impl<T: Expression> InterpreterCache<T> for DefaultInterpreterCache<T> {
         key: &InterpreterCacheKey,
         state: &impl DynamicState<T>,
     ) -> Option<(EvaluationResult<T>, Option<InterpreterCacheEntry<T>>)> {
-        self.cache.get(key).and_then(|entry| {
+        let result = self.cache.get(key).and_then(|entry| {
             let state_dependencies = entry.result.dependencies();
             if state_dependencies.is_empty() || entry.overall_state_hash == state.id() {
                 Some((entry.result().clone(), None))
@@ -198,7 +202,9 @@ impl<T: Expression> InterpreterCache<T> for DefaultInterpreterCache<T> {
             } else {
                 None
             }
-        })
+        });
+        trace!(interpreter_cache = if result.is_some() { "hit" } else { "miss" });
+        result
     }
     fn contains_key(&self, key: &InterpreterCacheKey) -> bool {
         self.cache.contains_key(&key)
