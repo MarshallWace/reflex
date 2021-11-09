@@ -20,9 +20,8 @@ pub fn global_error<T: Expression>(
         create_struct(
             once((
                 String::from("name"),
-                factory.create_value_term(ValueTerm::String(
-                    allocator.create_string(String::from("Error")),
-                )),
+                factory
+                    .create_value_term(ValueTerm::String(allocator.create_static_string("Error"))),
             ))
             .chain(once((
                 String::from("message"),
@@ -48,7 +47,7 @@ where
             once((
                 String::from("name"),
                 factory.create_value_term(ValueTerm::String(
-                    allocator.create_string(String::from("AggregateError")),
+                    allocator.create_static_string("AggregateError"),
                 )),
             ))
             .chain(once((

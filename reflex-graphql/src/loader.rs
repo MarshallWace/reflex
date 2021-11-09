@@ -109,7 +109,7 @@ where
                         factory.create_builtin_term(Stdlib::Effect),
                         allocator.create_list(vec![
                             factory.create_value_term(ValueTerm::String(
-                                allocator.create_string(String::from("reflex::graphql::execute")),
+                                allocator.create_static_string("reflex::graphql::execute"),
                             )),
                             factory.create_static_variable_term(1),
                             get_struct_field(

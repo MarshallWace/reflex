@@ -43,9 +43,7 @@ impl<T: Expression> Applicable<T> for Split {
             (Some(ValueTerm::String(target)), Some(ValueTerm::String(separator))) => Ok(factory
                 .create_vector_term(allocator.create_unsized_list(
                     target.as_str().split(separator.as_str()).map(|value| {
-                        factory.create_value_term(ValueTerm::String(
-                            allocator.create_string(value.into()),
-                        ))
+                        factory.create_value_term(ValueTerm::String(allocator.create_string(value)))
                     }),
                 ))),
             _ => Err(format!(

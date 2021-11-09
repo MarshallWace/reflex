@@ -216,7 +216,7 @@ fn parse_string_literal<'src, T: Expression + Rewritable<T> + Reducible<T>>(
 where
     T::Builtin: From<Stdlib>,
 {
-    factory.create_value_term(ValueTerm::String(allocator.create_string(value.into())))
+    factory.create_value_term(ValueTerm::String(allocator.create_string(value)))
 }
 
 fn parse_symbol_literal<'src, T: Expression + Rewritable<T> + Reducible<T>>(

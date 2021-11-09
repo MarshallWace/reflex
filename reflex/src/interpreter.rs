@@ -512,9 +512,10 @@ fn evaluate_instruction<T: Expression + Rewritable<T> + Reducible<T> + Applicabl
         }
         Instruction::PushString { value } => {
             trace!(instruction = "Instruction::PushString");
-            stack.push(factory.create_value_term(ValueTerm::String(
-                allocator.create_string(String::from(value)),
-            )));
+            stack.push(
+                factory
+                    .create_value_term(ValueTerm::String(allocator.create_string(value.as_str()))),
+            );
             Ok((ExecutionResult::Advance, DependencyList::empty()))
         }
         Instruction::PushSymbol { value } => {

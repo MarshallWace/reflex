@@ -92,7 +92,7 @@ where
         factory.create_builtin_term(Stdlib::Effect),
         allocator.create_list(
             once(factory.create_value_term(ValueTerm::String(
-                allocator.create_string(String::from(SIGNAL_TYPE_LOAD)),
+                allocator.create_static_string(SIGNAL_TYPE_LOAD),
             )))
             .chain(once(factory.create_partial_application_term(
                 factory.create_lambda_term(

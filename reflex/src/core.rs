@@ -530,7 +530,9 @@ impl<'a, T: Expression> IntoIterator for &'a SignalList<T> {
 }
 
 pub trait StringValue:
-    std::hash::Hash
+    From<String>
+    + for<'a> From<&'a str>
+    + std::hash::Hash
     + std::cmp::Eq
     + std::cmp::PartialEq
     + std::clone::Clone
@@ -540,6 +542,15 @@ where
     Self: std::marker::Sized,
 {
     fn as_str(&self) -> &str;
+    fn from_static(_self: Option<Self>, value: &'static str) -> Self;
+}
+impl StringValue for String {
+    fn as_str(&self) -> &str {
+        self.as_str()
+    }
+    fn from_static(_self: Option<Self>, value: &'static str) -> Self {
+        Self::from(value)
+    }
 }
 
 pub type StateToken = HashId;
@@ -851,7 +862,8 @@ pub trait HeapAllocator<T: Expression> {
     fn clone_struct_prototype(&self, prototype: &StructPrototype) -> StructPrototype;
     fn create_signal(&self, signal_type: SignalType, args: ExpressionList<T>) -> Signal<T>;
     fn clone_signal(&self, signal: &Signal<T>) -> Signal<T>;
-    fn create_string(&self, value: String) -> T::String;
+    fn create_string(&self, value: impl Into<T::String>) -> T::String;
+    fn create_static_string(&self, value: &'static str) -> T::String;
     fn clone_string(&self, value: &T::String) -> T::String;
 }
 
@@ -1312,7 +1324,7 @@ mod tests {
     };
 
     fn create_error_signal_term<T: Expression>(
-        message: impl Into<String>,
+        message: impl Into<T::String>,
         factory: &impl ExpressionFactory<T>,
         allocator: &impl HeapAllocator<T>,
     ) -> T {
@@ -1322,15 +1334,14 @@ mod tests {
     }
 
     fn create_error_signal<T: Expression>(
-        message: impl Into<String>,
+        message: impl Into<T::String>,
         factory: &impl ExpressionFactory<T>,
         allocator: &impl HeapAllocator<T>,
     ) -> Signal<T> {
         allocator.create_signal(
             SignalType::Error,
             allocator.create_unit_list(
-                factory
-                    .create_value_term(ValueTerm::String(allocator.create_string(message.into()))),
+                factory.create_value_term(ValueTerm::String(allocator.create_string(message))),
             ),
         )
     }

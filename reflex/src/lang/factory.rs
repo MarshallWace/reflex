@@ -45,7 +45,7 @@ impl<TBuiltin: Builtin> SharedTermFactory<TBuiltin> {
 impl<TBuiltin: Builtin> ExpressionFactory<CachedSharedTerm<TBuiltin>>
     for SharedTermFactory<TBuiltin>
 {
-    fn create_value_term(&self, value: ValueTerm<StringPrimitive>) -> CachedSharedTerm<TBuiltin> {
+    fn create_value_term(&self, value: ValueTerm<String>) -> CachedSharedTerm<TBuiltin> {
         trace!(factory_create = "value_term");
         self.create_expression(Term::Value(value))
     }
@@ -182,7 +182,7 @@ impl<TBuiltin: Builtin> ExpressionFactory<CachedSharedTerm<TBuiltin>>
     fn match_value_term<'a>(
         &self,
         expression: &'a CachedSharedTerm<TBuiltin>,
-    ) -> Option<&'a ValueTerm<StringPrimitive>> {
+    ) -> Option<&'a ValueTerm<String>> {
         match expression.value.value().value() {
             Term::Value(term) => Some(term),
             _ => None,

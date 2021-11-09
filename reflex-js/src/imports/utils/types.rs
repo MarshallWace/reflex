@@ -95,9 +95,9 @@ mod tests {
             result,
             EvaluationResult::new(
                 factory.create_constructor_term(allocator.create_struct_prototype(vec![
-                    allocator.create_string(String::from("foo")),
-                    allocator.create_string(String::from("bar")),
-                    allocator.create_string(String::from("baz")),
+                    allocator.create_static_string("foo"),
+                    allocator.create_static_string("bar"),
+                    allocator.create_static_string("baz"),
                 ])),
                 DependencyList::empty(),
             ),
@@ -131,9 +131,9 @@ mod tests {
             EvaluationResult::new(
                 factory.create_struct_term(
                     allocator.create_struct_prototype(vec![
-                        allocator.create_string(String::from("foo")),
-                        allocator.create_string(String::from("bar")),
-                        allocator.create_string(String::from("baz")),
+                        allocator.create_static_string("foo"),
+                        allocator.create_static_string("bar"),
+                        allocator.create_static_string("baz"),
                     ]),
                     allocator.create_list(vec![
                         factory.create_value_term(ValueTerm::Float(3.0)),
@@ -173,9 +173,9 @@ mod tests {
             EvaluationResult::new(
                 factory.create_struct_term(
                     allocator.create_struct_prototype(vec![
-                        allocator.create_string(String::from("foo")),
-                        allocator.create_string(String::from("bar")),
-                        allocator.create_string(String::from("baz")),
+                        allocator.create_static_string("foo"),
+                        allocator.create_static_string("bar"),
+                        allocator.create_static_string("baz"),
                     ]),
                     allocator.create_list(vec![
                         factory.create_value_term(ValueTerm::Float(3.0)),
@@ -215,9 +215,9 @@ mod tests {
             EvaluationResult::new(
                 factory.create_struct_term(
                     allocator.create_struct_prototype(vec![
-                        allocator.create_string(String::from("foo")),
-                        allocator.create_string(String::from("bar")),
-                        allocator.create_string(String::from("baz")),
+                        allocator.create_static_string("foo"),
+                        allocator.create_static_string("bar"),
+                        allocator.create_static_string("baz"),
                     ]),
                     allocator.create_list(vec![
                         factory.create_application_term(

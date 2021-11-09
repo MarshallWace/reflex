@@ -23,14 +23,14 @@ where
                     factory.create_builtin_term(Stdlib::Effect),
                     allocator.create_pair(
                         factory.create_value_term(ValueTerm::String(
-                            allocator.create_string(String::from("reflex::date::timestamp")),
+                            allocator.create_static_string("reflex::date::timestamp"),
                         )),
                         factory.create_application_term(
                             factory.create_builtin_term(Stdlib::Get),
                             allocator.create_pair(
                                 factory.create_static_variable_term(0),
                                 factory.create_value_term(ValueTerm::String(
-                                    allocator.create_string(String::from("interval")),
+                                    allocator.create_static_string("interval"),
                                 )),
                             ),
                         ),

@@ -38,7 +38,7 @@ pub fn create_introspection_query_response<T: Expression>(
     factory.create_signal_term(allocator.create_signal_list(once(allocator.create_signal(
         SignalType::Error,
         allocator.create_unit_list(factory.create_value_term(ValueTerm::String(
-            allocator.create_string(String::from("Introspection query not yet implemented")),
+            allocator.create_static_string("Introspection query not yet implemented"),
         ))),
     ))))
 }
@@ -313,7 +313,7 @@ where
                 allocator.create_pair(
                     factory.create_static_variable_term(0),
                     factory.create_value_term(ValueTerm::String(
-                        allocator.create_string(operation_type.into()),
+                        allocator.create_string(operation_type),
                     )),
                 ),
             )),
@@ -583,7 +583,8 @@ fn parse_value<'src, T: Expression>(
         ))),
         Value::Float(value) => Ok(factory.create_value_term(ValueTerm::Float(*value))),
         Value::String(value) => {
-            Ok(factory.create_value_term(ValueTerm::String(allocator.create_string(value.into()))))
+            Ok(factory
+                .create_value_term(ValueTerm::String(allocator.create_string(value.as_str()))))
         }
         Value::Boolean(value) => Ok(factory.create_value_term(ValueTerm::Boolean(*value))),
         Value::Null => Ok(factory.create_value_term(ValueTerm::Null)),

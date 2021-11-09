@@ -47,7 +47,7 @@ impl<T: Expression> Applicable<T> for Entries {
                             .map(|(key, value)| {
                                 factory.create_tuple_term(allocator.create_pair(
                                     factory.create_value_term(ValueTerm::String(
-                                        allocator.create_string(String::from(key)),
+                                        allocator.create_string(key.as_str()),
                                     )),
                                     value.clone(),
                                 ))

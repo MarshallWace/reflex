@@ -9,7 +9,8 @@ use std::{
 use tracing::trace;
 
 use crate::core::{
-    Expression, ExpressionList, HeapAllocator, Signal, SignalList, SignalType, StructPrototype,
+    Expression, ExpressionList, HeapAllocator, Signal, SignalList, SignalType, StringValue,
+    StructPrototype,
 };
 
 #[derive(Copy, Clone)]
@@ -94,9 +95,13 @@ impl<T: Expression<String = String>> HeapAllocator<T> for DefaultAllocator<T> {
             HeapAllocator::<T>::clone_list(self, signal.args()),
         )
     }
-    fn create_string(&self, value: String) -> T::String {
+    fn create_string(&self, value: impl Into<T::String>) -> T::String {
         trace!(alloc = "string");
-        value
+        value.into()
+    }
+    fn create_static_string(&self, value: &'static str) -> T::String {
+        trace!(alloc = "static_string");
+        T::String::from_static(Option::<T::String>::None, value)
     }
     fn clone_string(&self, value: &T::String) -> T::String {
         trace!(alloc = "clone_string");

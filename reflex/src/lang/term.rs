@@ -36,17 +36,10 @@ use crate::{
     core::{
         Applicable, Arity, DependencyList, DynamicState, EvaluationCache, Expression,
         ExpressionFactory, GraphNode, HeapAllocator, Reducible, Rewritable, SerializeJson,
-        StackOffset, StringValue, Substitutions, VarArgs,
+        StackOffset, Substitutions, VarArgs,
     },
     hash::{hash_object, HashId},
 };
-
-pub type StringPrimitive = String;
-impl StringValue for StringPrimitive {
-    fn as_str(&self) -> &str {
-        self
-    }
-}
 
 #[derive(Hash, Eq, PartialEq, Clone, Debug)]
 pub enum Term<T: Expression> {

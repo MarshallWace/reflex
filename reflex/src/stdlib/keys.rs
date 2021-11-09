@@ -38,9 +38,8 @@ impl<T: Expression> Applicable<T> for Keys {
         let result = if let Some(target) = factory.match_struct_term(&target) {
             Some(factory.create_vector_term(allocator.create_list(
                 target.prototype().keys().iter().map(|key| {
-                    factory.create_value_term(ValueTerm::String(
-                        allocator.create_string(String::from(key)),
-                    ))
+                    factory
+                        .create_value_term(ValueTerm::String(allocator.create_string(key.as_str())))
                 }),
             )))
         } else if let Some(target) = factory.match_vector_term(&target) {

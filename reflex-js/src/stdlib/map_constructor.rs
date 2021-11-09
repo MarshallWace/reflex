@@ -193,19 +193,19 @@ mod tests {
                     vec![
                         (
                             factory.create_value_term(ValueTerm::String(
-                                allocator.create_string(String::from("one"))
+                                allocator.create_static_string("one")
                             )),
                             factory.create_value_term(ValueTerm::Float(1.0)),
                         ),
                         (
                             factory.create_value_term(ValueTerm::String(
-                                allocator.create_string(String::from("two"))
+                                allocator.create_static_string("two")
                             )),
                             factory.create_value_term(ValueTerm::Float(2.0)),
                         ),
                         (
                             factory.create_value_term(ValueTerm::String(
-                                allocator.create_string(String::from("three"))
+                                allocator.create_static_string("three")
                             )),
                             factory.create_value_term(ValueTerm::Float(3.0)),
                         ),
@@ -231,19 +231,19 @@ mod tests {
                     vec![
                         (
                             factory.create_value_term(ValueTerm::String(
-                                allocator.create_string(String::from("one"))
+                                allocator.create_static_string("one")
                             )),
                             factory.create_value_term(ValueTerm::Float(1.0)),
                         ),
                         (
                             factory.create_value_term(ValueTerm::String(
-                                allocator.create_string(String::from("two"))
+                                allocator.create_static_string("two")
                             )),
                             factory.create_value_term(ValueTerm::Float(4.0)),
                         ),
                         (
                             factory.create_value_term(ValueTerm::String(
-                                allocator.create_string(String::from("three"))
+                                allocator.create_static_string("three")
                             )),
                             factory.create_value_term(ValueTerm::Float(3.0)),
                         ),
@@ -286,19 +286,19 @@ mod tests {
                 factory.create_vector_term(allocator.create_list(vec![
                     factory.create_tuple_term(allocator.create_pair(
                         factory.create_value_term(ValueTerm::String(
-                            allocator.create_string(String::from("one"))
+                            allocator.create_static_string("one")
                         )),
                         factory.create_value_term(ValueTerm::Float(1.0)),
                     )),
                     factory.create_tuple_term(allocator.create_pair(
                         factory.create_value_term(ValueTerm::String(
-                            allocator.create_string(String::from("two"))
+                            allocator.create_static_string("two")
                         )),
                         factory.create_value_term(ValueTerm::Float(2.0)),
                     )),
                     factory.create_tuple_term(allocator.create_pair(
                         factory.create_value_term(ValueTerm::String(
-                            allocator.create_string(String::from("three"))
+                            allocator.create_static_string("three")
                         )),
                         factory.create_value_term(ValueTerm::Float(3.0)),
                     )),
@@ -320,19 +320,19 @@ mod tests {
                 factory.create_vector_term(allocator.create_list(vec![
                     factory.create_tuple_term(allocator.create_pair(
                         factory.create_value_term(ValueTerm::String(
-                            allocator.create_string(String::from("one"))
+                            allocator.create_static_string("one")
                         )),
                         factory.create_value_term(ValueTerm::Float(1.0)),
                     )),
                     factory.create_tuple_term(allocator.create_pair(
                         factory.create_value_term(ValueTerm::String(
-                            allocator.create_string(String::from("two"))
+                            allocator.create_static_string("two")
                         )),
                         factory.create_value_term(ValueTerm::Float(4.0)),
                     )),
                     factory.create_tuple_term(allocator.create_pair(
                         factory.create_value_term(ValueTerm::String(
-                            allocator.create_string(String::from("three"))
+                            allocator.create_static_string("three")
                         )),
                         factory.create_value_term(ValueTerm::Float(3.0)),
                     )),
@@ -371,13 +371,13 @@ mod tests {
             EvaluationResult::new(
                 factory.create_vector_term(allocator.create_list(vec![
                     factory.create_value_term(ValueTerm::String(
-                        allocator.create_string(String::from("one"))
+                        allocator.create_static_string("one")
                     )),
                     factory.create_value_term(ValueTerm::String(
-                        allocator.create_string(String::from("two"))
+                        allocator.create_static_string("two")
                     )),
                     factory.create_value_term(ValueTerm::String(
-                        allocator.create_string(String::from("three"))
+                        allocator.create_static_string("three")
                     )),
                 ])),
                 DependencyList::empty(),
@@ -396,13 +396,13 @@ mod tests {
             EvaluationResult::new(
                 factory.create_vector_term(allocator.create_list(vec![
                     factory.create_value_term(ValueTerm::String(
-                        allocator.create_string(String::from("one"))
+                        allocator.create_static_string("one")
                     )),
                     factory.create_value_term(ValueTerm::String(
-                        allocator.create_string(String::from("two"))
+                        allocator.create_static_string("two")
                     )),
                     factory.create_value_term(ValueTerm::String(
-                        allocator.create_string(String::from("three"))
+                        allocator.create_static_string("three")
                     )),
                 ])),
                 DependencyList::empty(),

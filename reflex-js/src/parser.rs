@@ -598,9 +598,8 @@ where
         PropKey::Pat(node) => match node {
             Pat::Ident(node) => {
                 let field_name = parse_identifier(node)?;
-                Ok(factory.create_value_term(ValueTerm::String(
-                    allocator.create_string(String::from(field_name)),
-                )))
+                Ok(factory
+                    .create_value_term(ValueTerm::String(allocator.create_string(field_name))))
             }
             Pat::Obj(node) => Err(err_unimplemented(node)),
             Pat::Array(node) => Err(err_unimplemented(node)),
@@ -938,7 +937,7 @@ where
         .map(|quasi| match parse_template_element(quasi)? {
             "" => Ok(None),
             value => Ok(Some(factory.create_value_term(ValueTerm::String(
-                allocator.create_string(value.into()),
+                allocator.create_string(value),
             )))),
         })
         .zip(
@@ -961,9 +960,7 @@ where
         })
         .collect::<ParserResult<Vec<_>>>()?;
     Ok(match args.len() {
-        0 => {
-            factory.create_value_term(ValueTerm::String(allocator.create_string(String::from(""))))
-        }
+        0 => factory.create_value_term(ValueTerm::String(allocator.create_static_string(""))),
         1 => args.into_iter().next().unwrap(),
         _ => factory.create_application_term(
             factory.create_builtin_term(Stdlib::Concat),
@@ -1818,7 +1815,7 @@ fn get_static_field<T: Expression + Rewritable<T>>(
 where
     T::Builtin: From<Stdlib>,
 {
-    let field = factory.create_value_term(ValueTerm::String(allocator.create_string(field.into())));
+    let field = factory.create_value_term(ValueTerm::String(allocator.create_string(field)));
     get_dynamic_field(target, field, factory, allocator)
 }
 
@@ -1913,9 +1910,8 @@ where
     let target = parse_expression(target, scope, env, factory, allocator)?;
     let is_potential_builtin_method = get_builtin_field(None, method_name, factory).is_some();
     if is_potential_builtin_method {
-        let method = factory.create_value_term(ValueTerm::String(
-            allocator.create_string(method_name.into()),
-        ));
+        let method =
+            factory.create_value_term(ValueTerm::String(allocator.create_string(method_name)));
         let num_args = args.len();
         let args = args.into_iter().collect::<Vec<_>>();
         let method_args = parse_expressions(args.iter().cloned(), scope, env, factory, allocator)?;
@@ -2055,7 +2051,7 @@ mod tests {
                         once((
                             String::from("name"),
                             factory.create_value_term(ValueTerm::String(
-                                allocator.create_string(String::from("Error")),
+                                allocator.create_static_string("Error"),
                             )),
                         ))
                         .chain(once((
@@ -2143,43 +2139,31 @@ mod tests {
         let env = Env::new();
         assert_eq!(
             parse("''", &env, &factory, &allocator),
-            Ok(factory
-                .create_value_term(ValueTerm::String(allocator.create_string(String::from(""))))),
+            Ok(factory.create_value_term(ValueTerm::String(allocator.create_static_string("")))),
         );
         assert_eq!(
             parse("\"\"", &env, &factory, &allocator),
-            Ok(factory
-                .create_value_term(ValueTerm::String(allocator.create_string(String::from(""))))),
+            Ok(factory.create_value_term(ValueTerm::String(allocator.create_static_string("")))),
         );
         assert_eq!(
             parse("'foo'", &env, &factory, &allocator),
-            Ok(factory.create_value_term(ValueTerm::String(
-                allocator.create_string(String::from("foo"))
-            ))),
+            Ok(factory.create_value_term(ValueTerm::String(allocator.create_static_string("foo")))),
         );
         assert_eq!(
             parse("\"foo\"", &env, &factory, &allocator),
-            Ok(factory.create_value_term(ValueTerm::String(
-                allocator.create_string(String::from("foo"))
-            ))),
+            Ok(factory.create_value_term(ValueTerm::String(allocator.create_static_string("foo")))),
         );
         assert_eq!(
             parse("'\"'", &env, &factory, &allocator),
-            Ok(factory.create_value_term(ValueTerm::String(
-                allocator.create_string(String::from("\""))
-            ))),
+            Ok(factory.create_value_term(ValueTerm::String(allocator.create_static_string("\"")))),
         );
         assert_eq!(
             parse("'\\\"'", &env, &factory, &allocator),
-            Ok(factory.create_value_term(ValueTerm::String(
-                allocator.create_string(String::from("\""))
-            ))),
+            Ok(factory.create_value_term(ValueTerm::String(allocator.create_static_string("\"")))),
         );
         assert_eq!(
             parse("\"\\\"\"", &env, &factory, &allocator),
-            Ok(factory.create_value_term(ValueTerm::String(
-                allocator.create_string(String::from("\""))
-            ))),
+            Ok(factory.create_value_term(ValueTerm::String(allocator.create_static_string("\"")))),
         );
     }
 
@@ -2249,34 +2233,30 @@ mod tests {
         let env = Env::new();
         assert_eq!(
             parse("``", &env, &factory, &allocator),
-            Ok(factory
-                .create_value_term(ValueTerm::String(allocator.create_string(String::from(""))))),
+            Ok(factory.create_value_term(ValueTerm::String(allocator.create_static_string("")))),
         );
         assert_eq!(
             parse("`foo`", &env, &factory, &allocator),
-            Ok(factory.create_value_term(ValueTerm::String(
-                allocator.create_string(String::from("foo"))
-            ))),
+            Ok(factory.create_value_term(ValueTerm::String(allocator.create_static_string("foo")))),
         );
         assert_eq!(
             parse("`\"`", &env, &factory, &allocator),
-            Ok(factory.create_value_term(ValueTerm::String(
-                allocator.create_string(String::from("\""))
-            ))),
+            Ok(factory.create_value_term(ValueTerm::String(allocator.create_static_string("\"")))),
         );
         assert_eq!(
             parse("`\\\"`", &env, &factory, &allocator),
-            Ok(factory.create_value_term(ValueTerm::String(
-                allocator.create_string(String::from("\\\""))
-            ))),
+            Ok(factory
+                .create_value_term(ValueTerm::String(allocator.create_static_string("\\\"")))),
         );
         assert_eq!(
             parse("`${'foo'}`", &env, &factory, &allocator),
             Ok(factory.create_application_term(
                 factory.create_builtin_term(JsStdlib::ToString),
-                allocator.create_list(allocator.create_unit_list(factory.create_value_term(
-                    ValueTerm::String(allocator.create_string(String::from("foo")))
-                ))),
+                allocator.create_list(allocator.create_unit_list(
+                    factory.create_value_term(ValueTerm::String(
+                        allocator.create_static_string("foo")
+                    ))
+                )),
             )),
         );
         assert_eq!(
@@ -2285,12 +2265,12 @@ mod tests {
                 factory.create_builtin_term(Stdlib::Concat),
                 allocator.create_list(vec![
                     factory.create_value_term(ValueTerm::String(
-                        allocator.create_string(String::from("foo"))
+                        allocator.create_static_string("foo")
                     )),
                     factory.create_application_term(
                         factory.create_builtin_term(JsStdlib::ToString),
                         allocator.create_unit_list(factory.create_value_term(ValueTerm::String(
-                            allocator.create_string(String::from("bar"))
+                            allocator.create_static_string("bar")
                         ))),
                     ),
                 ]),
@@ -2304,11 +2284,11 @@ mod tests {
                     factory.create_application_term(
                         factory.create_builtin_term(JsStdlib::ToString),
                         allocator.create_unit_list(factory.create_value_term(ValueTerm::String(
-                            allocator.create_string(String::from("foo"))
+                            allocator.create_static_string("foo")
                         ))),
                     ),
                     factory.create_value_term(ValueTerm::String(
-                        allocator.create_string(String::from("bar"))
+                        allocator.create_static_string("bar")
                     )),
                 ]),
             )),
@@ -2321,13 +2301,13 @@ mod tests {
                     factory.create_application_term(
                         factory.create_builtin_term(JsStdlib::ToString),
                         allocator.create_unit_list(factory.create_value_term(ValueTerm::String(
-                            allocator.create_string(String::from("foo"))
+                            allocator.create_static_string("foo")
                         ))),
                     ),
                     factory.create_application_term(
                         factory.create_builtin_term(JsStdlib::ToString),
                         allocator.create_unit_list(factory.create_value_term(ValueTerm::String(
-                            allocator.create_string(String::from("bar"))
+                            allocator.create_static_string("bar")
                         ))),
                     ),
                 ]),
@@ -2339,16 +2319,16 @@ mod tests {
                 factory.create_builtin_term(Stdlib::Concat),
                 allocator.create_list(vec![
                     factory.create_value_term(ValueTerm::String(
-                        allocator.create_string(String::from("foo"))
+                        allocator.create_static_string("foo")
                     )),
                     factory.create_application_term(
                         factory.create_builtin_term(JsStdlib::ToString),
                         allocator.create_unit_list(factory.create_value_term(ValueTerm::String(
-                            allocator.create_string(String::from("bar"))
+                            allocator.create_static_string("bar")
                         ))),
                     ),
                     factory.create_value_term(ValueTerm::String(
-                        allocator.create_string(String::from("baz"))
+                        allocator.create_static_string("baz")
                     )),
                 ]),
             )),
@@ -2361,16 +2341,16 @@ mod tests {
                     factory.create_application_term(
                         factory.create_builtin_term(JsStdlib::ToString),
                         allocator.create_unit_list(factory.create_value_term(ValueTerm::String(
-                            allocator.create_string(String::from("foo"))
+                            allocator.create_static_string("foo")
                         ))),
                     ),
                     factory.create_value_term(ValueTerm::String(
-                        allocator.create_string(String::from("bar"))
+                        allocator.create_static_string("bar")
                     )),
                     factory.create_application_term(
                         factory.create_builtin_term(JsStdlib::ToString),
                         allocator.create_unit_list(factory.create_value_term(ValueTerm::String(
-                            allocator.create_string(String::from("baz"))
+                            allocator.create_static_string("baz")
                         ))),
                     ),
                 ]),
@@ -2384,19 +2364,19 @@ mod tests {
                     factory.create_application_term(
                         factory.create_builtin_term(JsStdlib::ToString),
                         allocator.create_unit_list(factory.create_value_term(ValueTerm::String(
-                            allocator.create_string(String::from("foo"))
+                            allocator.create_static_string("foo")
                         ))),
                     ),
                     factory.create_application_term(
                         factory.create_builtin_term(JsStdlib::ToString),
                         allocator.create_unit_list(factory.create_value_term(ValueTerm::String(
-                            allocator.create_string(String::from("bar"))
+                            allocator.create_static_string("bar")
                         ))),
                     ),
                     factory.create_application_term(
                         factory.create_builtin_term(JsStdlib::ToString),
                         allocator.create_unit_list(factory.create_value_term(ValueTerm::String(
-                            allocator.create_string(String::from("baz"))
+                            allocator.create_static_string("baz")
                         ))),
                     ),
                 ]),
@@ -2413,30 +2393,30 @@ mod tests {
                 factory.create_builtin_term(Stdlib::Concat),
                 allocator.create_list(vec![
                     factory.create_value_term(ValueTerm::String(
-                        allocator.create_string(String::from("foo"))
+                        allocator.create_static_string("foo")
                     )),
                     factory.create_application_term(
                         factory.create_builtin_term(JsStdlib::ToString),
                         allocator.create_unit_list(factory.create_value_term(ValueTerm::String(
-                            allocator.create_string(String::from("one"))
+                            allocator.create_static_string("one")
                         ))),
                     ),
                     factory.create_value_term(ValueTerm::String(
-                        allocator.create_string(String::from("bar"))
+                        allocator.create_static_string("bar")
                     )),
                     factory.create_application_term(
                         factory.create_builtin_term(JsStdlib::ToString),
                         allocator.create_unit_list(factory.create_value_term(ValueTerm::String(
-                            allocator.create_string(String::from("two"))
+                            allocator.create_static_string("two")
                         ))),
                     ),
                     factory.create_value_term(ValueTerm::String(
-                        allocator.create_string(String::from("baz"))
+                        allocator.create_static_string("baz")
                     )),
                     factory.create_application_term(
                         factory.create_builtin_term(JsStdlib::ToString),
                         allocator.create_unit_list(factory.create_value_term(ValueTerm::String(
-                            allocator.create_string(String::from("three"))
+                            allocator.create_static_string("three")
                         ))),
                     ),
                 ]),
@@ -2460,9 +2440,9 @@ mod tests {
             parse("({ foo: 3, bar: 4, baz: 5 })", &env, &factory, &allocator),
             Ok(factory.create_struct_term(
                 allocator.create_struct_prototype(vec![
-                    allocator.create_string(String::from("foo")),
-                    allocator.create_string(String::from("bar")),
-                    allocator.create_string(String::from("baz")),
+                    allocator.create_static_string("foo"),
+                    allocator.create_static_string("bar"),
+                    allocator.create_static_string("baz"),
                 ]),
                 allocator.create_list(vec![
                     factory.create_value_term(ValueTerm::Float(3.0)),
@@ -2480,9 +2460,9 @@ mod tests {
             ),
             Ok(factory.create_struct_term(
                 allocator.create_struct_prototype(vec![
-                    allocator.create_string(String::from("foo")),
-                    allocator.create_string(String::from("bar")),
-                    allocator.create_string(String::from("baz")),
+                    allocator.create_static_string("foo"),
+                    allocator.create_static_string("bar"),
+                    allocator.create_static_string("baz"),
                 ]),
                 allocator.create_list(vec![
                     factory.create_value_term(ValueTerm::Float(3.0)),
@@ -2500,9 +2480,9 @@ mod tests {
             ),
             Ok(factory.create_struct_term(
                 allocator.create_struct_prototype(vec![
-                    allocator.create_string(String::from("foo")),
-                    allocator.create_string(String::from("bar")),
-                    allocator.create_string(String::from("baz")),
+                    allocator.create_static_string("foo"),
+                    allocator.create_static_string("bar"),
+                    allocator.create_static_string("baz"),
                 ]),
                 allocator.create_list(vec![
                     factory.create_value_term(ValueTerm::Float(3.0)),
@@ -2520,19 +2500,19 @@ mod tests {
             ),
             Ok(factory.create_struct_term(
                 allocator.create_struct_prototype(vec![
-                    allocator.create_string(String::from("3")),
-                    allocator.create_string(String::from("4")),
-                    allocator.create_string(String::from("5")),
+                    allocator.create_static_string("3"),
+                    allocator.create_static_string("4"),
+                    allocator.create_static_string("5"),
                 ]),
                 allocator.create_list(vec![
                     factory.create_value_term(ValueTerm::String(
-                        allocator.create_string(String::from("foo"))
+                        allocator.create_static_string("foo")
                     )),
                     factory.create_value_term(ValueTerm::String(
-                        allocator.create_string(String::from("bar"))
+                        allocator.create_static_string("bar")
                     )),
                     factory.create_value_term(ValueTerm::String(
-                        allocator.create_string(String::from("baz"))
+                        allocator.create_static_string("baz")
                     )),
                 ]),
             )),
@@ -2546,19 +2526,19 @@ mod tests {
             ),
             Ok(factory.create_struct_term(
                 allocator.create_struct_prototype(vec![
-                    allocator.create_string(String::from("3")),
-                    allocator.create_string(String::from("4")),
-                    allocator.create_string(String::from("5")),
+                    allocator.create_static_string("3"),
+                    allocator.create_static_string("4"),
+                    allocator.create_static_string("5"),
                 ]),
                 allocator.create_list(vec![
                     factory.create_value_term(ValueTerm::String(
-                        allocator.create_string(String::from("foo"))
+                        allocator.create_static_string("foo")
                     )),
                     factory.create_value_term(ValueTerm::String(
-                        allocator.create_string(String::from("bar"))
+                        allocator.create_static_string("bar")
                     )),
                     factory.create_value_term(ValueTerm::String(
-                        allocator.create_string(String::from("baz"))
+                        allocator.create_static_string("baz")
                     )),
                 ]),
             )),
@@ -2572,19 +2552,19 @@ mod tests {
             ),
             Ok(factory.create_struct_term(
                 allocator.create_struct_prototype(vec![
-                    allocator.create_string(String::from("3")),
-                    allocator.create_string(String::from("4")),
-                    allocator.create_string(String::from("5")),
+                    allocator.create_static_string("3"),
+                    allocator.create_static_string("4"),
+                    allocator.create_static_string("5"),
                 ]),
                 allocator.create_list(vec![
                     factory.create_value_term(ValueTerm::String(
-                        allocator.create_string(String::from("foo"))
+                        allocator.create_static_string("foo")
                     )),
                     factory.create_value_term(ValueTerm::String(
-                        allocator.create_string(String::from("bar"))
+                        allocator.create_static_string("bar")
                     )),
                     factory.create_value_term(ValueTerm::String(
-                        allocator.create_string(String::from("baz"))
+                        allocator.create_static_string("baz")
                     )),
                 ]),
             )),
@@ -2598,19 +2578,19 @@ mod tests {
             ),
             Ok(factory.create_struct_term(
                 allocator.create_struct_prototype(vec![
-                    allocator.create_string(String::from("3")),
-                    allocator.create_string(String::from("4")),
-                    allocator.create_string(String::from("5")),
+                    allocator.create_static_string("3"),
+                    allocator.create_static_string("4"),
+                    allocator.create_static_string("5"),
                 ]),
                 allocator.create_list(vec![
                     factory.create_value_term(ValueTerm::String(
-                        allocator.create_string(String::from("foo"))
+                        allocator.create_static_string("foo")
                     )),
                     factory.create_value_term(ValueTerm::String(
-                        allocator.create_string(String::from("bar"))
+                        allocator.create_static_string("bar")
                     )),
                     factory.create_value_term(ValueTerm::String(
-                        allocator.create_string(String::from("baz"))
+                        allocator.create_static_string("baz")
                     )),
                 ]),
             )),
@@ -2624,19 +2604,19 @@ mod tests {
             ),
             Ok(factory.create_struct_term(
                 allocator.create_struct_prototype(vec![
-                    allocator.create_string(String::from("1.1")),
-                    allocator.create_string(String::from("1.2")),
-                    allocator.create_string(String::from("1.3")),
+                    allocator.create_static_string("1.1"),
+                    allocator.create_static_string("1.2"),
+                    allocator.create_static_string("1.3"),
                 ]),
                 allocator.create_list(vec![
                     factory.create_value_term(ValueTerm::String(
-                        allocator.create_string(String::from("foo"))
+                        allocator.create_static_string("foo")
                     )),
                     factory.create_value_term(ValueTerm::String(
-                        allocator.create_string(String::from("bar"))
+                        allocator.create_static_string("bar")
                     )),
                     factory.create_value_term(ValueTerm::String(
-                        allocator.create_string(String::from("baz"))
+                        allocator.create_static_string("baz")
                     )),
                 ]),
             )),
@@ -2663,7 +2643,7 @@ mod tests {
                     allocator.create_pair(
                         expression.clone(),
                         factory.create_value_term(ValueTerm::String(
-                            allocator.create_string(String::from("first")),
+                            allocator.create_static_string("first"),
                         )),
                     ),
                 ),
@@ -2672,7 +2652,7 @@ mod tests {
                     allocator.create_pair(
                         expression.clone(),
                         factory.create_value_term(ValueTerm::String(
-                            allocator.create_string(String::from("second")),
+                            allocator.create_static_string("second"),
                         )),
                     ),
                 ),
@@ -2681,7 +2661,7 @@ mod tests {
                     allocator.create_pair(
                         expression.clone(),
                         factory.create_value_term(ValueTerm::String(
-                            allocator.create_string(String::from("third")),
+                            allocator.create_static_string("third"),
                         )),
                     ),
                 ),
@@ -2690,7 +2670,7 @@ mod tests {
                     allocator.create_pair(
                         expression.clone(),
                         factory.create_value_term(ValueTerm::String(
-                            allocator.create_string(String::from("fourth")),
+                            allocator.create_static_string("fourth"),
                         )),
                     ),
                 ),
@@ -2699,7 +2679,7 @@ mod tests {
                     allocator.create_pair(
                         expression.clone(),
                         factory.create_value_term(ValueTerm::String(
-                            allocator.create_string(String::from("fifth")),
+                            allocator.create_static_string("fifth"),
                         )),
                     ),
                 ),
@@ -2740,7 +2720,7 @@ mod tests {
                     allocator.create_pair(
                         expression.clone(),
                         factory.create_value_term(ValueTerm::String(
-                            allocator.create_string(String::from("first")),
+                            allocator.create_static_string("first"),
                         )),
                     ),
                 ),
@@ -2749,7 +2729,7 @@ mod tests {
                     allocator.create_pair(
                         expression.clone(),
                         factory.create_value_term(ValueTerm::String(
-                            allocator.create_string(String::from("second")),
+                            allocator.create_static_string("second"),
                         )),
                     ),
                 ),
@@ -2758,7 +2738,7 @@ mod tests {
                     allocator.create_pair(
                         expression.clone(),
                         factory.create_value_term(ValueTerm::String(
-                            allocator.create_string(String::from("third")),
+                            allocator.create_static_string("third"),
                         )),
                     ),
                 ),
@@ -2949,7 +2929,7 @@ mod tests {
                         factory.create_value_term(ValueTerm::Float(5.0)),
                     ])),
                     factory.create_value_term(ValueTerm::String(
-                        allocator.create_string(String::from("map"))
+                        allocator.create_static_string("map")
                     )),
                     factory.create_application_term(
                         factory.create_application_term(
@@ -2961,7 +2941,7 @@ mod tests {
                                     factory.create_value_term(ValueTerm::Float(5.0)),
                                 ])),
                                 factory.create_value_term(ValueTerm::String(
-                                    allocator.create_string(String::from("map"))
+                                    allocator.create_static_string("map")
                                 )),
                             ),
                         ),
@@ -3101,9 +3081,9 @@ mod tests {
                     allocator.create_pair(
                         factory.create_struct_term(
                             allocator.create_struct_prototype(vec![
-                                allocator.create_string(String::from("foo")),
-                                allocator.create_string(String::from("bar")),
-                                allocator.create_string(String::from("baz")),
+                                allocator.create_static_string("foo"),
+                                allocator.create_static_string("bar"),
+                                allocator.create_static_string("baz"),
                             ]),
                             allocator.create_list(vec![
                                 factory.create_value_term(ValueTerm::Float(3.0)),
@@ -3112,7 +3092,7 @@ mod tests {
                             ]),
                         ),
                         factory.create_value_term(ValueTerm::String(
-                            allocator.create_string(String::from("foo"))
+                            allocator.create_static_string("foo")
                         )),
                     ),
                 ),
@@ -3129,9 +3109,9 @@ mod tests {
             Ok(factory.create_let_term(
                 factory.create_struct_term(
                     allocator.create_struct_prototype(vec![
-                        allocator.create_string(String::from("foo")),
-                        allocator.create_string(String::from("bar")),
-                        allocator.create_string(String::from("baz")),
+                        allocator.create_static_string("foo"),
+                        allocator.create_static_string("bar"),
+                        allocator.create_static_string("baz"),
                     ]),
                     allocator.create_list(vec![
                         factory.create_value_term(ValueTerm::Float(3.0)),
@@ -3145,7 +3125,7 @@ mod tests {
                         allocator.create_pair(
                             factory.create_static_variable_term(0),
                             factory.create_value_term(ValueTerm::String(
-                                allocator.create_string(String::from("bar"))
+                                allocator.create_static_string("bar")
                             )),
                         ),
                     ),
@@ -3155,7 +3135,7 @@ mod tests {
                             allocator.create_pair(
                                 factory.create_static_variable_term(1),
                                 factory.create_value_term(ValueTerm::String(
-                                    allocator.create_string(String::from("foo"))
+                                    allocator.create_static_string("foo")
                                 )),
                             ),
                         ),
@@ -3174,9 +3154,9 @@ mod tests {
             Ok(factory.create_let_term(
                 factory.create_struct_term(
                     allocator.create_struct_prototype(vec![
-                        allocator.create_string(String::from("foo")),
-                        allocator.create_string(String::from("bar")),
-                        allocator.create_string(String::from("baz")),
+                        allocator.create_static_string("foo"),
+                        allocator.create_static_string("bar"),
+                        allocator.create_static_string("baz"),
                     ]),
                     allocator.create_list(vec![
                         factory.create_value_term(ValueTerm::Float(3.0)),
@@ -3190,7 +3170,7 @@ mod tests {
                         allocator.create_pair(
                             factory.create_static_variable_term(0),
                             factory.create_value_term(ValueTerm::String(
-                                allocator.create_string(String::from("bar"))
+                                allocator.create_static_string("bar")
                             )),
                         ),
                     ),
@@ -3200,7 +3180,7 @@ mod tests {
                             allocator.create_pair(
                                 factory.create_static_variable_term(1),
                                 factory.create_value_term(ValueTerm::String(
-                                    allocator.create_string(String::from("foo"))
+                                    allocator.create_static_string("foo")
                                 )),
                             ),
                         ),
@@ -3219,9 +3199,9 @@ mod tests {
             Ok(factory.create_let_term(
                 factory.create_struct_term(
                     allocator.create_struct_prototype(vec![
-                        allocator.create_string(String::from("foo")),
-                        allocator.create_string(String::from("bar")),
-                        allocator.create_string(String::from("baz")),
+                        allocator.create_static_string("foo"),
+                        allocator.create_static_string("bar"),
+                        allocator.create_static_string("baz"),
                     ]),
                     allocator.create_list(vec![
                         factory.create_value_term(ValueTerm::Float(3.0)),
@@ -3235,7 +3215,7 @@ mod tests {
                         allocator.create_pair(
                             factory.create_static_variable_term(0),
                             factory.create_value_term(ValueTerm::String(
-                                allocator.create_string(String::from("bar"))
+                                allocator.create_static_string("bar")
                             )),
                         ),
                     ),
@@ -3245,7 +3225,7 @@ mod tests {
                             allocator.create_pair(
                                 factory.create_static_variable_term(1),
                                 factory.create_value_term(ValueTerm::String(
-                                    allocator.create_string(String::from("foo"))
+                                    allocator.create_static_string("foo")
                                 )),
                             ),
                         ),
@@ -3264,9 +3244,9 @@ mod tests {
             Ok(factory.create_let_term(
                 factory.create_struct_term(
                     allocator.create_struct_prototype(vec![
-                        allocator.create_string(String::from("foo")),
-                        allocator.create_string(String::from("bar")),
-                        allocator.create_string(String::from("baz")),
+                        allocator.create_static_string("foo"),
+                        allocator.create_static_string("bar"),
+                        allocator.create_static_string("baz"),
                     ]),
                     allocator.create_list(vec![
                         factory.create_value_term(ValueTerm::Float(3.0)),
@@ -3280,7 +3260,7 @@ mod tests {
                         allocator.create_pair(
                             factory.create_static_variable_term(0),
                             factory.create_value_term(ValueTerm::String(
-                                allocator.create_string(String::from("bar"))
+                                allocator.create_static_string("bar")
                             )),
                         ),
                     ),
@@ -3290,7 +3270,7 @@ mod tests {
                             allocator.create_pair(
                                 factory.create_static_variable_term(1),
                                 factory.create_value_term(ValueTerm::String(
-                                    allocator.create_string(String::from("foo"))
+                                    allocator.create_static_string("foo")
                                 )),
                             ),
                         ),
@@ -3309,9 +3289,9 @@ mod tests {
             Ok(factory.create_let_term(
                 factory.create_struct_term(
                     allocator.create_struct_prototype(vec![
-                        allocator.create_string(String::from("first")),
-                        allocator.create_string(String::from("second")),
-                        allocator.create_string(String::from("third")),
+                        allocator.create_static_string("first"),
+                        allocator.create_static_string("second"),
+                        allocator.create_static_string("third"),
                     ]),
                     allocator.create_list(vec![
                         factory.create_value_term(ValueTerm::Float(3.0)),
@@ -3327,7 +3307,7 @@ mod tests {
                             allocator.create_pair(
                                 factory.create_static_variable_term(0),
                                 factory.create_value_term(ValueTerm::String(
-                                    allocator.create_string(String::from("first")),
+                                    allocator.create_static_string("first"),
                                 )),
                             ),
                         ),
@@ -3337,7 +3317,7 @@ mod tests {
                                 allocator.create_pair(
                                     factory.create_static_variable_term(1),
                                     factory.create_value_term(ValueTerm::String(
-                                        allocator.create_string(String::from("second")),
+                                        allocator.create_static_string("second"),
                                     )),
                                 ),
                             ),
@@ -3357,9 +3337,9 @@ mod tests {
             Ok(factory.create_let_term(
                 factory.create_struct_term(
                     allocator.create_struct_prototype(vec![
-                        allocator.create_string(String::from("first")),
-                        allocator.create_string(String::from("second")),
-                        allocator.create_string(String::from("third")),
+                        allocator.create_static_string("first"),
+                        allocator.create_static_string("second"),
+                        allocator.create_static_string("third"),
                     ]),
                     allocator.create_list(vec![
                         factory.create_value_term(ValueTerm::Float(3.0)),
@@ -3377,7 +3357,7 @@ mod tests {
                                 allocator.create_pair(
                                     factory.create_static_variable_term(0),
                                     factory.create_value_term(ValueTerm::String(
-                                        allocator.create_string(String::from("first")),
+                                        allocator.create_static_string("first"),
                                     )),
                                 ),
                             ),
@@ -3387,7 +3367,7 @@ mod tests {
                                     allocator.create_pair(
                                         factory.create_static_variable_term(1),
                                         factory.create_value_term(ValueTerm::String(
-                                            allocator.create_string(String::from("second")),
+                                            allocator.create_static_string("second"),
                                         )),
                                     ),
                                 ),
@@ -3408,14 +3388,14 @@ mod tests {
             Ok(factory.create_let_term(
                 factory.create_struct_term(
                     allocator.create_struct_prototype(vec![
-                        allocator.create_string(String::from("one")),
-                        allocator.create_string(String::from("two")),
+                        allocator.create_static_string("one"),
+                        allocator.create_static_string("two"),
                     ]),
                     allocator.create_list(vec![
                         factory.create_struct_term(
                             allocator.create_struct_prototype(vec![
-                                allocator.create_string(String::from("a")),
-                                allocator.create_string(String::from("b")),
+                                allocator.create_static_string("a"),
+                                allocator.create_static_string("b"),
                             ]),
                             allocator.create_list(vec![
                                 factory.create_value_term(ValueTerm::Float(1.0)),
@@ -3424,8 +3404,8 @@ mod tests {
                         ),
                         factory.create_struct_term(
                             allocator.create_struct_prototype(vec![
-                                allocator.create_string(String::from("c")),
-                                allocator.create_string(String::from("d")),
+                                allocator.create_static_string("c"),
+                                allocator.create_static_string("d"),
                             ]),
                             allocator.create_list(vec![
                                 factory.create_value_term(ValueTerm::Float(3.0)),
@@ -3439,9 +3419,9 @@ mod tests {
                         factory.create_builtin_term(Stdlib::Get),
                         allocator.create_pair(
                             factory.create_static_variable_term(0),
-                            factory.create_value_term(ValueTerm::String(allocator.create_string(String::from(
+                            factory.create_value_term(ValueTerm::String(allocator.create_string(
                                 "one"
-                            )))),
+                            ))),
                         ),
                     ),
                     factory.create_let_term(
@@ -3449,9 +3429,9 @@ mod tests {
                             factory.create_builtin_term(Stdlib::Get),
                             allocator.create_pair(
                                 factory.create_static_variable_term(1),
-                                factory.create_value_term(ValueTerm::String(allocator.create_string(String::from(
+                                factory.create_value_term(ValueTerm::String(allocator.create_string(
                                     "two"
-                                )))),
+                                ))),
                             ),
                         ),
                         factory.create_let_term(
@@ -3461,7 +3441,7 @@ mod tests {
                                     factory.create_builtin_term(Stdlib::Get),
                                     allocator.create_pair(
                                         factory.create_static_variable_term(0),
-                                        factory.create_value_term(ValueTerm::String(allocator.create_string(String::from("a")))),
+                                        factory.create_value_term(ValueTerm::String(allocator.create_static_string("a"))),
                                     ),
                                 ),
                                 factory.create_let_term(
@@ -3469,7 +3449,7 @@ mod tests {
                                         factory.create_builtin_term(Stdlib::Get),
                                         allocator.create_pair(
                                             factory.create_static_variable_term(1),
-                                            factory.create_value_term(ValueTerm::String(allocator.create_string(String::from("b")))),
+                                            factory.create_value_term(ValueTerm::String(allocator.create_static_string("b"))),
                                         ),
                                     ),
                                     factory.create_let_term(
@@ -3479,7 +3459,7 @@ mod tests {
                                                 factory.create_builtin_term(Stdlib::Get),
                                                 allocator.create_pair(
                                                     factory.create_static_variable_term(0),
-                                                    factory.create_value_term(ValueTerm::String(allocator.create_string(String::from("c")))),
+                                                    factory.create_value_term(ValueTerm::String(allocator.create_static_string("c"))),
                                                 ),
                                             ),
                                             factory.create_let_term(
@@ -3487,7 +3467,7 @@ mod tests {
                                                     factory.create_builtin_term(Stdlib::Get),
                                                     allocator.create_pair(
                                                         factory.create_static_variable_term(1),
-                                                        factory.create_value_term(ValueTerm::String(allocator.create_string(String::from("d")))),
+                                                        factory.create_value_term(ValueTerm::String(allocator.create_static_string("d"))),
                                                     ),
                                                 ),
                                                 factory.create_static_variable_term(4),
@@ -3513,7 +3493,7 @@ mod tests {
                                 factory.create_builtin_term(Stdlib::Get),
                                 allocator.create_pair(
                                     factory.create_static_variable_term(0),
-                                    factory.create_value_term(ValueTerm::String(allocator.create_string(String::from("foo")))),
+                                    factory.create_value_term(ValueTerm::String(allocator.create_static_string("foo"))),
                                 ),
                             ),
                             factory.create_let_term(
@@ -3521,7 +3501,7 @@ mod tests {
                                     factory.create_builtin_term(Stdlib::Get),
                                     allocator.create_pair(
                                         factory.create_static_variable_term(1),
-                                        factory.create_value_term(ValueTerm::String(allocator.create_string(String::from("bar")))),
+                                        factory.create_value_term(ValueTerm::String(allocator.create_static_string("bar"))),
                                     ),
                                 ),
                                 factory.create_static_variable_term(0),
@@ -3531,8 +3511,8 @@ mod tests {
                 ),
                 allocator.create_unit_list(factory.create_struct_term(
                     allocator.create_struct_prototype(vec![
-                        allocator.create_string(String::from("foo")),
-                        allocator.create_string(String::from("bar")),
+                        allocator.create_static_string("foo"),
+                        allocator.create_static_string("bar"),
                     ]),
                     allocator.create_list(vec![
                         factory.create_value_term(ValueTerm::Boolean(false)),
@@ -4093,7 +4073,7 @@ mod tests {
                                 factory.create_builtin_term(JsStdlib::Throw),
                                 allocator.create_unit_list(
                                     create_error_instance(
-                                        factory.create_value_term(ValueTerm::String(allocator.create_string(String::from("foo")))),
+                                        factory.create_value_term(ValueTerm::String(allocator.create_static_string("foo"))),
                                         &factory,
                                         &allocator,
                                     )
@@ -4103,7 +4083,7 @@ mod tests {
                                 factory.create_builtin_term(JsStdlib::Throw),
                                 allocator.create_unit_list(
                                     create_error_instance(
-                                        factory.create_value_term(ValueTerm::String(allocator.create_string(String::from("bar")))),
+                                        factory.create_value_term(ValueTerm::String(allocator.create_static_string("bar"))),
                                         &factory,
                                         &allocator,
                                     )
@@ -4210,7 +4190,7 @@ mod tests {
                                 factory.create_builtin_term(JsStdlib::Throw),
                                 allocator.create_unit_list(
                                     create_error_instance(
-                                        factory.create_value_term(ValueTerm::String(allocator.create_string(String::from("foo")))),
+                                        factory.create_value_term(ValueTerm::String(allocator.create_static_string("foo"))),
                                         &factory,
                                         &allocator,
                                     )
@@ -4248,7 +4228,7 @@ mod tests {
                 factory.create_builtin_term(JsStdlib::Throw),
                 allocator.create_unit_list(create_error_instance(
                     factory.create_value_term(ValueTerm::String(
-                        allocator.create_string(String::from("foo"))
+                        allocator.create_static_string("foo")
                     )),
                     &factory,
                     &allocator
@@ -4264,12 +4244,12 @@ mod tests {
                         factory.create_builtin_term(Stdlib::Concat),
                         allocator.create_pair(
                             factory.create_value_term(ValueTerm::String(
-                                allocator.create_string(String::from("foo"))
+                                allocator.create_static_string("foo")
                             )),
                             factory.create_application_term(
                                 factory.create_builtin_term(JsStdlib::ToString),
                                 allocator.create_unit_list(factory.create_value_term(
-                                    ValueTerm::String(allocator.create_string(String::from("bar")))
+                                    ValueTerm::String(allocator.create_static_string("bar"))
                                 )),
                             ),
                         ),
@@ -4444,9 +4424,8 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                factory.create_value_term(ValueTerm::String(
-                    allocator.create_string(String::from("foo")),
-                )),
+                factory
+                    .create_value_term(ValueTerm::String(allocator.create_static_string("foo"),)),
                 DependencyList::empty(),
             ),
         );
@@ -4473,9 +4452,8 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                factory.create_value_term(ValueTerm::String(
-                    allocator.create_string(String::from("foo")),
-                )),
+                factory
+                    .create_value_term(ValueTerm::String(allocator.create_static_string("foo"),)),
                 DependencyList::empty(),
             ),
         );
@@ -4633,7 +4611,7 @@ mod tests {
                                         once((
                                             String::from("name"),
                                             factory.create_value_term(ValueTerm::String(
-                                                allocator.create_string(String::from("Error")),
+                                                allocator.create_static_string("Error"),
                                             )),
                                         ))
                                         .chain(once((
@@ -4742,7 +4720,7 @@ mod tests {
                         allocator.create_pair(
                             factory.create_static_variable_term(0),
                             factory.create_value_term(ValueTerm::String(
-                                allocator.create_string(String::from("foo"))
+                                allocator.create_static_string("foo")
                             )),
                         ),
                     ),
@@ -4762,7 +4740,7 @@ mod tests {
                             allocator.create_pair(
                                 factory.create_static_variable_term(0),
                                 factory.create_value_term(ValueTerm::String(
-                                    allocator.create_string(String::from("foo"))
+                                    allocator.create_static_string("foo")
                                 )),
                             ),
                         ),
@@ -4772,7 +4750,7 @@ mod tests {
                                 allocator.create_pair(
                                     factory.create_static_variable_term(1),
                                     factory.create_value_term(ValueTerm::String(
-                                        allocator.create_string(String::from("bar"))
+                                        allocator.create_static_string("bar")
                                     )),
                                 ),
                             ),
@@ -4805,7 +4783,7 @@ mod tests {
                             allocator.create_pair(
                                 factory.create_static_variable_term(0),
                                 factory.create_value_term(ValueTerm::String(
-                                    allocator.create_string(String::from("foo"))
+                                    allocator.create_static_string("foo")
                                 )),
                             ),
                         ),
@@ -4815,7 +4793,7 @@ mod tests {
                                 allocator.create_pair(
                                     factory.create_static_variable_term(1),
                                     factory.create_value_term(ValueTerm::String(
-                                        allocator.create_string(String::from("bar"))
+                                        allocator.create_static_string("bar")
                                     )),
                                 ),
                             ),
@@ -5263,7 +5241,7 @@ mod tests {
             result,
             EvaluationResult::new(
                 factory.create_value_term(ValueTerm::String(
-                    allocator.create_string(String::from("Hello, John Doe!"))
+                    allocator.create_static_string("Hello, John Doe!")
                 )),
                 DependencyList::empty(),
             ),
@@ -5307,7 +5285,7 @@ mod tests {
             result,
             EvaluationResult::new(
                 factory.create_value_term(ValueTerm::String(
-                    allocator.create_string(String::from("Hello, John Doe!"))
+                    allocator.create_static_string("Hello, John Doe!")
                 )),
                 DependencyList::empty(),
             ),

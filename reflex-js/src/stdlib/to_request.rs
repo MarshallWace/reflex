@@ -39,9 +39,8 @@ impl<T: Expression> Applicable<T> for ToRequest {
         let result = match factory.match_value_term(&target) {
             Some(ValueTerm::String(_)) => {
                 let url = target.clone();
-                let method = factory.create_value_term(ValueTerm::String(
-                    allocator.create_string(String::from("GET")),
-                ));
+                let method = factory
+                    .create_value_term(ValueTerm::String(allocator.create_static_string("GET")));
                 let headers = factory.create_struct_term(
                     allocator.create_struct_prototype(Vec::new()),
                     allocator.create_empty_list(),
