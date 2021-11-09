@@ -14,6 +14,7 @@ use im::OrdSet;
 use serde::{Deserialize, Serialize};
 pub use uuid::Uuid;
 
+use crate::cache::NoopCache;
 use crate::lang::*;
 use crate::{
     compiler::InstructionPointer,
@@ -68,6 +69,7 @@ macro_rules! uuid {
         uuid::Uuid::from_bytes(uuid::uuid_macro::parse_lit!($uuid))
     }};
 }
+
 pub use uuid;
 
 pub trait GraphNode {
@@ -81,8 +83,50 @@ pub trait GraphNode {
     fn is_atomic(&self) -> bool;
 }
 
+pub(crate) fn count_subexpression_usages<'a, T: Expression + Rewritable<T> + 'a>(
+    pattern: &T,
+    subexpressions: impl IntoIterator<Item = &'a T>,
+    subexpression_scope_offset: StackOffset,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> usize {
+    let mut noop_cache = NoopCache::default();
+    subexpressions.into_iter().fold(0, |result, subexpression| {
+        if subexpression_scope_offset == 0 {
+            result + subexpression.count_subexpression_usages(pattern, factory, allocator)
+        } else {
+            let adjusted_scope_pattern = pattern.substitute_static(
+                &Substitutions::increase_scope_offset(subexpression_scope_offset),
+                factory,
+                allocator,
+                &mut noop_cache,
+            );
+            let pattern = adjusted_scope_pattern.as_ref().unwrap_or(pattern);
+            result + subexpression.count_subexpression_usages(pattern, factory, allocator)
+        }
+    })
+}
+
 pub trait Rewritable<T: Expression + Rewritable<T>> {
-    fn subexpressions(&self) -> Vec<&T>;
+    fn children(&self) -> Vec<&T>;
+    fn subexpressions(&self) -> Vec<&T> {
+        self.children()
+            .into_iter()
+            .flat_map(|child| once(child).chain(child.subexpressions()))
+            .collect()
+    }
+    fn count_subexpression_usages(
+        &self,
+        expression: &T,
+        factory: &impl ExpressionFactory<T>,
+        allocator: &impl HeapAllocator<T>,
+    ) -> usize {
+        // Default expression assumes this is a container.
+        self.children()
+            .iter()
+            .map(|expr| expr.count_subexpression_usages(expression, factory, allocator))
+            .sum()
+    }
     fn substitute_static(
         &self,
         substitutions: &Substitutions<T>,
@@ -1322,6 +1366,7 @@ impl<T: Expression> EvaluationResult<T> {
 mod tests {
     use std::iter::once;
 
+    use crate::lang::create_struct;
     use crate::{
         allocator::DefaultAllocator,
         cache::SubstitutionCache,
@@ -1975,6 +2020,106 @@ mod tests {
                 })
                 .collect::<String>(),
             ""
+        );
+    }
+
+    #[test]
+    fn count_subexpression_usages_correct() {
+        let factory = SharedTermFactory::<Stdlib>::default();
+        let allocator = DefaultAllocator::default();
+        let pattern = factory.create_value_term(ValueTerm::Int(1));
+
+        let expression = factory.create_value_term(ValueTerm::Int(1));
+        assert_eq!(
+            1,
+            expression.count_subexpression_usages(&pattern, &factory, &allocator)
+        );
+
+        let expression = factory.create_value_term(ValueTerm::Int(0));
+        assert_eq!(
+            0,
+            expression.count_subexpression_usages(&pattern, &factory, &allocator)
+        );
+
+        let expression = create_struct(
+            [
+                (
+                    String::from("foo"),
+                    factory.create_value_term(ValueTerm::Int(1)),
+                ),
+                (
+                    String::from("bar"),
+                    factory.create_value_term(ValueTerm::Int(1)),
+                ),
+                (
+                    String::from("baz"),
+                    factory.create_value_term(ValueTerm::Int(0)),
+                ),
+            ],
+            &factory,
+            &allocator,
+        );
+        assert_eq!(
+            2,
+            expression.count_subexpression_usages(&pattern, &factory, &allocator)
+        );
+
+        let expression = factory.create_application_term(
+            factory.create_builtin_term(Stdlib::Add),
+            allocator.create_pair(
+                factory.create_value_term(ValueTerm::Int(1)),
+                factory.create_value_term(ValueTerm::Int(1)),
+            ),
+        );
+        assert_eq!(
+            2,
+            expression.count_subexpression_usages(&pattern, &factory, &allocator)
+        );
+
+        let expression = factory.create_partial_application_term(
+            factory.create_builtin_term(Stdlib::Add),
+            allocator.create_unit_list(factory.create_value_term(ValueTerm::Int(1))),
+        );
+        assert_eq!(
+            1,
+            expression.count_subexpression_usages(&pattern, &factory, &allocator)
+        );
+
+        let expression =
+            factory.create_lambda_term(1, factory.create_value_term(ValueTerm::Int(1)));
+        assert_eq!(
+            1,
+            expression.count_subexpression_usages(&pattern, &factory, &allocator)
+        );
+
+        // (foo) -> bar + foo - search for bar where bar refers to something up the stack
+        let pattern = factory.create_static_variable_term(0);
+        let expression = factory.create_lambda_term(
+            1,
+            factory.create_tuple_term(allocator.create_list([
+                factory.create_static_variable_term(0),
+                factory.create_static_variable_term(1),
+                factory.create_static_variable_term(1),
+            ])),
+        );
+        assert_eq!(
+            2,
+            expression.count_subexpression_usages(&pattern, &factory, &allocator)
+        );
+
+        // (let foo [foo bar bar]) where bar happens to equal foo
+        let pattern = factory.create_static_variable_term(0);
+        let expression = factory.create_let_term(
+            factory.create_static_variable_term(0),
+            factory.create_tuple_term(allocator.create_list([
+                factory.create_static_variable_term(0),
+                factory.create_static_variable_term(1),
+                factory.create_static_variable_term(1),
+            ])),
+        );
+        assert_eq!(
+            3,
+            expression.count_subexpression_usages(&pattern, &factory, &allocator)
         );
     }
 }

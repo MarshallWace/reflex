@@ -5,6 +5,7 @@
 use serde::{Deserialize, Serialize};
 use std::{collections::HashSet, iter::once};
 
+use crate::core::count_subexpression_usages;
 use crate::{
     compiler::{Compile, Compiler, Instruction, Program},
     core::{
@@ -65,12 +66,17 @@ impl<T: Expression> GraphNode for LetTerm<T> {
     }
 }
 impl<T: Expression + Rewritable<T> + Reducible<T>> Rewritable<T> for LetTerm<T> {
-    fn subexpressions(&self) -> Vec<&T> {
-        once(&self.initializer)
-            .chain(self.initializer.subexpressions())
-            .chain(once(&self.body))
-            .chain(self.body.subexpressions())
-            .collect()
+    fn children(&self) -> Vec<&T> {
+        once(&self.initializer).chain(once(&self.body)).collect()
+    }
+    fn count_subexpression_usages(
+        &self,
+        expression: &T,
+        factory: &impl ExpressionFactory<T>,
+        allocator: &impl HeapAllocator<T>,
+    ) -> usize {
+        count_subexpression_usages(expression, once(&self.initializer), 0, factory, allocator)
+            + count_subexpression_usages(expression, once(&self.body), 1, factory, allocator)
     }
     fn substitute_static(
         &self,

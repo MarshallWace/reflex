@@ -39,7 +39,7 @@ impl<TBuiltin: Builtin> SharedTermFactory<TBuiltin> {
         value: Term<CachedSharedTerm<TBuiltin>>,
     ) -> CachedSharedTerm<TBuiltin> {
         CachedSharedTerm {
-            value: CachedExpression::new(SharedExpression::new(value)),
+            value: CachedExpression::new(SharedExpression::new(TermExpression::new(value))),
         }
     }
 }
@@ -184,7 +184,7 @@ impl<TBuiltin: Builtin> ExpressionFactory<CachedSharedTerm<TBuiltin>>
         &self,
         expression: &'a CachedSharedTerm<TBuiltin>,
     ) -> Option<&'a ValueTerm<String>> {
-        match expression.value.value().value() {
+        match expression.inner_term() {
             Term::Value(term) => Some(term),
             _ => None,
         }
@@ -193,7 +193,7 @@ impl<TBuiltin: Builtin> ExpressionFactory<CachedSharedTerm<TBuiltin>>
         &self,
         expression: &'a CachedSharedTerm<TBuiltin>,
     ) -> Option<&'a StaticVariableTerm> {
-        match expression.value.value().value() {
+        match expression.inner_term() {
             Term::Variable(VariableTerm::Static(term)) => Some(term),
             _ => None,
         }
@@ -202,7 +202,7 @@ impl<TBuiltin: Builtin> ExpressionFactory<CachedSharedTerm<TBuiltin>>
         &self,
         expression: &'a CachedSharedTerm<TBuiltin>,
     ) -> Option<&'a DynamicVariableTerm<CachedSharedTerm<TBuiltin>>> {
-        match expression.value.value().value() {
+        match expression.inner_term() {
             Term::Variable(VariableTerm::Dynamic(term)) => Some(term),
             _ => None,
         }
@@ -211,7 +211,7 @@ impl<TBuiltin: Builtin> ExpressionFactory<CachedSharedTerm<TBuiltin>>
         &self,
         expression: &'a CachedSharedTerm<TBuiltin>,
     ) -> Option<&'a LetTerm<CachedSharedTerm<TBuiltin>>> {
-        match expression.value.value().value() {
+        match expression.inner_term() {
             Term::Let(term) => Some(term),
             _ => None,
         }
@@ -220,7 +220,7 @@ impl<TBuiltin: Builtin> ExpressionFactory<CachedSharedTerm<TBuiltin>>
         &self,
         expression: &'a CachedSharedTerm<TBuiltin>,
     ) -> Option<&'a LambdaTerm<CachedSharedTerm<TBuiltin>>> {
-        match expression.value.value().value() {
+        match expression.inner_term() {
             Term::Lambda(term) => Some(term),
             _ => None,
         }
@@ -229,7 +229,7 @@ impl<TBuiltin: Builtin> ExpressionFactory<CachedSharedTerm<TBuiltin>>
         &self,
         expression: &'a CachedSharedTerm<TBuiltin>,
     ) -> Option<&'a ApplicationTerm<CachedSharedTerm<TBuiltin>>> {
-        match expression.value.value().value() {
+        match expression.inner_term() {
             Term::Application(term) => Some(term),
             _ => None,
         }
@@ -238,7 +238,7 @@ impl<TBuiltin: Builtin> ExpressionFactory<CachedSharedTerm<TBuiltin>>
         &self,
         expression: &'a CachedSharedTerm<TBuiltin>,
     ) -> Option<&'a PartialApplicationTerm<CachedSharedTerm<TBuiltin>>> {
-        match expression.value.value().value() {
+        match expression.inner_term() {
             Term::PartialApplication(term) => Some(term),
             _ => None,
         }
@@ -247,7 +247,7 @@ impl<TBuiltin: Builtin> ExpressionFactory<CachedSharedTerm<TBuiltin>>
         &self,
         expression: &'a CachedSharedTerm<TBuiltin>,
     ) -> Option<&'a RecursiveTerm<CachedSharedTerm<TBuiltin>>> {
-        match expression.value.value().value() {
+        match expression.inner_term() {
             Term::Recursive(term) => Some(term),
             _ => None,
         }
@@ -256,7 +256,7 @@ impl<TBuiltin: Builtin> ExpressionFactory<CachedSharedTerm<TBuiltin>>
         &self,
         expression: &'a CachedSharedTerm<TBuiltin>,
     ) -> Option<&'a BuiltinTerm<CachedSharedTerm<TBuiltin>>> {
-        match expression.value.value().value() {
+        match expression.inner_term() {
             Term::Builtin(term) => Some(term),
             _ => None,
         }
@@ -265,7 +265,7 @@ impl<TBuiltin: Builtin> ExpressionFactory<CachedSharedTerm<TBuiltin>>
         &self,
         expression: &'a CachedSharedTerm<TBuiltin>,
     ) -> Option<&'a CompiledFunctionTerm> {
-        match expression.value.value().value() {
+        match expression.inner_term() {
             Term::CompiledFunction(term) => Some(term),
             _ => None,
         }
@@ -274,7 +274,7 @@ impl<TBuiltin: Builtin> ExpressionFactory<CachedSharedTerm<TBuiltin>>
         &self,
         expression: &'a CachedSharedTerm<TBuiltin>,
     ) -> Option<&'a TupleTerm<CachedSharedTerm<TBuiltin>>> {
-        match expression.value.value().value() {
+        match expression.inner_term() {
             Term::Tuple(term) => Some(term),
             _ => None,
         }
@@ -283,7 +283,7 @@ impl<TBuiltin: Builtin> ExpressionFactory<CachedSharedTerm<TBuiltin>>
         &self,
         expression: &'a CachedSharedTerm<TBuiltin>,
     ) -> Option<&'a StructTerm<CachedSharedTerm<TBuiltin>>> {
-        match expression.value.value().value() {
+        match expression.inner_term() {
             Term::Struct(term) => Some(term),
             _ => None,
         }
@@ -292,7 +292,7 @@ impl<TBuiltin: Builtin> ExpressionFactory<CachedSharedTerm<TBuiltin>>
         &self,
         expression: &'a CachedSharedTerm<TBuiltin>,
     ) -> Option<&'a ConstructorTerm> {
-        match expression.value.value().value() {
+        match expression.inner_term() {
             Term::Constructor(term) => Some(term),
             _ => None,
         }
@@ -301,7 +301,7 @@ impl<TBuiltin: Builtin> ExpressionFactory<CachedSharedTerm<TBuiltin>>
         &self,
         expression: &'a CachedSharedTerm<TBuiltin>,
     ) -> Option<&'a VectorTerm<CachedSharedTerm<TBuiltin>>> {
-        match expression.value.value().value() {
+        match expression.inner_term() {
             Term::Collection(CollectionTerm::Vector(term)) => Some(term),
             _ => None,
         }
@@ -310,7 +310,7 @@ impl<TBuiltin: Builtin> ExpressionFactory<CachedSharedTerm<TBuiltin>>
         &self,
         expression: &'a CachedSharedTerm<TBuiltin>,
     ) -> Option<&'a HashMapTerm<CachedSharedTerm<TBuiltin>>> {
-        match expression.value.value().value() {
+        match expression.inner_term() {
             Term::Collection(CollectionTerm::HashMap(term)) => Some(term),
             _ => None,
         }
@@ -319,7 +319,7 @@ impl<TBuiltin: Builtin> ExpressionFactory<CachedSharedTerm<TBuiltin>>
         &self,
         expression: &'a CachedSharedTerm<TBuiltin>,
     ) -> Option<&'a HashSetTerm<CachedSharedTerm<TBuiltin>>> {
-        match expression.value.value().value() {
+        match expression.inner_term() {
             Term::Collection(CollectionTerm::HashSet(term)) => Some(term),
             _ => None,
         }
@@ -328,7 +328,7 @@ impl<TBuiltin: Builtin> ExpressionFactory<CachedSharedTerm<TBuiltin>>
         &self,
         expression: &'a CachedSharedTerm<TBuiltin>,
     ) -> Option<&'a SignalTerm<CachedSharedTerm<TBuiltin>>> {
-        match expression.value.value().value() {
+        match expression.inner_term() {
             Term::Signal(term) => Some(term),
             _ => None,
         }
@@ -337,7 +337,15 @@ impl<TBuiltin: Builtin> ExpressionFactory<CachedSharedTerm<TBuiltin>>
 
 #[derive(PartialEq, Eq, Hash, Clone, Serialize, Deserialize)]
 pub struct CachedSharedTerm<TBuiltin: Builtin> {
-    value: CachedExpression<SharedExpression<Term<CachedSharedTerm<TBuiltin>>>>,
+    value: CachedExpression<SharedExpression<TermExpression<CachedSharedTerm<TBuiltin>>>>,
+}
+impl<TBuiltin: Builtin> CachedSharedTerm<TBuiltin> {
+    pub(crate) fn inner_term(&self) -> &Term<CachedSharedTerm<TBuiltin>> {
+        self.value.value().value.value()
+    }
+    pub(crate) fn inner_expression(&self) -> &TermExpression<CachedSharedTerm<TBuiltin>> {
+        self.value.value().value.as_ref()
+    }
 }
 impl<TBuiltin: Builtin> Expression for CachedSharedTerm<TBuiltin> {
     type String = String;
@@ -382,8 +390,17 @@ impl<TBuiltin: Builtin> SerializeJson for CachedSharedTerm<TBuiltin> {
     }
 }
 impl<TBuiltin: Builtin> Rewritable<CachedSharedTerm<TBuiltin>> for CachedSharedTerm<TBuiltin> {
-    fn subexpressions(&self) -> Vec<&CachedSharedTerm<TBuiltin>> {
-        self.value.value().value().subexpressions()
+    fn children(&self) -> Vec<&CachedSharedTerm<TBuiltin>> {
+        self.inner_term().children()
+    }
+    fn count_subexpression_usages(
+        &self,
+        expression: &CachedSharedTerm<TBuiltin>,
+        factory: &impl ExpressionFactory<CachedSharedTerm<TBuiltin>>,
+        allocator: &impl HeapAllocator<CachedSharedTerm<TBuiltin>>,
+    ) -> usize {
+        self.inner_expression()
+            .count_subexpression_usages(expression, factory, allocator)
     }
     fn substitute_static(
         &self,
@@ -392,9 +409,7 @@ impl<TBuiltin: Builtin> Rewritable<CachedSharedTerm<TBuiltin>> for CachedSharedT
         allocator: &impl HeapAllocator<CachedSharedTerm<TBuiltin>>,
         cache: &mut impl EvaluationCache<CachedSharedTerm<TBuiltin>>,
     ) -> Option<CachedSharedTerm<TBuiltin>> {
-        self.value
-            .value()
-            .value()
+        self.inner_term()
             .substitute_static(substitutions, factory, allocator, cache)
     }
     fn substitute_dynamic(
@@ -405,9 +420,7 @@ impl<TBuiltin: Builtin> Rewritable<CachedSharedTerm<TBuiltin>> for CachedSharedT
         allocator: &impl HeapAllocator<CachedSharedTerm<TBuiltin>>,
         cache: &mut impl EvaluationCache<CachedSharedTerm<TBuiltin>>,
     ) -> Option<CachedSharedTerm<TBuiltin>> {
-        self.value
-            .value()
-            .value()
+        self.inner_term()
             .substitute_dynamic(deep, state, factory, allocator, cache)
     }
     fn hoist_free_variables(
@@ -415,10 +428,7 @@ impl<TBuiltin: Builtin> Rewritable<CachedSharedTerm<TBuiltin>> for CachedSharedT
         factory: &impl ExpressionFactory<CachedSharedTerm<TBuiltin>>,
         allocator: &impl HeapAllocator<CachedSharedTerm<TBuiltin>>,
     ) -> Option<CachedSharedTerm<TBuiltin>> {
-        self.value
-            .value()
-            .value()
-            .hoist_free_variables(factory, allocator)
+        self.inner_term().hoist_free_variables(factory, allocator)
     }
     fn normalize(
         &self,
@@ -426,15 +436,12 @@ impl<TBuiltin: Builtin> Rewritable<CachedSharedTerm<TBuiltin>> for CachedSharedT
         allocator: &impl HeapAllocator<CachedSharedTerm<TBuiltin>>,
         cache: &mut impl EvaluationCache<CachedSharedTerm<TBuiltin>>,
     ) -> Option<CachedSharedTerm<TBuiltin>> {
-        self.value
-            .value()
-            .value()
-            .normalize(factory, allocator, cache)
+        self.inner_term().normalize(factory, allocator, cache)
     }
 }
 impl<TBuiltin: Builtin> Reducible<CachedSharedTerm<TBuiltin>> for CachedSharedTerm<TBuiltin> {
     fn is_reducible(&self) -> bool {
-        self.value.value().value().is_reducible()
+        self.inner_term().is_reducible()
     }
     fn reduce(
         &self,
@@ -442,12 +449,12 @@ impl<TBuiltin: Builtin> Reducible<CachedSharedTerm<TBuiltin>> for CachedSharedTe
         allocator: &impl HeapAllocator<CachedSharedTerm<TBuiltin>>,
         cache: &mut impl EvaluationCache<CachedSharedTerm<TBuiltin>>,
     ) -> Option<CachedSharedTerm<TBuiltin>> {
-        self.value.value().value().reduce(factory, allocator, cache)
+        self.inner_term().reduce(factory, allocator, cache)
     }
 }
 impl<TBuiltin: Builtin> Applicable<CachedSharedTerm<TBuiltin>> for CachedSharedTerm<TBuiltin> {
     fn arity(&self) -> Option<Arity> {
-        self.value.value().value().arity()
+        self.inner_term().arity()
     }
     fn apply(
         &self,
@@ -456,10 +463,7 @@ impl<TBuiltin: Builtin> Applicable<CachedSharedTerm<TBuiltin>> for CachedSharedT
         allocator: &impl HeapAllocator<CachedSharedTerm<TBuiltin>>,
         cache: &mut impl EvaluationCache<CachedSharedTerm<TBuiltin>>,
     ) -> Result<CachedSharedTerm<TBuiltin>, String> {
-        self.value
-            .value()
-            .value()
-            .apply(args, factory, allocator, cache)
+        self.inner_term().apply(args, factory, allocator, cache)
     }
 }
 impl<TBuiltin: Builtin> Compile<CachedSharedTerm<TBuiltin>> for CachedSharedTerm<TBuiltin> {
@@ -471,9 +475,7 @@ impl<TBuiltin: Builtin> Compile<CachedSharedTerm<TBuiltin>> for CachedSharedTerm
         allocator: &impl HeapAllocator<CachedSharedTerm<TBuiltin>>,
         compiler: &mut Compiler,
     ) -> Result<Program, String> {
-        self.value
-            .value()
-            .value()
+        self.inner_term()
             .compile(eager, stack_offset, factory, allocator, compiler)
     }
 }
@@ -486,7 +488,7 @@ impl<TBuiltin: Builtin> Evaluate<CachedSharedTerm<TBuiltin>> for CachedSharedTer
         cache: &mut impl EvaluationCache<CachedSharedTerm<TBuiltin>>,
     ) -> Option<EvaluationResult<CachedSharedTerm<TBuiltin>>> {
         evaluate_recursive(
-            self.value.value().value(),
+            self.inner_expression(),
             state,
             factory,
             allocator,

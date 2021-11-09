@@ -3,7 +3,7 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use serde::{Deserialize, Serialize};
-use std::{collections::HashSet, iter::once};
+use std::collections::HashSet;
 
 use crate::{
     compiler::{compile_expressions, Compile, Compiler, Instruction, Program},
@@ -61,11 +61,8 @@ impl<T: Expression> GraphNode for TupleTerm<T> {
     }
 }
 impl<T: Expression + Rewritable<T>> Rewritable<T> for TupleTerm<T> {
-    fn subexpressions(&self) -> Vec<&T> {
-        self.fields
-            .iter()
-            .flat_map(|field| once(field).chain(field.subexpressions()))
-            .collect()
+    fn children(&self) -> Vec<&T> {
+        self.fields.iter().collect()
     }
     fn substitute_static(
         &self,

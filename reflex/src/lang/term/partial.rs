@@ -101,16 +101,8 @@ impl<T: Expression + Applicable<T>> GraphNode for PartialApplicationTerm<T> {
 impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T>> Rewritable<T>
     for PartialApplicationTerm<T>
 {
-    fn subexpressions(&self) -> Vec<&T> {
-        once(&self.target)
-            .chain(self.target.subexpressions())
-            .into_iter()
-            .chain(
-                self.args
-                    .iter()
-                    .flat_map(|arg| once(arg).chain(arg.subexpressions())),
-            )
-            .collect()
+    fn children(&self) -> Vec<&T> {
+        once(&self.target).chain(self.args.iter()).collect()
     }
     fn substitute_static(
         &self,

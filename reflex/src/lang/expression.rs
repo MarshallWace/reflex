@@ -13,6 +13,7 @@ use crate::{
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
+use std::hash::Hash;
 use std::sync::Arc;
 
 #[derive(Eq, Clone, Copy, Deserialize, Serialize)]
@@ -99,8 +100,17 @@ impl<T: Expression> SerializeJson for CachedExpression<T> {
 }
 
 impl<T: Expression + Rewritable<T>> Rewritable<T> for CachedExpression<T> {
-    fn subexpressions(&self) -> Vec<&T> {
-        self.value.subexpressions()
+    fn children(&self) -> Vec<&T> {
+        self.value.children()
+    }
+    fn count_subexpression_usages(
+        &self,
+        expression: &T,
+        factory: &impl ExpressionFactory<T>,
+        allocator: &impl HeapAllocator<T>,
+    ) -> usize {
+        self.value
+            .count_subexpression_usages(expression, factory, allocator)
     }
     fn substitute_static(
         &self,
@@ -154,6 +164,14 @@ impl<T: Expression + Rewritable<T>> Rewritable<T> for CachedExpression<T> {
             }
         }
     }
+    fn hoist_free_variables(
+        &self,
+        factory: &impl ExpressionFactory<T>,
+        allocator: &impl HeapAllocator<T>,
+    ) -> Option<T> {
+        self.value.hoist_free_variables(factory, allocator)
+    }
+
     fn normalize(
         &self,
         factory: &impl ExpressionFactory<T>,
@@ -161,13 +179,6 @@ impl<T: Expression + Rewritable<T>> Rewritable<T> for CachedExpression<T> {
         cache: &mut impl EvaluationCache<T>,
     ) -> Option<T> {
         self.value.normalize(factory, allocator, cache)
-    }
-    fn hoist_free_variables(
-        &self,
-        factory: &impl ExpressionFactory<T>,
-        allocator: &impl HeapAllocator<T>,
-    ) -> Option<T> {
-        self.value.hoist_free_variables(factory, allocator)
     }
 }
 impl<T: Expression + Rewritable<T> + Reducible<T>> Reducible<T> for CachedExpression<T> {
@@ -247,9 +258,6 @@ impl<T: Expression> SharedExpression<T> {
             value: Arc::new(value),
         }
     }
-    pub fn value(&self) -> &T {
-        &self.value
-    }
 }
 impl<T: Expression> Expression for SharedExpression<T> {
     type String = T::String;
@@ -295,8 +303,17 @@ impl<T: Expression> SerializeJson for SharedExpression<T> {
 }
 
 impl<T: Expression + Rewritable<T>> Rewritable<T> for SharedExpression<T> {
-    fn subexpressions(&self) -> Vec<&T> {
-        self.value.subexpressions()
+    fn children(&self) -> Vec<&T> {
+        self.value.children()
+    }
+    fn count_subexpression_usages(
+        &self,
+        expression: &T,
+        factory: &impl ExpressionFactory<T>,
+        allocator: &impl HeapAllocator<T>,
+    ) -> usize {
+        self.value
+            .count_subexpression_usages(expression, factory, allocator)
     }
     fn substitute_static(
         &self,
@@ -319,6 +336,13 @@ impl<T: Expression + Rewritable<T>> Rewritable<T> for SharedExpression<T> {
         self.value
             .substitute_dynamic(deep, state, factory, allocator, cache)
     }
+    fn hoist_free_variables(
+        &self,
+        factory: &impl ExpressionFactory<T>,
+        allocator: &impl HeapAllocator<T>,
+    ) -> Option<T> {
+        self.value.hoist_free_variables(factory, allocator)
+    }
     fn normalize(
         &self,
         factory: &impl ExpressionFactory<T>,
@@ -326,13 +350,6 @@ impl<T: Expression + Rewritable<T>> Rewritable<T> for SharedExpression<T> {
         cache: &mut impl EvaluationCache<T>,
     ) -> Option<T> {
         self.value.normalize(factory, allocator, cache)
-    }
-    fn hoist_free_variables(
-        &self,
-        factory: &impl ExpressionFactory<T>,
-        allocator: &impl HeapAllocator<T>,
-    ) -> Option<T> {
-        self.value.hoist_free_variables(factory, allocator)
     }
 }
 impl<T: Expression + Reducible<T> + Rewritable<T>> Reducible<T> for SharedExpression<T> {

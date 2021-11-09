@@ -46,10 +46,8 @@ impl<T: Expression> GraphNode for RecursiveTerm<T> {
     }
 }
 impl<T: Expression + Rewritable<T>> Rewritable<T> for RecursiveTerm<T> {
-    fn subexpressions(&self) -> Vec<&T> {
-        once(&self.factory)
-            .chain(self.factory.subexpressions())
-            .collect()
+    fn children(&self) -> Vec<&T> {
+        once(&self.factory).collect()
     }
     fn substitute_static(
         &self,

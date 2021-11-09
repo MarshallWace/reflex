@@ -81,11 +81,11 @@ impl<T: Expression> Iterable for CollectionTerm<T> {
     }
 }
 impl<T: Expression + Rewritable<T>> Rewritable<T> for CollectionTerm<T> {
-    fn subexpressions(&self) -> Vec<&T> {
+    fn children(&self) -> Vec<&T> {
         match self {
-            Self::Vector(term) => term.subexpressions(),
-            Self::HashMap(term) => term.subexpressions(),
-            Self::HashSet(term) => term.subexpressions(),
+            Self::Vector(term) => term.children(),
+            Self::HashMap(term) => term.children(),
+            Self::HashSet(term) => term.children(),
         }
     }
     fn substitute_static(

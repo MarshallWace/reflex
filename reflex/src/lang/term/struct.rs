@@ -67,11 +67,8 @@ impl<T: Expression> GraphNode for StructTerm<T> {
     }
 }
 impl<T: Expression + Rewritable<T>> Rewritable<T> for StructTerm<T> {
-    fn subexpressions(&self) -> Vec<&T> {
-        self.fields
-            .iter()
-            .flat_map(|field| once(field).chain(field.subexpressions()))
-            .collect()
+    fn children(&self) -> Vec<&T> {
+        self.fields.iter().collect()
     }
     fn substitute_static(
         &self,

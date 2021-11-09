@@ -155,16 +155,8 @@ impl<T: Expression> GraphNode for HashMapTerm<T> {
     }
 }
 impl<T: Expression + Rewritable<T>> Rewritable<T> for HashMapTerm<T> {
-    fn subexpressions(&self) -> Vec<&T> {
-        self.keys
-            .iter()
-            .flat_map(|key| once(key).chain(key.subexpressions()))
-            .chain(
-                self.values
-                    .iter()
-                    .flat_map(|value| once(value).chain(value.subexpressions())),
-            )
-            .collect()
+    fn children(&self) -> Vec<&T> {
+        self.keys.iter().chain(self.values.iter()).collect()
     }
     fn substitute_static(
         &self,

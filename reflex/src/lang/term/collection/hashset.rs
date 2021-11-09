@@ -68,11 +68,8 @@ impl<T: Expression> GraphNode for HashSetTerm<T> {
     }
 }
 impl<T: Expression + Rewritable<T>> Rewritable<T> for HashSetTerm<T> {
-    fn subexpressions(&self) -> Vec<&T> {
-        self.values
-            .iter()
-            .flat_map(|value| once(value).chain(value.subexpressions()))
-            .collect()
+    fn children(&self) -> Vec<&T> {
+        self.values.iter().collect()
     }
     fn substitute_static(
         &self,

@@ -60,11 +60,8 @@ impl<T: Expression> Iterable for VectorTerm<T> {
     }
 }
 impl<T: Expression + Rewritable<T>> Rewritable<T> for VectorTerm<T> {
-    fn subexpressions(&self) -> Vec<&T> {
-        self.items
-            .iter()
-            .flat_map(|item| once(item).chain(item.subexpressions()))
-            .collect()
+    fn children(&self) -> Vec<&T> {
+        self.items.iter().collect()
     }
     fn substitute_static(
         &self,

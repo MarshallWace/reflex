@@ -3,6 +3,9 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use std::collections::HashSet;
+use std::fmt::{Display, Formatter};
+
+use serde_json::Value;
 
 use serde::{Deserialize, Serialize};
 
@@ -63,13 +66,6 @@ pub enum Term<T: Expression> {
     Constructor(ConstructorTerm),
     Collection(CollectionTerm<T>),
     Signal(SignalTerm<T>),
-}
-impl<T: Expression + Applicable<T>> Expression for Term<T> {
-    type String = T::String;
-    type Builtin = T::Builtin;
-    fn id(&self) -> HashId {
-        hash_object(self)
-    }
 }
 impl<T: Expression + Applicable<T>> GraphNode for Term<T> {
     fn capture_depth(&self) -> StackOffset {
@@ -184,17 +180,17 @@ impl<T: Expression + Applicable<T>> GraphNode for Term<T> {
 impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>> Rewritable<T>
     for Term<T>
 {
-    fn subexpressions(&self) -> Vec<&T> {
+    fn children(&self) -> Vec<&T> {
         match self {
-            Self::Variable(term) => term.subexpressions(),
-            Self::Let(term) => term.subexpressions(),
-            Self::Lambda(term) => term.subexpressions(),
-            Self::Application(term) => term.subexpressions(),
-            Self::PartialApplication(term) => term.subexpressions(),
-            Self::Recursive(term) => term.subexpressions(),
-            Self::Tuple(term) => term.subexpressions(),
-            Self::Struct(term) => term.subexpressions(),
-            Self::Collection(term) => term.subexpressions(),
+            Self::Variable(term) => term.children(),
+            Self::Let(term) => term.children(),
+            Self::Lambda(term) => term.children(),
+            Self::Application(term) => term.children(),
+            Self::PartialApplication(term) => term.children(),
+            Self::Recursive(term) => term.children(),
+            Self::Tuple(term) => term.children(),
+            Self::Struct(term) => term.children(),
+            Self::Collection(term) => term.children(),
             _ => Vec::new(),
         }
     }
@@ -292,6 +288,33 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>> 
             Self::Struct(term) => term.hoist_free_variables(factory, allocator),
             Self::Collection(term) => term.hoist_free_variables(factory, allocator),
             _ => None,
+        }
+    }
+    fn count_subexpression_usages(
+        &self,
+        expression: &T,
+        factory: &impl ExpressionFactory<T>,
+        allocator: &impl HeapAllocator<T>,
+    ) -> usize {
+        match self {
+            Self::Variable(term) => term.count_subexpression_usages(expression, factory, allocator),
+            Self::Let(term) => term.count_subexpression_usages(expression, factory, allocator),
+            Self::Lambda(term) => term.count_subexpression_usages(expression, factory, allocator),
+            Self::Application(term) => {
+                term.count_subexpression_usages(expression, factory, allocator)
+            }
+            Self::PartialApplication(term) => {
+                term.count_subexpression_usages(expression, factory, allocator)
+            }
+            Self::Recursive(term) => {
+                term.count_subexpression_usages(expression, factory, allocator)
+            }
+            Self::Tuple(term) => term.count_subexpression_usages(expression, factory, allocator),
+            Self::Struct(term) => term.count_subexpression_usages(expression, factory, allocator),
+            Self::Collection(term) => {
+                term.count_subexpression_usages(expression, factory, allocator)
+            }
+            _ => 0,
         }
     }
 }
@@ -432,6 +455,158 @@ impl<T: Expression> SerializeJson for Term<T> {
     }
 }
 
+/// A TermExpression is a thin wrapper around [Term]. In AST/graph terminology, a TermExpression
+/// is a node in the graph, a [Term] is the value stored at that node. i.e. a [Term] is not an
+/// [Expression] but a TermExpression is.
+#[derive(Hash, Eq, PartialEq, Clone, Debug)]
+pub struct TermExpression<T: Expression> {
+    value: Term<T>,
+}
+impl<T: Expression> TermExpression<T> {
+    pub(crate) fn new(value: Term<T>) -> Self {
+        Self { value }
+    }
+    pub(crate) fn value(&self) -> &Term<T> {
+        &self.value
+    }
+}
+impl<T: Expression + Applicable<T>> GraphNode for TermExpression<T> {
+    fn capture_depth(&self) -> StackOffset {
+        self.value.capture_depth()
+    }
+    fn free_variables(&self) -> HashSet<StackOffset> {
+        self.value.free_variables()
+    }
+    fn dynamic_dependencies(&self) -> DependencyList {
+        self.value.dynamic_dependencies()
+    }
+    fn is_static(&self) -> bool {
+        self.value.is_static()
+    }
+    fn is_atomic(&self) -> bool {
+        self.value.is_atomic()
+    }
+}
+impl<T: Expression> Display for TermExpression<T> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        self.value.fmt(f)
+    }
+}
+impl<T: Expression + Applicable<T>> Expression for TermExpression<T> {
+    type String = T::String;
+    type Builtin = T::Builtin;
+    fn id(&self) -> HashId {
+        hash_object(&self.value)
+    }
+}
+impl<T: Expression> SerializeJson for TermExpression<T> {
+    fn to_json(&self) -> Result<Value, String> {
+        self.value.to_json()
+    }
+}
+impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>> Rewritable<T>
+    for TermExpression<T>
+{
+    fn children(&self) -> Vec<&T> {
+        self.value.children()
+    }
+    fn count_subexpression_usages(
+        &self,
+        expression: &T,
+        factory: &impl ExpressionFactory<T>,
+        allocator: &impl HeapAllocator<T>,
+    ) -> usize {
+        // TODO: This should not all magically depend on people using TermExpression, instead we
+        // should expose a method for doing a walk on the tree and count matches in a visit algorithm
+        if self.id() == expression.id() {
+            1
+        } else {
+            self.value
+                .count_subexpression_usages(expression, factory, allocator)
+        }
+    }
+    fn substitute_static(
+        &self,
+        substitutions: &Substitutions<T>,
+        factory: &impl ExpressionFactory<T>,
+        allocator: &impl HeapAllocator<T>,
+        cache: &mut impl EvaluationCache<T>,
+    ) -> Option<T> {
+        self.value
+            .substitute_static(substitutions, factory, allocator, cache)
+    }
+    fn substitute_dynamic(
+        &self,
+        state: &impl DynamicState<T>,
+        factory: &impl ExpressionFactory<T>,
+        allocator: &impl HeapAllocator<T>,
+        cache: &mut impl EvaluationCache<T>,
+    ) -> Option<T> {
+        self.value
+            .substitute_dynamic(state, factory, allocator, cache)
+    }
+    fn hoist_free_variables(
+        &self,
+        factory: &impl ExpressionFactory<T>,
+        allocator: &impl HeapAllocator<T>,
+    ) -> Option<T> {
+        self.value.hoist_free_variables(factory, allocator)
+    }
+    fn normalize(
+        &self,
+        factory: &impl ExpressionFactory<T>,
+        allocator: &impl HeapAllocator<T>,
+        cache: &mut impl EvaluationCache<T>,
+    ) -> Option<T> {
+        self.value.normalize(factory, allocator, cache)
+    }
+}
+impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>> Reducible<T>
+    for TermExpression<T>
+{
+    fn is_reducible(&self) -> bool {
+        self.value.is_reducible()
+    }
+    fn reduce(
+        &self,
+        factory: &impl ExpressionFactory<T>,
+        allocator: &impl HeapAllocator<T>,
+        cache: &mut impl EvaluationCache<T>,
+    ) -> Option<T> {
+        self.value.reduce(factory, allocator, cache)
+    }
+}
+impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>> Applicable<T>
+    for TermExpression<T>
+{
+    fn arity(&self) -> Option<Arity> {
+        self.value.arity()
+    }
+    fn apply(
+        &self,
+        args: impl ExactSizeIterator<Item = T>,
+        factory: &impl ExpressionFactory<T>,
+        allocator: &impl HeapAllocator<T>,
+        cache: &mut impl EvaluationCache<T>,
+    ) -> Result<T, String> {
+        self.value.apply(args, factory, allocator, cache)
+    }
+}
+impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>> Compile<T>
+    for TermExpression<T>
+{
+    fn compile(
+        &self,
+        eager: VarArgs,
+        stack_offset: StackOffset,
+        factory: &impl ExpressionFactory<T>,
+        allocator: &impl HeapAllocator<T>,
+        compiler: &mut Compiler,
+    ) -> Result<Program, String> {
+        self.value
+            .compile(eager, stack_offset, factory, allocator, compiler)
+    }
+}
 #[cfg(test)]
 mod test {
     use super::*;

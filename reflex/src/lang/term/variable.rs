@@ -60,10 +60,10 @@ impl<T: Expression> GraphNode for VariableTerm<T> {
     }
 }
 impl<T: Expression + Rewritable<T>> Rewritable<T> for VariableTerm<T> {
-    fn subexpressions(&self) -> Vec<&T> {
+    fn children(&self) -> Vec<&T> {
         match self {
-            Self::Static(term) => term.subexpressions(),
-            Self::Dynamic(term) => term.subexpressions(),
+            Self::Static(term) => term.children(),
+            Self::Dynamic(term) => term.children(),
         }
     }
     fn substitute_static(
@@ -179,7 +179,7 @@ impl GraphNode for StaticVariableTerm {
     }
 }
 impl<T: Expression + Rewritable<T>> Rewritable<T> for StaticVariableTerm {
-    fn subexpressions(&self) -> Vec<&T> {
+    fn children(&self) -> Vec<&T> {
         Vec::new()
     }
     fn substitute_static(
@@ -282,7 +282,7 @@ impl<T: Expression> GraphNode for DynamicVariableTerm<T> {
     }
 }
 impl<T: Expression + Rewritable<T>> Rewritable<T> for DynamicVariableTerm<T> {
-    fn subexpressions(&self) -> Vec<&T> {
+    fn children(&self) -> Vec<&T> {
         Vec::new()
     }
     fn substitute_static(
