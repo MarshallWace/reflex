@@ -189,7 +189,7 @@ impl<T: Expression + Rewritable<T>> Rewritable<T> for StaticVariableTerm {
         allocator: &impl HeapAllocator<T>,
         cache: &mut impl EvaluationCache<T>,
     ) -> Option<T> {
-        substitutions.get(self.offset, factory, allocator, cache)
+        substitutions.substitute_variable(self.offset, factory, allocator, cache)
     }
     fn substitute_dynamic(
         &self,

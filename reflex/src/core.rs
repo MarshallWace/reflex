@@ -14,8 +14,7 @@ use im::OrdSet;
 use serde::{Deserialize, Serialize};
 pub use uuid::Uuid;
 
-use crate::cache::NoopCache;
-use crate::lang::*;
+use crate::{cache::NoopCache, lang::*};
 use crate::{
     compiler::InstructionPointer,
     hash::{hash_object, HashId},
@@ -1007,10 +1006,16 @@ impl std::fmt::Display for SignalType {
     }
 }
 
+#[derive(Hash, Eq, PartialEq, Copy, Clone, Debug)]
+enum SubstitutionPatterns<'a, T: Expression> {
+    Variable(&'a Vec<(StackOffset, T)>, Option<ScopeOffset>),
+    Term(&'a Vec<(T, T)>),
+    Offset(ScopeOffset),
+}
+
 #[derive(Hash, Eq, PartialEq, Debug)]
 pub struct Substitutions<'a, T: Expression> {
-    entries: Option<&'a [(StackOffset, T)]>,
-    scope_offset: Option<ScopeOffset>,
+    entries: SubstitutionPatterns<'a, T>,
     min_depth: StackOffset,
     offset: StackOffset,
 }
@@ -1021,12 +1026,11 @@ pub(crate) enum ScopeOffset {
 }
 impl<'a, T: Expression + Rewritable<T>> Substitutions<'a, T> {
     pub(crate) fn named(
-        entries: &'a [(StackOffset, T)],
+        entries: &'a Vec<(StackOffset, T)>,
         scope_offset: Option<ScopeOffset>,
     ) -> Self {
         Self {
-            entries: Some(entries),
-            scope_offset,
+            entries: SubstitutionPatterns::Variable(entries, scope_offset),
             min_depth: entries
                 .iter()
                 .map(|(offset, _)| offset)
@@ -1034,26 +1038,30 @@ impl<'a, T: Expression + Rewritable<T>> Substitutions<'a, T> {
             offset: 0,
         }
     }
-    pub fn increase_scope_offset(depth: StackOffset) -> Self {
+    pub(crate) fn term_match(substitutions: &'a Vec<(T, T)>) -> Self {
         Self {
-            entries: None,
-            scope_offset: Some(ScopeOffset::Wrap(depth)),
+            entries: SubstitutionPatterns::Term(substitutions),
             min_depth: 0,
             offset: 0,
         }
     }
-    pub fn decrease_scope_offset(depth: StackOffset) -> Self {
+    pub fn increase_scope_offset(depth: StackOffset) -> Self {
         Self {
-            entries: None,
-            scope_offset: Some(ScopeOffset::Unwrap(depth)),
+            entries: SubstitutionPatterns::Offset(ScopeOffset::Wrap(depth)),
             min_depth: 0,
+            offset: 0,
+        }
+    }
+    pub fn decrease_scope_offset(depth: StackOffset, min_depth: StackOffset) -> Self {
+        Self {
+            entries: SubstitutionPatterns::Offset(ScopeOffset::Unwrap(depth)),
+            min_depth,
             offset: 0,
         }
     }
     pub(crate) fn offset(&self, offset: StackOffset) -> Self {
         Self {
-            entries: self.entries.as_ref().copied(),
-            scope_offset: self.scope_offset.as_ref().copied(),
+            entries: self.entries.clone(),
             min_depth: self.min_depth,
             offset: self.offset + offset,
         }
@@ -1066,7 +1074,43 @@ impl<'a, T: Expression + Rewritable<T>> Substitutions<'a, T> {
             expression.capture_depth() - 1 < self.min_depth + self.offset
         }
     }
-    pub(crate) fn get(
+    pub(crate) fn substitute_term(
+        &self,
+        current: HashId,
+        factory: &impl ExpressionFactory<T>,
+        allocator: &impl HeapAllocator<T>,
+        cache: &mut impl EvaluationCache<T>,
+    ) -> Option<T> {
+        match self.entries {
+            SubstitutionPatterns::Term(entries) => {
+                entries.iter().find_map(|(pattern, replacement)| {
+                    let adjusted_scope_pattern = pattern.substitute_static(
+                        &Substitutions::increase_scope_offset(self.offset),
+                        factory,
+                        allocator,
+                        cache,
+                    );
+                    let pattern = adjusted_scope_pattern.as_ref().unwrap_or(pattern);
+                    if pattern.id() == current {
+                        Some(
+                            replacement
+                                .substitute_static(
+                                    &Substitutions::increase_scope_offset(self.offset),
+                                    factory,
+                                    allocator,
+                                    cache,
+                                )
+                                .unwrap_or_else(|| replacement.clone()),
+                        )
+                    } else {
+                        None
+                    }
+                })
+            }
+            _ => None,
+        }
+    }
+    pub(crate) fn substitute_variable(
         &self,
         offset: StackOffset,
         factory: &impl ExpressionFactory<T>,
@@ -1076,8 +1120,16 @@ impl<'a, T: Expression + Rewritable<T>> Substitutions<'a, T> {
         if offset < self.offset {
             return None;
         }
+        let (entries, scope_offset) = match self.entries {
+            SubstitutionPatterns::Term(_) => None,
+            SubstitutionPatterns::Variable(entries, scope_offset) => {
+                Some((Some(entries), scope_offset))
+            }
+            SubstitutionPatterns::Offset(scope_offset) => Some((None, Some(scope_offset))),
+        }?;
+
         let target_offset = offset - self.offset;
-        let replacement = self.entries.and_then(|entries| {
+        let replacement = entries.and_then(|entries| {
             entries.iter().find_map(|(offset, replacement)| {
                 if *offset == target_offset {
                     Some(replacement)
@@ -1097,7 +1149,7 @@ impl<'a, T: Expression + Rewritable<T>> Substitutions<'a, T> {
                     )
                     .unwrap_or_else(|| replacement.clone()),
             ),
-            None => match &self.scope_offset {
+            None => match scope_offset {
                 Some(scope_offset) => {
                     let target_offset = match scope_offset {
                         ScopeOffset::Wrap(scope_offset) => offset + scope_offset,

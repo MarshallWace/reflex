@@ -532,8 +532,14 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>> 
         allocator: &impl HeapAllocator<T>,
         cache: &mut impl EvaluationCache<T>,
     ) -> Option<T> {
-        self.value
-            .substitute_static(substitutions, factory, allocator, cache)
+        // TODO: This should not all magically depend on people using TermExpression, instead we
+        // should expose a method for doing a walk on the tree and perform transformations to the tree
+        substitutions
+            .substitute_term(self.id(), factory, allocator, cache)
+            .or_else(|| {
+                self.value
+                    .substitute_static(substitutions, factory, allocator, cache)
+            })
     }
     fn substitute_dynamic(
         &self,
