@@ -147,6 +147,10 @@ impl<T: Expression + Rewritable<T> + Reducible<T>> Rewritable<T> for LetTerm<T> 
     ) -> Option<T> {
         let normalized_initializer = self.initializer.normalize(factory, allocator, cache);
         let normalized_body = self.body.normalize(factory, allocator, cache);
+        let initializer = normalized_initializer
+            .as_ref()
+            .unwrap_or(&self.initializer)
+            .clone();
         let substituted_expression = match normalized_initializer {
             Some(initializer) => Some(factory.create_let_term(
                 initializer,
@@ -156,19 +160,47 @@ impl<T: Expression + Rewritable<T> + Reducible<T>> Rewritable<T> for LetTerm<T> 
                 normalized_body.map(|body| factory.create_let_term(self.initializer.clone(), body))
             }
         };
-        let reduced_expression = match substituted_expression {
+        let substituted_expression = match substituted_expression {
             Some(expression) => expression
                 .reduce(factory, allocator, cache)
                 .or_else(|| Some(expression)),
             None => self.reduce(factory, allocator, cache),
         };
-        reduced_expression.map(|expression| {
+        let substituted_expression = substituted_expression.map(|expression| {
             expression
                 .normalize(factory, allocator, cache)
-                .unwrap_or_else(|| expression)
-        })
+                .unwrap_or(expression)
+        });
+
+        let result = substituted_expression.map(|expression| {
+            abstract_unused_let_initializer(&expression, initializer, factory, allocator, cache)
+                .unwrap_or(expression)
+        });
+
+        result
     }
 }
+
+fn abstract_unused_let_initializer<T: Expression + Rewritable<T>>(
+    expression: &T,
+    initializer: T,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+    cache: &mut impl EvaluationCache<T>,
+) -> Option<T> {
+    let has_unused_initializer = initializer.is_complex()
+        && expression.count_subexpression_usages(&initializer, factory, allocator) > 1;
+    if !has_unused_initializer {
+        return None;
+    }
+    let substitutions = vec![(initializer.clone(), factory.create_static_variable_term(0))];
+    let substitutions = Substitutions::term_match(&substitutions, Some(ScopeOffset::Wrap(1)));
+    Some(factory.create_let_term(
+        initializer,
+        expression.substitute_static(&substitutions, factory, allocator, cache)?,
+    ))
+}
+
 impl<T: Expression + Rewritable<T>> Reducible<T> for LetTerm<T> {
     fn is_reducible(&self) -> bool {
         true
@@ -191,7 +223,7 @@ impl<T: Expression + Rewritable<T>> Reducible<T> for LetTerm<T> {
 }
 impl<T: Expression> std::fmt::Display for LetTerm<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "<let:{}>", self.initializer)
+        write!(f, "<let:{}:{}>", self.initializer, self.body)
     }
 }
 impl<T: Expression + Rewritable<T> + Reducible<T> + Compile<T>> Compile<T> for LetTerm<T> {

@@ -337,14 +337,19 @@ impl<TBuiltin: Builtin> ExpressionFactory<CachedSharedTerm<TBuiltin>>
 
 #[derive(PartialEq, Eq, Hash, Clone, Serialize, Deserialize)]
 pub struct CachedSharedTerm<TBuiltin: Builtin> {
-    value: CachedExpression<SharedExpression<TermExpression<CachedSharedTerm<TBuiltin>>>>,
+    value: CachedExpression<SharedExpression<TermExpression<Self>>>,
 }
 impl<TBuiltin: Builtin> CachedSharedTerm<TBuiltin> {
-    pub(crate) fn inner_term(&self) -> &Term<CachedSharedTerm<TBuiltin>> {
+    pub(crate) fn inner_term(&self) -> &Term<Self> {
         self.value.value().value.value()
     }
-    pub(crate) fn inner_expression(&self) -> &TermExpression<CachedSharedTerm<TBuiltin>> {
+    pub(crate) fn inner_expression(&self) -> &TermExpression<Self> {
         self.value.value().value.as_ref()
+    }
+    fn into_normalized(self) -> Self {
+        Self {
+            value: self.value.into_normalized(),
+        }
     }
 }
 impl<TBuiltin: Builtin> Expression for CachedSharedTerm<TBuiltin> {
@@ -389,104 +394,166 @@ impl<TBuiltin: Builtin> SerializeJson for CachedSharedTerm<TBuiltin> {
         SerializeJson::to_json(&self.value)
     }
 }
-impl<TBuiltin: Builtin> Rewritable<CachedSharedTerm<TBuiltin>> for CachedSharedTerm<TBuiltin> {
-    fn children(&self) -> Vec<&CachedSharedTerm<TBuiltin>> {
+impl<TBuiltin: Builtin> Rewritable<Self> for CachedSharedTerm<TBuiltin> {
+    fn children(&self) -> Vec<&Self> {
         self.inner_term().children()
     }
     fn count_subexpression_usages(
         &self,
-        expression: &CachedSharedTerm<TBuiltin>,
-        factory: &impl ExpressionFactory<CachedSharedTerm<TBuiltin>>,
-        allocator: &impl HeapAllocator<CachedSharedTerm<TBuiltin>>,
+        expression: &Self,
+        factory: &impl ExpressionFactory<Self>,
+        allocator: &impl HeapAllocator<Self>,
     ) -> usize {
-        self.inner_expression()
-            .count_subexpression_usages(expression, factory, allocator)
+        if self.id() == expression.id() {
+            1
+        } else {
+            self.inner_expression()
+                .count_subexpression_usages(expression, factory, allocator)
+        }
     }
     fn substitute_static(
         &self,
-        substitutions: &Substitutions<CachedSharedTerm<TBuiltin>>,
-        factory: &impl ExpressionFactory<CachedSharedTerm<TBuiltin>>,
-        allocator: &impl HeapAllocator<CachedSharedTerm<TBuiltin>>,
-        cache: &mut impl EvaluationCache<CachedSharedTerm<TBuiltin>>,
-    ) -> Option<CachedSharedTerm<TBuiltin>> {
-        self.inner_term()
-            .substitute_static(substitutions, factory, allocator, cache)
+        substitutions: &Substitutions<Self>,
+        factory: &impl ExpressionFactory<Self>,
+        allocator: &impl HeapAllocator<Self>,
+        cache: &mut impl EvaluationCache<Self>,
+    ) -> Option<Self> {
+        // TODO: This should not all magically depend on people using CachedSharedTerm, instead we
+        // should expose a method for doing a walk on the tree and perform transformations to the tree
+        if substitutions.can_skip(&self) {
+            return None;
+        }
+        match cache.retrieve_static_substitution(&self, substitutions) {
+            Some(result) => result,
+            None => {
+                // TODO: This should not all magically depend on people using Cached term, instead we
+                // should expose a method for doing a walk on the tree and perform transformations to the tree
+                let result = substitutions
+                    .substitute_term(self.id(), factory, allocator, cache)
+                    .or_else(|| {
+                        self.inner_expression().substitute_static(
+                            substitutions,
+                            factory,
+                            allocator,
+                            cache,
+                        )
+                    });
+                cache.store_static_substitution(&self, substitutions, result.as_ref().cloned());
+                result
+            }
+        }
     }
     fn substitute_dynamic(
         &self,
         deep: bool,
-        state: &impl DynamicState<CachedSharedTerm<TBuiltin>>,
-        factory: &impl ExpressionFactory<CachedSharedTerm<TBuiltin>>,
-        allocator: &impl HeapAllocator<CachedSharedTerm<TBuiltin>>,
-        cache: &mut impl EvaluationCache<CachedSharedTerm<TBuiltin>>,
-    ) -> Option<CachedSharedTerm<TBuiltin>> {
+        state: &impl DynamicState<Self>,
+        factory: &impl ExpressionFactory<Self>,
+        allocator: &impl HeapAllocator<Self>,
+        cache: &mut impl EvaluationCache<Self>,
+    ) -> Option<Self> {
         self.inner_term()
             .substitute_dynamic(deep, state, factory, allocator, cache)
     }
     fn hoist_free_variables(
         &self,
-        factory: &impl ExpressionFactory<CachedSharedTerm<TBuiltin>>,
-        allocator: &impl HeapAllocator<CachedSharedTerm<TBuiltin>>,
-    ) -> Option<CachedSharedTerm<TBuiltin>> {
+        factory: &impl ExpressionFactory<Self>,
+        allocator: &impl HeapAllocator<Self>,
+    ) -> Option<Self> {
         self.inner_term().hoist_free_variables(factory, allocator)
     }
     fn normalize(
         &self,
-        factory: &impl ExpressionFactory<CachedSharedTerm<TBuiltin>>,
-        allocator: &impl HeapAllocator<CachedSharedTerm<TBuiltin>>,
-        cache: &mut impl EvaluationCache<CachedSharedTerm<TBuiltin>>,
-    ) -> Option<CachedSharedTerm<TBuiltin>> {
-        self.inner_term().normalize(factory, allocator, cache)
+        factory: &impl ExpressionFactory<Self>,
+        allocator: &impl HeapAllocator<Self>,
+        cache: &mut impl EvaluationCache<Self>,
+    ) -> Option<Self> {
+        if self.value.normalized() {
+            None
+        } else {
+            match cache.retrieve_normalization(&self) {
+                Some(result) => result,
+                None => {
+                    let result = self
+                        .inner_term()
+                        .normalize(factory, allocator, cache)
+                        .and_then(|result| {
+                            if result.id() == self.id() {
+                                None
+                            } else {
+                                Some(result.into_normalized())
+                            }
+                        });
+                    cache.store_normalization(&self, result.as_ref().cloned());
+                    result
+                }
+            }
+        }
     }
 }
-impl<TBuiltin: Builtin> Reducible<CachedSharedTerm<TBuiltin>> for CachedSharedTerm<TBuiltin> {
+impl<TBuiltin: Builtin> Reducible<Self> for CachedSharedTerm<TBuiltin> {
     fn is_reducible(&self) -> bool {
         self.inner_term().is_reducible()
     }
     fn reduce(
         &self,
-        factory: &impl ExpressionFactory<CachedSharedTerm<TBuiltin>>,
-        allocator: &impl HeapAllocator<CachedSharedTerm<TBuiltin>>,
-        cache: &mut impl EvaluationCache<CachedSharedTerm<TBuiltin>>,
-    ) -> Option<CachedSharedTerm<TBuiltin>> {
-        self.inner_term().reduce(factory, allocator, cache)
+        factory: &impl ExpressionFactory<Self>,
+        allocator: &impl HeapAllocator<Self>,
+        cache: &mut impl EvaluationCache<Self>,
+    ) -> Option<Self> {
+        match cache.retrieve_reduction(&self) {
+            Some(result) => result,
+            None => {
+                let result = self
+                    .inner_term()
+                    .reduce(factory, allocator, cache)
+                    .and_then(|result| {
+                        if result.id() == self.id() {
+                            None
+                        } else {
+                            Some(result)
+                        }
+                    });
+                cache.store_reduction(&self, result.as_ref().cloned());
+                result
+            }
+        }
     }
 }
-impl<TBuiltin: Builtin> Applicable<CachedSharedTerm<TBuiltin>> for CachedSharedTerm<TBuiltin> {
+impl<TBuiltin: Builtin> Applicable<Self> for CachedSharedTerm<TBuiltin> {
     fn arity(&self) -> Option<Arity> {
         self.inner_term().arity()
     }
     fn apply(
         &self,
-        args: impl ExactSizeIterator<Item = CachedSharedTerm<TBuiltin>>,
-        factory: &impl ExpressionFactory<CachedSharedTerm<TBuiltin>>,
-        allocator: &impl HeapAllocator<CachedSharedTerm<TBuiltin>>,
-        cache: &mut impl EvaluationCache<CachedSharedTerm<TBuiltin>>,
-    ) -> Result<CachedSharedTerm<TBuiltin>, String> {
+        args: impl ExactSizeIterator<Item = Self>,
+        factory: &impl ExpressionFactory<Self>,
+        allocator: &impl HeapAllocator<Self>,
+        cache: &mut impl EvaluationCache<Self>,
+    ) -> Result<Self, String> {
         self.inner_term().apply(args, factory, allocator, cache)
     }
 }
-impl<TBuiltin: Builtin> Compile<CachedSharedTerm<TBuiltin>> for CachedSharedTerm<TBuiltin> {
+impl<TBuiltin: Builtin> Compile<Self> for CachedSharedTerm<TBuiltin> {
     fn compile(
         &self,
         eager: VarArgs,
         stack_offset: StackOffset,
-        factory: &impl ExpressionFactory<CachedSharedTerm<TBuiltin>>,
-        allocator: &impl HeapAllocator<CachedSharedTerm<TBuiltin>>,
+        factory: &impl ExpressionFactory<Self>,
+        allocator: &impl HeapAllocator<Self>,
         compiler: &mut Compiler,
     ) -> Result<Program, String> {
         self.inner_term()
             .compile(eager, stack_offset, factory, allocator, compiler)
     }
 }
-impl<TBuiltin: Builtin> Evaluate<CachedSharedTerm<TBuiltin>> for CachedSharedTerm<TBuiltin> {
+impl<TBuiltin: Builtin> Evaluate<Self> for CachedSharedTerm<TBuiltin> {
     fn evaluate(
         &self,
-        state: &impl DynamicState<CachedSharedTerm<TBuiltin>>,
-        factory: &impl ExpressionFactory<CachedSharedTerm<TBuiltin>>,
-        allocator: &impl HeapAllocator<CachedSharedTerm<TBuiltin>>,
-        cache: &mut impl EvaluationCache<CachedSharedTerm<TBuiltin>>,
-    ) -> Option<EvaluationResult<CachedSharedTerm<TBuiltin>>> {
+        state: &impl DynamicState<Self>,
+        factory: &impl ExpressionFactory<Self>,
+        allocator: &impl HeapAllocator<Self>,
+        cache: &mut impl EvaluationCache<Self>,
+    ) -> Option<EvaluationResult<Self>> {
         evaluate_recursive(
             self.inner_expression(),
             state,

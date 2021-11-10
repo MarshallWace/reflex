@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
+use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashSet,
@@ -13,9 +14,10 @@ use crate::{
     core::{
         transform_expression_list, Applicable, ArgType, Arity, DependencyList, DynamicState,
         EvaluationCache, Expression, ExpressionFactory, ExpressionList, GraphNode, HeapAllocator,
-        Reducible, Rewritable, SerializeJson, SignalType, StackOffset, Substitutions, VarArgs,
+        Reducible, Rewritable, ScopeOffset, SerializeJson, SignalType, StackOffset, Substitutions,
+        VarArgs,
     },
-    lang::{SignalTerm, ValueTerm},
+    lang::{LambdaTerm, SignalTerm, ValueTerm},
 };
 
 #[derive(Hash, Eq, PartialEq, Clone, Debug, Serialize, Deserialize)]
@@ -173,34 +175,143 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T>> Rewritable<T>
         cache: &mut impl EvaluationCache<T>,
     ) -> Option<T> {
         let normalized_target = self.target.normalize(factory, allocator, cache);
+        if self.args.is_empty() {
+            let target = normalized_target.as_ref().unwrap_or(&self.target);
+            match factory.match_lambda_term(target) {
+                Some(target) if target.num_args() == 0 => {
+                    return Some(target.body().clone());
+                }
+                _ => {}
+            }
+        }
         let normalized_args = transform_expression_list(&self.args, allocator, |arg| {
             arg.normalize(factory, allocator, cache)
         });
+        let target = normalized_target.as_ref().unwrap_or(&self.target);
+        let args = allocator.clone_list(normalized_args.as_ref().unwrap_or(&self.args));
+        if let Some(partial) = factory.match_partial_application_term(target) {
+            return factory
+                .create_application_term(
+                    partial.target().clone(),
+                    allocator.create_unsized_list(
+                        partial
+                            .args()
+                            .iter()
+                            .cloned()
+                            .chain(self.args.iter().cloned()),
+                    ),
+                )
+                .normalize(factory, allocator, cache);
+        }
         let substituted_expression = match normalized_args {
             Some(args) => Some(factory.create_application_term(
                 normalized_target.unwrap_or_else(|| self.target.clone()),
                 args,
             )),
             None => normalized_target.map(|target| {
-                factory.create_application_term(
-                    target,
-                    allocator.create_list(self.args.iter().map(|arg| arg.clone())),
-                )
+                factory.create_application_term(target, allocator.clone_list(&self.args))
             }),
         };
-        let reduced_expression = match substituted_expression {
+        let substituted_expression = match substituted_expression {
             Some(expression) => expression
                 .reduce(factory, allocator, cache)
-                .or_else(|| Some(expression)),
+                .or(Some(expression)),
             None => self.reduce(factory, allocator, cache),
         };
-        reduced_expression.map(|expression| {
+        let substituted_expression = substituted_expression.map(|expression| {
             expression
                 .normalize(factory, allocator, cache)
-                .unwrap_or_else(|| expression)
-        })
+                .unwrap_or(expression)
+        });
+        let result = substituted_expression.map(|expression| {
+            abstract_unused_application_args(
+                &expression,
+                args.as_slice(),
+                factory,
+                allocator,
+                cache,
+            )
+            .unwrap_or(expression)
+        });
+
+        // FIXME: reinstate 'IIFE -> let' conversion
+        // let result = result.map(|expression| {
+        //     convert_immediately_invoked_lambda_to_let(&expression, factory).unwrap_or(expression)
+        // });
+
+        result
     }
 }
+
+fn abstract_unused_application_args<T: Expression + Rewritable<T>>(
+    expression: &T,
+    args: &[T],
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+    cache: &mut impl EvaluationCache<T>,
+) -> Option<T> {
+    let abstracted_args = args
+        .iter()
+        .unique()
+        .filter(|arg| {
+            arg.is_complex() && expression.count_subexpression_usages(arg, factory, allocator) > 1
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    if abstracted_args.is_empty() {
+        return None;
+    }
+    let substitutions = abstracted_args
+        .iter()
+        .enumerate()
+        .map(|(index, arg)| {
+            (
+                arg.clone(),
+                factory.create_static_variable_term(abstracted_args.len() - index - 1),
+            )
+        })
+        .collect::<Vec<_>>();
+    let substitutions = Substitutions::term_match(
+        &substitutions,
+        Some(ScopeOffset::Wrap(abstracted_args.len())),
+    );
+    Some(factory.create_application_term(
+        factory.create_lambda_term(
+            abstracted_args.len(),
+            expression.substitute_static(&substitutions, factory, allocator, cache)?,
+        ),
+        allocator.create_list(abstracted_args),
+    ))
+}
+
+fn convert_immediately_invoked_lambda_to_let<T: Expression>(
+    target: &T,
+    factory: &impl ExpressionFactory<T>,
+) -> Option<T> {
+    let application = factory.match_application_term(&target)?;
+    let lambda = factory.match_lambda_term(application.target())?;
+    Some(convert_lambda_application_to_let(
+        lambda,
+        application.args().as_slice(),
+        factory,
+    ))
+}
+
+fn convert_lambda_application_to_let<T: Expression>(
+    lambda: &LambdaTerm<T>,
+    args: &[T],
+    factory: &impl ExpressionFactory<T>,
+) -> T {
+    if args.is_empty() {
+        lambda.body().clone()
+    } else {
+        factory.create_let_term(
+            args[0].clone(),
+            convert_lambda_application_to_let(lambda, &args[1..], factory),
+        )
+    }
+}
+
 impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T>> Reducible<T>
     for ApplicationTerm<T>
 {
@@ -379,7 +490,7 @@ impl<T: Expression> std::fmt::Display for ApplicationTerm<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "<call:{}:{}>",
+            "<apply:{}:{}>",
             self.target,
             self.args
                 .iter()
@@ -668,5 +779,497 @@ fn match_compiled_function_result(program: &Program) -> Option<InstructionPointe
     match program.instructions().first() {
         Some(Instruction::PushFunction { target }) if program.len() == 1 => Some(*target),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+
+    use crate::parser::sexpr::parse;
+    use crate::{
+        allocator::DefaultAllocator,
+        cache::SubstitutionCache,
+        core::{ExpressionFactory, HeapAllocator, Rewritable},
+        lang::{create_struct, CachedSharedTerm, SharedTermFactory, ValueTerm},
+        stdlib::Stdlib,
+    };
+
+    use super::convert_immediately_invoked_lambda_to_let;
+
+    #[test]
+    fn lambda_let_conversion() {
+        let factory = SharedTermFactory::<Stdlib>::default();
+        let allocator = DefaultAllocator::<CachedSharedTerm<Stdlib>>::default();
+
+        let expression = parse("((lambda () 3))", &factory, &allocator).unwrap();
+        assert_eq!(
+            convert_immediately_invoked_lambda_to_let(&expression, &factory),
+            Some(factory.create_value_term(ValueTerm::Int(3)))
+        );
+
+        let expression = parse("((lambda (foo) foo) 3)", &factory, &allocator).unwrap();
+        assert_eq!(
+            convert_immediately_invoked_lambda_to_let(&expression, &factory),
+            Some(factory.create_let_term(
+                factory.create_value_term(ValueTerm::Int(3)),
+                factory.create_static_variable_term(0)
+            ))
+        );
+
+        let expression = parse(
+            "((lambda (foo bar baz) (+ foo (+ bar baz))) 3 4 5)",
+            &factory,
+            &allocator,
+        )
+        .unwrap();
+        assert_eq!(
+            convert_immediately_invoked_lambda_to_let(&expression, &factory),
+            Some(factory.create_let_term(
+                factory.create_value_term(ValueTerm::Int(3)),
+                factory.create_let_term(
+                    factory.create_value_term(ValueTerm::Int(4)),
+                    factory.create_let_term(
+                        factory.create_value_term(ValueTerm::Int(5)),
+                        factory.create_application_term(
+                            factory.create_builtin_term(Stdlib::Add),
+                            allocator.create_pair(
+                                factory.create_static_variable_term(2),
+                                factory.create_application_term(
+                                    factory.create_builtin_term(Stdlib::Add),
+                                    allocator.create_pair(
+                                        factory.create_static_variable_term(1),
+                                        factory.create_static_variable_term(0),
+                                    )
+                                )
+                            )
+                        )
+                    )
+                )
+            ))
+        );
+    }
+
+    #[test]
+    fn variable_inlining_single_use_is_inlined() {
+        let factory = SharedTermFactory::<Stdlib>::default();
+        let allocator = DefaultAllocator::<CachedSharedTerm<Stdlib>>::default();
+        let expression = factory.create_application_term(
+            factory.create_lambda_term(
+                1,
+                create_struct(
+                    [
+                        (String::from("foo"), factory.create_static_variable_term(0)),
+                        (
+                            String::from("bar"),
+                            factory.create_application_term(
+                                factory.create_builtin_term(Stdlib::Abs),
+                                allocator
+                                    .create_unit_list(factory.create_value_term(ValueTerm::Int(3))),
+                            ),
+                        ),
+                    ],
+                    &factory,
+                    &allocator,
+                ),
+            ),
+            allocator.create_unit_list(factory.create_struct_term(
+                allocator.create_struct_prototype([String::from("x")]),
+                allocator.create_unit_list(factory.create_value_term(ValueTerm::Boolean(true))),
+            )),
+        );
+        let result = expression.normalize(&factory, &allocator, &mut SubstitutionCache::new());
+        assert_eq!(
+            result,
+            Some(create_struct(
+                [
+                    (
+                        String::from("foo"),
+                        factory.create_struct_term(
+                            allocator.create_struct_prototype([String::from("x")]),
+                            allocator.create_unit_list(
+                                factory.create_value_term(ValueTerm::Boolean(true))
+                            ),
+                        )
+                    ),
+                    (
+                        String::from("bar"),
+                        factory.create_value_term(ValueTerm::Int(3))
+                    ),
+                ],
+                &factory,
+                &allocator,
+            ))
+        );
+    }
+
+    #[test]
+    fn variable_inlining_subexpressions_normalized_but_complex_variables_not_inlined_twice() {
+        let factory = SharedTermFactory::<Stdlib>::default();
+        let allocator = DefaultAllocator::<CachedSharedTerm<Stdlib>>::default();
+        let expression = factory.create_application_term(
+            factory.create_lambda_term(
+                1,
+                create_struct(
+                    [
+                        (String::from("foo"), factory.create_static_variable_term(0)),
+                        (
+                            String::from("bar"),
+                            factory.create_application_term(
+                                factory.create_builtin_term(Stdlib::Abs),
+                                allocator
+                                    .create_unit_list(factory.create_value_term(ValueTerm::Int(3))),
+                            ),
+                        ),
+                        (String::from("baz"), factory.create_static_variable_term(0)),
+                    ],
+                    &factory,
+                    &allocator,
+                ),
+            ),
+            allocator.create_unit_list(factory.create_struct_term(
+                allocator.create_struct_prototype([String::from("x")]),
+                allocator.create_unit_list(factory.create_value_term(ValueTerm::Boolean(true))),
+            )),
+        );
+        let result = expression.normalize(&factory, &allocator, &mut SubstitutionCache::new());
+        assert_eq!(
+            result,
+            // Some(factory.create_let_term(
+            //     factory.create_struct_term(
+            //         allocator.create_struct_prototype([String::from("x")]),
+            //         allocator.create_unit_list(factory.create_value_term(ValueTerm::Boolean(true)))
+            //     ),
+            //     create_struct(
+            //         [
+            //             (String::from("foo"), factory.create_static_variable_term(0)),
+            //             (
+            //                 String::from("bar"),
+            //                 factory.create_value_term(ValueTerm::Int(3)),
+            //             ),
+            //             (String::from("baz"), factory.create_static_variable_term(0)),
+            //         ],
+            //         &factory,
+            //         &allocator,
+            //     ),
+            // )),
+            Some(factory.create_application_term(
+                factory.create_lambda_term(
+                    1,
+                    create_struct(
+                        [
+                            (String::from("foo"), factory.create_static_variable_term(0)),
+                            (
+                                String::from("bar"),
+                                factory.create_value_term(ValueTerm::Int(3)),
+                            ),
+                            (String::from("baz"), factory.create_static_variable_term(0)),
+                        ],
+                        &factory,
+                        &allocator,
+                    ),
+                ),
+                allocator.create_unit_list(factory.create_struct_term(
+                    allocator.create_struct_prototype([String::from("x")]),
+                    allocator.create_unit_list(factory.create_value_term(ValueTerm::Boolean(true)))
+                )),
+            )),
+        );
+    }
+
+    #[test]
+    fn variable_inlining_primitive_args_inlined_and_subexpressions_normalized() {
+        let factory = SharedTermFactory::<Stdlib>::default();
+        let allocator = DefaultAllocator::<CachedSharedTerm<Stdlib>>::default();
+        let expression = factory.create_application_term(
+            factory.create_lambda_term(
+                2,
+                create_struct(
+                    [
+                        (String::from("foo"), factory.create_static_variable_term(1)),
+                        (
+                            String::from("bar"),
+                            factory.create_application_term(
+                                factory.create_builtin_term(Stdlib::Add),
+                                allocator.create_pair(
+                                    factory.create_static_variable_term(0),
+                                    factory.create_static_variable_term(0),
+                                ),
+                            ),
+                        ),
+                        (String::from("baz"), factory.create_static_variable_term(1)),
+                    ],
+                    &factory,
+                    &allocator,
+                ),
+            ),
+            allocator.create_pair(
+                factory.create_struct_term(
+                    allocator.create_struct_prototype([String::from("x")]),
+                    allocator.create_unit_list(factory.create_value_term(ValueTerm::Boolean(true))),
+                ),
+                factory.create_value_term(ValueTerm::Int(3)),
+            ),
+        );
+        let result = expression.normalize(&factory, &allocator, &mut SubstitutionCache::new());
+        assert_eq!(
+            result,
+            // Some(factory.create_let_term(
+            //     factory.create_struct_term(
+            //         allocator.create_struct_prototype([String::from("x")]),
+            //         allocator.create_unit_list(factory.create_value_term(ValueTerm::Boolean(true)))
+            //     ),
+            //     create_struct(
+            //         [
+            //             (String::from("foo"), factory.create_static_variable_term(0)),
+            //             (
+            //                 String::from("bar"),
+            //                 factory.create_value_term(ValueTerm::Int(3 + 3)),
+            //             ),
+            //             (String::from("baz"), factory.create_static_variable_term(0)),
+            //         ],
+            //         &factory,
+            //         &allocator,
+            //     ),
+            // ))
+            Some(factory.create_application_term(
+                factory.create_lambda_term(
+                    1,
+                    create_struct(
+                        [
+                            (String::from("foo"), factory.create_static_variable_term(0)),
+                            (
+                                String::from("bar"),
+                                factory.create_value_term(ValueTerm::Int(3 + 3)),
+                            ),
+                            (String::from("baz"), factory.create_static_variable_term(0)),
+                        ],
+                        &factory,
+                        &allocator,
+                    ),
+                ),
+                allocator.create_unit_list(factory.create_struct_term(
+                    allocator.create_struct_prototype([String::from("x")]),
+                    allocator.create_unit_list(factory.create_value_term(ValueTerm::Boolean(true)))
+                )),
+            )),
+        );
+    }
+
+    #[test]
+    fn variable_inlining_complex_args_inlined_if_it_simplifies_overall() {
+        let factory = SharedTermFactory::<Stdlib>::default();
+        let allocator = DefaultAllocator::<CachedSharedTerm<Stdlib>>::default();
+        let expression = factory.create_application_term(
+            factory.create_lambda_term(
+                3,
+                create_struct(
+                    [
+                        (
+                            // foo -> {"X": 1, "Y": 2}["X"]
+                            String::from("foo"),
+                            factory.create_application_term(
+                                factory.create_builtin_term(Stdlib::Get),
+                                allocator.create_pair(
+                                    factory.create_static_variable_term(0),
+                                    factory.create_static_variable_term(1),
+                                ),
+                            ),
+                        ),
+                        (
+                            // bar -> {"X": 1, "Y": 2}["Y"]
+                            String::from("bar"),
+                            factory.create_application_term(
+                                factory.create_builtin_term(Stdlib::Get),
+                                allocator.create_pair(
+                                    factory.create_static_variable_term(0),
+                                    factory.create_static_variable_term(2),
+                                ),
+                            ),
+                        ),
+                        (String::from("baz"), factory.create_static_variable_term(0)),
+                    ],
+                    &factory,
+                    &allocator,
+                ),
+            ),
+            allocator.create_list(vec![
+                factory.create_value_term(ValueTerm::String(String::from("Y"))),
+                factory.create_value_term(ValueTerm::String(String::from("X"))),
+                create_struct(
+                    [
+                        (
+                            String::from("X"),
+                            factory.create_value_term(ValueTerm::Int(1)),
+                        ),
+                        (
+                            String::from("Y"),
+                            factory.create_value_term(ValueTerm::Int(2)),
+                        ),
+                    ],
+                    &factory,
+                    &allocator,
+                ),
+            ]),
+        );
+        let result = expression.normalize(&factory, &allocator, &mut SubstitutionCache::new());
+        assert_eq!(
+            result,
+            Some(create_struct(
+                [
+                    (
+                        // foo -> {"X": 1, "Y": 2}["X"]
+                        String::from("foo"),
+                        factory.create_value_term(ValueTerm::Int(1))
+                    ),
+                    (
+                        // bar -> {"X": 1, "Y": 2}["Y"]
+                        String::from("bar"),
+                        factory.create_value_term(ValueTerm::Int(2))
+                    ),
+                    (
+                        String::from("baz"),
+                        create_struct(
+                            [
+                                (
+                                    String::from("X"),
+                                    factory.create_value_term(ValueTerm::Int(1)),
+                                ),
+                                (
+                                    String::from("Y"),
+                                    factory.create_value_term(ValueTerm::Int(2)),
+                                ),
+                            ],
+                            &factory,
+                            &allocator,
+                        )
+                    ),
+                ],
+                &factory,
+                &allocator,
+            ))
+        );
+    }
+
+    #[test]
+    fn variable_inlining_pairs_of_args_inlined() {
+        let factory = SharedTermFactory::<Stdlib>::default();
+        let allocator = DefaultAllocator::<CachedSharedTerm<Stdlib>>::default();
+        let expression = factory.create_application_term(
+            factory.create_lambda_term(
+                3,
+                create_struct(
+                    [
+                        (String::from("foo"), factory.create_static_variable_term(2)),
+                        (
+                            String::from("bar"),
+                            factory.create_application_term(
+                                factory.create_builtin_term(Stdlib::Add),
+                                allocator.create_pair(
+                                    factory.create_application_term(
+                                        factory.create_builtin_term(Stdlib::Add),
+                                        allocator.create_pair(
+                                            factory.create_static_variable_term(0),
+                                            factory.create_static_variable_term(1),
+                                        ),
+                                    ),
+                                    factory.create_application_term(
+                                        factory.create_builtin_term(Stdlib::Add),
+                                        allocator.create_pair(
+                                            factory.create_static_variable_term(0),
+                                            factory.create_static_variable_term(1),
+                                        ),
+                                    ),
+                                ),
+                            ),
+                        ),
+                        (String::from("baz"), factory.create_static_variable_term(2)),
+                    ],
+                    &factory,
+                    &allocator,
+                ),
+            ),
+            allocator.create_list([
+                factory.create_struct_term(
+                    allocator.create_struct_prototype([String::from("x")]),
+                    allocator.create_unit_list(factory.create_value_term(ValueTerm::Boolean(true))),
+                ),
+                factory.create_value_term(ValueTerm::Int(3)),
+                factory.create_value_term(ValueTerm::Int(4)),
+            ]),
+        );
+        let result = expression.normalize(&factory, &allocator, &mut SubstitutionCache::new());
+        assert_eq!(
+            result,
+            // Some(factory.create_let_term(
+            //     factory.create_struct_term(
+            //         allocator.create_struct_prototype([String::from("x")]),
+            //         allocator.create_unit_list(factory.create_value_term(ValueTerm::Boolean(true)))
+            //     ),
+            //     create_struct(
+            //         [
+            //             (String::from("foo"), factory.create_static_variable_term(0)),
+            //             (
+            //                 String::from("bar"),
+            //                 factory.create_value_term(ValueTerm::Int(3 + 4 + 3 + 4)),
+            //             ),
+            //             (String::from("baz"), factory.create_static_variable_term(0)),
+            //         ],
+            //         &factory,
+            //         &allocator,
+            //     ),
+            // )),
+            Some(factory.create_application_term(
+                factory.create_lambda_term(
+                    1,
+                    create_struct(
+                        [
+                            (String::from("foo"), factory.create_static_variable_term(0)),
+                            (
+                                String::from("bar"),
+                                factory.create_value_term(ValueTerm::Int(3 + 4 + 3 + 4)),
+                            ),
+                            (String::from("baz"), factory.create_static_variable_term(0)),
+                        ],
+                        &factory,
+                        &allocator,
+                    ),
+                ),
+                allocator.create_unit_list(factory.create_struct_term(
+                    allocator.create_struct_prototype([String::from("x")]),
+                    allocator.create_unit_list(factory.create_value_term(ValueTerm::Boolean(true)))
+                )),
+            )),
+        );
+    }
+
+    #[test]
+    fn variable_inlining_lambda_as_a_variable() {
+        let factory = SharedTermFactory::<Stdlib>::default();
+        let allocator = DefaultAllocator::<CachedSharedTerm<Stdlib>>::default();
+        let expression = parse(
+            "
+            ((lambda (value) ((lambda (foo) foo) (* value 2))) 3)
+        ",
+            &factory,
+            &allocator,
+        )
+        .unwrap();
+        assert_eq!(
+            expression.normalize(&factory, &allocator, &mut SubstitutionCache::new()),
+            Some(factory.create_value_term(ValueTerm::Int(6)))
+        );
+    }
+
+    #[test]
+    fn normalize_zero_arg_applications() {
+        let factory = SharedTermFactory::<Stdlib>::default();
+        let allocator = DefaultAllocator::<CachedSharedTerm<Stdlib>>::default();
+
+        let expression = factory.create_application_term(
+            factory.create_lambda_term(0, factory.create_value_term(ValueTerm::Int(3))),
+            allocator.create_empty_list(),
+        );
+        let result = expression.normalize(&factory, &allocator, &mut SubstitutionCache::new());
+        assert_eq!(result, Some(factory.create_value_term(ValueTerm::Int(3))));
     }
 }

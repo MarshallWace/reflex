@@ -114,6 +114,9 @@ pub trait Rewritable<T: Expression + Rewritable<T>> {
             .flat_map(|child| once(child).chain(child.subexpressions()))
             .collect()
     }
+    fn is_complex(&self) -> bool {
+        !self.children().is_empty()
+    }
     fn count_subexpression_usages(
         &self,
         expression: &T,
@@ -713,6 +716,8 @@ pub trait EvaluationCache<T: Expression> {
     );
     fn retrieve_reduction(&mut self, expression: &T) -> Option<Option<T>>;
     fn store_reduction(&mut self, expression: &T, result: Option<T>);
+    fn retrieve_normalization(&mut self, expression: &T) -> Option<Option<T>>;
+    fn store_normalization(&mut self, expression: &T, result: Option<T>);
     fn retrieve_evaluation(
         &mut self,
         expression: &T,
@@ -1009,7 +1014,7 @@ impl std::fmt::Display for SignalType {
 #[derive(Hash, Eq, PartialEq, Copy, Clone, Debug)]
 enum SubstitutionPatterns<'a, T: Expression> {
     Variable(&'a Vec<(StackOffset, T)>, Option<ScopeOffset>),
-    Term(&'a Vec<(T, T)>),
+    Term(&'a Vec<(T, T)>, Option<ScopeOffset>),
     Offset(ScopeOffset),
 }
 
@@ -1038,9 +1043,12 @@ impl<'a, T: Expression + Rewritable<T>> Substitutions<'a, T> {
             offset: 0,
         }
     }
-    pub(crate) fn term_match(substitutions: &'a Vec<(T, T)>) -> Self {
+    pub(crate) fn term_match(
+        substitutions: &'a Vec<(T, T)>,
+        scope_offset: Option<ScopeOffset>,
+    ) -> Self {
         Self {
-            entries: SubstitutionPatterns::Term(substitutions),
+            entries: SubstitutionPatterns::Term(substitutions, scope_offset),
             min_depth: 0,
             offset: 0,
         }
@@ -1067,6 +1075,9 @@ impl<'a, T: Expression + Rewritable<T>> Substitutions<'a, T> {
         }
     }
     pub(crate) fn can_skip(&self, expression: &T) -> bool {
+        if matches!(self.entries, SubstitutionPatterns::Term(_, _)) {
+            return false;
+        }
         let capture_depth = expression.capture_depth();
         if capture_depth == 0 {
             true
@@ -1082,7 +1093,7 @@ impl<'a, T: Expression + Rewritable<T>> Substitutions<'a, T> {
         cache: &mut impl EvaluationCache<T>,
     ) -> Option<T> {
         match self.entries {
-            SubstitutionPatterns::Term(entries) => {
+            SubstitutionPatterns::Term(entries, _) => {
                 entries.iter().find_map(|(pattern, replacement)| {
                     let adjusted_scope_pattern = pattern.substitute_static(
                         &Substitutions::increase_scope_offset(self.offset),
@@ -1117,11 +1128,11 @@ impl<'a, T: Expression + Rewritable<T>> Substitutions<'a, T> {
         allocator: &impl HeapAllocator<T>,
         cache: &mut impl EvaluationCache<T>,
     ) -> Option<T> {
-        if offset < self.offset {
+        if offset < self.offset + self.min_depth {
             return None;
         }
         let (entries, scope_offset) = match self.entries {
-            SubstitutionPatterns::Term(_) => None,
+            SubstitutionPatterns::Term(_, scope_offset) => Some((None, scope_offset)),
             SubstitutionPatterns::Variable(entries, scope_offset) => {
                 Some((Some(entries), scope_offset))
             }

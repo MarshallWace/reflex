@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use std::{convert::Infallible, future::Future, iter::once, sync::Arc};
 
 use hyper::{
@@ -23,6 +24,7 @@ pub mod builtins;
 pub mod cli;
 
 mod graphql;
+pub use graphql::compile_graphql_query;
 use graphql::{
     http::handle_graphql_http_request, playground::handle_playground_http_request,
     websocket::handle_graphql_ws_request,

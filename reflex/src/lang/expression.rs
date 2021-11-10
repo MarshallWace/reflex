@@ -23,6 +23,7 @@ pub struct CachedExpression<T: Expression> {
     has_dynamic_dependencies_shallow: bool,
     has_dynamic_dependencies_deep: bool,
     value: T,
+    normalized: bool,
 }
 impl<T: Expression> CachedExpression<T> {
     pub fn new(value: T) -> Self {
@@ -32,10 +33,20 @@ impl<T: Expression> CachedExpression<T> {
             has_dynamic_dependencies_shallow: value.has_dynamic_dependencies(false),
             has_dynamic_dependencies_deep: value.has_dynamic_dependencies(true),
             value,
+            normalized: false,
         }
     }
     pub fn value(&self) -> &T {
         &self.value
+    }
+    pub fn normalized(&self) -> bool {
+        self.normalized
+    }
+    pub fn into_normalized(self) -> Self {
+        Self {
+            normalized: true,
+            ..self
+        }
     }
 }
 impl<T: Expression> Expression for CachedExpression<T> {
@@ -125,9 +136,14 @@ impl<T: Expression + Rewritable<T>> Rewritable<T> for CachedExpression<T> {
         match cache.retrieve_static_substitution(&self.value, substitutions) {
             Some(result) => result,
             None => {
-                let result = self
-                    .value
-                    .substitute_static(substitutions, factory, allocator, cache);
+                // TODO: This should not all magically depend on people using Cached term, instead we
+                // should expose a method for doing a walk on the tree and perform transformations to the tree
+                let result = substitutions
+                    .substitute_term(self.id(), factory, allocator, cache)
+                    .or_else(|| {
+                        self.value()
+                            .substitute_static(substitutions, factory, allocator, cache)
+                    });
                 cache.store_static_substitution(
                     &self.value,
                     substitutions,
@@ -178,7 +194,14 @@ impl<T: Expression + Rewritable<T>> Rewritable<T> for CachedExpression<T> {
         allocator: &impl HeapAllocator<T>,
         cache: &mut impl EvaluationCache<T>,
     ) -> Option<T> {
-        self.value.normalize(factory, allocator, cache)
+        match cache.retrieve_normalization(&self.value) {
+            Some(result) => result,
+            None => {
+                let result = self.value.normalize(factory, allocator, cache);
+                cache.store_normalization(&self.value, result.as_ref().cloned());
+                result
+            }
+        }
     }
 }
 impl<T: Expression + Rewritable<T> + Reducible<T>> Reducible<T> for CachedExpression<T> {

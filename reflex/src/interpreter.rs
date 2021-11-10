@@ -6,7 +6,7 @@ use std::convert::TryInto;
 use std::{collections::hash_map::DefaultHasher, hash::Hasher, iter::once};
 
 use tracing::info_span;
-use tracing::{debug, trace};
+use tracing::trace;
 
 pub use cache::{
     CacheEntries, DefaultInterpreterCache, GcMetrics, InterpreterCache, InterpreterCacheEntry,
@@ -162,20 +162,10 @@ fn evaluate_program_loop<T: Expression + Rewritable<T> + Reducible<T> + Applicab
             )),
             Some(instruction) => {
                 if debug_instructions {
-                    debug!("> {:x} {:?}", call_stack.program_counter(), instruction);
+                    println!("{}", format_current_instruction(call_stack));
                 }
                 if debug_stack {
-                    debug!(
-                        "{}",
-                        stack
-                            .values()
-                            .iter()
-                            .rev()
-                            .enumerate()
-                            .map(|(offset, value)| format!("  {}: {}", offset, value))
-                            .collect::<Vec<_>>()
-                            .join("\n")
-                    );
+                    println!("{}", format_current_stack(stack))
                 }
                 evaluate_instruction(
                     instruction,
@@ -1186,6 +1176,31 @@ fn generate_function_call_hash<'a, T: Expression + 'a>(
         arg.hash(&mut hasher);
     }
     hasher.finish()
+}
+
+fn format_current_instruction<T: Expression>(call_stack: &CallStack<T>) -> String {
+    format!(
+        "> {:x} {}",
+        call_stack.program_counter(),
+        call_stack
+            .current_instruction()
+            .map(|instruction| format!("{:?}", instruction))
+            .unwrap_or_else(|| String::from("---"))
+    )
+}
+
+fn format_current_stack<T: Expression>(stack: &VariableStack<T>) -> String {
+    format!(
+        "{}",
+        stack
+            .values()
+            .iter()
+            .rev()
+            .enumerate()
+            .map(|(offset, value)| format!("  {}: {}", offset, value))
+            .collect::<Vec<_>>()
+            .join("\n")
+    )
 }
 
 fn combine_slices<'a, T>(left: &'a [T], right: &'a [T]) -> CombinedSlice<'a, T> {

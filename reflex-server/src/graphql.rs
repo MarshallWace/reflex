@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 pub(crate) mod http;
 pub(crate) mod playground;
 pub(crate) mod websocket;
@@ -13,7 +14,7 @@ use reflex::{
     core::{Applicable, Expression, ExpressionFactory, HeapAllocator, Reducible, Rewritable},
 };
 
-pub(crate) fn compile_graphql_query<
+pub fn compile_graphql_query<
     T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
 >(
     query: T,

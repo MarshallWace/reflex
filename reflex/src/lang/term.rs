@@ -458,8 +458,12 @@ impl<T: Expression> SerializeJson for Term<T> {
 /// A TermExpression is a thin wrapper around [Term]. In AST/graph terminology, a TermExpression
 /// is a node in the graph, a [Term] is the value stored at that node. i.e. a [Term] is not an
 /// [Expression] but a TermExpression is.
-#[derive(Hash, Eq, PartialEq, Clone, Debug)]
+#[derive(Hash, Eq, PartialEq, Clone, Debug, Serialize, Deserialize)]
 pub struct TermExpression<T: Expression> {
+    #[serde(bound(
+        serialize = "<T as Expression>::String: Serialize, T: Serialize",
+        deserialize = "<T as Expression>::String: Deserialize<'de>, T: Deserialize<'de>"
+    ))]
     value: Term<T>,
 }
 impl<T: Expression> TermExpression<T> {
@@ -477,8 +481,11 @@ impl<T: Expression + Applicable<T>> GraphNode for TermExpression<T> {
     fn free_variables(&self) -> HashSet<StackOffset> {
         self.value.free_variables()
     }
-    fn dynamic_dependencies(&self) -> DependencyList {
-        self.value.dynamic_dependencies()
+    fn dynamic_dependencies(&self, deep: bool) -> DependencyList {
+        self.value.dynamic_dependencies(deep)
+    }
+    fn has_dynamic_dependencies(&self, deep: bool) -> bool {
+        self.value.has_dynamic_dependencies(deep)
     }
     fn is_static(&self) -> bool {
         self.value.is_static()
@@ -543,13 +550,14 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>> 
     }
     fn substitute_dynamic(
         &self,
+        deep: bool,
         state: &impl DynamicState<T>,
         factory: &impl ExpressionFactory<T>,
         allocator: &impl HeapAllocator<T>,
         cache: &mut impl EvaluationCache<T>,
     ) -> Option<T> {
         self.value
-            .substitute_dynamic(state, factory, allocator, cache)
+            .substitute_dynamic(deep, state, factory, allocator, cache)
     }
     fn hoist_free_variables(
         &self,

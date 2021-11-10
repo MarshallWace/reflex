@@ -5,6 +5,7 @@
 use std::process;
 
 use reflex::{allocator::DefaultAllocator, lang::SharedTermFactory};
+use reflex::compiler::CompilerOptions;
 use reflex_cli::compiler::js::standard_js_loaders;
 use reflex_server::{
     builtins::ServerBuiltins,
@@ -22,7 +23,7 @@ pub async fn main() {
             Some(standard_js_loaders(&factory, &allocator)),
             &factory,
             &allocator,
-            None,
+            Some(CompilerOptions::unoptimized()),
             None,
             NoopGraphQlHttpQueryTransform::default(),
         )

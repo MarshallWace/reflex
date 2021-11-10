@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use std::collections::{hash_map::Entry, HashMap};
 
 use crate::{
@@ -62,6 +63,10 @@ impl<T: Expression> EvaluationCache<T> for NoopCache {
         None
     }
     fn store_reduction(&mut self, _expression: &T, _result: Option<T>) {}
+    fn retrieve_normalization(&mut self, _expression: &T) -> Option<Option<T>> {
+        None
+    }
+    fn store_normalization(&mut self, _expression: &T, _result: Option<T>) {}
 }
 
 pub struct SubstitutionCache<T: Expression> {
@@ -104,6 +109,19 @@ impl<T: Expression + Rewritable<T> + Reducible<T>> EvaluationCache<T> for Substi
             Entry::Occupied(mut entry) => entry.get_mut().set_reduce(result),
             Entry::Vacant(entry) => {
                 entry.insert(SubstitutionCacheEntry::from_reduce(expression, result));
+            }
+        }
+    }
+    fn retrieve_normalization(&mut self, expression: &T) -> Option<Option<T>> {
+        self.entries
+            .get(expression)
+            .map(|entry| entry.get_normalize().cloned())
+    }
+    fn store_normalization(&mut self, expression: &T, result: Option<T>) {
+        match self.entries.entry(expression.clone()) {
+            Entry::Occupied(mut entry) => entry.get_mut().set_normalize(result),
+            Entry::Vacant(entry) => {
+                entry.insert(SubstitutionCacheEntry::from_normalize(expression, result));
             }
         }
     }
@@ -253,6 +271,7 @@ impl<T: Expression + Rewritable<T> + Reducible<T>> EvaluationCache<T> for Substi
 struct SubstitutionCacheEntry<T: Expression> {
     state_dependencies: Vec<StateToken>,
     reduce: Option<T>,
+    normalize: Option<T>,
     evaluate: HashMap<HashId, Option<EvaluationResult<T>>>,
     substitute_static: HashMap<HashId, Option<T>>,
     substitute_dynamic: HashMap<HashId, Option<T>>,
@@ -262,6 +281,7 @@ impl<T: Expression> SubstitutionCacheEntry<T> {
         Self {
             state_dependencies: target.dynamic_dependencies(false).iter().collect(),
             reduce: None,
+            normalize: None,
             evaluate: HashMap::new(),
             substitute_static: HashMap::new(),
             substitute_dynamic: HashMap::new(),
@@ -270,6 +290,11 @@ impl<T: Expression> SubstitutionCacheEntry<T> {
     fn from_reduce(target: &T, value: Option<T>) -> Self {
         let mut entry = Self::new(target);
         entry.set_reduce(value);
+        entry
+    }
+    fn from_normalize(target: &T, value: Option<T>) -> Self {
+        let mut entry = Self::new(target);
+        entry.set_normalize(value);
         entry
     }
     fn from_evaluate(
@@ -300,6 +325,12 @@ impl<T: Expression> SubstitutionCacheEntry<T> {
     }
     fn set_reduce(&mut self, value: Option<T>) {
         self.reduce = value;
+    }
+    fn get_normalize(&self) -> Option<&T> {
+        self.normalize.as_ref()
+    }
+    fn set_normalize(&mut self, value: Option<T>) {
+        self.normalize = value;
     }
     fn get_evaluate(&self, state: &impl DynamicState<T>) -> Option<Option<&EvaluationResult<T>>> {
         let overall_state_hash = state.id();
@@ -389,6 +420,28 @@ impl<T: Expression + Rewritable<T> + Reducible<T>> EvaluationCache<T>
     }
     fn store_reduction(&mut self, expression: &T, result: Option<T>) {
         self.current.store_reduction(expression, result);
+    }
+    fn retrieve_normalization(&mut self, expression: &T) -> Option<Option<T>> {
+        match self.current.retrieve_normalization(expression) {
+            Some(result) => Some(result),
+            None => match &mut self.previous {
+                Some(previous) => match previous.retrieve_normalization(expression) {
+                    Some(result) => Some(match result {
+                        Some(value) => {
+                            self.current
+                                .store_normalization(expression, Some(value.clone()));
+                            Some(value)
+                        }
+                        None => None,
+                    }),
+                    None => None,
+                },
+                None => None,
+            },
+        }
+    }
+    fn store_normalization(&mut self, expression: &T, result: Option<T>) {
+        self.current.store_normalization(expression, result);
     }
     fn retrieve_evaluation(
         &mut self,
