@@ -170,6 +170,9 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T>> Rewritable<T>
         cache: &mut impl EvaluationCache<T>,
     ) -> Option<T> {
         let normalized_target = self.target.normalize(factory, allocator, cache);
+        if self.args.is_empty() {
+            return normalized_target.or_else(|| Some(self.target.clone()));
+        }
         let normalized_args = transform_expression_list(&self.args, allocator, |arg| {
             arg.normalize(factory, allocator, cache)
         });
@@ -262,5 +265,79 @@ impl<T: Expression> std::fmt::Display for PartialApplicationTerm<T> {
 impl<T: Expression> SerializeJson for PartialApplicationTerm<T> {
     fn to_json(&self) -> Result<serde_json::Value, String> {
         Err(format!("Unable to serialize term: {}", self))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        allocator::DefaultAllocator,
+        cache::SubstitutionCache,
+        core::{ExpressionFactory, HeapAllocator, Rewritable},
+        lang::{CachedSharedTerm, SharedTermFactory, ValueTerm},
+        stdlib::Stdlib,
+    };
+
+    #[test]
+    fn normalize_fully_applied_partial() {
+        let factory = SharedTermFactory::<Stdlib>::default();
+        let allocator = DefaultAllocator::<CachedSharedTerm<Stdlib>>::default();
+
+        let expression = factory.create_partial_application_term(
+            factory.create_lambda_term(0, factory.create_value_term(ValueTerm::Int(3))),
+            allocator.create_empty_list(),
+        );
+        let result = expression.normalize(&factory, &allocator, &mut SubstitutionCache::new());
+        assert_eq!(
+            result,
+            Some(factory.create_lambda_term(0, factory.create_value_term(ValueTerm::Int(3))))
+        );
+
+        let expression = factory.create_partial_application_term(
+            factory.create_lambda_term(1, factory.create_static_variable_term(0)),
+            allocator.create_empty_list(),
+        );
+        let result = expression.normalize(&factory, &allocator, &mut SubstitutionCache::new());
+        assert_eq!(
+            result,
+            Some(factory.create_lambda_term(1, factory.create_static_variable_term(0)))
+        );
+
+        let expression = factory.create_partial_application_term(
+            factory.create_lambda_term(1, factory.create_static_variable_term(0)),
+            allocator.create_unit_list(factory.create_static_variable_term(0)),
+        );
+        let result = expression.normalize(&factory, &allocator, &mut SubstitutionCache::new());
+        assert_eq!(result, None);
+
+        let expression = factory.create_application_term(
+            factory.create_partial_application_term(
+                factory.create_lambda_term(1, factory.create_static_variable_term(0)),
+                allocator.create_unit_list(factory.create_value_term(ValueTerm::Int(3))),
+            ),
+            allocator.create_empty_list(),
+        );
+        let result = expression.normalize(&factory, &allocator, &mut SubstitutionCache::new());
+        assert_eq!(result, Some(factory.create_value_term(ValueTerm::Int(3))));
+
+        let expression = factory.create_application_term(
+            factory.create_partial_application_term(
+                factory.create_lambda_term(0, factory.create_value_term(ValueTerm::Int(3))),
+                allocator.create_empty_list(),
+            ),
+            allocator.create_empty_list(),
+        );
+        let result = expression.normalize(&factory, &allocator, &mut SubstitutionCache::new());
+        assert_eq!(result, Some(factory.create_value_term(ValueTerm::Int(3))));
+
+        let expression = factory.create_application_term(
+            factory.create_partial_application_term(
+                factory.create_lambda_term(1, factory.create_static_variable_term(0)),
+                allocator.create_empty_list(),
+            ),
+            allocator.create_unit_list(factory.create_value_term(ValueTerm::Int(3))),
+        );
+        let result = expression.normalize(&factory, &allocator, &mut SubstitutionCache::new());
+        assert_eq!(result, Some(factory.create_value_term(ValueTerm::Int(3))));
     }
 }
