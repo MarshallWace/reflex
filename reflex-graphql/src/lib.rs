@@ -651,7 +651,7 @@ mod tests {
         lang::{create_struct, SharedTermFactory, ValueTerm},
         stdlib::Stdlib,
     };
-    use std::convert::TryFrom;
+    use std::convert::{TryFrom, TryInto};
 
     use super::{parse, stdlib::Stdlib as GraphQlStdlib, NoopGraphQlQueryTransform};
 
@@ -681,8 +681,14 @@ mod tests {
     impl TryFrom<Uuid> for GraphQlTestBuiltins {
         type Error = ();
 
-        fn try_from(_: Uuid) -> Result<Self, Self::Error> {
-            unimplemented!()
+        fn try_from(value: Uuid) -> Result<Self, Self::Error> {
+            let stdlib_builtin: Result<Stdlib, ()> = value.try_into();
+            stdlib_builtin
+                .map(|builtin| GraphQlTestBuiltins::Stdlib(builtin))
+                .or_else(|_| {
+                    let graphql_builtin: Result<GraphQlStdlib, ()> = value.try_into();
+                    graphql_builtin.map(|builtin| GraphQlTestBuiltins::GraphQl(builtin))
+                })
         }
     }
     impl Builtin for GraphQlTestBuiltins {
