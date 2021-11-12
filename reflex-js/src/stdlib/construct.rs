@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use reflex::core::{
     uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
     FunctionArity, HeapAllocator, Uid, Uuid,
@@ -8,7 +9,7 @@ use reflex::core::{
 
 pub struct Construct {}
 impl Construct {
-    const UUID: Uuid = uuid!("5a68dc6b-71fa-407f-8039-bcd87323f2bf");
+    pub(crate) const UUID: Uuid = uuid!("5a68dc6b-71fa-407f-8039-bcd87323f2bf");
     const ARITY: FunctionArity<1, 0> = FunctionArity {
         required: [ArgType::Strict],
         optional: [],

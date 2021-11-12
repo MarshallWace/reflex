@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use reflex::{
     core::{
         uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
@@ -11,7 +12,7 @@ use reflex::{
 
 pub struct JsonStringify {}
 impl JsonStringify {
-    const UUID: Uuid = uuid!("b0a2caca-1101-402c-a21e-bccdf276e44c");
+    pub(crate) const UUID: Uuid = uuid!("b0a2caca-1101-402c-a21e-bccdf276e44c");
     const ARITY: FunctionArity<1, 0> = FunctionArity {
         required: [ArgType::Strict],
         optional: [],

@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use crate::core::{
     uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
     FunctionArity, HeapAllocator, Uid, Uuid,
@@ -10,7 +11,7 @@ use super::cons::match_cons_cell;
 
 pub struct Car {}
 impl Car {
-    const UUID: Uuid = uuid!("dd331a0f-3734-454c-a485-6565462220b4");
+    pub(crate) const UUID: Uuid = uuid!("dd331a0f-3734-454c-a485-6565462220b4");
     const ARITY: FunctionArity<1, 0> = FunctionArity {
         required: [ArgType::Strict],
         optional: [],

@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use crate::{
     compiler::{Compile, Compiler, Program},
     core::{
@@ -10,10 +11,11 @@ use crate::{
     },
     hash::HashId,
 };
+use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::sync::Arc;
 
-#[derive(Eq, Clone, Copy)]
+#[derive(Eq, Clone, Copy, Deserialize, Serialize)]
 pub struct CachedExpression<T: Expression> {
     hash: HashId,
     capture_depth: StackOffset,
@@ -235,7 +237,7 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Evaluate<T>> Evaluate<T>
     }
 }
 
-#[derive(Hash, PartialEq, Eq, Clone)]
+#[derive(Hash, PartialEq, Eq, Clone, Serialize, Deserialize)]
 pub struct SharedExpression<T: Expression> {
     pub(crate) value: Arc<T>,
 }

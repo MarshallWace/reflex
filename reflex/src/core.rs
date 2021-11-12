@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
+use std::convert::TryFrom;
 use std::{
     collections::{hash_map::DefaultHasher, BTreeSet, HashSet},
     hash::{Hash, Hasher},
@@ -43,6 +44,7 @@ pub trait Builtin:
     + std::fmt::Debug
     + std::hash::Hash
     + std::marker::Copy
+    + TryFrom<Uuid, Error = ()>
     + std::fmt::Display
 {
     fn arity<T: Expression<Builtin = Self> + Applicable<T>>(&self) -> Option<Arity>;
@@ -403,7 +405,7 @@ pub trait SerializeJson {
     fn to_json(&self) -> Result<serde_json::Value, String>;
 }
 
-#[derive(Eq, PartialEq, Clone, Debug)]
+#[derive(Eq, PartialEq, Clone, Debug, Serialize, Deserialize)]
 pub struct ExpressionList<T: Expression> {
     hash: HashId,
     items: Vec<T>,
@@ -499,7 +501,7 @@ impl<T: Expression> GraphNode for ExpressionList<T> {
     }
 }
 
-#[derive(Hash, Eq, PartialEq, Clone, Debug)]
+#[derive(Hash, Eq, PartialEq, Clone, Debug, Serialize, Deserialize)]
 pub struct SignalList<T: Expression> {
     signals: BTreeSet<Signal<T>>,
 }
@@ -884,7 +886,7 @@ pub enum VarArgs {
 
 pub type SignalId = HashId;
 
-#[derive(Eq, PartialEq, Clone, Debug)]
+#[derive(Eq, PartialEq, Clone, Debug, Serialize, Deserialize)]
 pub struct Signal<T: Expression> {
     hash: HashId,
     signal_type: SignalType,

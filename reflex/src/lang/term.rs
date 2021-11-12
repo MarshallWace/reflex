@@ -4,6 +4,8 @@
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use std::collections::HashSet;
 
+use serde::{Deserialize, Serialize};
+
 mod application;
 pub use application::*;
 mod builtin;
@@ -41,8 +43,12 @@ use crate::{
     hash::{hash_object, HashId},
 };
 
-#[derive(Hash, Eq, PartialEq, Clone, Debug)]
+#[derive(Hash, Eq, PartialEq, Clone, Debug, Serialize, Deserialize)]
 pub enum Term<T: Expression> {
+    #[serde(bound(
+        serialize = "<T as Expression>::String: Serialize",
+        deserialize = "<T as Expression>::String: Deserialize<'de>"
+    ))]
     Value(ValueTerm<T::String>),
     Variable(VariableTerm<T>),
     Let(LetTerm<T>),
@@ -423,5 +429,37 @@ impl<T: Expression> SerializeJson for Term<T> {
             Term::Collection(term) => term.to_json(),
             Term::Signal(term) => term.to_json(),
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::allocator::DefaultAllocator;
+    use crate::lang::{CachedSharedTerm, SharedTermFactory, ValueTerm};
+    use crate::parser::sexpr::parse;
+    use crate::stdlib::Stdlib;
+    use rmp_serde::Serializer;
+
+    #[test]
+    fn round_trip_serde() {
+        let factory = SharedTermFactory::<Stdlib>::default();
+        let allocator = DefaultAllocator::default();
+
+        let value = factory.create_value_term(ValueTerm::Int(5));
+        let serialized = serde_json::to_string(&value).unwrap();
+        let deser: CachedSharedTerm<Stdlib> = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(value, deser);
+
+        let value = parse("((lambda (foo) (* (+ 2 3) foo)) 2)", &factory, &allocator).unwrap();
+        let serialized = serde_json::to_string(&value).unwrap();
+        let deser: CachedSharedTerm<Stdlib> = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(value, deser);
+
+        // Since serde_json is somewhat special lets also test rmp_serde
+        let mut buf = Vec::new();
+        value.serialize(&mut Serializer::new(&mut buf)).unwrap();
+        let deser: CachedSharedTerm<Stdlib> = rmp_serde::from_read_ref(&buf).unwrap();
+        assert_eq!(value, deser);
     }
 }

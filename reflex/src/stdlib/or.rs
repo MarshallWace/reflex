@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use crate::core::{
     uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
     FunctionArity, HeapAllocator, Uid, Uuid,
@@ -10,7 +11,7 @@ use super::is_truthy;
 
 pub struct Or {}
 impl Or {
-    const UUID: Uuid = uuid!("b4798927-f64e-4835-962e-e3ff1fbe3153");
+    pub(crate) const UUID: Uuid = uuid!("b4798927-f64e-4835-962e-e3ff1fbe3153");
     const ARITY: FunctionArity<2, 0> = FunctionArity {
         required: [ArgType::Strict, ArgType::Lazy],
         optional: [],

@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use crate::core::{
     uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
     FunctionArity, HeapAllocator, Uid, Uuid,
@@ -8,7 +9,7 @@ use crate::core::{
 
 pub struct Apply {}
 impl Apply {
-    const UUID: Uuid = uuid!("faf2e936-d76c-4f54-bdae-bd67a2ab36a1");
+    pub(crate) const UUID: Uuid = uuid!("faf2e936-d76c-4f54-bdae-bd67a2ab36a1");
     const ARITY: FunctionArity<2, 0> = FunctionArity {
         required: [ArgType::Strict, ArgType::Strict],
         optional: [],

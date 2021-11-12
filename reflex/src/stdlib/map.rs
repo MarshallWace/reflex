@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use std::iter::once;
 
 use crate::core::{
@@ -10,7 +11,7 @@ use crate::core::{
 
 pub struct Map {}
 impl Map {
-    const UUID: Uuid = uuid!("5f9f3e01-8d8d-439a-aa99-979ea3da918d");
+    pub(crate) const UUID: Uuid = uuid!("5f9f3e01-8d8d-439a-aa99-979ea3da918d");
     const ARITY: FunctionArity<2, 0> = FunctionArity {
         required: [ArgType::Strict, ArgType::Strict],
         optional: [],

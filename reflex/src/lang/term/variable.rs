@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
+use serde::{Deserialize, Serialize};
 use std::{
     collections::HashSet,
     iter::{once, FromIterator},
@@ -15,7 +16,7 @@ use crate::{
     },
 };
 
-#[derive(Hash, Eq, PartialEq, Clone, Debug)]
+#[derive(Hash, Eq, PartialEq, Clone, Debug, Serialize, Deserialize)]
 pub enum VariableTerm<T: Expression> {
     Static(StaticVariableTerm),
     Dynamic(DynamicVariableTerm<T>),
@@ -145,7 +146,7 @@ impl<T: Expression> SerializeJson for VariableTerm<T> {
     }
 }
 
-#[derive(Hash, Eq, PartialEq, Clone, Debug)]
+#[derive(Hash, Eq, PartialEq, Clone, Debug, Serialize, Deserialize)]
 pub struct StaticVariableTerm {
     offset: StackOffset,
 }
@@ -241,7 +242,7 @@ impl SerializeJson for StaticVariableTerm {
     }
 }
 
-#[derive(Hash, Eq, PartialEq, Clone, Debug)]
+#[derive(Hash, Eq, PartialEq, Clone, Debug, Serialize, Deserialize)]
 pub struct DynamicVariableTerm<T: Expression> {
     state_token: StateToken,
     fallback: T,

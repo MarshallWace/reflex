@@ -15,6 +15,7 @@ use crate::{
     },
     hash::HashId,
 };
+use serde::{Deserialize, Serialize};
 
 use super::{
     expression::{CachedExpression, SharedExpression},
@@ -334,7 +335,7 @@ impl<TBuiltin: Builtin> ExpressionFactory<CachedSharedTerm<TBuiltin>>
     }
 }
 
-#[derive(PartialEq, Eq, Hash, Clone)]
+#[derive(PartialEq, Eq, Hash, Clone, Serialize, Deserialize)]
 pub struct CachedSharedTerm<TBuiltin: Builtin> {
     value: CachedExpression<SharedExpression<Term<CachedSharedTerm<TBuiltin>>>>,
 }

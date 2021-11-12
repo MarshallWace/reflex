@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+use crate::cli::reflex::core::Uuid;
 use reflex::{
     core::{
         Applicable, Arity, Builtin, EvaluationCache, Expression, ExpressionFactory, HeapAllocator,
@@ -10,8 +12,10 @@ use reflex::{
 };
 use reflex_graphql::stdlib::Stdlib as GraphQlStdlib;
 use reflex_js::stdlib::Stdlib as JsStdlib;
+use serde::{Deserialize, Serialize};
+use std::convert::{TryFrom, TryInto};
 
-#[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
+#[derive(Clone, Copy, Eq, PartialEq, Hash, Debug, Serialize, Deserialize)]
 pub enum ServerBuiltins {
     Stdlib(Stdlib),
     Js(JsStdlib),
@@ -49,6 +53,23 @@ impl Uid for ServerBuiltins {
         }
     }
 }
+impl TryFrom<Uuid> for ServerBuiltins {
+    type Error = ();
+
+    fn try_from(value: Uuid) -> Result<Self, Self::Error> {
+        let stdlib_builtin: Result<Stdlib, ()> = value.try_into();
+        stdlib_builtin
+            .map(|builtin| ServerBuiltins::Stdlib(builtin))
+            .or_else(|_| {
+                let js_builtin: Result<JsStdlib, ()> = value.try_into();
+                js_builtin.map(|builtin| ServerBuiltins::Js(builtin))
+            })
+            .or_else(|_| {
+                let graphql_builtin: Result<GraphQlStdlib, ()> = value.try_into();
+                graphql_builtin.map(|builtin| ServerBuiltins::GraphQl(builtin))
+            })
+    }
+}
 impl Builtin for ServerBuiltins {
     fn arity<T: Expression<Builtin = Self> + Applicable<T>>(&self) -> Option<Arity> {
         match self {
@@ -78,5 +99,26 @@ impl std::fmt::Display for ServerBuiltins {
             Self::Js(target) => std::fmt::Display::fmt(target, f),
             Self::GraphQl(target) => std::fmt::Display::fmt(target, f),
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use reflex::allocator::DefaultAllocator;
+    use reflex::lang::{CachedSharedTerm, SharedTermFactory};
+    use reflex::parser::sexpr::parse;
+    use rmp_serde::Serializer;
+
+    #[test]
+    fn round_trip_serde() {
+        let factory = SharedTermFactory::<ServerBuiltins>::default();
+        let allocator = DefaultAllocator::default();
+
+        let value = parse("((lambda (foo) (* (+ 2 3) foo)) 2)", &factory, &allocator).unwrap();
+        let mut buf = Vec::new();
+        value.serialize(&mut Serializer::new(&mut buf)).unwrap();
+        let deser: CachedSharedTerm<ServerBuiltins> = rmp_serde::from_read_ref(&buf).unwrap();
+        assert_eq!(value, deser);
     }
 }

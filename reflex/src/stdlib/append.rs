@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use std::iter::once;
 
 use crate::{
@@ -13,7 +14,7 @@ use crate::{
 
 pub struct Append {}
 impl Append {
-    const UUID: Uuid = uuid!("d5a4e3e7-0bef-45e8-bb6b-69b09fbd7666");
+    pub(crate) const UUID: Uuid = uuid!("d5a4e3e7-0bef-45e8-bb6b-69b09fbd7666");
     const ARITY: FunctionArity<1, 0> = FunctionArity {
         required: [ArgType::Strict],
         optional: [],

@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use crate::stdlib::Stdlib as GraphQlStdlib;
 use reflex::{
     core::{
@@ -13,7 +14,7 @@ use reflex::{
 
 pub struct FlattenDeep {}
 impl FlattenDeep {
-    const UUID: Uuid = uuid!("52299fbb-a84b-488e-81ef-98c439869f74");
+    pub(crate) const UUID: Uuid = uuid!("52299fbb-a84b-488e-81ef-98c439869f74");
     const ARITY: FunctionArity<1, 0> = FunctionArity {
         required: [ArgType::Strict],
         optional: [],

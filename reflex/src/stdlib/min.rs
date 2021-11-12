@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use crate::{
     core::{
         uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
@@ -11,7 +12,7 @@ use crate::{
 
 pub struct Min {}
 impl Min {
-    const UUID: Uuid = uuid!("6c9a537a-367d-44b7-a5c4-85c930f9fe2e");
+    pub(crate) const UUID: Uuid = uuid!("6c9a537a-367d-44b7-a5c4-85c930f9fe2e");
     const ARITY: FunctionArity<2, 0> = FunctionArity {
         required: [ArgType::Strict, ArgType::Strict],
         optional: [],

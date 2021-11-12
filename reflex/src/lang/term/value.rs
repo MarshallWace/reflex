@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
+use serde::{Deserialize, Serialize};
 use std::{cmp::Eq, collections::HashSet, hash::Hash, iter::once};
 
 use crate::{
@@ -17,7 +18,7 @@ pub type SymbolId = usize;
 pub type IntValue = i32;
 pub type FloatValue = f64;
 
-#[derive(PartialEq, Clone)]
+#[derive(PartialEq, Clone, Serialize, Deserialize)]
 pub enum ValueTerm<TString: StringValue> {
     Null,
     Boolean(bool),

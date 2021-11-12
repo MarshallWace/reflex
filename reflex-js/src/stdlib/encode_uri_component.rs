@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use reflex::{
     core::{
         uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
@@ -11,7 +12,7 @@ use reflex::{
 
 pub struct EncodeUriComponent {}
 impl EncodeUriComponent {
-    const UUID: Uuid = uuid!("ad730068-31a7-49a4-ae09-ecbda0c9914a");
+    pub(crate) const UUID: Uuid = uuid!("ad730068-31a7-49a4-ae09-ecbda0c9914a");
     const ARITY: FunctionArity<1, 0> = FunctionArity {
         required: [ArgType::Strict],
         optional: [],

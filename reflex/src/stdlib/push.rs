@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use std::iter::once;
 
 use crate::core::{
@@ -10,7 +11,7 @@ use crate::core::{
 
 pub struct Push {}
 impl Push {
-    const UUID: Uuid = uuid!("3e426e31-dddb-4732-93a7-216dc6c009dd");
+    pub(crate) const UUID: Uuid = uuid!("3e426e31-dddb-4732-93a7-216dc6c009dd");
     const ARITY: FunctionArity<2, 0> = FunctionArity {
         required: [ArgType::Strict, ArgType::Lazy],
         optional: [],

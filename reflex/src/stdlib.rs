@@ -1,7 +1,9 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use serde::{Deserialize, Serialize};
+use std::convert::TryFrom;
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 
@@ -199,6 +201,84 @@ pub enum Stdlib {
 impl Stdlib {
     pub fn entries() -> impl Iterator<Item = Self> {
         Self::iter()
+    }
+}
+impl TryFrom<Uuid> for Stdlib {
+    type Error = ();
+
+    fn try_from(uuid: Uuid) -> Result<Self, Self::Error> {
+        match uuid {
+            Abs::UUID => Ok(Self::Abs),
+            Add::UUID => Ok(Self::Add),
+            And::UUID => Ok(Self::And),
+            Append::UUID => Ok(Self::Append),
+            Apply::UUID => Ok(Self::Apply),
+            Car::UUID => Ok(Self::Car),
+            Cdr::UUID => Ok(Self::Cdr),
+            Ceil::UUID => Ok(Self::Ceil),
+            Collect::UUID => Ok(Self::Collect),
+            CollectFilterResults::UUID => Ok(Self::CollectFilterResults),
+            CollectHashMap::UUID => Ok(Self::CollectHashMap),
+            CollectHashSet::UUID => Ok(Self::CollectHashSet),
+            CollectStruct::UUID => Ok(Self::CollectStruct),
+            CollectTuple::UUID => Ok(Self::CollectTuple),
+            CollectVector::UUID => Ok(Self::CollectVector),
+            Concat::UUID => Ok(Self::Concat),
+            Cons::UUID => Ok(Self::Cons),
+            ConstructHashMap::UUID => Ok(Self::ConstructHashMap),
+            ConstructHashSet::UUID => Ok(Self::ConstructHashSet),
+            ConstructStruct::UUID => Ok(Self::ConstructStruct),
+            ConstructTuple::UUID => Ok(Self::ConstructTuple),
+            ConstructVector::UUID => Ok(Self::ConstructVector),
+            Contains::UUID => Ok(Self::Contains),
+            Divide::UUID => Ok(Self::Divide),
+            Effect::UUID => Ok(Self::Effect),
+            EndsWith::UUID => Ok(Self::EndsWith),
+            Entries::UUID => Ok(Self::Entries),
+            Eq::UUID => Ok(Self::Eq),
+            Equal::UUID => Ok(Self::Equal),
+            Filter::UUID => Ok(Self::Filter),
+            Floor::UUID => Ok(Self::Floor),
+            Get::UUID => Ok(Self::Get),
+            Gt::UUID => Ok(Self::Gt),
+            Gte::UUID => Ok(Self::Gte),
+            If::UUID => Ok(Self::If),
+            IfError::UUID => Ok(Self::IfError),
+            IfPending::UUID => Ok(Self::IfPending),
+            Insert::UUID => Ok(Self::Insert),
+            Keys::UUID => Ok(Self::Keys),
+            Lt::UUID => Ok(Self::Lt),
+            Lte::UUID => Ok(Self::Lte),
+            Map::UUID => Ok(Self::Map),
+            Match::UUID => Ok(Self::Match),
+            Max::UUID => Ok(Self::Max),
+            Merge::UUID => Ok(Self::Merge),
+            Min::UUID => Ok(Self::Min),
+            Multiply::UUID => Ok(Self::Multiply),
+            Not::UUID => Ok(Self::Not),
+            Or::UUID => Ok(Self::Or),
+            Pow::UUID => Ok(Self::Pow),
+            Push::UUID => Ok(Self::Push),
+            PushFront::UUID => Ok(Self::PushFront),
+            Reduce::UUID => Ok(Self::Reduce),
+            Remainder::UUID => Ok(Self::Remainder),
+            Replace::UUID => Ok(Self::Replace),
+            ResolveDeep::UUID => Ok(Self::ResolveDeep),
+            ResolveHashMap::UUID => Ok(Self::ResolveHashMap),
+            ResolveHashSet::UUID => Ok(Self::ResolveHashSet),
+            ResolveShallow::UUID => Ok(Self::ResolveShallow),
+            ResolveStruct::UUID => Ok(Self::ResolveStruct),
+            ResolveTuple::UUID => Ok(Self::ResolveTuple),
+            ResolveVector::UUID => Ok(Self::ResolveVector),
+            Round::UUID => Ok(Self::Round),
+            Sequence::UUID => Ok(Self::Sequence),
+            Slice::UUID => Ok(Self::Slice),
+            Split::UUID => Ok(Self::Split),
+            StartsWith::UUID => Ok(Self::StartsWith),
+            Subtract::UUID => Ok(Self::Subtract),
+            Values::UUID => Ok(Self::Values),
+            _ => Err(()),
+        }
     }
 }
 impl Uid for Stdlib {
@@ -480,6 +560,7 @@ impl Stdlib {
         }
     }
 }
+
 impl Builtin for Stdlib {
     fn arity<T: Expression<Builtin = Self> + Applicable<T>>(&self) -> Option<Arity> {
         self.arity::<T>()

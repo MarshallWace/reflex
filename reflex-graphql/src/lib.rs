@@ -639,6 +639,7 @@ where
 
 #[cfg(test)]
 mod tests {
+    use reflex::core::Uuid;
     use reflex::{
         allocator::DefaultAllocator,
         cache::SubstitutionCache,
@@ -650,6 +651,7 @@ mod tests {
         lang::{create_struct, SharedTermFactory, ValueTerm},
         stdlib::Stdlib,
     };
+    use std::convert::TryFrom;
 
     use super::{parse, stdlib::Stdlib as GraphQlStdlib, NoopGraphQlQueryTransform};
 
@@ -674,6 +676,13 @@ mod tests {
                 GraphQlTestBuiltins::Stdlib(term) => term.uid(),
                 GraphQlTestBuiltins::GraphQl(term) => term.uid(),
             }
+        }
+    }
+    impl TryFrom<Uuid> for GraphQlTestBuiltins {
+        type Error = ();
+
+        fn try_from(_: Uuid) -> Result<Self, Self::Error> {
+            unimplemented!()
         }
     }
     impl Builtin for GraphQlTestBuiltins {

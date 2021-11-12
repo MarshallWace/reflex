@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use uuid::Uuid;
 
 use crate::{
@@ -13,7 +14,7 @@ use crate::{
 
 pub struct Abs {}
 impl Abs {
-    const UUID: Uuid = uuid!("493be078-9705-40d8-9967-b3d0867b0869");
+    pub(crate) const UUID: Uuid = uuid!("493be078-9705-40d8-9967-b3d0867b0869");
     const ARITY: FunctionArity<1, 0> = FunctionArity {
         required: [ArgType::Strict],
         optional: [],

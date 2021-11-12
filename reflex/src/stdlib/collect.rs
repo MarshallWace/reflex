@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use std::iter::once;
 
 use crate::{
@@ -14,7 +15,7 @@ use crate::{
 
 pub struct Collect {}
 impl Collect {
-    const UUID: Uuid = uuid!("c3365e24-8bbc-461c-ad86-71ca519ec20e");
+    pub(crate) const UUID: Uuid = uuid!("c3365e24-8bbc-461c-ad86-71ca519ec20e");
     const ARITY: FunctionArity<1, 0> = FunctionArity {
         required: [ArgType::Strict],
         optional: [],
@@ -79,7 +80,7 @@ where
 
 pub struct CollectTuple {}
 impl CollectTuple {
-    const UUID: Uuid = uuid!("b1e26891-1dda-45f0-a54e-c3d047dc20ef");
+    pub(crate) const UUID: Uuid = uuid!("b1e26891-1dda-45f0-a54e-c3d047dc20ef");
     const ARITY: FunctionArity<0, 0> = FunctionArity {
         required: [],
         optional: [],
@@ -108,7 +109,7 @@ impl<T: Expression> Applicable<T> for CollectTuple {
 
 pub struct CollectStruct {}
 impl CollectStruct {
-    const UUID: Uuid = uuid!("03e8d5bb-917d-414b-8041-d07ec403c1a9");
+    pub(crate) const UUID: Uuid = uuid!("03e8d5bb-917d-414b-8041-d07ec403c1a9");
     const ARITY: FunctionArity<1, 0> = FunctionArity {
         required: [ArgType::Strict],
         optional: [],
@@ -149,7 +150,7 @@ impl<T: Expression> Applicable<T> for CollectStruct {
 
 pub struct CollectVector {}
 impl CollectVector {
-    const UUID: Uuid = uuid!("c99b0901-f996-4887-9403-c2f123b779b0");
+    pub(crate) const UUID: Uuid = uuid!("c99b0901-f996-4887-9403-c2f123b779b0");
     const ARITY: FunctionArity<0, 0> = FunctionArity {
         required: [],
         optional: [],
@@ -178,7 +179,7 @@ impl<T: Expression> Applicable<T> for CollectVector {
 
 pub struct CollectHashSet {}
 impl CollectHashSet {
-    const UUID: Uuid = uuid!("941b9298-62d3-47e1-a909-d4252df2c935");
+    pub(crate) const UUID: Uuid = uuid!("941b9298-62d3-47e1-a909-d4252df2c935");
     const ARITY: FunctionArity<0, 0> = FunctionArity {
         required: [],
         optional: [],
@@ -212,7 +213,7 @@ impl<T: Expression> Applicable<T> for CollectHashSet {
 
 pub struct CollectHashMap {}
 impl CollectHashMap {
-    const UUID: Uuid = uuid!("4a9b9c32-8597-4a23-875e-d320f187cf7a");
+    pub(crate) const UUID: Uuid = uuid!("4a9b9c32-8597-4a23-875e-d320f187cf7a");
     const ARITY: FunctionArity<0, 0> = FunctionArity {
         required: [],
         optional: [],

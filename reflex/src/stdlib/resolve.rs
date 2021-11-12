@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use std::iter::once;
 
 use crate::{
@@ -13,7 +14,7 @@ use crate::{
 
 pub struct ResolveTuple {}
 impl ResolveTuple {
-    const UUID: Uuid = uuid!("4422c938-62aa-4610-a388-ecaf7af487e5");
+    pub(crate) const UUID: Uuid = uuid!("4422c938-62aa-4610-a388-ecaf7af487e5");
     const ARITY: FunctionArity<1, 0> = FunctionArity {
         required: [ArgType::Strict],
         optional: [],
@@ -57,7 +58,7 @@ where
 
 pub struct ResolveStruct {}
 impl ResolveStruct {
-    const UUID: Uuid = uuid!("0e580200-7a85-415b-ba8e-ac854dc51ec7");
+    pub(crate) const UUID: Uuid = uuid!("0e580200-7a85-415b-ba8e-ac854dc51ec7");
     const ARITY: FunctionArity<1, 0> = FunctionArity {
         required: [ArgType::Strict],
         optional: [],
@@ -107,7 +108,7 @@ where
 
 pub struct ResolveVector {}
 impl ResolveVector {
-    const UUID: Uuid = uuid!("6d324a63-2138-41ad-8775-ad4931043700");
+    pub(crate) const UUID: Uuid = uuid!("6d324a63-2138-41ad-8775-ad4931043700");
     const ARITY: FunctionArity<1, 0> = FunctionArity {
         required: [ArgType::Strict],
         optional: [],
@@ -151,7 +152,7 @@ where
 
 pub struct ResolveHashSet {}
 impl ResolveHashSet {
-    const UUID: Uuid = uuid!("8c3c802c-8092-4dbf-9d5f-393b8144d39e");
+    pub(crate) const UUID: Uuid = uuid!("8c3c802c-8092-4dbf-9d5f-393b8144d39e");
     const ARITY: FunctionArity<1, 0> = FunctionArity {
         required: [ArgType::Strict],
         optional: [],
@@ -195,7 +196,7 @@ where
 
 pub struct ResolveHashMap {}
 impl ResolveHashMap {
-    const UUID: Uuid = uuid!("15ccc11f-31e9-4f8d-abb9-cf9dff0b26bd");
+    pub(crate) const UUID: Uuid = uuid!("15ccc11f-31e9-4f8d-abb9-cf9dff0b26bd");
     const ARITY: FunctionArity<1, 0> = FunctionArity {
         required: [ArgType::Strict],
         optional: [],

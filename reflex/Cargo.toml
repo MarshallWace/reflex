@@ -10,7 +10,7 @@ edition = "2018"
 [dependencies]
 fnv = "1.0.7"
 im = "15.0.0"
-serde = { version = "^1.0", features = ["derive"] }
+serde = { version = "^1.0", features = ["derive", "rc"] }
 serde_json = "^1.0"
 strum = "0.22"
 strum_macros = "0.22"
@@ -21,3 +21,6 @@ features = ["macros", "serde"]
 # TODO: Update to cargo registry once "macros" feature is stable
 git = "https://github.com/uuid-rs/uuid"
 rev = "e6a6dbd07d3e6385870becd63ce5787ab042c058"
+
+[dev-dependencies]
+rmp-serde = "0.15"

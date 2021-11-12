@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use crate::{
     core::{
         match_typed_expression_list, uuid, Applicable, ArgType, Arity, EvaluationCache, Expression,
@@ -11,7 +12,7 @@ use crate::{
 
 pub struct ConstructTuple {}
 impl ConstructTuple {
-    const UUID: Uuid = uuid!("3b347355-5a6a-4756-8f51-1920f602df85");
+    pub(crate) const UUID: Uuid = uuid!("3b347355-5a6a-4756-8f51-1920f602df85");
     const ARITY: FunctionArity<0, 0> = FunctionArity {
         required: [],
         optional: [],
@@ -40,7 +41,7 @@ impl<T: Expression> Applicable<T> for ConstructTuple {
 
 pub struct ConstructStruct {}
 impl ConstructStruct {
-    const UUID: Uuid = uuid!("f3a1b7ad-fe7d-444b-adf3-6945332e03b7");
+    pub(crate) const UUID: Uuid = uuid!("f3a1b7ad-fe7d-444b-adf3-6945332e03b7");
     const ARITY: FunctionArity<2, 0> = FunctionArity {
         required: [ArgType::Strict, ArgType::Strict],
         optional: [],
@@ -106,7 +107,7 @@ impl<T: Expression> Applicable<T> for ConstructStruct {
 
 pub struct ConstructHashMap {}
 impl ConstructHashMap {
-    const UUID: Uuid = uuid!("e9d74f69-3722-47f0-810b-76730129d6d3");
+    pub(crate) const UUID: Uuid = uuid!("e9d74f69-3722-47f0-810b-76730129d6d3");
     const ARITY: FunctionArity<2, 0> = FunctionArity {
         required: [ArgType::Strict, ArgType::Strict],
         optional: [],
@@ -172,7 +173,7 @@ impl<T: Expression> Applicable<T> for ConstructHashMap {
 
 pub struct ConstructHashSet {}
 impl ConstructHashSet {
-    const UUID: Uuid = uuid!("d2772dad-f42c-49a1-9707-e1df4b07b1ae");
+    pub(crate) const UUID: Uuid = uuid!("d2772dad-f42c-49a1-9707-e1df4b07b1ae");
     const ARITY: FunctionArity<0, 0> = FunctionArity {
         required: [],
         optional: [],
@@ -206,7 +207,7 @@ impl<T: Expression> Applicable<T> for ConstructHashSet {
 
 pub struct ConstructVector {}
 impl ConstructVector {
-    const UUID: Uuid = uuid!("ecdf265f-d628-415b-80d5-5977e10a1141");
+    pub(crate) const UUID: Uuid = uuid!("ecdf265f-d628-415b-80d5-5977e10a1141");
     const ARITY: FunctionArity<0, 0> = FunctionArity {
         required: [],
         optional: [],

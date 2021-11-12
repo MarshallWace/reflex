@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use std::iter::once;
 
 use reflex::{
@@ -14,7 +15,7 @@ use reflex::{
 
 pub struct Dispatch {}
 impl Dispatch {
-    const UUID: Uuid = uuid!("f37c66ee-cd73-496d-8420-1ce83ab924ad");
+    pub(crate) const UUID: Uuid = uuid!("f37c66ee-cd73-496d-8420-1ce83ab924ad");
     const ARITY: FunctionArity<3, 0> = FunctionArity {
         required: [ArgType::Strict, ArgType::Strict, ArgType::Lazy],
         optional: [],

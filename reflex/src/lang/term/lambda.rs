@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
+use serde::{Deserialize, Serialize};
 use std::{collections::HashSet, iter::once};
 
 use crate::{
@@ -15,7 +16,7 @@ use crate::{
     hash::hash_object,
 };
 
-#[derive(Hash, Eq, PartialEq, Clone, Debug)]
+#[derive(Hash, Eq, PartialEq, Clone, Debug, Serialize, Deserialize)]
 pub struct LambdaTerm<T: Expression> {
     num_args: StackOffset,
     body: T,

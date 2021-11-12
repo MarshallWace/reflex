@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
+use reflex::core::Uuid;
 use reflex::{
     core::{
         Applicable, Arity, Builtin, EvaluationCache, Expression, ExpressionFactory, HeapAllocator,
@@ -9,10 +10,12 @@ use reflex::{
     },
     stdlib::Stdlib,
 };
+use serde::{Deserialize, Serialize};
+use std::convert::{TryFrom, TryInto};
 
 use crate::stdlib::Stdlib as JsStdlib;
 
-#[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
+#[derive(Clone, Copy, Eq, PartialEq, Hash, Debug, Serialize, Deserialize)]
 pub enum JsBuiltins {
     Stdlib(Stdlib),
     Js(JsStdlib),
@@ -68,5 +71,49 @@ impl std::fmt::Display for JsBuiltins {
             Self::Stdlib(target) => std::fmt::Display::fmt(target, f),
             Self::Js(target) => std::fmt::Display::fmt(target, f),
         }
+    }
+}
+impl TryFrom<Uuid> for JsBuiltins {
+    type Error = ();
+
+    fn try_from(value: Uuid) -> Result<Self, Self::Error> {
+        let stdlib_builtin: Result<Stdlib, ()> = value.try_into();
+        stdlib_builtin
+            .map(|builtin| JsBuiltins::Stdlib(builtin))
+            .or_else(|_| {
+                let js_builtin: Result<JsStdlib, ()> = value.try_into();
+                js_builtin.map(|builtin| JsBuiltins::Js(builtin))
+            })
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use crate::builtins::JsBuiltins;
+    use crate::{create_js_env, parse};
+    use reflex::allocator::DefaultAllocator;
+    use reflex::core::ExpressionFactory;
+    use reflex::lang::{CachedSharedTerm, SharedTermFactory, ValueTerm};
+
+    #[test]
+    fn round_trip_serde() {
+        let factory = SharedTermFactory::<JsBuiltins>::default();
+        let allocator = DefaultAllocator::default();
+
+        let value = factory.create_value_term(ValueTerm::Int(5));
+        let serialized = serde_json::to_string(&value).unwrap();
+        let deser: CachedSharedTerm<JsBuiltins> = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(value, deser);
+
+        let value = parse(
+            "const x = () => {return 1 + 1;}; throw x",
+            &create_js_env(&factory, &allocator),
+            &factory,
+            &allocator,
+        )
+        .unwrap();
+        let serialized = serde_json::to_string(&value).unwrap();
+        let deser: CachedSharedTerm<JsBuiltins> = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(value, deser);
     }
 }

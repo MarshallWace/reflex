@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use reflex::{
     core::{
         Applicable, Arity, EvaluationCache, Expression, ExpressionFactory, HeapAllocator, Uid, Uuid,
@@ -8,6 +9,7 @@ use reflex::{
     stdlib::Stdlib as BuiltinStdlib,
 };
 use serde::{Deserialize, Serialize};
+use std::convert::TryFrom;
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 
@@ -26,6 +28,17 @@ pub enum Stdlib {
 impl Stdlib {
     pub fn entries() -> impl Iterator<Item = Self> {
         Self::iter()
+    }
+}
+impl TryFrom<Uuid> for Stdlib {
+    type Error = ();
+
+    fn try_from(value: Uuid) -> Result<Self, Self::Error> {
+        match value {
+            DynamicQueryBranch::UUID => Ok(Self::DynamicQueryBranch),
+            FlattenDeep::UUID => Ok(Self::FlattenDeep),
+            _ => Err(()),
+        }
     }
 }
 impl Uid for Stdlib {

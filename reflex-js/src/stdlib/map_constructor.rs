@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use reflex::{
     core::{
         uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
@@ -12,7 +13,7 @@ use reflex::{
 
 pub struct MapConstructor {}
 impl MapConstructor {
-    const UUID: Uuid = uuid!("81fae6f8-9557-4784-998a-13ebfbf289ef");
+    pub(crate) const UUID: Uuid = uuid!("81fae6f8-9557-4784-998a-13ebfbf289ef");
     const ARITY: FunctionArity<0, 1> = FunctionArity {
         required: [],
         optional: [ArgType::Strict],

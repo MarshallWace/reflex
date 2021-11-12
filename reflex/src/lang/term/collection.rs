@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
+use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
 pub use hashmap::*;
@@ -20,7 +21,7 @@ mod hashmap;
 mod hashset;
 mod vector;
 
-#[derive(Hash, Eq, PartialEq, Clone, Debug)]
+#[derive(Hash, Eq, PartialEq, Clone, Debug, Serialize, Deserialize)]
 pub enum CollectionTerm<T: Expression> {
     Vector(VectorTerm<T>),
     HashMap(HashMapTerm<T>),

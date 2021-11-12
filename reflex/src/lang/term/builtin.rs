@@ -2,10 +2,15 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
+use std::convert::TryInto;
+use std::fmt::Formatter;
+use std::marker::PhantomData;
 use std::{collections::HashSet, iter::once};
 
-use serde::{Deserialize, Serialize};
+use serde::de::{Error, SeqAccess, Visitor};
+use serde::{Deserializer, Serializer};
 
+use crate::core::Uuid;
 use crate::{
     compiler::{Compile, Compiler, Instruction, Program},
     core::{
@@ -14,11 +19,71 @@ use crate::{
     },
 };
 
-#[derive(Hash, Eq, PartialEq, Clone, Copy, Debug, Serialize, Deserialize)]
-#[serde(tag = "type")]
+#[derive(Hash, Eq, PartialEq, Clone, Copy, Debug)]
 pub struct BuiltinTerm<T: Expression> {
     target: T::Builtin,
 }
+impl<T: Expression> serde::ser::Serialize for BuiltinTerm<T>
+where
+    T::String: serde::ser::Serialize,
+{
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_bytes(self.target.uid().as_ref())
+    }
+}
+impl<'de, T: Expression> serde::de::Deserialize<'de> for BuiltinTerm<T> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserializer.deserialize_bytes(BuiltinTermVisitor::<T>::new())
+    }
+}
+struct BuiltinTermVisitor<T> {
+    _phantom: PhantomData<T>,
+}
+impl<T> BuiltinTermVisitor<T> {
+    fn new() -> Self {
+        Self {
+            _phantom: PhantomData,
+        }
+    }
+}
+impl<'de, T: Expression> Visitor<'de> for BuiltinTermVisitor<T> {
+    type Value = BuiltinTerm<T>;
+
+    fn expecting(&self, formatter: &mut Formatter) -> std::fmt::Result {
+        formatter.write_str("Only accepts bytes representing a valid uuid")
+    }
+
+    fn visit_bytes<E>(self, v: &[u8]) -> Result<Self::Value, E>
+    where
+        E: Error,
+    {
+        let uuid = Uuid::from_slice(v).map_err(|err| E::custom(format!("{:?}", err)))?;
+        let builtin: T::Builtin = uuid
+            .try_into()
+            .map_err(|_err| E::custom("uuid not found"))?;
+        Ok(BuiltinTerm::new(builtin))
+    }
+
+    // Some types of serde (e.g. serde-json) do not distinguish between bytes and a sequence
+    // so we need to implement both visit methods
+    fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+    where
+        A: SeqAccess<'de>,
+    {
+        let mut bytes = Vec::new();
+        while let Ok(Some(byte)) = seq.next_element() {
+            bytes.push(byte)
+        }
+        self.visit_bytes(&bytes)
+    }
+}
+
 impl<T: Expression> BuiltinTerm<T> {
     pub fn new(target: T::Builtin) -> Self {
         Self { target }

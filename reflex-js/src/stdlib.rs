@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use reflex::{
     core::{
         Applicable, Arity, EvaluationCache, Expression, ExpressionFactory, HeapAllocator, Uid, Uuid,
@@ -8,6 +9,7 @@ use reflex::{
     stdlib::Stdlib as BuiltinStdlib,
 };
 use serde::{Deserialize, Serialize};
+use std::convert::TryFrom;
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 
@@ -77,6 +79,28 @@ impl Uid for Stdlib {
             Self::Throw => Uid::uid(&Throw {}),
             Self::ToRequest => Uid::uid(&ToRequest {}),
             Self::ToString => Uid::uid(&ToString {}),
+        }
+    }
+}
+impl TryFrom<Uuid> for Stdlib {
+    type Error = ();
+
+    fn try_from(value: Uuid) -> Result<Self, Self::Error> {
+        match value {
+            Construct::UUID => Ok(Self::Construct),
+            Dispatch::UUID => Ok(Self::Dispatch),
+            EncodeUriComponent::UUID => Ok(Self::EncodeUriComponent),
+            FormatErrorMessage::UUID => Ok(Self::FormatErrorMessage),
+            FromEntries::UUID => Ok(Self::FromEntries),
+            JsonParse::UUID => Ok(Self::JsonParse),
+            JsonStringify::UUID => Ok(Self::JsonStringify),
+            MapConstructor::UUID => Ok(Self::MapConstructor),
+            SetConstructor::UUID => Ok(Self::SetConstructor),
+            StructTypeFactory::UUID => Ok(Self::StructTypeFactory),
+            Throw::UUID => Ok(Self::Throw),
+            ToRequest::UUID => Ok(Self::ToRequest),
+            ToString::UUID => Ok(Self::ToString),
+            _ => Err(()),
         }
     }
 }

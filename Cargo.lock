@@ -941,6 +941,7 @@ version = "0.1.0"
 dependencies = [
  "fnv",
  "im",
+ "rmp-serde",
  "serde",
  "serde_json",
  "strum",
@@ -1007,6 +1008,7 @@ dependencies = [
  "resast",
  "ressa",
  "serde",
+ "serde_json",
  "strum",
  "strum_macros",
  "urlencoding",
@@ -1051,6 +1053,7 @@ dependencies = [
  "reflex-json",
  "reflex-runtime",
  "rmp-serde",
+ "serde",
  "tokio",
 ]
 

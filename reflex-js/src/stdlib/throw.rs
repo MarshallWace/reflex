@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use std::iter::once;
 
 use reflex::core::{
@@ -10,7 +11,7 @@ use reflex::core::{
 
 pub struct Throw {}
 impl Throw {
-    const UUID: Uuid = uuid!("fb9bef4b-da7a-46ef-af03-50ed2984274c");
+    pub(crate) const UUID: Uuid = uuid!("fb9bef4b-da7a-46ef-af03-50ed2984274c");
     const ARITY: FunctionArity<1, 0> = FunctionArity {
         required: [ArgType::Strict],
         optional: [],

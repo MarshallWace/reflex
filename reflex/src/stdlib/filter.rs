@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use std::iter::once;
 
 use crate::{
@@ -15,7 +16,7 @@ use super::Stdlib;
 
 pub struct Filter {}
 impl Filter {
-    const UUID: Uuid = uuid!("110c1120-4526-4757-ae4d-fbc5cef2c4f5");
+    pub(crate) const UUID: Uuid = uuid!("110c1120-4526-4757-ae4d-fbc5cef2c4f5");
     const ARITY: FunctionArity<2, 0> = FunctionArity {
         required: [ArgType::Strict, ArgType::Strict],
         optional: [],
@@ -115,7 +116,7 @@ where
 
 pub struct CollectFilterResults {}
 impl CollectFilterResults {
-    const UUID: Uuid = uuid!("36517ace-60b4-4c2f-8768-9717cf262b90");
+    pub(crate) const UUID: Uuid = uuid!("36517ace-60b4-4c2f-8768-9717cf262b90");
     const ARITY: FunctionArity<3, 0> = FunctionArity {
         required: [ArgType::Strict, ArgType::Strict, ArgType::Strict],
         optional: [],

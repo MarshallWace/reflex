@@ -12,7 +12,7 @@ use crate::{
 
 pub struct Contains {}
 impl Contains {
-    const UUID: Uuid = uuid!("7ed23b1e-14d6-4e39-b314-01184bf66b5a");
+    pub(crate) const UUID: Uuid = uuid!("7ed23b1e-14d6-4e39-b314-01184bf66b5a");
     const ARITY: FunctionArity<2, 0> = FunctionArity {
         required: [ArgType::Strict, ArgType::Strict],
         optional: [],

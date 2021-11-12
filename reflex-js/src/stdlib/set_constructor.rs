@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use reflex::{
     core::{
         uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
@@ -12,7 +13,7 @@ use reflex::{
 
 pub struct SetConstructor {}
 impl SetConstructor {
-    const UUID: Uuid = uuid!("c87cb7a9-a926-4f78-b38b-5be67ac83baf");
+    pub(crate) const UUID: Uuid = uuid!("c87cb7a9-a926-4f78-b38b-5be67ac83baf");
     const ARITY: FunctionArity<0, 1> = FunctionArity {
         required: [],
         optional: [ArgType::Strict],

@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use crate::stdlib::Stdlib as GraphQlStdlib;
 use reflex::{
     core::{
@@ -13,7 +14,7 @@ use reflex::{
 
 pub struct DynamicQueryBranch {}
 impl DynamicQueryBranch {
-    const UUID: Uuid = uuid!("58dd19b7-c9f0-473b-84c5-34af607c176b");
+    pub(crate) const UUID: Uuid = uuid!("58dd19b7-c9f0-473b-84c5-34af607c176b");
     const ARITY: FunctionArity<2, 0> = FunctionArity {
         required: [ArgType::Strict, ArgType::Strict],
         optional: [],

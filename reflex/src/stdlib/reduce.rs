@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use crate::core::{
     uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
     FunctionArity, HeapAllocator, Uid, Uuid,
@@ -8,7 +9,7 @@ use crate::core::{
 
 pub struct Reduce {}
 impl Reduce {
-    const UUID: Uuid = uuid!("f8312370-a299-457e-b9fb-f902f84f71b2");
+    pub(crate) const UUID: Uuid = uuid!("f8312370-a299-457e-b9fb-f902f84f71b2");
     const ARITY: FunctionArity<3, 0> = FunctionArity {
         required: [ArgType::Strict, ArgType::Strict, ArgType::Lazy],
         optional: [],

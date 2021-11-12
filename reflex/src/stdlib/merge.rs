@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use std::collections::{hash_map::Entry, HashMap};
 
 use crate::core::{
@@ -10,7 +11,7 @@ use crate::core::{
 
 pub struct Merge {}
 impl Merge {
-    const UUID: Uuid = uuid!("7093b95b-630d-4ad2-8d55-7d1bbaf0968a");
+    pub(crate) const UUID: Uuid = uuid!("7093b95b-630d-4ad2-8d55-7d1bbaf0968a");
     const ARITY: FunctionArity<1, 0> = FunctionArity {
         required: [ArgType::Strict],
         optional: [],

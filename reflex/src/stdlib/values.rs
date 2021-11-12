@@ -9,7 +9,7 @@ use crate::core::{
 
 pub struct Values {}
 impl Values {
-    const UUID: Uuid = uuid!("d41e9dee-b0c7-48cd-8002-06f4315268b3");
+    pub(crate) const UUID: Uuid = uuid!("d41e9dee-b0c7-48cd-8002-06f4315268b3");
     const ARITY: FunctionArity<1, 0> = FunctionArity {
         required: [ArgType::Strict],
         optional: [],
