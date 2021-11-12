@@ -4,11 +4,7 @@
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use std::process;
 
-use reflex::{
-    allocator::DefaultAllocator,
-    core::{ExpressionFactory, Uid},
-    lang::SharedTermFactory,
-};
+use reflex::{allocator::DefaultAllocator, lang::SharedTermFactory};
 use reflex_cli::compiler::js::standard_js_loaders;
 use reflex_server::{
     builtins::ServerBuiltins,
@@ -26,8 +22,6 @@ pub async fn main() {
             Some(standard_js_loaders(&factory, &allocator)),
             &factory,
             &allocator,
-            ServerBuiltins::entries()
-                .map(|builtin| (builtin.uid(), factory.create_builtin_term(builtin))),
             None,
             None,
             NoopGraphQlHttpQueryTransform::default(),

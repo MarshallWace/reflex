@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use std::{
     borrow::Cow,
     iter::{empty, once},
@@ -2031,7 +2032,7 @@ mod tests {
         },
         core::{
             evaluate, DependencyList, EvaluationResult, Expression, ExpressionFactory,
-            HeapAllocator, SignalType, StateCache, StringValue, Uid,
+            HeapAllocator, SignalType, StateCache, StringValue,
         },
         env::inject_env_vars,
         interpreter::{execute, DefaultInterpreterCache, InterpreterOptions},
@@ -5291,10 +5292,6 @@ mod tests {
             .unwrap();
         let state = StateCache::default();
         let mut cache = DefaultInterpreterCache::default();
-        let builtins = JsBuiltins::entries()
-            .into_iter()
-            .map(|builtin| (builtin.uid(), factory.create_builtin_term(builtin)))
-            .collect::<Vec<_>>();
         let entry_point = InstructionPointer::default();
         let cache_key = hash_program_root(&program, &entry_point);
         let (result, _) = execute(
@@ -5304,7 +5301,6 @@ mod tests {
             &state,
             &factory,
             &allocator,
-            &builtins,
             &InterpreterOptions::default(),
             &mut cache,
         )

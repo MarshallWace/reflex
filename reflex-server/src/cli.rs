@@ -10,7 +10,7 @@ use clap::Parser;
 use hyper::{server::conn::AddrStream, service::make_service_fn, Server};
 use reflex::{
     compiler::{Compile, CompilerMode, CompilerOptions, InstructionPointer, Program},
-    core::{Applicable, Expression, Reducible, Rewritable, Signal, StringValue, Uuid},
+    core::{Applicable, Expression, Reducible, Rewritable, Signal, StringValue},
     interpreter::InterpreterOptions,
     stdlib::Stdlib,
 };
@@ -70,7 +70,6 @@ pub async fn cli<
     custom_loader: Option<impl Fn(&str, &Path) -> Option<Result<T, String>> + 'static>,
     factory: &impl AsyncExpressionFactory<T>,
     allocator: &impl AsyncHeapAllocator<T>,
-    builtins: impl IntoIterator<Item = (Uuid, T)>,
     compiler_options: Option<CompilerOptions>,
     interpreter_options: Option<InterpreterOptions>,
     transform: impl GraphQlHttpQueryTransform,
@@ -117,7 +116,6 @@ where
     let runtime = if args.debug_signals {
         Runtime::new(
             state,
-            builtins,
             debug_signal_handler(signal_handler),
             cache,
             factory,
@@ -128,7 +126,6 @@ where
     } else {
         Runtime::new(
             state,
-            builtins,
             signal_handler,
             cache,
             factory,

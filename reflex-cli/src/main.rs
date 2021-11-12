@@ -16,7 +16,7 @@ use reflex::{
     allocator::DefaultAllocator,
     cache::SubstitutionCache,
     compiler::{hash_program_root, Compiler, CompilerMode, CompilerOptions, InstructionPointer},
-    core::{Expression, ExpressionFactory, HeapAllocator, Reducible, Rewritable, StateCache, Uid},
+    core::{Expression, ExpressionFactory, HeapAllocator, Reducible, Rewritable, StateCache},
     env::inject_env_vars,
     interpreter::{execute, DefaultInterpreterCache, InterpreterOptions},
     lang::{term::SignalTerm, SharedTermFactory, ValueTerm},
@@ -65,10 +65,6 @@ pub async fn main() -> Result<()> {
     let debug_interpreter = args.debug_interpreter;
     let debug_stack = args.debug_stack;
     let factory = SharedTermFactory::<JsBuiltins>::default();
-    let builtins = JsBuiltins::entries()
-        .into_iter()
-        .map(|builtin| (builtin.uid(), factory.create_builtin_term(builtin)))
-        .collect::<Vec<_>>();
     let allocator = DefaultAllocator::default();
     let input_path = args.entry_point;
     let syntax = args.syntax;
@@ -117,7 +113,6 @@ pub async fn main() -> Result<()> {
                 &state,
                 &factory,
                 &allocator,
-                &builtins,
                 &interpreter_options,
                 &mut interpreter_cache,
             )
@@ -133,7 +128,6 @@ pub async fn main() -> Result<()> {
                 let runtime = if debug_signals {
                     Runtime::new(
                         state,
-                        builtins,
                         debug_signal_handler(signal_handler),
                         cache,
                         &factory,
@@ -144,7 +138,6 @@ pub async fn main() -> Result<()> {
                 } else {
                     Runtime::new(
                         state,
-                        builtins,
                         debug_signal_handler(signal_handler),
                         cache,
                         &factory,

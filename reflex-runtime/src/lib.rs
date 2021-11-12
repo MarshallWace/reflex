@@ -16,7 +16,7 @@ use reflex::{
     core::{
         Applicable, DependencyList, DynamicState, EvaluationResult, Expression, ExpressionFactory,
         HeapAllocator, Reducible, Rewritable, Signal, SignalId, SignalType, StateCache, StateToken,
-        StringValue, Uuid,
+        StringValue,
     },
     hash::{hash_object, HashId},
     interpreter::{
@@ -437,7 +437,6 @@ impl<T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile
 impl<T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>> Runtime<T> {
     pub fn new<THandler>(
         state: RuntimeState<T>,
-        builtins: impl IntoIterator<Item = (Uuid, T)>,
         signal_handler: THandler,
         cache: RuntimeCache<T>,
         factory: &impl AsyncExpressionFactory<T>,
@@ -456,7 +455,6 @@ impl<T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile
         let (commands_tx, mut commands_rx) = mpsc::channel(1024);
         let (flush_tx, flush_rx) = broadcast::channel(1024);
         let commands_handler = tokio::spawn({
-            let builtins = Arc::new(builtins.into_iter().collect::<Vec<_>>());
             let mut store = Mutex::new(RuntimeStore::new(state));
             let factory = factory.clone();
             let allocator = allocator.clone();
@@ -482,7 +480,6 @@ impl<T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile
                                     &flush_tx,
                                     &factory,
                                     &allocator,
-                                    &builtins,
                                     &interpreter_options,
                                 );
                                 let subscription_cache_key = cache.register_subscription(
@@ -631,7 +628,6 @@ fn process_subscribe_command<T: AsyncExpression + Rewritable<T> + Reducible<T> +
     flush: &broadcast::Sender<FlushPayload<T>>,
     factory: &impl AsyncExpressionFactory<T>,
     allocator: &impl AsyncHeapAllocator<T>,
-    builtins: &Arc<Vec<(Uuid, T)>>,
     interpreter_options: &InterpreterOptions,
 ) -> (SubscriptionId, HashId)
 where
@@ -651,7 +647,6 @@ where
             let flush = flush.clone();
             let factory = factory.clone();
             let allocator = allocator.clone();
-            let builtins = builtins.clone();
             let interpreter_options = interpreter_options.clone();
             let cache = cache.clone();
             let commands = commands.clone();
@@ -670,7 +665,6 @@ where
                     &state,
                     &factory,
                     &allocator,
-                    &builtins,
                     &interpreter_options,
                     &cache,
                 );
@@ -724,7 +718,6 @@ where
                         &state,
                         &factory,
                         &allocator,
-                        &builtins,
                         &interpreter_options,
                         &cache,
                     );
@@ -766,7 +759,6 @@ fn evaluate_subscription<T: Expression + Rewritable<T> + Reducible<T> + Applicab
     state: &impl DynamicState<T>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-    builtins: &[(Uuid, T)],
     interpreter_options: &InterpreterOptions,
     cache: &impl InterpreterCache<T>,
 ) -> (EvaluationResult<T>, CacheEntries<T>) {
@@ -779,7 +771,6 @@ fn evaluate_subscription<T: Expression + Rewritable<T> + Reducible<T> + Applicab
         state,
         factory,
         allocator,
-        builtins,
         interpreter_options,
         cache,
     )
