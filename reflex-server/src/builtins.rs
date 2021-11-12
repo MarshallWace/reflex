@@ -55,19 +55,11 @@ impl Uid for ServerBuiltins {
 }
 impl TryFrom<Uuid> for ServerBuiltins {
     type Error = ();
-
     fn try_from(value: Uuid) -> Result<Self, Self::Error> {
-        let stdlib_builtin: Result<Stdlib, ()> = value.try_into();
-        stdlib_builtin
-            .map(|builtin| ServerBuiltins::Stdlib(builtin))
-            .or_else(|_| {
-                let js_builtin: Result<JsStdlib, ()> = value.try_into();
-                js_builtin.map(|builtin| ServerBuiltins::Js(builtin))
-            })
-            .or_else(|_| {
-                let graphql_builtin: Result<GraphQlStdlib, ()> = value.try_into();
-                graphql_builtin.map(|builtin| ServerBuiltins::GraphQl(builtin))
-            })
+        TryInto::<Stdlib>::try_into(value)
+            .map(Self::Stdlib)
+            .or_else(|_| TryInto::<JsStdlib>::try_into(value).map(Self::Js))
+            .or_else(|_| TryInto::<GraphQlStdlib>::try_into(value).map(Self::GraphQl))
     }
 }
 impl Builtin for ServerBuiltins {

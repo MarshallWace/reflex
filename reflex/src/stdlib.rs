@@ -205,7 +205,6 @@ impl Stdlib {
 }
 impl TryFrom<Uuid> for Stdlib {
     type Error = ();
-
     fn try_from(uuid: Uuid) -> Result<Self, Self::Error> {
         match uuid {
             Abs::UUID => Ok(Self::Abs),

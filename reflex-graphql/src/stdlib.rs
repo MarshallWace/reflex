@@ -32,7 +32,6 @@ impl Stdlib {
 }
 impl TryFrom<Uuid> for Stdlib {
     type Error = ();
-
     fn try_from(value: Uuid) -> Result<Self, Self::Error> {
         match value {
             DynamicQueryBranch::UUID => Ok(Self::DynamicQueryBranch),

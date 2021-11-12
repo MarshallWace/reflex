@@ -75,15 +75,10 @@ impl std::fmt::Display for JsBuiltins {
 }
 impl TryFrom<Uuid> for JsBuiltins {
     type Error = ();
-
     fn try_from(value: Uuid) -> Result<Self, Self::Error> {
-        let stdlib_builtin: Result<Stdlib, ()> = value.try_into();
-        stdlib_builtin
-            .map(|builtin| JsBuiltins::Stdlib(builtin))
-            .or_else(|_| {
-                let js_builtin: Result<JsStdlib, ()> = value.try_into();
-                js_builtin.map(|builtin| JsBuiltins::Js(builtin))
-            })
+        TryInto::<Stdlib>::try_into(value)
+            .map(Self::Stdlib)
+            .or_else(|_| TryInto::<JsStdlib>::try_into(value).map(Self::Js))
     }
 }
 

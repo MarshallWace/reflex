@@ -680,15 +680,10 @@ mod tests {
     }
     impl TryFrom<Uuid> for GraphQlTestBuiltins {
         type Error = ();
-
         fn try_from(value: Uuid) -> Result<Self, Self::Error> {
-            let stdlib_builtin: Result<Stdlib, ()> = value.try_into();
-            stdlib_builtin
-                .map(|builtin| GraphQlTestBuiltins::Stdlib(builtin))
-                .or_else(|_| {
-                    let graphql_builtin: Result<GraphQlStdlib, ()> = value.try_into();
-                    graphql_builtin.map(|builtin| GraphQlTestBuiltins::GraphQl(builtin))
-                })
+            TryInto::<Stdlib>::try_into(value)
+                .map(Self::Stdlib)
+                .or_else(|_| TryInto::<GraphQlStdlib>::try_into(value).map(Self::GraphQl))
         }
     }
     impl Builtin for GraphQlTestBuiltins {
