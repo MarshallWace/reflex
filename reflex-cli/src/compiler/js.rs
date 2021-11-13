@@ -56,7 +56,7 @@ pub fn compile_js_source(
     compile_js_source_with_customisation(
         root_module_path,
         Some(module_loaders),
-        std::env::vars(),
+        Some(std::env::vars()),
         factory,
         allocator,
         compiler_options,
@@ -69,7 +69,7 @@ pub fn compile_js_source_with_customisation<
 >(
     root_module_path: impl AsRef<Path> + std::fmt::Display,
     custom_loader: Option<impl Fn(&str, &Path) -> Option<Result<T, String>> + 'static>,
-    env: impl IntoIterator<Item = (String, String)>,
+    env: Option<impl IntoIterator<Item = (String, String)>>,
     factory: &(impl ExpressionFactory<T> + Clone + 'static),
     allocator: &(impl HeapAllocator<T> + Clone + 'static),
     compiler_options: CompilerOptions,
@@ -88,7 +88,13 @@ where
         factory,
         allocator,
     )
-    .map(|expression| inject_env_vars(expression, env, factory, allocator))?;
+    .map(move |expression| {
+        if let Some(env) = env {
+            inject_env_vars(expression, env, factory, allocator)
+        } else {
+            expression
+        }
+    })?;
     compile_root(root, factory, allocator, compiler_options, compiler_mode)
 }
 

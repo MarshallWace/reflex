@@ -95,7 +95,7 @@ where
             compile_js_source_with_customisation(
                 root_module_path,
                 custom_loader,
-                std::env::vars(),
+                Some(std::env::vars()),
                 factory,
                 allocator,
                 compiler_options,
