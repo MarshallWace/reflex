@@ -9,12 +9,12 @@ pub mod loader;
 
 use reflex::{
     compiler::Compile,
-    core::{Applicable, Reducible, Rewritable, Signal, StringValue},
+    core::{Applicable, Reducible, Rewritable, Signal},
     stdlib::Stdlib,
 };
 use reflex_runtime::{
-    AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator, SignalHandlerResult,
-    SignalHelpers, SignalResult,
+    AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator, SignalHandler,
+    SignalHandlerResult, SignalHelpers, SignalResult,
 };
 
 pub mod utils {
@@ -29,9 +29,9 @@ pub fn builtin_signal_handler<
 >(
     factory: &impl AsyncExpressionFactory<T>,
     allocator: &impl AsyncHeapAllocator<T>,
-) -> impl Fn(&str, &[&Signal<T>], &SignalHelpers<T>) -> SignalHandlerResult<T> + Send + Sync + 'static
+) -> impl SignalHandler<T>
 where
-    T::String: StringValue + Send + Sync,
+    T::String: Send + Sync,
     T::Builtin: From<Stdlib>,
 {
     compose_signal_handlers(
@@ -46,34 +46,47 @@ where
     )
 }
 
-pub fn compose_signal_handlers<T: AsyncExpression + Compile<T>>(
-    head: impl Fn(&str, &[&Signal<T>], &SignalHelpers<T>) -> SignalHandlerResult<T> + 'static,
-    tail: impl Fn(&str, &[&Signal<T>], &SignalHelpers<T>) -> SignalHandlerResult<T> + 'static,
-) -> impl Fn(&str, &[&Signal<T>], &SignalHelpers<T>) -> SignalHandlerResult<T>
+#[derive(Clone, Copy, Debug)]
+pub struct NoopSignalHandler;
+impl<T> SignalHandler<T> for NoopSignalHandler
 where
-    T::String: StringValue + Send + Sync,
+    T: AsyncExpression + Compile<T>,
+    T::String: Send + Sync,
 {
-    move |signal_type: &str, signals: &[&Signal<T>], helpers: &SignalHelpers<T>| match head(
+    fn handle(
+        &self,
+        _signal_type: &str,
+        _signals: &[&Signal<T>],
+        _helpers: &SignalHelpers<T>,
+    ) -> SignalHandlerResult<T> {
+        None
+    }
+}
+
+pub fn compose_signal_handlers<T>(
+    head: impl SignalHandler<T>,
+    tail: impl SignalHandler<T>,
+) -> impl SignalHandler<T>
+where
+    T: AsyncExpression + Compile<T>,
+    T::String: Send + Sync,
+{
+    move |signal_type: &str, signals: &[&Signal<T>], helpers: &SignalHelpers<T>| match head.handle(
         signal_type,
         signals,
         helpers,
     ) {
         Some(result) => Some(result),
-        None => tail(signal_type, signals, helpers),
+        None => tail.handle(signal_type, signals, helpers),
     }
 }
 
-pub fn debug_signal_handler<T: AsyncExpression + Compile<T>, THandler>(
-    handler: THandler,
-) -> impl Fn(&str, &[&Signal<T>], &SignalHelpers<T>) -> SignalHandlerResult<T> + Send + Sync + 'static
+pub fn debug_signal_handler<T>(handler: impl SignalHandler<T>) -> impl SignalHandler<T>
 where
-    T::String: StringValue + Send + Sync,
-    THandler: Fn(&str, &[&Signal<T>], &SignalHelpers<T>) -> SignalHandlerResult<T>
-        + Send
-        + Sync
-        + 'static,
+    T: AsyncExpression + Compile<T>,
+    T::String: Send + Sync,
 {
-    move |signal_type, signals, helpers| {
+    move |signal_type: &str, signals: &[&Signal<T>], helpers: &SignalHelpers<T>| {
         eprintln!(
             "[{}]{}",
             signal_type,
@@ -98,6 +111,31 @@ where
                 )
             };
         }
-        handler(signal_type, signals, helpers)
+        handler.handle(signal_type, signals, helpers)
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum EitherHandler<L, R> {
+    Left(L),
+    Right(R),
+}
+impl<T, L, R> SignalHandler<T> for EitherHandler<L, R>
+where
+    T: AsyncExpression + Compile<T>,
+    T::String: Send + Sync,
+    L: SignalHandler<T>,
+    R: SignalHandler<T>,
+{
+    fn handle(
+        &self,
+        signal_type: &str,
+        signals: &[&Signal<T>],
+        helpers: &SignalHelpers<T>,
+    ) -> reflex_runtime::SignalHandlerResult<T> {
+        match self {
+            Self::Left(handler) => handler.handle(signal_type, signals, helpers),
+            Self::Right(handler) => handler.handle(signal_type, signals, helpers),
+        }
     }
 }

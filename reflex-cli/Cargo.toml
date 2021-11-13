@@ -8,16 +8,18 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-anyhow = "^1.0"
 reflex = { path = "../reflex" }
 reflex-handlers = { path = "../reflex-handlers" }
 reflex-js = { path = "../reflex-js" }
+reflex-json = { path = "../reflex-json" }
 reflex-graphql = { path = "../reflex-graphql" }
 reflex-runtime = { path = "../reflex-runtime" }
-tokio = { version = "1", features = ["full"] }
+anyhow = "1.0"
 clap = { git = "https://github.com/clap-rs/clap", rev = "efeb02cd342af78d2eb8446ecce8aed05643594b" } # TODO: once clap 3.0 comes out depend on it from crates.io
-rmp-serde = "^0.15"
-serde_json = "^1.0"
+rmp-serde = "0.15"
+serde_json = "1.0"
+tokio = { version = "1", features = ["full"] }
 
 [[bin]]
 name = "reflexc"
+path = "src/bin/compiler.rs"

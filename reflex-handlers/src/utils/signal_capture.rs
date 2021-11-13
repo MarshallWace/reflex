@@ -1,9 +1,11 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
+// SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use std::{
     collections::HashMap,
     io::Write,
+    path::Path,
     sync::{Arc, Mutex},
 };
 
@@ -16,8 +18,8 @@ use reflex::{
     },
 };
 use reflex_runtime::{
-    AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator, RuntimeEffect,
-    SignalHandlerResult, SignalHelpers, SignalResult, StateUpdate, StateUpdateType,
+    AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator, RuntimeEffect, SignalHandler,
+    SignalHelpers, SignalResult, StateUpdate, StateUpdateType,
 };
 use serde::{Deserialize, Serialize};
 
@@ -35,25 +37,16 @@ where
     T: AsyncExpression + Compile<T>,
     T::String: StringValue + Send + Sync,
 {
-    async fn run(&mut self, capture_file: String) {
+    async fn run(&mut self, mut output_file: std::fs::File) {
         // Why not tokio file? Because tokio files do not implement Write, only
         // AsyncWrite which is not supported by serde. This means holding a file handle
         // across an await. TODO: is this a problem? signal recording should not
         // be used in production so probably not.
-        let output_file = std::fs::File::create(&capture_file);
-        match output_file {
-            Err(err) => eprintln!(
-                "ERROR: failed to open file for signal capture {}: {}",
-                capture_file, err
-            ),
-            Ok(mut output_file) => {
-                while let Some(message) = self.receiver.recv().await {
-                    let record: serialization::SignalCaptureRecord = message.into();
-                    let _ = serde_json::to_writer(&mut output_file, &record);
-                    let _ = output_file.write(b"\n");
-                    let _ = output_file.flush();
-                }
-            }
+        while let Some(message) = self.receiver.recv().await {
+            let record: serialization::SignalCaptureRecord = message.into();
+            let _ = serde_json::to_writer(&mut output_file, &record);
+            let _ = output_file.write(b"\n");
+            let _ = output_file.flush();
         }
     }
 }
@@ -103,37 +96,38 @@ where
 impl<T> SignalRecorder<T>
 where
     T: AsyncExpression + Compile<T>,
-    T::String: StringValue + Send + Sync,
+    T::String: Send + Sync,
 {
     pub fn new(
-        recorded_signal_types: std::collections::HashSet<String>,
-        capture_file: String,
-    ) -> Self {
+        recorded_signal_types: impl IntoIterator<Item = String>,
+        capture_file: &Path,
+    ) -> Result<Self, String> {
+        let output_file = std::fs::File::create(&capture_file).map_err(|err| {
+            format!(
+                "ERROR: failed to open file for signal capture {}: {}",
+                capture_file.display(),
+                err
+            )
+        })?;
         let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
         let mut recorder = SignalRecorderActor { receiver };
-        tokio::spawn(async move { recorder.run(capture_file).await });
-        Self {
-            recorded_signal_types,
+        tokio::spawn(async move { recorder.run(output_file).await });
+        Ok(Self {
+            recorded_signal_types: recorded_signal_types.into_iter().collect(),
             sender,
-        }
+        })
     }
 
-    pub fn record_signal_handler<THandler>(
+    pub fn record_signal_handler(
         &self,
-        handler: THandler,
+        handler: impl SignalHandler<T>,
         factory: &impl AsyncExpressionFactory<T>,
-    ) -> impl Fn(&str, &[&Signal<T>], &SignalHelpers<T>) -> SignalHandlerResult<T> + Send + Sync + 'static
-    where
-        THandler: Fn(&str, &[&Signal<T>], &SignalHelpers<T>) -> SignalHandlerResult<T>
-            + Send
-            + Sync
-            + 'static,
-    {
+    ) -> impl SignalHandler<T> {
         let sender = self.sender.clone();
         let recorded_signal_types = self.recorded_signal_types.clone();
         let factory = factory.clone();
-        move |signal_type, signals, helpers| {
-            let result = handler(signal_type, signals, helpers);
+        move |signal_type: &str, signals: &[&Signal<T>], helpers: &SignalHelpers<T>| {
+            let result = handler.handle(signal_type, signals, helpers);
             if recorded_signal_types.contains(signal_type) {
                 println!("Capturing signal for type {}", &signal_type);
                 result.map(|results| {
@@ -271,8 +265,8 @@ struct SignalCapture {
     recorded_signals: Arc<Mutex<HashMap<SignalId, Vec<SignalCaptureRecord>>>>,
 }
 impl SignalCapture {
-    fn from_file(capture_file_name: String) -> Result<Self, String> {
-        let signal_results = serialization::from_capture_file(capture_file_name)?;
+    fn from_file(capture_file: &Path) -> Result<Self, String> {
+        let signal_results = serialization::from_capture_file(capture_file)?;
         Ok(Self {
             recorded_signals: Arc::new(Mutex::new(signal_results)),
         })
@@ -307,35 +301,31 @@ pub struct SignalPlayback {
 
 impl SignalPlayback {
     pub fn new(
-        recorded_signal_types: std::collections::HashSet<String>,
-        capture_file: String,
+        recorded_signal_types: impl IntoIterator<Item = String>,
+        capture_file: &Path,
     ) -> Result<Self, String> {
         let capture = SignalCapture::from_file(capture_file)?;
         Ok(Self {
-            recorded_signal_types,
+            recorded_signal_types: recorded_signal_types.into_iter().collect(),
             capture,
         })
     }
 
-    pub fn playback_signal_handler<THandler, T>(
+    pub fn playback_signal_handler<T>(
         &self,
-        handler: THandler,
+        handler: impl SignalHandler<T>,
         factory: &impl AsyncExpressionFactory<T>,
         allocator: &impl AsyncHeapAllocator<T>,
-    ) -> impl Fn(&str, &[&Signal<T>], &SignalHelpers<T>) -> SignalHandlerResult<T> + Send + Sync + 'static
+    ) -> impl SignalHandler<T>
     where
         T: AsyncExpression + Compile<T>,
-        T::String: StringValue + Send + Sync,
-        THandler: Fn(&str, &[&Signal<T>], &SignalHelpers<T>) -> SignalHandlerResult<T>
-            + Send
-            + Sync
-            + 'static,
+        T::String: Send + Sync,
     {
         let recorded_signal_types = self.recorded_signal_types.clone();
         let capture = self.capture.clone();
         let factory = factory.clone();
         let allocator = allocator.clone();
-        move |signal_type, signals, helpers| {
+        move |signal_type: &str, signals: &[&Signal<T>], helpers: &SignalHelpers<T>| {
             if recorded_signal_types.contains(signal_type) {
                 println!("{} is a captured signal_type", signal_type);
                 Some(
@@ -354,14 +344,14 @@ impl SignalPlayback {
                         .collect::<Vec<Result<SignalResult<T>, String>>>(),
                 )
             } else {
-                handler(signal_type, signals, helpers)
+                handler.handle(signal_type, signals, helpers)
             }
         }
     }
 }
 
 mod serialization {
-    use std::collections::HashMap;
+    use std::{collections::HashMap, path::Path};
 
     use reflex::core::{ExpressionFactory, HeapAllocator};
     use reflex_runtime::{create_pending_expression, SignalResult};
@@ -641,11 +631,11 @@ mod serialization {
     }
 
     pub(super) fn from_capture_file(
-        capture_file_name: String,
+        capture_file: &Path,
     ) -> Result<HashMap<SignalId, Vec<SignalCaptureRecord>>, String> {
         let mut deserialized = HashMap::new();
-        let capture_file = std::fs::File::open(&capture_file_name)
-            .map_err(|err| format!("Failed to open {}: {}", capture_file_name, err))?;
+        let capture_file = std::fs::File::open(capture_file)
+            .map_err(|err| format!("Failed to open {}: {}", capture_file.display(), err))?;
         let records: Result<Vec<SignalCaptureRecord>, serde_json::Error> =
             serde_json::Deserializer::from_reader(capture_file)
                 .into_iter::<SignalCaptureRecord>()

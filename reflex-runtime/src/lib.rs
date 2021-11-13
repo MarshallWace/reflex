@@ -4,15 +4,12 @@
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use futures::{
     future::{AbortHandle, Abortable},
-    stream, FutureExt,
+    FutureExt,
 };
 use itertools::{Either, Itertools};
 use parking_lot::RwLock;
 use reflex::{
-    compiler::{
-        create_main_function, hash_program_root, Compile, Compiler, CompilerMode, CompilerOptions,
-        Instruction, InstructionPointer, Program,
-    },
+    compiler::{hash_program_root, Compile, CompilerOptions, InstructionPointer, Program},
     core::{
         Applicable, DependencyList, DynamicState, EvaluationResult, Expression, ExpressionFactory,
         HeapAllocator, Reducible, Rewritable, Signal, SignalId, SignalType, StateCache, StateToken,
@@ -47,8 +44,8 @@ use tokio::{
 use tokio_stream::wrappers::{BroadcastStream, WatchStream};
 pub use tokio_stream::{Stream, StreamExt};
 
-pub type SignalResult<T> = (T, Option<RuntimeEffect<T>>);
-pub type SignalHandlerResult<T> = Option<Vec<Result<SignalResult<T>, String>>>;
+mod handler;
+pub use handler::{SignalHandler, SignalHandlerResult, SignalHelpers, SignalResult};
 
 pub trait AsyncExpression: Expression + Send + Sync + Unpin + 'static {}
 impl<T> AsyncExpression for T
@@ -435,9 +432,9 @@ impl<T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile
     }
 }
 impl<T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>> Runtime<T> {
-    pub fn new<THandler>(
+    pub fn new(
         state: RuntimeState<T>,
-        signal_handler: THandler,
+        signal_handler: &impl SignalHandler<T>,
         cache: RuntimeCache<T>,
         factory: &impl AsyncExpressionFactory<T>,
         allocator: &impl AsyncHeapAllocator<T>,
@@ -446,16 +443,13 @@ impl<T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile
     ) -> Self
     where
         T::String: StringValue + Send + Sync,
-        THandler: Fn(&str, &[&Signal<T>], &SignalHelpers<T>) -> SignalHandlerResult<T>
-            + Send
-            + Sync
-            + 'static,
     {
         // TODO: Establish sensible defaults for channel buffer sizes
         let (commands_tx, mut commands_rx) = mpsc::channel(1024);
         let (flush_tx, flush_rx) = broadcast::channel(1024);
         let commands_handler = tokio::spawn({
             let mut store = Mutex::new(RuntimeStore::new(state));
+            let signal_handler = signal_handler.clone();
             let factory = factory.clone();
             let allocator = allocator.clone();
             let commands = commands_tx.clone();
@@ -590,7 +584,7 @@ impl<T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile
     }
 }
 
-async fn create_subscription<
+pub(crate) async fn create_subscription<
     'a,
     T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
 >(
@@ -874,23 +868,18 @@ fn process_unsubscribe_command<T: Expression>(
 
 fn process_emit_command<
     T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
-    THandler,
 >(
     payload: EmitCommand<T>,
     store: &mut Mutex<RuntimeStore<T>>,
     cache: &mut RuntimeCache<T>,
     commands: &RuntimeCommandChannel<T>,
-    signal_handler: &THandler,
+    signal_handler: &impl SignalHandler<T>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
     compiler_options: &CompilerOptions,
 ) -> Vec<StateUpdate<T>>
 where
     T::String: StringValue + Send + Sync,
-    THandler: Fn(&str, &[&Signal<T>], &SignalHelpers<T>) -> SignalHandlerResult<T>
-        + Send
-        + Sync
-        + 'static,
 {
     let subscription_id = payload.subscription_id;
     let cache_key = payload.cache_key;
@@ -967,10 +956,9 @@ where
 fn handle_custom_signals<
     'a,
     T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T> + 'a,
-    THandler,
 >(
     signals: &[&'a Signal<T>],
-    signal_handler: &THandler,
+    signal_handler: &impl SignalHandler<T>,
     program: Arc<Program>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
@@ -979,10 +967,6 @@ fn handle_custom_signals<
 ) -> (Vec<(SignalId, T)>, Vec<(SignalId, RuntimeEffect<T>)>)
 where
     T::String: StringValue + Send + Sync,
-    THandler: Fn(&str, &[&Signal<T>], &SignalHelpers<T>) -> SignalHandlerResult<T>
-        + Send
-        + Sync
-        + 'static,
 {
     let signal_helpers = SignalHelpers::new(program, commands.clone(), *compiler_options);
     let signals_by_type = signals
@@ -1007,7 +991,7 @@ where
         );
     let mut signal_results = HashMap::with_capacity(signals.len());
     for (signal_type, signals) in signals_by_type {
-        let results = signal_handler(signal_type, &signals, &signal_helpers);
+        let results = signal_handler.handle(signal_type, &signals, &signal_helpers);
         if let Some(results) = results {
             let signal_ids = signals.iter().map(|signal| signal.id());
             if results.len() == signals.len() {
@@ -1163,7 +1147,7 @@ fn gc<T: Expression>(store: &mut Mutex<RuntimeStore<T>>, cache: &mut RuntimeCach
     let start_time = Instant::now();
     println!("[Runtime] GC started");
     {
-        print!("[Runtime] Purging cache entries...");
+        eprint!("[Runtime] Purging cache entries...");
         let start_time = Instant::now();
         let metrics = cache.gc();
         println!("{:?} ({})", start_time.elapsed(), metrics);
@@ -1177,7 +1161,7 @@ fn gc<T: Expression>(store: &mut Mutex<RuntimeStore<T>>, cache: &mut RuntimeCach
             start_time.elapsed()
         );
         if !dispose_callbacks.is_empty() {
-            print!(
+            eprint!(
                 "[Runtime] Cleaning up {} signal effects...",
                 dispose_callbacks.len()
             );
@@ -1189,121 +1173,6 @@ fn gc<T: Expression>(store: &mut Mutex<RuntimeStore<T>>, cache: &mut RuntimeCach
         }
     }
     println!("[Runtime] GC completed in {:?}", start_time.elapsed());
-}
-
-#[derive(Clone)]
-pub struct SignalHelpers<T: AsyncExpression + Compile<T>>
-where
-    T::String: StringValue + Send + Sync,
-{
-    program: Arc<Program>,
-    commands: RuntimeCommandChannel<T>,
-    compiler_options: CompilerOptions,
-}
-impl<T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>>
-    SignalHelpers<T>
-where
-    T::String: StringValue + Send + Sync,
-{
-    fn new(
-        program: Arc<Program>,
-        commands: RuntimeCommandChannel<T>,
-        compiler_options: CompilerOptions,
-    ) -> Self {
-        Self {
-            program,
-            commands,
-            compiler_options,
-        }
-    }
-    pub fn program(&self) -> &Program {
-        &self.program
-    }
-    pub fn watch_expression(
-        self,
-        expression: T,
-        initiators: impl IntoIterator<Item = SignalId>,
-        factory: &impl AsyncExpressionFactory<T>,
-        allocator: &impl AsyncHeapAllocator<T>,
-    ) -> Result<impl Stream<Item = T> + Send + 'static, String> {
-        let initiators = initiators.into_iter().collect::<Vec<_>>();
-        let entry_point = InstructionPointer::new(self.program.len());
-        let prelude = (*self.program).clone();
-        Compiler::new(self.compiler_options, Some(prelude))
-            .compile(&expression, CompilerMode::Function, factory, allocator)
-            .map(|program| {
-                // TODO: Error if runtime expression depends on unrecognized native functions
-                self.watch_compiled_expression(program, entry_point, initiators, factory, allocator)
-            })
-    }
-    pub fn watch_state(
-        self,
-        state_token: StateToken,
-        initiators: impl IntoIterator<Item = SignalId>,
-        factory: &impl AsyncExpressionFactory<T>,
-        allocator: &impl AsyncHeapAllocator<T>,
-    ) -> impl Stream<Item = T> + Send + 'static {
-        let initiators = initiators.into_iter().collect::<Vec<_>>();
-        let program = compile_state_subscription_expression(state_token);
-        self.watch_compiled_expression(
-            program,
-            InstructionPointer::default(),
-            initiators,
-            factory,
-            allocator,
-        )
-    }
-    fn watch_compiled_expression(
-        self,
-        program: Program,
-        entry_point: InstructionPointer,
-        initiators: Vec<SignalId>,
-        factory: &impl AsyncExpressionFactory<T>,
-        allocator: &impl AsyncHeapAllocator<T>,
-    ) -> impl Stream<Item = T> + Send + 'static {
-        futures::StreamExt::flatten(
-            {
-                let factory = factory.clone();
-                let allocator = allocator.clone();
-                async move {
-                    match create_subscription(
-                        &self.commands,
-                        program,
-                        entry_point,
-                        Some(initiators),
-                    )
-                    .await
-                    {
-                        Err(error) => futures::StreamExt::left_stream(stream::iter(once(
-                            create_error_expression(
-                                once(factory.create_value_term(ValueTerm::String(
-                                    allocator.create_string(error),
-                                ))),
-                                &factory,
-                                &allocator,
-                            ),
-                        ))),
-                        Ok(subscription) => {
-                            futures::StreamExt::right_stream(subscription.into_stream())
-                        }
-                    }
-                }
-            }
-            .into_stream(),
-        )
-    }
-}
-
-fn compile_state_subscription_expression(state_token: StateToken) -> Program {
-    create_main_function([
-        Instruction::PushSignal {
-            signal_type: SignalType::Pending,
-            num_args: 0,
-        },
-        Instruction::PushDynamic { state_token },
-        Instruction::Evaluate,
-        Instruction::Return,
-    ])
 }
 
 #[derive(Clone)]

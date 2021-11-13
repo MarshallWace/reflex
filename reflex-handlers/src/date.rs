@@ -5,22 +5,27 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use futures_util::future::{AbortHandle, Abortable};
 use reflex::{
+    compiler::Compile,
     core::{Expression, ExpressionFactory, ExpressionList, Signal, StateToken},
     lang::ValueTerm,
 };
 use reflex_runtime::{
-    AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator, RuntimeEffect,
-    SignalHandlerResult, SignalHelpers, StateUpdate,
+    AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator, RuntimeEffect, SignalHandler,
+    SignalHelpers, StateUpdate,
 };
 use tokio::time::{interval_at, Instant};
 use tokio_stream::{wrappers::IntervalStream, StreamExt};
 
 use crate::SignalResult;
 
-pub fn date_timestamp_handler<T: AsyncExpression>(
+pub fn date_timestamp_handler<T>(
     factory: &impl AsyncExpressionFactory<T>,
     allocator: &impl AsyncHeapAllocator<T>,
-) -> impl Fn(&str, &[&Signal<T>], &SignalHelpers<T>) -> SignalHandlerResult<T> {
+) -> impl SignalHandler<T>
+where
+    T: AsyncExpression + Compile<T>,
+    T::String: Send + Sync,
+{
     let factory = factory.clone();
     let allocator = allocator.clone();
     move |signal_type: &str, signals: &[&Signal<T>], _helpers: &SignalHelpers<T>| {

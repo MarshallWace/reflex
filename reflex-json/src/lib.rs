@@ -20,11 +20,11 @@ pub fn json_array(items: impl IntoIterator<Item = JsonValue>) -> JsonValue {
 }
 
 pub fn parse<T: Expression>(
-    value: &str,
+    input: &str,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
 ) -> Result<T, String> {
-    deserialize(value).and_then(|value| hydrate(value, factory, allocator))
+    deserialize(input).and_then(|value| hydrate(value, factory, allocator))
 }
 
 pub fn stringify<'a, T: Expression>(value: &T) -> Result<String, String> {

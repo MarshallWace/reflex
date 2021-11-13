@@ -10,11 +10,11 @@ edition = "2018"
 [dependencies]
 fnv = "1.0.7"
 im = "15.0.0"
-serde = { version = "^1.0", features = ["derive", "rc"] }
-serde_json = "^1.0"
+serde = { version = "1.0", features = ["derive", "rc"] }
+serde_json = "1.0"
 strum = "0.22"
 strum_macros = "0.22"
-tracing = { version = "^0.1.0", features = ["release_max_level_info"] }
+tracing = { version = "0.1.0", features = ["release_max_level_info"] }
 
 [dependencies.uuid]
 features = ["macros", "serde"]

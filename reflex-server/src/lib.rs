@@ -21,7 +21,11 @@ use reflex_json::JsonValue;
 use reflex_runtime::{AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator, Runtime};
 
 pub mod builtins;
-pub mod cli;
+pub mod cli {
+    pub mod execute_query;
+    pub mod profile_query;
+    pub mod reflex_server;
+}
 
 mod graphql;
 pub use graphql::compile_graphql_query;

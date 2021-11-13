@@ -8,10 +8,9 @@ use reflex::{
     allocator::DefaultAllocator,
     cache::SubstitutionCache,
     compiler::{hash_program_root, Compiler, CompilerMode, CompilerOptions, InstructionPointer},
-    core::{evaluate, ExpressionFactory, StateCache, Uid},
+    core::{evaluate, StateCache},
     interpreter::{execute, DefaultInterpreterCache, InterpreterOptions},
     lang::SharedTermFactory,
-    stdlib::Stdlib,
 };
 use reflex_js::{builtins::JsBuiltins, parse, Env};
 use test::Bencher;
@@ -37,10 +36,6 @@ fn js_interpreted(b: &mut Bencher) {
 fn js_compiled(b: &mut Bencher) {
     let factory = SharedTermFactory::<JsBuiltins>::default();
     let allocator = DefaultAllocator::default();
-    let builtins = Stdlib::entries()
-        .into_iter()
-        .map(|builtin| (builtin.uid(), factory.create_builtin_term(builtin)))
-        .collect::<Vec<_>>();
     let env = Env::new();
     let input = "
         const fullName = (first, last) => `${first} ${last}`;
@@ -70,7 +65,6 @@ fn js_compiled(b: &mut Bencher) {
             &state,
             &factory,
             &allocator,
-            &builtins,
             &options,
             &mut cache,
         )

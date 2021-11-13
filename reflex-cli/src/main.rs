@@ -5,10 +5,8 @@
 use anyhow::{anyhow, Context, Result};
 use clap::Parser;
 use std::{
-    fs,
-    io::{self, Write},
-    path::PathBuf,
-    str::FromStr,
+    io::Write,
+    path::{Path, PathBuf},
     sync::Mutex,
 };
 
@@ -16,28 +14,24 @@ use reflex::{
     allocator::DefaultAllocator,
     cache::SubstitutionCache,
     compiler::{hash_program_root, Compiler, CompilerMode, CompilerOptions, InstructionPointer},
-    core::{Expression, ExpressionFactory, HeapAllocator, Reducible, Rewritable, StateCache},
+    core::{Expression, ExpressionFactory, StateCache},
     env::inject_env_vars,
     interpreter::{execute, DefaultInterpreterCache, InterpreterOptions},
     lang::{term::SignalTerm, SharedTermFactory, ValueTerm},
-    stdlib::Stdlib,
 };
 
-use reflex_cli::Syntax;
-use reflex_handlers::{builtin_signal_handler, debug_signal_handler};
-use reflex_js::{
-    self, builtins::JsBuiltins, create_js_env, create_module_loader,
-    imports::builtin_imports_loader, stdlib::Stdlib as JsStdlib,
-};
+use reflex_cli::{create_parser, Syntax, SyntaxParser};
+use reflex_handlers::{builtin_signal_handler, debug_signal_handler, EitherHandler};
+use reflex_js::builtins::JsBuiltins;
 use reflex_runtime::{Runtime, RuntimeCache, RuntimeState, StreamExt};
-use repl::ReplParser;
 
 mod repl;
 
+/// Reflex runtime evaluator
 #[derive(Parser)]
-struct Opts {
+struct Args {
     #[clap(about = "Optional script to run, if not given will start in repl mode")]
-    entry_point: Option<String>,
+    entry_point: Option<PathBuf>,
     #[clap(
         long,
         about = "What syntax to interpret input in",
@@ -58,7 +52,7 @@ struct Opts {
 
 #[tokio::main]
 pub async fn main() -> Result<()> {
-    let args = Opts::parse();
+    let args = Args::parse();
     let unoptimized = args.unoptimized;
     let debug_signals = args.debug_signals;
     let debug_compiler = args.debug_compiler;
@@ -68,7 +62,7 @@ pub async fn main() -> Result<()> {
     let allocator = DefaultAllocator::default();
     let input_path = args.entry_point;
     let syntax = args.syntax;
-    if syntax == Syntax::ByteCode {
+    if syntax == Syntax::Bytecode {
         return Err(anyhow!("CLI is not yet supported for bytecode"));
     }
     match input_path {
@@ -81,21 +75,37 @@ pub async fn main() -> Result<()> {
         Some(input_path) => {
             let compiler_options = CompilerOptions {
                 debug: debug_compiler,
-                normalize: !unoptimized,
-                ..CompilerOptions::default()
+                ..if unoptimized {
+                    CompilerOptions::unoptimized()
+                } else {
+                    CompilerOptions::default()
+                }
             };
             let source = read_file(&input_path)?;
-            let parser = create_parser(syntax, Some(input_path.to_owned()), &factory, &allocator);
-            let expression = parser(&source)
+            let parser = create_parser(syntax, Some(&input_path), &factory, &allocator);
+            let expression = parser
+                .parse(&source)
                 .map(|expression| {
                     inject_env_vars(expression, std::env::vars(), &factory, &allocator)
                 })
-                .map_err(|err| anyhow!("Failed to parse source at {}: {}", input_path, err))?;
+                .map_err(|err| {
+                    anyhow!(
+                        "Failed to parse source at {}: {}",
+                        input_path.display(),
+                        err
+                    )
+                })?;
             let program = Compiler::new(compiler_options, None)
                 .compile(&expression, CompilerMode::Function, &factory, &allocator)
-                .map_err(|err| anyhow!("Failed to compile source at {}: {}", input_path, err))?;
+                .map_err(|err| {
+                    anyhow!(
+                        "Failed to compile source at {}: {}",
+                        input_path.display(),
+                        err
+                    )
+                })?;
 
-            let mut stdout = io::stdout();
+            let mut stdout = std::io::stdout();
             let state = StateCache::default();
             let interpreter_options = InterpreterOptions {
                 debug_instructions: debug_interpreter || debug_stack,
@@ -116,36 +126,35 @@ pub async fn main() -> Result<()> {
                 &interpreter_options,
                 &mut interpreter_cache,
             )
-            .map_err(|err| anyhow!("Failed to execute program at {}: {}", &input_path, err))?;
+            .map_err(|err| {
+                anyhow!(
+                    "Failed to execute program at {}: {}",
+                    input_path.display(),
+                    err
+                )
+            })?;
 
             let (output, dependencies) = result.into_parts();
             if dependencies.is_empty() {
                 writeln!(stdout, "{}", output).or_else(|error| Err(anyhow!("{}", error)))?;
             } else {
                 let signal_handler = builtin_signal_handler(&factory, &allocator);
+                let signal_handler = if !debug_signals {
+                    EitherHandler::Left(signal_handler)
+                } else {
+                    EitherHandler::Right(debug_signal_handler(signal_handler))
+                };
                 let state = RuntimeState::default();
                 let cache = RuntimeCache::new(cache_entries);
-                let runtime = if debug_signals {
-                    Runtime::new(
-                        state,
-                        debug_signal_handler(signal_handler),
-                        cache,
-                        &factory,
-                        &allocator,
-                        interpreter_options,
-                        compiler_options,
-                    )
-                } else {
-                    Runtime::new(
-                        state,
-                        debug_signal_handler(signal_handler),
-                        cache,
-                        &factory,
-                        &allocator,
-                        interpreter_options,
-                        compiler_options,
-                    )
-                };
+                let runtime = Runtime::new(
+                    state,
+                    &signal_handler,
+                    cache,
+                    &factory,
+                    &allocator,
+                    interpreter_options,
+                    compiler_options,
+                );
                 let stdout = Mutex::new(stdout);
 
                 match runtime
@@ -178,81 +187,7 @@ pub async fn main() -> Result<()> {
             }
         }
     }
-
     Ok(())
-}
-
-fn create_parser<T>(
-    syntax: Syntax,
-    entry_path: Option<String>,
-    factory: &(impl ExpressionFactory<T> + Clone + 'static),
-    allocator: &(impl HeapAllocator<T> + Clone + 'static),
-) -> Box<dyn Fn(&str) -> Result<T, String>>
-where
-    T: Expression + Reducible<T> + Rewritable<T> + 'static,
-    T::Builtin: From<Stdlib> + From<JsStdlib>,
-{
-    match (syntax, entry_path) {
-        (Syntax::JavaScript, None) => create_js_script_parser(factory, allocator),
-        (Syntax::JavaScript, Some(entry_path)) => {
-            create_js_module_parser(&entry_path, factory, allocator)
-        }
-        (Syntax::Lisp, _) => create_sexpr_parser(factory, allocator),
-        (Syntax::ByteCode, _) => todo!(),
-    }
-}
-
-fn create_js_script_parser<T: Expression + Rewritable<T> + 'static>(
-    factory: &(impl ExpressionFactory<T> + Clone + 'static),
-    allocator: &(impl HeapAllocator<T> + Clone + 'static),
-) -> ReplParser<T>
-where
-    T::Builtin: From<Stdlib> + From<JsStdlib>,
-{
-    let env = create_js_env(factory, allocator);
-    let factory = factory.clone();
-    let allocator = allocator.clone();
-    Box::new(move |input: &str| reflex_js::parse(input, &env, &factory, &allocator))
-}
-
-fn create_js_module_parser<T: Expression + Rewritable<T> + 'static>(
-    path: &str,
-    factory: &(impl ExpressionFactory<T> + Clone + 'static),
-    allocator: &(impl HeapAllocator<T> + Clone + 'static),
-) -> ReplParser<T>
-where
-    T::Builtin: From<Stdlib> + From<JsStdlib>,
-{
-    let path = PathBuf::from_str(&path).unwrap();
-    let env = create_js_env(factory, allocator);
-    let loader = create_module_loader(
-        env.clone(),
-        Some(builtin_imports_loader(factory, allocator)),
-        factory,
-        allocator,
-    );
-    let factory = factory.clone();
-    let allocator = allocator.clone();
-    Box::new(move |input: &str| {
-        reflex_js::parse_module(input, &env, &path, &loader, &factory, &allocator)
-    })
-}
-
-fn create_sexpr_parser<T: Expression + Rewritable<T> + Reducible<T>>(
-    factory: &(impl ExpressionFactory<T> + Clone + 'static),
-    allocator: &(impl HeapAllocator<T> + Clone + 'static),
-) -> ReplParser<T>
-where
-    T::Builtin: From<Stdlib>,
-{
-    let factory = factory.clone();
-    let allocator = allocator.clone();
-    Box::new(
-        move |input: &str| match reflex::parser::sexpr::parse(input, &factory, &allocator) {
-            Ok(result) => Ok(result),
-            Err(error) => Err(format!("{}", error)),
-        },
-    )
 }
 
 fn format_signal_errors<T: Expression>(
@@ -267,8 +202,8 @@ fn format_signal_errors<T: Expression>(
         })
 }
 
-fn read_file(path: &str) -> Result<String> {
-    fs::read_to_string(path).with_context(|| format!("Failed to read path {}", path))
+fn read_file(path: &Path) -> Result<String> {
+    std::fs::read_to_string(path).with_context(|| format!("Failed to read path {}", path.display()))
 }
 
 fn clear_escape_sequence() -> &'static str {

@@ -11,6 +11,7 @@ use futures_util::{
     stream, FutureExt, StreamExt,
 };
 use reflex::{
+    compiler::Compile,
     core::{
         Expression, ExpressionFactory, ExpressionList, HeapAllocator, Signal, SignalType,
         StateToken, StringValue,
@@ -20,8 +21,8 @@ use reflex::{
 use reflex_graphql::GraphQlOperationPayload;
 use reflex_json::JsonValue;
 use reflex_runtime::{
-    AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator, RuntimeEffect,
-    SignalHandlerResult, SignalHelpers, SignalResult, StateUpdate,
+    AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator, RuntimeEffect, SignalHandler,
+    SignalHelpers, SignalResult, StateUpdate,
 };
 
 use crate::utils::{
@@ -29,10 +30,14 @@ use crate::utils::{
     graphql::{create_json_error_object, WebSocketConnectionManager},
 };
 
-pub fn create_graphql_signal_handler<T: AsyncExpression>(
+pub fn create_graphql_signal_handler<T>(
     factory: &impl AsyncExpressionFactory<T>,
     allocator: &impl AsyncHeapAllocator<T>,
-) -> impl Fn(&str, &[&Signal<T>], &SignalHelpers<T>) -> SignalHandlerResult<T> {
+) -> impl SignalHandler<T>
+where
+    T: AsyncExpression + Compile<T>,
+    T::String: Send + Sync,
+{
     let connections = WebSocketConnectionManager::default();
     let factory = factory.clone();
     let allocator = allocator.clone();

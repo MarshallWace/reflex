@@ -22,21 +22,20 @@ use reflex::{
     stdlib::Stdlib,
 };
 use reflex_runtime::{
-    AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator, RuntimeEffect,
-    SignalHandlerResult, SignalHelpers, StateUpdate, Stream,
+    AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator, RuntimeEffect, SignalHandler,
+    SignalHelpers, StateUpdate, Stream,
 };
 
 pub(crate) const SIGNAL_TYPE_LOAD: &'static str = "reflex::loader::load";
 
 const HASH_NAMESPACE_LOADER: &'static str = "reflex::loader";
 
-pub fn load_signal_handler<
-    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
->(
+pub fn load_signal_handler<T>(
     factory: &impl AsyncExpressionFactory<T>,
     allocator: &impl AsyncHeapAllocator<T>,
-) -> impl Fn(&str, &[&Signal<T>], &SignalHelpers<T>) -> SignalHandlerResult<T>
+) -> impl SignalHandler<T>
 where
+    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
     T::String: Send + Sync,
     T::Builtin: From<Stdlib>,
 {

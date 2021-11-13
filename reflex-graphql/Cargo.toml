@@ -12,6 +12,6 @@ reflex = { path = "../reflex" }
 reflex-json = { path = "../reflex-json" }
 either = "1.6.1"
 graphql-parser = "0.3.0"
-serde = { version = "^1.0", features = ["derive"] }
+serde = { version = "1.0", features = ["derive"] }
 strum = "0.22"
 strum_macros = "0.22"

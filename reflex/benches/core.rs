@@ -83,7 +83,6 @@ fn nested_expressions_bytecode(b: &mut Bencher) {
             &state,
             &factory,
             &allocator,
-            &builtins,
             &options,
             &mut cache,
         )
@@ -94,10 +93,6 @@ fn nested_expressions_bytecode(b: &mut Bencher) {
 fn nested_expressions_compiled(b: &mut Bencher) {
     let factory = SharedTermFactory::<Stdlib>::default();
     let allocator = DefaultAllocator::default();
-    let builtins = Stdlib::entries()
-        .into_iter()
-        .map(|builtin| (builtin.uid(), factory.create_builtin_term(builtin)))
-        .collect::<Vec<_>>();
     let expression = parse("(+ (+ (abs -3) 4) 5)", &factory, &allocator).unwrap();
     let program = Compiler::new(CompilerOptions::unoptimized(), None)
         .compile(&expression, CompilerMode::Function, &factory, &allocator)
@@ -115,7 +110,6 @@ fn nested_expressions_compiled(b: &mut Bencher) {
             &state,
             &factory,
             &allocator,
-            &builtins,
             &options,
             &mut cache,
         )

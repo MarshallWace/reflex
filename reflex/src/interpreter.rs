@@ -657,6 +657,10 @@ fn evaluate_instruction<T: Expression + Rewritable<T> + Reducible<T> + Applicabl
                 ))
             } else {
                 let target = stack.pop().unwrap();
+                trace!(
+                    instruction = "Instruction::Apply",
+                    apply_metadata = %target,
+                );
                 if let Some((compiled_target, partial_args)) =
                     match_compiled_application_target(&target, factory)
                 {
@@ -665,16 +669,7 @@ fn evaluate_instruction<T: Expression + Rewritable<T> + Reducible<T> + Applicabl
                     let resume_address = call_stack.next_program_counter();
                     let num_combined_args = num_args + partial_args.len();
                     if !partial_args.is_empty() {
-                        trace!(
-                            instruction = "Instruction::Apply",
-                            apply_metadata = "Partial"
-                        );
                         stack.splice(num_args, partial_args);
-                    } else {
-                        trace!(
-                            instruction = "Instruction::Apply",
-                            apply_metadata = "Static"
-                        );
                     }
                     Ok((
                         ExecutionResult::CallFunction {
@@ -687,10 +682,6 @@ fn evaluate_instruction<T: Expression + Rewritable<T> + Reducible<T> + Applicabl
                     ))
                 } else {
                     let arity = get_function_arity(&target)?;
-                    trace!(
-                        instruction = "Instruction::Apply",
-                        apply_metadata =  %target,
-                    );
                     if has_unresolved_args(&arity, stack.slice(num_args)) {
                         let args = stack.pop_multiple(num_args);
                         Ok((
