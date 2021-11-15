@@ -15,6 +15,9 @@ use reflex::{
 use reflex_js::stdlib::Stdlib as JsStdlib;
 use std::{io::Write, path::Path, str::FromStr, time::Instant};
 
+pub mod cli {
+    pub mod compiler;
+}
 pub mod syntax {
     pub mod bytecode;
     pub mod js;
@@ -102,7 +105,7 @@ impl<T: Expression> SyntaxParser<T> for GenericSyntaxParser<T> {
     }
 }
 
-pub fn compile_entry_point<T: Expression + Rewritable<T> + Reducible<T> + 'static, TLoader>(
+pub fn compile_entry_point<T, TLoader>(
     path: &Path,
     syntax: Syntax,
     env: Option<impl IntoIterator<Item = (String, String)>>,
@@ -112,7 +115,7 @@ pub fn compile_entry_point<T: Expression + Rewritable<T> + Reducible<T> + 'stati
     allocator: &(impl HeapAllocator<T> + Clone + 'static),
 ) -> Result<(Program, InstructionPointer)>
 where
-    T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
+    T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T> + 'static,
     T::Builtin: From<Stdlib> + From<JsStdlib>,
     TLoader: Fn(&str, &Path) -> Option<Result<T, String>> + 'static,
 {
