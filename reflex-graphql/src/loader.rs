@@ -14,6 +14,9 @@ use reflex::{
     stdlib::Stdlib,
 };
 
+// TODO: Address circular dependency when attempting to load signal type directly from handler
+const SIGNAL_TYPE_GRAPHQL_EXECUTE: &str = "reflex::graphql::execute";
+
 pub fn graphql_loader<T: Expression>(
     factory: &(impl ExpressionFactory<T> + Clone + 'static),
     allocator: &(impl HeapAllocator<T> + Clone + 'static),
@@ -109,7 +112,7 @@ where
                         factory.create_builtin_term(Stdlib::Effect),
                         allocator.create_list(vec![
                             factory.create_value_term(ValueTerm::String(
-                                allocator.create_static_string("reflex::graphql::execute"),
+                                allocator.create_static_string(SIGNAL_TYPE_GRAPHQL_EXECUTE),
                             )),
                             factory.create_static_variable_term(1),
                             get_struct_field(

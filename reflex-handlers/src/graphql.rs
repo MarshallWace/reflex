@@ -30,7 +30,9 @@ use crate::utils::{
     graphql::{create_json_error_object, WebSocketConnectionManager},
 };
 
-pub fn create_graphql_signal_handler<T>(
+pub const SIGNAL_TYPE_GRAPHQL_EXECUTE: &str = "reflex::graphql::execute";
+
+pub fn create_graphql_execute_signal_handler<T>(
     factory: &impl AsyncExpressionFactory<T>,
     allocator: &impl AsyncHeapAllocator<T>,
 ) -> impl SignalHandler<T>
@@ -42,7 +44,7 @@ where
     let factory = factory.clone();
     let allocator = allocator.clone();
     move |signal_type: &str, signals: &[&Signal<T>], _helpers: &SignalHelpers<T>| {
-        if signal_type != "reflex::graphql::execute" {
+        if signal_type != SIGNAL_TYPE_GRAPHQL_EXECUTE {
             return None;
         }
         Some(

@@ -7,6 +7,11 @@ pub mod graphql;
 pub mod http;
 pub mod loader;
 
+pub use date::*;
+pub use graphql::*;
+pub use http::*;
+pub use loader::*;
+
 use reflex::{
     compiler::Compile,
     core::{Applicable, Reducible, Rewritable, Signal},
@@ -35,12 +40,12 @@ where
     T::Builtin: From<Stdlib>,
 {
     compose_signal_handlers(
-        date::date_timestamp_handler(factory, allocator),
+        date::create_date_timestamp_handler(factory, allocator),
         compose_signal_handlers(
-            loader::load_signal_handler(factory, allocator),
+            loader::create_loader_load_signal_handler(factory, allocator),
             compose_signal_handlers(
-                http::http_fetch_handler(factory, allocator),
-                graphql::create_graphql_signal_handler(factory, allocator),
+                http::create_http_fetch_signal_handler(factory, allocator),
+                graphql::create_graphql_execute_signal_handler(factory, allocator),
             ),
         ),
     )

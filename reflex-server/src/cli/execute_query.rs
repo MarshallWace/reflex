@@ -21,7 +21,7 @@ use reflex_graphql::{
 use reflex_handlers::{
     debug_signal_handler,
     utils::signal_capture::{SignalPlayback, SignalRecorder},
-    EitherHandler,
+    EitherHandler, SIGNAL_TYPE_GRAPHQL_EXECUTE, SIGNAL_TYPE_HTTP_FETCH,
 };
 use reflex_js::stdlib::Stdlib as JsStdlib;
 use reflex_runtime::{
@@ -33,8 +33,8 @@ use crate::compile_graphql_query;
 
 pub fn default_captured_signals() -> Vec<String> {
     vec![
-        String::from("reflex::http::fetch"),
-        String::from("reflex::graphql::execute"),
+        String::from(SIGNAL_TYPE_HTTP_FETCH),
+        String::from(SIGNAL_TYPE_GRAPHQL_EXECUTE),
     ]
 }
 

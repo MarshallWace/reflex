@@ -19,7 +19,9 @@ use reflex_runtime::{
 
 use crate::{utils::fetch, SignalResult};
 
-pub fn http_fetch_handler<T>(
+pub const SIGNAL_TYPE_HTTP_FETCH: &str = "reflex::http::fetch";
+
+pub fn create_http_fetch_signal_handler<T>(
     factory: &impl AsyncExpressionFactory<T>,
     allocator: &impl AsyncHeapAllocator<T>,
 ) -> impl SignalHandler<T>
@@ -30,7 +32,7 @@ where
     let factory = factory.clone();
     let allocator = allocator.clone();
     move |signal_type: &str, signals: &[&Signal<T>], _helpers: &SignalHelpers<T>| {
-        if signal_type != "reflex::http::fetch" {
+        if signal_type != SIGNAL_TYPE_HTTP_FETCH {
             return None;
         }
         Some(

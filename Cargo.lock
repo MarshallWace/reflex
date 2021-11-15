@@ -1239,6 +1239,7 @@ name = "reflex-js"
 version = "0.1.0"
 dependencies = [
  "reflex",
+ "reflex-handlers",
  "reflex-json",
  "serde",
  "serde_json",

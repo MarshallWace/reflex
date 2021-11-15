@@ -18,7 +18,9 @@ use tokio_stream::{wrappers::IntervalStream, StreamExt};
 
 use crate::SignalResult;
 
-pub fn date_timestamp_handler<T>(
+pub const SIGNAL_TYPE_DATE_TIMESTAMP: &str = "reflex::date::timestamp";
+
+pub fn create_date_timestamp_handler<T>(
     factory: &impl AsyncExpressionFactory<T>,
     allocator: &impl AsyncHeapAllocator<T>,
 ) -> impl SignalHandler<T>
@@ -29,7 +31,7 @@ where
     let factory = factory.clone();
     let allocator = allocator.clone();
     move |signal_type: &str, signals: &[&Signal<T>], _helpers: &SignalHelpers<T>| {
-        if signal_type != "reflex::date::timestamp" {
+        if signal_type != SIGNAL_TYPE_DATE_TIMESTAMP {
             return None;
         }
         Some(

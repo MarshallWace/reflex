@@ -26,11 +26,11 @@ use reflex_runtime::{
     SignalHelpers, StateUpdate, Stream,
 };
 
-pub(crate) const SIGNAL_TYPE_LOAD: &'static str = "reflex::loader::load";
+pub(crate) const SIGNAL_TYPE_LOADER_LOAD: &'static str = "reflex::loader::load";
 
 const HASH_NAMESPACE_LOADER: &'static str = "reflex::loader";
 
-pub fn load_signal_handler<T>(
+pub fn create_loader_load_signal_handler<T>(
     factory: &impl AsyncExpressionFactory<T>,
     allocator: &impl AsyncHeapAllocator<T>,
 ) -> impl SignalHandler<T>
@@ -42,7 +42,7 @@ where
     let factory = factory.clone();
     let allocator = allocator.clone();
     move |signal_type: &str, signals: &[&Signal<T>], helpers: &SignalHelpers<T>| {
-        if signal_type != SIGNAL_TYPE_LOAD {
+        if signal_type != SIGNAL_TYPE_LOADER_LOAD {
             return None;
         }
         let parsed_signals = signals

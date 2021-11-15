@@ -10,6 +10,7 @@ edition = "2018"
 [dependencies]
 reflex = { path = "../reflex" }
 reflex-json = { path = "../reflex-json" }
+reflex-handlers = { path = "../reflex-handlers" }
 serde = { version = "^1.0", features = ["derive"] }
 strum = "0.22"
 strum_macros = "0.22"
