@@ -6,7 +6,7 @@ use reflex::{
     lang::{create_struct, ValueTerm},
     stdlib::Stdlib,
 };
-use reflex_handlers::SIGNAL_TYPE_DATE_TIMESTAMP;
+use reflex_handlers::SIGNAL_TYPE_TIMESTAMP;
 
 pub fn import_date<T: Expression>(
     factory: &impl ExpressionFactory<T>,
@@ -24,7 +24,7 @@ where
                     factory.create_builtin_term(Stdlib::Effect),
                     allocator.create_pair(
                         factory.create_value_term(ValueTerm::String(
-                            allocator.create_static_string(SIGNAL_TYPE_DATE_TIMESTAMP),
+                            allocator.create_static_string(SIGNAL_TYPE_TIMESTAMP),
                         )),
                         factory.create_application_term(
                             factory.create_builtin_term(Stdlib::Get),

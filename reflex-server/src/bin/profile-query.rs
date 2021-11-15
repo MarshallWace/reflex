@@ -10,7 +10,10 @@ use reflex_cli::{syntax::js::default_js_loaders, Syntax};
 use reflex_handlers::builtin_signal_handler;
 use reflex_server::{
     builtins::ServerBuiltins,
-    cli::{execute_query::ExecuteQueryCliOptions, profile_query::cli},
+    cli::{
+        execute_query::{default_captured_signals, ExecuteQueryCliOptions},
+        profile_query::cli,
+    },
 };
 
 /// Profile GraphQL query execution
@@ -50,12 +53,14 @@ impl Into<ExecuteQueryCliOptions> for Args {
             args: self.args,
             capture_signals: self.capture_signals,
             replay_signals: self.replay_signals,
-            captured_signals: self.captured_signals,
             unoptimized: self.unoptimized,
             debug_compiler: self.debug_compiler,
             debug_signals: self.debug_signals,
             debug_interpreter: self.debug_interpreter,
             debug_stack: self.debug_stack,
+            captured_signals: self
+                .captured_signals
+                .unwrap_or_else(|| default_captured_signals()),
         }
     }
 }

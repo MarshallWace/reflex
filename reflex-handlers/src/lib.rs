@@ -2,15 +2,23 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
-pub mod date;
+pub mod assign;
+pub mod fetch;
 pub mod graphql;
-pub mod http;
+pub mod increment;
 pub mod loader;
+pub mod scan;
+pub mod timeout;
+pub mod timestamp;
 
-pub use date::*;
+pub use assign::*;
+pub use fetch::*;
 pub use graphql::*;
-pub use http::*;
+pub use increment::*;
 pub use loader::*;
+pub use scan::*;
+pub use timeout::*;
+pub use timestamp::*;
 
 use reflex::{
     compiler::Compile,
@@ -40,12 +48,24 @@ where
     T::Builtin: From<Stdlib>,
 {
     compose_signal_handlers(
-        date::create_date_timestamp_handler(factory, allocator),
+        assign::create_assign_signal_handler(factory, allocator),
         compose_signal_handlers(
-            loader::create_loader_load_signal_handler(factory, allocator),
+            fetch::create_fetch_signal_handler(factory, allocator),
             compose_signal_handlers(
-                http::create_http_fetch_signal_handler(factory, allocator),
-                graphql::create_graphql_execute_signal_handler(factory, allocator),
+                graphql::create_graphql_signal_handler(factory, allocator),
+                compose_signal_handlers(
+                    increment::increment_signal_handler(factory, allocator),
+                    compose_signal_handlers(
+                        loader::create_loader_signal_handler(factory, allocator),
+                        compose_signal_handlers(
+                            scan::create_scan_handler(factory, allocator),
+                            compose_signal_handlers(
+                                timeout::create_timeout_signal_handler(factory, allocator),
+                                timestamp::create_timestamp_handler(factory, allocator),
+                            ),
+                        ),
+                    ),
+                ),
             ),
         ),
     )

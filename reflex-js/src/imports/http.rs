@@ -7,6 +7,7 @@ use reflex::{
     lang::{create_struct, ValueTerm},
     stdlib::Stdlib,
 };
+use reflex_handlers::SIGNAL_TYPE_FETCH;
 
 pub fn import_http<T: Expression>(
     factory: &impl ExpressionFactory<T>,
@@ -54,7 +55,7 @@ where
                     factory.create_builtin_term(Stdlib::Effect),
                     allocator.create_list(vec![
                         factory.create_value_term(ValueTerm::String(
-                            allocator.create_static_string("reflex::http::fetch"),
+                            allocator.create_static_string(SIGNAL_TYPE_FETCH),
                         )),
                         factory.create_application_term(
                             factory.create_builtin_term(Stdlib::Get),

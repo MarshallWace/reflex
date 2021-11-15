@@ -21,7 +21,7 @@ use reflex_graphql::{
 use reflex_handlers::{
     debug_signal_handler,
     utils::signal_capture::{SignalPlayback, SignalRecorder},
-    EitherHandler, SIGNAL_TYPE_GRAPHQL_EXECUTE, SIGNAL_TYPE_HTTP_FETCH,
+    EitherHandler, SIGNAL_TYPE_FETCH, SIGNAL_TYPE_GRAPHQL,
 };
 use reflex_js::stdlib::Stdlib as JsStdlib;
 use reflex_runtime::{
@@ -33,8 +33,8 @@ use crate::compile_graphql_query;
 
 pub fn default_captured_signals() -> Vec<String> {
     vec![
-        String::from(SIGNAL_TYPE_HTTP_FETCH),
-        String::from(SIGNAL_TYPE_GRAPHQL_EXECUTE),
+        String::from(SIGNAL_TYPE_FETCH),
+        String::from(SIGNAL_TYPE_GRAPHQL),
     ]
 }
 
@@ -46,7 +46,7 @@ pub struct ExecuteQueryCliOptions {
     pub args: Option<String>,
     pub capture_signals: Option<PathBuf>,
     pub replay_signals: Option<PathBuf>,
-    pub captured_signals: Option<Vec<String>>,
+    pub captured_signals: Vec<String>,
     pub unoptimized: bool,
     pub debug_compiler: bool,
     pub debug_signals: bool,
@@ -145,14 +145,9 @@ where
     {
         Ok(EitherHandler::Left(signal_handler))
     } else {
-        let default_signal_types = default_captured_signals();
-        let captured_signals = options
-            .captured_signals
-            .as_ref()
-            .unwrap_or(&default_signal_types);
         let signal_handler = if let Some(path) = &options.replay_signals {
             let signal_playback =
-                SignalPlayback::new(captured_signals.iter().cloned(), path.as_path())
+                SignalPlayback::new(options.captured_signals.iter().cloned(), path.as_path())
                     .map_err(|err| anyhow!("{}", err))
                     .with_context(|| format!("Failed to create signal playback handler"))?;
             EitherHandler::Left(signal_playback.playback_signal_handler(
@@ -165,7 +160,7 @@ where
         };
         let signal_handler = if let Some(path) = &options.capture_signals {
             let signal_recorder =
-                SignalRecorder::new(captured_signals.iter().cloned(), path.as_path())
+                SignalRecorder::new(options.captured_signals.iter().cloned(), path.as_path())
                     .map_err(|err| anyhow!("{}", err))
                     .with_context(|| format!("Failed to create signal recorder handler"))?;
             EitherHandler::Left(signal_recorder.record_signal_handler(signal_handler, factory))

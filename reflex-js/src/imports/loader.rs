@@ -8,8 +8,7 @@ use reflex::{
     lang::{create_struct, ValueTerm},
     stdlib::Stdlib,
 };
-
-pub(crate) const SIGNAL_TYPE_LOAD: &'static str = "reflex::loader::load";
+use reflex_handlers::SIGNAL_TYPE_LOADER;
 
 pub fn import_loader<T: Expression>(
     factory: &impl ExpressionFactory<T>,
@@ -92,7 +91,7 @@ where
         factory.create_builtin_term(Stdlib::Effect),
         allocator.create_list(
             once(factory.create_value_term(ValueTerm::String(
-                allocator.create_static_string(SIGNAL_TYPE_LOAD),
+                allocator.create_static_string(SIGNAL_TYPE_LOADER),
             )))
             .chain(once(factory.create_partial_application_term(
                 factory.create_lambda_term(

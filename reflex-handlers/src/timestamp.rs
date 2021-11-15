@@ -11,16 +11,14 @@ use reflex::{
 };
 use reflex_runtime::{
     AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator, RuntimeEffect, SignalHandler,
-    SignalHelpers, StateUpdate,
+    SignalHelpers, SignalResult, StateUpdate,
 };
 use tokio::time::{interval_at, Instant};
 use tokio_stream::{wrappers::IntervalStream, StreamExt};
 
-use crate::SignalResult;
+pub const SIGNAL_TYPE_TIMESTAMP: &str = "reflex::timestamp";
 
-pub const SIGNAL_TYPE_DATE_TIMESTAMP: &str = "reflex::date::timestamp";
-
-pub fn create_date_timestamp_handler<T>(
+pub fn create_timestamp_handler<T>(
     factory: &impl AsyncExpressionFactory<T>,
     allocator: &impl AsyncHeapAllocator<T>,
 ) -> impl SignalHandler<T>
@@ -31,21 +29,21 @@ where
     let factory = factory.clone();
     let allocator = allocator.clone();
     move |signal_type: &str, signals: &[&Signal<T>], _helpers: &SignalHelpers<T>| {
-        if signal_type != SIGNAL_TYPE_DATE_TIMESTAMP {
+        if signal_type != SIGNAL_TYPE_TIMESTAMP {
             return None;
         }
         Some(
             signals
                 .iter()
                 .map(|signal| {
-                    handle_date_timestamp_signal(signal.id(), signal.args(), &factory, &allocator)
+                    handle_timestamp_signal(signal.id(), signal.args(), &factory, &allocator)
                 })
                 .collect(),
         )
     }
 }
 
-fn handle_date_timestamp_signal<T: AsyncExpression>(
+fn handle_timestamp_signal<T: AsyncExpression>(
     signal_id: StateToken,
     args: &ExpressionList<T>,
     factory: &impl AsyncExpressionFactory<T>,
