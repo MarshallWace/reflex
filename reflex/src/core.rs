@@ -1014,6 +1014,7 @@ impl std::fmt::Display for SignalType {
 #[derive(Hash, Eq, PartialEq, Copy, Clone, Debug)]
 enum SubstitutionPatterns<'a, T: Expression> {
     Variable(&'a Vec<(StackOffset, T)>, Option<ScopeOffset>),
+    #[allow(dead_code)]
     Term(&'a Vec<(T, T)>, Option<ScopeOffset>),
     Offset(ScopeOffset),
 }
@@ -1043,6 +1044,7 @@ impl<'a, T: Expression + Rewritable<T>> Substitutions<'a, T> {
             offset: 0,
         }
     }
+    #[allow(dead_code)]
     pub(crate) fn term_match(
         substitutions: &'a Vec<(T, T)>,
         scope_offset: Option<ScopeOffset>,

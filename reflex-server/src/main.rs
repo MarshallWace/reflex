@@ -4,8 +4,8 @@
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use std::process;
 
-use reflex::{allocator::DefaultAllocator, lang::SharedTermFactory};
 use reflex::compiler::CompilerOptions;
+use reflex::{allocator::DefaultAllocator, lang::SharedTermFactory};
 use reflex_cli::compiler::js::standard_js_loaders;
 use reflex_server::{
     builtins::ServerBuiltins,
