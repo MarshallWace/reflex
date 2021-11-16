@@ -62,6 +62,15 @@ impl<T: Expression> std::fmt::Display for RuntimeTraceStatistics<T> {
             "Total execution passes: {}\n",
             self.execution_count.load(Ordering::Acquire)
         )?;
+        writeln!(
+            f,
+            "Total instruction count: {}\n",
+            self.global_instruction_count
+                .lock()
+                .unwrap()
+                .iter()
+                .fold(0, |result, (_, count)| result + *count)
+        )?;
         write_map_summary(
             f,
             "Global Instruction counts",
