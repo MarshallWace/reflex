@@ -466,7 +466,6 @@ impl<T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile
                         match command {
                             RuntimeCommand::Subscribe(command) => {
                                 let is_root = command.payload.initiators.is_none();
-                                println!("subscribe");
                                 let (subscription_id, cache_key) = process_subscribe_command(
                                     command,
                                     &mut store,

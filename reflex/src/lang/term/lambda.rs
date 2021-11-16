@@ -178,7 +178,7 @@ impl<T: Expression + Rewritable<T>> Rewritable<T> for LambdaTerm<T> {
                     .normalize(factory, allocator, cache)
                     .or_else(|| Some(eta_reduced_body.clone()))
             })
-            .or(normalized_body.map(|body| factory.create_lambda_term(self.num_args, body)))
+            .or_else(|| normalized_body.map(|body| factory.create_lambda_term(self.num_args, body)))
     }
 }
 impl<T: Expression + Rewritable<T>> Applicable<T> for LambdaTerm<T> {

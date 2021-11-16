@@ -1130,7 +1130,7 @@ impl<'a, T: Expression + Rewritable<T>> Substitutions<'a, T> {
         allocator: &impl HeapAllocator<T>,
         cache: &mut impl EvaluationCache<T>,
     ) -> Option<T> {
-        if offset < self.offset + self.min_depth {
+        if offset < self.min_depth + self.offset {
             return None;
         }
         let (entries, scope_offset) = match self.entries {
@@ -2089,7 +2089,7 @@ mod tests {
     }
 
     #[test]
-    fn count_subexpression_usages_correct() {
+    fn count_subexpression_usages() {
         let factory = SharedTermFactory::<Stdlib>::default();
         let allocator = DefaultAllocator::default();
         let pattern = factory.create_value_term(ValueTerm::Int(1));

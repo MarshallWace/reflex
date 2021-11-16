@@ -139,13 +139,22 @@ fn create_signal_handler<
 where
     T::String: Send + Sync,
 {
-    if options.replay_signals.is_none()
+    if options.capture_signals.is_none()
         && options.replay_signals.is_none()
         && !options.debug_signals
     {
         Ok(EitherHandler::Left(signal_handler))
     } else {
         let signal_handler = if let Some(path) = &options.replay_signals {
+            println!(
+                "[CLI] Replaying signal results from {}:{}",
+                path.as_path().display(),
+                options
+                    .captured_signals
+                    .iter()
+                    .map(|signal_type| format!("\n  \"{}\"", signal_type))
+                    .collect::<String>()
+            );
             let signal_playback =
                 SignalPlayback::new(options.captured_signals.iter().cloned(), path.as_path())
                     .map_err(|err| anyhow!("{}", err))
@@ -159,6 +168,15 @@ where
             EitherHandler::Right(signal_handler)
         };
         let signal_handler = if let Some(path) = &options.capture_signals {
+            println!(
+                "[CLI] Recording signal results to {}:{}",
+                path.as_path().display(),
+                options
+                    .captured_signals
+                    .iter()
+                    .map(|signal_type| format!("\n  \"{}\"", signal_type))
+                    .collect::<String>()
+            );
             let signal_recorder =
                 SignalRecorder::new(options.captured_signals.iter().cloned(), path.as_path())
                     .map_err(|err| anyhow!("{}", err))
