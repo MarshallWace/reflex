@@ -130,7 +130,7 @@ fn handle_graphql_http_operation<T: AsyncExpression>(
                 let allocator = allocator.clone();
                 let (abort_handle, abort_registration) = AbortHandle::new_pair();
                 let task = async move {
-                    println!("[GraphQL] HTTP request: {} {}", method, url);
+                    eprintln!("[GraphQL] HTTP request: {} {}", method, url);
                     let response = fetch(&method, &url, headers, Some(body)).await;
                     let result = match response {
                         Ok((_status, data)) => {
@@ -142,11 +142,14 @@ fn handle_graphql_http_operation<T: AsyncExpression>(
                             };
                             match result {
                                 Ok(result) => {
-                                    println!("[GraphQL] HTTP success response: {} {}", method, url);
+                                    eprintln!(
+                                        "[GraphQL] HTTP success response: {} {}",
+                                        method, url
+                                    );
                                     Ok(result)
                                 }
                                 Err(errors) => {
-                                    println!(
+                                    eprintln!(
                                         "[GraphQL] HTTP error response: {} {}{}",
                                         method,
                                         url,
@@ -161,7 +164,7 @@ fn handle_graphql_http_operation<T: AsyncExpression>(
                             }
                         }
                         Err(error) => {
-                            println!(
+                            eprintln!(
                                 "[GraphQL] HTTP network error: {} {}\n {}",
                                 method, url, error
                             );
@@ -230,7 +233,7 @@ fn handle_graphql_ws_operation<T: AsyncExpression>(
                 let allocator = allocator.clone();
                 let active_subscription_id = active_subscription_id.clone();
                 let connections = connections.clone();
-                println!("[GraphQL] WebSocket request: {}", url);
+                eprintln!("[GraphQL] WebSocket request: {}", url);
                 Box::pin(
                     connections
                         .clone()
@@ -279,7 +282,7 @@ fn handle_graphql_ws_operation<T: AsyncExpression>(
                                 });
                                 let value = match result {
                                     Err(errors) => {
-                                        println!(
+                                        eprintln!(
                                             "[GraphQL] WebSocket error response: {}{}",
                                             url,
                                             errors
@@ -291,7 +294,7 @@ fn handle_graphql_ws_operation<T: AsyncExpression>(
                                         create_error_signal(errors, &factory, &allocator)
                                     }
                                     Ok(result) => {
-                                        println!("[GraphQL] WebSocket success response: {}", url);
+                                        eprintln!("[GraphQL] WebSocket success response: {}", url);
                                         result
                                     }
                                 };

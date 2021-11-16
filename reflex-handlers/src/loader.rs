@@ -137,7 +137,7 @@ where
                                 let (cache_key, signal_ids, loader_keys, _, _) =
                                     keys_by_loader.remove(loader).unwrap();
                                 let loader = loader.clone();
-                                println!(
+                                eprintln!(
                                     "[Loader] {}: Subscribing to {} keys",
                                     hash_object(&loader),
                                     loader_keys.len()
@@ -167,7 +167,7 @@ where
                                                 loader_keys.iter().map(|_| result.clone()).collect()
                                             }
                                         };
-                                        println!(
+                                        eprintln!(
                                             "[Loader] {}: Received {} results",
                                             hash_object(&loader),
                                             results.len(),

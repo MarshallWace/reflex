@@ -666,7 +666,7 @@ where
                 let mut latest_result = Mutex::new(result.clone());
 
                 if let Some(value) = parse_subscription_result(&result, &factory, &allocator) {
-                    println!("[Runtime] Emit #{}", subscription_id);
+                    eprintln!("[Runtime] Emit #{}", subscription_id);
                     let _ = updates.send(Some(value));
                 }
                 let _ = commands
@@ -724,7 +724,7 @@ where
 
                     let output_value = parse_subscription_result(&result, &factory, &allocator);
                     if let Some(value) = output_value {
-                        println!("[Runtime] Emit #{}", subscription_id);
+                        eprintln!("[Runtime] Emit #{}", subscription_id);
                         let _ = updates.send(Some(value));
                     }
                     let _ = commands
@@ -756,7 +756,7 @@ fn evaluate_subscription<T: Expression + Rewritable<T> + Reducible<T> + Applicab
     interpreter_options: &InterpreterOptions,
     cache: &impl InterpreterCache<T>,
 ) -> (EvaluationResult<T>, CacheEntries<T>) {
-    println!("[Runtime] Evaluating subscription #{}", subscription_id);
+    eprintln!("[Runtime] Evaluating subscription #{}", subscription_id);
     let start_time = Instant::now();
     let result = execute(
         cache_key,
@@ -784,7 +784,7 @@ fn evaluate_subscription<T: Expression + Rewritable<T> + Reducible<T> + Applicab
             CacheEntries::default(),
         )
     });
-    println!(
+    eprintln!(
         "[Runtime] Evaluated subscription #{} in {:?}",
         subscription_id,
         start_time.elapsed()
@@ -1144,18 +1144,18 @@ where
 
 fn gc<T: Expression>(store: &mut Mutex<RuntimeStore<T>>, cache: &mut RuntimeCache<T>) {
     let start_time = Instant::now();
-    println!("[Runtime] GC started");
+    eprintln!("[Runtime] GC started");
     {
         eprint!("[Runtime] Purging cache entries...");
         let start_time = Instant::now();
         let metrics = cache.gc();
-        println!("{:?} ({})", start_time.elapsed(), metrics);
+        eprintln!("{:?} ({})", start_time.elapsed(), metrics);
     }
     {
-        println!("[Runtime] Computing inactive subscriptions...");
+        eprintln!("[Runtime] Computing inactive subscriptions...");
         let start_time = Instant::now();
         let dispose_callbacks = store.get_mut().unwrap().gc();
-        println!(
+        eprintln!(
             "[Runtime] Inactive subscriptions computed in {:?}",
             start_time.elapsed()
         );
@@ -1168,10 +1168,10 @@ fn gc<T: Expression>(store: &mut Mutex<RuntimeStore<T>>, cache: &mut RuntimeCach
             for dispose_callback in dispose_callbacks {
                 tokio::spawn(dispose_callback);
             }
-            println!("{:?}", start_time.elapsed());
+            eprintln!("{:?}", start_time.elapsed());
         }
     }
-    println!("[Runtime] GC completed in {:?}", start_time.elapsed());
+    eprintln!("[Runtime] GC completed in {:?}", start_time.elapsed());
 }
 
 #[derive(Clone)]
@@ -1297,7 +1297,7 @@ impl<T: Expression> RuntimeStore<T> {
     ) -> SubscriptionId {
         self.subscription_counter += 1;
         let subscription_id = self.subscription_counter;
-        println!("[Runtime] Subscribe #{}", subscription_id);
+        eprintln!("[Runtime] Subscribe #{}", subscription_id);
         let is_root = initiators.is_none();
         self.subscriptions.push(Subscription::new(
             subscription_id,
@@ -1317,7 +1317,7 @@ impl<T: Expression> RuntimeStore<T> {
             .iter()
             .position(|subscription| subscription.id == subscription_id)
             .map(|index| {
-                println!("[Runtime] Unsubscribe #{}", subscription_id);
+                eprintln!("[Runtime] Unsubscribe #{}", subscription_id);
                 let subscription = self.subscriptions.remove(index);
                 if subscription.is_root {
                     self.subscription_cache
@@ -1389,7 +1389,7 @@ impl<T: Expression> RuntimeStore<T> {
             let (disposed_signal_ids, disposed_subscriptions): (Vec<_>, Vec<_>) =
                 self.subscription_cache.gc();
             if !disposed_signal_ids.is_empty() {
-                println!(
+                eprintln!(
                     "[Runtime] Disposing {} inactive signals",
                     disposed_signal_ids.len()
                 );
@@ -1401,7 +1401,7 @@ impl<T: Expression> RuntimeStore<T> {
                 }
             }
             if !disposed_subscriptions.is_empty() {
-                println!(
+                eprintln!(
                     "[Runtime] Disposing {} inactive subscriptions",
                     disposed_subscriptions.len()
                 );

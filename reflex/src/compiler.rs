@@ -450,7 +450,7 @@ impl Compiler {
         let compiled_chunks = std::mem::replace(&mut self.compiled_chunks, HashMap::new());
         let compiled_program = link_compiled_chunks(program, self.prelude, compiled_chunks)?;
         if self.options.debug {
-            println!("{}", compiled_program);
+            eprintln!("{}", compiled_program);
         }
         Ok(compiled_program)
     }

@@ -162,10 +162,10 @@ fn evaluate_program_loop<T: Expression + Rewritable<T> + Reducible<T> + Applicab
             )),
             Some(instruction) => {
                 if debug_instructions {
-                    println!("{}", format_current_instruction(call_stack));
+                    eprintln!("{}", format_current_instruction(call_stack));
                 }
                 if debug_stack {
-                    println!("{}", format_current_stack(stack))
+                    eprintln!("{}", format_current_stack(stack))
                 }
                 evaluate_instruction(
                     instruction,

@@ -129,7 +129,7 @@ where
         move |signal_type: &str, signals: &[&Signal<T>], helpers: &SignalHelpers<T>| {
             let result = handler.handle(signal_type, signals, helpers);
             if recorded_signal_types.contains(signal_type) {
-                println!("Capturing signal for type {}", &signal_type);
+                eprintln!("Capturing signal for type {}", &signal_type);
                 result.map(|results| {
                     results
                         .into_iter()
@@ -327,7 +327,7 @@ impl SignalPlayback {
         let allocator = allocator.clone();
         move |signal_type: &str, signals: &[&Signal<T>], helpers: &SignalHelpers<T>| {
             if recorded_signal_types.contains(signal_type) {
-                println!("{} is a captured signal_type", signal_type);
+                eprintln!("{} is a captured signal_type", signal_type);
                 Some(
                     signals
                         .iter()

@@ -146,7 +146,7 @@ where
         Ok(EitherHandler::Left(signal_handler))
     } else {
         let signal_handler = if let Some(path) = &options.replay_signals {
-            println!(
+            eprintln!(
                 "[CLI] Replaying signal results from {}:{}",
                 path.as_path().display(),
                 options
@@ -168,7 +168,7 @@ where
             EitherHandler::Right(signal_handler)
         };
         let signal_handler = if let Some(path) = &options.capture_signals {
-            println!(
+            eprintln!(
                 "[CLI] Recording signal results to {}:{}",
                 path.as_path().display(),
                 options

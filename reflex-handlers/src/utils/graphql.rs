@@ -361,7 +361,7 @@ impl WebSocketConnection {
                             match command {
                                 WebSocketConnectionCommand::Subscribe(command) => {
                                     let (subscription_id, operation) = command.payload;
-                                    println!(
+                                    eprintln!(
                                         "[GraphQL] {} Start subscription {}",
                                         url, subscription_id
                                     );
@@ -375,7 +375,7 @@ impl WebSocketConnection {
                                 }
                                 WebSocketConnectionCommand::Unsubscribe(command) => {
                                     let subscription_id = command.payload;
-                                    println!(
+                                    eprintln!(
                                         "[GraphQL] {} Stop subscription {}",
                                         url, subscription_id
                                     );
@@ -386,7 +386,7 @@ impl WebSocketConnection {
                                     let _ = command.response.send(result);
                                 }
                                 WebSocketConnectionCommand::Close(command) => {
-                                    println!("[GraphQL] {} Terminate connection", url);
+                                    eprintln!("[GraphQL] {} Terminate connection", url);
                                     let message =
                                         GraphQlSubscriptionClientMessage::connection_terminate();
                                     let _ =
