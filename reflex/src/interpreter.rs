@@ -14,6 +14,7 @@ pub use cache::{
 };
 pub use stack::{CallStack, VariableStack};
 
+use crate::hash::hash_object;
 use crate::{
     cache::NoopCache,
     compiler::{Instruction, InstructionPointer, Program},
@@ -657,13 +658,17 @@ fn evaluate_instruction<T: Expression + Rewritable<T> + Reducible<T> + Applicabl
                 ))
             } else {
                 let target = stack.pop().unwrap();
-                trace!(
-                    instruction = "Instruction::Apply",
-                    apply_metadata = %target,
-                );
                 if let Some((compiled_target, partial_args)) =
                     match_compiled_application_target(&target, factory)
                 {
+                    trace!(
+                        instruction = "Instruction::Apply",
+                        apply_metadata = %(if partial_args.is_empty() {
+                            format!("{}", compiled_target)
+                        } else {
+                            format!("<partial:{}:[{};{}]>", compiled_target, partial_args.len(), hash_object(&partial_args))
+                        }),
+                    );
                     let target_address = compiled_target.address();
                     let caller_address = call_stack.program_counter();
                     let resume_address = call_stack.next_program_counter();
@@ -680,7 +685,13 @@ fn evaluate_instruction<T: Expression + Rewritable<T> + Reducible<T> + Applicabl
                         },
                         DependencyList::empty(),
                     ))
+                } else if let Some(partial) = factory.match_partial_application_term(&target) {
+                    panic!("UNPROCESSED PARTIAL: {}", partial);
                 } else {
+                    trace!(
+                        instruction = "Instruction::Apply",
+                        apply_metadata = %target,
+                    );
                     let arity = get_function_arity(&target)?;
                     if has_unresolved_args(&arity, stack.slice(num_args)) {
                         let args = stack.pop_multiple(num_args);
@@ -1260,6 +1271,39 @@ mod tests {
     };
 
     use super::*;
+
+    #[test]
+    fn match_compiled_functions() {
+        let factory = SharedTermFactory::<Stdlib>::default();
+        let allocator = DefaultAllocator::default();
+        let compiled_function = CompiledFunctionTerm::new(InstructionPointer::default(), 0, 0, 0);
+        let expression = factory.create_partial_application_term(
+            factory.create_partial_application_term(
+                factory.create_partial_application_term(
+                    factory.create_compiled_function_term(
+                        compiled_function.address(),
+                        compiled_function.hash(),
+                        compiled_function.required_args(),
+                        compiled_function.optional_args(),
+                    ),
+                    allocator.create_unit_list(factory.create_value_term(ValueTerm::Int(5))),
+                ),
+                allocator.create_unit_list(factory.create_value_term(ValueTerm::Int(4))),
+            ),
+            allocator.create_unit_list(factory.create_value_term(ValueTerm::Int(3))),
+        );
+        assert_eq!(
+            match_compiled_application_target(&expression, &factory),
+            Some((
+                &compiled_function,
+                vec![
+                    factory.create_value_term(ValueTerm::Int(3)),
+                    factory.create_value_term(ValueTerm::Int(4)),
+                    factory.create_value_term(ValueTerm::Int(5))
+                ],
+            ))
+        )
+    }
 
     #[test]
     fn compiled_functions() {

@@ -38,6 +38,9 @@ impl CompiledFunctionTerm {
     pub fn address(&self) -> InstructionPointer {
         self.address
     }
+    pub fn hash(&self) -> HashId {
+        self.hash
+    }
     pub fn required_args(&self) -> StackOffset {
         self.required_args
     }
