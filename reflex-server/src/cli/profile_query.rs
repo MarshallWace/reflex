@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use std::{
     cmp::Reverse,
     collections::HashMap,
@@ -39,6 +40,8 @@ pub struct RuntimeTraceStatistics<T: Expression> {
     factory_create_count: Arc<Mutex<HashMap<String, u64>>>,
     allocator_create_count: Arc<Mutex<HashMap<String, u64>>>,
     allocator_list_id_count: Arc<Mutex<HashMap<String, u64>>>,
+    cache_entries_hit_counts: Arc<Mutex<HashMap<String, u64>>>,
+    interpreter_cache_hit_counts: Arc<Mutex<HashMap<String, u64>>>,
 }
 impl<T: Expression> RuntimeTraceStatistics<T> {
     fn new() -> Self {
@@ -52,6 +55,8 @@ impl<T: Expression> RuntimeTraceStatistics<T> {
             factory_create_count: Arc::new(Mutex::new(HashMap::new())),
             allocator_create_count: Arc::new(Mutex::new(HashMap::new())),
             allocator_list_id_count: Arc::new(Mutex::new(HashMap::new())),
+            cache_entries_hit_counts: Arc::new(Mutex::new(HashMap::new())),
+            interpreter_cache_hit_counts: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 }
@@ -137,6 +142,24 @@ impl<T: Expression> std::fmt::Display for RuntimeTraceStatistics<T> {
                 .iter()
                 .map(|(key, value)| (key.clone(), *value)),
         )?;
+        write_map_summary(
+            f,
+            "Cache entries hit counts",
+            self.cache_entries_hit_counts
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|(key, value)| (key.clone(), *value)),
+        )?;
+        write_map_summary(
+            f,
+            "Interpreter cache hit counts",
+            self.interpreter_cache_hit_counts
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|(key, value)| (key.clone(), *value)),
+        )?;
         write_list_summary(
             f,
             "Allocator list id counts",
@@ -157,10 +180,12 @@ fn write_map_summary(
 ) -> std::fmt::Result {
     let mut entries = entries.into_iter().collect::<Vec<_>>();
     entries.sort_by_key(|(_, value)| Reverse(*value));
+    let total: u64 = entries.iter().map(|(_, val)| val).sum();
     writeln!(
         f,
-        "{}:\n\n{}\n",
+        "{} - Total - {}:\n\n{}\n",
         title,
+        total,
         entries
             .into_iter()
             .map(|(key, value)| format!("{}: {}", key, value))
@@ -200,6 +225,8 @@ struct RuntimeStatisticsVisitor<'a> {
     factory_create_count: MutexGuard<'a, HashMap<String, u64>>,
     allocator_create_count: MutexGuard<'a, HashMap<String, u64>>,
     allocator_list_id_count: MutexGuard<'a, HashMap<String, u64>>,
+    cache_entries_hit_counts: MutexGuard<'a, HashMap<String, u64>>,
+    interpreter_cache_hit_counts: MutexGuard<'a, HashMap<String, u64>>,
 }
 
 struct RuntimeStatisticsLayer<T: Expression> {
@@ -219,6 +246,8 @@ impl<T: Expression> RuntimeStatisticsLayer<T> {
             factory_create_count: self.entries.factory_create_count.lock().unwrap(),
             allocator_create_count: self.entries.allocator_create_count.lock().unwrap(),
             allocator_list_id_count: self.entries.allocator_list_id_count.lock().unwrap(),
+            cache_entries_hit_counts: self.entries.cache_entries_hit_counts.lock().unwrap(),
+            interpreter_cache_hit_counts: self.entries.interpreter_cache_hit_counts.lock().unwrap(),
         }
     }
 }
@@ -241,6 +270,10 @@ impl<'a> Visit for RuntimeStatisticsVisitor<'a> {
             Some((&mut self.allocator_create_count, value))
         } else if field.name() == "list_id" {
             Some((&mut self.allocator_list_id_count, value))
+        } else if field.name() == "cache_entries" {
+            Some((&mut self.cache_entries_hit_counts, value))
+        } else if field.name() == "interpreter_cache" {
+            Some((&mut self.interpreter_cache_hit_counts, value))
         } else {
             None
         };
