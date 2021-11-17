@@ -685,8 +685,6 @@ fn evaluate_instruction<T: Expression + Rewritable<T> + Reducible<T> + Applicabl
                         },
                         DependencyList::empty(),
                     ))
-                } else if let Some(partial) = factory.match_partial_application_term(&target) {
-                    panic!("UNPROCESSED PARTIAL: {}", partial);
                 } else {
                     trace!(
                         instruction = "Instruction::Apply",
