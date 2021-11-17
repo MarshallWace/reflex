@@ -33,6 +33,9 @@ impl<T: Expression> GraphNode for VectorTerm<T> {
     fn free_variables(&self) -> HashSet<StackOffset> {
         self.items.free_variables()
     }
+    fn count_variable_usages(&self, offset: StackOffset) -> usize {
+        self.items.count_variable_usages(offset)
+    }
     fn dynamic_dependencies(&self, deep: bool) -> DependencyList {
         if deep {
             self.items.dynamic_dependencies(deep)

@@ -39,6 +39,9 @@ impl<T: Expression> GraphNode for TupleTerm<T> {
     fn free_variables(&self) -> HashSet<StackOffset> {
         self.fields.free_variables()
     }
+    fn count_variable_usages(&self, offset: StackOffset) -> usize {
+        self.fields.count_variable_usages(offset)
+    }
     fn dynamic_dependencies(&self, deep: bool) -> DependencyList {
         if deep {
             self.fields.dynamic_dependencies(deep)

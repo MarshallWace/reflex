@@ -104,6 +104,24 @@ impl<T: Expression + Applicable<T>> GraphNode for Term<T> {
             Self::Signal(term) => term.free_variables(),
         }
     }
+    fn count_variable_usages(&self, offset: StackOffset) -> usize {
+        match self {
+            Self::Value(term) => term.count_variable_usages(offset),
+            Self::Variable(term) => term.count_variable_usages(offset),
+            Self::Let(term) => term.count_variable_usages(offset),
+            Self::Lambda(term) => term.count_variable_usages(offset),
+            Self::Application(term) => term.count_variable_usages(offset),
+            Self::PartialApplication(term) => term.count_variable_usages(offset),
+            Self::Recursive(term) => term.count_variable_usages(offset),
+            Self::Builtin(term) => term.count_variable_usages(offset),
+            Self::CompiledFunction(term) => term.count_variable_usages(offset),
+            Self::Tuple(term) => term.count_variable_usages(offset),
+            Self::Struct(term) => term.count_variable_usages(offset),
+            Self::Constructor(term) => term.count_variable_usages(offset),
+            Self::Collection(term) => term.count_variable_usages(offset),
+            Self::Signal(term) => term.count_variable_usages(offset),
+        }
+    }
     fn dynamic_dependencies(&self, deep: bool) -> DependencyList {
         match self {
             Self::Value(term) => term.dynamic_dependencies(deep),
@@ -480,6 +498,9 @@ impl<T: Expression + Applicable<T>> GraphNode for TermExpression<T> {
     }
     fn free_variables(&self) -> HashSet<StackOffset> {
         self.value.free_variables()
+    }
+    fn count_variable_usages(&self, offset: StackOffset) -> usize {
+        self.value.count_variable_usages(offset)
     }
     fn dynamic_dependencies(&self, deep: bool) -> DependencyList {
         self.value.dynamic_dependencies(deep)

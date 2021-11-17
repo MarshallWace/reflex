@@ -73,6 +73,9 @@ impl<T: Expression> GraphNode for CachedExpression<T> {
     fn free_variables(&self) -> HashSet<StackOffset> {
         self.value.free_variables()
     }
+    fn count_variable_usages(&self, offset: StackOffset) -> usize {
+        self.value.count_variable_usages(offset)
+    }
     fn dynamic_dependencies(&self, deep: bool) -> DependencyList {
         if self.has_dynamic_dependencies(deep) {
             self.value.dynamic_dependencies(deep)
@@ -295,6 +298,9 @@ impl<T: Expression> GraphNode for SharedExpression<T> {
     }
     fn free_variables(&self) -> HashSet<StackOffset> {
         self.value.free_variables()
+    }
+    fn count_variable_usages(&self, offset: StackOffset) -> usize {
+        self.value.count_variable_usages(offset)
     }
     fn dynamic_dependencies(&self, deep: bool) -> DependencyList {
         self.value.dynamic_dependencies(deep)

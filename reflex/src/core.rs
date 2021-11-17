@@ -74,6 +74,7 @@ pub use uuid;
 pub trait GraphNode {
     fn capture_depth(&self) -> StackOffset;
     fn free_variables(&self) -> HashSet<StackOffset>;
+    fn count_variable_usages(&self, offset: StackOffset) -> usize;
     fn dynamic_dependencies(&self, deep: bool) -> DependencyList;
     fn has_dynamic_dependencies(&self, deep: bool) -> bool;
     /** Weak head normal form - outer term is fully evaluated, sub-expressions may contain dynamic values */
@@ -234,14 +235,14 @@ impl Arity {
     }
     pub fn required(&self) -> impl ExactSizeIterator<Item = ArgType> {
         match self {
-            Self::Homogeneous(arity) => ArityIterator::Homogeneous(arity.required()),
-            Self::Heterogeneous(arity) => ArityIterator::Heterogeneous(arity.required()),
+            Self::Homogeneous(arity) => PositionalArityIterator::Homogeneous(arity.required()),
+            Self::Heterogeneous(arity) => PositionalArityIterator::Heterogeneous(arity.required()),
         }
     }
     pub fn optional(&self) -> impl ExactSizeIterator<Item = ArgType> {
         match self {
-            Self::Homogeneous(arity) => ArityIterator::Homogeneous(arity.optional()),
-            Self::Heterogeneous(arity) => ArityIterator::Heterogeneous(arity.optional()),
+            Self::Homogeneous(arity) => PositionalArityIterator::Homogeneous(arity.optional()),
+            Self::Heterogeneous(arity) => PositionalArityIterator::Heterogeneous(arity.optional()),
         }
     }
     pub fn variadic(&self) -> Option<ArgType> {
@@ -364,11 +365,11 @@ impl std::fmt::Display for HeterogeneousArity {
         )
     }
 }
-pub enum ArityIterator {
+pub enum PositionalArityIterator {
     Homogeneous(HomogeneousArityIterator),
     Heterogeneous(HeterogeneousArityIterator),
 }
-impl Iterator for ArityIterator {
+impl Iterator for PositionalArityIterator {
     type Item = ArgType;
     fn next(&mut self) -> Option<Self::Item> {
         match self {
@@ -376,8 +377,23 @@ impl Iterator for ArityIterator {
             Self::Heterogeneous(iter) => iter.next(),
         }
     }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        match self {
+            Self::Homogeneous(iter) => iter.size_hint(),
+            Self::Heterogeneous(iter) => iter.size_hint(),
+        }
+    }
+    fn count(self) -> usize
+    where
+        Self: Sized,
+    {
+        match self {
+            Self::Homogeneous(iter) => iter.count(),
+            Self::Heterogeneous(iter) => iter.count(),
+        }
+    }
 }
-impl ExactSizeIterator for ArityIterator {
+impl ExactSizeIterator for PositionalArityIterator {
     fn len(&self) -> usize {
         match self {
             Self::Homogeneous(iter) => iter.len(),
@@ -397,6 +413,17 @@ impl Iterator for HomogeneousArityIterator {
             Some(ArgType::Lazy)
         }
     }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let len = ExactSizeIterator::len(self);
+        (len, Some(len))
+    }
+    fn count(self) -> usize
+    where
+        Self: Sized,
+    {
+        let len = ExactSizeIterator::len(&self);
+        len
+    }
 }
 impl ExactSizeIterator for HomogeneousArityIterator {
     fn len(&self) -> usize {
@@ -414,12 +441,24 @@ impl Iterator for HeterogeneousArityIterator {
         self.1 += 1;
         Some(*arg)
     }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let len = ExactSizeIterator::len(self);
+        (len, Some(len))
+    }
+    fn count(self) -> usize
+    where
+        Self: Sized,
+    {
+        let len = ExactSizeIterator::len(&self);
+        len
+    }
 }
 impl ExactSizeIterator for HeterogeneousArityIterator {
     fn len(&self) -> usize {
         let args = self.0;
         let index = self.1;
-        args.len() - index
+        let remaining = args.len() - index;
+        remaining
     }
 }
 
@@ -493,7 +532,6 @@ impl<T: Expression> ExpressionList<T> {
 }
 impl<T: Expression, I: std::slice::SliceIndex<[T]>> std::ops::Index<I> for ExpressionList<T> {
     type Output = I::Output;
-
     fn index(&self, index: I) -> &Self::Output {
         &self.items[index]
     }
@@ -501,7 +539,6 @@ impl<T: Expression, I: std::slice::SliceIndex<[T]>> std::ops::Index<I> for Expre
 impl<'a, T: Expression> IntoIterator for ExpressionList<T> {
     type Item = T;
     type IntoIter = std::vec::IntoIter<Self::Item>;
-
     fn into_iter(self) -> Self::IntoIter {
         self.items.into_iter()
     }
@@ -509,7 +546,6 @@ impl<'a, T: Expression> IntoIterator for ExpressionList<T> {
 impl<'a, T: Expression> IntoIterator for &'a ExpressionList<T> {
     type Item = &'a T;
     type IntoIter = std::slice::Iter<'a, T>;
-
     fn into_iter(self) -> Self::IntoIter {
         self.items.iter()
     }
@@ -525,6 +561,11 @@ impl<T: Expression> GraphNode for ExpressionList<T> {
         self.items.iter().fold(HashSet::new(), |mut results, term| {
             results.extend(term.free_variables());
             results
+        })
+    }
+    fn count_variable_usages(&self, offset: StackOffset) -> usize {
+        self.items.iter().fold(0, |results, term| {
+            results + term.count_variable_usages(offset)
         })
     }
     fn dynamic_dependencies(&self, deep: bool) -> DependencyList {
@@ -1310,6 +1351,13 @@ impl Iterator for ConsumingDependencyListIterator {
     fn size_hint(&self) -> (usize, Option<usize>) {
         let len = ExactSizeIterator::len(self);
         (len, Some(len))
+    }
+    fn count(self) -> usize
+    where
+        Self: Sized,
+    {
+        let len = ExactSizeIterator::len(&self);
+        len
     }
 }
 impl ExactSizeIterator for ConsumingDependencyListIterator {

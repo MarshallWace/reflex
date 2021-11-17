@@ -25,7 +25,7 @@ use crate::{
     hash::HashId,
     lang::{
         get_combined_short_circuit_signal, get_num_short_circuit_signals, get_short_circuit_signal,
-        validate_function_args, CompiledFunctionTerm, ValueTerm, WithExactSizeIterator,
+        validate_function_application_arity, CompiledFunctionTerm, ValueTerm,
     },
 };
 
@@ -1026,15 +1026,14 @@ fn apply_function<T: Expression + Applicable<T>>(
     allocator: &impl HeapAllocator<T>,
 ) -> Result<T, String> {
     let arity = get_function_arity(target)?;
-    let args = validate_function_args(target, &arity, args)?;
-    let num_args = args.len();
+    let num_args = validate_function_application_arity(target, &arity, args.len())?;
     let num_required_args = arity.required().len();
     let num_optional_args = arity.optional().len();
     let num_positional_args = num_required_args + num_optional_args;
     let num_unspecified_optional_args = num_positional_args.saturating_sub(num_args);
     let args = WithExactSizeIterator::new(
-        args.len() + num_unspecified_optional_args,
-        args.chain(
+        num_args + num_unspecified_optional_args,
+        args.take(num_args).chain(
             (0..num_unspecified_optional_args).map(|_| factory.create_value_term(ValueTerm::Null)),
         ),
     );
@@ -1254,6 +1253,43 @@ impl<'a, T> Iterator for CombinedSliceIterator<'a, T> {
 impl<'a, T> ExactSizeIterator for CombinedSliceIterator<'a, T> {
     fn len(&self) -> usize {
         self.left.len() + self.right.len()
+    }
+}
+
+struct WithExactSizeIterator<T: Iterator> {
+    remaining: usize,
+    iter: T,
+}
+impl<T: Iterator> WithExactSizeIterator<T> {
+    pub fn new(remaining: usize, iter: T) -> Self {
+        Self { remaining, iter }
+    }
+}
+impl<T: Iterator> Iterator for WithExactSizeIterator<T> {
+    type Item = T::Item;
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.remaining == 0 {
+            None
+        } else {
+            self.remaining -= 1;
+            self.iter.next()
+        }
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let len = ExactSizeIterator::len(self);
+        (len, Some(len))
+    }
+    fn count(self) -> usize
+    where
+        Self: Sized,
+    {
+        let len = ExactSizeIterator::len(&self);
+        len
+    }
+}
+impl<T: Iterator> ExactSizeIterator for WithExactSizeIterator<T> {
+    fn len(&self) -> usize {
+        self.remaining
     }
 }
 

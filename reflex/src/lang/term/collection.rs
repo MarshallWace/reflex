@@ -42,6 +42,13 @@ impl<T: Expression> GraphNode for CollectionTerm<T> {
             Self::HashSet(term) => term.free_variables(),
         }
     }
+    fn count_variable_usages(&self, offset: StackOffset) -> usize {
+        match self {
+            Self::Vector(term) => term.count_variable_usages(offset),
+            Self::HashMap(term) => term.count_variable_usages(offset),
+            Self::HashSet(term) => term.count_variable_usages(offset),
+        }
+    }
     fn dynamic_dependencies(&self, deep: bool) -> DependencyList {
         match self {
             Self::Vector(term) => term.dynamic_dependencies(deep),

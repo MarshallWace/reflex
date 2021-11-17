@@ -51,6 +51,9 @@ impl<T: Expression> GraphNode for LambdaTerm<T> {
             })
             .collect()
     }
+    fn count_variable_usages(&self, offset: StackOffset) -> usize {
+        self.body.count_variable_usages(offset + self.num_args)
+    }
     fn dynamic_dependencies(&self, deep: bool) -> DependencyList {
         if deep {
             self.body.dynamic_dependencies(deep)

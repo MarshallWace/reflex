@@ -13,10 +13,13 @@ use crate::{
     core::{
         transform_expression_list, Applicable, ArgType, Arity, DependencyList, DynamicState,
         EvaluationCache, Expression, ExpressionFactory, ExpressionList, GraphNode, HeapAllocator,
-        Reducible, Rewritable, SerializeJson, SignalType, StackOffset, Substitutions, VarArgs,
+        Reducible, Rewritable, ScopeOffset, SerializeJson, SignalType, StackOffset, Substitutions,
+        VarArgs,
     },
     lang::{SignalTerm, ValueTerm},
 };
+
+use super::LambdaTerm;
 
 #[derive(Hash, Eq, PartialEq, Clone, Debug, Serialize, Deserialize)]
 pub struct ApplicationTerm<T: Expression> {
@@ -53,23 +56,21 @@ impl<T: Expression + Applicable<T>> GraphNode for ApplicationTerm<T> {
             combined
         }
     }
+    fn count_variable_usages(&self, offset: StackOffset) -> usize {
+        self.target.count_variable_usages(offset) + self.args.count_variable_usages(offset)
+    }
     fn dynamic_dependencies(&self, deep: bool) -> DependencyList {
         let target_dependencies = self.target.dynamic_dependencies(deep);
         if deep {
             target_dependencies.union(self.args.dynamic_dependencies(deep))
         } else {
-            let eager_args = self.target.arity().map(|arity| {
-                self.args
-                    .iter()
-                    .zip(arity.iter())
-                    .filter_map(|(arg, arg_type)| match arg_type {
-                        ArgType::Strict | ArgType::Eager => Some(arg),
-                        _ => None,
-                    })
-            });
+            let eager_args = self
+                .target
+                .arity()
+                .map(|arity| get_eager_args(self.args.iter(), &arity));
             match eager_args {
                 None => target_dependencies,
-                Some(args) => args.fold(target_dependencies, |acc, arg| {
+                Some(args) => args.into_iter().fold(target_dependencies, |acc, arg| {
                     acc.union(arg.dynamic_dependencies(deep))
                 }),
             }
@@ -173,56 +174,35 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T>> Rewritable<T>
         cache: &mut impl EvaluationCache<T>,
     ) -> Option<T> {
         let normalized_target = self.target.normalize(factory, allocator, cache);
-        if self.args.is_empty() {
-            let target = normalized_target.as_ref().unwrap_or(&self.target);
-            match factory.match_lambda_term(target) {
-                Some(target) if target.num_args() == 0 => {
-                    return Some(target.body().clone());
-                }
-                _ => {}
-            }
-        }
         let normalized_args = transform_expression_list(&self.args, allocator, |arg| {
             arg.normalize(factory, allocator, cache)
         });
         let target = normalized_target.as_ref().unwrap_or(&self.target);
+        let args = normalized_args.as_ref().unwrap_or(&self.args);
         if let Some(partial) = factory.match_partial_application_term(target) {
-            return factory
+            factory
                 .create_application_term(
                     partial.target().clone(),
-                    allocator.create_unsized_list(
-                        partial
-                            .args()
-                            .iter()
-                            .cloned()
-                            .chain(self.args.iter().cloned()),
+                    allocator.create_sized_list(
+                        partial.args().len() + args.len(),
+                        partial.args().iter().chain(args).cloned(),
                     ),
                 )
-                .normalize(factory, allocator, cache);
-        }
-        let substituted_expression = match normalized_args {
-            Some(args) => Some(factory.create_application_term(
-                normalized_target.unwrap_or_else(|| self.target.clone()),
-                args,
-            )),
-            None => normalized_target.map(|target| {
-                factory.create_application_term(target, allocator.clone_list(&self.args))
-            }),
-        };
-        let substituted_expression = match substituted_expression {
-            Some(expression) => expression
-                .reduce(factory, allocator, cache)
-                .or(Some(expression)),
-            None => self.reduce(factory, allocator, cache),
-        };
-        substituted_expression.map(|expression| {
-            expression
                 .normalize(factory, allocator, cache)
-                .unwrap_or(expression)
-        })
+        } else {
+            normalize_function_application(target, args, factory, allocator, cache).or_else(|| {
+                if normalized_target.is_some() || normalized_args.is_some() {
+                    Some(factory.create_application_term(
+                        normalized_target.unwrap_or_else(|| self.target.clone()),
+                        normalized_args.unwrap_or_else(|| self.args.clone()),
+                    ))
+                } else {
+                    None
+                }
+            })
+        }
     }
 }
-
 impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T>> Reducible<T>
     for ApplicationTerm<T>
 {
@@ -247,76 +227,36 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T>> Reducible<T>
         match target.arity() {
             None => None,
             Some(arity) => {
-                let num_required_args = arity.required().len();
-                let num_optional_args = arity.optional().len();
-                match validate_function_args(target, &arity, self.args.iter()) {
-                    Err(err) => Some(create_error_signal_term(
-                        factory.create_value_term(ValueTerm::String(allocator.create_string(err))),
-                        factory,
-                        allocator,
-                    )),
-                    Ok(args) => {
-                        let num_args = args.len();
-                        let result =
-                            match reduce_function_args(args, arity, factory, allocator, cache) {
-                                Err(args) => Err(args),
-                                Ok((mut resolved_args, short_circuit_signal)) => {
-                                    let num_positional_args = num_required_args + num_optional_args;
-                                    let num_unspecified_optional_args =
-                                        num_positional_args.saturating_sub(num_args);
-                                    if num_unspecified_optional_args > 0 {
-                                        resolved_args.extend(
-                                            (0..num_unspecified_optional_args).map(|_| {
-                                                factory.create_value_term(ValueTerm::Null)
-                                            }),
-                                        )
-                                    }
-                                    if let Some(signal) = short_circuit_signal {
-                                        Ok(signal)
-                                    } else if is_compiled_application_target(target, factory) {
-                                        Err(resolved_args)
-                                    } else {
-                                        target
-                                            .apply(
-                                                resolved_args.into_iter(),
-                                                factory,
-                                                allocator,
-                                                cache,
-                                            )
-                                            .or_else(|error| {
-                                                Ok(create_error_signal_term(
-                                                    factory.create_value_term(ValueTerm::String(
-                                                        allocator.create_string(error),
-                                                    )),
-                                                    factory,
-                                                    allocator,
-                                                ))
-                                            })
-                                    }
-                                }
-                            };
-                        match result {
-                            Ok(result) => {
-                                Some(result.reduce(factory, allocator, cache).unwrap_or(result))
-                            }
-                            Err(args) => {
-                                if reduced_target.is_none()
-                                    && self
-                                        .args
-                                        .iter()
-                                        .zip(args.iter())
-                                        .all(|(arg, evaluated_arg)| arg.id() == evaluated_arg.id())
-                                {
-                                    None
-                                } else {
-                                    let target =
-                                        reduced_target.unwrap_or_else(|| self.target.clone());
-                                    Some(factory.create_application_term(
-                                        target,
-                                        allocator.create_list(args),
-                                    ))
-                                }
-                            }
+                let result = match reduce_function_args(
+                    target, &arity, &self.args, factory, allocator, cache,
+                ) {
+                    FunctionArgs::ShortCircuit(signal) => Ok(signal),
+                    FunctionArgs::Unresolved(args) => Err(args),
+                    FunctionArgs::Resolved(args) => {
+                        if is_compiled_application_target(target, factory) {
+                            Err(args)
+                        } else {
+                            Ok(apply_function(target, args, factory, allocator, cache))
+                        }
+                    }
+                };
+                match result {
+                    Ok(result) => Some(result.reduce(factory, allocator, cache).unwrap_or(result)),
+                    Err(reduced_args) => {
+                        if reduced_target.is_none()
+                            && self
+                                .args
+                                .iter()
+                                .zip(reduced_args.iter())
+                                .all(|(arg, evaluated_arg)| arg.id() == evaluated_arg.id())
+                        {
+                            None
+                        } else {
+                            let target = reduced_target.unwrap_or_else(|| self.target.clone());
+                            Some(factory.create_application_term(
+                                target,
+                                allocator.create_list(reduced_args),
+                            ))
                         }
                     }
                 }
@@ -417,12 +357,11 @@ impl<T: Expression> SerializeJson for ApplicationTerm<T> {
     }
 }
 
-pub fn validate_function_args<T: Expression + Applicable<T>, V>(
+pub fn validate_function_application_arity<T: Expression>(
     target: &T,
     arity: &Arity,
-    args: impl ExactSizeIterator<Item = V>,
-) -> Result<impl ExactSizeIterator<Item = V>, String> {
-    let num_args = args.len();
+    num_args: usize,
+) -> Result<usize, String> {
     let num_required_args = arity.required().len();
     let num_optional_args = arity.optional().len();
     if num_args < num_required_args {
@@ -444,85 +383,228 @@ pub fn validate_function_args<T: Expression + Applicable<T>, V>(
             Some(_) => num_args,
             None => num_args.min(num_required_args + num_optional_args),
         };
-        Ok(WithExactSizeIterator::new(num_args, args.take(num_args)))
+        Ok(num_args)
     }
 }
 
-pub(crate) struct WithExactSizeIterator<T: Iterator> {
-    remaining: usize,
-    iter: T,
-}
-impl<T: Iterator> WithExactSizeIterator<T> {
-    pub fn new(remaining: usize, iter: T) -> Self {
-        Self { remaining, iter }
-    }
-}
-impl<T: Iterator> Iterator for WithExactSizeIterator<T> {
-    type Item = T::Item;
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.remaining == 0 {
-            None
-        } else {
-            self.remaining -= 1;
-            self.iter.next()
-        }
-    }
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        (self.remaining, Some(self.remaining))
-    }
-    fn count(self) -> usize
-    where
-        Self: Sized,
-    {
-        self.remaining
-    }
-}
-impl<T: Iterator> ExactSizeIterator for WithExactSizeIterator<T> {
-    fn len(&self) -> usize {
-        self.remaining
-    }
-}
-
-fn reduce_function_args<'a, T: Expression + Rewritable<T> + Reducible<T> + 'a>(
-    args: impl IntoIterator<Item = &'a T>,
-    arity: Arity,
+fn apply_function<T: Expression + Applicable<T>>(
+    target: &T,
+    args: impl IntoIterator<Item = T, IntoIter = impl ExactSizeIterator<Item = T>>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
     cache: &mut impl EvaluationCache<T>,
-) -> Result<(Vec<T>, Option<T>), Vec<T>> {
-    let mut has_unresolved_args = false;
-    let mut num_short_circuit_signals = ShortCircuitCount::None;
-    let resolved_args = args
-        .into_iter()
-        .zip(arity.iter())
-        .map(|(arg, arg_type)| match arg_type {
-            ArgType::Strict | ArgType::Eager => {
-                let resolved_arg = Reducible::reduce(arg, factory, allocator, cache)
-                    .unwrap_or_else(|| arg.clone());
-                if is_unresolved_arg(&resolved_arg) {
-                    has_unresolved_args = true;
-                }
-                if factory.match_signal_term(&resolved_arg).is_some() {
-                    if let ArgType::Strict = arg_type {
-                        num_short_circuit_signals.increment();
-                    }
-                }
-                resolved_arg
-            }
-            ArgType::Lazy => arg.clone(),
+) -> T {
+    target
+        .apply(args.into_iter(), factory, allocator, cache)
+        .unwrap_or_else(|error| {
+            create_error_signal_term(
+                factory.create_value_term(ValueTerm::String(allocator.create_string(error))),
+                factory,
+                allocator,
+            )
         })
-        .collect::<Vec<_>>();
-    if has_unresolved_args {
-        Err(resolved_args)
+}
+
+fn normalize_function_application<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T>>(
+    target: &T,
+    args: &ExpressionList<T>,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+    cache: &mut impl EvaluationCache<T>,
+) -> Option<T> {
+    if let Some(_) = factory.match_compiled_function_term(target) {
+        None
+    } else if let Some(target) = factory.match_lambda_term(target) {
+        normalize_lambda_application(target, args, factory, allocator, cache)
+    } else if let Some(arity) = target.arity() {
+        normalize_builtin_application(target, &arity, args, factory, allocator, cache)
     } else {
-        let short_circuit_signal = get_combined_short_circuit_signal(
-            num_short_circuit_signals,
-            &resolved_args,
-            &arity,
+        None
+    }
+}
+
+fn normalize_lambda_application<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T>>(
+    target: &LambdaTerm<T>,
+    args: &ExpressionList<T>,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+    cache: &mut impl EvaluationCache<T>,
+) -> Option<T> {
+    if args.is_empty() {
+        Some(target.body().clone())
+    } else {
+        let num_args = target.num_args();
+        let (inlined_args, remaining_args): (Vec<_>, Vec<_>) = args
+            .iter()
+            .take(num_args)
+            .enumerate()
+            .map(|(index, arg)| (num_args - index - 1, arg.clone()))
+            .partition(|(offset, arg)| {
+                !arg.is_complex() || target.body().count_variable_usages(*offset) <= 1
+            });
+        if remaining_args.is_empty() {
+            Some(
+                target
+                    .body()
+                    .substitute_static(
+                        &Substitutions::named(&inlined_args, Some(ScopeOffset::Unwrap(num_args))),
+                        factory,
+                        allocator,
+                        cache,
+                    )
+                    .map(|result| {
+                        result
+                            .normalize(factory, allocator, cache)
+                            .unwrap_or(result)
+                    })
+                    .unwrap_or_else(|| target.body().clone()),
+            )
+        } else if !inlined_args.is_empty() {
+            Some(
+                factory.create_application_term(
+                    factory.create_lambda_term(
+                        remaining_args.len(),
+                        inlined_args.into_iter().fold(
+                            target.body().clone(),
+                            |body, (offset, arg)| {
+                                let arg = arg
+                                    .substitute_static(
+                                        &Substitutions::increase_scope_offset(remaining_args.len()),
+                                        factory,
+                                        allocator,
+                                        cache,
+                                    )
+                                    .unwrap_or(arg);
+                                body.substitute_static(
+                                    &Substitutions::named(
+                                        &vec![(offset, arg)],
+                                        Some(ScopeOffset::Unwrap(1)),
+                                    ),
+                                    factory,
+                                    allocator,
+                                    cache,
+                                )
+                                .unwrap_or(body)
+                            },
+                        ),
+                    ),
+                    allocator.create_list(remaining_args.into_iter().map(|(_, arg)| arg)),
+                ),
+            )
+        } else {
+            None
+        }
+    }
+}
+
+fn normalize_builtin_application<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T>>(
+    target: &T,
+    arity: &Arity,
+    args: &ExpressionList<T>,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+    cache: &mut impl EvaluationCache<T>,
+) -> Option<T> {
+    match reduce_function_args(target, arity, args, factory, allocator, cache) {
+        FunctionArgs::ShortCircuit(signal) => Some(signal),
+        FunctionArgs::Unresolved(_) => None,
+        FunctionArgs::Resolved(resolved_args) => {
+            if args.capture_depth() > 0 {
+                None
+            } else {
+                let result = apply_function(target, resolved_args, factory, allocator, cache);
+                Some(
+                    result
+                        .normalize(factory, allocator, cache)
+                        .unwrap_or(result),
+                )
+            }
+        }
+    }
+}
+
+pub(crate) fn get_eager_args<'a, T: Expression + 'a>(
+    args: impl IntoIterator<Item = &'a T>,
+    arity: &Arity,
+) -> impl Iterator<Item = &'a T> {
+    arity
+        .iter()
+        .zip(args)
+        .filter_map(|(arg_type, arg)| match arg_type {
+            ArgType::Strict | ArgType::Eager => Some(arg),
+            ArgType::Lazy => None,
+        })
+}
+
+enum FunctionArgs<T: Expression> {
+    ShortCircuit(T),
+    Unresolved(Vec<T>),
+    Resolved(Vec<T>),
+}
+fn reduce_function_args<T: Expression + Rewritable<T> + Reducible<T>>(
+    target: &T,
+    arity: &Arity,
+    args: &ExpressionList<T>,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+    cache: &mut impl EvaluationCache<T>,
+) -> FunctionArgs<T> {
+    match validate_function_application_arity(target, arity, args.len()) {
+        Err(message) => FunctionArgs::ShortCircuit(create_error_signal_term(
+            factory.create_value_term(ValueTerm::String(allocator.create_string(message))),
             factory,
             allocator,
-        );
-        Ok((resolved_args, short_circuit_signal))
+        )),
+        Ok(num_args) => {
+            let mut has_unresolved_args = false;
+            let mut num_short_circuit_signals = ShortCircuitCount::None;
+            let mut resolved_args = args
+                .iter()
+                .take(num_args)
+                .zip(arity.iter())
+                .map(|(arg, arg_type)| match arg_type {
+                    ArgType::Strict | ArgType::Eager => {
+                        let resolved_arg = Reducible::reduce(arg, factory, allocator, cache)
+                            .unwrap_or_else(|| arg.clone());
+                        if is_unresolved_arg(&resolved_arg) {
+                            has_unresolved_args = true;
+                        }
+                        if factory.match_signal_term(&resolved_arg).is_some() {
+                            if let ArgType::Strict = arg_type {
+                                num_short_circuit_signals.increment();
+                            }
+                        }
+                        resolved_arg
+                    }
+                    ArgType::Lazy => arg.clone(),
+                })
+                .collect::<Vec<_>>();
+            if has_unresolved_args {
+                FunctionArgs::Unresolved(resolved_args)
+            } else if let Some(signal) = get_combined_short_circuit_signal(
+                num_short_circuit_signals,
+                &resolved_args,
+                arity,
+                factory,
+                allocator,
+            ) {
+                FunctionArgs::ShortCircuit(signal)
+            } else {
+                let num_provided_args = resolved_args.len();
+                let num_required_args = arity.required().len();
+                let num_optional_args = arity.optional().len();
+                let num_positional_args = num_required_args + num_optional_args;
+                let num_unspecified_optional_args =
+                    num_positional_args.saturating_sub(num_provided_args);
+                if num_unspecified_optional_args > 0 {
+                    resolved_args.extend(
+                        (0..num_unspecified_optional_args)
+                            .map(|_| factory.create_value_term(ValueTerm::Null)),
+                    )
+                }
+                FunctionArgs::Resolved(resolved_args)
+            }
+        }
     }
 }
 
@@ -708,12 +790,181 @@ mod tests {
     fn normalize_zero_arg_applications() {
         let factory = SharedTermFactory::<Stdlib>::default();
         let allocator = DefaultAllocator::<CachedSharedTerm<Stdlib>>::default();
-
         let expression = factory.create_application_term(
             factory.create_lambda_term(0, factory.create_value_term(ValueTerm::Int(3))),
             allocator.create_empty_list(),
         );
         let result = expression.normalize(&factory, &allocator, &mut SubstitutionCache::new());
         assert_eq!(result, Some(factory.create_value_term(ValueTerm::Int(3))));
+    }
+
+    #[test]
+    fn normalize_fully_specified_applications() {
+        let factory = SharedTermFactory::<Stdlib>::default();
+        let allocator = DefaultAllocator::<CachedSharedTerm<Stdlib>>::default();
+        let expression = factory.create_application_term(
+            factory.create_lambda_term(
+                3,
+                factory.create_application_term(
+                    factory.create_builtin_term(Stdlib::Subtract),
+                    allocator.create_pair(
+                        factory.create_static_variable_term(2),
+                        factory.create_application_term(
+                            factory.create_builtin_term(Stdlib::Add),
+                            allocator.create_pair(
+                                factory.create_static_variable_term(1),
+                                factory.create_static_variable_term(0),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+            allocator.create_triple(
+                factory.create_value_term(ValueTerm::Int(3)),
+                factory.create_value_term(ValueTerm::Int(4)),
+                factory.create_value_term(ValueTerm::Int(5)),
+            ),
+        );
+        let result = expression.normalize(&factory, &allocator, &mut SubstitutionCache::new());
+        assert_eq!(
+            result,
+            Some(factory.create_value_term(ValueTerm::Int(3 - (4 + 5))))
+        );
+    }
+
+    #[test]
+    fn normalize_partially_specified_applications() {
+        let factory = SharedTermFactory::<Stdlib>::default();
+        let allocator = DefaultAllocator::<CachedSharedTerm<Stdlib>>::default();
+        let expression = factory.create_application_term(
+            factory.create_lambda_term(
+                3,
+                factory.create_application_term(
+                    factory.create_builtin_term(Stdlib::Subtract),
+                    allocator.create_pair(
+                        factory.create_static_variable_term(2),
+                        factory.create_application_term(
+                            factory.create_builtin_term(Stdlib::Add),
+                            allocator.create_pair(
+                                factory.create_static_variable_term(1),
+                                factory.create_static_variable_term(0),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+            allocator.create_triple(
+                factory.create_static_variable_term(123),
+                factory.create_value_term(ValueTerm::Int(4)),
+                factory.create_value_term(ValueTerm::Int(5)),
+            ),
+        );
+        let result = expression.normalize(&factory, &allocator, &mut SubstitutionCache::new());
+        assert_eq!(
+            result,
+            Some(factory.create_application_term(
+                factory.create_builtin_term(Stdlib::Subtract),
+                allocator.create_pair(
+                    factory.create_static_variable_term(123),
+                    factory.create_value_term(ValueTerm::Int(4 + 5)),
+                ),
+            ))
+        );
+    }
+
+    #[test]
+    fn normalize_complex_application_args() {
+        let factory = SharedTermFactory::<Stdlib>::default();
+        let allocator = DefaultAllocator::<CachedSharedTerm<Stdlib>>::default();
+        let expression = factory.create_application_term(
+            factory.create_lambda_term(
+                3,
+                factory.create_application_term(
+                    factory.create_builtin_term(Stdlib::Add),
+                    allocator.create_pair(
+                        factory.create_application_term(
+                            factory.create_builtin_term(Stdlib::Get),
+                            allocator.create_pair(
+                                factory.create_static_variable_term(2),
+                                factory.create_static_variable_term(1),
+                            ),
+                        ),
+                        factory.create_application_term(
+                            factory.create_builtin_term(Stdlib::Get),
+                            allocator.create_pair(
+                                factory.create_static_variable_term(2),
+                                factory.create_static_variable_term(0),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+            allocator.create_triple(
+                factory.create_tuple_term(allocator.create_pair(
+                    factory.create_value_term(ValueTerm::Int(3)),
+                    factory.create_value_term(ValueTerm::Int(4)),
+                )),
+                factory.create_value_term(ValueTerm::Int(0)),
+                factory.create_static_variable_term(0),
+            ),
+        );
+        let result = expression.normalize(&factory, &allocator, &mut SubstitutionCache::new());
+        assert_eq!(
+            result,
+            Some(factory.create_application_term(
+                factory.create_lambda_term(
+                    1,
+                    factory.create_application_term(
+                        factory.create_builtin_term(Stdlib::Add),
+                        allocator.create_pair(
+                            factory.create_application_term(
+                                factory.create_builtin_term(Stdlib::Get),
+                                allocator.create_pair(
+                                    factory.create_static_variable_term(0),
+                                    factory.create_value_term(ValueTerm::Int(0)),
+                                ),
+                            ),
+                            factory.create_application_term(
+                                factory.create_builtin_term(Stdlib::Get),
+                                allocator.create_pair(
+                                    factory.create_static_variable_term(0),
+                                    factory.create_static_variable_term(1),
+                                ),
+                            ),
+                        ),
+                    ),
+                ),
+                allocator.create_unit_list(factory.create_tuple_term(allocator.create_pair(
+                    factory.create_value_term(ValueTerm::Int(3)),
+                    factory.create_value_term(ValueTerm::Int(4)),
+                )),),
+            ))
+        );
+    }
+
+    #[test]
+    fn normalize_builtin_application_args() {
+        let factory = SharedTermFactory::<Stdlib>::default();
+        let allocator = DefaultAllocator::<CachedSharedTerm<Stdlib>>::default();
+        let expression = factory.create_application_term(
+            factory.create_builtin_term(Stdlib::Get),
+            allocator.create_pair(
+                factory.create_tuple_term(allocator.create_unit_list(
+                    factory.create_application_term(
+                        factory.create_builtin_term(Stdlib::Add),
+                        allocator.create_pair(
+                            factory.create_value_term(ValueTerm::Int(3)),
+                            factory.create_value_term(ValueTerm::Int(4)),
+                        ),
+                    ),
+                )),
+                factory.create_value_term(ValueTerm::Int(0)),
+            ),
+        );
+        let result = expression.normalize(&factory, &allocator, &mut SubstitutionCache::new());
+        assert_eq!(
+            result,
+            Some(factory.create_value_term(ValueTerm::Int(3 + 4))),
+        );
     }
 }

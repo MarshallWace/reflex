@@ -366,6 +366,9 @@ impl<TBuiltin: Builtin> GraphNode for CachedSharedTerm<TBuiltin> {
     fn free_variables(&self) -> HashSet<StackOffset> {
         self.value.free_variables()
     }
+    fn count_variable_usages(&self, offset: StackOffset) -> usize {
+        self.value.count_variable_usages(offset)
+    }
     fn dynamic_dependencies(&self, deep: bool) -> DependencyList {
         self.value.dynamic_dependencies(deep)
     }

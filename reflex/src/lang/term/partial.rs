@@ -50,6 +50,9 @@ impl<T: Expression + Applicable<T>> GraphNode for PartialApplicationTerm<T> {
             target_free_variables
         }
     }
+    fn count_variable_usages(&self, offset: StackOffset) -> usize {
+        self.target.count_variable_usages(offset) + self.args.count_variable_usages(offset)
+    }
     fn dynamic_dependencies(&self, deep: bool) -> DependencyList {
         let target_dependencies = self.target.dynamic_dependencies(deep);
         if deep {

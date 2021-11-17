@@ -32,6 +32,9 @@ impl<T: Expression> GraphNode for RecursiveTerm<T> {
     fn free_variables(&self) -> HashSet<StackOffset> {
         self.factory.free_variables()
     }
+    fn count_variable_usages(&self, offset: StackOffset) -> usize {
+        self.factory.count_variable_usages(offset)
+    }
     fn dynamic_dependencies(&self, deep: bool) -> DependencyList {
         self.factory.dynamic_dependencies(deep)
     }

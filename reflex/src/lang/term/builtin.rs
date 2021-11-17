@@ -96,6 +96,9 @@ impl<T: Expression> GraphNode for BuiltinTerm<T> {
     fn free_variables(&self) -> HashSet<StackOffset> {
         HashSet::new()
     }
+    fn count_variable_usages(&self, _offset: StackOffset) -> usize {
+        0
+    }
     fn dynamic_dependencies(&self, _deep: bool) -> crate::core::DependencyList {
         DependencyList::empty()
     }

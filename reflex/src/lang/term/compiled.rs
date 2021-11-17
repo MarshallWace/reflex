@@ -55,6 +55,9 @@ impl GraphNode for CompiledFunctionTerm {
     fn free_variables(&self) -> HashSet<StackOffset> {
         HashSet::new()
     }
+    fn count_variable_usages(&self, _offset: StackOffset) -> usize {
+        0
+    }
     fn dynamic_dependencies(&self, _deep: bool) -> DependencyList {
         DependencyList::empty()
     }

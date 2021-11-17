@@ -50,6 +50,9 @@ impl<T: Expression> GraphNode for LetTerm<T> {
             }))
             .collect()
     }
+    fn count_variable_usages(&self, offset: StackOffset) -> usize {
+        self.body.count_variable_usages(offset + 1)
+    }
     fn dynamic_dependencies(&self, deep: bool) -> DependencyList {
         self.initializer
             .dynamic_dependencies(deep)
@@ -147,26 +150,34 @@ impl<T: Expression + Rewritable<T> + Reducible<T>> Rewritable<T> for LetTerm<T> 
     ) -> Option<T> {
         let normalized_initializer = self.initializer.normalize(factory, allocator, cache);
         let normalized_body = self.body.normalize(factory, allocator, cache);
-        let substituted_expression = match normalized_initializer {
-            Some(initializer) => Some(factory.create_let_term(
-                initializer,
+        let initializer = normalized_initializer.as_ref().unwrap_or(&self.initializer);
+        let body = normalized_body.as_ref().unwrap_or(&self.body);
+        let can_inline_initializer =
+            !initializer.is_complex() || body.count_variable_usages(0) <= 1;
+        if can_inline_initializer {
+            body.substitute_static(
+                &Substitutions::named(
+                    &vec![(0, initializer.clone())],
+                    Some(ScopeOffset::Unwrap(1)),
+                ),
+                factory,
+                allocator,
+                cache,
+            )
+            .map(|result| {
+                result
+                    .normalize(factory, allocator, cache)
+                    .unwrap_or(result)
+            })
+            .or_else(|| normalized_body.or_else(|| Some(self.body.clone())))
+        } else if normalized_initializer.is_some() || normalized_body.is_some() {
+            Some(factory.create_let_term(
+                normalized_initializer.unwrap_or_else(|| self.initializer.clone()),
                 normalized_body.unwrap_or_else(|| self.body.clone()),
-            )),
-            None => {
-                normalized_body.map(|body| factory.create_let_term(self.initializer.clone(), body))
-            }
-        };
-        let substituted_expression = match substituted_expression {
-            Some(expression) => expression
-                .reduce(factory, allocator, cache)
-                .or_else(|| Some(expression)),
-            None => self.reduce(factory, allocator, cache),
-        };
-        substituted_expression.map(|expression| {
-            expression
-                .normalize(factory, allocator, cache)
-                .unwrap_or(expression)
-        })
+            ))
+        } else {
+            None
+        }
     }
 }
 

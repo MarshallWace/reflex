@@ -132,6 +132,9 @@ impl<T: Expression> GraphNode for HashMapTerm<T> {
             combined
         }
     }
+    fn count_variable_usages(&self, offset: StackOffset) -> usize {
+        self.keys.count_variable_usages(offset) + self.values.count_variable_usages(offset)
+    }
     fn dynamic_dependencies(&self, deep: bool) -> DependencyList {
         self.keys.dynamic_dependencies(deep).union(if deep {
             self.values.dynamic_dependencies(deep)

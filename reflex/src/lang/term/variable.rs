@@ -34,6 +34,12 @@ impl<T: Expression> GraphNode for VariableTerm<T> {
             Self::Dynamic(term) => term.free_variables(),
         }
     }
+    fn count_variable_usages(&self, offset: StackOffset) -> usize {
+        match self {
+            Self::Static(term) => term.count_variable_usages(offset),
+            Self::Dynamic(term) => term.count_variable_usages(offset),
+        }
+    }
     fn dynamic_dependencies(&self, deep: bool) -> DependencyList {
         match self {
             Self::Static(term) => term.dynamic_dependencies(deep),
@@ -165,6 +171,13 @@ impl GraphNode for StaticVariableTerm {
     fn free_variables(&self) -> HashSet<StackOffset> {
         HashSet::from_iter(once(self.offset))
     }
+    fn count_variable_usages(&self, offset: StackOffset) -> usize {
+        if offset == self.offset {
+            1
+        } else {
+            0
+        }
+    }
     fn dynamic_dependencies(&self, _deep: bool) -> DependencyList {
         DependencyList::empty()
     }
@@ -267,6 +280,9 @@ impl<T: Expression> GraphNode for DynamicVariableTerm<T> {
     }
     fn free_variables(&self) -> HashSet<StackOffset> {
         HashSet::new()
+    }
+    fn count_variable_usages(&self, _offset: StackOffset) -> usize {
+        0
     }
     fn dynamic_dependencies(&self, _deep: bool) -> DependencyList {
         DependencyList::of(self.state_token)

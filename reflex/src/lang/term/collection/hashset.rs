@@ -46,6 +46,9 @@ impl<T: Expression> GraphNode for HashSetTerm<T> {
     fn free_variables(&self) -> HashSet<StackOffset> {
         self.values.free_variables()
     }
+    fn count_variable_usages(&self, offset: StackOffset) -> usize {
+        self.values.count_variable_usages(offset)
+    }
     fn dynamic_dependencies(&self, deep: bool) -> DependencyList {
         if deep {
             self.values.dynamic_dependencies(deep)
