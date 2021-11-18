@@ -96,7 +96,7 @@ pub(crate) fn count_subexpression_usages<'a, T: Expression + Rewritable<T> + 'a>
             result + subexpression.count_subexpression_usages(pattern, factory, allocator)
         } else {
             let adjusted_scope_pattern = pattern.substitute_static(
-                &Substitutions::increase_scope_offset(subexpression_scope_offset),
+                &Substitutions::increase_scope_offset(subexpression_scope_offset, 0),
                 factory,
                 allocator,
                 &mut noop_cache,
@@ -1096,10 +1096,10 @@ impl<'a, T: Expression + Rewritable<T>> Substitutions<'a, T> {
             offset: 0,
         }
     }
-    pub fn increase_scope_offset(depth: StackOffset) -> Self {
+    pub fn increase_scope_offset(depth: StackOffset, min_depth: StackOffset) -> Self {
         Self {
             entries: SubstitutionPatterns::Offset(ScopeOffset::Wrap(depth)),
-            min_depth: 0,
+            min_depth,
             offset: 0,
         }
     }
@@ -1139,7 +1139,7 @@ impl<'a, T: Expression + Rewritable<T>> Substitutions<'a, T> {
             SubstitutionPatterns::Term(entries, _) => {
                 entries.iter().find_map(|(pattern, replacement)| {
                     let adjusted_scope_pattern = pattern.substitute_static(
-                        &Substitutions::increase_scope_offset(self.offset),
+                        &Substitutions::increase_scope_offset(self.offset, 0),
                         factory,
                         allocator,
                         cache,
@@ -1149,7 +1149,7 @@ impl<'a, T: Expression + Rewritable<T>> Substitutions<'a, T> {
                         Some(
                             replacement
                                 .substitute_static(
-                                    &Substitutions::increase_scope_offset(self.offset),
+                                    &Substitutions::increase_scope_offset(self.offset, 0),
                                     factory,
                                     allocator,
                                     cache,
@@ -1196,7 +1196,7 @@ impl<'a, T: Expression + Rewritable<T>> Substitutions<'a, T> {
             Some(replacement) => Some(
                 replacement
                     .substitute_static(
-                        &Substitutions::increase_scope_offset(self.offset),
+                        &Substitutions::increase_scope_offset(self.offset, 0),
                         factory,
                         allocator,
                         cache,

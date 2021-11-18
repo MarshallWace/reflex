@@ -1597,7 +1597,7 @@ where
                 factory.create_application_term(
                     handler
                         .substitute_static(
-                            &Substitutions::increase_scope_offset(1),
+                            &Substitutions::increase_scope_offset(1, 0),
                             factory,
                             allocator,
                             &mut NoopCache::default(),

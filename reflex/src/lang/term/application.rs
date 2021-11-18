@@ -469,7 +469,10 @@ fn normalize_lambda_application<T: Expression + Rewritable<T> + Reducible<T> + A
                             |body, (offset, arg)| {
                                 let arg = arg
                                     .substitute_static(
-                                        &Substitutions::increase_scope_offset(remaining_args.len()),
+                                        &Substitutions::increase_scope_offset(
+                                            remaining_args.len(),
+                                            0,
+                                        ),
                                         factory,
                                         allocator,
                                         cache,
