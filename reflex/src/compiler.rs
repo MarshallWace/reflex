@@ -419,17 +419,6 @@ impl Compiler {
             .insert(id, (chunk_address, instructions));
         chunk_address
     }
-    pub(crate) fn retrieve_compiled_chunk(&self, address: InstructionPointer) -> Option<&Program> {
-        self.compiled_chunks
-            .iter()
-            .find_map(|(_, (chunk_address, chunk))| {
-                if *chunk_address == address {
-                    Some(chunk)
-                } else {
-                    None
-                }
-            })
-    }
     pub fn compile<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>>(
         mut self,
         expression: &T,
