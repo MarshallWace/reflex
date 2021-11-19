@@ -80,71 +80,6 @@ pub trait CacheEntries<T: Expression> {
     fn is_empty(&self) -> bool;
 }
 
-pub(super) struct MultithreadedCacheEntries<'a, T: Expression> {
-    parent_cache: Option<&'a MultithreadedCacheEntries<'a, T>>,
-    thread_local_cache: LocalCacheEntries<T>,
-}
-impl<'a, T: Expression> MultithreadedCacheEntries<'a, T> {
-    pub(super) fn new_top_level() -> Self {
-        Self {
-            parent_cache: None,
-            thread_local_cache: LocalCacheEntries::default(),
-        }
-    }
-    pub(super) fn new_from_threaded<'b: 'a>(
-        shared_cache: &'a MultithreadedCacheEntries<'b, T>,
-    ) -> Self {
-        Self {
-            parent_cache: Some(shared_cache),
-            thread_local_cache: LocalCacheEntries::default(),
-        }
-    }
-    pub(super) fn into_thread_local_entries(self) -> LocalCacheEntries<T> {
-        self.thread_local_cache
-    }
-}
-impl<'a, T: Expression> CacheEntries<T> for MultithreadedCacheEntries<'a, T> {
-    fn insert(
-        &mut self,
-        key: InterpreterCacheKey,
-        value: InterpreterCacheEntry<T>,
-        subexpressions: Vec<InterpreterCacheKey>,
-    ) {
-        self.thread_local_cache.insert(key, value, subexpressions)
-    }
-    fn extend(
-        &mut self,
-        entries: impl IntoIterator<
-            Item = (
-                InterpreterCacheKey,
-                InterpreterCacheEntry<T>,
-                Vec<InterpreterCacheKey>,
-            ),
-        >,
-    ) {
-        self.thread_local_cache.extend(entries)
-    }
-    fn get(
-        &self,
-        key: &InterpreterCacheKey,
-    ) -> Option<&(InterpreterCacheEntry<T>, Vec<InterpreterCacheKey>)> {
-        self.thread_local_cache
-            .get(key)
-            .or_else(|| self.parent_cache.map(|parent| parent.get(key)).flatten())
-    }
-    fn len(&self) -> usize {
-        self.thread_local_cache.len() + self.parent_cache.map(|parent| parent.len()).unwrap_or(0)
-    }
-
-    fn is_empty(&self) -> bool {
-        self.thread_local_cache.is_empty()
-            && self
-                .parent_cache
-                .map(|parent| parent.is_empty())
-                .unwrap_or(true)
-    }
-}
-
 pub struct LocalCacheEntries<T: Expression> {
     entries: FnvHashMap<InterpreterCacheKey, (InterpreterCacheEntry<T>, Vec<InterpreterCacheKey>)>,
     insertion_order: Vec<InterpreterCacheKey>,
@@ -243,6 +178,66 @@ impl<T: Expression> Iterator for CacheEntriesIntoIter<T> {
     }
 }
 
+pub(super) struct MultithreadedCacheEntries<'a, T: Expression> {
+    parent: Option<&'a MultithreadedCacheEntries<'a, T>>,
+    entries: LocalCacheEntries<T>,
+}
+impl<'a, T: Expression> Default for MultithreadedCacheEntries<'a, T> {
+    fn default() -> Self {
+        Self {
+            parent: None,
+            entries: LocalCacheEntries::default(),
+        }
+    }
+}
+impl<'a, T: Expression> MultithreadedCacheEntries<'a, T> {
+    pub(super) fn create_child(&'a self) -> Self {
+        Self {
+            parent: Some(self),
+            entries: LocalCacheEntries::default(),
+        }
+    }
+    pub(super) fn into_entries(self) -> LocalCacheEntries<T> {
+        self.entries
+    }
+}
+impl<'a, T: Expression> CacheEntries<T> for MultithreadedCacheEntries<'a, T> {
+    fn insert(
+        &mut self,
+        key: InterpreterCacheKey,
+        value: InterpreterCacheEntry<T>,
+        subexpressions: Vec<InterpreterCacheKey>,
+    ) {
+        self.entries.insert(key, value, subexpressions)
+    }
+    fn extend(
+        &mut self,
+        entries: impl IntoIterator<
+            Item = (
+                InterpreterCacheKey,
+                InterpreterCacheEntry<T>,
+                Vec<InterpreterCacheKey>,
+            ),
+        >,
+    ) {
+        self.entries.extend(entries)
+    }
+    fn get(
+        &self,
+        key: &InterpreterCacheKey,
+    ) -> Option<&(InterpreterCacheEntry<T>, Vec<InterpreterCacheKey>)> {
+        self.entries
+            .get(key)
+            .or_else(|| self.parent.map(|parent| parent.get(key)).flatten())
+    }
+    fn len(&self) -> usize {
+        self.entries.len() + self.parent.map(|parent| parent.len()).unwrap_or(0)
+    }
+
+    fn is_empty(&self) -> bool {
+        self.entries.is_empty() && self.parent.map(|parent| parent.is_empty()).unwrap_or(true)
+    }
+}
 pub struct DefaultInterpreterCache<T: Expression> {
     cache: DependencyCache<InterpreterCacheKey, InterpreterCacheEntry<T>>,
 }

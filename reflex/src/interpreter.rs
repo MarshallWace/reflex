@@ -112,7 +112,7 @@ pub fn execute<
     trace!("Starting execution");
     let mut stack = VariableStack::new(options.variable_stack_size);
     let mut call_stack = CallStack::new(program, entry_point, options.call_stack_size);
-    let mut evaluation_cache_entries = MultithreadedCacheEntries::new_top_level();
+    let mut evaluation_cache_entries = MultithreadedCacheEntries::default();
     let result = evaluate_program_loop(
         state,
         &mut stack,
@@ -125,7 +125,7 @@ pub fn execute<
         options.debug_stack,
     );
     std::mem::drop(execution_span);
-    let mut cache_entries = evaluation_cache_entries.into_thread_local_entries();
+    let mut cache_entries = evaluation_cache_entries.into_entries();
     match result {
         Err(error) => Err(error),
         Ok(value) => {
@@ -1412,7 +1412,7 @@ fn resolve_parallel_args<
                     Vec::new(),
                     DependencyList::empty(),
                     Vec::new(),
-                    MultithreadedCacheEntries::new_from_threaded(cache_entries),
+                    cache_entries.create_child(),
                 )
             },
             |(mut resolved_args, mut dependencies, mut subexpressions, mut cache_entries),
@@ -1453,7 +1453,7 @@ fn resolve_parallel_args<
                     Vec::new(),
                     DependencyList::empty(),
                     Vec::new(),
-                    MultithreadedCacheEntries::new_from_threaded(cache_entries),
+                    cache_entries.create_child(),
                 )
             },
             |(mut results, mut dependencies, mut subexpressions, mut cache_entries),
@@ -1461,12 +1461,12 @@ fn resolve_parallel_args<
                 results.append(&mut other_results);
                 dependencies.extend(other_deps);
                 subexpressions.append(&mut other_subexps);
-                let local_entries = other_cache_entries.into_thread_local_entries();
+                let local_entries = other_cache_entries.into_entries();
                 cache_entries.extend(local_entries);
                 (results, dependencies, subexpressions, cache_entries)
             },
         );
-    let local_entries = new_cache_entries.into_thread_local_entries();
+    let local_entries = new_cache_entries.into_entries();
     cache_entries.extend(local_entries);
     call_stack.add_state_dependencies(dependencies);
     call_stack.add_subexpressions(subexpressions);
