@@ -16,6 +16,7 @@ use crate::{
         Reducible, Rewritable, ScopeOffset, SerializeJson, SignalType, StackOffset, Substitutions,
         VarArgs,
     },
+    hash::HashId,
     lang::{SignalTerm, ValueTerm},
 };
 
@@ -315,11 +316,14 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>> 
                         num_args,
                     ))
                 } else {
-                    if let Some(target_address) = match_compiled_function_result(&compiled_target) {
+                    if let Some((target_address, target_hash)) =
+                        match_compiled_function_result(&compiled_target)
+                    {
                         let mut result = compiled_args;
                         // TODO: jump to target if in tail position
                         result.push(Instruction::Call {
-                            target: target_address,
+                            target_address,
+                            target_hash,
                             num_args,
                         });
                         Ok(result)
@@ -771,9 +775,11 @@ pub(crate) fn compile_args<'a, T: Expression + Compile<T> + 'a>(
     )?))
 }
 
-fn match_compiled_function_result(program: &Program) -> Option<InstructionPointer> {
+fn match_compiled_function_result(program: &Program) -> Option<(InstructionPointer, HashId)> {
     match program.instructions().first() {
-        Some(Instruction::PushFunction { target }) if program.len() == 1 => Some(*target),
+        Some(&Instruction::PushFunction { target, hash }) if program.len() == 1 => {
+            Some((target, hash))
+        }
         _ => None,
     }
 }

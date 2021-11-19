@@ -258,3 +258,188 @@ fn method_not_allowed() -> Response<Body> {
         String::from("Method not allowed"),
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use std::iter::empty;
+
+    use reflex::{
+        allocator::DefaultAllocator,
+        compiler::{Compile, Compiler, CompilerMode, CompilerOptions, InstructionPointer, Program},
+        core::{
+            Applicable, Expression, ExpressionFactory, HeapAllocator, Reducible, Rewritable, Signal,
+        },
+        interpreter::InterpreterOptions,
+        lang::{create_struct, SharedTermFactory, ValueTerm},
+        stdlib::Stdlib,
+    };
+    use reflex_graphql::{stdlib::Stdlib as GraphQlStdlib, NoopGraphQlQueryTransform};
+    use reflex_js::{create_js_env, stdlib::Stdlib as JsStdlib};
+    use reflex_runtime::{
+        AsyncExpression, Runtime, RuntimeCache, RuntimeState, SignalHandler, SignalHandlerResult,
+        SignalHelpers, Stream, StreamExt, StreamSubscription,
+    };
+
+    use crate::{builtins::ServerBuiltins, compile_graphql_query};
+
+    fn noop_signal_handler<T: AsyncExpression + Compile<T>>(
+        _factory: &impl ExpressionFactory<T>,
+        _allocator: &impl HeapAllocator<T>,
+    ) -> impl SignalHandler<T>
+    where
+        T::String: Send + Sync,
+    {
+        |_signal_type: &str,
+         _signals: &[&Signal<T>],
+         _signal_helpers: &SignalHelpers<T>|
+         -> SignalHandlerResult<T> { None }
+    }
+
+    fn compile_js_graph_root<
+        T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
+    >(
+        input: &str,
+        factory: &impl ExpressionFactory<T>,
+        allocator: &impl HeapAllocator<T>,
+    ) -> Result<(Program, InstructionPointer), String>
+    where
+        T::Builtin: From<Stdlib> + From<JsStdlib>,
+    {
+        let root = reflex_js::parse(
+            input,
+            &create_js_env(factory, allocator),
+            factory,
+            allocator,
+        )?;
+        Compiler::new(CompilerOptions::default(), None)
+            .compile(&root, CompilerMode::Function, factory, allocator)
+            .map(|program| (program, InstructionPointer::default()))
+    }
+
+    async fn subscribe_query<'a, 'b, T: 'a>(
+        query: &str,
+        variables: impl IntoIterator<Item = (&'b str, T)>,
+        graph_root: &(Program, InstructionPointer),
+        runtime: &'a Runtime<T>,
+        factory: &impl ExpressionFactory<T>,
+        allocator: &impl HeapAllocator<T>,
+    ) -> Result<StreamSubscription<'a, T, impl Stream<Item = T>>, String>
+    where
+        T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
+        T::Builtin: From<Stdlib> + From<GraphQlStdlib>,
+    {
+        let query = reflex_graphql::parse(
+            query,
+            variables,
+            factory,
+            allocator,
+            &NoopGraphQlQueryTransform {},
+        )?;
+        let (program, entry_point) = compile_graphql_query(
+            query,
+            graph_root.clone(),
+            &CompilerOptions::default(),
+            factory,
+            allocator,
+        )?;
+        runtime.subscribe(program, entry_point).await
+    }
+
+    #[tokio::test]
+    async fn simultaneous_subscriptions() {
+        let factory = SharedTermFactory::<ServerBuiltins>::default();
+        let allocator = DefaultAllocator::default();
+        let signal_handler = noop_signal_handler(&factory, &allocator);
+        let runtime = Runtime::new(
+            RuntimeState::default(),
+            &signal_handler,
+            RuntimeCache::default(),
+            &factory,
+            &allocator,
+            InterpreterOptions::default(),
+            CompilerOptions::default(),
+        );
+
+        let graph_root = compile_js_graph_root(
+            "
+            ({
+                query: {
+                    foo: {
+                        value: true,
+                    },
+                    bar: {
+                        value: false
+                    },
+                },
+                mutation: null,
+                subscription: null,
+            })
+        ",
+            &factory,
+            &allocator,
+        )
+        .unwrap();
+
+        let mut subscription1 = subscribe_query(
+            "{ foo { value } }",
+            empty(),
+            &graph_root,
+            &runtime,
+            &factory,
+            &allocator,
+        )
+        .await
+        .unwrap()
+        .into_stream();
+
+        assert_eq!(
+            subscription1.next().await,
+            Some(create_struct(
+                [(
+                    String::from("foo"),
+                    create_struct(
+                        [(
+                            String::from("value"),
+                            factory.create_value_term(ValueTerm::Boolean(true)),
+                        )],
+                        &factory,
+                        &allocator
+                    ),
+                )],
+                &factory,
+                &allocator
+            ))
+        );
+
+        let mut subscription2 = subscribe_query(
+            "{ bar { value } }",
+            empty(),
+            &graph_root,
+            &runtime,
+            &factory,
+            &allocator,
+        )
+        .await
+        .unwrap()
+        .into_stream();
+
+        assert_eq!(
+            subscription2.next().await,
+            Some(create_struct(
+                [(
+                    String::from("bar"),
+                    create_struct(
+                        [(
+                            String::from("value"),
+                            factory.create_value_term(ValueTerm::Boolean(false)),
+                        )],
+                        &factory,
+                        &allocator
+                    ),
+                )],
+                &factory,
+                &allocator
+            ))
+        );
+    }
+}

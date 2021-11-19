@@ -117,6 +117,7 @@ pub enum Instruction {
     },
     PushFunction {
         target: InstructionPointer,
+        hash: HashId,
     },
     PushBuiltin {
         target: Uuid,
@@ -141,7 +142,8 @@ pub enum Instruction {
         target: InstructionPointer,
     },
     Call {
-        target: InstructionPointer,
+        target_address: InstructionPointer,
+        target_hash: HashId,
         num_args: usize,
     },
     Apply {
@@ -214,9 +216,10 @@ impl std::hash::Hash for Instruction {
                 state.write_u8(8);
                 value.hash(state);
             }
-            Self::PushFunction { target } => {
+            Self::PushFunction { target, hash } => {
                 state.write_u8(9);
                 target.hash(state);
+                hash.hash(state)
             }
             Self::PushBuiltin { target } => {
                 state.write_u8(10);
@@ -250,9 +253,14 @@ impl std::hash::Hash for Instruction {
                 state.write_u8(16);
                 target.hash(state);
             }
-            Self::Call { target, num_args } => {
+            Self::Call {
+                target_address,
+                target_hash,
+                num_args,
+            } => {
                 state.write_u8(17);
-                target.hash(state);
+                target_address.hash(state);
+                target_hash.hash(state);
                 num_args.hash(state);
             }
             Self::Apply { num_args } => {
@@ -411,6 +419,17 @@ impl Compiler {
             .insert(id, (chunk_address, instructions));
         chunk_address
     }
+    pub(crate) fn retrieve_compiled_chunk(&self, address: InstructionPointer) -> Option<&Program> {
+        self.compiled_chunks
+            .iter()
+            .find_map(|(_, (chunk_address, chunk))| {
+                if *chunk_address == address {
+                    Some(chunk)
+                } else {
+                    None
+                }
+            })
+    }
     pub fn compile<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>>(
         mut self,
         expression: &T,
@@ -456,7 +475,7 @@ impl Compiler {
     }
     pub fn intern(&mut self, target: &Program) -> Result<Program, String> {
         match target.instructions().first() {
-            Some(Instruction::Function { .. }) => {
+            Some(Instruction::Function { hash, .. }) => {
                 extract_compiled_chunk(target.instructions(), target, &mut self.compiled_chunks)
                     .map(|chunk| {
                         let chunk_hash = hash_object(&chunk);
@@ -465,6 +484,7 @@ impl Compiler {
                             .insert(chunk_hash, (chunk_index, chunk));
                         Program::new(once(Instruction::PushFunction {
                             target: chunk_index,
+                            hash: *hash,
                         }))
                     })
             }
@@ -512,15 +532,19 @@ fn link_compiled_chunks(
                 .chain(compiled_instructions)
                 .map(|instruction| {
                     let result = match instruction {
-                        // FIXME: Differentiate between addresses of unlinked functions vs previously-linked prelude functions
-                        Instruction::PushFunction { target } => match address_mappings.get(&target)
-                        {
-                            Some(address) => Ok(Instruction::PushFunction { target: *address }),
-                            None if target.get() < prelude_length => {
-                                Ok(Instruction::PushFunction { target })
+                        // FIXME: Use hash to discriminate between addresses of unlinked functions vs previously-linked prelude functions
+                        Instruction::PushFunction { target, hash } => {
+                            match address_mappings.get(&target) {
+                                Some(address) => Ok(Instruction::PushFunction {
+                                    target: *address,
+                                    hash,
+                                }),
+                                None if target.get() < prelude_length => {
+                                    Ok(Instruction::PushFunction { target, hash })
+                                }
+                                _ => Err((instruction, target)),
                             }
-                            _ => Err((instruction, target)),
-                        },
+                        }
                         Instruction::Jump { target } => match address_mappings.get(&target) {
                             Some(address) => Ok(Instruction::Jump { target: *address }),
                             None if target.get() < prelude_length => {
@@ -528,16 +552,26 @@ fn link_compiled_chunks(
                             }
                             _ => Err((instruction, target)),
                         },
-                        Instruction::Call { target, num_args } => {
-                            match address_mappings.get(&target) {
+                        Instruction::Call {
+                            target_address,
+                            target_hash,
+                            num_args,
+                        } => {
+                            // TODO: use target hash to discriminate between unlinked chunks and prelude functions
+                            match address_mappings.get(&target_address) {
                                 Some(address) => Ok(Instruction::Call {
-                                    target: *address,
+                                    target_address: *address,
+                                    target_hash,
                                     num_args,
                                 }),
-                                None if target.get() < prelude_length => {
-                                    Ok(Instruction::Call { target, num_args })
+                                None if target_address.get() < prelude_length => {
+                                    Ok(Instruction::Call {
+                                        target_address,
+                                        target_hash,
+                                        num_args,
+                                    })
                                 }
-                                _ => Err((instruction, target)),
+                                _ => Err((instruction, target_address)),
                             }
                         }
                         _ => Ok(instruction),
@@ -564,27 +598,32 @@ fn extract_compiled_chunk<'a>(
     let mut chunk = Program::new(empty());
     while let Some(instruction) = instructions.next() {
         match instruction {
-            Instruction::Call { target, num_args } => {
-                let remapped_target = remap_compiled_address(*target, program, compiled_chunks)?;
+            &Instruction::Call {
+                target_address: target,
+                target_hash: hash,
+                num_args,
+            } => {
+                let remapped_target = remap_compiled_address(target, program, compiled_chunks)?;
                 chunk.push(Instruction::Call {
-                    target: remapped_target,
-                    num_args: *num_args,
+                    target_address: remapped_target,
+                    target_hash: hash,
+                    num_args,
                 })
             }
-            Instruction::Jump { target } => {
-                let remapped_target = remap_compiled_address(*target, program, compiled_chunks)?;
+            &Instruction::Jump { target } => {
+                let remapped_target = remap_compiled_address(target, program, compiled_chunks)?;
                 chunk.push(Instruction::Jump {
                     target: remapped_target,
                 })
             }
-            Instruction::PushFunction { target } => {
-                let remapped_target = remap_compiled_address(*target, program, compiled_chunks)?;
+            &Instruction::PushFunction { target, hash } => {
+                let remapped_target = remap_compiled_address(target, program, compiled_chunks)?;
                 chunk.push(Instruction::PushFunction {
                     target: remapped_target,
+                    hash,
                 })
             }
-            // TODO: allow extracting functions containing early exit
-            Instruction::Return => {
+            &Instruction::Return => {
                 chunk.push(instruction.clone());
                 break;
             }

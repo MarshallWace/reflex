@@ -12,6 +12,7 @@ use reflex::{
         InstructionPointer, Program,
     },
     core::{Applicable, Expression, ExpressionFactory, HeapAllocator, Reducible, Rewritable},
+    hash::HashId,
 };
 
 pub fn compile_graphql_query<
@@ -32,28 +33,47 @@ pub fn compile_graphql_query<
         allocator,
     )?;
     let entry_point = InstructionPointer::new(program.len());
+    let graph_factory_hash = get_compiled_function_hash(graph_factory_address, &program)?;
+    let query_factory_hash = get_compiled_function_hash(query_factory_address, &program)?;
     program.extend(create_query_entry_point_function(
-        graph_factory_address,
-        query_factory_address,
+        (graph_factory_address, graph_factory_hash),
+        (query_factory_address, query_factory_hash),
     ));
     Ok((program, entry_point))
 }
 
 fn create_query_entry_point_function(
-    graph_factory_address: InstructionPointer,
-    query_factory_address: InstructionPointer,
+    graph_factory: (InstructionPointer, HashId),
+    query_factory: (InstructionPointer, HashId),
 ) -> Program {
+    let (graph_factory_address, graph_factory_hash) = graph_factory;
+    let (query_factory_address, query_factory_hash) = query_factory;
     create_main_function([
         Instruction::Call {
-            target: graph_factory_address,
+            target_address: graph_factory_address,
+            target_hash: graph_factory_hash,
             num_args: 0,
         },
         Instruction::Call {
-            target: query_factory_address,
+            target_address: query_factory_address,
+            target_hash: query_factory_hash,
             num_args: 0,
         },
         Instruction::Apply { num_args: 1 },
         Instruction::Evaluate,
         Instruction::Return,
     ])
+}
+
+fn get_compiled_function_hash(
+    address: InstructionPointer,
+    program: &Program,
+) -> Result<HashId, String> {
+    program
+        .get(address)
+        .and_then(|instruction| match instruction {
+            &Instruction::Function { hash, .. } => Some(hash),
+            _ => None,
+        })
+        .ok_or_else(|| format!("Target address is not a function: {:x}", address))
 }

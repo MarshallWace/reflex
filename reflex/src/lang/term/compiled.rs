@@ -99,6 +99,7 @@ impl<T: Expression + Compile<T>> Compile<T> for CompiledFunctionTerm {
     ) -> Result<Program, String> {
         Ok(Program::new(once(Instruction::PushFunction {
             target: self.address,
+            hash: self.hash(),
         })))
     }
 }

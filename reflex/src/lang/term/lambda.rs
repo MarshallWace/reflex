@@ -284,6 +284,7 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Compile<T>> Compile<T> for L
         };
         Ok(Program::new(once(Instruction::PushFunction {
             target: target_address,
+            hash,
         })))
     }
 }

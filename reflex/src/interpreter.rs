@@ -38,6 +38,7 @@ enum ExecutionResult<T: Expression> {
     Jump(InstructionPointer),
     CallFunction {
         target_address: InstructionPointer,
+        target_hash: HashId,
         num_args: usize,
         caller_address: InstructionPointer,
         resume_address: InstructionPointer,
@@ -337,20 +338,20 @@ fn evaluate_program_loop<T: Expression + Rewritable<T> + Reducible<T> + Applicab
                     ExecutionResult::CallFunction {
                         num_args,
                         target_address,
+                        target_hash,
                         caller_address,
                         resume_address,
                     } => {
-                        if let Some((target_hash, num_required_args, num_optional_args)) =
-                            call_stack
-                                .lookup_instruction(target_address)
-                                .and_then(|target| match target {
-                                    &Instruction::Function {
-                                        hash,
-                                        required_args,
-                                        optional_args,
-                                    } => Some((hash, required_args, optional_args)),
-                                    _ => None,
-                                })
+                        if let Some((num_required_args, num_optional_args)) = call_stack
+                            .lookup_instruction(target_address)
+                            .and_then(|target| match target {
+                                &Instruction::Function {
+                                    required_args,
+                                    optional_args,
+                                    ..
+                                } => Some((required_args, optional_args)),
+                                _ => None,
+                            })
                         {
                             let hash =
                                 generate_function_call_hash(&target_hash, stack.slice(num_args));
@@ -529,7 +530,7 @@ fn evaluate_instruction<T: Expression + Rewritable<T> + Reducible<T> + Applicabl
             stack.push(factory.create_value_term(ValueTerm::Hash(*value)));
             Ok((ExecutionResult::Advance, DependencyList::empty()))
         }
-        Instruction::PushFunction { target } => {
+        Instruction::PushFunction { target, .. } => {
             trace!(instruction = "Instruction::PushFunction");
             let target_address = *target;
             match call_stack.lookup_instruction(target_address) {
@@ -634,15 +635,21 @@ fn evaluate_instruction<T: Expression + Rewritable<T> + Reducible<T> + Applicabl
                 DependencyList::empty(),
             ))
         }
-        Instruction::Call { target, num_args } => {
+        Instruction::Call {
+            target_address,
+            target_hash,
+            num_args,
+        } => {
             trace!(instruction = "Instruction::Call");
-            let target_address = *target;
+            let target_address = *target_address;
+            let target_hash = *target_hash;
             let num_args = *num_args;
             let caller_address = call_stack.program_counter();
             let resume_address = call_stack.next_program_counter();
             Ok((
                 ExecutionResult::CallFunction {
                     target_address,
+                    target_hash,
                     num_args,
                     caller_address,
                     resume_address,
@@ -670,6 +677,7 @@ fn evaluate_instruction<T: Expression + Rewritable<T> + Reducible<T> + Applicabl
                         }),
                     );
                     let target_address = compiled_target.address();
+                    let target_hash = compiled_target.hash();
                     let caller_address = call_stack.program_counter();
                     let resume_address = call_stack.next_program_counter();
                     let num_combined_args = num_args + partial_args.len();
@@ -679,6 +687,7 @@ fn evaluate_instruction<T: Expression + Rewritable<T> + Reducible<T> + Applicabl
                     Ok((
                         ExecutionResult::CallFunction {
                             target_address,
+                            target_hash,
                             num_args: num_combined_args,
                             caller_address,
                             resume_address,
@@ -930,6 +939,7 @@ fn evaluate_expression<T: Expression + Applicable<T>>(
                 Ok((
                     ExecutionResult::CallFunction {
                         target_address,
+                        target_hash: hash,
                         num_args,
                         caller_address,
                         resume_address,
