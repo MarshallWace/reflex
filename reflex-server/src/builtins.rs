@@ -82,6 +82,16 @@ impl Builtin for ServerBuiltins {
             ServerBuiltins::GraphQl(term) => term.apply(args, factory, allocator, cache),
         }
     }
+    fn should_parallelize<T: Expression<Builtin = Self> + Applicable<T>>(
+        &self,
+        args: &[T],
+    ) -> bool {
+        match self {
+            ServerBuiltins::Stdlib(term) => term.should_parallelize(args),
+            ServerBuiltins::Js(term) => term.should_parallelize(args),
+            ServerBuiltins::GraphQl(term) => term.should_parallelize(args),
+        }
+    }
 }
 impl std::fmt::Display for ServerBuiltins {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

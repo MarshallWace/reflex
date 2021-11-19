@@ -535,6 +535,9 @@ impl<TBuiltin: Builtin> Applicable<Self> for CachedSharedTerm<TBuiltin> {
     ) -> Result<Self, String> {
         self.inner_term().apply(args, factory, allocator, cache)
     }
+    fn should_parallelize(&self, args: &[Self]) -> bool {
+        self.inner_expression().should_parallelize(args)
+    }
 }
 impl<TBuiltin: Builtin> Compile<Self> for CachedSharedTerm<TBuiltin> {
     fn compile(

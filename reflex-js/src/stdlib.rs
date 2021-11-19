@@ -231,6 +231,41 @@ impl Stdlib {
             Self::Variable => Applicable::<T>::apply(&Variable {}, args, factory, allocator, cache),
         }
     }
+    pub fn should_parallelize<T: Expression + Applicable<T>>(&self, args: &[T]) -> bool
+    where
+        T::Builtin: From<Self> + From<BuiltinStdlib>,
+    {
+        match self {
+            Self::Construct => Applicable::<T>::should_parallelize(&Construct {}, args),
+            Self::Dispatch => Applicable::<T>::should_parallelize(&Dispatch {}, args),
+            Self::EncodeUriComponent => {
+                Applicable::<T>::should_parallelize(&EncodeUriComponent {}, args)
+            }
+            Self::Float => Applicable::<T>::should_parallelize(&Float {}, args),
+            Self::FormatErrorMessage => {
+                Applicable::<T>::should_parallelize(&FormatErrorMessage {}, args)
+            }
+            Self::FromEntries => Applicable::<T>::should_parallelize(&FromEntries {}, args),
+            Self::Getter => Applicable::<T>::should_parallelize(&Getter {}, args),
+            Self::Hash => Applicable::<T>::should_parallelize(&Hash {}, args),
+            Self::Int => Applicable::<T>::should_parallelize(&Int {}, args),
+            Self::JsonParse => Applicable::<T>::should_parallelize(&JsonParse {}, args),
+            Self::JsonStringify => Applicable::<T>::should_parallelize(&JsonStringify {}, args),
+            Self::Log => Applicable::<T>::should_parallelize(&Log {}, args),
+            Self::LogArgs => Applicable::<T>::should_parallelize(&LogArgs {}, args),
+            Self::MapConstructor => Applicable::<T>::should_parallelize(&MapConstructor {}, args),
+            Self::Scan => Applicable::<T>::should_parallelize(&Scan {}, args),
+            Self::SetConstructor => Applicable::<T>::should_parallelize(&SetConstructor {}, args),
+            Self::Setter => Applicable::<T>::should_parallelize(&Setter {}, args),
+            Self::StructTypeFactory => {
+                Applicable::<T>::should_parallelize(&StructTypeFactory {}, args)
+            }
+            Self::Throw => Applicable::<T>::should_parallelize(&Throw {}, args),
+            Self::ToRequest => Applicable::<T>::should_parallelize(&ToRequest {}, args),
+            Self::ToString => Applicable::<T>::should_parallelize(&ToString {}, args),
+            Self::Variable => Applicable::<T>::should_parallelize(&Variable {}, args),
+        }
+    }
 }
 impl std::fmt::Display for Stdlib {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

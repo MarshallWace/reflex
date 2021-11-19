@@ -86,6 +86,20 @@ impl Stdlib {
             }
         }
     }
+    pub fn should_parallelize<T: Expression + Applicable<T>>(&self, args: &[T]) -> bool
+    where
+        T::Builtin: From<Self> + From<BuiltinStdlib>,
+    {
+        match self {
+            Self::CollectQueryListItems => {
+                Applicable::<T>::should_parallelize(&CollectQueryListItems {}, args)
+            }
+            Self::DynamicQueryBranch => {
+                Applicable::<T>::should_parallelize(&DynamicQueryBranch {}, args)
+            }
+            Self::FlattenDeep => Applicable::<T>::should_parallelize(&FlattenDeep {}, args),
+        }
+    }
 }
 impl std::fmt::Display for Stdlib {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

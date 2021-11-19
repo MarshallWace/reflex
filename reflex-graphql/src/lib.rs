@@ -705,6 +705,15 @@ mod tests {
                 GraphQlTestBuiltins::GraphQl(term) => term.apply(args, factory, allocator, cache),
             }
         }
+        fn should_parallelize<T: Expression<Builtin = Self> + Applicable<T>>(
+            &self,
+            args: &[T],
+        ) -> bool {
+            match self {
+                GraphQlTestBuiltins::Stdlib(term) => term.should_parallelize(args),
+                GraphQlTestBuiltins::GraphQl(term) => term.should_parallelize(args),
+            }
+        }
     }
     impl std::fmt::Display for GraphQlTestBuiltins {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

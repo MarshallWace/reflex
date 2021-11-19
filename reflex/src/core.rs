@@ -55,6 +55,8 @@ pub trait Builtin:
         allocator: &impl HeapAllocator<T>,
         cache: &mut impl EvaluationCache<T>,
     ) -> Result<T, String>;
+    fn should_parallelize<T: Expression<Builtin = Self> + Applicable<T>>(&self, args: &[T])
+        -> bool;
 }
 
 pub trait Uid {

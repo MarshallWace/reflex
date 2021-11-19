@@ -390,6 +390,16 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>> 
             _ => Err(format!("Invalid function application target: {}", self)),
         }
     }
+    fn should_parallelize(&self, args: &[T]) -> bool {
+        match self {
+            Self::Lambda(term) => term.should_parallelize(args),
+            Self::PartialApplication(term) => term.should_parallelize(args),
+            Self::Builtin(term) => term.should_parallelize(args),
+            Self::CompiledFunction(term) => term.should_parallelize(args),
+            Self::Constructor(term) => term.should_parallelize(args),
+            _ => false,
+        }
+    }
 }
 impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>> Compile<T>
     for Term<T>
@@ -625,6 +635,9 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>> 
         cache: &mut impl EvaluationCache<T>,
     ) -> Result<T, String> {
         self.value.apply(args, factory, allocator, cache)
+    }
+    fn should_parallelize(&self, args: &[T]) -> bool {
+        self.value.should_parallelize(args)
     }
 }
 impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>> Compile<T>

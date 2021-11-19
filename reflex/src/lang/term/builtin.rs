@@ -89,6 +89,9 @@ impl<T: Expression + Applicable<T>> Applicable<T> for BuiltinTerm<T> {
         Builtin::apply(&self.target, args, factory, allocator, cache)
             .map_err(|err| format!("{}: {}", self, err))
     }
+    fn should_parallelize(&self, args: &[T]) -> bool {
+        self.target.should_parallelize(args)
+    }
 }
 impl<T: Expression + Applicable<T> + Compile<T>> Compile<T> for BuiltinTerm<T> {
     fn compile(

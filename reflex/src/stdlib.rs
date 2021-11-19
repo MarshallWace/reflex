@@ -558,6 +558,88 @@ impl Stdlib {
             Self::Values => Applicable::<T>::apply(&Values {}, args, factory, allocator, cache),
         }
     }
+    pub fn should_parallelize<T: Expression + Applicable<T>>(&self, args: &[T]) -> bool
+    where
+        T::Builtin: From<Self>,
+    {
+        match self {
+            Self::Abs => Applicable::<T>::should_parallelize(&Abs {}, args),
+            Self::Add => Applicable::<T>::should_parallelize(&Add {}, args),
+            Self::And => Applicable::<T>::should_parallelize(&And {}, args),
+            Self::Append => Applicable::<T>::should_parallelize(&Append {}, args),
+            Self::Apply => Applicable::<T>::should_parallelize(&Apply {}, args),
+            Self::Car => Applicable::<T>::should_parallelize(&Car {}, args),
+            Self::Cdr => Applicable::<T>::should_parallelize(&Cdr {}, args),
+            Self::Ceil => Applicable::<T>::should_parallelize(&Ceil {}, args),
+            Self::Collect => Applicable::<T>::should_parallelize(&Collect {}, args),
+            Self::CollectFilterResults => {
+                Applicable::<T>::should_parallelize(&CollectFilterResults {}, args)
+            }
+            Self::CollectHashMap => Applicable::<T>::should_parallelize(&CollectHashMap {}, args),
+            Self::CollectHashSet => Applicable::<T>::should_parallelize(&CollectHashSet {}, args),
+            Self::CollectStruct => Applicable::<T>::should_parallelize(&CollectStruct {}, args),
+            Self::CollectTuple => Applicable::<T>::should_parallelize(&CollectTuple {}, args),
+            Self::CollectVector => Applicable::<T>::should_parallelize(&CollectVector {}, args),
+            Self::Concat => Applicable::<T>::should_parallelize(&Concat {}, args),
+            Self::Cons => Applicable::<T>::should_parallelize(&Cons {}, args),
+            Self::ConstructHashMap => {
+                Applicable::<T>::should_parallelize(&ConstructHashMap {}, args)
+            }
+            Self::ConstructHashSet => {
+                Applicable::<T>::should_parallelize(&ConstructHashSet {}, args)
+            }
+            Self::ConstructStruct => Applicable::<T>::should_parallelize(&ConstructStruct {}, args),
+            Self::ConstructTuple => Applicable::<T>::should_parallelize(&ConstructTuple {}, args),
+            Self::ConstructVector => Applicable::<T>::should_parallelize(&ConstructVector {}, args),
+            Self::Contains => Applicable::<T>::should_parallelize(&Contains {}, args),
+            Self::Divide => Applicable::<T>::should_parallelize(&Divide {}, args),
+            Self::Effect => Applicable::<T>::should_parallelize(&Effect {}, args),
+            Self::EndsWith => Applicable::<T>::should_parallelize(&EndsWith {}, args),
+            Self::Entries => Applicable::<T>::should_parallelize(&Entries {}, args),
+            Self::Eq => Applicable::<T>::should_parallelize(&Eq {}, args),
+            Self::Equal => Applicable::<T>::should_parallelize(&Equal {}, args),
+            Self::Filter => Applicable::<T>::should_parallelize(&Filter {}, args),
+            Self::Floor => Applicable::<T>::should_parallelize(&Floor {}, args),
+            Self::Get => Applicable::<T>::should_parallelize(&Get {}, args),
+            Self::Gt => Applicable::<T>::should_parallelize(&Gt {}, args),
+            Self::Gte => Applicable::<T>::should_parallelize(&Gte {}, args),
+            Self::If => Applicable::<T>::should_parallelize(&If {}, args),
+            Self::IfError => Applicable::<T>::should_parallelize(&IfError {}, args),
+            Self::IfPending => Applicable::<T>::should_parallelize(&IfPending {}, args),
+            Self::Insert => Applicable::<T>::should_parallelize(&Insert {}, args),
+            Self::Keys => Applicable::<T>::should_parallelize(&Keys {}, args),
+            Self::Lt => Applicable::<T>::should_parallelize(&Lt {}, args),
+            Self::Lte => Applicable::<T>::should_parallelize(&Lte {}, args),
+            Self::Map => Applicable::<T>::should_parallelize(&Map {}, args),
+            Self::Match => Applicable::<T>::should_parallelize(&Match {}, args),
+            Self::Max => Applicable::<T>::should_parallelize(&Max {}, args),
+            Self::Merge => Applicable::<T>::should_parallelize(&Merge {}, args),
+            Self::Min => Applicable::<T>::should_parallelize(&Min {}, args),
+            Self::Multiply => Applicable::<T>::should_parallelize(&Multiply {}, args),
+            Self::Not => Applicable::<T>::should_parallelize(&Not {}, args),
+            Self::Or => Applicable::<T>::should_parallelize(&Or {}, args),
+            Self::Pow => Applicable::<T>::should_parallelize(&Pow {}, args),
+            Self::Push => Applicable::<T>::should_parallelize(&Push {}, args),
+            Self::PushFront => Applicable::<T>::should_parallelize(&PushFront {}, args),
+            Self::Reduce => Applicable::<T>::should_parallelize(&Reduce {}, args),
+            Self::Remainder => Applicable::<T>::should_parallelize(&Remainder {}, args),
+            Self::Replace => Applicable::<T>::should_parallelize(&Replace {}, args),
+            Self::ResolveDeep => Applicable::<T>::should_parallelize(&ResolveDeep {}, args),
+            Self::ResolveHashMap => Applicable::<T>::should_parallelize(&ResolveHashMap {}, args),
+            Self::ResolveHashSet => Applicable::<T>::should_parallelize(&ResolveHashSet {}, args),
+            Self::ResolveShallow => Applicable::<T>::should_parallelize(&ResolveShallow {}, args),
+            Self::ResolveStruct => Applicable::<T>::should_parallelize(&ResolveStruct {}, args),
+            Self::ResolveTuple => Applicable::<T>::should_parallelize(&ResolveTuple {}, args),
+            Self::ResolveVector => Applicable::<T>::should_parallelize(&ResolveVector {}, args),
+            Self::Round => Applicable::<T>::should_parallelize(&Round {}, args),
+            Self::Sequence => Applicable::<T>::should_parallelize(&Sequence {}, args),
+            Self::Slice => Applicable::<T>::should_parallelize(&Slice {}, args),
+            Self::Split => Applicable::<T>::should_parallelize(&Split {}, args),
+            Self::StartsWith => Applicable::<T>::should_parallelize(&StartsWith {}, args),
+            Self::Subtract => Applicable::<T>::should_parallelize(&Subtract {}, args),
+            Self::Values => Applicable::<T>::should_parallelize(&Values {}, args),
+        }
+    }
 }
 
 impl Builtin for Stdlib {
@@ -572,6 +654,13 @@ impl Builtin for Stdlib {
         cache: &mut impl EvaluationCache<T>,
     ) -> Result<T, String> {
         self.apply(args, factory, allocator, cache)
+    }
+
+    fn should_parallelize<T: Expression<Builtin = Self> + Applicable<T>>(
+        &self,
+        args: &[T],
+    ) -> bool {
+        self.should_parallelize(args)
     }
 }
 impl std::fmt::Display for Stdlib {
