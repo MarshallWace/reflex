@@ -290,7 +290,7 @@ impl<T: Expression + 'static, S: Subscriber> Layer<S> for RuntimeStatisticsLayer
     }
 }
 
-pub async fn cli<T, TLoader>(
+pub async fn cli<'de, T, TLoader>(
     options: ExecuteQueryCliOptions,
     env: Option<impl IntoIterator<Item = (String, String)>>,
     signal_handler: impl SignalHandler<T>,
@@ -299,7 +299,13 @@ pub async fn cli<T, TLoader>(
     allocator: &impl AsyncHeapAllocator<T>,
 ) -> Result<RuntimeTraceStatistics<T>>
 where
-    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
+    T: AsyncExpression
+        + Rewritable<T>
+        + Reducible<T>
+        + Applicable<T>
+        + Compile<T>
+        + serde::Serialize
+        + serde::Deserialize<'de>,
     T::String: Send + Sync,
     T::Builtin: From<Stdlib> + From<JsStdlib> + From<GraphQlStdlib>,
     TLoader: Fn(&str, &Path) -> Option<Result<T, String>> + 'static,

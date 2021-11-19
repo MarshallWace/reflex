@@ -54,7 +54,7 @@ pub struct ExecuteQueryCliOptions {
     pub debug_stack: bool,
 }
 
-pub async fn cli<T, TLoader>(
+pub async fn cli<'de, T, TLoader>(
     options: ExecuteQueryCliOptions,
     env: Option<impl IntoIterator<Item = (String, String)>>,
     signal_handler: impl SignalHandler<T>,
@@ -63,7 +63,13 @@ pub async fn cli<T, TLoader>(
     allocator: &impl AsyncHeapAllocator<T>,
 ) -> Result<T>
 where
-    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
+    T: AsyncExpression
+        + Rewritable<T>
+        + Reducible<T>
+        + Applicable<T>
+        + Compile<T>
+        + serde::Serialize
+        + serde::Deserialize<'de>,
     T::String: Send + Sync,
     T::Builtin: From<Stdlib> + From<JsStdlib> + From<GraphQlStdlib>,
     TLoader: Fn(&str, &Path) -> Option<Result<T, String>> + 'static,
@@ -107,7 +113,7 @@ where
     )
     .map_err(|err| anyhow!("{}", err))
     .with_context(|| format!("Failed to compile GraphQL query"))?;
-    let signal_handler = create_signal_handler(signal_handler, &options, factory, allocator)?;
+    let signal_handler = create_signal_handler(signal_handler, &options)?;
     let state = RuntimeState::default();
     let cache = RuntimeCache::default();
     let runtime = Runtime::new(
@@ -136,12 +142,17 @@ where
 }
 
 fn create_signal_handler<
-    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
+    'de,
+    T: AsyncExpression
+        + Rewritable<T>
+        + Reducible<T>
+        + Applicable<T>
+        + Compile<T>
+        + serde::Serialize
+        + serde::Deserialize<'de>,
 >(
     signal_handler: impl SignalHandler<T>,
     options: &ExecuteQueryCliOptions,
-    factory: &impl AsyncExpressionFactory<T>,
-    allocator: &impl AsyncHeapAllocator<T>,
 ) -> Result<impl SignalHandler<T>>
 where
     T::String: Send + Sync,
@@ -166,11 +177,7 @@ where
                 SignalPlayback::new(options.captured_signals.iter().cloned(), path.as_path())
                     .map_err(|err| anyhow!("{}", err))
                     .with_context(|| format!("Failed to create signal playback handler"))?;
-            EitherHandler::Left(signal_playback.playback_signal_handler(
-                signal_handler,
-                factory,
-                allocator,
-            ))
+            EitherHandler::Left(signal_playback.wrap_signal_handler(signal_handler))
         } else {
             EitherHandler::Right(signal_handler)
         };
@@ -188,7 +195,7 @@ where
                 SignalRecorder::new(options.captured_signals.iter().cloned(), path.as_path())
                     .map_err(|err| anyhow!("{}", err))
                     .with_context(|| format!("Failed to create signal recorder handler"))?;
-            EitherHandler::Left(signal_recorder.record_signal_handler(signal_handler, factory))
+            EitherHandler::Left(signal_recorder.wrap_signal_handler(signal_handler))
         } else {
             EitherHandler::Right(signal_handler)
         };

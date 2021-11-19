@@ -87,6 +87,7 @@ where
 
 pub type SubscriptionId = usize;
 
+#[derive(Debug)]
 pub struct StateUpdate<T: Expression> {
     state_token: StateToken,
     update: StateUpdateType<T>,
@@ -117,6 +118,14 @@ impl<T: Expression> StateUpdate<T> {
         Self {
             state_token,
             update: StateUpdateType::Patch(Box::new(updater)),
+        }
+    }
+}
+impl<T: Expression> std::fmt::Debug for StateUpdateType<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Value(value) => f.debug_tuple("Value").field(value).finish(),
+            Self::Patch(_) => f.debug_tuple("Patch").field(&"<function>").finish(),
         }
     }
 }
