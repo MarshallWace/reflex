@@ -3,7 +3,7 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use std::path::PathBuf;
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use clap::Parser;
 use reflex::{
     allocator::DefaultAllocator,
@@ -81,12 +81,13 @@ async fn main() -> Result<()> {
         &allocator,
     )
     .await?;
-    if let Some(signal) = factory.match_signal_term(&result) {
-        eprintln!("{}", format_signal_result(signal, &factory))
+    let output = if let Some(signal) = factory.match_signal_term(&result) {
+        Err(anyhow!("{}", format_signal_result(signal, &factory)))
     } else if let Ok(value) = result.to_json() {
-        println!("{}", value)
+        Ok(format!("{}", value))
     } else {
-        eprintln!("Invalid query result: {}", result)
-    }
+        Err(anyhow!("Invalid query result: {}", result))
+    }?;
+    println!("{}", output);
     Ok(())
 }
