@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use std::path::PathBuf;
+use std::{iter::empty, path::PathBuf};
 
 use anyhow::Result;
 use clap::Parser;
@@ -56,7 +56,7 @@ pub async fn main() -> Result<()> {
     cli(
         Args::parse().into(),
         builtin_signal_handler(&factory, &allocator),
-        Some(default_js_loaders(&factory, &allocator)),
+        Some(default_js_loaders(empty(), &factory, &allocator)),
         &factory,
         &allocator,
         Some(CompilerOptions::unoptimized()),

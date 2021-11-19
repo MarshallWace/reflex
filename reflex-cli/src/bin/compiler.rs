@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+use std::iter::empty;
 use std::path::PathBuf;
 
 use anyhow::Result;
@@ -60,7 +61,7 @@ fn main() -> Result<()> {
     let stdout = std::io::stdout();
     cli(
         Args::parse().into(),
-        Some(default_js_loaders(&factory, &allocator)),
+        Some(default_js_loaders(empty(), &factory, &allocator)),
         &factory,
         &allocator,
         stdout.lock(),

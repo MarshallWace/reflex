@@ -12,13 +12,17 @@ use reflex::{
 };
 use reflex_graphql::graphql_loader;
 use reflex_js::{
-    compose_module_loaders, create_js_env, create_module_loader, imports::builtin_imports_loader,
-    parse_module, stdlib::Stdlib as JsStdlib,
+    builtin_imports, compose_module_loaders, create_js_env, create_module_loader, parse_module,
+    static_module_loader, stdlib::Stdlib as JsStdlib,
 };
 
 use crate::{compile_graph_root, SyntaxParser};
 
-pub fn default_js_loaders<T: Expression + 'static>(
+pub fn default_js_loaders<'a, T: Expression + 'static>(
+    imports: impl IntoIterator<
+        Item = (&'static str, T),
+        IntoIter = impl Iterator<Item = (&'static str, T)> + 'static,
+    >,
     factory: &(impl ExpressionFactory<T> + Clone + 'static),
     allocator: &(impl HeapAllocator<T> + Clone + 'static),
 ) -> impl Fn(&str, &Path) -> Option<Result<T, String>> + 'static
@@ -27,7 +31,11 @@ where
     T::Builtin: From<Stdlib> + From<JsStdlib>,
 {
     compose_module_loaders(
-        reflex_js::imports::builtin_imports_loader(factory, allocator),
+        static_module_loader(
+            imports
+                .into_iter()
+                .chain(builtin_imports(factory, allocator)),
+        ),
         graphql_loader(factory, allocator),
     )
 }
@@ -56,7 +64,7 @@ where
     let env = create_js_env(factory, allocator);
     let loader = create_module_loader(
         env.clone(),
-        Some(builtin_imports_loader(factory, allocator)),
+        Some(static_module_loader(builtin_imports(factory, allocator))),
         factory,
         allocator,
     );

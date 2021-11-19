@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use std::path::PathBuf;
+use std::{iter::empty, path::PathBuf};
 
 use anyhow::Result;
 use clap::Parser;
@@ -70,7 +70,7 @@ async fn main() -> Result<()> {
     let factory = SharedTermFactory::<ServerBuiltins>::default();
     let allocator = DefaultAllocator::default();
     let signal_handler = builtin_signal_handler(&factory, &allocator);
-    let module_loader = Some(default_js_loaders(&factory, &allocator));
+    let module_loader = Some(default_js_loaders(empty(), &factory, &allocator));
     let metrics = cli(
         Args::parse().into(),
         Some(std::env::vars()),
