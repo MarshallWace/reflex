@@ -5,12 +5,14 @@
 use std::convert::TryInto;
 use std::{collections::hash_map::DefaultHasher, hash::Hasher, iter::once};
 
+use rayon::prelude::*;
 use tracing::info_span;
 use tracing::trace;
 
+use cache::MultithreadedCacheEntries;
 pub use cache::{
     CacheEntries, DefaultInterpreterCache, GcMetrics, InterpreterCache, InterpreterCacheEntry,
-    InterpreterCacheKey,
+    InterpreterCacheKey, LocalCacheEntries,
 };
 pub use stack::{CallStack, VariableStack};
 
@@ -84,16 +86,19 @@ impl InterpreterOptions {
     }
 }
 
-pub fn execute<'a, T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + 'a>(
+pub fn execute<
+    'a,
+    T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + 'a + Send + Sync,
+>(
     cache_key: HashId,
     program: &Program,
     entry_point: InstructionPointer,
-    state: &impl DynamicState<T>,
-    factory: &impl ExpressionFactory<T>,
-    allocator: &impl HeapAllocator<T>,
+    state: &(impl DynamicState<T> + Sync),
+    factory: &(impl ExpressionFactory<T> + Sync),
+    allocator: &(impl HeapAllocator<T> + Sync),
     options: &InterpreterOptions,
-    cache: &impl InterpreterCache<T>,
-) -> Result<(EvaluationResult<T>, CacheEntries<T>), String> {
+    cache: &(impl InterpreterCache<T> + Sync),
+) -> Result<(EvaluationResult<T>, LocalCacheEntries<T>), String> {
     match program.get(entry_point) {
         Some(&Instruction::Function { required_args, .. }) if required_args == 0 => Ok(()),
         Some(instruction) => Err(format!(
@@ -107,7 +112,7 @@ pub fn execute<'a, T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> 
     trace!("Starting execution");
     let mut stack = VariableStack::new(options.variable_stack_size);
     let mut call_stack = CallStack::new(program, entry_point, options.call_stack_size);
-    let mut cache_entries = CacheEntries::default();
+    let mut evaluation_cache_entries = MultithreadedCacheEntries::new_top_level();
     let result = evaluate_program_loop(
         state,
         &mut stack,
@@ -115,11 +120,12 @@ pub fn execute<'a, T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> 
         factory,
         allocator,
         cache,
-        &mut cache_entries,
+        &mut evaluation_cache_entries,
         options.debug_instructions,
         options.debug_stack,
     );
     std::mem::drop(execution_span);
+    let mut cache_entries = evaluation_cache_entries.into_thread_local_entries();
     match result {
         Err(error) => Err(error),
         Ok(value) => {
@@ -145,14 +151,17 @@ pub fn execute<'a, T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> 
     }
 }
 
-fn evaluate_program_loop<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T>>(
-    state: &impl DynamicState<T>,
+fn evaluate_program_loop<
+    'a,
+    T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Send + Sync,
+>(
+    state: &(impl DynamicState<T> + Sync),
     stack: &mut VariableStack<T>,
     call_stack: &mut CallStack<T>,
-    factory: &impl ExpressionFactory<T>,
-    allocator: &impl HeapAllocator<T>,
-    cache: &impl InterpreterCache<T>,
-    cache_entries: &mut CacheEntries<T>,
+    factory: &(impl ExpressionFactory<T> + Sync),
+    allocator: &(impl HeapAllocator<T> + Sync),
+    cache: &(impl InterpreterCache<T> + Sync),
+    cache_entries: &mut MultithreadedCacheEntries<'a, T>,
     debug_instructions: bool,
     debug_stack: bool,
 ) -> Result<T, String> {
@@ -209,27 +218,62 @@ fn evaluate_program_loop<T: Expression + Rewritable<T> + Reducible<T> + Applicab
                     }
                     ExecutionResult::ResolveApplicationArgs {
                         target,
-                        args,
                         caller_address,
+                        args,
                         resume_address,
                     } => {
                         let arity = get_function_arity(&target)?;
-                        let results =
-                            fill_resolved_args(&args, &arity, Vec::with_capacity(args.len()));
-                        let next_arg = args.get(results.len()).unwrap().clone();
-                        call_stack
-                            .update_program_counter(call_stack.evaluate_arg_program_counter());
-                        call_stack.enter_application_arg_list(
-                            target,
-                            arity,
-                            caller_address,
-                            resume_address,
-                            args,
-                            results,
-                        );
-                        let expression_hash = next_arg.id();
-                        stack.push(next_arg);
-                        call_stack.enter_expression(expression_hash);
+
+                        if target.should_parallelize(&args) {
+                            let resolved_args = resolve_parallel_args(
+                                state,
+                                call_stack,
+                                arity,
+                                args,
+                                stack,
+                                factory,
+                                allocator,
+                                debug_instructions,
+                                debug_stack,
+                                cache,
+                                cache_entries,
+                            )?;
+                            stack.push(
+                                if let Some(signal) = get_short_circuit_signal(
+                                    &resolved_args,
+                                    &arity,
+                                    factory,
+                                    allocator,
+                                ) {
+                                    signal
+                                } else {
+                                    apply_function(
+                                        &target,
+                                        resolved_args.into_iter(),
+                                        factory,
+                                        allocator,
+                                    )?
+                                },
+                            );
+                            call_stack.update_program_counter(resume_address);
+                        } else {
+                            let results =
+                                fill_resolved_args(&args, &arity, Vec::with_capacity(args.len()));
+                            let next_arg = args.get(results.len()).unwrap().clone();
+                            call_stack
+                                .update_program_counter(call_stack.evaluate_arg_program_counter());
+                            call_stack.enter_application_arg_list(
+                                target,
+                                arity,
+                                caller_address,
+                                resume_address,
+                                args,
+                                results,
+                            );
+                            let expression_hash = next_arg.id();
+                            stack.push(next_arg);
+                            call_stack.enter_expression(expression_hash);
+                        }
                     }
                     ExecutionResult::Advance => {
                         let previous_address = call_stack.program_counter();
@@ -266,6 +310,12 @@ fn evaluate_program_loop<T: Expression + Rewritable<T> + Reducible<T> + Applicab
                                     allocator.create_list(args),
                                 ));
                                 continue;
+                            } else if let Some((dependencies, subexpressions)) =
+                                call_stack.pop_application_arg_stack()
+                            {
+                                call_stack.add_state_dependencies(dependencies);
+                                call_stack.add_subexpressions(subexpressions);
+                                return Ok(stack.pop().unwrap());
                             } else if let Some((
                                 target,
                                 arity,
@@ -455,7 +505,7 @@ fn evaluate_program_loop<T: Expression + Rewritable<T> + Reducible<T> + Applicab
     }
 }
 
-fn evaluate_instruction<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T>>(
+fn evaluate_instruction<'a, T: Expression + Rewritable<T> + Reducible<T> + Applicable<T>>(
     instruction: &Instruction,
     state: &impl DynamicState<T>,
     stack: &mut VariableStack<T>,
@@ -463,7 +513,7 @@ fn evaluate_instruction<T: Expression + Rewritable<T> + Reducible<T> + Applicabl
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
     cache: &impl InterpreterCache<T>,
-    cache_entries: &mut CacheEntries<T>,
+    cache_entries: &mut MultithreadedCacheEntries<'a, T>,
 ) -> Result<(ExecutionResult<T>, DependencyList), String> {
     match instruction {
         Instruction::PushStatic { offset } => {
@@ -894,7 +944,7 @@ fn evaluate_expression<T: Expression + Applicable<T>>(
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
     cache: &impl InterpreterCache<T>,
-    cache_entries: &mut CacheEntries<T>,
+    cache_entries: &mut impl CacheEntries<T>,
 ) -> Result<(ExecutionResult<T>, DependencyList), String> {
     if expression.is_static() {
         stack.push(expression.clone());
@@ -1136,7 +1186,7 @@ fn retrieve_cached_result<T: Expression>(
     hash: &HashId,
     state: &impl DynamicState<T>,
     cache: &impl InterpreterCache<T>,
-    cache_entries: &CacheEntries<T>,
+    cache_entries: &impl CacheEntries<T>,
 ) -> Option<(EvaluationResult<T>, Option<InterpreterCacheEntry<T>>)> {
     cache_entries
         .get(hash)
@@ -1301,6 +1351,178 @@ impl<T: Iterator> ExactSizeIterator for WithExactSizeIterator<T> {
     fn len(&self) -> usize {
         self.remaining
     }
+}
+
+fn resolve_parallel_args<
+    'a,
+    T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Sync + Send,
+>(
+    state: &(impl DynamicState<T> + Sync),
+    call_stack: &mut CallStack<T>,
+    arity: Arity,
+    args: Vec<T>,
+    stack: &mut VariableStack<T>,
+    factory: &(impl ExpressionFactory<T> + Sync),
+    allocator: &(impl HeapAllocator<T> + Sync),
+    debug_instructions: bool,
+    debug_stack: bool,
+    cache: &(impl InterpreterCache<T> + Sync),
+    cache_entries: &mut MultithreadedCacheEntries<'a, T>,
+) -> Result<Vec<T>, String> {
+    {
+        // this inner block does the calculation for a single entry which warms up the cache
+        let first_unresolved_eager_arg = args
+            .iter()
+            .zip(arity.iter())
+            .find(|(arg, arg_type)| match arg_type {
+                ArgType::Lazy => false,
+                ArgType::Strict | ArgType::Eager => !arg.is_static(),
+            })
+            .map(|(arg, _)| arg);
+        if let Some(arg) = first_unresolved_eager_arg {
+            let _ = resolve_arg_within_new_stack(
+                arg.clone(),
+                state,
+                call_stack,
+                stack,
+                factory,
+                allocator,
+                debug_instructions,
+                debug_stack,
+                cache,
+                cache_entries,
+            );
+        } else {
+            return Ok(args);
+        }
+    }
+
+    // TODO: only parallelize argument evaluation for non-static arguments
+    let (results, dependencies, subexpressions, new_cache_entries) = args
+        .into_iter()
+        .zip(arity.iter())
+        .collect::<Vec<_>>()
+        .into_par_iter()
+        // why fold -> reduce? see
+        // https://docs.rs/rayon/1.5.1/rayon/iter/trait.ParallelIterator.html#fold-vs-mapreduce
+        // basically we want to reuse thread local caches as much as possible
+        .fold(
+            || {
+                (
+                    Vec::new(),
+                    DependencyList::empty(),
+                    Vec::new(),
+                    MultithreadedCacheEntries::new_from_threaded(cache_entries),
+                )
+            },
+            |(mut resolved_args, mut dependencies, mut subexpressions, mut cache_entries),
+             (arg, arg_type)| {
+                let already_resolved = match arg_type {
+                    ArgType::Lazy => true,
+                    ArgType::Strict | ArgType::Eager => arg.is_static(),
+                };
+                let (args, dependencies, subexpressions) = if already_resolved {
+                    resolved_args.push(Ok(arg));
+                    (resolved_args, dependencies, subexpressions)
+                } else {
+                    let (result, new_dependencies, mut new_subexpressions) =
+                        resolve_arg_within_new_stack(
+                            arg,
+                            state,
+                            call_stack,
+                            stack,
+                            factory,
+                            allocator,
+                            debug_instructions,
+                            debug_stack,
+                            cache,
+                            &mut cache_entries,
+                        );
+                    subexpressions.append(&mut new_subexpressions);
+                    dependencies.extend(new_dependencies);
+
+                    resolved_args.push(result);
+                    (resolved_args, dependencies, subexpressions)
+                };
+                (args, dependencies, subexpressions, cache_entries)
+            },
+        )
+        .reduce(
+            || {
+                (
+                    Vec::new(),
+                    DependencyList::empty(),
+                    Vec::new(),
+                    MultithreadedCacheEntries::new_from_threaded(cache_entries),
+                )
+            },
+            |(mut results, mut dependencies, mut subexpressions, mut cache_entries),
+             (mut other_results, other_deps, mut other_subexps, other_cache_entries)| {
+                results.append(&mut other_results);
+                dependencies.extend(other_deps);
+                subexpressions.append(&mut other_subexps);
+                let local_entries = other_cache_entries.into_thread_local_entries();
+                cache_entries.extend(local_entries);
+                (results, dependencies, subexpressions, cache_entries)
+            },
+        );
+    let local_entries = new_cache_entries.into_thread_local_entries();
+    cache_entries.extend(local_entries);
+    call_stack.add_state_dependencies(dependencies);
+    call_stack.add_subexpressions(subexpressions);
+    results.into_iter().collect()
+}
+
+fn resolve_arg_within_new_stack<
+    'a,
+    T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Sync + Send,
+>(
+    arg: T,
+    state: &(impl DynamicState<T> + Sync),
+    call_stack: &CallStack<T>,
+    stack: &VariableStack<T>,
+    factory: &(impl ExpressionFactory<T> + Sync),
+    allocator: &(impl HeapAllocator<T> + Sync),
+    debug_instructions: bool,
+    debug_stack: bool,
+    cache: &(impl InterpreterCache<T> + Sync),
+    cache_entries: &mut MultithreadedCacheEntries<'a, T>,
+) -> (Result<T, String>, DependencyList, Vec<HashId>) {
+    let capture_depth = arg.capture_depth();
+    let mut new_stack = stack.clone_shallow(capture_depth);
+    let mut new_call_stack = CallStack::new(
+        call_stack.program(),
+        call_stack.evaluate_arg_program_counter(),
+        None,
+    );
+    new_call_stack.enter_application_arg();
+    new_call_stack.enter_expression(arg.id());
+    new_stack.push(arg);
+    let result = evaluate_program_loop(
+        state,
+        &mut new_stack,
+        &mut new_call_stack,
+        factory,
+        allocator,
+        cache,
+        cache_entries,
+        debug_instructions,
+        debug_stack,
+    );
+    assert_eq!(
+        new_call_stack.call_stack_depth(),
+        0,
+        "{} frames remaining on call stack",
+        new_call_stack.call_stack_depth()
+    );
+    assert_eq!(
+        new_stack.len(),
+        capture_depth,
+        "{} values remaining on variable stack",
+        new_stack.len()
+    );
+    let (dependencies, subexpressions) = new_call_stack.drain();
+    return (result, dependencies, subexpressions);
 }
 
 #[cfg(test)]

@@ -47,7 +47,7 @@ where
             Ok(target)
         } else if let Some(list) = factory.match_vector_term(&target) {
             Ok(factory.create_application_term(
-                factory.create_builtin_term(Stdlib::CollectVector),
+                factory.create_builtin_term(GraphQlStdlib::CollectQueryListItems),
                 allocator.create_list(list.items().iter().map(|item| {
                     factory.create_application_term(
                         factory.create_builtin_term(GraphQlStdlib::DynamicQueryBranch),

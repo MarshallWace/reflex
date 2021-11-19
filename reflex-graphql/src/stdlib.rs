@@ -13,15 +13,18 @@ use std::convert::TryFrom;
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 
+pub use collect_query_list_items::*;
 pub use dynamic_query_branch::*;
 pub use flatten_deep::*;
 
+mod collect_query_list_items;
 mod dynamic_query_branch;
 mod flatten_deep;
 
 #[derive(Hash, Eq, PartialEq, Clone, Copy, Debug, Serialize, Deserialize, EnumIter)]
 #[serde(tag = "type")]
 pub enum Stdlib {
+    CollectQueryListItems,
     DynamicQueryBranch,
     FlattenDeep,
 }
@@ -34,6 +37,7 @@ impl TryFrom<Uuid> for Stdlib {
     type Error = ();
     fn try_from(value: Uuid) -> Result<Self, Self::Error> {
         match value {
+            CollectQueryListItems::UUID => Ok(Self::CollectQueryListItems),
             DynamicQueryBranch::UUID => Ok(Self::DynamicQueryBranch),
             FlattenDeep::UUID => Ok(Self::FlattenDeep),
             _ => Err(()),
@@ -43,6 +47,7 @@ impl TryFrom<Uuid> for Stdlib {
 impl Uid for Stdlib {
     fn uid(&self) -> Uuid {
         match self {
+            Self::CollectQueryListItems => Uid::uid(&CollectQueryListItems {}),
             Self::DynamicQueryBranch => Uid::uid(&DynamicQueryBranch {}),
             Self::FlattenDeep => Uid::uid(&FlattenDeep {}),
         }
@@ -54,6 +59,7 @@ impl Stdlib {
         T::Builtin: From<Self> + From<BuiltinStdlib>,
     {
         match self {
+            Self::CollectQueryListItems => Applicable::<T>::arity(&CollectQueryListItems {}),
             Self::DynamicQueryBranch => Applicable::<T>::arity(&DynamicQueryBranch {}),
             Self::FlattenDeep => Applicable::<T>::arity(&FlattenDeep {}),
         }
@@ -69,6 +75,9 @@ impl Stdlib {
         T::Builtin: From<Self> + From<BuiltinStdlib>,
     {
         match self {
+            Self::CollectQueryListItems => {
+                Applicable::<T>::apply(&CollectQueryListItems {}, args, factory, allocator, cache)
+            }
             Self::DynamicQueryBranch => {
                 Applicable::<T>::apply(&DynamicQueryBranch {}, args, factory, allocator, cache)
             }

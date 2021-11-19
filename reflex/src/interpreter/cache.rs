@@ -36,7 +36,6 @@ pub trait InterpreterCache<T: Expression> {
     ) -> Option<(EvaluationResult<T>, Option<InterpreterCacheEntry<T>>)>;
     fn contains_key(&self, key: &InterpreterCacheKey) -> bool;
 }
-
 pub struct InterpreterCacheEntry<T: Expression> {
     result: EvaluationResult<T>,
     overall_state_hash: HashId,
@@ -56,11 +55,101 @@ impl<T: Expression> InterpreterCacheEntry<T> {
     }
 }
 
-pub struct CacheEntries<T: Expression> {
+pub trait CacheEntries<T: Expression> {
+    fn insert(
+        &mut self,
+        key: InterpreterCacheKey,
+        value: InterpreterCacheEntry<T>,
+        subexpressions: Vec<InterpreterCacheKey>,
+    );
+    fn extend(
+        &mut self,
+        entries: impl IntoIterator<
+            Item = (
+                InterpreterCacheKey,
+                InterpreterCacheEntry<T>,
+                Vec<InterpreterCacheKey>,
+            ),
+        >,
+    );
+    fn get(
+        &self,
+        key: &InterpreterCacheKey,
+    ) -> Option<&(InterpreterCacheEntry<T>, Vec<InterpreterCacheKey>)>;
+    fn len(&self) -> usize;
+    fn is_empty(&self) -> bool;
+}
+
+pub(super) struct MultithreadedCacheEntries<'a, T: Expression> {
+    parent_cache: Option<&'a MultithreadedCacheEntries<'a, T>>,
+    thread_local_cache: LocalCacheEntries<T>,
+}
+impl<'a, T: Expression> MultithreadedCacheEntries<'a, T> {
+    pub(super) fn new_top_level() -> Self {
+        Self {
+            parent_cache: None,
+            thread_local_cache: LocalCacheEntries::default(),
+        }
+    }
+    pub(super) fn new_from_threaded<'b: 'a>(
+        shared_cache: &'a MultithreadedCacheEntries<'b, T>,
+    ) -> Self {
+        Self {
+            parent_cache: Some(shared_cache),
+            thread_local_cache: LocalCacheEntries::default(),
+        }
+    }
+    pub(super) fn into_thread_local_entries(self) -> LocalCacheEntries<T> {
+        self.thread_local_cache
+    }
+}
+impl<'a, T: Expression> CacheEntries<T> for MultithreadedCacheEntries<'a, T> {
+    fn insert(
+        &mut self,
+        key: InterpreterCacheKey,
+        value: InterpreterCacheEntry<T>,
+        subexpressions: Vec<InterpreterCacheKey>,
+    ) {
+        self.thread_local_cache.insert(key, value, subexpressions)
+    }
+    fn extend(
+        &mut self,
+        entries: impl IntoIterator<
+            Item = (
+                InterpreterCacheKey,
+                InterpreterCacheEntry<T>,
+                Vec<InterpreterCacheKey>,
+            ),
+        >,
+    ) {
+        self.thread_local_cache.extend(entries)
+    }
+    fn get(
+        &self,
+        key: &InterpreterCacheKey,
+    ) -> Option<&(InterpreterCacheEntry<T>, Vec<InterpreterCacheKey>)> {
+        self.thread_local_cache
+            .get(key)
+            .or_else(|| self.parent_cache.map(|parent| parent.get(key)).flatten())
+    }
+    fn len(&self) -> usize {
+        self.thread_local_cache.len() + self.parent_cache.map(|parent| parent.len()).unwrap_or(0)
+    }
+
+    fn is_empty(&self) -> bool {
+        self.thread_local_cache.is_empty()
+            && self
+                .parent_cache
+                .map(|parent| parent.is_empty())
+                .unwrap_or(true)
+    }
+}
+
+pub struct LocalCacheEntries<T: Expression> {
     entries: FnvHashMap<InterpreterCacheKey, (InterpreterCacheEntry<T>, Vec<InterpreterCacheKey>)>,
     insertion_order: Vec<InterpreterCacheKey>,
 }
-impl<T: Expression> Default for CacheEntries<T> {
+impl<T: Expression> Default for LocalCacheEntries<T> {
     fn default() -> Self {
         Self {
             entries: FnvHashMap::default(),
@@ -68,8 +157,8 @@ impl<T: Expression> Default for CacheEntries<T> {
         }
     }
 }
-impl<T: Expression> CacheEntries<T> {
-    pub fn insert(
+impl<T: Expression> CacheEntries<T> for LocalCacheEntries<T> {
+    fn insert(
         &mut self,
         key: InterpreterCacheKey,
         value: InterpreterCacheEntry<T>,
@@ -88,7 +177,21 @@ impl<T: Expression> CacheEntries<T> {
             }
         }
     }
-    pub fn get(
+    fn extend(
+        &mut self,
+        entries: impl IntoIterator<
+            Item = (
+                InterpreterCacheKey,
+                InterpreterCacheEntry<T>,
+                Vec<InterpreterCacheKey>,
+            ),
+        >,
+    ) {
+        for (key, value, subexpressions) in entries {
+            self.insert(key, value, subexpressions)
+        }
+    }
+    fn get(
         &self,
         key: &InterpreterCacheKey,
     ) -> Option<&(InterpreterCacheEntry<T>, Vec<InterpreterCacheKey>)> {
@@ -96,17 +199,14 @@ impl<T: Expression> CacheEntries<T> {
         trace!(cache_entries = if entry.is_some() { "hit" } else { "miss" });
         entry
     }
-    pub fn len(&self) -> usize {
+    fn len(&self) -> usize {
         self.entries.len()
     }
-    pub fn is_empty(&self) -> bool {
+    fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
-    pub fn iter(&self) -> CacheEntriesIter<T> {
-        CacheEntriesIter::new(self)
-    }
 }
-impl<T: Expression + 'static> IntoIterator for CacheEntries<T> {
+impl<T: Expression> IntoIterator for LocalCacheEntries<T> {
     type Item = (
         InterpreterCacheKey,
         InterpreterCacheEntry<T>,
@@ -117,38 +217,12 @@ impl<T: Expression + 'static> IntoIterator for CacheEntries<T> {
         CacheEntriesIntoIter::new(self)
     }
 }
-pub struct CacheEntriesIter<'a, T: Expression> {
-    entries:
-        &'a FnvHashMap<InterpreterCacheKey, (InterpreterCacheEntry<T>, Vec<InterpreterCacheKey>)>,
-    insertion_order: std::slice::Iter<'a, InterpreterCacheKey>,
-}
-impl<'a, T: Expression> CacheEntriesIter<'a, T> {
-    fn new(entries: &'a CacheEntries<T>) -> Self {
-        Self {
-            entries: &entries.entries,
-            insertion_order: entries.insertion_order.iter(),
-        }
-    }
-}
-impl<'a, T: Expression> Iterator for CacheEntriesIter<'a, T> {
-    type Item = (
-        &'a InterpreterCacheKey,
-        &'a InterpreterCacheEntry<T>,
-        &'a Vec<InterpreterCacheKey>,
-    );
-    fn next(&mut self) -> Option<Self::Item> {
-        self.insertion_order.next().map(move |key| {
-            let (entry, subexpressions) = self.entries.get(key).unwrap();
-            (key, entry, subexpressions)
-        })
-    }
-}
 pub struct CacheEntriesIntoIter<T: Expression> {
     entries: FnvHashMap<InterpreterCacheKey, (InterpreterCacheEntry<T>, Vec<InterpreterCacheKey>)>,
     insertion_order: std::vec::IntoIter<InterpreterCacheKey>,
 }
 impl<T: Expression> CacheEntriesIntoIter<T> {
-    fn new(entries: CacheEntries<T>) -> Self {
+    fn new(entries: LocalCacheEntries<T>) -> Self {
         Self {
             entries: entries.entries,
             insertion_order: entries.insertion_order.into_iter(),

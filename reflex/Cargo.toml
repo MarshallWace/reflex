@@ -10,6 +10,7 @@ edition = "2018"
 [dependencies]
 fnv = "1.0.7"
 im = "15.0.0"
+rayon = "1.5.1"
 serde = { version = "1.0", features = ["derive", "rc"] }
 serde_json = "1.0"
 strum = "0.22"

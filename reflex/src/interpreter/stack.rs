@@ -27,6 +27,7 @@ pub(crate) enum StackFrame<T: Expression> {
     ApplicationTarget {
         args: ExpressionList<T>,
     },
+    ApplicationArg,
     ApplicationArgList {
         target: T,
         arity: Arity,
@@ -177,6 +178,25 @@ impl<'src, T: Expression> CallStack<'src, T> {
         } else {
             None
         }
+    }
+    pub(crate) fn pop_application_arg_stack(&mut self) -> Option<(DependencyList, Vec<HashId>)> {
+        let is_application_arg = self
+            .call_stack
+            .last()
+            .map(|entry| &entry.context == &StackFrame::ApplicationArg)
+            .unwrap_or(false);
+        if is_application_arg {
+            self.pop_call_stack()
+                .and_then(|(_, dependencies, subexpressions, frame)| match frame {
+                    StackFrame::ApplicationArg => Some((dependencies, subexpressions)),
+                    _ => None,
+                })
+        } else {
+            None
+        }
+    }
+    pub(crate) fn enter_application_arg(&mut self) {
+        self.enter_stack_frame(None, StackFrame::ApplicationArg);
     }
     pub(crate) fn enter_application_arg_list(
         &mut self,

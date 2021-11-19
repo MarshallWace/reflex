@@ -17,8 +17,8 @@ use reflex::{
     },
     hash::{hash_object, HashId},
     interpreter::{
-        execute, CacheEntries, DefaultInterpreterCache, GcMetrics, InterpreterCache,
-        InterpreterCacheEntry, InterpreterCacheKey, InterpreterOptions,
+        execute, DefaultInterpreterCache, GcMetrics, InterpreterCache, InterpreterCacheEntry,
+        InterpreterCacheKey, InterpreterOptions, LocalCacheEntries,
     },
     lang::ValueTerm,
     DependencyCache,
@@ -372,7 +372,7 @@ struct EmitCommand<T: Expression> {
     program: Arc<Program>,
     state: RuntimeState<T>,
     result: EvaluationResult<T>,
-    cache_entries: CacheEntries<T>,
+    cache_entries: LocalCacheEntries<T>,
 }
 impl<T: Expression> RuntimeCommand<T> {
     fn subscribe(
@@ -399,7 +399,7 @@ impl<T: Expression> RuntimeCommand<T> {
         program: Arc<Program>,
         state: RuntimeState<T>,
         result: EvaluationResult<T>,
-        cache_entries: CacheEntries<T>,
+        cache_entries: LocalCacheEntries<T>,
     ) -> Self {
         let payload = EmitCommand {
             subscription_id,
@@ -745,17 +745,19 @@ where
     (subscription_id, cache_key)
 }
 
-fn evaluate_subscription<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T>>(
+fn evaluate_subscription<
+    T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Send + Sync,
+>(
     subscription_id: SubscriptionId,
     cache_key: HashId,
     program: &Program,
     entry_point: InstructionPointer,
-    state: &impl DynamicState<T>,
-    factory: &impl ExpressionFactory<T>,
-    allocator: &impl HeapAllocator<T>,
+    state: &(impl DynamicState<T> + Sync),
+    factory: &(impl ExpressionFactory<T> + Sync),
+    allocator: &(impl HeapAllocator<T> + Sync),
     interpreter_options: &InterpreterOptions,
-    cache: &impl InterpreterCache<T>,
-) -> (EvaluationResult<T>, CacheEntries<T>) {
+    cache: &(impl InterpreterCache<T> + Sync),
+) -> (EvaluationResult<T>, LocalCacheEntries<T>) {
     eprintln!("[Runtime] Evaluating subscription #{}", subscription_id);
     let start_time = Instant::now();
     let result = execute(
@@ -781,7 +783,7 @@ fn evaluate_subscription<T: Expression + Rewritable<T> + Reducible<T> + Applicab
                 ),
                 DependencyList::empty(),
             ),
-            CacheEntries::default(),
+            LocalCacheEntries::default(),
         )
     });
     eprintln!(

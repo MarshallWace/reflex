@@ -42,48 +42,11 @@ impl<'de, T: Expression> serde::de::Deserialize<'de> for BuiltinTerm<T> {
         deserializer.deserialize_bytes(BuiltinTermVisitor::<T>::new())
     }
 }
-struct BuiltinTermVisitor<T> {
-    _phantom: PhantomData<T>,
-}
-impl<T> BuiltinTermVisitor<T> {
-    fn new() -> Self {
-        Self {
-            _phantom: PhantomData,
-        }
+impl<T: Expression> Uid for BuiltinTerm<T> {
+    fn uid(&self) -> Uuid {
+        self.target.uid()
     }
 }
-impl<'de, T: Expression> Visitor<'de> for BuiltinTermVisitor<T> {
-    type Value = BuiltinTerm<T>;
-
-    fn expecting(&self, formatter: &mut Formatter) -> std::fmt::Result {
-        formatter.write_str("Only accepts bytes representing a valid uuid")
-    }
-
-    fn visit_bytes<E>(self, v: &[u8]) -> Result<Self::Value, E>
-    where
-        E: Error,
-    {
-        let uuid = Uuid::from_slice(v).map_err(|err| E::custom(format!("{:?}", err)))?;
-        let builtin: T::Builtin = uuid
-            .try_into()
-            .map_err(|_err| E::custom("uuid not found"))?;
-        Ok(BuiltinTerm::new(builtin))
-    }
-
-    // Some types of serde (e.g. serde-json) do not distinguish between bytes and a sequence
-    // so we need to implement both visit methods
-    fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
-    where
-        A: SeqAccess<'de>,
-    {
-        let mut bytes = Vec::new();
-        while let Ok(Some(byte)) = seq.next_element() {
-            bytes.push(byte)
-        }
-        self.visit_bytes(&bytes)
-    }
-}
-
 impl<T: Expression> BuiltinTerm<T> {
     pub fn new(target: T::Builtin) -> Self {
         Self { target }
@@ -149,5 +112,47 @@ impl<T: Expression> std::fmt::Display for BuiltinTerm<T> {
 impl<T: Expression> SerializeJson for BuiltinTerm<T> {
     fn to_json(&self) -> Result<serde_json::Value, String> {
         Err(format!("Unable to serialize term: {}", self))
+    }
+}
+
+struct BuiltinTermVisitor<T> {
+    _phantom: PhantomData<T>,
+}
+impl<T> BuiltinTermVisitor<T> {
+    fn new() -> Self {
+        Self {
+            _phantom: PhantomData,
+        }
+    }
+}
+impl<'de, T: Expression> Visitor<'de> for BuiltinTermVisitor<T> {
+    type Value = BuiltinTerm<T>;
+
+    fn expecting(&self, formatter: &mut Formatter) -> std::fmt::Result {
+        formatter.write_str("Only accepts bytes representing a valid uuid")
+    }
+
+    fn visit_bytes<E>(self, v: &[u8]) -> Result<Self::Value, E>
+    where
+        E: Error,
+    {
+        let uuid = Uuid::from_slice(v).map_err(|err| E::custom(format!("{:?}", err)))?;
+        let builtin: T::Builtin = uuid
+            .try_into()
+            .map_err(|_err| E::custom("uuid not found"))?;
+        Ok(BuiltinTerm::new(builtin))
+    }
+
+    // Some types of serde (e.g. serde-json) do not distinguish between bytes and a sequence
+    // so we need to implement both visit methods
+    fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+    where
+        A: SeqAccess<'de>,
+    {
+        let mut bytes = Vec::new();
+        while let Ok(Some(byte)) = seq.next_element() {
+            bytes.push(byte)
+        }
+        self.visit_bytes(&bytes)
     }
 }

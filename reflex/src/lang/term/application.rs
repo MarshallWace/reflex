@@ -616,7 +616,7 @@ fn reduce_function_args<T: Expression + Rewritable<T> + Reducible<T>>(
 }
 
 fn is_unresolved_arg<T: Expression + Rewritable<T> + Reducible<T>>(arg: &T) -> bool {
-    arg.capture_depth() > 0 || !arg.dynamic_dependencies(false).is_empty() || arg.is_reducible()
+    arg.capture_depth() > 0 || arg.has_dynamic_dependencies(false) || arg.is_reducible()
 }
 
 fn is_compiled_application_target<T: Expression>(

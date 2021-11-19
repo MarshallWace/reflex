@@ -471,6 +471,9 @@ pub trait Applicable<T: Expression> {
         allocator: &impl HeapAllocator<T>,
         cache: &mut impl EvaluationCache<T>,
     ) -> Result<T, String>;
+    fn should_parallelize(&self, _args: &[T]) -> bool {
+        false
+    }
 }
 
 pub trait Evaluate<T: Expression> {

@@ -258,7 +258,7 @@ mod tests {
         );
         assert_eq!(
             parse("-0", &factory, &allocator),
-            Ok(factory.create_value_term(ValueTerm::Int(0))),
+            Ok(factory.create_value_term(ValueTerm::Float(0.0))),
         );
         assert_eq!(
             parse("-3", &factory, &allocator),
