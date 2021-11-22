@@ -163,6 +163,7 @@ where
                         }
                         Ok(transform) => {
                             let subscription_id = message.subscription_id();
+                            let operation_id = uuid::Uuid::new_v4();
                             if subscriptions
                                 .get_mut()
                                 .unwrap()
@@ -197,6 +198,7 @@ where
                                     Ok(query) => {
                                         match compile_graphql_query(
                                             query,
+                                            &operation_id,
                                             graph_root.clone(),
                                             compiler_options,
                                             &factory,

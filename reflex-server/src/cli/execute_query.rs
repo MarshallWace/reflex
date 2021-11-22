@@ -96,10 +96,17 @@ where
         factory,
         allocator,
     )?;
-    let (program, entry_point) =
-        compile_graphql_query(query, graph_root, &compiler_options, factory, allocator)
-            .map_err(|err| anyhow!("{}", err))
-            .with_context(|| format!("Failed to compile GraphQL query"))?;
+    let operation_id = 0;
+    let (program, entry_point) = compile_graphql_query(
+        query,
+        &operation_id,
+        graph_root,
+        &compiler_options,
+        factory,
+        allocator,
+    )
+    .map_err(|err| anyhow!("{}", err))
+    .with_context(|| format!("Failed to compile GraphQL query"))?;
     let signal_handler = create_signal_handler(signal_handler, &options, factory, allocator)?;
     let state = RuntimeState::default();
     let cache = RuntimeCache::default();

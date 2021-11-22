@@ -1,12 +1,13 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use std::{iter::empty, path::PathBuf};
+use std::path::PathBuf;
 
 use anyhow::Result;
 use clap::Parser;
 use reflex::{allocator::DefaultAllocator, compiler::CompilerOptions, lang::SharedTermFactory};
 use reflex_cli::{syntax::js::default_js_loaders, Syntax};
+use reflex_graphql::graphql_imports;
 use reflex_handlers::builtin_signal_handler;
 use reflex_server::{
     builtins::ServerBuiltins,
@@ -56,7 +57,11 @@ pub async fn main() -> Result<()> {
     cli(
         Args::parse().into(),
         builtin_signal_handler(&factory, &allocator),
-        Some(default_js_loaders(empty(), &factory, &allocator)),
+        Some(default_js_loaders(
+            graphql_imports(&factory, &allocator),
+            &factory,
+            &allocator,
+        )),
         &factory,
         &allocator,
         Some(CompilerOptions::unoptimized()),

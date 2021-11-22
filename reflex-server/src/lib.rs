@@ -261,7 +261,7 @@ fn method_not_allowed() -> Response<Body> {
 
 #[cfg(test)]
 mod tests {
-    use std::iter::empty;
+    use std::{hash::Hash, iter::empty};
 
     use reflex::{
         allocator::DefaultAllocator,
@@ -319,6 +319,7 @@ mod tests {
     async fn subscribe_query<'a, 'b, T: 'a>(
         query: &str,
         variables: impl IntoIterator<Item = (&'b str, T)>,
+        operation_id: &impl Hash,
         graph_root: &(Program, InstructionPointer),
         runtime: &'a Runtime<T>,
         factory: &impl ExpressionFactory<T>,
@@ -337,6 +338,7 @@ mod tests {
         )?;
         let (program, entry_point) = compile_graphql_query(
             query,
+            operation_id,
             graph_root.clone(),
             &CompilerOptions::default(),
             factory,
@@ -362,17 +364,17 @@ mod tests {
 
         let graph_root = compile_js_graph_root(
             "
-            ({
-                query: {
+            (_) => ({
+                query: ({
                     foo: {
                         value: true,
                     },
                     bar: {
                         value: false
                     },
-                },
-                mutation: null,
-                subscription: null,
+                }),
+                mutation: () => null,
+                subscription: () => null,
             })
         ",
             &factory,
@@ -383,6 +385,7 @@ mod tests {
         let mut subscription1 = subscribe_query(
             "{ foo { value } }",
             empty(),
+            &0,
             &graph_root,
             &runtime,
             &factory,
@@ -414,6 +417,7 @@ mod tests {
         let mut subscription2 = subscribe_query(
             "{ bar { value } }",
             empty(),
+            &1,
             &graph_root,
             &runtime,
             &factory,

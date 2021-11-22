@@ -55,11 +55,13 @@ where
         Ok(transform) => transform,
     };
     let request_etag = parse_request_etag(&req);
+    let operation_id = uuid::Uuid::new_v4();
     let response = match parse_graphql_request(req, factory, allocator, &transform).await {
         Err(response) => Ok(response),
         Ok(query) => {
             match compile_graphql_query(
                 query,
+                &operation_id,
                 graph_root.clone(),
                 &compiler_options,
                 factory,

@@ -15,6 +15,8 @@ use reflex_json::{json_array, json_object, sanitize, JsonValue};
 
 pub use graphql_parser::query as graphql;
 
+mod imports;
+pub use imports::graphql_imports;
 mod loader;
 pub use loader::graphql_loader;
 mod operation;
@@ -92,8 +94,6 @@ pub fn sanitize_signal_errors<T: Expression>(signal: &SignalTerm<T>) -> Vec<Json
         .collect()
 }
 
-const DEFAULT_OPERATION_TYPE: &str = "query";
-
 pub trait GraphQlQueryTransform {
     fn transform<'a>(&self, document: GraphQlAst<'a>) -> Result<GraphQlAst<'a>, String>;
 }
@@ -163,18 +163,9 @@ where
                 .collect::<QueryFragments>();
             match get_root_operation(&document) {
                 Err(error) => Err(error),
-                Ok(operation) => match operation {
-                    OperationDefinition::SelectionSet(selection_set) => parse_root_operation(
-                        DEFAULT_OPERATION_TYPE,
-                        selection_set,
-                        &Vec::new(),
-                        variables,
-                        &fragments,
-                        factory,
-                        allocator,
-                    ),
-                    _ => parse_operation(operation, variables, &fragments, factory, allocator),
-                },
+                Ok(operation) => {
+                    parse_operation(operation, variables, &fragments, factory, allocator)
+                }
             }
         }
         Err(error) => Err(format!("{}", error)),
@@ -209,114 +200,60 @@ fn parse_operation<'src, T: Expression>(
 where
     T::Builtin: From<Stdlib> + From<GraphQlStdlib>,
 {
-    match operation {
-        OperationDefinition::Query(operation) => {
-            parse_query_operation(operation, variables, fragments, factory, allocator)
-        }
-        OperationDefinition::Mutation(operation) => {
-            parse_mutation_operation(operation, variables, fragments, factory, allocator)
-        }
-        OperationDefinition::Subscription(operation) => {
-            parse_subscription_operation(operation, variables, fragments, factory, allocator)
-        }
-        OperationDefinition::SelectionSet(selection) => {
-            parse_selection_set(selection, variables, fragments, factory, allocator)
-        }
-    }
-}
-
-fn parse_query_operation<'src, T: Expression>(
-    operation: &Query<'src, GraphQlText<'src>>,
-    variables: &QueryVariables<'src, T>,
-    fragments: &QueryFragments<'src, '_>,
-    factory: &impl ExpressionFactory<T>,
-    allocator: &impl HeapAllocator<T>,
-) -> Result<T, String>
-where
-    T::Builtin: From<Stdlib> + From<GraphQlStdlib>,
-{
-    parse_root_operation(
-        "query",
-        &operation.selection_set,
-        &operation.variable_definitions,
+    let (selection_set, variable_definitions) = match operation {
+        OperationDefinition::Query(operation) => (
+            &operation.selection_set,
+            Some(&operation.variable_definitions),
+        ),
+        OperationDefinition::Mutation(operation) => (
+            &operation.selection_set,
+            Some(&operation.variable_definitions),
+        ),
+        OperationDefinition::Subscription(operation) => (
+            &operation.selection_set,
+            Some(&operation.variable_definitions),
+        ),
+        OperationDefinition::SelectionSet(selection) => (selection, None),
+    };
+    let variables = parse_operation_variables(
+        variable_definitions.unwrap_or(&Vec::new()),
         variables,
-        fragments,
         factory,
         allocator,
-    )
+    )?;
+    let shape = parse_selection_set(selection_set, &variables, fragments, factory, allocator)?;
+    let operation_type = match operation {
+        OperationDefinition::Query(_) | OperationDefinition::SelectionSet(_) => "query",
+        OperationDefinition::Mutation(_) => "mutation",
+        OperationDefinition::Subscription(_) => "subscription",
+    };
+    Ok(create_query_root(shape, operation_type, factory, allocator))
 }
 
-fn parse_mutation_operation<'src, T: Expression>(
-    operation: &Mutation<'src, GraphQlText<'src>>,
-    variables: &QueryVariables<'src, T>,
-    fragments: &QueryFragments<'src, '_>,
+fn create_query_root<T: Expression>(
+    shape: T,
+    operation_type: &'static str,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> Result<T, String>
+) -> T
 where
-    T::Builtin: From<Stdlib> + From<GraphQlStdlib>,
+    T::Builtin: From<Stdlib>,
 {
-    parse_root_operation(
-        "mutation",
-        &operation.selection_set,
-        &operation.variable_definitions,
-        variables,
-        fragments,
-        factory,
-        allocator,
-    )
-}
-
-fn parse_subscription_operation<'src, T: Expression>(
-    operation: &Subscription<'src, GraphQlText<'src>>,
-    variables: &QueryVariables<'src, T>,
-    fragments: &QueryFragments<'src, '_>,
-    factory: &impl ExpressionFactory<T>,
-    allocator: &impl HeapAllocator<T>,
-) -> Result<T, String>
-where
-    T::Builtin: From<Stdlib> + From<GraphQlStdlib>,
-{
-    parse_root_operation(
-        "subscription",
-        &operation.selection_set,
-        &operation.variable_definitions,
-        variables,
-        fragments,
-        factory,
-        allocator,
-    )
-}
-
-fn parse_root_operation<'src, T: Expression>(
-    operation_type: &str,
-    selection_set: &SelectionSet<'src, GraphQlText<'src>>,
-    variable_definitions: &[VariableDefinition<'src, GraphQlText<'src>>],
-    variables: &QueryVariables<'src, T>,
-    fragments: &QueryFragments<'src, '_>,
-    factory: &impl ExpressionFactory<T>,
-    allocator: &impl HeapAllocator<T>,
-) -> Result<T, String>
-where
-    T::Builtin: From<Stdlib> + From<GraphQlStdlib>,
-{
-    let variables = parse_operation_variables(variable_definitions, variables, factory, allocator)?;
-    let query = parse_selection_set(selection_set, &variables, fragments, factory, allocator)?;
-    Ok(factory.create_lambda_term(
+    factory.create_lambda_term(
         1,
         factory.create_application_term(
-            query,
+            shape,
             allocator.create_unit_list(factory.create_application_term(
                 factory.create_builtin_term(Stdlib::Get),
                 allocator.create_pair(
                     factory.create_static_variable_term(0),
                     factory.create_value_term(ValueTerm::String(
-                        allocator.create_string(operation_type),
+                        allocator.create_static_string(operation_type),
                     )),
                 ),
             )),
         ),
-    ))
+    )
 }
 
 fn parse_operation_variables<'src, T: Expression>(

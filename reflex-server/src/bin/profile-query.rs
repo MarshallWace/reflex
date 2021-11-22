@@ -1,12 +1,13 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use std::{iter::empty, path::PathBuf};
+use std::path::PathBuf;
 
 use anyhow::Result;
 use clap::Parser;
 use reflex::{allocator::DefaultAllocator, lang::SharedTermFactory};
 use reflex_cli::{syntax::js::default_js_loaders, Syntax};
+use reflex_graphql::graphql_imports;
 use reflex_handlers::builtin_signal_handler;
 use reflex_server::{
     builtins::ServerBuiltins,
@@ -70,7 +71,11 @@ async fn main() -> Result<()> {
     let factory = SharedTermFactory::<ServerBuiltins>::default();
     let allocator = DefaultAllocator::default();
     let signal_handler = builtin_signal_handler(&factory, &allocator);
-    let module_loader = Some(default_js_loaders(empty(), &factory, &allocator));
+    let module_loader = Some(default_js_loaders(
+        graphql_imports(&factory, &allocator),
+        &factory,
+        &allocator,
+    ));
     let metrics = cli(
         Args::parse().into(),
         Some(std::env::vars()),
