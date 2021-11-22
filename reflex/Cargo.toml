@@ -16,12 +16,7 @@ serde_json = "1.0"
 strum = "0.22"
 strum_macros = "0.22"
 tracing = { version = "0.1.0", features = ["release_max_level_info"] }
-
-[dependencies.uuid]
-features = ["macros", "serde"]
-# TODO: Update to cargo registry once "macros" feature is stable
-git = "https://github.com/uuid-rs/uuid"
-rev = "e6a6dbd07d3e6385870becd63ce5787ab042c058"
+uuid = { version = "1.0.0-alpha.1", features = ["macro-diagnostics", "serde"] }
 
 [dev-dependencies]
 rmp-serde = "0.15"

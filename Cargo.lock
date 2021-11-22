@@ -1260,7 +1260,7 @@ dependencies = [
  "strum",
  "strum_macros",
  "tracing",
- "uuid 0.8.1",
+ "uuid 1.0.0-alpha.1",
 ]
 
 [[package]]
@@ -2137,15 +2137,6 @@ checksum = "09cc8ee72d2a9becf2f2febe0205bbed8fc6615b7cb429ad062dc7b7ddd036a9"
 
 [[package]]
 name = "uuid"
-version = "0.8.1"
-source = "git+https://github.com/uuid-rs/uuid?rev=e6a6dbd07d3e6385870becd63ce5787ab042c058#e6a6dbd07d3e6385870becd63ce5787ab042c058"
-dependencies = [
- "serde",
- "uuid_macro",
-]
-
-[[package]]
-name = "uuid"
 version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bc5cf98d8186244414c848017f0e2676b3fcb46807f6668a97dfe67359a3c4b7"
@@ -2154,9 +2145,22 @@ dependencies = [
 ]
 
 [[package]]
-name = "uuid_macro"
-version = "0.0.0"
-source = "git+https://github.com/uuid-rs/uuid?rev=e6a6dbd07d3e6385870becd63ce5787ab042c058#e6a6dbd07d3e6385870becd63ce5787ab042c058"
+name = "uuid"
+version = "1.0.0-alpha.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bb3ab47baa004111b323696c6eaa2752e7356f7f77cf6b6dc7a2087368ce1ca4"
+dependencies = [
+ "getrandom 0.2.3",
+ "rand 0.8.4",
+ "serde",
+ "uuid-macro-internal",
+]
+
+[[package]]
+name = "uuid-macro-internal"
+version = "1.0.0-alpha.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8840edd0c528bd9c74bb58a2ed578009a2200f7036bd7206c76873b4e8b7a881"
 dependencies = [
  "proc-macro2",
  "quote",

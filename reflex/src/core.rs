@@ -12,7 +12,7 @@ use std::{
 use fnv::FnvHashMap;
 use im::OrdSet;
 use serde::{Deserialize, Serialize};
-pub use uuid::Uuid;
+pub use uuid::{uuid, Uuid};
 
 use crate::{cache::NoopCache, lang::*};
 use crate::{
@@ -62,16 +62,6 @@ pub trait Builtin:
 pub trait Uid {
     fn uid(&self) -> Uuid;
 }
-
-// TODO: Replace with standard macro once "macros" feature is stable in uuid crate
-#[macro_export]
-macro_rules! uuid {
-    ($uuid:tt) => {{
-        uuid::Uuid::from_bytes(uuid::uuid_macro::parse_lit!($uuid))
-    }};
-}
-
-pub use uuid;
 
 pub trait GraphNode {
     fn capture_depth(&self) -> StackOffset;
