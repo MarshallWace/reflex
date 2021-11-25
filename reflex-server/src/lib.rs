@@ -11,7 +11,7 @@ use hyper::{
 };
 use reflex::{
     compiler::{Compile, CompilerOptions, InstructionPointer, Program},
-    core::{Applicable, Reducible, Rewritable, StringValue},
+    core::{Applicable, Reducible, Rewritable},
     stdlib::Stdlib,
 };
 use reflex_graphql::{
@@ -37,27 +37,27 @@ use graphql::{
 pub type RequestHeaders = HeaderMap<HeaderValue>;
 
 pub trait GraphQlHttpQueryTransform: Send + Sync + 'static {
-    type T: AsyncGraphQlQueryTransform;
+    type Transform: AsyncGraphQlQueryTransform;
     fn factory(
         &self,
         headers: &RequestHeaders,
         connection_params: Option<&JsonValue>,
-    ) -> Result<Self::T, (StatusCode, String)>;
+    ) -> Result<Self::Transform, (StatusCode, String)>;
 }
-impl<T, T2> GraphQlHttpQueryTransform for T
+impl<TFactory, TTransform> GraphQlHttpQueryTransform for TFactory
 where
-    T: Fn(&RequestHeaders, Option<&JsonValue>) -> Result<T2, (StatusCode, String)>
+    TFactory: Fn(&RequestHeaders, Option<&JsonValue>) -> Result<TTransform, (StatusCode, String)>
         + Send
         + Sync
         + 'static,
-    T2: AsyncGraphQlQueryTransform,
+    TTransform: AsyncGraphQlQueryTransform,
 {
-    type T = T2;
+    type Transform = TTransform;
     fn factory(
         &self,
         headers: &RequestHeaders,
         connection_params: Option<&JsonValue>,
-    ) -> Result<Self::T, (StatusCode, String)> {
+    ) -> Result<Self::Transform, (StatusCode, String)> {
         self(headers, connection_params)
     }
 }
@@ -69,19 +69,17 @@ impl Default for NoopGraphQlHttpQueryTransform {
     }
 }
 impl GraphQlHttpQueryTransform for NoopGraphQlHttpQueryTransform {
-    type T = NoopGraphQlQueryTransform;
+    type Transform = NoopGraphQlQueryTransform;
     fn factory(
         &self,
         _headers: &RequestHeaders,
         _connection_params: Option<&JsonValue>,
-    ) -> Result<Self::T, (StatusCode, String)> {
+    ) -> Result<Self::Transform, (StatusCode, String)> {
         Ok(NoopGraphQlQueryTransform::default())
     }
 }
 
-pub fn graphql_service<
-    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
->(
+pub fn graphql_service<T>(
     runtime: Arc<Runtime<T>>,
     graph_root: Arc<(Program, InstructionPointer)>,
     factory: &impl AsyncExpressionFactory<T>,
@@ -95,7 +93,8 @@ pub fn graphql_service<
     Future = impl Future<Output = Result<Response<Body>, Infallible>> + Send + Sync,
 >
 where
-    T::String: StringValue + Send + Sync,
+    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
+    T::String: Send + Sync,
     T::Builtin: From<Stdlib> + From<GraphQlStdlib>,
 {
     service_fn({
@@ -153,9 +152,7 @@ fn handle_cors_preflight_request(req: Request<Body>) -> Result<Response<Body>, I
     ))
 }
 
-async fn handle_graphql_upgrade_request<
-    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
->(
+async fn handle_graphql_upgrade_request<T>(
     req: Request<Body>,
     runtime: Arc<Runtime<T>>,
     graph_root: Arc<(Program, InstructionPointer)>,
@@ -165,7 +162,8 @@ async fn handle_graphql_upgrade_request<
     transform: Arc<impl GraphQlHttpQueryTransform + Send + Sync + 'static>,
 ) -> Result<Response<Body>, Infallible>
 where
-    T::String: StringValue + Send + Sync,
+    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
+    T::String: Send + Sync,
     T::Builtin: From<Stdlib> + From<GraphQlStdlib>,
 {
     Ok(if hyper_tungstenite::is_upgrade_request(&req) {

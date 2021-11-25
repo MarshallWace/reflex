@@ -9,11 +9,11 @@ use std::{
 };
 
 use crate::{graphql_service, GraphQlHttpQueryTransform};
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result};
 use hyper::{server::conn::AddrStream, service::make_service_fn, Server};
 use reflex::{
-    compiler::{Compile, CompilerOptions, InstructionPointer, Program},
-    core::{Applicable, Expression, Reducible, Rewritable, StringValue},
+    compiler::{Compile, CompilerOptions},
+    core::{Applicable, Expression, Reducible, Rewritable},
     interpreter::InterpreterOptions,
     stdlib::Stdlib,
 };
@@ -45,15 +45,7 @@ pub struct ReflexServerCliOptions {
     pub debug_stack: bool,
 }
 
-pub async fn cli<
-    T: AsyncExpression
-        + Expression<String = String>
-        + Rewritable<T>
-        + Reducible<T>
-        + Applicable<T>
-        + Compile<T>
-        + 'static,
->(
+pub async fn cli<T>(
     args: ReflexServerCliOptions,
     signal_handler: impl SignalHandler<T>,
     module_loader: Option<impl Fn(&str, &Path) -> Option<Result<T, String>> + 'static>,
@@ -64,6 +56,13 @@ pub async fn cli<
     transform: impl GraphQlHttpQueryTransform,
 ) -> Result<()>
 where
+    T: AsyncExpression
+        + Expression<String = String>
+        + Rewritable<T>
+        + Reducible<T>
+        + Applicable<T>
+        + Compile<T>
+        + 'static,
     T::String: Send + Sync,
     T::Builtin: From<Stdlib> + From<JsStdlib> + From<GraphQlStdlib>,
 {
@@ -72,6 +71,11 @@ where
         debug: args.debug_compiler,
         normalize: !args.unoptimized,
         ..CompilerOptions::default()
+    });
+    let interpreter_options = interpreter_options.unwrap_or_else(|| InterpreterOptions {
+        debug_instructions: args.debug_interpreter || args.debug_stack,
+        debug_stack: args.debug_stack,
+        ..InterpreterOptions::default()
     });
     let graph_root = compile_entry_point(
         root_module_path.as_path(),
@@ -82,19 +86,13 @@ where
         factory,
         allocator,
     )?;
-
-    let interpreter_options = interpreter_options.unwrap_or_else(|| InterpreterOptions {
-        debug_instructions: args.debug_interpreter || args.debug_stack,
-        debug_stack: args.debug_stack,
-        ..InterpreterOptions::default()
-    });
-    let state = RuntimeState::default();
-    let cache = RuntimeCache::default();
     let signal_handler = if !args.debug_signals {
         EitherHandler::Left(signal_handler)
     } else {
         EitherHandler::Right(debug_signal_handler(signal_handler))
     };
+    let state = RuntimeState::default();
+    let cache = RuntimeCache::default();
     let runtime = Runtime::new(
         state,
         &signal_handler,
@@ -104,54 +102,30 @@ where
         interpreter_options,
         compiler_options,
     );
+    let service = make_service_fn({
+        let runtime = Arc::new(runtime);
+        let graph_root = Arc::new(graph_root);
+        let transform = Arc::new(transform);
+        move |_socket: &AddrStream| {
+            let runtime = Arc::clone(&runtime);
+            let graph_root = Arc::clone(&graph_root);
+            let transform = Arc::clone(&transform);
+            let service = graphql_service(
+                runtime,
+                graph_root,
+                factory,
+                allocator,
+                compiler_options,
+                transform,
+            );
+            async { Ok::<_, Infallible>(service) }
+        }
+    });
     let address = SocketAddr::from(([0, 0, 0, 0], args.port));
-    let server = create_server(
-        runtime,
-        graph_root,
-        factory,
-        allocator,
-        compiler_options,
-        transform,
-        &address,
-    );
+    let server = Server::bind(&address).serve(service);
     eprintln!(
-        "Listening for incoming HTTP requests on port {}",
+        "[server] Listening for incoming HTTP requests on port {}",
         &address.port()
     );
     server.await.with_context(|| "Server error")
-}
-
-async fn create_server<
-    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
->(
-    runtime: Runtime<T>,
-    graph_root: (Program, InstructionPointer),
-    factory: &impl AsyncExpressionFactory<T>,
-    allocator: &impl AsyncHeapAllocator<T>,
-    compiler_options: CompilerOptions,
-    transform: impl GraphQlHttpQueryTransform,
-    address: &SocketAddr,
-) -> Result<()>
-where
-    T::String: StringValue + Send + Sync,
-    T::Builtin: From<Stdlib> + From<GraphQlStdlib>,
-{
-    let runtime = Arc::new(runtime);
-    let graph_root = Arc::new(graph_root);
-    let transform = Arc::new(transform);
-    let server = Server::bind(&address).serve(make_service_fn(|_socket: &AddrStream| {
-        let runtime = Arc::clone(&runtime);
-        let graph_root = Arc::clone(&graph_root);
-        let transform = Arc::clone(&transform);
-        let service = graphql_service(
-            runtime,
-            graph_root,
-            factory,
-            allocator,
-            compiler_options,
-            transform,
-        );
-        async { Ok::<_, Infallible>(service) }
-    }));
-    server.await.map_err(|err| anyhow!("{}", err))
 }
