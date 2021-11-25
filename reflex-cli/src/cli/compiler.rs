@@ -75,8 +75,7 @@ where
         &compiler_options,
         factory,
         allocator,
-    )
-    .map_err(|err| anyhow!("{}", err))?;
+    )?;
     match options.output_format {
         OutputFormat::Json => serde_json::to_writer(output, &program)?,
         OutputFormat::Rmp => rmp_serde::encode::write(&mut output, &program)?,
