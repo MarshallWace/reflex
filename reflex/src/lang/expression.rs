@@ -11,12 +11,11 @@ use crate::{
     },
     hash::HashId,
 };
-use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::hash::Hash;
 use std::sync::Arc;
 
-#[derive(Eq, Clone, Copy, Deserialize, Serialize)]
+#[derive(Eq, Clone, Copy)]
 pub struct CachedExpression<T: Expression> {
     hash: HashId,
     capture_depth: StackOffset,
@@ -112,7 +111,6 @@ impl<T: Expression> SerializeJson for CachedExpression<T> {
         self.value().to_json()
     }
 }
-
 impl<T: Expression + Rewritable<T>> Rewritable<T> for CachedExpression<T> {
     fn children(&self) -> Vec<&T> {
         self.value.children()
@@ -190,7 +188,6 @@ impl<T: Expression + Rewritable<T>> Rewritable<T> for CachedExpression<T> {
     ) -> Option<T> {
         self.value.hoist_free_variables(factory, allocator)
     }
-
     fn normalize(
         &self,
         factory: &impl ExpressionFactory<T>,
@@ -273,8 +270,30 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Evaluate<T>> Evaluate<T>
         }
     }
 }
+impl<T: Expression> serde::Serialize for CachedExpression<T>
+where
+    T: serde::Serialize,
+{
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        self.value.serialize(serializer)
+    }
+}
+impl<'de, T: Expression> serde::Deserialize<'de> for CachedExpression<T>
+where
+    T: serde::Deserialize<'de>,
+{
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        Ok(Self::new(T::deserialize(deserializer)?))
+    }
+}
 
-#[derive(Hash, PartialEq, Eq, Clone, Serialize, Deserialize)]
+#[derive(Hash, PartialEq, Eq, Clone)]
 pub struct SharedExpression<T: Expression> {
     pub(crate) value: Arc<T>,
 }
@@ -330,7 +349,6 @@ impl<T: Expression> SerializeJson for SharedExpression<T> {
         (*self.value).to_json()
     }
 }
-
 impl<T: Expression + Rewritable<T>> Rewritable<T> for SharedExpression<T> {
     fn children(&self) -> Vec<&T> {
         self.value.children()
@@ -432,5 +450,27 @@ impl<T: Expression + Compile<T>> Compile<T> for SharedExpression<T> {
     ) -> Result<Program, String> {
         self.value
             .compile(eager, stack_offset, factory, allocator, compiler)
+    }
+}
+impl<T: Expression> serde::Serialize for SharedExpression<T>
+where
+    T: serde::Serialize,
+{
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        self.value.serialize(serializer)
+    }
+}
+impl<'de, T: Expression> serde::Deserialize<'de> for SharedExpression<T>
+where
+    T: serde::Deserialize<'de>,
+{
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        Ok(Self::new(T::deserialize(deserializer)?))
     }
 }

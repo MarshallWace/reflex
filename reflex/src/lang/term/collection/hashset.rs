@@ -15,7 +15,7 @@ use crate::{
     hash::HashId,
 };
 
-#[derive(Eq, PartialEq, Clone, Debug, Serialize, Deserialize)]
+#[derive(Eq, PartialEq, Clone, Debug)]
 pub struct HashSetTerm<T: Expression> {
     values: ExpressionList<T>,
     lookup: HashSet<HashId>,
@@ -179,18 +179,55 @@ impl<T: Expression> std::fmt::Display for HashSetTerm<T> {
         )
     }
 }
-
 impl<T: Expression> SerializeJson for HashSetTerm<T> {
     fn to_json(&self) -> Result<serde_json::Value, String> {
         Err(format!("Unable to serialize term: {}", self))
     }
 }
-
 impl<T: Expression> Iterable for HashSetTerm<T> {
     fn is_empty(&self) -> bool {
         self.values.is_empty()
     }
 }
+impl<T: Expression> serde::Serialize for HashSetTerm<T>
+where
+    T: serde::Serialize,
+{
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        Into::<SerializedHashSetTerm<T>>::into(self).serialize(serializer)
+    }
+}
+impl<'de, T: Expression> serde::Deserialize<'de> for HashSetTerm<T>
+where
+    T: serde::Deserialize<'de>,
+{
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        Ok(SerializedHashSetTerm::<T>::deserialize(deserializer)?.into())
+    }
+}
+#[derive(Debug, Serialize, Deserialize)]
+struct SerializedHashSetTerm<T: Expression> {
+    values: ExpressionList<T>,
+}
+impl<'a, T: Expression> Into<SerializedHashSetTerm<T>> for &'a HashSetTerm<T> {
+    fn into(self) -> SerializedHashSetTerm<T> {
+        let HashSetTerm { values, .. } = self.clone();
+        SerializedHashSetTerm { values }
+    }
+}
+impl<T: Expression> Into<HashSetTerm<T>> for SerializedHashSetTerm<T> {
+    fn into(self) -> HashSetTerm<T> {
+        let SerializedHashSetTerm { values } = self;
+        HashSetTerm::new(values)
+    }
+}
+
 fn build_lookup_table<'a, T: Expression + 'a>(
     values: impl IntoIterator<Item = &'a T, IntoIter = impl ExactSizeIterator<Item = &'a T>>,
 ) -> HashSet<HashId> {

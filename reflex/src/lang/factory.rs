@@ -15,7 +15,6 @@ use crate::{
     },
     hash::HashId,
 };
-use serde::{Deserialize, Serialize};
 
 use super::{
     expression::{CachedExpression, SharedExpression},
@@ -335,7 +334,7 @@ impl<TBuiltin: Builtin> ExpressionFactory<CachedSharedTerm<TBuiltin>>
     }
 }
 
-#[derive(PartialEq, Eq, Hash, Clone, Serialize, Deserialize)]
+#[derive(PartialEq, Eq, Hash, Clone)]
 pub struct CachedSharedTerm<TBuiltin: Builtin> {
     value: CachedExpression<SharedExpression<TermExpression<Self>>>,
 }
@@ -569,6 +568,26 @@ impl<TBuiltin: Builtin> Evaluate<Self> for CachedSharedTerm<TBuiltin> {
             None,
             DependencyList::empty(),
         )
+    }
+}
+impl<TBuiltin: Builtin> serde::Serialize for CachedSharedTerm<TBuiltin> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        self.value.serialize(serializer)
+    }
+}
+impl<'de, TBuiltin: Builtin> serde::Deserialize<'de> for CachedSharedTerm<TBuiltin> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        Ok(Self {
+            value: CachedExpression::<SharedExpression<TermExpression<Self>>>::deserialize(
+                deserializer,
+            )?,
+        })
     }
 }
 

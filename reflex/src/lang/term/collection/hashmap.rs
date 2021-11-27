@@ -19,7 +19,7 @@ use crate::{
     hash::HashId,
 };
 
-#[derive(Eq, PartialEq, Clone, Debug, Serialize, Deserialize)]
+#[derive(Eq, PartialEq, Clone, Debug)]
 pub struct HashMapTerm<T: Expression> {
     keys: ExpressionList<T>,
     values: ExpressionList<T>,
@@ -313,10 +313,48 @@ impl<T: Expression> std::fmt::Display for HashMapTerm<T> {
         )
     }
 }
-
 impl<T: Expression> SerializeJson for HashMapTerm<T> {
     fn to_json(&self) -> Result<serde_json::Value, String> {
         Err(format!("Unable to serialize term: {}", self))
+    }
+}
+impl<T: Expression> serde::Serialize for HashMapTerm<T>
+where
+    T: serde::Serialize,
+{
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        Into::<SerializedHashMapTerm<T>>::into(self).serialize(serializer)
+    }
+}
+impl<'de, T: Expression> serde::Deserialize<'de> for HashMapTerm<T>
+where
+    T: serde::Deserialize<'de>,
+{
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        Ok(SerializedHashMapTerm::<T>::deserialize(deserializer)?.into())
+    }
+}
+#[derive(Debug, Serialize, Deserialize)]
+struct SerializedHashMapTerm<T: Expression> {
+    keys: ExpressionList<T>,
+    values: ExpressionList<T>,
+}
+impl<'a, T: Expression> Into<SerializedHashMapTerm<T>> for &'a HashMapTerm<T> {
+    fn into(self) -> SerializedHashMapTerm<T> {
+        let HashMapTerm { keys, values, .. } = self.clone();
+        SerializedHashMapTerm { keys, values }
+    }
+}
+impl<T: Expression> Into<HashMapTerm<T>> for SerializedHashMapTerm<T> {
+    fn into(self) -> HashMapTerm<T> {
+        let SerializedHashMapTerm { keys, values } = self;
+        HashMapTerm::new(keys, values)
     }
 }
 

@@ -485,7 +485,7 @@ pub trait SerializeJson {
     fn to_json(&self) -> Result<serde_json::Value, String>;
 }
 
-#[derive(Eq, PartialEq, Clone, Debug, Serialize, Deserialize)]
+#[derive(Eq, PartialEq, Clone, Debug)]
 pub struct ExpressionList<T: Expression> {
     hash: HashId,
     items: Vec<T>,
@@ -582,8 +582,44 @@ impl<T: Expression> GraphNode for ExpressionList<T> {
         self.items.iter().all(|item| item.is_atomic())
     }
 }
+impl<T: Expression> serde::Serialize for ExpressionList<T>
+where
+    T: serde::Serialize,
+{
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        Into::<SerializedExpressionList<T>>::into(self).serialize(serializer)
+    }
+}
+impl<'de, T: Expression> serde::Deserialize<'de> for ExpressionList<T>
+where
+    T: serde::Deserialize<'de>,
+{
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        Ok(SerializedExpressionList::<T>::deserialize(deserializer)?.into())
+    }
+}
+#[derive(Debug, Serialize, Deserialize)]
+struct SerializedExpressionList<T: Expression>(Vec<T>);
+impl<'a, T: Expression> Into<SerializedExpressionList<T>> for &'a ExpressionList<T> {
+    fn into(self) -> SerializedExpressionList<T> {
+        let ExpressionList { items, .. } = self.clone();
+        SerializedExpressionList(items)
+    }
+}
+impl<T: Expression> Into<ExpressionList<T>> for SerializedExpressionList<T> {
+    fn into(self) -> ExpressionList<T> {
+        let SerializedExpressionList(items) = self;
+        ExpressionList::new(items)
+    }
+}
 
-#[derive(Hash, Eq, PartialEq, Clone, Debug, Serialize, Deserialize)]
+#[derive(Hash, Eq, PartialEq, Clone, Debug)]
 pub struct SignalList<T: Expression> {
     signals: BTreeSet<Signal<T>>,
 }
@@ -606,7 +642,6 @@ impl<T: Expression> SignalList<T> {
 impl<'a, T: Expression> IntoIterator for SignalList<T> {
     type Item = Signal<T>;
     type IntoIter = std::collections::btree_set::IntoIter<Self::Item>;
-
     fn into_iter(self) -> Self::IntoIter {
         self.signals.into_iter()
     }
@@ -614,9 +649,43 @@ impl<'a, T: Expression> IntoIterator for SignalList<T> {
 impl<'a, T: Expression> IntoIterator for &'a SignalList<T> {
     type Item = &'a Signal<T>;
     type IntoIter = std::collections::btree_set::Iter<'a, Signal<T>>;
-
     fn into_iter(self) -> Self::IntoIter {
         self.signals.iter()
+    }
+}
+impl<T: Expression> serde::Serialize for SignalList<T>
+where
+    T: serde::Serialize,
+{
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        Into::<SerializedSignalList<T>>::into(self).serialize(serializer)
+    }
+}
+impl<'de, T: Expression> serde::Deserialize<'de> for SignalList<T>
+where
+    T: serde::Deserialize<'de>,
+{
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        Ok(SerializedSignalList::<T>::deserialize(deserializer)?.into())
+    }
+}
+#[derive(Debug, Serialize, Deserialize)]
+struct SerializedSignalList<T: Expression>(Vec<Signal<T>>);
+impl<'a, T: Expression> Into<SerializedSignalList<T>> for &'a SignalList<T> {
+    fn into(self) -> SerializedSignalList<T> {
+        SerializedSignalList(self.signals.iter().cloned().collect())
+    }
+}
+impl<T: Expression> Into<SignalList<T>> for SerializedSignalList<T> {
+    fn into(self) -> SignalList<T> {
+        let SerializedSignalList(signals) = self;
+        SignalList::new(signals)
     }
 }
 
@@ -970,7 +1039,7 @@ pub enum VarArgs {
 
 pub type SignalId = HashId;
 
-#[derive(Eq, PartialEq, Clone, Debug, Serialize, Deserialize)]
+#[derive(Eq, PartialEq, Clone, Debug)]
 pub struct Signal<T: Expression> {
     hash: HashId,
     signal_type: SignalType,
@@ -1034,8 +1103,50 @@ impl<T: Expression> std::fmt::Display for Signal<T> {
         )
     }
 }
+impl<T: Expression> serde::Serialize for Signal<T>
+where
+    T: serde::Serialize,
+{
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        Into::<SerializedSignal<T>>::into(self).serialize(serializer)
+    }
+}
+impl<'de, T: Expression> serde::Deserialize<'de> for Signal<T>
+where
+    T: serde::Deserialize<'de>,
+{
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        Ok((SerializedSignal::<T>::deserialize(deserializer)?).into())
+    }
+}
+#[derive(Debug, Serialize, Deserialize)]
+struct SerializedSignal<T: Expression> {
+    signal_type: SignalType,
+    args: ExpressionList<T>,
+}
+impl<'a, T: Expression> Into<SerializedSignal<T>> for &'a Signal<T> {
+    fn into(self) -> SerializedSignal<T> {
+        let Signal {
+            signal_type, args, ..
+        } = self.clone();
+        SerializedSignal { signal_type, args }
+    }
+}
+impl<T: Expression> Into<Signal<T>> for SerializedSignal<T> {
+    fn into(self) -> Signal<T> {
+        let SerializedSignal { signal_type, args } = self;
+        Signal::new(signal_type, args)
+    }
+}
 
 #[derive(Hash, Eq, PartialEq, Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "type", content = "value")]
 pub enum SignalType {
     Error,
     Pending,

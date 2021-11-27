@@ -47,6 +47,7 @@ use crate::{
 };
 
 #[derive(Hash, Eq, PartialEq, Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "type", content = "value")]
 pub enum Term<T: Expression> {
     #[serde(bound(
         serialize = "<T as Expression>::String: Serialize",
@@ -486,12 +487,8 @@ impl<T: Expression> SerializeJson for Term<T> {
 /// A TermExpression is a thin wrapper around [Term]. In AST/graph terminology, a TermExpression
 /// is a node in the graph, a [Term] is the value stored at that node. i.e. a [Term] is not an
 /// [Expression] but a TermExpression is.
-#[derive(Hash, Eq, PartialEq, Clone, Debug, Serialize, Deserialize)]
+#[derive(Hash, Eq, PartialEq, Clone, Debug)]
 pub struct TermExpression<T: Expression> {
-    #[serde(bound(
-        serialize = "<T as Expression>::String: Serialize, T: Serialize",
-        deserialize = "<T as Expression>::String: Deserialize<'de>, T: Deserialize<'de>"
-    ))]
     value: Term<T>,
 }
 impl<T: Expression> TermExpression<T> {
@@ -655,10 +652,36 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>> 
             .compile(eager, stack_offset, factory, allocator, compiler)
     }
 }
+impl<T: Expression> serde::Serialize for TermExpression<T>
+where
+    T: serde::Serialize,
+    T::String: serde::Serialize,
+{
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        self.value.serialize(serializer)
+    }
+}
+impl<'de, T: Expression> serde::Deserialize<'de> for TermExpression<T>
+where
+    T: serde::Deserialize<'de>,
+    T::String: serde::Deserialize<'de>,
+{
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        Ok(Self::new(Term::<T>::deserialize(deserializer)?))
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
     use crate::allocator::DefaultAllocator;
+    use crate::core::SignalType;
     use crate::lang::{CachedSharedTerm, SharedTermFactory, ValueTerm};
     use crate::parser::sexpr::parse;
     use crate::stdlib::Stdlib;
@@ -670,6 +693,15 @@ mod test {
         let allocator = DefaultAllocator::default();
 
         let value = factory.create_value_term(ValueTerm::Int(5));
+        let serialized = serde_json::to_string(&value).unwrap();
+        let deser: CachedSharedTerm<Stdlib> = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(value, deser);
+
+        let value =
+            factory.create_signal_term(allocator.create_signal_list([allocator.create_signal(
+                SignalType::Custom(String::from("foo")),
+                allocator.create_unit_list(factory.create_value_term(ValueTerm::Int(3))),
+            )]));
         let serialized = serde_json::to_string(&value).unwrap();
         let deser: CachedSharedTerm<Stdlib> = serde_json::from_str(&serialized).unwrap();
         assert_eq!(value, deser);
