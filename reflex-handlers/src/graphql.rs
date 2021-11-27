@@ -218,7 +218,7 @@ fn handle_graphql_ws_operation<T: AsyncExpression>(
         async move {
             let active_subscription_id = active_subscription_id.lock().unwrap().take();
             if let Some(subscription_id) = active_subscription_id {
-                let _ = connections.unsubscribe(subscription_id).await;
+                let _ = connections.channel().unsubscribe(subscription_id).await;
             }
         }
     };
@@ -236,7 +236,7 @@ fn handle_graphql_ws_operation<T: AsyncExpression>(
                 eprintln!("[GraphQL] WebSocket request: {}", url);
                 Box::pin(
                     connections
-                        .clone()
+                        .channel()
                         .subscribe(url.clone(), operation)
                         .into_stream()
                         .flat_map({
@@ -254,7 +254,7 @@ fn handle_graphql_ws_operation<T: AsyncExpression>(
                                     let unsubscribe_existing = if let Some(existing_id) =
                                         existing_id
                                     {
-                                        connections.clone().unsubscribe(existing_id).left_future()
+                                        connections.channel().unsubscribe(existing_id).left_future()
                                     } else {
                                         future::ready(Ok(())).right_future()
                                     };

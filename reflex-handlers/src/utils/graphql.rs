@@ -4,7 +4,7 @@
 use std::{
     collections::{hash_map::Entry, HashMap},
     iter::once,
-    sync::Mutex,
+    sync::{Arc, Mutex},
 };
 
 use futures_util::{
@@ -16,6 +16,7 @@ use reflex_json::{json_object, JsonValue};
 use tokio::{
     net::TcpStream,
     sync::{broadcast, mpsc, oneshot, watch},
+    task::JoinHandle,
 };
 use tokio_stream::{
     wrappers::{BroadcastStream, WatchStream},
@@ -99,21 +100,52 @@ impl WebSocketConnectionManagerCommand {
     }
 }
 
+#[derive(Clone)]
 pub struct WebSocketConnectionManager {
-    commands: mpsc::Sender<WebSocketConnectionManagerCommand>,
-}
-impl Clone for WebSocketConnectionManager {
-    fn clone(&self) -> Self {
-        Self {
-            commands: self.commands.clone(),
-        }
-    }
+    connection: Arc<Mutex<Option<WebSocketConnectionChannel>>>,
 }
 impl Default for WebSocketConnectionManager {
     fn default() -> Self {
+        Self {
+            connection: Arc::new(Mutex::new(None)),
+        }
+    }
+}
+impl WebSocketConnectionManager {
+    pub fn channel(&self) -> WebSocketConnectionChannel {
+        let mut guard = self.connection.lock().unwrap();
+        let existing_connection = guard.take();
+        let connection = existing_connection.unwrap_or_else(|| WebSocketConnectionChannel::spawn());
+        let child_connection = connection.clone();
+        guard.replace(connection);
+        child_connection
+    }
+}
+
+pub struct WebSocketConnectionChannel {
+    commands: mpsc::Sender<WebSocketConnectionManagerCommand>,
+    task: Option<JoinHandle<()>>,
+}
+impl Clone for WebSocketConnectionChannel {
+    fn clone(&self) -> Self {
+        Self {
+            commands: self.commands.clone(),
+            task: None,
+        }
+    }
+}
+impl Drop for WebSocketConnectionChannel {
+    fn drop(&mut self) {
+        if let Some(task) = self.task.take() {
+            task.abort();
+        }
+    }
+}
+impl WebSocketConnectionChannel {
+    fn spawn() -> Self {
         let (messages_tx, mut messages_rx) =
             mpsc::channel::<WebSocketConnectionManagerCommand>(1024);
-        tokio::spawn({
+        let task = tokio::spawn({
             let mut connections = Mutex::new(ConnectionCache::default());
             async move {
                 while let Some(command) = messages_rx.recv().await {
@@ -162,10 +194,9 @@ impl Default for WebSocketConnectionManager {
         });
         Self {
             commands: messages_tx,
+            task: Some(task),
         }
     }
-}
-impl WebSocketConnectionManager {
     pub async fn subscribe(
         self,
         url: String,
