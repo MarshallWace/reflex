@@ -23,33 +23,14 @@ use crate::{
 pub struct BuiltinTerm<T: Expression> {
     target: T::Builtin,
 }
-impl<T: Expression> serde::ser::Serialize for BuiltinTerm<T>
-where
-    T::String: serde::ser::Serialize,
-{
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        serializer.serialize_bytes(self.target.uid().as_ref())
-    }
-}
-impl<'de, T: Expression> serde::de::Deserialize<'de> for BuiltinTerm<T> {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        deserializer.deserialize_bytes(BuiltinTermVisitor::<T>::new())
+impl<T: Expression> BuiltinTerm<T> {
+    pub fn new(target: T::Builtin) -> Self {
+        Self { target }
     }
 }
 impl<T: Expression> Uid for BuiltinTerm<T> {
     fn uid(&self) -> Uuid {
         self.target.uid()
-    }
-}
-impl<T: Expression> BuiltinTerm<T> {
-    pub fn new(target: T::Builtin) -> Self {
-        Self { target }
     }
 }
 impl<T: Expression> GraphNode for BuiltinTerm<T> {
@@ -74,10 +55,13 @@ impl<T: Expression> GraphNode for BuiltinTerm<T> {
     fn is_atomic(&self) -> bool {
         true
     }
+    fn is_complex(&self) -> bool {
+        false
+    }
 }
 impl<T: Expression + Applicable<T>> Applicable<T> for BuiltinTerm<T> {
     fn arity(&self) -> Option<Arity> {
-        Builtin::arity::<T>(&self.target)
+        self.target.arity::<T>()
     }
     fn apply(
         &self,
@@ -86,14 +70,15 @@ impl<T: Expression + Applicable<T>> Applicable<T> for BuiltinTerm<T> {
         allocator: &impl HeapAllocator<T>,
         cache: &mut impl EvaluationCache<T>,
     ) -> Result<T, String> {
-        Builtin::apply(&self.target, args, factory, allocator, cache)
+        self.target
+            .apply(args, factory, allocator, cache)
             .map_err(|err| format!("{}: {}", self, err))
     }
     fn should_parallelize(&self, args: &[T]) -> bool {
         self.target.should_parallelize(args)
     }
 }
-impl<T: Expression + Applicable<T> + Compile<T>> Compile<T> for BuiltinTerm<T> {
+impl<T: Expression> Compile<T> for BuiltinTerm<T> {
     fn compile(
         &self,
         _eager: VarArgs,
@@ -117,24 +102,37 @@ impl<T: Expression> SerializeJson for BuiltinTerm<T> {
         Err(format!("Unable to serialize term: {}", self))
     }
 }
-
-struct BuiltinTermVisitor<T> {
+impl<T: Expression> serde::ser::Serialize for BuiltinTerm<T> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_bytes(self.target.uid().as_ref())
+    }
+}
+impl<'de, T: Expression> serde::de::Deserialize<'de> for BuiltinTerm<T> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserializer.deserialize_bytes(BuiltinTermDeserializeVisitor::<T>::new())
+    }
+}
+struct BuiltinTermDeserializeVisitor<T: Expression> {
     _phantom: PhantomData<T>,
 }
-impl<T> BuiltinTermVisitor<T> {
+impl<T: Expression> BuiltinTermDeserializeVisitor<T> {
     fn new() -> Self {
         Self {
             _phantom: PhantomData,
         }
     }
 }
-impl<'de, T: Expression> Visitor<'de> for BuiltinTermVisitor<T> {
+impl<'de, T: Expression> Visitor<'de> for BuiltinTermDeserializeVisitor<T> {
     type Value = BuiltinTerm<T>;
-
     fn expecting(&self, formatter: &mut Formatter) -> std::fmt::Result {
         formatter.write_str("Only accepts bytes representing a valid uuid")
     }
-
     fn visit_bytes<E>(self, v: &[u8]) -> Result<Self::Value, E>
     where
         E: Error,
@@ -145,7 +143,6 @@ impl<'de, T: Expression> Visitor<'de> for BuiltinTermVisitor<T> {
             .map_err(|_err| E::custom("uuid not found"))?;
         Ok(BuiltinTerm::new(builtin))
     }
-
     // Some types of serde (e.g. serde-json) do not distinguish between bytes and a sequence
     // so we need to implement both visit methods
     fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>

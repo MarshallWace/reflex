@@ -8,8 +8,9 @@ use std::{collections::HashSet, iter::once};
 use crate::{
     compiler::{Compile, Compiler, Instruction, Program},
     core::{
-        DependencyList, DynamicState, EvaluationCache, Expression, ExpressionFactory, GraphNode,
-        HeapAllocator, Reducible, Rewritable, SerializeJson, StackOffset, Substitutions, VarArgs,
+        CompoundNode, DependencyList, DynamicState, EvaluationCache, Expression, ExpressionFactory,
+        GraphNode, HeapAllocator, Reducible, Rewritable, SerializeJson, StackOffset, Substitutions,
+        VarArgs,
     },
 };
 
@@ -47,11 +48,18 @@ impl<T: Expression> GraphNode for RecursiveTerm<T> {
     fn is_atomic(&self) -> bool {
         false
     }
+    fn is_complex(&self) -> bool {
+        true
+    }
+}
+pub type RecursiveTermChildren<'a, T> = std::iter::Once<&'a T>;
+impl<'a, T: Expression + 'a> CompoundNode<'a, T> for RecursiveTerm<T> {
+    type Children = RecursiveTermChildren<'a, T>;
+    fn children(&'a self) -> Self::Children {
+        once(&self.factory)
+    }
 }
 impl<T: Expression + Rewritable<T>> Rewritable<T> for RecursiveTerm<T> {
-    fn children(&self) -> Vec<&T> {
-        once(&self.factory).collect()
-    }
     fn substitute_static(
         &self,
         substitutions: &Substitutions<T>,
@@ -95,7 +103,7 @@ impl<T: Expression + Rewritable<T>> Rewritable<T> for RecursiveTerm<T> {
             .map(|target| factory.create_recursive_term(target))
     }
 }
-impl<T: Expression + Rewritable<T> + Reducible<T>> Reducible<T> for RecursiveTerm<T> {
+impl<T: Expression + Reducible<T>> Reducible<T> for RecursiveTerm<T> {
     fn is_reducible(&self) -> bool {
         true
     }

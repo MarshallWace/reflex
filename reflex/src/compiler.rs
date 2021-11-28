@@ -20,7 +20,7 @@ use crate::{
 };
 use serde::{Deserialize, Serialize};
 
-pub trait Compile<T: Expression + Compile<T>> {
+pub trait Compile<T: Expression> {
     fn compile(
         &self,
         eager: VarArgs,

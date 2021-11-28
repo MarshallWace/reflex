@@ -70,6 +70,21 @@ impl Stdlib {
             Self::GraphQlResolver => Applicable::<T>::arity(&GraphQlResolver {}),
         }
     }
+    pub fn should_parallelize<T: Expression + Applicable<T>>(&self, args: &[T]) -> bool
+    where
+        T::Builtin: From<Self> + From<BuiltinStdlib>,
+    {
+        match self {
+            Self::CollectQueryListItems => {
+                Applicable::<T>::should_parallelize(&CollectQueryListItems {}, args)
+            }
+            Self::DynamicQueryBranch => {
+                Applicable::<T>::should_parallelize(&DynamicQueryBranch {}, args)
+            }
+            Self::FlattenDeep => Applicable::<T>::should_parallelize(&FlattenDeep {}, args),
+            Self::GraphQlResolver => Applicable::<T>::should_parallelize(&GraphQlResolver {}, args),
+        }
+    }
     pub fn apply<T: Expression + Applicable<T>>(
         &self,
         args: impl ExactSizeIterator<Item = T>,
@@ -93,21 +108,6 @@ impl Stdlib {
             Self::GraphQlResolver => {
                 Applicable::<T>::apply(&GraphQlResolver {}, args, factory, allocator, cache)
             }
-        }
-    }
-    pub fn should_parallelize<T: Expression + Applicable<T>>(&self, args: &[T]) -> bool
-    where
-        T::Builtin: From<Self> + From<BuiltinStdlib>,
-    {
-        match self {
-            Self::CollectQueryListItems => {
-                Applicable::<T>::should_parallelize(&CollectQueryListItems {}, args)
-            }
-            Self::DynamicQueryBranch => {
-                Applicable::<T>::should_parallelize(&DynamicQueryBranch {}, args)
-            }
-            Self::FlattenDeep => Applicable::<T>::should_parallelize(&FlattenDeep {}, args),
-            Self::GraphQlResolver => Applicable::<T>::should_parallelize(&GraphQlResolver {}, args),
         }
     }
 }

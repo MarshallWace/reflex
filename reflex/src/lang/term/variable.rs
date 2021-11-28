@@ -11,146 +11,11 @@ use std::{
 use crate::{
     compiler::{Compile, Compiler, Instruction, Program},
     core::{
-        DependencyList, DynamicState, EvaluationCache, Expression, ExpressionFactory, GraphNode,
-        HeapAllocator, Rewritable, SerializeJson, StackOffset, StateToken, Substitutions, VarArgs,
+        CompoundNode, DependencyList, DynamicState, Evaluate, EvaluationCache, EvaluationResult,
+        Expression, ExpressionFactory, GraphNode, HeapAllocator, Rewritable, SerializeJson,
+        StackOffset, StateToken, Substitutions, VarArgs,
     },
 };
-
-#[derive(Hash, Eq, PartialEq, Clone, Debug, Serialize, Deserialize)]
-pub enum VariableTerm<T: Expression> {
-    Static(StaticVariableTerm),
-    Dynamic(DynamicVariableTerm<T>),
-}
-impl<T: Expression> GraphNode for VariableTerm<T> {
-    fn capture_depth(&self) -> StackOffset {
-        match self {
-            Self::Static(term) => term.capture_depth(),
-            Self::Dynamic(term) => term.capture_depth(),
-        }
-    }
-    fn free_variables(&self) -> HashSet<StackOffset> {
-        match self {
-            Self::Static(term) => term.free_variables(),
-            Self::Dynamic(term) => term.free_variables(),
-        }
-    }
-    fn count_variable_usages(&self, offset: StackOffset) -> usize {
-        match self {
-            Self::Static(term) => term.count_variable_usages(offset),
-            Self::Dynamic(term) => term.count_variable_usages(offset),
-        }
-    }
-    fn dynamic_dependencies(&self, deep: bool) -> DependencyList {
-        match self {
-            Self::Static(term) => term.dynamic_dependencies(deep),
-            Self::Dynamic(term) => term.dynamic_dependencies(deep),
-        }
-    }
-    fn has_dynamic_dependencies(&self, deep: bool) -> bool {
-        match self {
-            Self::Static(term) => term.has_dynamic_dependencies(deep),
-            Self::Dynamic(term) => term.has_dynamic_dependencies(deep),
-        }
-    }
-    fn is_static(&self) -> bool {
-        match self {
-            Self::Static(term) => term.is_static(),
-            Self::Dynamic(term) => term.is_static(),
-        }
-    }
-    fn is_atomic(&self) -> bool {
-        match self {
-            Self::Static(term) => term.is_atomic(),
-            Self::Dynamic(term) => term.is_atomic(),
-        }
-    }
-}
-impl<T: Expression + Rewritable<T>> Rewritable<T> for VariableTerm<T> {
-    fn children(&self) -> Vec<&T> {
-        match self {
-            Self::Static(term) => term.children(),
-            Self::Dynamic(term) => term.children(),
-        }
-    }
-    fn substitute_static(
-        &self,
-        substitutions: &Substitutions<T>,
-        factory: &impl ExpressionFactory<T>,
-        allocator: &impl HeapAllocator<T>,
-        cache: &mut impl EvaluationCache<T>,
-    ) -> Option<T> {
-        match self {
-            Self::Static(term) => term.substitute_static(substitutions, factory, allocator, cache),
-            Self::Dynamic(term) => term.substitute_static(substitutions, factory, allocator, cache),
-        }
-    }
-    fn substitute_dynamic(
-        &self,
-        deep: bool,
-        state: &impl DynamicState<T>,
-        factory: &impl ExpressionFactory<T>,
-        allocator: &impl HeapAllocator<T>,
-        cache: &mut impl EvaluationCache<T>,
-    ) -> Option<T> {
-        match self {
-            Self::Static(term) => term.substitute_dynamic(deep, state, factory, allocator, cache),
-            Self::Dynamic(term) => term.substitute_dynamic(deep, state, factory, allocator, cache),
-        }
-    }
-    fn hoist_free_variables(
-        &self,
-        factory: &impl ExpressionFactory<T>,
-        allocator: &impl HeapAllocator<T>,
-    ) -> Option<T> {
-        match self {
-            Self::Static(term) => term.hoist_free_variables(factory, allocator),
-            Self::Dynamic(term) => term.hoist_free_variables(factory, allocator),
-        }
-    }
-    fn normalize(
-        &self,
-        factory: &impl ExpressionFactory<T>,
-        allocator: &impl HeapAllocator<T>,
-        cache: &mut impl EvaluationCache<T>,
-    ) -> Option<T> {
-        match self {
-            Self::Static(term) => term.normalize(factory, allocator, cache),
-            Self::Dynamic(term) => term.normalize(factory, allocator, cache),
-        }
-    }
-}
-impl<T: Expression + Compile<T>> Compile<T> for VariableTerm<T> {
-    fn compile(
-        &self,
-        eager: VarArgs,
-        stack_offset: StackOffset,
-        factory: &impl ExpressionFactory<T>,
-        allocator: &impl HeapAllocator<T>,
-        compiler: &mut Compiler,
-    ) -> Result<Program, String> {
-        match self {
-            Self::Static(term) => term.compile(eager, stack_offset, factory, allocator, compiler),
-            Self::Dynamic(term) => term.compile(eager, stack_offset, factory, allocator, compiler),
-        }
-    }
-}
-impl<T: Expression> std::fmt::Display for VariableTerm<T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Static(term) => std::fmt::Display::fmt(term, f),
-            Self::Dynamic(term) => std::fmt::Display::fmt(term, f),
-        }
-    }
-}
-
-impl<T: Expression> SerializeJson for VariableTerm<T> {
-    fn to_json(&self) -> Result<serde_json::Value, String> {
-        match self {
-            Self::Static(term) => term.to_json(),
-            Self::Dynamic(term) => term.to_json(),
-        }
-    }
-}
 
 #[derive(Hash, Eq, PartialEq, Clone, Debug, Serialize, Deserialize)]
 pub struct StaticVariableTerm {
@@ -190,11 +55,11 @@ impl GraphNode for StaticVariableTerm {
     fn is_atomic(&self) -> bool {
         false
     }
+    fn is_complex(&self) -> bool {
+        false
+    }
 }
 impl<T: Expression + Rewritable<T>> Rewritable<T> for StaticVariableTerm {
-    fn children(&self) -> Vec<&T> {
-        Vec::new()
-    }
     fn substitute_static(
         &self,
         substitutions: &Substitutions<T>,
@@ -296,11 +161,35 @@ impl<T: Expression> GraphNode for DynamicVariableTerm<T> {
     fn is_atomic(&self) -> bool {
         false
     }
+    fn is_complex(&self) -> bool {
+        true
+    }
+}
+pub type DynamicVariableTermChildren<'a, T> = std::iter::Once<&'a T>;
+impl<'a, T: Expression + 'a> CompoundNode<'a, T> for DynamicVariableTerm<T> {
+    type Children = DynamicVariableTermChildren<'a, T>;
+    fn children(&'a self) -> Self::Children {
+        once(&self.fallback)
+    }
+}
+impl<T: Expression> Evaluate<T> for DynamicVariableTerm<T> {
+    fn evaluate(
+        &self,
+        state: &impl DynamicState<T>,
+        _factory: &impl ExpressionFactory<T>,
+        _allocator: &impl HeapAllocator<T>,
+        _cache: &mut impl EvaluationCache<T>,
+    ) -> Option<EvaluationResult<T>> {
+        Some(EvaluationResult::new(
+            state
+                .get(&self.state_token)
+                .unwrap_or(&self.fallback)
+                .clone(),
+            DependencyList::of(self.state_token),
+        ))
+    }
 }
 impl<T: Expression + Rewritable<T>> Rewritable<T> for DynamicVariableTerm<T> {
-    fn children(&self) -> Vec<&T> {
-        Vec::new()
-    }
     fn substitute_static(
         &self,
         _substitutions: &Substitutions<T>,
@@ -318,12 +207,7 @@ impl<T: Expression + Rewritable<T>> Rewritable<T> for DynamicVariableTerm<T> {
         _allocator: &impl HeapAllocator<T>,
         _cache: &mut impl EvaluationCache<T>,
     ) -> Option<T> {
-        Some(
-            state
-                .get(&self.state_token)
-                .unwrap_or(&self.fallback)
-                .clone(),
-        )
+        state.get(&self.state_token).cloned()
     }
     fn hoist_free_variables(
         &self,
@@ -365,7 +249,6 @@ impl<T: Expression> std::fmt::Display for DynamicVariableTerm<T> {
         write!(f, "<dynamic:{}:{}>", self.state_token, self.fallback)
     }
 }
-
 impl<T: Expression> SerializeJson for DynamicVariableTerm<T> {
     fn to_json(&self) -> Result<serde_json::Value, String> {
         Err(format!("Unable to serialize term: {}", self))

@@ -356,7 +356,7 @@ impl Uid for Stdlib {
     }
 }
 impl Stdlib {
-    pub fn arity<T: Expression + Applicable<T>>(&self) -> Option<Arity>
+    pub fn arity<T: Expression>(&self) -> Option<Arity>
     where
         T::Builtin: From<Self>,
     {
@@ -432,7 +432,7 @@ impl Stdlib {
             Self::Values => Applicable::<T>::arity(&Values {}),
         }
     }
-    pub fn apply<T: Expression + Applicable<T>>(
+    pub fn apply<T: Expression>(
         &self,
         args: impl ExactSizeIterator<Item = T>,
         factory: &impl ExpressionFactory<T>,
@@ -558,7 +558,7 @@ impl Stdlib {
             Self::Values => Applicable::<T>::apply(&Values {}, args, factory, allocator, cache),
         }
     }
-    pub fn should_parallelize<T: Expression + Applicable<T>>(&self, args: &[T]) -> bool
+    pub fn should_parallelize<T: Expression>(&self, args: &[T]) -> bool
     where
         T::Builtin: From<Self>,
     {
@@ -641,12 +641,14 @@ impl Stdlib {
         }
     }
 }
-
 impl Builtin for Stdlib {
-    fn arity<T: Expression<Builtin = Self> + Applicable<T>>(&self) -> Option<Arity> {
+    fn arity<T: Expression<Builtin = Self>>(&self) -> Option<Arity> {
         self.arity::<T>()
     }
-    fn apply<T: Expression<Builtin = Self> + Applicable<T>>(
+    fn should_parallelize<T: Expression<Builtin = Self>>(&self, args: &[T]) -> bool {
+        self.should_parallelize(args)
+    }
+    fn apply<T: Expression<Builtin = Self>>(
         &self,
         args: impl ExactSizeIterator<Item = T>,
         factory: &impl ExpressionFactory<T>,
@@ -654,13 +656,6 @@ impl Builtin for Stdlib {
         cache: &mut impl EvaluationCache<T>,
     ) -> Result<T, String> {
         self.apply(args, factory, allocator, cache)
-    }
-
-    fn should_parallelize<T: Expression<Builtin = Self> + Applicable<T>>(
-        &self,
-        args: &[T],
-    ) -> bool {
-        self.should_parallelize(args)
     }
 }
 impl std::fmt::Display for Stdlib {

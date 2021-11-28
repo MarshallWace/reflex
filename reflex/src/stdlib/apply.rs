@@ -21,9 +21,12 @@ impl Uid for Apply {
         Self::UUID
     }
 }
-impl<T: Expression + Applicable<T>> Applicable<T> for Apply {
+impl<T: Expression> Applicable<T> for Apply {
     fn arity(&self) -> Option<Arity> {
         Some(Arity::from(&Self::ARITY))
+    }
+    fn should_parallelize(&self, _args: &[T]) -> bool {
+        false
     }
     fn apply(
         &self,
@@ -34,26 +37,18 @@ impl<T: Expression + Applicable<T>> Applicable<T> for Apply {
     ) -> Result<T, String> {
         let target = args.next().unwrap();
         let args = args.next().unwrap();
-        let result = if target.arity().is_some() {
-            let arg_values = if let Some(args) = factory.match_tuple_term(&args) {
-                Some(args.fields())
-            } else if let Some(args) = factory.match_vector_term(&args) {
-                Some(args.items())
-            } else {
-                None
-            };
-            match arg_values {
-                Some(arg_values) => {
-                    Ok(factory.create_application_term(target, allocator.clone_list(arg_values)))
-                }
-                None => Err((target, args)),
-            }
+        let arg_values = if let Some(args) = factory.match_tuple_term(&args) {
+            Some(args.fields())
+        } else if let Some(args) = factory.match_vector_term(&args) {
+            Some(args.items())
         } else {
-            Err((target, args))
+            None
         };
-        match result {
-            Ok(result) => Ok(result),
-            Err((target, args)) => Err(format!(
+        match arg_values {
+            Some(arg_values) => {
+                Ok(factory.create_application_term(target, allocator.clone_list(arg_values)))
+            }
+            None => Err(format!(
                 "Expected (<function>, <tuple>) or (<function>, Vector), received ({}, {})",
                 target, args
             )),

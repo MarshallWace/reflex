@@ -3,10 +3,11 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use serde::{Deserialize, Serialize};
-use std::{collections::HashSet, iter::once};
+use std::collections::HashSet;
+use std::iter::once;
 
 use crate::cache::NoopCache;
-use crate::core::count_subexpression_usages;
+use crate::core::CompoundNode;
 use crate::{
     compiler::{Compile, Compiler, Instruction, Program},
     core::{
@@ -68,20 +69,18 @@ impl<T: Expression> GraphNode for LetTerm<T> {
     fn is_atomic(&self) -> bool {
         false
     }
+    fn is_complex(&self) -> bool {
+        true
+    }
+}
+pub type LetTermChildren<'a, T> = std::iter::Chain<std::iter::Once<&'a T>, std::iter::Once<&'a T>>;
+impl<'a, T: Expression + 'a> CompoundNode<'a, T> for LetTerm<T> {
+    type Children = LetTermChildren<'a, T>;
+    fn children(&'a self) -> Self::Children {
+        once(&self.initializer).chain(once(&self.body))
+    }
 }
 impl<T: Expression + Rewritable<T> + Reducible<T>> Rewritable<T> for LetTerm<T> {
-    fn children(&self) -> Vec<&T> {
-        once(&self.initializer).chain(once(&self.body)).collect()
-    }
-    fn count_subexpression_usages(
-        &self,
-        expression: &T,
-        factory: &impl ExpressionFactory<T>,
-        allocator: &impl HeapAllocator<T>,
-    ) -> usize {
-        count_subexpression_usages(expression, once(&self.initializer), 0, factory, allocator)
-            + count_subexpression_usages(expression, once(&self.body), 1, factory, allocator)
-    }
     fn substitute_static(
         &self,
         substitutions: &Substitutions<T>,

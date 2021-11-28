@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
+// SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use reflex::core::{
     uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
     FunctionArity, HeapAllocator, Uid, Uuid,
@@ -24,6 +25,9 @@ impl<T: Expression> Applicable<T> for CollectQueryListItems {
     fn arity(&self) -> Option<Arity> {
         Some(Arity::from(&Self::ARITY))
     }
+    fn should_parallelize(&self, args: &[T]) -> bool {
+        args.len() >= 64
+    }
     fn apply(
         &self,
         args: impl ExactSizeIterator<Item = T>,
@@ -32,8 +36,5 @@ impl<T: Expression> Applicable<T> for CollectQueryListItems {
         _cache: &mut impl EvaluationCache<T>,
     ) -> Result<T, String> {
         Ok(factory.create_vector_term(allocator.create_list(args)))
-    }
-    fn should_parallelize(&self, args: &[T]) -> bool {
-        args.len() >= 64
     }
 }

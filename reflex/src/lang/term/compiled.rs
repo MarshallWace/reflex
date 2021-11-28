@@ -70,6 +70,9 @@ impl GraphNode for CompiledFunctionTerm {
     fn is_atomic(&self) -> bool {
         false
     }
+    fn is_complex(&self) -> bool {
+        false
+    }
 }
 impl<T: Expression> Applicable<T> for CompiledFunctionTerm {
     fn arity(&self) -> Option<Arity> {
@@ -86,6 +89,9 @@ impl<T: Expression> Applicable<T> for CompiledFunctionTerm {
             "Compiled functions cannot be invoked directly: {}",
             self,
         ))
+    }
+    fn should_parallelize(&self, _args: &[T]) -> bool {
+        false
     }
 }
 impl<T: Expression + Compile<T>> Compile<T> for CompiledFunctionTerm {

@@ -47,6 +47,9 @@ impl<T: Expression> GraphNode for SignalTerm<T> {
     fn is_atomic(&self) -> bool {
         true
     }
+    fn is_complex(&self) -> bool {
+        false
+    }
 }
 impl<T: Expression + Rewritable<T> + Reducible<T> + Compile<T>> Compile<T> for SignalTerm<T> {
     fn compile(

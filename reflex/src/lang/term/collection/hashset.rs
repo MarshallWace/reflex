@@ -8,9 +8,9 @@ use std::{collections::HashSet, hash::Hash, iter::once};
 use crate::{
     compiler::{compile_expressions, Compile, Compiler, Instruction, Program},
     core::{
-        transform_expression_list, DependencyList, DynamicState, EvaluationCache, Expression,
-        ExpressionFactory, ExpressionList, GraphNode, HeapAllocator, Iterable, Rewritable,
-        SerializeJson, StackOffset, Substitutions, VarArgs,
+        transform_expression_list, CompoundNode, DependencyList, DynamicState, EvaluationCache,
+        Expression, ExpressionFactory, ExpressionList, ExpressionListSlice, GraphNode,
+        HeapAllocator, Rewritable, SerializeJson, StackOffset, Substitutions, VarArgs,
     },
     hash::HashId,
 };
@@ -69,11 +69,18 @@ impl<T: Expression> GraphNode for HashSetTerm<T> {
     fn is_atomic(&self) -> bool {
         self.values.is_empty()
     }
+    fn is_complex(&self) -> bool {
+        true
+    }
+}
+pub type HashSetTermChildren<'a, T> = ExpressionListSlice<'a, T>;
+impl<'a, T: Expression + 'a> CompoundNode<'a, T> for HashSetTerm<T> {
+    type Children = HashSetTermChildren<'a, T>;
+    fn children(&'a self) -> Self::Children {
+        self.values.iter()
+    }
 }
 impl<T: Expression + Rewritable<T>> Rewritable<T> for HashSetTerm<T> {
-    fn children(&self) -> Vec<&T> {
-        self.values.iter().collect()
-    }
     fn substitute_static(
         &self,
         substitutions: &Substitutions<T>,
@@ -182,11 +189,6 @@ impl<T: Expression> std::fmt::Display for HashSetTerm<T> {
 impl<T: Expression> SerializeJson for HashSetTerm<T> {
     fn to_json(&self) -> Result<serde_json::Value, String> {
         Err(format!("Unable to serialize term: {}", self))
-    }
-}
-impl<T: Expression> Iterable for HashSetTerm<T> {
-    fn is_empty(&self) -> bool {
-        self.values.is_empty()
     }
 }
 impl<T: Expression> serde::Serialize for HashSetTerm<T>

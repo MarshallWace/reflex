@@ -8,9 +8,10 @@ use std::{collections::HashSet, iter::once};
 use crate::{
     compiler::{compile_expressions, Compile, Compiler, Instruction, Program},
     core::{
-        transform_expression_list, Applicable, Arity, DependencyList, DynamicState,
-        EvaluationCache, Expression, ExpressionFactory, ExpressionList, GraphNode, HeapAllocator,
-        Reducible, Rewritable, SerializeJson, StackOffset, StructPrototype, Substitutions, VarArgs,
+        transform_expression_list, Applicable, Arity, CompoundNode, DependencyList, DynamicState,
+        EvaluationCache, Expression, ExpressionFactory, ExpressionList, ExpressionListSlice,
+        GraphNode, HeapAllocator, Reducible, Rewritable, SerializeJson, StackOffset,
+        StructPrototype, Substitutions, VarArgs,
     },
 };
 
@@ -68,11 +69,18 @@ impl<T: Expression> GraphNode for StructTerm<T> {
     fn is_atomic(&self) -> bool {
         self.fields.is_atomic()
     }
+    fn is_complex(&self) -> bool {
+        true
+    }
+}
+pub type StructTermChildren<'a, T> = ExpressionListSlice<'a, T>;
+impl<'a, T: Expression + 'a> CompoundNode<'a, T> for StructTerm<T> {
+    type Children = StructTermChildren<'a, T>;
+    fn children(&'a self) -> Self::Children {
+        self.fields.iter()
+    }
 }
 impl<T: Expression + Rewritable<T>> Rewritable<T> for StructTerm<T> {
-    fn children(&self) -> Vec<&T> {
-        self.fields.iter().collect()
-    }
     fn substitute_static(
         &self,
         substitutions: &Substitutions<T>,
@@ -233,6 +241,9 @@ impl GraphNode for ConstructorTerm {
     fn is_atomic(&self) -> bool {
         true
     }
+    fn is_complex(&self) -> bool {
+        false
+    }
 }
 impl<T: Expression> Applicable<T> for ConstructorTerm {
     fn arity(&self) -> Option<Arity> {
@@ -249,6 +260,9 @@ impl<T: Expression> Applicable<T> for ConstructorTerm {
             allocator.clone_struct_prototype(&self.prototype),
             allocator.create_list(args),
         ))
+    }
+    fn should_parallelize(&self, _args: &[T]) -> bool {
+        false
     }
 }
 impl<T: Expression + Compile<T>> Compile<T> for ConstructorTerm {

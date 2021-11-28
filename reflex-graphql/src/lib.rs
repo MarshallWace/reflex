@@ -630,6 +630,15 @@ mod tests {
                 GraphQlTestBuiltins::GraphQl(term) => term.arity::<T>(),
             }
         }
+        fn should_parallelize<T: Expression<Builtin = Self> + Applicable<T>>(
+            &self,
+            args: &[T],
+        ) -> bool {
+            match self {
+                GraphQlTestBuiltins::Stdlib(term) => term.should_parallelize(args),
+                GraphQlTestBuiltins::GraphQl(term) => term.should_parallelize(args),
+            }
+        }
         fn apply<T: Expression<Builtin = Self> + Applicable<T>>(
             &self,
             args: impl ExactSizeIterator<Item = T>,
@@ -640,15 +649,6 @@ mod tests {
             match self {
                 GraphQlTestBuiltins::Stdlib(term) => term.apply(args, factory, allocator, cache),
                 GraphQlTestBuiltins::GraphQl(term) => term.apply(args, factory, allocator, cache),
-            }
-        }
-        fn should_parallelize<T: Expression<Builtin = Self> + Applicable<T>>(
-            &self,
-            args: &[T],
-        ) -> bool {
-            match self {
-                GraphQlTestBuiltins::Stdlib(term) => term.should_parallelize(args),
-                GraphQlTestBuiltins::GraphQl(term) => term.should_parallelize(args),
             }
         }
     }

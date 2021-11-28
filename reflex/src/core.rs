@@ -14,7 +14,7 @@ use im::OrdSet;
 use serde::{Deserialize, Serialize};
 pub use uuid::{uuid, Uuid};
 
-use crate::{cache::NoopCache, lang::*};
+use crate::lang::*;
 use crate::{
     compiler::InstructionPointer,
     hash::{hash_object, HashId},
@@ -69,59 +69,20 @@ pub trait GraphNode {
     fn count_variable_usages(&self, offset: StackOffset) -> usize;
     fn dynamic_dependencies(&self, deep: bool) -> DependencyList;
     fn has_dynamic_dependencies(&self, deep: bool) -> bool;
-    /** Weak head normal form - outer term is fully evaluated, sub-expressions may contain dynamic values */
+    /// Weak head normal form - outer term is fully evaluated, sub-expressions may contain dynamic values
     fn is_static(&self) -> bool;
-    /** Term is fully evaluated and contains no dynamic sub-expressions */
+    /// Term is fully evaluated and contains no dynamic sub-expressions
     fn is_atomic(&self) -> bool;
+    /// Term contains sub-expressions
+    fn is_complex(&self) -> bool;
 }
 
-pub(crate) fn count_subexpression_usages<'a, T: Expression + Rewritable<T> + 'a>(
-    pattern: &T,
-    subexpressions: impl IntoIterator<Item = &'a T>,
-    subexpression_scope_offset: StackOffset,
-    factory: &impl ExpressionFactory<T>,
-    allocator: &impl HeapAllocator<T>,
-) -> usize {
-    let mut noop_cache = NoopCache::default();
-    subexpressions.into_iter().fold(0, |result, subexpression| {
-        if subexpression_scope_offset == 0 {
-            result + subexpression.count_subexpression_usages(pattern, factory, allocator)
-        } else {
-            let adjusted_scope_pattern = pattern.substitute_static(
-                &Substitutions::increase_scope_offset(subexpression_scope_offset, 0),
-                factory,
-                allocator,
-                &mut noop_cache,
-            );
-            let pattern = adjusted_scope_pattern.as_ref().unwrap_or(pattern);
-            result + subexpression.count_subexpression_usages(pattern, factory, allocator)
-        }
-    })
+pub trait CompoundNode<'a, T: Expression + 'a> {
+    type Children: Iterator<Item = &'a T>;
+    fn children(&'a self) -> Self::Children;
 }
 
-pub trait Rewritable<T: Expression + Rewritable<T>> {
-    fn children(&self) -> Vec<&T>;
-    fn subexpressions(&self) -> Vec<&T> {
-        self.children()
-            .into_iter()
-            .flat_map(|child| once(child).chain(child.subexpressions()))
-            .collect()
-    }
-    fn is_complex(&self) -> bool {
-        !self.children().is_empty()
-    }
-    fn count_subexpression_usages(
-        &self,
-        expression: &T,
-        factory: &impl ExpressionFactory<T>,
-        allocator: &impl HeapAllocator<T>,
-    ) -> usize {
-        // Default expression assumes this is a container.
-        self.children()
-            .iter()
-            .map(|expr| expr.count_subexpression_usages(expression, factory, allocator))
-            .sum()
-    }
+pub trait Rewritable<T: Expression> {
     fn substitute_static(
         &self,
         substitutions: &Substitutions<T>,
@@ -150,7 +111,7 @@ pub trait Rewritable<T: Expression + Rewritable<T>> {
     ) -> Option<T>;
 }
 
-pub trait Reducible<T: Expression + Rewritable<T>> {
+pub trait Reducible<T: Expression> {
     fn is_reducible(&self) -> bool;
     fn reduce(
         &self,
@@ -158,6 +119,32 @@ pub trait Reducible<T: Expression + Rewritable<T>> {
         allocator: &impl HeapAllocator<T>,
         cache: &mut impl EvaluationCache<T>,
     ) -> Option<T>;
+}
+
+pub trait Applicable<T: Expression> {
+    fn arity(&self) -> Option<Arity>;
+    fn should_parallelize(&self, args: &[T]) -> bool;
+    fn apply(
+        &self,
+        args: impl ExactSizeIterator<Item = T>,
+        factory: &impl ExpressionFactory<T>,
+        allocator: &impl HeapAllocator<T>,
+        cache: &mut impl EvaluationCache<T>,
+    ) -> Result<T, String>;
+}
+
+pub trait Evaluate<T: Expression> {
+    fn evaluate(
+        &self,
+        state: &impl DynamicState<T>,
+        factory: &impl ExpressionFactory<T>,
+        allocator: &impl HeapAllocator<T>,
+        cache: &mut impl EvaluationCache<T>,
+    ) -> Option<EvaluationResult<T>>;
+}
+
+pub trait SerializeJson {
+    fn to_json(&self) -> Result<serde_json::Value, String>;
 }
 
 #[derive(Hash, Eq, PartialEq, Clone, Copy, Debug)]
@@ -454,36 +441,7 @@ impl ExactSizeIterator for HeterogeneousArityIterator {
     }
 }
 
-pub trait Applicable<T: Expression> {
-    fn arity(&self) -> Option<Arity>;
-    fn apply(
-        &self,
-        args: impl ExactSizeIterator<Item = T>,
-        factory: &impl ExpressionFactory<T>,
-        allocator: &impl HeapAllocator<T>,
-        cache: &mut impl EvaluationCache<T>,
-    ) -> Result<T, String>;
-    fn should_parallelize(&self, _args: &[T]) -> bool {
-        false
-    }
-}
-
-pub trait Evaluate<T: Expression> {
-    fn evaluate(
-        &self,
-        state: &impl DynamicState<T>,
-        factory: &impl ExpressionFactory<T>,
-        allocator: &impl HeapAllocator<T>,
-        cache: &mut impl EvaluationCache<T>,
-    ) -> Option<EvaluationResult<T>>;
-}
-
-pub trait Iterable {
-    fn is_empty(&self) -> bool;
-}
-pub trait SerializeJson {
-    fn to_json(&self) -> Result<serde_json::Value, String>;
-}
+pub type ExpressionListSlice<'a, T> = std::slice::Iter<'a, T>;
 
 #[derive(Eq, PartialEq, Clone, Debug)]
 pub struct ExpressionList<T: Expression> {
@@ -515,7 +473,7 @@ impl<T: Expression> ExpressionList<T> {
     pub fn is_empty(&self) -> bool {
         self.items.is_empty()
     }
-    pub fn iter(&self) -> impl ExactSizeIterator<Item = &T> + DoubleEndedIterator<Item = &T> {
+    pub fn iter<'a>(&'a self) -> ExpressionListSlice<'a, T> {
         self.items.iter()
     }
     pub fn as_slice(&self) -> &[T] {
@@ -580,6 +538,9 @@ impl<T: Expression> GraphNode for ExpressionList<T> {
     }
     fn is_atomic(&self) -> bool {
         self.items.iter().all(|item| item.is_atomic())
+    }
+    fn is_complex(&self) -> bool {
+        true
     }
 }
 impl<T: Expression> serde::Serialize for ExpressionList<T>
@@ -797,40 +758,40 @@ pub fn hash_state_values<T: Expression>(
 pub trait EvaluationCache<T: Expression> {
     fn retrieve_static_substitution(
         &mut self,
-        expression: &T,
+        expression: &impl Expression,
         substitutions: &Substitutions<T>,
     ) -> Option<Option<T>>;
     fn store_static_substitution(
         &mut self,
-        expression: &T,
+        expression: &impl Expression,
         substitutions: &Substitutions<T>,
         result: Option<T>,
     );
     fn retrieve_dynamic_substitution(
         &mut self,
-        expression: &T,
+        expression: &impl Expression,
         deep: bool,
         state: &impl DynamicState<T>,
     ) -> Option<Option<T>>;
     fn store_dynamic_substitution(
         &mut self,
-        expression: &T,
+        expression: &impl Expression,
         deep: bool,
         state: &impl DynamicState<T>,
         result: Option<T>,
     );
-    fn retrieve_reduction(&mut self, expression: &T) -> Option<Option<T>>;
-    fn store_reduction(&mut self, expression: &T, result: Option<T>);
-    fn retrieve_normalization(&mut self, expression: &T) -> Option<Option<T>>;
-    fn store_normalization(&mut self, expression: &T, result: Option<T>);
+    fn retrieve_reduction(&mut self, expression: &impl Expression) -> Option<Option<T>>;
+    fn store_reduction(&mut self, expression: &impl Expression, result: Option<T>);
+    fn retrieve_normalization(&mut self, expression: &impl Expression) -> Option<Option<T>>;
+    fn store_normalization(&mut self, expression: &impl Expression, result: Option<T>);
     fn retrieve_evaluation(
         &mut self,
-        expression: &T,
+        expression: &impl Expression,
         state: &impl DynamicState<T>,
     ) -> Option<Option<EvaluationResult<T>>>;
     fn store_evaluation(
         &mut self,
-        expression: &T,
+        expression: &impl Expression,
         state: &impl DynamicState<T>,
         result: Option<EvaluationResult<T>>,
     );
@@ -1162,7 +1123,6 @@ impl std::fmt::Display for SignalType {
 enum SubstitutionPatterns<'a, T: Expression> {
     Variable(&'a Vec<(StackOffset, T)>, Option<ScopeOffset>),
     #[allow(dead_code)]
-    Term(&'a Vec<(T, T)>, Option<ScopeOffset>),
     Offset(ScopeOffset),
 }
 
@@ -1191,17 +1151,6 @@ impl<'a, T: Expression + Rewritable<T>> Substitutions<'a, T> {
             offset: 0,
         }
     }
-    #[allow(dead_code)]
-    pub(crate) fn term_match(
-        substitutions: &'a Vec<(T, T)>,
-        scope_offset: Option<ScopeOffset>,
-    ) -> Self {
-        Self {
-            entries: SubstitutionPatterns::Term(substitutions, scope_offset),
-            min_depth: 0,
-            offset: 0,
-        }
-    }
     pub fn increase_scope_offset(depth: StackOffset, min_depth: StackOffset) -> Self {
         Self {
             entries: SubstitutionPatterns::Offset(ScopeOffset::Wrap(depth)),
@@ -1223,51 +1172,12 @@ impl<'a, T: Expression + Rewritable<T>> Substitutions<'a, T> {
             offset: self.offset + offset,
         }
     }
-    pub(crate) fn can_skip(&self, expression: &T) -> bool {
-        if matches!(self.entries, SubstitutionPatterns::Term(_, _)) {
-            return false;
-        }
+    pub(crate) fn can_skip(&self, expression: &impl Expression) -> bool {
         let capture_depth = expression.capture_depth();
         if capture_depth == 0 {
             true
         } else {
             expression.capture_depth() - 1 < self.min_depth + self.offset
-        }
-    }
-    pub(crate) fn substitute_term(
-        &self,
-        current: HashId,
-        factory: &impl ExpressionFactory<T>,
-        allocator: &impl HeapAllocator<T>,
-        cache: &mut impl EvaluationCache<T>,
-    ) -> Option<T> {
-        match self.entries {
-            SubstitutionPatterns::Term(entries, _) => {
-                entries.iter().find_map(|(pattern, replacement)| {
-                    let adjusted_scope_pattern = pattern.substitute_static(
-                        &Substitutions::increase_scope_offset(self.offset, 0),
-                        factory,
-                        allocator,
-                        cache,
-                    );
-                    let pattern = adjusted_scope_pattern.as_ref().unwrap_or(pattern);
-                    if pattern.id() == current {
-                        Some(
-                            replacement
-                                .substitute_static(
-                                    &Substitutions::increase_scope_offset(self.offset, 0),
-                                    factory,
-                                    allocator,
-                                    cache,
-                                )
-                                .unwrap_or_else(|| replacement.clone()),
-                        )
-                    } else {
-                        None
-                    }
-                })
-            }
-            _ => None,
         }
     }
     pub(crate) fn substitute_variable(
@@ -1281,7 +1191,6 @@ impl<'a, T: Expression + Rewritable<T>> Substitutions<'a, T> {
             return None;
         }
         let (entries, scope_offset) = match self.entries {
-            SubstitutionPatterns::Term(_, scope_offset) => Some((None, scope_offset)),
             SubstitutionPatterns::Variable(entries, scope_offset) => {
                 Some((Some(entries), scope_offset))
             }
@@ -1579,13 +1488,18 @@ impl<T: Expression> EvaluationResult<T> {
     pub fn into_parts(self) -> (T, DependencyList) {
         (self.result, self.dependencies)
     }
+    pub fn with_dependencies(self, dependencies: DependencyList) -> Self {
+        Self {
+            result: self.result,
+            dependencies: self.dependencies.union(dependencies),
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use std::iter::once;
 
-    use crate::lang::create_struct;
     use crate::{
         allocator::DefaultAllocator,
         cache::SubstitutionCache,
@@ -2239,106 +2153,6 @@ mod tests {
                 })
                 .collect::<String>(),
             ""
-        );
-    }
-
-    #[test]
-    fn count_subexpression_usages() {
-        let factory = SharedTermFactory::<Stdlib>::default();
-        let allocator = DefaultAllocator::default();
-        let pattern = factory.create_value_term(ValueTerm::Int(1));
-
-        let expression = factory.create_value_term(ValueTerm::Int(1));
-        assert_eq!(
-            1,
-            expression.count_subexpression_usages(&pattern, &factory, &allocator)
-        );
-
-        let expression = factory.create_value_term(ValueTerm::Int(0));
-        assert_eq!(
-            0,
-            expression.count_subexpression_usages(&pattern, &factory, &allocator)
-        );
-
-        let expression = create_struct(
-            [
-                (
-                    String::from("foo"),
-                    factory.create_value_term(ValueTerm::Int(1)),
-                ),
-                (
-                    String::from("bar"),
-                    factory.create_value_term(ValueTerm::Int(1)),
-                ),
-                (
-                    String::from("baz"),
-                    factory.create_value_term(ValueTerm::Int(0)),
-                ),
-            ],
-            &factory,
-            &allocator,
-        );
-        assert_eq!(
-            2,
-            expression.count_subexpression_usages(&pattern, &factory, &allocator)
-        );
-
-        let expression = factory.create_application_term(
-            factory.create_builtin_term(Stdlib::Add),
-            allocator.create_pair(
-                factory.create_value_term(ValueTerm::Int(1)),
-                factory.create_value_term(ValueTerm::Int(1)),
-            ),
-        );
-        assert_eq!(
-            2,
-            expression.count_subexpression_usages(&pattern, &factory, &allocator)
-        );
-
-        let expression = factory.create_partial_application_term(
-            factory.create_builtin_term(Stdlib::Add),
-            allocator.create_unit_list(factory.create_value_term(ValueTerm::Int(1))),
-        );
-        assert_eq!(
-            1,
-            expression.count_subexpression_usages(&pattern, &factory, &allocator)
-        );
-
-        let expression =
-            factory.create_lambda_term(1, factory.create_value_term(ValueTerm::Int(1)));
-        assert_eq!(
-            1,
-            expression.count_subexpression_usages(&pattern, &factory, &allocator)
-        );
-
-        // (foo) -> bar + foo - search for bar where bar refers to something up the stack
-        let pattern = factory.create_static_variable_term(0);
-        let expression = factory.create_lambda_term(
-            1,
-            factory.create_tuple_term(allocator.create_list([
-                factory.create_static_variable_term(0),
-                factory.create_static_variable_term(1),
-                factory.create_static_variable_term(1),
-            ])),
-        );
-        assert_eq!(
-            2,
-            expression.count_subexpression_usages(&pattern, &factory, &allocator)
-        );
-
-        // (let foo [foo bar bar]) where bar happens to equal foo
-        let pattern = factory.create_static_variable_term(0);
-        let expression = factory.create_let_term(
-            factory.create_static_variable_term(0),
-            factory.create_tuple_term(allocator.create_list([
-                factory.create_static_variable_term(0),
-                factory.create_static_variable_term(1),
-                factory.create_static_variable_term(1),
-            ])),
-        );
-        assert_eq!(
-            3,
-            expression.count_subexpression_usages(&pattern, &factory, &allocator)
         );
     }
 }

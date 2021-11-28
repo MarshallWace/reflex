@@ -8,9 +8,9 @@ use std::{collections::HashSet, iter::once};
 use crate::{
     compiler::{compile_expressions, Compile, Compiler, Instruction, Program},
     core::{
-        transform_expression_list, DependencyList, DynamicState, EvaluationCache, Expression,
-        ExpressionFactory, ExpressionList, GraphNode, HeapAllocator, Iterable, Rewritable,
-        SerializeJson, StackOffset, Substitutions, VarArgs,
+        transform_expression_list, CompoundNode, DependencyList, DynamicState, EvaluationCache,
+        Expression, ExpressionFactory, ExpressionList, ExpressionListSlice, GraphNode,
+        HeapAllocator, Rewritable, SerializeJson, StackOffset, Substitutions, VarArgs,
     },
 };
 
@@ -56,16 +56,18 @@ impl<T: Expression> GraphNode for VectorTerm<T> {
     fn is_atomic(&self) -> bool {
         self.items.is_atomic()
     }
+    fn is_complex(&self) -> bool {
+        true
+    }
 }
-impl<T: Expression> Iterable for VectorTerm<T> {
-    fn is_empty(&self) -> bool {
-        self.items.is_empty()
+pub type VectorTermChildren<'a, T> = ExpressionListSlice<'a, T>;
+impl<'a, T: Expression + 'a> CompoundNode<'a, T> for VectorTerm<T> {
+    type Children = VectorTermChildren<'a, T>;
+    fn children(&'a self) -> Self::Children {
+        self.items.iter()
     }
 }
 impl<T: Expression + Rewritable<T>> Rewritable<T> for VectorTerm<T> {
-    fn children(&self) -> Vec<&T> {
-        self.items.iter().collect()
-    }
     fn substitute_static(
         &self,
         substitutions: &Substitutions<T>,

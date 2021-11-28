@@ -8,9 +8,10 @@ use std::{collections::HashSet, iter::once};
 use crate::{
     compiler::{Compile, Compiler, Instruction, Program},
     core::{
-        transform_expression_list, Applicable, ArgType, Arity, DependencyList, DynamicState,
-        EvaluationCache, Expression, ExpressionFactory, ExpressionList, GraphNode, HeapAllocator,
-        Reducible, Rewritable, SerializeJson, StackOffset, Substitutions, VarArgs,
+        transform_expression_list, Applicable, ArgType, Arity, CompoundNode, DependencyList,
+        DynamicState, EvaluationCache, Expression, ExpressionFactory, ExpressionList,
+        ExpressionListSlice, GraphNode, HeapAllocator, Rewritable, SerializeJson, StackOffset,
+        Substitutions, VarArgs,
     },
 };
 
@@ -100,13 +101,19 @@ impl<T: Expression + Applicable<T>> GraphNode for PartialApplicationTerm<T> {
     fn is_atomic(&self) -> bool {
         false
     }
-}
-impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T>> Rewritable<T>
-    for PartialApplicationTerm<T>
-{
-    fn children(&self) -> Vec<&T> {
-        once(&self.target).chain(self.args.iter()).collect()
+    fn is_complex(&self) -> bool {
+        true
     }
+}
+pub type PartialApplicationTermChildren<'a, T> =
+    std::iter::Chain<std::iter::Once<&'a T>, ExpressionListSlice<'a, T>>;
+impl<'a, T: Expression + 'a> CompoundNode<'a, T> for PartialApplicationTerm<T> {
+    type Children = PartialApplicationTermChildren<'a, T>;
+    fn children(&'a self) -> Self::Children {
+        once(&self.target).chain(self.args.iter())
+    }
+}
+impl<T: Expression + Rewritable<T>> Rewritable<T> for PartialApplicationTerm<T> {
     fn substitute_static(
         &self,
         substitutions: &Substitutions<T>,
@@ -189,7 +196,7 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T>> Rewritable<T>
         }
     }
 }
-impl<T: Expression + Rewritable<T> + Applicable<T>> Applicable<T> for PartialApplicationTerm<T> {
+impl<T: Expression + Applicable<T>> Applicable<T> for PartialApplicationTerm<T> {
     fn arity(&self) -> Option<Arity> {
         match self.target.arity() {
             None => None,
@@ -215,10 +222,11 @@ impl<T: Expression + Rewritable<T> + Applicable<T>> Applicable<T> for PartialApp
             cache,
         )
     }
+    fn should_parallelize(&self, _args: &[T]) -> bool {
+        false
+    }
 }
-impl<T: Expression + Applicable<T> + Rewritable<T> + Reducible<T> + Compile<T>> Compile<T>
-    for PartialApplicationTerm<T>
-{
+impl<T: Expression + Applicable<T> + Compile<T>> Compile<T> for PartialApplicationTerm<T> {
     fn compile(
         &self,
         eager: VarArgs,

@@ -5,14 +5,13 @@
 use serde::{Deserialize, Serialize};
 use std::{collections::HashSet, iter::once};
 
-use crate::core::count_subexpression_usages;
 use crate::{
     cache::NoopCache,
     compiler::{Compile, Compiler, Instruction, Program},
     core::{
-        Applicable, Arity, DependencyList, DynamicState, EvaluationCache, Expression,
-        ExpressionFactory, GraphNode, HeapAllocator, Reducible, Rewritable, ScopeOffset,
-        SerializeJson, StackOffset, Substitutions, VarArgs,
+        Applicable, Arity, CompoundNode, DependencyList, DynamicState, EvaluationCache, Expression,
+        ExpressionFactory, GraphNode, HeapAllocator, Rewritable, ScopeOffset, SerializeJson,
+        StackOffset, Substitutions, VarArgs,
     },
     hash::hash_object,
 };
@@ -70,25 +69,18 @@ impl<T: Expression> GraphNode for LambdaTerm<T> {
     fn is_atomic(&self) -> bool {
         false
     }
+    fn is_complex(&self) -> bool {
+        true
+    }
+}
+pub type LambdaTermChildren<'a, T> = std::iter::Once<&'a T>;
+impl<'a, T: Expression + 'a> CompoundNode<'a, T> for LambdaTerm<T> {
+    type Children = LambdaTermChildren<'a, T>;
+    fn children(&'a self) -> Self::Children {
+        once(&self.body)
+    }
 }
 impl<T: Expression + Rewritable<T>> Rewritable<T> for LambdaTerm<T> {
-    fn children(&self) -> Vec<&T> {
-        once(&self.body).collect()
-    }
-    fn count_subexpression_usages(
-        &self,
-        expression: &T,
-        factory: &impl ExpressionFactory<T>,
-        allocator: &impl HeapAllocator<T>,
-    ) -> usize {
-        count_subexpression_usages(
-            expression,
-            self.children(),
-            self.num_args,
-            factory,
-            allocator,
-        )
-    }
     fn substitute_static(
         &self,
         substitutions: &Substitutions<T>,
@@ -213,6 +205,9 @@ impl<T: Expression + Rewritable<T>> Applicable<T> for LambdaTerm<T> {
                 .unwrap_or_else(|| self.body.clone()))
         }
     }
+    fn should_parallelize(&self, _args: &[T]) -> bool {
+        false
+    }
 }
 impl<T: Expression> std::fmt::Display for LambdaTerm<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -246,7 +241,7 @@ fn apply_eta_reduction<'a, T: Expression>(
         _ => None,
     }
 }
-impl<T: Expression + Rewritable<T> + Reducible<T> + Compile<T>> Compile<T> for LambdaTerm<T> {
+impl<T: Expression + Compile<T>> Compile<T> for LambdaTerm<T> {
     fn compile(
         &self,
         _eager: VarArgs,
@@ -295,7 +290,7 @@ mod tests {
         allocator::DefaultAllocator,
         cache::SubstitutionCache,
         core::{
-            DependencyList, Evaluate, EvaluationResult, ExpressionFactory, HeapAllocator,
+            evaluate, DependencyList, EvaluationResult, ExpressionFactory, HeapAllocator,
             Rewritable, StateCache,
         },
         lang::{SharedTermFactory, ValueTerm},
@@ -355,16 +350,17 @@ mod tests {
             allocator.create_empty_list(),
         );
         assert_eq!(
-            expression.evaluate(
+            evaluate(
+                &expression,
                 &StateCache::default(),
                 &factory,
                 &allocator,
                 &mut SubstitutionCache::new()
             ),
-            Some(EvaluationResult::new(
+            EvaluationResult::new(
                 factory.create_value_term(ValueTerm::Int(1 + 2 + 3)),
                 DependencyList::empty()
-            ))
+            )
         );
 
         let input = "
@@ -420,16 +416,17 @@ mod tests {
             allocator.create_list(vec![factory.create_value_term(ValueTerm::Int(4))]),
         );
         assert_eq!(
-            expression.evaluate(
+            evaluate(
+                &expression,
                 &StateCache::default(),
                 &factory,
                 &allocator,
                 &mut SubstitutionCache::new()
             ),
-            Some(EvaluationResult::new(
+            EvaluationResult::new(
                 factory.create_value_term(ValueTerm::Int(1 + 2 + 3 + 4)),
                 DependencyList::empty()
-            ))
+            )
         );
 
         let input = "
@@ -515,16 +512,17 @@ mod tests {
             ]),
         );
         assert_eq!(
-            expression.evaluate(
+            evaluate(
+                &expression,
                 &StateCache::default(),
                 &factory,
                 &allocator,
                 &mut SubstitutionCache::new()
             ),
-            Some(EvaluationResult::new(
+            EvaluationResult::new(
                 factory.create_value_term(ValueTerm::Int(1 + 2 + 3 + 4 + 5 + 6)),
                 DependencyList::empty()
-            ))
+            )
         );
     }
 }

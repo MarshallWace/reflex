@@ -127,6 +127,9 @@ impl<TString: StringValue> GraphNode for ValueTerm<TString> {
     fn is_atomic(&self) -> bool {
         true
     }
+    fn is_complex(&self) -> bool {
+        false
+    }
 }
 impl<T: Expression + Compile<T>> Compile<T> for ValueTerm<T::String> {
     fn compile(

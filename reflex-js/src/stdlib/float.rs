@@ -27,6 +27,9 @@ impl<T: Expression> Applicable<T> for Float {
     fn arity(&self) -> Option<Arity> {
         Some(Arity::from(&Self::ARITY))
     }
+    fn should_parallelize(&self, _args: &[T]) -> bool {
+        false
+    }
     fn apply(
         &self,
         args: impl ExactSizeIterator<Item = T>,

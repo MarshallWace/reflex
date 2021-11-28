@@ -8,9 +8,10 @@ use std::collections::HashSet;
 use crate::{
     compiler::{compile_expressions, Compile, Compiler, Instruction, Program},
     core::{
-        transform_expression_list, DependencyList, DynamicState, EvaluationCache, Expression,
-        ExpressionFactory, ExpressionList, GraphNode, HeapAllocator, Rewritable, SerializeJson,
-        StackOffset, StructFieldOffset, Substitutions, VarArgs,
+        transform_expression_list, CompoundNode, DependencyList, DynamicState, EvaluationCache,
+        Expression, ExpressionFactory, ExpressionList, ExpressionListSlice, GraphNode,
+        HeapAllocator, Rewritable, SerializeJson, StackOffset, StructFieldOffset, Substitutions,
+        VarArgs,
     },
 };
 
@@ -62,11 +63,18 @@ impl<T: Expression> GraphNode for TupleTerm<T> {
     fn is_atomic(&self) -> bool {
         self.fields.is_atomic()
     }
+    fn is_complex(&self) -> bool {
+        true
+    }
+}
+pub type TupleTermChildren<'a, T> = ExpressionListSlice<'a, T>;
+impl<'a, T: Expression + 'a> CompoundNode<'a, T> for TupleTerm<T> {
+    type Children = TupleTermChildren<'a, T>;
+    fn children(&'a self) -> Self::Children {
+        self.fields.iter()
+    }
 }
 impl<T: Expression + Rewritable<T>> Rewritable<T> for TupleTerm<T> {
-    fn children(&self) -> Vec<&T> {
-        self.fields.iter().collect()
-    }
     fn substitute_static(
         &self,
         substitutions: &Substitutions<T>,

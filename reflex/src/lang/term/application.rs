@@ -11,10 +11,10 @@ use std::{
 use crate::{
     compiler::{Compile, Compiler, Instruction, InstructionPointer, Program},
     core::{
-        transform_expression_list, Applicable, ArgType, Arity, DependencyList, DynamicState,
-        EvaluationCache, Expression, ExpressionFactory, ExpressionList, GraphNode, HeapAllocator,
-        Reducible, Rewritable, ScopeOffset, SerializeJson, SignalType, StackOffset, Substitutions,
-        VarArgs,
+        transform_expression_list, Applicable, ArgType, Arity, CompoundNode, DependencyList,
+        DynamicState, Evaluate, EvaluationCache, EvaluationResult, Expression, ExpressionFactory,
+        ExpressionList, ExpressionListSlice, GraphNode, HeapAllocator, Reducible, Rewritable,
+        ScopeOffset, SerializeJson, SignalType, StackOffset, StateCache, Substitutions, VarArgs,
     },
     hash::HashId,
     lang::{SignalTerm, ValueTerm},
@@ -102,13 +102,21 @@ impl<T: Expression + Applicable<T>> GraphNode for ApplicationTerm<T> {
     fn is_atomic(&self) -> bool {
         false
     }
+    fn is_complex(&self) -> bool {
+        true
+    }
 }
-impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T>> Rewritable<T>
+pub type ApplicationTermChildren<'a, T> =
+    std::iter::Chain<std::iter::Once<&'a T>, ExpressionListSlice<'a, T>>;
+impl<'a, T: Expression + 'a> CompoundNode<'a, T> for ApplicationTerm<T> {
+    type Children = ApplicationTermChildren<'a, T>;
+    fn children(&'a self) -> Self::Children {
+        once(&self.target).chain(self.args.iter())
+    }
+}
+impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Evaluate<T>> Rewritable<T>
     for ApplicationTerm<T>
 {
-    fn children(&self) -> Vec<&T> {
-        once(&self.target).chain(self.args.iter()).collect()
-    }
     fn substitute_static(
         &self,
         substitutions: &Substitutions<T>,
@@ -204,7 +212,7 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T>> Rewritable<T>
         }
     }
 }
-impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T>> Reducible<T>
+impl<T: Expression + Reducible<T> + Applicable<T> + Evaluate<T>> Reducible<T>
     for ApplicationTerm<T>
 {
     fn is_reducible(&self) -> bool {
@@ -216,58 +224,27 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T>> Reducible<T>
         allocator: &impl HeapAllocator<T>,
         cache: &mut impl EvaluationCache<T>,
     ) -> Option<T> {
-        let reduced_target = self.target.reduce(factory, allocator, cache);
-        let target = reduced_target.as_ref().unwrap_or(&self.target);
-        let short_circuit_target = match factory.match_signal_term(target) {
-            Some(_) => true,
-            _ => false,
-        };
-        if short_circuit_target {
-            return reduced_target;
-        }
-        match target.arity() {
-            None => None,
-            Some(arity) => {
-                let result = match reduce_function_args(
-                    target, &arity, &self.args, factory, allocator, cache,
-                ) {
-                    FunctionArgs::ShortCircuit(signal) => Ok(signal),
-                    FunctionArgs::Unresolved(args) => Err(args),
-                    FunctionArgs::Resolved(args) => {
-                        if is_compiled_application_target(target, factory) {
-                            Err(args)
-                        } else {
-                            Ok(apply_function(target, args, factory, allocator, cache))
-                        }
-                    }
-                };
-                match result {
-                    Ok(result) => Some(result.reduce(factory, allocator, cache).unwrap_or(result)),
-                    Err(reduced_args) => {
-                        if reduced_target.is_none()
-                            && self
-                                .args
-                                .iter()
-                                .zip(reduced_args.iter())
-                                .all(|(arg, evaluated_arg)| arg.id() == evaluated_arg.id())
-                        {
-                            None
-                        } else {
-                            let target = reduced_target.unwrap_or_else(|| self.target.clone());
-                            Some(factory.create_application_term(
-                                target,
-                                allocator.create_list(reduced_args),
-                            ))
-                        }
-                    }
-                }
-            }
-        }
+        let state = Option::<&StateCache<T>>::None;
+        evaluate_function_application(self, state, factory, allocator, cache).map(|result| {
+            let (result, _) = result.into_parts();
+            result
+        })
     }
 }
-impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>> Compile<T>
+impl<T: Expression + Reducible<T> + Applicable<T> + Evaluate<T>> Evaluate<T>
     for ApplicationTerm<T>
 {
+    fn evaluate(
+        &self,
+        state: &impl DynamicState<T>,
+        factory: &impl ExpressionFactory<T>,
+        allocator: &impl HeapAllocator<T>,
+        cache: &mut impl EvaluationCache<T>,
+    ) -> Option<EvaluationResult<T>> {
+        evaluate_function_application(self, Some(state), factory, allocator, cache)
+    }
+}
+impl<T: Expression + Applicable<T> + Compile<T>> Compile<T> for ApplicationTerm<T> {
     fn compile(
         &self,
         eager: VarArgs,
@@ -409,7 +386,9 @@ fn apply_function<T: Expression + Applicable<T>>(
         })
 }
 
-fn normalize_function_application<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T>>(
+fn normalize_function_application<
+    T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Evaluate<T>,
+>(
     target: &T,
     args: &ExpressionList<T>,
     factory: &impl ExpressionFactory<T>,
@@ -427,7 +406,7 @@ fn normalize_function_application<T: Expression + Rewritable<T> + Reducible<T> +
     }
 }
 
-fn normalize_lambda_application<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T>>(
+fn normalize_lambda_application<T: Expression + Rewritable<T>>(
     target: &LambdaTerm<T>,
     args: &ExpressionList<T>,
     factory: &impl ExpressionFactory<T>,
@@ -504,7 +483,9 @@ fn normalize_lambda_application<T: Expression + Rewritable<T> + Reducible<T> + A
     }
 }
 
-fn normalize_builtin_application<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T>>(
+fn normalize_builtin_application<
+    T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Evaluate<T>,
+>(
     target: &T,
     arity: &Arity,
     args: &ExpressionList<T>,
@@ -512,10 +493,11 @@ fn normalize_builtin_application<T: Expression + Rewritable<T> + Reducible<T> + 
     allocator: &impl HeapAllocator<T>,
     cache: &mut impl EvaluationCache<T>,
 ) -> Option<T> {
-    match reduce_function_args(target, arity, args, factory, allocator, cache) {
-        FunctionArgs::ShortCircuit(signal) => Some(signal),
-        FunctionArgs::Unresolved(_) => None,
-        FunctionArgs::Resolved(resolved_args) => {
+    let state = Option::<&StateCache<T>>::None;
+    match evaluate_function_args(target, arity, args, state, factory, allocator, cache) {
+        (FunctionArgs::ShortCircuit(signal), _) => Some(signal),
+        (FunctionArgs::Unresolved(_), _) => None,
+        (FunctionArgs::Resolved(resolved_args), _) => {
             if args.capture_depth() > 0 {
                 None
             } else {
@@ -543,51 +525,163 @@ pub(crate) fn get_eager_args<'a, T: Expression + 'a>(
         })
 }
 
+fn evaluate_function_application<
+    T: Expression + Reducible<T> + Applicable<T> + Evaluate<T>,
+    TState: DynamicState<T>,
+>(
+    expression: &ApplicationTerm<T>,
+    state: Option<&TState>,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+    cache: &mut impl EvaluationCache<T>,
+) -> Option<EvaluationResult<T>> {
+    let reduced_target = resolve_eager_value(&expression.target, state, factory, allocator, cache);
+    let (reduced_target, target_dependencies) = reduced_target
+        .map(|target| {
+            let (result, dependencies) = target.into_parts();
+            (Some(result), dependencies)
+        })
+        .unwrap_or((None, DependencyList::empty()));
+    let target = reduced_target.as_ref().unwrap_or(&expression.target);
+    let short_circuit_target = match factory.match_signal_term(target) {
+        Some(_) => true,
+        _ => false,
+    };
+    if short_circuit_target {
+        return reduced_target.map(|target| EvaluationResult::new(target, target_dependencies));
+    }
+    match target.arity() {
+        None => None,
+        Some(arity) => {
+            let (args, arg_dependencies) = evaluate_function_args(
+                target,
+                &arity,
+                &expression.args,
+                state,
+                factory,
+                allocator,
+                cache,
+            );
+            let args_result = match args {
+                FunctionArgs::ShortCircuit(signal) => Ok(signal),
+                FunctionArgs::Unresolved(args) => Err(args),
+                FunctionArgs::Resolved(args) => {
+                    if is_compiled_application_target(target, factory) {
+                        Err(args)
+                    } else {
+                        Ok(apply_function(target, args, factory, allocator, cache))
+                    }
+                }
+            };
+            let combined_dependencies = target_dependencies.union(arg_dependencies);
+            match args_result {
+                Ok(result) => Some(
+                    match resolve_eager_value(&result, state, factory, allocator, cache) {
+                        Some(result) => result.with_dependencies(combined_dependencies),
+                        None => EvaluationResult::new(result, combined_dependencies),
+                    },
+                ),
+                Err(reduced_args) => {
+                    if reduced_target.is_none()
+                        && expression
+                            .args
+                            .iter()
+                            .zip(reduced_args.iter())
+                            .all(|(arg, evaluated_arg)| arg.id() == evaluated_arg.id())
+                    {
+                        None
+                    } else {
+                        let target = reduced_target.unwrap_or_else(|| expression.target.clone());
+                        Some(EvaluationResult::new(
+                            factory.create_application_term(
+                                target,
+                                allocator.create_list(reduced_args),
+                            ),
+                            combined_dependencies,
+                        ))
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn resolve_eager_value<T: Expression + Reducible<T> + Evaluate<T>, TState: DynamicState<T>>(
+    expression: &T,
+    state: Option<&TState>,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+    cache: &mut impl EvaluationCache<T>,
+) -> Option<EvaluationResult<T>> {
+    if let Some(state) = state {
+        expression.evaluate(state, factory, allocator, cache)
+    } else {
+        expression
+            .reduce(factory, allocator, cache)
+            .map(|result| EvaluationResult::new(result, DependencyList::empty()))
+    }
+}
+
 enum FunctionArgs<T: Expression> {
     ShortCircuit(T),
     Unresolved(Vec<T>),
     Resolved(Vec<T>),
 }
-fn reduce_function_args<T: Expression + Rewritable<T> + Reducible<T>>(
+fn evaluate_function_args<T: Expression + Reducible<T> + Evaluate<T>, TState: DynamicState<T>>(
     target: &T,
     arity: &Arity,
     args: &ExpressionList<T>,
+    state: Option<&TState>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
     cache: &mut impl EvaluationCache<T>,
-) -> FunctionArgs<T> {
+) -> (FunctionArgs<T>, DependencyList) {
     match validate_function_application_arity(target, arity, args.len()) {
-        Err(message) => FunctionArgs::ShortCircuit(create_error_signal_term(
-            factory.create_value_term(ValueTerm::String(allocator.create_string(message))),
-            factory,
-            allocator,
-        )),
+        Err(message) => (
+            FunctionArgs::ShortCircuit(create_error_signal_term(
+                factory.create_value_term(ValueTerm::String(allocator.create_string(message))),
+                factory,
+                allocator,
+            )),
+            DependencyList::empty(),
+        ),
         Ok(num_args) => {
             let mut has_unresolved_args = false;
             let mut num_short_circuit_signals = ShortCircuitCount::None;
-            let mut resolved_args = args
+            let (mut resolved_args, dependencies) = args
                 .iter()
                 .take(num_args)
                 .zip(arity.iter())
                 .map(|(arg, arg_type)| match arg_type {
                     ArgType::Strict | ArgType::Eager => {
-                        let resolved_arg = Reducible::reduce(arg, factory, allocator, cache)
-                            .unwrap_or_else(|| arg.clone());
-                        if is_unresolved_arg(&resolved_arg) {
+                        let resolved_arg =
+                            resolve_eager_value(arg, state, factory, allocator, cache)
+                                .unwrap_or_else(|| {
+                                    EvaluationResult::new(arg.clone(), DependencyList::empty())
+                                });
+                        let value = resolved_arg.result();
+                        if is_unresolved_arg(value) {
                             has_unresolved_args = true;
                         }
-                        if factory.match_signal_term(&resolved_arg).is_some() {
+                        if factory.match_signal_term(value).is_some() {
                             if let ArgType::Strict = arg_type {
                                 num_short_circuit_signals.increment();
                             }
                         }
                         resolved_arg
                     }
-                    ArgType::Lazy => arg.clone(),
+                    ArgType::Lazy => EvaluationResult::new(arg.clone(), DependencyList::empty()),
                 })
-                .collect::<Vec<_>>();
+                .fold(
+                    (Vec::<T>::with_capacity(num_args), DependencyList::empty()),
+                    |(mut args, dependencies), result| {
+                        let (arg_value, arg_dependencies) = result.into_parts();
+                        args.push(arg_value);
+                        (args, dependencies.union(arg_dependencies))
+                    },
+                );
             if has_unresolved_args {
-                FunctionArgs::Unresolved(resolved_args)
+                (FunctionArgs::Unresolved(resolved_args), dependencies)
             } else if let Some(signal) = get_combined_short_circuit_signal(
                 num_short_circuit_signals,
                 &resolved_args,
@@ -595,7 +689,7 @@ fn reduce_function_args<T: Expression + Rewritable<T> + Reducible<T>>(
                 factory,
                 allocator,
             ) {
-                FunctionArgs::ShortCircuit(signal)
+                (FunctionArgs::ShortCircuit(signal), dependencies)
             } else {
                 let num_provided_args = resolved_args.len();
                 let num_required_args = arity.required().len();
@@ -609,14 +703,14 @@ fn reduce_function_args<T: Expression + Rewritable<T> + Reducible<T>>(
                             .map(|_| factory.create_value_term(ValueTerm::Null)),
                     )
                 }
-                FunctionArgs::Resolved(resolved_args)
+                (FunctionArgs::Resolved(resolved_args), dependencies)
             }
         }
     }
 }
 
-fn is_unresolved_arg<T: Expression + Rewritable<T> + Reducible<T>>(arg: &T) -> bool {
-    arg.capture_depth() > 0 || arg.has_dynamic_dependencies(false) || arg.is_reducible()
+fn is_unresolved_arg<T: Expression>(arg: &T) -> bool {
+    arg.capture_depth() > 0 || arg.has_dynamic_dependencies(false) || !arg.is_static()
 }
 
 fn is_compiled_application_target<T: Expression>(

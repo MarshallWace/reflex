@@ -12,9 +12,9 @@ use std::{
 use crate::{
     compiler::{compile_expressions, Compile, Compiler, Instruction, Program},
     core::{
-        transform_expression_list, DependencyList, DynamicState, EvaluationCache, Expression,
-        ExpressionFactory, ExpressionList, GraphNode, HeapAllocator, Iterable, Rewritable,
-        SerializeJson, StackOffset, Substitutions, VarArgs,
+        transform_expression_list, CompoundNode, DependencyList, DynamicState, EvaluationCache,
+        Expression, ExpressionFactory, ExpressionList, ExpressionListSlice, GraphNode,
+        HeapAllocator, Rewritable, SerializeJson, StackOffset, Substitutions, VarArgs,
     },
     hash::HashId,
 };
@@ -156,11 +156,19 @@ impl<T: Expression> GraphNode for HashMapTerm<T> {
     fn is_atomic(&self) -> bool {
         self.keys.is_empty()
     }
+    fn is_complex(&self) -> bool {
+        true
+    }
+}
+pub type HashMapTermChildren<'a, T> =
+    std::iter::Chain<ExpressionListSlice<'a, T>, ExpressionListSlice<'a, T>>;
+impl<'a, T: Expression + 'a> CompoundNode<'a, T> for HashMapTerm<T> {
+    type Children = HashMapTermChildren<'a, T>;
+    fn children(&'a self) -> Self::Children {
+        self.keys.iter().chain(self.values.iter())
+    }
 }
 impl<T: Expression + Rewritable<T>> Rewritable<T> for HashMapTerm<T> {
-    fn children(&self) -> Vec<&T> {
-        self.keys.iter().chain(self.values.iter()).collect()
-    }
     fn substitute_static(
         &self,
         substitutions: &Substitutions<T>,
@@ -246,11 +254,6 @@ impl<T: Expression + Rewritable<T>> Rewritable<T> for HashMapTerm<T> {
             keys.unwrap_or_else(|| allocator.clone_list(&self.keys)),
             values.unwrap_or_else(|| allocator.clone_list(&self.values)),
         ))
-    }
-}
-impl<T: Expression> Iterable for HashMapTerm<T> {
-    fn is_empty(&self) -> bool {
-        self.keys.is_empty()
     }
 }
 impl<T: Expression + Compile<T>> Compile<T> for HashMapTerm<T> {

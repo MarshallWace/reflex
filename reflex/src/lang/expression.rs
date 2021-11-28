@@ -5,7 +5,7 @@
 use crate::{
     compiler::{Compile, Compiler, Program},
     core::{
-        Applicable, Arity, DependencyList, DynamicState, Evaluate, EvaluationCache,
+        Applicable, Arity, CompoundNode, DependencyList, DynamicState, Evaluate, EvaluationCache,
         EvaluationResult, Expression, ExpressionFactory, GraphNode, HeapAllocator, Reducible,
         Rewritable, SerializeJson, StackOffset, Substitutions, VarArgs,
     },
@@ -17,12 +17,11 @@ use std::sync::Arc;
 
 #[derive(Eq, Clone, Copy)]
 pub struct CachedExpression<T: Expression> {
+    value: T,
     hash: HashId,
     capture_depth: StackOffset,
     has_dynamic_dependencies_shallow: bool,
     has_dynamic_dependencies_deep: bool,
-    value: T,
-    normalized: bool,
 }
 impl<T: Expression> CachedExpression<T> {
     pub fn new(value: T) -> Self {
@@ -32,20 +31,10 @@ impl<T: Expression> CachedExpression<T> {
             has_dynamic_dependencies_shallow: value.has_dynamic_dependencies(false),
             has_dynamic_dependencies_deep: value.has_dynamic_dependencies(true),
             value,
-            normalized: false,
         }
     }
     pub fn value(&self) -> &T {
         &self.value
-    }
-    pub fn normalized(&self) -> bool {
-        self.normalized
-    }
-    pub fn into_normalized(self) -> Self {
-        Self {
-            normalized: true,
-            ..self
-        }
     }
 }
 impl<T: Expression> Expression for CachedExpression<T> {
@@ -95,56 +84,41 @@ impl<T: Expression> GraphNode for CachedExpression<T> {
     fn is_atomic(&self) -> bool {
         self.value.is_atomic()
     }
-}
-impl<T: Expression> std::fmt::Display for CachedExpression<T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        std::fmt::Display::fmt(&self.value, f)
+    fn is_complex(&self) -> bool {
+        self.value.is_complex()
     }
 }
-impl<T: Expression> std::fmt::Debug for CachedExpression<T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        std::fmt::Debug::fmt(&self.value, f)
-    }
-}
-impl<T: Expression> SerializeJson for CachedExpression<T> {
-    fn to_json(&self) -> Result<serde_json::Value, String> {
-        self.value().to_json()
-    }
-}
-impl<T: Expression + Rewritable<T>> Rewritable<T> for CachedExpression<T> {
-    fn children(&self) -> Vec<&T> {
+impl<'a, TWrapper: Expression, T: Expression> CompoundNode<'a, TWrapper> for CachedExpression<T>
+where
+    T: CompoundNode<'a, TWrapper> + 'a,
+    TWrapper: 'a,
+{
+    type Children = T::Children;
+    fn children(&'a self) -> Self::Children {
         self.value.children()
     }
-    fn count_subexpression_usages(
-        &self,
-        expression: &T,
-        factory: &impl ExpressionFactory<T>,
-        allocator: &impl HeapAllocator<T>,
-    ) -> usize {
-        self.value
-            .count_subexpression_usages(expression, factory, allocator)
-    }
+}
+impl<TWrapper: Expression, T: Expression> Rewritable<TWrapper> for CachedExpression<T>
+where
+    TWrapper: Rewritable<TWrapper>,
+    T: Rewritable<TWrapper>,
+{
     fn substitute_static(
         &self,
-        substitutions: &Substitutions<T>,
-        factory: &impl ExpressionFactory<T>,
-        allocator: &impl HeapAllocator<T>,
-        cache: &mut impl EvaluationCache<T>,
-    ) -> Option<T> {
-        if substitutions.can_skip(&self.value) {
+        substitutions: &Substitutions<TWrapper>,
+        factory: &impl ExpressionFactory<TWrapper>,
+        allocator: &impl HeapAllocator<TWrapper>,
+        cache: &mut impl EvaluationCache<TWrapper>,
+    ) -> Option<TWrapper> {
+        if substitutions.can_skip(self) {
             return None;
         }
-        match cache.retrieve_static_substitution(&self.value, substitutions) {
+        match cache.retrieve_static_substitution(self, substitutions) {
             Some(result) => result,
             None => {
-                // TODO: This should not all magically depend on people using Cached term, instead we
-                // should expose a method for doing a walk on the tree and perform transformations to the tree
-                let result = substitutions
-                    .substitute_term(self.id(), factory, allocator, cache)
-                    .or_else(|| {
-                        self.value()
-                            .substitute_static(substitutions, factory, allocator, cache)
-                    });
+                let result =
+                    self.value()
+                        .substitute_static(substitutions, factory, allocator, cache);
                 cache.store_static_substitution(
                     &self.value,
                     substitutions,
@@ -157,15 +131,15 @@ impl<T: Expression + Rewritable<T>> Rewritable<T> for CachedExpression<T> {
     fn substitute_dynamic(
         &self,
         deep: bool,
-        state: &impl DynamicState<T>,
-        factory: &impl ExpressionFactory<T>,
-        allocator: &impl HeapAllocator<T>,
-        cache: &mut impl EvaluationCache<T>,
-    ) -> Option<T> {
+        state: &impl DynamicState<TWrapper>,
+        factory: &impl ExpressionFactory<TWrapper>,
+        allocator: &impl HeapAllocator<TWrapper>,
+        cache: &mut impl EvaluationCache<TWrapper>,
+    ) -> Option<TWrapper> {
         if !self.has_dynamic_dependencies(deep) {
             return None;
         }
-        match cache.retrieve_dynamic_substitution(&self.value, deep, state) {
+        match cache.retrieve_dynamic_substitution(self, deep, state) {
             Some(result) => result,
             None => {
                 let result = self
@@ -183,17 +157,17 @@ impl<T: Expression + Rewritable<T>> Rewritable<T> for CachedExpression<T> {
     }
     fn hoist_free_variables(
         &self,
-        factory: &impl ExpressionFactory<T>,
-        allocator: &impl HeapAllocator<T>,
-    ) -> Option<T> {
+        factory: &impl ExpressionFactory<TWrapper>,
+        allocator: &impl HeapAllocator<TWrapper>,
+    ) -> Option<TWrapper> {
         self.value.hoist_free_variables(factory, allocator)
     }
     fn normalize(
         &self,
-        factory: &impl ExpressionFactory<T>,
-        allocator: &impl HeapAllocator<T>,
-        cache: &mut impl EvaluationCache<T>,
-    ) -> Option<T> {
+        factory: &impl ExpressionFactory<TWrapper>,
+        allocator: &impl HeapAllocator<TWrapper>,
+        cache: &mut impl EvaluationCache<TWrapper>,
+    ) -> Option<TWrapper> {
         match cache.retrieve_normalization(&self.value) {
             Some(result) => result,
             None => {
@@ -204,16 +178,20 @@ impl<T: Expression + Rewritable<T>> Rewritable<T> for CachedExpression<T> {
         }
     }
 }
-impl<T: Expression + Rewritable<T> + Reducible<T>> Reducible<T> for CachedExpression<T> {
+impl<TWrapper: Expression, T: Expression> Reducible<TWrapper> for CachedExpression<T>
+where
+    TWrapper: Reducible<TWrapper>,
+    T: Reducible<TWrapper>,
+{
     fn is_reducible(&self) -> bool {
         self.value.is_reducible()
     }
     fn reduce(
         &self,
-        factory: &impl ExpressionFactory<T>,
-        allocator: &impl HeapAllocator<T>,
-        cache: &mut impl EvaluationCache<T>,
-    ) -> Option<T> {
+        factory: &impl ExpressionFactory<TWrapper>,
+        allocator: &impl HeapAllocator<TWrapper>,
+        cache: &mut impl EvaluationCache<TWrapper>,
+    ) -> Option<TWrapper> {
         match cache.retrieve_reduction(&self.value) {
             Some(result) => result,
             None => {
@@ -224,56 +202,85 @@ impl<T: Expression + Rewritable<T> + Reducible<T>> Reducible<T> for CachedExpres
         }
     }
 }
-impl<T: Expression + Applicable<T>> Applicable<T> for CachedExpression<T> {
+impl<TWrapper: Expression, T: Expression> Applicable<TWrapper> for CachedExpression<T>
+where
+    TWrapper: Applicable<TWrapper>,
+    T: Applicable<TWrapper>,
+{
     fn arity(&self) -> Option<Arity> {
         self.value.arity()
     }
     fn apply(
         &self,
-        args: impl ExactSizeIterator<Item = T>,
-        factory: &impl ExpressionFactory<T>,
-        allocator: &impl HeapAllocator<T>,
-        cache: &mut impl EvaluationCache<T>,
-    ) -> Result<T, String> {
-        // TODO: Memoize function applications based on arg list hash
+        args: impl ExactSizeIterator<Item = TWrapper>,
+        factory: &impl ExpressionFactory<TWrapper>,
+        allocator: &impl HeapAllocator<TWrapper>,
+        cache: &mut impl EvaluationCache<TWrapper>,
+    ) -> Result<TWrapper, String> {
         self.value.apply(args, factory, allocator, cache)
     }
+    fn should_parallelize(&self, args: &[TWrapper]) -> bool {
+        self.value.should_parallelize(args)
+    }
 }
-impl<T: Expression + Compile<T>> Compile<T> for CachedExpression<T> {
+impl<TWrapper: Expression, T: Expression> Compile<TWrapper> for CachedExpression<T>
+where
+    TWrapper: Compile<TWrapper>,
+    T: Compile<TWrapper>,
+{
     fn compile(
         &self,
         eager: VarArgs,
         stack_offset: StackOffset,
-        factory: &impl ExpressionFactory<T>,
-        allocator: &impl HeapAllocator<T>,
+        factory: &impl ExpressionFactory<TWrapper>,
+        allocator: &impl HeapAllocator<TWrapper>,
         compiler: &mut Compiler,
     ) -> Result<Program, String> {
         self.value
             .compile(eager, stack_offset, factory, allocator, compiler)
     }
 }
-impl<T: Expression + Rewritable<T> + Reducible<T> + Evaluate<T>> Evaluate<T>
-    for CachedExpression<T>
+impl<TWrapper: Expression, T: Expression> Evaluate<TWrapper> for CachedExpression<T>
+where
+    TWrapper: Evaluate<TWrapper>,
+    T: Evaluate<TWrapper>,
 {
     fn evaluate(
         &self,
-        state: &impl DynamicState<T>,
-        factory: &impl ExpressionFactory<T>,
-        allocator: &impl HeapAllocator<T>,
-        cache: &mut impl EvaluationCache<T>,
-    ) -> Option<EvaluationResult<T>> {
-        let result = self.value.evaluate(state, factory, allocator, cache)?;
-        if result.result().id() == self.id() {
-            None
-        } else {
-            Some(result)
+        state: &impl DynamicState<TWrapper>,
+        factory: &impl ExpressionFactory<TWrapper>,
+        allocator: &impl HeapAllocator<TWrapper>,
+        cache: &mut impl EvaluationCache<TWrapper>,
+    ) -> Option<EvaluationResult<TWrapper>> {
+        if self.is_static() {
+            return None;
+        }
+        match cache.retrieve_evaluation(&self.value, state) {
+            Some(result) => result,
+            None => {
+                let result = self.value.evaluate(state, factory, allocator, cache);
+                cache.store_evaluation(&self.value, state, result.as_ref().cloned());
+                result
+            }
         }
     }
 }
-impl<T: Expression> serde::Serialize for CachedExpression<T>
-where
-    T: serde::Serialize,
-{
+impl<T: Expression> std::fmt::Display for CachedExpression<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Display::fmt(&self.value, f)
+    }
+}
+impl<T: Expression> std::fmt::Debug for CachedExpression<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Debug::fmt(&self.value, f)
+    }
+}
+impl<T: Expression> SerializeJson for CachedExpression<T> {
+    fn to_json(&self) -> Result<serde_json::Value, String> {
+        self.value().to_json()
+    }
+}
+impl<T: Expression + serde::Serialize> serde::Serialize for CachedExpression<T> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
@@ -281,10 +288,7 @@ where
         self.value.serialize(serializer)
     }
 }
-impl<'de, T: Expression> serde::Deserialize<'de> for CachedExpression<T>
-where
-    T: serde::Deserialize<'de>,
-{
+impl<'de, T: Expression + serde::Deserialize<'de>> serde::Deserialize<'de> for CachedExpression<T> {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
@@ -295,13 +299,16 @@ where
 
 #[derive(Hash, PartialEq, Eq, Clone)]
 pub struct SharedExpression<T: Expression> {
-    pub(crate) value: Arc<T>,
+    pub value: Arc<T>,
 }
 impl<T: Expression> SharedExpression<T> {
     pub fn new(value: T) -> Self {
         Self {
             value: Arc::new(value),
         }
+    }
+    pub fn value(&self) -> &T {
+        &self.value
     }
 }
 impl<T: Expression> Expression for SharedExpression<T> {
@@ -333,6 +340,147 @@ impl<T: Expression> GraphNode for SharedExpression<T> {
     fn is_atomic(&self) -> bool {
         self.value.is_atomic()
     }
+    fn is_complex(&self) -> bool {
+        self.value.is_complex()
+    }
+}
+impl<'a, TWrapper: Expression, T: Expression> CompoundNode<'a, TWrapper> for SharedExpression<T>
+where
+    T: CompoundNode<'a, TWrapper> + 'a,
+    TWrapper: 'a,
+{
+    type Children = T::Children;
+    fn children(&'a self) -> Self::Children {
+        self.value.children()
+    }
+}
+impl<TWrapper: Expression, T: Expression> Rewritable<TWrapper> for SharedExpression<T>
+where
+    TWrapper: Rewritable<TWrapper>,
+    T: Rewritable<TWrapper>,
+{
+    fn substitute_static(
+        &self,
+        substitutions: &Substitutions<TWrapper>,
+        factory: &impl ExpressionFactory<TWrapper>,
+        allocator: &impl HeapAllocator<TWrapper>,
+        cache: &mut impl EvaluationCache<TWrapper>,
+    ) -> Option<TWrapper> {
+        self.value
+            .substitute_static(substitutions, factory, allocator, cache)
+    }
+    fn substitute_dynamic(
+        &self,
+        deep: bool,
+        state: &impl DynamicState<TWrapper>,
+        factory: &impl ExpressionFactory<TWrapper>,
+        allocator: &impl HeapAllocator<TWrapper>,
+        cache: &mut impl EvaluationCache<TWrapper>,
+    ) -> Option<TWrapper> {
+        self.value
+            .substitute_dynamic(deep, state, factory, allocator, cache)
+    }
+    fn hoist_free_variables(
+        &self,
+        factory: &impl ExpressionFactory<TWrapper>,
+        allocator: &impl HeapAllocator<TWrapper>,
+    ) -> Option<TWrapper> {
+        self.value.hoist_free_variables(factory, allocator)
+    }
+    fn normalize(
+        &self,
+        factory: &impl ExpressionFactory<TWrapper>,
+        allocator: &impl HeapAllocator<TWrapper>,
+        cache: &mut impl EvaluationCache<TWrapper>,
+    ) -> Option<TWrapper> {
+        self.value.normalize(factory, allocator, cache)
+    }
+}
+impl<TWrapper: Expression, T: Expression> Reducible<TWrapper> for SharedExpression<T>
+where
+    TWrapper: Reducible<TWrapper>,
+    T: Reducible<TWrapper>,
+{
+    fn is_reducible(&self) -> bool {
+        self.value.is_reducible()
+    }
+    fn reduce(
+        &self,
+        factory: &impl ExpressionFactory<TWrapper>,
+        allocator: &impl HeapAllocator<TWrapper>,
+        cache: &mut impl EvaluationCache<TWrapper>,
+    ) -> Option<TWrapper> {
+        self.value.reduce(factory, allocator, cache)
+    }
+}
+impl<TWrapper: Expression, T: Expression> Applicable<TWrapper> for SharedExpression<T>
+where
+    TWrapper: Applicable<TWrapper>,
+    T: Applicable<TWrapper>,
+{
+    fn arity(&self) -> Option<Arity> {
+        self.value.arity()
+    }
+    fn apply(
+        &self,
+        args: impl ExactSizeIterator<Item = TWrapper>,
+        factory: &impl ExpressionFactory<TWrapper>,
+        allocator: &impl HeapAllocator<TWrapper>,
+        cache: &mut impl EvaluationCache<TWrapper>,
+    ) -> Result<TWrapper, String> {
+        self.value.apply(args, factory, allocator, cache)
+    }
+    fn should_parallelize(&self, args: &[TWrapper]) -> bool {
+        self.value.should_parallelize(args)
+    }
+}
+impl<TWrapper: Expression, T: Expression> Evaluate<TWrapper> for SharedExpression<T>
+where
+    TWrapper: Evaluate<TWrapper>,
+    T: Evaluate<TWrapper>,
+{
+    fn evaluate(
+        &self,
+        state: &impl DynamicState<TWrapper>,
+        factory: &impl ExpressionFactory<TWrapper>,
+        allocator: &impl HeapAllocator<TWrapper>,
+        cache: &mut impl EvaluationCache<TWrapper>,
+    ) -> Option<EvaluationResult<TWrapper>> {
+        self.value.evaluate(state, factory, allocator, cache)
+    }
+}
+impl<TWrapper: Expression, T: Expression> Compile<TWrapper> for SharedExpression<T>
+where
+    TWrapper: Compile<TWrapper>,
+    T: Compile<TWrapper>,
+{
+    fn compile(
+        &self,
+        eager: VarArgs,
+        stack_offset: StackOffset,
+        factory: &impl ExpressionFactory<TWrapper>,
+        allocator: &impl HeapAllocator<TWrapper>,
+        compiler: &mut Compiler,
+    ) -> Result<Program, String> {
+        self.value
+            .compile(eager, stack_offset, factory, allocator, compiler)
+    }
+}
+impl<T: Expression + serde::Serialize> serde::Serialize for SharedExpression<T> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        self.value.serialize(serializer)
+    }
+}
+impl<'de, T: Expression + serde::Deserialize<'de>> serde::Deserialize<'de> for SharedExpression<T> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        Ok(Self::new(T::deserialize(deserializer)?))
+    }
 }
 impl<T: Expression> std::fmt::Display for SharedExpression<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -347,130 +495,5 @@ impl<T: Expression> std::fmt::Debug for SharedExpression<T> {
 impl<T: Expression> SerializeJson for SharedExpression<T> {
     fn to_json(&self) -> Result<serde_json::Value, String> {
         (*self.value).to_json()
-    }
-}
-impl<T: Expression + Rewritable<T>> Rewritable<T> for SharedExpression<T> {
-    fn children(&self) -> Vec<&T> {
-        self.value.children()
-    }
-    fn count_subexpression_usages(
-        &self,
-        expression: &T,
-        factory: &impl ExpressionFactory<T>,
-        allocator: &impl HeapAllocator<T>,
-    ) -> usize {
-        self.value
-            .count_subexpression_usages(expression, factory, allocator)
-    }
-    fn substitute_static(
-        &self,
-        substitutions: &Substitutions<T>,
-        factory: &impl ExpressionFactory<T>,
-        allocator: &impl HeapAllocator<T>,
-        cache: &mut impl EvaluationCache<T>,
-    ) -> Option<T> {
-        self.value
-            .substitute_static(substitutions, factory, allocator, cache)
-    }
-    fn substitute_dynamic(
-        &self,
-        deep: bool,
-        state: &impl DynamicState<T>,
-        factory: &impl ExpressionFactory<T>,
-        allocator: &impl HeapAllocator<T>,
-        cache: &mut impl EvaluationCache<T>,
-    ) -> Option<T> {
-        self.value
-            .substitute_dynamic(deep, state, factory, allocator, cache)
-    }
-    fn hoist_free_variables(
-        &self,
-        factory: &impl ExpressionFactory<T>,
-        allocator: &impl HeapAllocator<T>,
-    ) -> Option<T> {
-        self.value.hoist_free_variables(factory, allocator)
-    }
-    fn normalize(
-        &self,
-        factory: &impl ExpressionFactory<T>,
-        allocator: &impl HeapAllocator<T>,
-        cache: &mut impl EvaluationCache<T>,
-    ) -> Option<T> {
-        self.value.normalize(factory, allocator, cache)
-    }
-}
-impl<T: Expression + Reducible<T> + Rewritable<T>> Reducible<T> for SharedExpression<T> {
-    fn is_reducible(&self) -> bool {
-        self.value.is_reducible()
-    }
-    fn reduce(
-        &self,
-        factory: &impl ExpressionFactory<T>,
-        allocator: &impl HeapAllocator<T>,
-        cache: &mut impl EvaluationCache<T>,
-    ) -> Option<T> {
-        self.value.reduce(factory, allocator, cache)
-    }
-}
-impl<T: Expression + Applicable<T>> Applicable<T> for SharedExpression<T> {
-    fn arity(&self) -> Option<crate::core::Arity> {
-        self.value.arity()
-    }
-    fn apply(
-        &self,
-        args: impl ExactSizeIterator<Item = T>,
-        factory: &impl ExpressionFactory<T>,
-        allocator: &impl HeapAllocator<T>,
-        cache: &mut impl EvaluationCache<T>,
-    ) -> Result<T, String> {
-        self.value.apply(args, factory, allocator, cache)
-    }
-}
-impl<T: Expression + Rewritable<T> + Reducible<T> + Evaluate<T>> Evaluate<T>
-    for SharedExpression<T>
-{
-    fn evaluate(
-        &self,
-        state: &impl DynamicState<T>,
-        factory: &impl ExpressionFactory<T>,
-        allocator: &impl HeapAllocator<T>,
-        cache: &mut impl EvaluationCache<T>,
-    ) -> Option<EvaluationResult<T>> {
-        self.value.evaluate(state, factory, allocator, cache)
-    }
-}
-impl<T: Expression + Compile<T>> Compile<T> for SharedExpression<T> {
-    fn compile(
-        &self,
-        eager: VarArgs,
-        stack_offset: StackOffset,
-        factory: &impl ExpressionFactory<T>,
-        allocator: &impl HeapAllocator<T>,
-        compiler: &mut Compiler,
-    ) -> Result<Program, String> {
-        self.value
-            .compile(eager, stack_offset, factory, allocator, compiler)
-    }
-}
-impl<T: Expression> serde::Serialize for SharedExpression<T>
-where
-    T: serde::Serialize,
-{
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        self.value.serialize(serializer)
-    }
-}
-impl<'de, T: Expression> serde::Deserialize<'de> for SharedExpression<T>
-where
-    T: serde::Deserialize<'de>,
-{
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        Ok(Self::new(T::deserialize(deserializer)?))
     }
 }

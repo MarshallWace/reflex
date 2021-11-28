@@ -34,6 +34,9 @@ where
     fn arity(&self) -> Option<Arity> {
         Some(Arity::from(&Self::ARITY))
     }
+    fn should_parallelize(&self, _args: &[T]) -> bool {
+        false
+    }
     fn apply(
         &self,
         mut args: impl ExactSizeIterator<Item = T>,
@@ -96,6 +99,9 @@ impl<T: Expression> Applicable<T> for CollectTuple {
     fn arity(&self) -> Option<Arity> {
         Some(Arity::from(&Self::ARITY))
     }
+    fn should_parallelize(&self, _args: &[T]) -> bool {
+        false
+    }
     fn apply(
         &self,
         args: impl ExactSizeIterator<Item = T>,
@@ -124,6 +130,9 @@ impl Uid for CollectStruct {
 impl<T: Expression> Applicable<T> for CollectStruct {
     fn arity(&self) -> Option<Arity> {
         Some(Arity::from(&Self::ARITY))
+    }
+    fn should_parallelize(&self, _args: &[T]) -> bool {
+        false
     }
     fn apply(
         &self,
@@ -166,6 +175,9 @@ impl<T: Expression> Applicable<T> for CollectVector {
     fn arity(&self) -> Option<Arity> {
         Some(Arity::from(&Self::ARITY))
     }
+    fn should_parallelize(&self, _args: &[T]) -> bool {
+        false
+    }
     fn apply(
         &self,
         args: impl ExactSizeIterator<Item = T>,
@@ -194,6 +206,9 @@ impl Uid for CollectHashSet {
 impl<T: Expression> Applicable<T> for CollectHashSet {
     fn arity(&self) -> Option<Arity> {
         Some(Arity::from(&Self::ARITY))
+    }
+    fn should_parallelize(&self, _args: &[T]) -> bool {
+        false
     }
     fn apply(
         &self,
@@ -231,6 +246,9 @@ where
 {
     fn arity(&self) -> Option<Arity> {
         Some(Arity::from(&Self::ARITY))
+    }
+    fn should_parallelize(&self, _args: &[T]) -> bool {
+        false
     }
     fn apply(
         &self,

@@ -28,6 +28,9 @@ impl<T: Expression> Applicable<T> for ConstructTuple {
     fn arity(&self) -> Option<Arity> {
         Some(Arity::from(&Self::ARITY))
     }
+    fn should_parallelize(&self, _args: &[T]) -> bool {
+        false
+    }
     fn apply(
         &self,
         args: impl ExactSizeIterator<Item = T>,
@@ -56,6 +59,9 @@ impl Uid for ConstructStruct {
 impl<T: Expression> Applicable<T> for ConstructStruct {
     fn arity(&self) -> Option<Arity> {
         Some(Arity::from(&Self::ARITY))
+    }
+    fn should_parallelize(&self, _args: &[T]) -> bool {
+        false
     }
     fn apply(
         &self,
@@ -123,6 +129,9 @@ impl<T: Expression> Applicable<T> for ConstructHashMap {
     fn arity(&self) -> Option<Arity> {
         Some(Arity::from(&Self::ARITY))
     }
+    fn should_parallelize(&self, _args: &[T]) -> bool {
+        false
+    }
     fn apply(
         &self,
         mut args: impl ExactSizeIterator<Item = T>,
@@ -189,6 +198,9 @@ impl<T: Expression> Applicable<T> for ConstructHashSet {
     fn arity(&self) -> Option<Arity> {
         Some(Arity::from(&Self::ARITY))
     }
+    fn should_parallelize(&self, _args: &[T]) -> bool {
+        false
+    }
     fn apply(
         &self,
         args: impl ExactSizeIterator<Item = T>,
@@ -222,6 +234,9 @@ impl Uid for ConstructVector {
 impl<T: Expression> Applicable<T> for ConstructVector {
     fn arity(&self) -> Option<Arity> {
         Some(Arity::from(&Self::ARITY))
+    }
+    fn should_parallelize(&self, _args: &[T]) -> bool {
+        false
     }
     fn apply(
         &self,
