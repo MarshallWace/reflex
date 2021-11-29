@@ -1,7 +1,10 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use std::iter::{once, FromIterator};
+use std::{
+    collections::HashMap,
+    iter::{once, FromIterator},
+};
 
 use reflex_json::{deserialize, JsonMap, JsonValue};
 
@@ -12,6 +15,7 @@ pub enum GraphQlSubscriptionClientMessage {
     ConnectionInit(GraphQlSubscriptionConnectionInitMessage),
     Start(GraphQlSubscriptionStartMessage),
     Stop(GraphQlSubscriptionStopMessage),
+    Update(GraphQlSubscriptionUpdateMessage),
     ConnectionTerminate,
 }
 impl GraphQlSubscriptionClientMessage {
@@ -31,6 +35,15 @@ impl GraphQlSubscriptionClientMessage {
             id: subscription_id,
         })
     }
+    pub fn update(
+        subscription_id: String,
+        payload: impl IntoIterator<Item = (String, JsonValue)>,
+    ) -> Self {
+        GraphQlSubscriptionClientMessage::Update(GraphQlSubscriptionUpdateMessage {
+            id: subscription_id,
+            payload: payload.into_iter().collect(),
+        })
+    }
     pub fn connection_terminate() -> Self {
         GraphQlSubscriptionClientMessage::ConnectionTerminate
     }
@@ -47,6 +60,16 @@ impl GraphQlSubscriptionClientMessage {
                 Some(message.payload.into_json()),
             )),
             Self::Stop(message) => Ok(serialize_message("stop", Some(message.id), None)),
+            Self::Update(message) => Ok(serialize_message(
+                "update",
+                Some(message.id),
+                Some(JsonValue::Object(JsonMap::from_iter(
+                    message
+                        .payload
+                        .iter()
+                        .map(|(key, value)| (key.clone(), value.clone())),
+                ))),
+            )),
             Self::ConnectionTerminate => Ok(serialize_message("connection_terminate", None, None)),
         }
     }
@@ -86,6 +109,23 @@ pub struct GraphQlSubscriptionStopMessage {
 impl GraphQlSubscriptionStopMessage {
     pub fn subscription_id(&self) -> &SubscriptionId {
         &self.id
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct GraphQlSubscriptionUpdateMessage {
+    id: SubscriptionId,
+    payload: HashMap<String, JsonValue>,
+}
+impl GraphQlSubscriptionUpdateMessage {
+    pub fn subscription_id(&self) -> &SubscriptionId {
+        &self.id
+    }
+    pub fn payload(&self) -> &HashMap<String, JsonValue> {
+        &self.payload
+    }
+    pub fn into_payload(self) -> HashMap<String, JsonValue> {
+        self.payload
     }
 }
 
@@ -150,6 +190,7 @@ pub fn deserialize_graphql_client_message(
                     "connection_init" => deserialize_client_connection_init_message(message),
                     "start" => deserialize_client_start_message(message),
                     "stop" => deserialize_client_stop_message(message),
+                    "update" => deserialize_client_update_message(message),
                     "connection_terminate" => {
                         deserialize_client_connection_terminate_message(message)
                     }
@@ -239,6 +280,17 @@ fn deserialize_client_stop_message(
 ) -> Result<GraphQlSubscriptionClientMessage, String> {
     let id = deserialize_message_id(&message)?;
     Ok(GraphQlSubscriptionClientMessage::stop(id))
+}
+
+fn deserialize_client_update_message(
+    message: JsonMap<String, JsonValue>,
+) -> Result<GraphQlSubscriptionClientMessage, String> {
+    let id = deserialize_message_id(&message)?;
+    let payload = deserialize_message_payload(message).and_then(|variables| match variables {
+        JsonValue::Object(entries) => Ok(entries),
+        _ => Err(format!("Invalid update payload: {}", variables)),
+    })?;
+    Ok(GraphQlSubscriptionClientMessage::update(id, payload))
 }
 
 fn deserialize_client_connection_terminate_message(

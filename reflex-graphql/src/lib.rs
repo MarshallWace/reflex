@@ -109,6 +109,17 @@ where
 pub trait AsyncGraphQlQueryTransform: GraphQlQueryTransform + Send + Sync + 'static {}
 impl<T> AsyncGraphQlQueryTransform for T where T: GraphQlQueryTransform + Send + Sync + 'static {}
 
+impl GraphQlQueryTransform for Box<dyn GraphQlQueryTransform> {
+    fn transform<'a>(&self, document: GraphQlAst<'a>) -> Result<GraphQlAst<'a>, String> {
+        (&**self).transform(document)
+    }
+}
+impl GraphQlQueryTransform for Box<dyn AsyncGraphQlQueryTransform> {
+    fn transform<'a>(&self, document: GraphQlAst<'a>) -> Result<GraphQlAst<'a>, String> {
+        (&**self).transform(document)
+    }
+}
+
 #[derive(Default)]
 pub struct NoopGraphQlQueryTransform {}
 impl GraphQlQueryTransform for NoopGraphQlQueryTransform {
@@ -128,7 +139,6 @@ where
 {
     let variables = operation
         .variables()
-        .into_iter()
         .map(|(key, value)| {
             reflex_json::hydrate(value.clone(), factory, allocator).map(|value| (key, value))
         })

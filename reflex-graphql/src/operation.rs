@@ -56,15 +56,30 @@ impl GraphQlOperationPayload {
     pub fn extension(&self, name: &str) -> Option<&JsonValue> {
         self.extensions.get(name)
     }
-    pub fn variables(&self) -> impl IntoIterator<Item = (&str, &JsonValue)> {
+    pub fn variables(&self) -> impl Iterator<Item = (&str, &JsonValue)> {
         self.variables
             .iter()
             .map(|(key, value)| (key.as_str(), value))
     }
-    pub fn extensions(&self) -> impl IntoIterator<Item = (&str, &JsonValue)> {
+    pub fn extensions(&self) -> impl Iterator<Item = (&str, &JsonValue)> {
         self.extensions
             .iter()
             .map(|(key, value)| (key.as_str(), value))
+    }
+    pub fn into_parts(
+        self,
+    ) -> (
+        String,
+        Option<String>,
+        impl IntoIterator<Item = (String, JsonValue)>,
+        impl IntoIterator<Item = (String, JsonValue)>,
+    ) {
+        (
+            self.query,
+            self.operation_name,
+            self.variables,
+            self.extensions,
+        )
     }
     pub fn into_json(self) -> JsonValue {
         JsonValue::Object(JsonMap::from_iter(vec![
