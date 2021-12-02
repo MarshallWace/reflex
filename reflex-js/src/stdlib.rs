@@ -22,6 +22,7 @@ pub use from_entries::*;
 pub use getter::*;
 pub use hash::*;
 pub use int::*;
+pub use is_finite::*;
 pub use json_parse::*;
 pub use json_stringify::*;
 pub use log::*;
@@ -44,6 +45,7 @@ mod from_entries;
 mod getter;
 mod hash;
 mod int;
+mod is_finite;
 mod json_parse;
 mod json_stringify;
 mod log;
@@ -69,6 +71,7 @@ pub enum Stdlib {
     Getter,
     Hash,
     Int,
+    IsFinite,
     JsonParse,
     JsonStringify,
     Log,
@@ -100,6 +103,7 @@ impl Uid for Stdlib {
             Self::Getter => Uid::uid(&Getter {}),
             Self::Hash => Uid::uid(&Hash {}),
             Self::Int => Uid::uid(&Int {}),
+            Self::IsFinite => Uid::uid(&IsFinite {}),
             Self::JsonParse => Uid::uid(&JsonParse {}),
             Self::JsonStringify => Uid::uid(&JsonStringify {}),
             Self::Log => Uid::uid(&Log {}),
@@ -129,6 +133,7 @@ impl TryFrom<Uuid> for Stdlib {
             Getter::UUID => Ok(Self::Getter),
             Hash::UUID => Ok(Self::Hash),
             Int::UUID => Ok(Self::Int),
+            IsFinite::UUID => Ok(Self::IsFinite),
             JsonParse::UUID => Ok(Self::JsonParse),
             JsonStringify::UUID => Ok(Self::JsonStringify),
             Log::UUID => Ok(Self::Log),
@@ -161,6 +166,7 @@ impl Stdlib {
             Self::Getter => Applicable::<T>::arity(&Getter {}),
             Self::Hash => Applicable::<T>::arity(&Hash {}),
             Self::Int => Applicable::<T>::arity(&Int {}),
+            Self::IsFinite => Applicable::<T>::arity(&IsFinite {}),
             Self::JsonParse => Applicable::<T>::arity(&JsonParse {}),
             Self::JsonStringify => Applicable::<T>::arity(&JsonStringify {}),
             Self::Log => Applicable::<T>::arity(&Log {}),
@@ -194,6 +200,7 @@ impl Stdlib {
             Self::Getter => Applicable::<T>::should_parallelize(&Getter {}, args),
             Self::Hash => Applicable::<T>::should_parallelize(&Hash {}, args),
             Self::Int => Applicable::<T>::should_parallelize(&Int {}, args),
+            Self::IsFinite => Applicable::<T>::should_parallelize(&IsFinite {}, args),
             Self::JsonParse => Applicable::<T>::should_parallelize(&JsonParse {}, args),
             Self::JsonStringify => Applicable::<T>::should_parallelize(&JsonStringify {}, args),
             Self::Log => Applicable::<T>::should_parallelize(&Log {}, args),
@@ -239,6 +246,7 @@ impl Stdlib {
             Self::Getter => Applicable::<T>::apply(&Getter {}, args, factory, allocator, cache),
             Self::Hash => Applicable::<T>::apply(&Hash {}, args, factory, allocator, cache),
             Self::Int => Applicable::<T>::apply(&Int {}, args, factory, allocator, cache),
+            Self::IsFinite => Applicable::<T>::apply(&IsFinite {}, args, factory, allocator, cache),
             Self::JsonParse => {
                 Applicable::<T>::apply(&JsonParse {}, args, factory, allocator, cache)
             }

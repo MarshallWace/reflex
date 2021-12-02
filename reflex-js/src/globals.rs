@@ -43,6 +43,7 @@ where
         ("Map", global_map(factory)),
         ("Set", global_set(factory)),
         ("JSON", global_json(factory, allocator)),
+        ("isFinite", factory.create_builtin_term(JsStdlib::IsFinite)),
         (
             "encodeURIComponent",
             factory.create_builtin_term(JsStdlib::EncodeUriComponent),
