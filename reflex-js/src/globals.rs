@@ -24,7 +24,7 @@ pub use process::global_process;
 pub(crate) mod set;
 pub use set::global_set;
 pub(crate) mod string;
-pub use string::{global_encode_uri_component, global_string};
+pub use string::global_string;
 
 pub fn builtin_globals<T: Expression>(
     factory: &impl ExpressionFactory<T>,
@@ -45,7 +45,7 @@ where
         ("JSON", global_json(factory, allocator)),
         (
             "encodeURIComponent",
-            global_encode_uri_component(factory, allocator),
+            factory.create_builtin_term(JsStdlib::EncodeUriComponent),
         ),
         ("process", global_process(factory, allocator)),
     ]

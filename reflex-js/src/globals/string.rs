@@ -13,13 +13,3 @@ where
 {
     factory.create_builtin_term(JsStdlib::ToString)
 }
-
-pub fn global_encode_uri_component<T: Expression>(
-    factory: &impl ExpressionFactory<T>,
-    _allocator: &impl HeapAllocator<T>,
-) -> T
-where
-    T::Builtin: From<JsStdlib>,
-{
-    factory.create_builtin_term(JsStdlib::EncodeUriComponent)
-}
