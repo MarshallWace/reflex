@@ -129,16 +129,17 @@ pub fn execute<
     match result {
         Err(error) => Err(error),
         Ok(value) => {
-            assert!(
-                call_stack.call_stack_depth() == 0,
-                "{} frames remaining on call stack",
-                call_stack.call_stack_depth(),
-            );
-            assert!(
-                stack.len() == 0,
-                "{} values remaining on variable stack",
-                stack.len()
-            );
+            // FIXME: Unwind call frame / variable stack on short-circuit signals
+            // debug_assert!(
+            //     call_stack.call_stack_depth() == 0,
+            //     "{} frames remaining on call stack",
+            //     call_stack.call_stack_depth(),
+            // );
+            // debug_assert!(
+            //     stack.len() == 0,
+            //     "{} values remaining on variable stack",
+            //     stack.len()
+            // );
             let (dependencies, subexpressions) = call_stack.drain();
             let result = EvaluationResult::new(value, dependencies);
             cache_entries.insert(
@@ -1509,18 +1510,19 @@ fn resolve_arg_within_new_stack<
         debug_instructions,
         debug_stack,
     );
-    assert_eq!(
-        new_call_stack.call_stack_depth(),
-        0,
-        "{} frames remaining on call stack",
-        new_call_stack.call_stack_depth()
-    );
-    assert_eq!(
-        new_stack.len(),
-        capture_depth,
-        "{} values remaining on variable stack",
-        new_stack.len()
-    );
+    // FIXME: Unwind call frame / variable stack on short-circuit signals
+    // debug_assert_eq!(
+    //     new_call_stack.call_stack_depth(),
+    //     0,
+    //     "{} frames remaining on call stack",
+    //     new_call_stack.call_stack_depth()
+    // );
+    // debug_assert_eq!(
+    //     new_stack.len(),
+    //     capture_depth,
+    //     "{} values remaining on variable stack",
+    //     new_stack.len()
+    // );
     let (dependencies, subexpressions) = new_call_stack.drain();
     return (result, dependencies, subexpressions);
 }
