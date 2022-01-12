@@ -40,6 +40,7 @@ pub use if_error::*;
 pub use if_pending::*;
 pub use insert::*;
 pub use keys::*;
+pub use length::*;
 pub use lt::*;
 pub use lte::*;
 pub use map::*;
@@ -96,6 +97,7 @@ mod if_error;
 mod if_pending;
 mod insert;
 mod keys;
+mod length;
 mod lt;
 mod lte;
 mod map;
@@ -167,6 +169,7 @@ pub enum Stdlib {
     IfPending,
     Insert,
     Keys,
+    Length,
     Lt,
     Lte,
     Map,
@@ -246,6 +249,7 @@ impl TryFrom<Uuid> for Stdlib {
             IfPending::UUID => Ok(Self::IfPending),
             Insert::UUID => Ok(Self::Insert),
             Keys::UUID => Ok(Self::Keys),
+            Length::UUID => Ok(Self::Length),
             Lt::UUID => Ok(Self::Lt),
             Lte::UUID => Ok(Self::Lte),
             Map::UUID => Ok(Self::Map),
@@ -322,6 +326,7 @@ impl Uid for Stdlib {
             Self::IfPending => Uid::uid(&IfPending {}),
             Self::Insert => Uid::uid(&Insert {}),
             Self::Keys => Uid::uid(&Keys {}),
+            Self::Length => Uid::uid(&Length {}),
             Self::Lt => Uid::uid(&Lt {}),
             Self::Lte => Uid::uid(&Lte {}),
             Self::Map => Uid::uid(&Map {}),
@@ -400,6 +405,7 @@ impl Stdlib {
             Self::IfPending => Applicable::<T>::arity(&IfPending {}),
             Self::Insert => Applicable::<T>::arity(&Insert {}),
             Self::Keys => Applicable::<T>::arity(&Keys {}),
+            Self::Length => Applicable::<T>::arity(&Length {}),
             Self::Lt => Applicable::<T>::arity(&Lt {}),
             Self::Lte => Applicable::<T>::arity(&Lte {}),
             Self::Map => Applicable::<T>::arity(&Map {}),
@@ -506,6 +512,7 @@ impl Stdlib {
             }
             Self::Insert => Applicable::<T>::apply(&Insert {}, args, factory, allocator, cache),
             Self::Keys => Applicable::<T>::apply(&Keys {}, args, factory, allocator, cache),
+            Self::Length => Applicable::<T>::apply(&Length {}, args, factory, allocator, cache),
             Self::Lt => Applicable::<T>::apply(&Lt {}, args, factory, allocator, cache),
             Self::Lte => Applicable::<T>::apply(&Lte {}, args, factory, allocator, cache),
             Self::Map => Applicable::<T>::apply(&Map {}, args, factory, allocator, cache),
@@ -608,6 +615,7 @@ impl Stdlib {
             Self::IfPending => Applicable::<T>::should_parallelize(&IfPending {}, args),
             Self::Insert => Applicable::<T>::should_parallelize(&Insert {}, args),
             Self::Keys => Applicable::<T>::should_parallelize(&Keys {}, args),
+            Self::Length => Applicable::<T>::should_parallelize(&Length {}, args),
             Self::Lt => Applicable::<T>::should_parallelize(&Lt {}, args),
             Self::Lte => Applicable::<T>::should_parallelize(&Lte {}, args),
             Self::Map => Applicable::<T>::should_parallelize(&Map {}, args),
