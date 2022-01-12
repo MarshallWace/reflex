@@ -18,24 +18,22 @@ use reflex_js::builtins::JsBuiltins;
 #[derive(Parser)]
 #[clap(name = "reflexc")]
 struct Args {
-    #[clap(about = "Path to program entry point")]
+    /// Path to program entry point
     entry_point: PathBuf,
-    #[clap(long, about = "Input file syntax", default_value = "javascript")]
+    /// Input file syntax
+    #[clap(long, default_value = "javascript")]
     syntax: Syntax,
-    #[clap(
-        long,
-        about = "Output file serialization format",
-        default_value = "rmp"
-    )]
+    /// Output file serialization format
+    #[clap(long, default_value = "rmp")]
     output_format: OutputFormat,
-    #[clap(
-        long,
-        about = "Inline current environment variables into compiled output"
-    )]
+    /// Inline current environment variables into compiled output
+    #[clap(long)]
     inline_env: bool,
-    #[clap(long, about = "Prevent static compiler optimizations")]
+    /// Prevent static compiler optimizations
+    #[clap(long)]
     unoptimized: bool,
-    #[clap(long, about = "Log compiler output")]
+    /// Log compiler output
+    #[clap(long)]
     debug: bool,
 }
 impl Into<CompilerCliOptions> for Args {

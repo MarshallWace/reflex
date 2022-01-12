@@ -17,7 +17,7 @@ reflex-js = { path = "../reflex-js" }
 reflex-json = { path = "../reflex-json" }
 reflex-runtime = { path = "../reflex-runtime" }
 anyhow = "1.0"
-clap = { git = "https://github.com/clap-rs/clap", rev = "efeb02cd342af78d2eb8446ecce8aed05643594b" } # TODO: once clap 3.0 comes out depend on it from crates.io
+clap = "3.0"
 futures = "*"
 hyper = { version = "0.14", features = ["full"] }
 hyper-tungstenite = "0.3.2"

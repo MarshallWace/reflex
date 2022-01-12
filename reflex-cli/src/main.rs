@@ -30,23 +30,25 @@ mod repl;
 /// Reflex runtime evaluator
 #[derive(Parser)]
 struct Args {
-    #[clap(about = "Optional script to run, if not given will start in repl mode")]
+    /// Optional entry point module to evaluate (defaults to REPL)
     entry_point: Option<PathBuf>,
-    #[clap(
-        long,
-        about = "What syntax to interpret input in",
-        default_value = "javascript"
-    )]
+    /// Entry point syntax
+    #[clap(long, default_value = "javascript")]
     syntax: Syntax,
-    #[clap(long, about = "Prevent static optimizations")]
+    /// Prevent static optimizations
+    #[clap(long)]
     unoptimized: bool,
-    #[clap(long, about = "Add debug printing of signal handlers")]
+    /// Add debug printing of signal handlers
+    #[clap(long)]
     debug_signals: bool,
-    #[clap(long, about = "Add debug printing of bytecode output from compiler")]
+    /// Add debug printing of bytecode output from compiler
+    #[clap(long)]
     debug_compiler: bool,
-    #[clap(long, about = "Add debug printing of bytecode execution")]
+    /// Add debug printing of bytecode execution
+    #[clap(long)]
     debug_interpreter: bool,
-    #[clap(long, about = "Add debug printing of stack during execution")]
+    /// Add debug printing of stack during execution
+    #[clap(long)]
     debug_stack: bool,
 }
 

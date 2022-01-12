@@ -18,21 +18,28 @@ use reflex_server::{
 /// Launch a GraphQL server for the provided graph root
 #[derive(Parser)]
 struct Args {
-    #[clap(about = "Path to graph definition entry point")]
+    /// Path to graph definition entry point
     entry_point: PathBuf,
-    #[clap(long, about = "Graph definition syntax", default_value = "javascript")]
+    /// Graph definition syntax
+    #[clap(long, default_value = "javascript")]
     syntax: Syntax,
-    #[clap(long, about = "Port on which to expose a GraphQL HTTP server")]
+    /// Port on which to expose a GraphQL HTTP server
+    #[clap(long)]
     port: u16,
-    #[clap(long, about = "Prevent static compiler optimizations")]
+    /// Prevent static compiler optimizations
+    #[clap(long)]
     unoptimized: bool,
-    #[clap(long, about = "Log compiler output")]
+    /// Log compiler output
+    #[clap(long)]
     debug_compiler: bool,
-    #[clap(long, about = "Log runtime signals")]
+    /// Log runtime signals
+    #[clap(long)]
     debug_signals: bool,
-    #[clap(long, about = "Log interpreter instructions")]
+    /// Log interpreter instructions
+    #[clap(long)]
     debug_interpreter: bool,
-    #[clap(long, about = "Log interpreter stack")]
+    /// Log interpreter stack
+    #[clap(long)]
     debug_stack: bool,
 }
 impl Into<ReflexServerCliOptions> for Args {

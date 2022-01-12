@@ -20,29 +20,41 @@ use reflex_server::{
 /// Profile GraphQL query execution
 #[derive(Parser)]
 pub struct Args {
-    #[clap(long, about = "Path to graph definition entry point")]
+    /// Path to graph definition entry point
+    #[clap(long)]
     graph_root: PathBuf,
-    #[clap(long, about = "Graph definition syntax", default_value = "javascript")]
+    /// Graph definition syntax
+    #[clap(long, default_value = "javascript")]
     syntax: Syntax,
-    #[clap(long, about = "GraphQL query")]
+    /// GraphQL query
+    #[clap(long)]
     query: String,
-    #[clap(long, about = "JSON-formatted GraphQL query arguments")]
+    /// JSON-formatted GraphQL query arguments
+    #[clap(long)]
     args: Option<String>,
-    #[clap(long, about = "Path to capture runtime signal playback file")]
+    /// Path to capture runtime signal playback file
+    #[clap(long)]
     capture_signals: Option<PathBuf>,
-    #[clap(long, about = "Path to previously-captured signal playback file")]
+    /// Path to previously-captured signal playback file
+    #[clap(long)]
     replay_signals: Option<PathBuf>,
-    #[clap(long, about = "Comma-separated list of captured signal types")]
+    /// Comma-separated list of captured signal types
+    #[clap(long)]
     captured_signals: Option<Vec<String>>,
-    #[clap(long, about = "Prevent static compiler optimizations")]
+    /// Prevent static compiler optimizations
+    #[clap(long)]
     unoptimized: bool,
-    #[clap(long, about = "Log compiler output")]
+    /// Log compiler output
+    #[clap(long)]
     debug_compiler: bool,
-    #[clap(long, about = "Log runtime signals")]
+    /// Log runtime signals
+    #[clap(long)]
     debug_signals: bool,
-    #[clap(long, about = "Log interpreter instructions")]
+    /// Log interpreter instructions
+    #[clap(long)]
     debug_interpreter: bool,
-    #[clap(long, about = "Log interpreter stack")]
+    /// Log interpreter stack
+    #[clap(long)]
     debug_stack: bool,
 }
 impl Into<ExecuteQueryCliOptions> for Args {
