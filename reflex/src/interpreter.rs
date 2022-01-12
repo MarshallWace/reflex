@@ -5,6 +5,7 @@
 use std::convert::TryInto;
 use std::{collections::hash_map::DefaultHasher, hash::Hasher, iter::once};
 
+use fnv::FnvHashSet;
 use rayon::prelude::*;
 use tracing::info_span;
 use tracing::trace;
@@ -291,14 +292,16 @@ fn evaluate_program_loop<
                                 call_stack.pop_expression_stack(previous_address)
                             {
                                 call_stack.add_state_dependencies(dependencies.iter());
-                                cache_entries.insert(
-                                    hash,
-                                    InterpreterCacheEntry::new(
-                                        EvaluationResult::new(value.clone(), dependencies),
-                                        state,
-                                    ),
-                                    subexpressions,
-                                );
+                                if !cache_entries.contains_key(&hash) {
+                                    cache_entries.insert(
+                                        hash,
+                                        InterpreterCacheEntry::new(
+                                            EvaluationResult::new(value.clone(), dependencies),
+                                            state,
+                                        ),
+                                        subexpressions,
+                                    );
+                                }
                             }
                             if let Some((args, dependencies, subexpressions)) =
                                 call_stack.pop_application_target_stack()
@@ -460,15 +463,16 @@ fn evaluate_program_loop<
                         )) => {
                             let value = stack.peek().unwrap();
                             call_stack.add_state_dependencies(dependencies.iter());
-                            cache_entries.insert(
-                                hash,
-                                InterpreterCacheEntry::new(
-                                    EvaluationResult::new(value.clone(), dependencies),
-                                    state,
-                                ),
-                                subexpressions,
-                            );
-
+                            if !cache_entries.contains_key(&hash) {
+                                cache_entries.insert(
+                                    hash,
+                                    InterpreterCacheEntry::new(
+                                        EvaluationResult::new(value.clone(), dependencies),
+                                        state,
+                                    ),
+                                    subexpressions,
+                                );
+                            }
                             let is_entering_evaluation = call_stack
                                 .lookup_instruction(resume_address)
                                 .map(is_evaluate_instruction)
@@ -1403,35 +1407,40 @@ fn resolve_parallel_args<
     }
 
     // TODO: only parallelize argument evaluation for non-static arguments
-    let (results, dependencies, subexpressions, new_cache_entries) = args
+    let (results, dependencies, subexpressions, added_cache_entries) = args
         .into_iter()
         .zip(arity.iter())
         .collect::<Vec<_>>()
         .into_par_iter()
-        // why fold -> reduce? see
-        // https://docs.rs/rayon/1.5.1/rayon/iter/trait.ParallelIterator.html#fold-vs-mapreduce
-        // basically we want to reuse thread local caches as much as possible
         .fold(
             || {
                 (
                     Vec::new(),
                     DependencyList::empty(),
-                    Vec::new(),
-                    cache_entries.create_child(),
+                    FnvHashSet::default(),
+                    LocalCacheEntries::default(),
                 )
             },
-            |(mut resolved_args, mut dependencies, mut subexpressions, mut cache_entries),
-             (arg, arg_type)| {
-                let already_resolved = match arg_type {
+            |mut results, (arg, arg_type)| {
+                let is_already_resolved = match arg_type {
                     ArgType::Lazy => true,
                     ArgType::Strict | ArgType::Eager => arg.is_static(),
                 };
-                let (args, dependencies, subexpressions) = if already_resolved {
-                    resolved_args.push(Ok(arg));
-                    (resolved_args, dependencies, subexpressions)
+                if is_already_resolved {
+                    let (combined_results, _, _, _) = &mut results;
+                    combined_results.push(Ok(arg));
+                    results
                 } else {
-                    let (result, new_dependencies, mut new_subexpressions) =
-                        resolve_arg_within_new_stack(
+                    let (
+                        mut combined_results,
+                        mut combined_dependencies,
+                        mut combined_subexpressions,
+                        combined_cache_entries,
+                    ) = results;
+                    let (result, dependencies, subexpressions, combined_cache_entries) = {
+                        let mut subtask_cache_entries =
+                            cache_entries.create_child(combined_cache_entries);
+                        let (result, dependencies, subexpressions) = resolve_arg_within_new_stack(
                             arg,
                             state,
                             call_stack,
@@ -1441,15 +1450,25 @@ fn resolve_parallel_args<
                             debug_instructions,
                             debug_stack,
                             cache,
-                            &mut cache_entries,
+                            &mut subtask_cache_entries,
                         );
-                    subexpressions.append(&mut new_subexpressions);
-                    dependencies.extend(new_dependencies);
-
-                    resolved_args.push(result);
-                    (resolved_args, dependencies, subexpressions)
-                };
-                (args, dependencies, subexpressions, cache_entries)
+                        (
+                            result,
+                            dependencies,
+                            subexpressions,
+                            subtask_cache_entries.into_entries(),
+                        )
+                    };
+                    combined_results.push(result);
+                    combined_dependencies.extend(dependencies);
+                    combined_subexpressions.extend(subexpressions);
+                    (
+                        combined_results,
+                        combined_dependencies,
+                        combined_subexpressions,
+                        combined_cache_entries,
+                    )
+                }
             },
         )
         .reduce(
@@ -1457,25 +1476,39 @@ fn resolve_parallel_args<
                 (
                     Vec::new(),
                     DependencyList::empty(),
-                    Vec::new(),
-                    cache_entries.create_child(),
+                    FnvHashSet::default(),
+                    LocalCacheEntries::default(),
                 )
             },
-            |(mut results, mut dependencies, mut subexpressions, mut cache_entries),
-             (mut other_results, other_deps, mut other_subexps, other_cache_entries)| {
-                results.append(&mut other_results);
-                dependencies.extend(other_deps);
-                subexpressions.append(&mut other_subexps);
-                let local_entries = other_cache_entries.into_entries();
-                cache_entries.extend(local_entries);
-                (results, dependencies, subexpressions, cache_entries)
+            |mut results, subtask_output| {
+                let (
+                    combined_results,
+                    combined_dependencies,
+                    combined_subexpressions,
+                    combined_cache_entries,
+                ) = &mut results;
+                let (
+                    subtask_results,
+                    subtask_dependencies,
+                    subtask_subexpressions,
+                    subtask_cache_entries,
+                ) = subtask_output;
+                combined_results.extend(subtask_results);
+                combined_dependencies.extend(subtask_dependencies);
+                combined_subexpressions.extend(subtask_subexpressions);
+                combined_cache_entries.extend(
+                    subtask_cache_entries
+                        .into_iter()
+                        .filter(|(key, _, _)| !combined_cache_entries.contains_key(key))
+                        .collect::<Vec<_>>(),
+                );
+                results
             },
         );
-    let local_entries = new_cache_entries.into_entries();
-    cache_entries.extend(local_entries);
+    cache_entries.extend(added_cache_entries);
     call_stack.add_state_dependencies(dependencies);
     call_stack.add_subexpressions(subexpressions);
-    results.into_iter().collect()
+    results.into_iter().collect::<Result<Vec<_>, _>>()
 }
 
 fn resolve_arg_within_new_stack<

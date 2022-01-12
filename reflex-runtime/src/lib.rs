@@ -1286,7 +1286,10 @@ impl<T: Expression> RuntimeCache<T> {
             ),
         >,
     ) {
-        self.cache.write().extend(entries)
+        let mut cache = self.cache.write();
+        for (key, result, subexpressions) in entries {
+            cache.set(key, result, subexpressions)
+        }
     }
 }
 

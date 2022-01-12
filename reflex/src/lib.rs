@@ -99,21 +99,34 @@ impl<K: Eq + Copy + std::fmt::Debug + std::hash::Hash + 'static, V> DependencyCa
         self.cache.get(key).map(|entry| entry.value())
     }
     pub fn set(&mut self, key: K, value: V, children: Vec<K>) {
-        let (retain_count, existing_children) = match self.cache.remove(&key) {
-            Some(existing) => (existing.retain_count, existing.children),
-            None => (0, Vec::new()),
+        let (retain_count, existing_children, added_children) = match self.cache.remove(&key) {
+            Some(existing) => {
+                let existing_children = existing.children;
+                let added_children = if children.is_empty() || existing_children.is_empty() {
+                    children
+                } else {
+                    children
+                        .into_iter()
+                        .filter(|child| !existing_children.contains(child))
+                        .collect::<Vec<_>>()
+                };
+                (existing.retain_count, existing_children, added_children)
+            }
+            None => (0, Vec::new(), children),
         };
         if retain_count > 0 {
-            self.retain(children.iter());
+            self.retain(added_children.iter());
         }
-        let mut combined_children = existing_children;
-        combined_children.extend(children);
         self.cache.insert(
             key,
             DependencyCacheEntry {
                 retain_count,
                 value,
-                children: combined_children,
+                children: {
+                    let mut combined_children = existing_children;
+                    combined_children.extend(added_children);
+                    combined_children
+                },
             },
         );
     }
@@ -228,11 +241,6 @@ impl<K: Eq + Copy + std::fmt::Debug + std::hash::Hash + 'static, V> DependencyCa
             })
             .filter_map(identity)
             .collect::<I>()
-    }
-    pub(crate) fn extend(&mut self, entries: impl IntoIterator<Item = (K, V, Vec<K>)>) {
-        for (key, value, children) in entries {
-            self.set(key, value, children);
-        }
     }
 }
 struct DependencyCacheEntry<K, V> {

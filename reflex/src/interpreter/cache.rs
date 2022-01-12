@@ -36,6 +36,7 @@ pub trait InterpreterCache<T: Expression> {
     ) -> Option<(EvaluationResult<T>, Option<InterpreterCacheEntry<T>>)>;
     fn contains_key(&self, key: &InterpreterCacheKey) -> bool;
 }
+#[derive(Clone, Debug)]
 pub struct InterpreterCacheEntry<T: Expression> {
     result: EvaluationResult<T>,
     overall_state_hash: HashId,
@@ -76,6 +77,7 @@ pub trait CacheEntries<T: Expression> {
         &self,
         key: &InterpreterCacheKey,
     ) -> Option<&(InterpreterCacheEntry<T>, Vec<InterpreterCacheKey>)>;
+    fn contains_key(&self, key: &InterpreterCacheKey) -> bool;
     fn len(&self) -> usize;
     fn is_empty(&self) -> bool;
 }
@@ -100,11 +102,8 @@ impl<T: Expression> CacheEntries<T> for LocalCacheEntries<T> {
         subexpressions: Vec<InterpreterCacheKey>,
     ) {
         match self.entries.entry(key) {
-            Entry::Occupied(mut entry) => {
-                let mut subexpressions = subexpressions;
-                let existing_subexpressions = &entry.get().1;
-                subexpressions.extend(existing_subexpressions);
-                entry.insert((value, subexpressions));
+            Entry::Occupied(_) => {
+                panic!("Cache entry {} already exists", key);
             }
             Entry::Vacant(entry) => {
                 self.insertion_order.push(key);
@@ -133,6 +132,9 @@ impl<T: Expression> CacheEntries<T> for LocalCacheEntries<T> {
         let entry = self.entries.get(key);
         trace!(cache_entries = if entry.is_some() { "hit" } else { "miss" });
         entry
+    }
+    fn contains_key(&self, key: &InterpreterCacheKey) -> bool {
+        self.entries.contains_key(key)
     }
     fn len(&self) -> usize {
         self.entries.len()
@@ -191,10 +193,10 @@ impl<'a, T: Expression> Default for MultithreadedCacheEntries<'a, T> {
     }
 }
 impl<'a, T: Expression> MultithreadedCacheEntries<'a, T> {
-    pub(super) fn create_child(&'a self) -> Self {
+    pub(super) fn create_child(&'a self, entries: LocalCacheEntries<T>) -> Self {
         Self {
             parent: Some(self),
-            entries: LocalCacheEntries::default(),
+            entries,
         }
     }
     pub(super) fn into_entries(self) -> LocalCacheEntries<T> {
@@ -230,10 +232,16 @@ impl<'a, T: Expression> CacheEntries<T> for MultithreadedCacheEntries<'a, T> {
             .get(key)
             .or_else(|| self.parent.map(|parent| parent.get(key)).flatten())
     }
+    fn contains_key(&self, key: &InterpreterCacheKey) -> bool {
+        self.entries.contains_key(key)
+            || self
+                .parent
+                .map(|parent| parent.contains_key(key))
+                .unwrap_or(false)
+    }
     fn len(&self) -> usize {
         self.entries.len() + self.parent.map(|parent| parent.len()).unwrap_or(0)
     }
-
     fn is_empty(&self) -> bool {
         self.entries.is_empty() && self.parent.map(|parent| parent.is_empty()).unwrap_or(true)
     }
@@ -293,21 +301,13 @@ impl<T: Expression> DefaultInterpreterCache<T> {
             cache: DependencyCache::new(entries),
         }
     }
-    pub fn extend(
+    pub fn set(
         &mut self,
-        entries: impl IntoIterator<
-            Item = (
-                InterpreterCacheKey,
-                InterpreterCacheEntry<T>,
-                Vec<InterpreterCacheKey>,
-            ),
-        >,
+        key: InterpreterCacheKey,
+        result: InterpreterCacheEntry<T>,
+        children: Vec<InterpreterCacheKey>,
     ) {
-        self.cache.extend(
-            entries
-                .into_iter()
-                .map(|(key, value, subexpressions)| (key, value, subexpressions)),
-        );
+        self.cache.set(key, result, children);
     }
     pub fn store_result(
         &mut self,
@@ -322,12 +322,15 @@ impl<T: Expression> DefaultInterpreterCache<T> {
         } else {
             (state.id(), hash_state_values(state, state_dependencies))
         };
-        let entry = InterpreterCacheEntry {
-            result,
-            overall_state_hash,
-            minimal_state_hash,
-        };
-        self.cache.set(key, entry, children);
+        self.set(
+            key,
+            InterpreterCacheEntry {
+                result,
+                overall_state_hash,
+                minimal_state_hash,
+            },
+            children,
+        )
     }
     pub fn replace_children(
         &mut self,
