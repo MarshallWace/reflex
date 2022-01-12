@@ -1165,7 +1165,14 @@ fn gc<T: Expression>(store: &mut Mutex<RuntimeStore<T>>, cache: &mut RuntimeCach
     {
         eprintln!("[Runtime] Computing inactive subscriptions...");
         let start_time = Instant::now();
-        let dispose_callbacks = store.get_mut().unwrap().gc();
+        let dispose_callbacks = {
+            let store = store.get_mut().unwrap();
+            let (disposed_signal_ids, dispose_callbacks) = store.gc();
+            if !disposed_signal_ids.is_empty() {
+                store.state.remove_many(disposed_signal_ids.iter());
+            }
+            dispose_callbacks
+        };
         eprintln!(
             "[Runtime] Inactive subscriptions computed in {:?}",
             start_time.elapsed()
@@ -1394,12 +1401,14 @@ impl<T: Expression> RuntimeStore<T> {
             .filter_map(|(signal_id, callback)| self.effect_cache.insert(signal_id, callback))
             .collect::<Vec<_>>()
     }
-    fn gc(&mut self) -> Vec<DisposeCallback> {
-        let mut dispose_callbacks = Vec::new();
+    fn gc(&mut self) -> (Vec<SignalId>, Vec<DisposeCallback>) {
+        let mut combined_disposed_signal_ids = Vec::new();
+        let mut combined_dispose_callbacks = Vec::new();
         loop {
             let (disposed_signal_ids, disposed_subscriptions): (Vec<_>, Vec<_>) =
                 self.subscription_cache.gc();
             if !disposed_signal_ids.is_empty() {
+                combined_disposed_signal_ids.extend(disposed_signal_ids.iter().cloned());
                 eprintln!(
                     "[Runtime] Disposing {} inactive signals",
                     disposed_signal_ids.len()
@@ -1407,7 +1416,7 @@ impl<T: Expression> RuntimeStore<T> {
                 for signal_id in disposed_signal_ids {
                     self.state.remove(&signal_id);
                     if let Some(dispose_callback) = self.effect_cache.remove(&signal_id) {
-                        dispose_callbacks.push(dispose_callback)
+                        combined_dispose_callbacks.push(dispose_callback)
                     }
                 }
             }
@@ -1423,7 +1432,7 @@ impl<T: Expression> RuntimeStore<T> {
             }
             break;
         }
-        dispose_callbacks
+        (combined_disposed_signal_ids, combined_dispose_callbacks)
     }
 }
 struct Subscription {
