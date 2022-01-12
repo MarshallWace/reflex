@@ -716,7 +716,11 @@ fn evaluate_instruction<'a, T: Expression + Rewritable<T> + Reducible<T> + Appli
                 ))
             } else {
                 let target = stack.pop().unwrap();
-                if let Some((compiled_target, partial_args)) =
+                if let Some(_) = factory.match_signal_term(&target) {
+                    stack.pop_multiple(num_args);
+                    stack.push(target);
+                    Ok((ExecutionResult::Advance, DependencyList::empty()))
+                } else if let Some((compiled_target, partial_args)) =
                     match_compiled_application_target(&target, factory)
                 {
                     trace!(
