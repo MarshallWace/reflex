@@ -12,8 +12,8 @@ use tracing::trace;
 
 use cache::MultithreadedCacheEntries;
 pub use cache::{
-    CacheEntries, DefaultInterpreterCache, GcMetrics, InterpreterCache, InterpreterCacheEntry,
-    InterpreterCacheKey, LocalCacheEntries,
+    DefaultInterpreterCache, GcMetrics, InterpreterCache, InterpreterCacheEntry, LocalCacheEntries,
+    MutableInterpreterCache,
 };
 pub use stack::{CallStack, VariableStack};
 
@@ -94,6 +94,7 @@ pub fn execute<
     cache_key: HashId,
     program: &Program,
     entry_point: InstructionPointer,
+    state_id: usize,
     state: &(impl DynamicState<T> + Sync),
     factory: &(impl ExpressionFactory<T> + Sync),
     allocator: &(impl HeapAllocator<T> + Sync),
@@ -113,8 +114,9 @@ pub fn execute<
     trace!("Starting execution");
     let mut stack = VariableStack::new(options.variable_stack_size);
     let mut call_stack = CallStack::new(program, entry_point, options.call_stack_size);
-    let mut evaluation_cache_entries = MultithreadedCacheEntries::default();
+    let mut evaluation_cache_entries = MultithreadedCacheEntries::new(state);
     let result = evaluate_program_loop(
+        state_id,
         state,
         &mut stack,
         &mut call_stack,
@@ -143,11 +145,13 @@ pub fn execute<
             // );
             let (dependencies, subexpressions) = call_stack.drain();
             let result = EvaluationResult::new(value, dependencies);
-            cache_entries.insert(
+            cache_entries.insert(InterpreterCacheEntry::new(
                 cache_key,
-                InterpreterCacheEntry::new(result.clone(), state),
+                result.clone(),
+                state_id,
+                state,
                 subexpressions,
-            );
+            ));
             Ok((result, cache_entries))
         }
     }
@@ -157,6 +161,7 @@ fn evaluate_program_loop<
     'a,
     T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Send + Sync,
 >(
+    state_id: usize,
     state: &(impl DynamicState<T> + Sync),
     stack: &mut VariableStack<T>,
     call_stack: &mut CallStack<T>,
@@ -228,6 +233,7 @@ fn evaluate_program_loop<
 
                         if target.should_parallelize(&args) {
                             let resolved_args = resolve_parallel_args(
+                                state_id,
                                 state,
                                 call_stack,
                                 arity,
@@ -292,16 +298,13 @@ fn evaluate_program_loop<
                                 call_stack.pop_expression_stack(previous_address)
                             {
                                 call_stack.add_state_dependencies(dependencies.iter());
-                                if !cache_entries.contains_key(&hash) {
-                                    cache_entries.insert(
-                                        hash,
-                                        InterpreterCacheEntry::new(
-                                            EvaluationResult::new(value.clone(), dependencies),
-                                            state,
-                                        ),
-                                        subexpressions,
-                                    );
-                                }
+                                cache_entries.insert(InterpreterCacheEntry::new(
+                                    hash,
+                                    EvaluationResult::new(value.clone(), dependencies),
+                                    state_id,
+                                    state,
+                                    subexpressions,
+                                ));
                             }
                             if let Some((args, dependencies, subexpressions)) =
                                 call_stack.pop_application_target_stack()
@@ -409,13 +412,10 @@ fn evaluate_program_loop<
                         {
                             let hash =
                                 generate_function_call_hash(&target_hash, stack.slice(num_args));
-                            if let Some((cached_result, updated_cache_entry)) =
-                                retrieve_cached_result(&hash, state, cache, cache_entries)
+                            if let Some(result) =
+                                retrieve_cached_result(hash, state, cache, cache_entries)
                             {
-                                if let Some(cache_entry) = updated_cache_entry {
-                                    cache_entries.insert(hash, cache_entry, Vec::new())
-                                }
-                                let (result, dependencies) = cached_result.into_parts();
+                                let (result, dependencies) = result.into_parts();
                                 call_stack.add_subexpression(hash);
                                 call_stack.add_state_dependencies(dependencies.iter());
                                 stack.pop_multiple(num_args);
@@ -463,16 +463,13 @@ fn evaluate_program_loop<
                         )) => {
                             let value = stack.peek().unwrap();
                             call_stack.add_state_dependencies(dependencies.iter());
-                            if !cache_entries.contains_key(&hash) {
-                                cache_entries.insert(
-                                    hash,
-                                    InterpreterCacheEntry::new(
-                                        EvaluationResult::new(value.clone(), dependencies),
-                                        state,
-                                    ),
-                                    subexpressions,
-                                );
-                            }
+                            cache_entries.insert(InterpreterCacheEntry::new(
+                                hash,
+                                EvaluationResult::new(value.clone(), dependencies),
+                                state_id,
+                                state,
+                                subexpressions,
+                            ));
                             let is_entering_evaluation = call_stack
                                 .lookup_instruction(resume_address)
                                 .map(is_evaluate_instruction)
@@ -953,19 +950,14 @@ fn evaluate_expression<T: Expression + Applicable<T>>(
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
     cache: &impl InterpreterCache<T>,
-    cache_entries: &mut impl CacheEntries<T>,
+    cache_entries: &mut impl MutableInterpreterCache<T>,
 ) -> Result<(ExecutionResult<T>, DependencyList), String> {
     if expression.is_static() {
         stack.push(expression.clone());
         Ok((ExecutionResult::Advance, DependencyList::empty()))
     } else {
         let hash = expression.id();
-        if let Some((cached_result, updated_cache_entry)) =
-            retrieve_cached_result(&hash, state, cache, cache_entries)
-        {
-            if let Some(cache_entry) = updated_cache_entry {
-                cache_entries.insert(hash, cache_entry, Vec::new())
-            }
+        if let Some(cached_result) = retrieve_cached_result(hash, state, cache, cache_entries) {
             let (result, dependencies) = cached_result.into_parts();
             stack.push(result);
             Ok((ExecutionResult::Advance, dependencies))
@@ -1192,14 +1184,14 @@ fn fill_resolved_args<T: Expression>(args: &[T], arity: &Arity, results: Vec<T>)
 }
 
 fn retrieve_cached_result<T: Expression>(
-    hash: &HashId,
+    hash: HashId,
     state: &impl DynamicState<T>,
     cache: &impl InterpreterCache<T>,
-    cache_entries: &impl CacheEntries<T>,
-) -> Option<(EvaluationResult<T>, Option<InterpreterCacheEntry<T>>)> {
+    cache_entries: &mut impl MutableInterpreterCache<T>,
+) -> Option<EvaluationResult<T>> {
     cache_entries
-        .get(hash)
-        .map(|(entry, _subexpressions)| (entry.result().clone(), None))
+        .retrieve_result(hash, state)
+        .map(|entry| entry.clone())
         .or_else(|| cache.retrieve_result(hash, state))
 }
 
@@ -1366,6 +1358,7 @@ fn resolve_parallel_args<
     'a,
     T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Sync + Send,
 >(
+    state_id: usize,
     state: &(impl DynamicState<T> + Sync),
     call_stack: &mut CallStack<T>,
     arity: Arity,
@@ -1391,6 +1384,7 @@ fn resolve_parallel_args<
         if let Some(arg) = first_unresolved_eager_arg {
             let _ = resolve_arg_within_new_stack(
                 arg.clone(),
+                state_id,
                 state,
                 call_stack,
                 stack,
@@ -1418,7 +1412,7 @@ fn resolve_parallel_args<
                     Vec::new(),
                     DependencyList::empty(),
                     FnvHashSet::default(),
-                    LocalCacheEntries::default(),
+                    LocalCacheEntries::new(state),
                 )
             },
             |mut results, (arg, arg_type)| {
@@ -1438,10 +1432,11 @@ fn resolve_parallel_args<
                         combined_cache_entries,
                     ) = results;
                     let (result, dependencies, subexpressions, combined_cache_entries) = {
-                        let mut subtask_cache_entries =
+                        let mut local_cache_entries =
                             cache_entries.create_child(combined_cache_entries);
                         let (result, dependencies, subexpressions) = resolve_arg_within_new_stack(
                             arg,
+                            state_id,
                             state,
                             call_stack,
                             stack,
@@ -1450,13 +1445,13 @@ fn resolve_parallel_args<
                             debug_instructions,
                             debug_stack,
                             cache,
-                            &mut subtask_cache_entries,
+                            &mut local_cache_entries,
                         );
                         (
                             result,
                             dependencies,
                             subexpressions,
-                            subtask_cache_entries.into_entries(),
+                            local_cache_entries.into_entries(),
                         )
                     };
                     combined_results.push(result);
@@ -1477,7 +1472,7 @@ fn resolve_parallel_args<
                     Vec::new(),
                     DependencyList::empty(),
                     FnvHashSet::default(),
-                    LocalCacheEntries::default(),
+                    LocalCacheEntries::new(state),
                 )
             },
             |mut results, subtask_output| {
@@ -1496,18 +1491,13 @@ fn resolve_parallel_args<
                 combined_results.extend(subtask_results);
                 combined_dependencies.extend(subtask_dependencies);
                 combined_subexpressions.extend(subtask_subexpressions);
-                combined_cache_entries.extend(
-                    subtask_cache_entries
-                        .into_iter()
-                        .filter(|(key, _, _)| !combined_cache_entries.contains_key(key))
-                        .collect::<Vec<_>>(),
-                );
+                combined_cache_entries.extend(subtask_cache_entries);
                 results
             },
         );
-    cache_entries.extend(added_cache_entries);
     call_stack.add_state_dependencies(dependencies);
     call_stack.add_subexpressions(subexpressions);
+    cache_entries.extend(added_cache_entries);
     results.into_iter().collect::<Result<Vec<_>, _>>()
 }
 
@@ -1516,6 +1506,7 @@ fn resolve_arg_within_new_stack<
     T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Sync + Send,
 >(
     arg: T,
+    state_id: usize,
     state: &(impl DynamicState<T> + Sync),
     call_stack: &CallStack<T>,
     stack: &VariableStack<T>,
@@ -1537,6 +1528,7 @@ fn resolve_arg_within_new_stack<
     new_call_stack.enter_expression(arg.id());
     new_stack.push(arg);
     let result = evaluate_program_loop(
+        state_id,
         state,
         &mut new_stack,
         &mut new_call_stack,
@@ -1634,12 +1626,14 @@ mod tests {
             .compile(&expression, CompilerMode::Function, &factory, &allocator)
             .unwrap();
         let mut state = StateCache::default();
+        let state_id = 0;
         let entry_point = InstructionPointer::default();
         let cache_key = hash_program_root(&program, &entry_point);
         let (result, _) = execute(
             cache_key,
             &program,
             entry_point,
+            state_id,
             &state,
             &factory,
             &allocator,
@@ -1658,10 +1652,12 @@ mod tests {
         );
 
         state.set(state_token, factory.create_value_term(ValueTerm::Int(4)));
+        let state_id = 1;
         let (result, _) = execute(
             cache_key,
             &program,
             InstructionPointer::default(),
+            state_id,
             &state,
             &factory,
             &allocator,
@@ -1695,10 +1691,12 @@ mod tests {
             .unwrap();
         let entry_point = InstructionPointer::default();
         let cache_key = hash_program_root(&program, &entry_point);
+        let state_id = 0;
         let (result, _) = execute(
             cache_key,
             &program,
             entry_point,
+            state_id,
             &mut StateCache::default(),
             &factory,
             &allocator,
@@ -1732,10 +1730,12 @@ mod tests {
             .unwrap();
         let entry_point = InstructionPointer::default();
         let cache_key = hash_program_root(&program, &entry_point);
+        let state_id = 0;
         let (result, _) = execute(
             cache_key,
             &program,
             entry_point,
+            state_id,
             &mut StateCache::default(),
             &factory,
             &allocator,
@@ -1770,10 +1770,12 @@ mod tests {
         let state = StateCache::default();
         let entry_point = InstructionPointer::default();
         let cache_key = hash_program_root(&program, &entry_point);
+        let state_id = 0;
         let (result, _) = execute(
             cache_key,
             &program,
             InstructionPointer::default(),
+            state_id,
             &state,
             &factory,
             &allocator,
@@ -1824,10 +1826,12 @@ mod tests {
         let state = StateCache::default();
         let entry_point = InstructionPointer::default();
         let cache_key = hash_program_root(&program, &entry_point);
+        let state_id = 0;
         let (result, _) = execute(
             cache_key,
             &program,
             InstructionPointer::default(),
+            state_id,
             &state,
             &factory,
             &allocator,
@@ -1862,10 +1866,12 @@ mod tests {
         let state = StateCache::default();
         let entry_point = InstructionPointer::default();
         let cache_key = hash_program_root(&program, &entry_point);
+        let state_id = 0;
         let (result, _) = execute(
             cache_key,
             &program,
             InstructionPointer::default(),
+            state_id,
             &state,
             &factory,
             &allocator,
@@ -1896,10 +1902,12 @@ mod tests {
             .compile(&expression, CompilerMode::Function, &factory, &allocator)
             .unwrap();
         let state = StateCache::default();
+        let state_id = 0;
         let (result, _) = execute(
             cache_key,
             &program,
             InstructionPointer::default(),
+            state_id,
             &state,
             &factory,
             &allocator,
@@ -1929,13 +1937,15 @@ mod tests {
         let program = Compiler::new(CompilerOptions::unoptimized(), None)
             .compile(&expression, CompilerMode::Function, &factory, &allocator)
             .unwrap();
-        let state = StateCache::default();
         let entry_point = InstructionPointer::default();
         let cache_key = hash_program_root(&program, &entry_point);
+        let state = StateCache::default();
+        let state_id = 0;
         let (result, _) = execute(
             cache_key,
             &program,
             InstructionPointer::default(),
+            state_id,
             &state,
             &factory,
             &allocator,
@@ -1971,13 +1981,15 @@ mod tests {
         let program = Compiler::new(CompilerOptions::unoptimized(), None)
             .compile(&expression, CompilerMode::Function, &factory, &allocator)
             .unwrap();
-        let state = StateCache::default();
         let entry_point = InstructionPointer::default();
         let cache_key = hash_program_root(&program, &entry_point);
+        let state = StateCache::default();
+        let state_id = 0;
         let (result, _) = execute(
             cache_key,
             &program,
             InstructionPointer::default(),
+            state_id,
             &state,
             &factory,
             &allocator,
@@ -2013,13 +2025,15 @@ mod tests {
         let program = Compiler::new(CompilerOptions::unoptimized(), None)
             .compile(&expression, CompilerMode::Function, &factory, &allocator)
             .unwrap();
-        let state = StateCache::default();
         let entry_point = InstructionPointer::default();
         let cache_key = hash_program_root(&program, &entry_point);
+        let state = StateCache::default();
+        let state_id = 0;
         let (result, _) = execute(
             cache_key,
             &program,
             InstructionPointer::default(),
+            state_id,
             &state,
             &factory,
             &allocator,
@@ -2057,13 +2071,15 @@ mod tests {
         let program = Compiler::new(CompilerOptions::unoptimized(), None)
             .compile(&expression, CompilerMode::Function, &factory, &allocator)
             .unwrap();
-        let state = StateCache::default();
         let entry_point = InstructionPointer::default();
         let cache_key = hash_program_root(&program, &entry_point);
+        let state = StateCache::default();
+        let state_id = 0;
         let (result, _) = execute(
             cache_key,
             &program,
             InstructionPointer::default(),
+            state_id,
             &state,
             &factory,
             &allocator,
@@ -2099,13 +2115,15 @@ mod tests {
         let program = Compiler::new(CompilerOptions::unoptimized(), None)
             .compile(&expression, CompilerMode::Function, &factory, &allocator)
             .unwrap();
-        let state = StateCache::default();
         let entry_point = InstructionPointer::default();
         let cache_key = hash_program_root(&program, &entry_point);
+        let state = StateCache::default();
+        let state_id = 0;
         let (result, _) = execute(
             cache_key,
             &program,
             InstructionPointer::default(),
+            state_id,
             &state,
             &factory,
             &allocator,
@@ -2150,13 +2168,15 @@ mod tests {
         let program = Compiler::new(CompilerOptions::unoptimized(), None)
             .compile(&expression, CompilerMode::Function, &factory, &allocator)
             .unwrap();
-        let state = StateCache::default();
         let entry_point = InstructionPointer::default();
         let cache_key = hash_program_root(&program, &entry_point);
+        let state = StateCache::default();
+        let state_id = 0;
         let (result, _) = execute(
             cache_key,
             &program,
             InstructionPointer::default(),
+            state_id,
             &state,
             &factory,
             &allocator,
@@ -2226,13 +2246,15 @@ mod tests {
         let program = Compiler::new(CompilerOptions::unoptimized(), None)
             .compile(&expression, CompilerMode::Function, &factory, &allocator)
             .unwrap();
-        let state = StateCache::default();
         let entry_point = InstructionPointer::default();
         let cache_key = hash_program_root(&program, &entry_point);
+        let state = StateCache::default();
+        let state_id = 0;
         let (result, _) = execute(
             cache_key,
             &program,
             InstructionPointer::default(),
+            state_id,
             &state,
             &factory,
             &allocator,

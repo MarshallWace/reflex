@@ -1467,7 +1467,7 @@ pub fn evaluate<T: Expression + Rewritable<T> + Reducible<T> + Evaluate<T>>(
         .unwrap_or_else(|| EvaluationResult::new(expression.clone(), DependencyList::empty()))
 }
 
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, Eq, PartialEq, Debug)]
 pub struct EvaluationResult<T: Expression> {
     result: T,
     dependencies: DependencyList,

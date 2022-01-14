@@ -69,17 +69,18 @@ fn nested_expressions_bytecode(b: &mut Bencher) {
         Instruction::Squash { depth: 1 },
         Instruction::Return,
     ]);
-    let mut cache = DefaultInterpreterCache::default();
-    let entry_point = InstructionPointer::default();
-    let state = StateCache::default();
     let entry_point = InstructionPointer::default();
     let options = InterpreterOptions::default();
     let cache_key = hash_program_root(&program, &entry_point);
+    let state = StateCache::default();
+    let state_id = 0;
+    let mut cache = DefaultInterpreterCache::default();
     b.iter(|| {
         execute(
             cache_key,
             &program,
             entry_point,
+            state_id,
             &state,
             &factory,
             &allocator,
@@ -99,14 +100,16 @@ fn nested_expressions_compiled(b: &mut Bencher) {
         .unwrap();
     let entry_point = InstructionPointer::default();
     let mut cache = DefaultInterpreterCache::default();
-    let state = StateCache::default();
     let options = InterpreterOptions::default();
     let cache_key = hash_program_root(&program, &entry_point);
+    let state = StateCache::default();
+    let state_id = 0;
     b.iter(|| {
         execute(
             cache_key,
             &program,
             entry_point,
+            state_id,
             &state,
             &factory,
             &allocator,

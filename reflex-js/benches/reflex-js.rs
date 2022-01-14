@@ -53,6 +53,7 @@ fn js_compiled(b: &mut Bencher) {
     .compile(&expression, CompilerMode::Function, &factory, &allocator)
     .unwrap();
     let state = StateCache::default();
+    let state_id = 0;
     let options = InterpreterOptions::default();
     b.iter(|| {
         let mut cache = DefaultInterpreterCache::default();
@@ -62,6 +63,7 @@ fn js_compiled(b: &mut Bencher) {
             cache_key,
             &program,
             entry_point,
+            state_id,
             &state,
             &factory,
             &allocator,

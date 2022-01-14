@@ -340,11 +340,11 @@ impl<'src, T: Expression> CallStack<'src, T> {
     ) {
         self.state_dependencies.extend(state_tokens);
     }
-    pub(crate) fn add_subexpression(&mut self, hash: HashId) {
-        self.subexpressions.push(hash);
+    pub(crate) fn add_subexpression(&mut self, subexpression: HashId) {
+        self.subexpressions.push(subexpression);
     }
-    pub(crate) fn add_subexpressions(&mut self, hashes: impl IntoIterator<Item = HashId>) {
-        self.subexpressions.extend(hashes);
+    pub(crate) fn add_subexpressions(&mut self, subexpressions: impl IntoIterator<Item = HashId>) {
+        self.subexpressions.extend(subexpressions);
     }
     pub(crate) fn drain(&mut self) -> (DependencyList, Vec<HashId>) {
         if self.call_stack.is_empty() {

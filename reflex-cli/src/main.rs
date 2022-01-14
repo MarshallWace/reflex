@@ -109,6 +109,7 @@ pub async fn main() -> Result<()> {
 
             let mut stdout = std::io::stdout();
             let state = StateCache::default();
+            let state_id = 0;
             let interpreter_options = InterpreterOptions {
                 debug_instructions: debug_interpreter || debug_stack,
                 debug_stack,
@@ -122,6 +123,7 @@ pub async fn main() -> Result<()> {
                 cache_key,
                 &program,
                 entry_point,
+                state_id,
                 &state,
                 &factory,
                 &allocator,
@@ -147,7 +149,8 @@ pub async fn main() -> Result<()> {
                     EitherHandler::Right(debug_signal_handler(signal_handler))
                 };
                 let state = RuntimeState::default();
-                let cache = RuntimeCache::new(cache_entries);
+                let mut cache = RuntimeCache::default();
+                cache.apply_updates(cache_entries, state_id, state_id);
                 let runtime = Runtime::new(
                     state,
                     &signal_handler,

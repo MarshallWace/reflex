@@ -300,13 +300,15 @@ mod tests {
         let program = Compiler::new(CompilerOptions::unoptimized(), None)
             .compile(&expression, CompilerMode::Function, &factory, &allocator)
             .unwrap();
-        let state = StateCache::default();
         let entry_point = InstructionPointer::default();
         let cache_key = hash_program_root(&program, &entry_point);
+        let state = StateCache::default();
+        let state_id = 0;
         let (result, _) = execute(
             cache_key,
             &program,
             InstructionPointer::default(),
+            state_id,
             &state,
             &factory,
             &allocator,
@@ -338,13 +340,15 @@ mod tests {
         let program = Compiler::new(CompilerOptions::unoptimized(), None)
             .compile(&expression, CompilerMode::Function, &factory, &allocator)
             .unwrap();
-        let state = StateCache::default();
         let entry_point = InstructionPointer::default();
         let cache_key = hash_program_root(&program, &entry_point);
+        let state = StateCache::default();
+        let state_id = 0;
         let (result, _) = execute(
             cache_key,
             &program,
             InstructionPointer::default(),
+            state_id,
             &state,
             &factory,
             &allocator,
@@ -383,13 +387,15 @@ mod tests {
         let program = Compiler::new(CompilerOptions::unoptimized(), None)
             .compile(&expression, CompilerMode::Function, &factory, &allocator)
             .unwrap();
-        let state = StateCache::default();
         let entry_point = InstructionPointer::default();
         let cache_key = hash_program_root(&program, &entry_point);
+        let state = StateCache::default();
+        let state_id = 0;
         let (result, _) = execute(
             cache_key,
             &program,
             InstructionPointer::default(),
+            state_id,
             &state,
             &factory,
             &allocator,
@@ -424,13 +430,15 @@ mod tests {
         let program = Compiler::new(CompilerOptions::unoptimized(), None)
             .compile(&expression, CompilerMode::Function, &factory, &allocator)
             .unwrap();
-        let state = StateCache::default();
         let entry_point = InstructionPointer::default();
         let cache_key = hash_program_root(&program, &entry_point);
+        let state = StateCache::default();
+        let state_id = 0;
         let (result, _) = execute(
             cache_key,
             &program,
             InstructionPointer::default(),
+            state_id,
             &state,
             &factory,
             &allocator,

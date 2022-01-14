@@ -3,7 +3,7 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use std::{
-    collections::hash_map::Entry,
+    collections::{hash_map::Entry, HashMap, VecDeque},
     iter::{once, FromIterator},
 };
 
@@ -13,12 +13,11 @@ use tracing::trace;
 use crate::{
     core::{hash_state_values, DynamicState, EvaluationResult, Expression},
     hash::HashId,
-    DependencyCache,
 };
 
 pub struct GcMetrics {
-    purged: usize,
-    remaining: usize,
+    pub purged: usize,
+    pub remaining: usize,
 }
 impl std::fmt::Display for GcMetrics {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -26,157 +25,317 @@ impl std::fmt::Display for GcMetrics {
     }
 }
 
-pub type InterpreterCacheKey = HashId;
-
 pub trait InterpreterCache<T: Expression> {
     fn retrieve_result(
         &self,
-        key: &InterpreterCacheKey,
+        key: HashId,
         state: &impl DynamicState<T>,
-    ) -> Option<(EvaluationResult<T>, Option<InterpreterCacheEntry<T>>)>;
-    fn contains_key(&self, key: &InterpreterCacheKey) -> bool;
+    ) -> Option<EvaluationResult<T>>;
+    fn contains(&self, key: HashId, state: &impl DynamicState<T>) -> bool;
+    fn len(&self) -> usize;
 }
-#[derive(Clone, Debug)]
+pub trait MutableInterpreterCache<T: Expression>: InterpreterCache<T> {
+    fn insert(&mut self, entry: InterpreterCacheEntry<T>);
+    fn update_state_hash(&mut self, key: HashId, state: &impl DynamicState<T>);
+    fn extend(&mut self, entries: impl IntoIterator<Item = InterpreterCacheEntry<T>>);
+}
+
+#[derive(Eq)]
 pub struct InterpreterCacheEntry<T: Expression> {
+    cache_key: HashId,
     result: EvaluationResult<T>,
+    state_id: usize,
     overall_state_hash: HashId,
     minimal_state_hash: HashId,
+    children: Vec<HashId>,
+}
+impl<T: Expression> PartialEq for InterpreterCacheEntry<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.cache_key == other.cache_key
+            && self.result == other.result
+            && self.overall_state_hash == other.overall_state_hash
+            && self.minimal_state_hash == other.minimal_state_hash
+    }
+}
+impl<T: Expression> std::hash::Hash for InterpreterCacheEntry<T> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.cache_key.hash(state);
+        self.overall_state_hash.hash(state);
+        self.minimal_state_hash.hash(state);
+    }
 }
 impl<T: Expression> InterpreterCacheEntry<T> {
-    pub fn new(result: EvaluationResult<T>, state: &impl DynamicState<T>) -> Self {
+    pub fn new(
+        cache_key: HashId,
+        result: EvaluationResult<T>,
+        state_id: usize,
+        state: &impl DynamicState<T>,
+        children: Vec<HashId>,
+    ) -> Self {
+        let (overall_state_hash, minimal_state_hash) = if result.dependencies().is_empty() {
+            (0, 0)
+        } else {
+            (state.id(), hash_state_values(state, result.dependencies()))
+        };
         Self {
-            overall_state_hash: state.id(),
-            minimal_state_hash: hash_state_values(state, result.dependencies()),
+            cache_key,
+            state_id,
+            overall_state_hash,
+            minimal_state_hash,
             result,
+            children,
         }
     }
-
+    pub fn cache_key(&self) -> HashId {
+        self.cache_key
+    }
     pub fn result(&self) -> &EvaluationResult<T> {
         &self.result
     }
+    pub fn state_id(&self) -> usize {
+        self.state_id
+    }
+    pub fn state_hash(&self) -> HashId {
+        self.overall_state_hash
+    }
+    pub fn children(&self) -> &[HashId] {
+        &self.children
+    }
+    pub fn into_result(self) -> EvaluationResult<T> {
+        self.result
+    }
+}
+impl<T: Expression> std::fmt::Debug for InterpreterCacheEntry<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "\n {}: {}",
+            self.cache_key,
+            self.children
+                .iter()
+                .map(|child| format!("\n  {}", child))
+                .collect::<String>()
+        )
+    }
 }
 
-pub trait CacheEntries<T: Expression> {
-    fn insert(
+struct GcWrapper<T> {
+    value: T,
+    marked: bool,
+}
+fn gc<'a, T: Expression>(
+    cache_entries: &mut FnvHashMap<HashId, GcWrapper<InterpreterCacheEntry<T>>>,
+    roots: impl IntoIterator<Item = HashId>,
+) -> GcMetrics {
+    let existing_size = cache_entries.len();
+    // Mark any values accessible from the given roots
+    for key in roots {
+        mark_gc_nodes(cache_entries, VecDeque::from_iter(once(key)));
+    }
+    // Sweep out unmarked values, resetting the GC marker for any marked values
+    cache_entries.retain(|_key, value| {
+        if value.marked {
+            value.marked = false;
+            true
+        } else {
+            false
+        }
+    });
+    let num_remaining = cache_entries.len();
+    let num_disposed = existing_size - num_remaining;
+    GcMetrics {
+        purged: num_disposed,
+        remaining: num_remaining,
+    }
+}
+fn mark_gc_nodes<T: Expression>(
+    cache_entries: &mut FnvHashMap<HashId, GcWrapper<InterpreterCacheEntry<T>>>,
+    mut keys: VecDeque<HashId>,
+) {
+    while let Some(key) = keys.pop_front() {
+        // Determine whether the given key exists in the store
+        if let Some(wrapper) = cache_entries.get_mut(&key) {
+            // If the key has not yet been marked, mark the node and all its descendants
+            if !wrapper.marked {
+                wrapper.marked = true;
+                keys.extend(wrapper.value.children.iter());
+            }
+        }
+    }
+}
+
+pub struct DefaultInterpreterCache<T: Expression> {
+    cache: FnvHashMap<HashId, GcWrapper<InterpreterCacheEntry<T>>>,
+}
+impl<T: Expression> Default for DefaultInterpreterCache<T> {
+    fn default() -> Self {
+        Self {
+            cache: FnvHashMap::default(),
+        }
+    }
+}
+impl<T: Expression> DefaultInterpreterCache<T> {
+    pub fn apply_updates(
         &mut self,
-        key: InterpreterCacheKey,
-        value: InterpreterCacheEntry<T>,
-        subexpressions: Vec<InterpreterCacheKey>,
-    );
-    fn extend(
-        &mut self,
-        entries: impl IntoIterator<
-            Item = (
-                InterpreterCacheKey,
-                InterpreterCacheEntry<T>,
-                Vec<InterpreterCacheKey>,
-            ),
-        >,
-    );
-    fn get(
+        entries: impl IntoIterator<Item = InterpreterCacheEntry<T>>,
+        state_id: usize,
+        latest_state_id: usize,
+    ) {
+        let is_latest_state = state_id == latest_state_id;
+        if is_latest_state {
+            self.extend(entries)
+        } else {
+            for entry in entries {
+                let is_newer = match self.cache.get(&entry.cache_key()) {
+                    None => true,
+                    Some(wrapper) => state_id > wrapper.value.state_id,
+                };
+                if is_newer {
+                    self.insert(entry);
+                }
+            }
+        }
+    }
+    pub fn gc(&mut self, roots: impl IntoIterator<Item = HashId>) -> GcMetrics {
+        gc(&mut self.cache, roots)
+    }
+}
+impl<T: Expression> InterpreterCache<T> for DefaultInterpreterCache<T> {
+    fn retrieve_result(
         &self,
-        key: &InterpreterCacheKey,
-    ) -> Option<&(InterpreterCacheEntry<T>, Vec<InterpreterCacheKey>)>;
-    fn contains_key(&self, key: &InterpreterCacheKey) -> bool;
-    fn len(&self) -> usize;
-    fn is_empty(&self) -> bool;
+        key: HashId,
+        state: &impl DynamicState<T>,
+    ) -> Option<EvaluationResult<T>> {
+        self.cache.get(&key).and_then(|wrapper| {
+            let entry = &wrapper.value;
+            let state_dependencies = entry.result.dependencies();
+            if state_dependencies.is_empty()
+                || entry.overall_state_hash == 0
+                || entry.overall_state_hash == state.id()
+                || entry.minimal_state_hash == hash_state_values(state, state_dependencies)
+            {
+                Some(entry.result.clone())
+            } else {
+                None
+            }
+        })
+    }
+    fn contains(&self, key: HashId, state: &impl DynamicState<T>) -> bool {
+        self.cache
+            .get(&key)
+            .map(|wrapper| {
+                let entry = &wrapper.value;
+                entry.overall_state_hash == 0
+                    || entry.overall_state_hash == state.id()
+                    || entry.minimal_state_hash
+                        == hash_state_values(state, entry.result.dependencies())
+            })
+            .unwrap_or(false)
+    }
+    fn len(&self) -> usize {
+        self.cache.len()
+    }
+}
+impl<T: Expression> MutableInterpreterCache<T> for DefaultInterpreterCache<T> {
+    fn insert(&mut self, entry: InterpreterCacheEntry<T>) {
+        match self.cache.entry(entry.cache_key) {
+            Entry::Occupied(mut occupied_entry) => {
+                occupied_entry.insert(GcWrapper {
+                    marked: occupied_entry.get().marked,
+                    value: entry,
+                });
+            }
+            Entry::Vacant(vacant_entry) => {
+                vacant_entry.insert(GcWrapper {
+                    marked: false,
+                    value: entry,
+                });
+            }
+        }
+    }
+    fn update_state_hash(&mut self, key: HashId, state: &impl DynamicState<T>) {
+        match self.cache.get_mut(&key) {
+            Some(wrapper) => {
+                let entry = &mut wrapper.value;
+                entry.overall_state_hash = state.id()
+            }
+            None => {
+                panic!("Cache entry not found: {}", key);
+            }
+        }
+    }
+    fn extend(&mut self, entries: impl IntoIterator<Item = InterpreterCacheEntry<T>>) {
+        for entry in entries {
+            self.insert(entry)
+        }
+    }
 }
 
 pub struct LocalCacheEntries<T: Expression> {
-    entries: FnvHashMap<InterpreterCacheKey, (InterpreterCacheEntry<T>, Vec<InterpreterCacheKey>)>,
-    insertion_order: Vec<InterpreterCacheKey>,
+    state_hash: HashId,
+    entries: HashMap<HashId, InterpreterCacheEntry<T>>,
 }
-impl<T: Expression> Default for LocalCacheEntries<T> {
-    fn default() -> Self {
+impl<T: Expression> LocalCacheEntries<T> {
+    pub fn new(state: &impl DynamicState<T>) -> Self {
         Self {
-            entries: FnvHashMap::default(),
-            insertion_order: Vec::default(),
+            state_hash: state.id(),
+            entries: HashMap::default(),
         }
     }
 }
-impl<T: Expression> CacheEntries<T> for LocalCacheEntries<T> {
-    fn insert(
-        &mut self,
-        key: InterpreterCacheKey,
-        value: InterpreterCacheEntry<T>,
-        subexpressions: Vec<InterpreterCacheKey>,
-    ) {
-        match self.entries.entry(key) {
-            Entry::Occupied(_) => {
-                panic!("Cache entry {} already exists", key);
-            }
-            Entry::Vacant(entry) => {
-                self.insertion_order.push(key);
-                entry.insert((value, subexpressions));
-            }
-        }
+impl<T: Expression> IntoIterator for LocalCacheEntries<T> {
+    type Item = InterpreterCacheEntry<T>;
+    type IntoIter = std::collections::hash_map::IntoValues<HashId, Self::Item>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.entries.into_values()
     }
-    fn extend(
-        &mut self,
-        entries: impl IntoIterator<
-            Item = (
-                InterpreterCacheKey,
-                InterpreterCacheEntry<T>,
-                Vec<InterpreterCacheKey>,
-            ),
-        >,
-    ) {
-        for (key, value, subexpressions) in entries {
-            self.insert(key, value, subexpressions)
-        }
-    }
-    fn get(
+}
+impl<T: Expression> InterpreterCache<T> for LocalCacheEntries<T> {
+    fn retrieve_result(
         &self,
-        key: &InterpreterCacheKey,
-    ) -> Option<&(InterpreterCacheEntry<T>, Vec<InterpreterCacheKey>)> {
-        let entry = self.entries.get(key);
+        key: HashId,
+        state: &impl DynamicState<T>,
+    ) -> Option<EvaluationResult<T>> {
+        let entry = if state.id() == self.state_hash {
+            self.entries.get(&key).map(|entry| entry.result.clone())
+        } else {
+            None
+        };
         trace!(cache_entries = if entry.is_some() { "hit" } else { "miss" });
         entry
     }
-    fn contains_key(&self, key: &InterpreterCacheKey) -> bool {
-        self.entries.contains_key(key)
+    fn contains(&self, key: HashId, state: &impl DynamicState<T>) -> bool {
+        state.id() == self.state_hash && self.entries.contains_key(&key)
     }
     fn len(&self) -> usize {
         self.entries.len()
     }
-    fn is_empty(&self) -> bool {
-        self.entries.is_empty()
-    }
 }
-impl<T: Expression> IntoIterator for LocalCacheEntries<T> {
-    type Item = (
-        InterpreterCacheKey,
-        InterpreterCacheEntry<T>,
-        Vec<InterpreterCacheKey>,
-    );
-    type IntoIter = CacheEntriesIntoIter<T>;
-    fn into_iter(self) -> Self::IntoIter {
-        CacheEntriesIntoIter::new(self)
-    }
-}
-pub struct CacheEntriesIntoIter<T: Expression> {
-    entries: FnvHashMap<InterpreterCacheKey, (InterpreterCacheEntry<T>, Vec<InterpreterCacheKey>)>,
-    insertion_order: std::vec::IntoIter<InterpreterCacheKey>,
-}
-impl<T: Expression> CacheEntriesIntoIter<T> {
-    fn new(entries: LocalCacheEntries<T>) -> Self {
-        Self {
-            entries: entries.entries,
-            insertion_order: entries.insertion_order.into_iter(),
+impl<T: Expression> MutableInterpreterCache<T> for LocalCacheEntries<T> {
+    fn insert(&mut self, entry: InterpreterCacheEntry<T>) {
+        match self.entries.entry(entry.cache_key) {
+            Entry::Occupied(mut occupied_entry) => {
+                occupied_entry.insert(entry);
+            }
+            Entry::Vacant(vacant_entry) => {
+                vacant_entry.insert(entry);
+            }
         }
     }
-}
-impl<T: Expression> Iterator for CacheEntriesIntoIter<T> {
-    type Item = (
-        InterpreterCacheKey,
-        InterpreterCacheEntry<T>,
-        Vec<InterpreterCacheKey>,
-    );
-    fn next(&mut self) -> Option<Self::Item> {
-        self.insertion_order.next().map(move |key| {
-            let (entry, subexpressions) = self.entries.remove(&key).unwrap();
-            (key, entry, subexpressions)
-        })
+    fn update_state_hash(&mut self, key: HashId, state: &impl DynamicState<T>) {
+        match self.entries.get_mut(&key) {
+            Some(entry) => {
+                entry.overall_state_hash = state.id();
+            }
+            None => {
+                panic!("Cache entry not found: {}", key);
+            }
+        }
+    }
+    fn extend(&mut self, entries: impl IntoIterator<Item = InterpreterCacheEntry<T>>) {
+        for entry in entries {
+            self.insert(entry)
+        }
     }
 }
 
@@ -184,15 +343,13 @@ pub(super) struct MultithreadedCacheEntries<'a, T: Expression> {
     parent: Option<&'a MultithreadedCacheEntries<'a, T>>,
     entries: LocalCacheEntries<T>,
 }
-impl<'a, T: Expression> Default for MultithreadedCacheEntries<'a, T> {
-    fn default() -> Self {
+impl<'a, T: Expression> MultithreadedCacheEntries<'a, T> {
+    pub(super) fn new(state: &impl DynamicState<T>) -> Self {
         Self {
             parent: None,
-            entries: LocalCacheEntries::default(),
+            entries: LocalCacheEntries::new(state),
         }
     }
-}
-impl<'a, T: Expression> MultithreadedCacheEntries<'a, T> {
     pub(super) fn create_child(&'a self, entries: LocalCacheEntries<T>) -> Self {
         Self {
             parent: Some(self),
@@ -203,166 +360,36 @@ impl<'a, T: Expression> MultithreadedCacheEntries<'a, T> {
         self.entries
     }
 }
-impl<'a, T: Expression> CacheEntries<T> for MultithreadedCacheEntries<'a, T> {
-    fn insert(
-        &mut self,
-        key: InterpreterCacheKey,
-        value: InterpreterCacheEntry<T>,
-        subexpressions: Vec<InterpreterCacheKey>,
-    ) {
-        self.entries.insert(key, value, subexpressions)
-    }
-    fn extend(
-        &mut self,
-        entries: impl IntoIterator<
-            Item = (
-                InterpreterCacheKey,
-                InterpreterCacheEntry<T>,
-                Vec<InterpreterCacheKey>,
-            ),
-        >,
-    ) {
-        self.entries.extend(entries)
-    }
-    fn get(
+impl<'a, T: Expression> InterpreterCache<T> for MultithreadedCacheEntries<'a, T> {
+    fn retrieve_result(
         &self,
-        key: &InterpreterCacheKey,
-    ) -> Option<&(InterpreterCacheEntry<T>, Vec<InterpreterCacheKey>)> {
-        self.entries
-            .get(key)
-            .or_else(|| self.parent.map(|parent| parent.get(key)).flatten())
+        key: HashId,
+        state: &impl DynamicState<T>,
+    ) -> Option<EvaluationResult<T>> {
+        self.entries.retrieve_result(key, state).or_else(|| {
+            self.parent
+                .and_then(|parent| parent.retrieve_result(key, state))
+        })
     }
-    fn contains_key(&self, key: &InterpreterCacheKey) -> bool {
-        self.entries.contains_key(key)
+    fn contains(&self, key: HashId, state: &impl DynamicState<T>) -> bool {
+        self.entries.contains(key, state)
             || self
                 .parent
-                .map(|parent| parent.contains_key(key))
+                .map(|parent| parent.contains(key, state))
                 .unwrap_or(false)
     }
     fn len(&self) -> usize {
         self.entries.len() + self.parent.map(|parent| parent.len()).unwrap_or(0)
     }
-    fn is_empty(&self) -> bool {
-        self.entries.is_empty() && self.parent.map(|parent| parent.is_empty()).unwrap_or(true)
-    }
 }
-pub struct DefaultInterpreterCache<T: Expression> {
-    cache: DependencyCache<InterpreterCacheKey, InterpreterCacheEntry<T>>,
-}
-impl<T: Expression> Default for DefaultInterpreterCache<T> {
-    fn default() -> Self {
-        Self {
-            cache: DependencyCache::default(),
-        }
+impl<'a, T: Expression> MutableInterpreterCache<T> for MultithreadedCacheEntries<'a, T> {
+    fn insert(&mut self, entry: InterpreterCacheEntry<T>) {
+        self.entries.insert(entry)
     }
-}
-impl<T: Expression> InterpreterCache<T> for DefaultInterpreterCache<T> {
-    fn retrieve_result(
-        &self,
-        key: &InterpreterCacheKey,
-        state: &impl DynamicState<T>,
-    ) -> Option<(EvaluationResult<T>, Option<InterpreterCacheEntry<T>>)> {
-        let result = self.cache.get(key).and_then(|entry| {
-            let state_dependencies = entry.result.dependencies();
-            if state_dependencies.is_empty() || entry.overall_state_hash == state.id() {
-                Some((entry.result().clone(), None))
-            } else if entry.minimal_state_hash == hash_state_values(state, state_dependencies) {
-                let result = entry.result();
-                Some((
-                    result.clone(),
-                    Some(InterpreterCacheEntry {
-                        result: result.clone(),
-                        overall_state_hash: state.id(),
-                        minimal_state_hash: entry.minimal_state_hash,
-                    }),
-                ))
-            } else {
-                None
-            }
-        });
-        trace!(interpreter_cache = if result.is_some() { "hit" } else { "miss" });
-        result
+    fn update_state_hash(&mut self, key: HashId, state: &impl DynamicState<T>) {
+        self.entries.update_state_hash(key, state);
     }
-    fn contains_key(&self, key: &InterpreterCacheKey) -> bool {
-        self.cache.contains_key(&key)
-    }
-}
-impl<T: Expression> DefaultInterpreterCache<T> {
-    pub fn new(
-        entries: impl IntoIterator<
-            Item = (
-                InterpreterCacheKey,
-                InterpreterCacheEntry<T>,
-                Vec<InterpreterCacheKey>,
-            ),
-        >,
-    ) -> Self {
-        Self {
-            cache: DependencyCache::new(entries),
-        }
-    }
-    pub fn set(
-        &mut self,
-        key: InterpreterCacheKey,
-        result: InterpreterCacheEntry<T>,
-        children: Vec<InterpreterCacheKey>,
-    ) {
-        self.cache.set(key, result, children);
-    }
-    pub fn store_result(
-        &mut self,
-        key: InterpreterCacheKey,
-        state: &impl DynamicState<T>,
-        result: EvaluationResult<T>,
-        children: Vec<InterpreterCacheKey>,
-    ) {
-        let state_dependencies = result.dependencies();
-        let (overall_state_hash, minimal_state_hash) = if state_dependencies.is_empty() {
-            (0, 0)
-        } else {
-            (state.id(), hash_state_values(state, state_dependencies))
-        };
-        self.set(
-            key,
-            InterpreterCacheEntry {
-                result,
-                overall_state_hash,
-                minimal_state_hash,
-            },
-            children,
-        )
-    }
-    pub fn replace_children(
-        &mut self,
-        key: &InterpreterCacheKey,
-        children: Vec<InterpreterCacheKey>,
-    ) -> bool {
-        self.cache.replace_children(key, children)
-    }
-    pub fn retain(&mut self, key: InterpreterCacheKey) {
-        self.cache.retain(once(&key));
-    }
-    pub fn release(&mut self, key: InterpreterCacheKey) {
-        self.cache.release(once(&key));
-    }
-    pub fn gc(&mut self) -> GcMetrics {
-        let num_disposed = self.cache.gc::<IteratorCounter>().count();
-        let num_remaining = self.cache.len();
-        GcMetrics {
-            purged: num_disposed,
-            remaining: num_remaining,
-        }
-    }
-}
-
-struct IteratorCounter(usize);
-impl IteratorCounter {
-    fn count(&self) -> usize {
-        self.0
-    }
-}
-impl<V> FromIterator<V> for IteratorCounter {
-    fn from_iter<T: IntoIterator<Item = V>>(iter: T) -> Self {
-        Self(iter.into_iter().fold(0, |count, _| count + 1))
+    fn extend(&mut self, entries: impl IntoIterator<Item = InterpreterCacheEntry<T>>) {
+        self.entries.extend(entries)
     }
 }

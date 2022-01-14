@@ -12,13 +12,13 @@ use reflex::{
     compiler::{hash_program_root, Compile, CompilerOptions, InstructionPointer, Program},
     core::{
         Applicable, DependencyList, DynamicState, EvaluationResult, Expression, ExpressionFactory,
-        HeapAllocator, Reducible, Rewritable, Signal, SignalId, SignalType, StateCache, StateToken,
+        HeapAllocator, Reducible, Rewritable, Signal, SignalId, SignalType, StateToken,
         StringValue,
     },
     hash::{hash_object, HashId},
     interpreter::{
         execute, DefaultInterpreterCache, GcMetrics, InterpreterCache, InterpreterCacheEntry,
-        InterpreterCacheKey, InterpreterOptions, LocalCacheEntries,
+        InterpreterOptions, LocalCacheEntries, MutableInterpreterCache,
     },
     lang::ValueTerm,
     DependencyCache,
@@ -356,7 +356,7 @@ impl<TRequest, TResponse, TUpdate> StreamOperation<TRequest, TResponse, TUpdate>
 }
 
 type RuntimeCommandChannel<T> = mpsc::Sender<RuntimeCommand<T>>;
-type FlushPayload<T> = Arc<(RuntimeState<T>, Vec<StateToken>)>;
+type FlushPayload<T> = Arc<(usize, RuntimeState<T>, Vec<StateToken>)>;
 
 enum RuntimeCommand<T: Expression> {
     Subscribe(StreamOperation<SubscribeCommand, SubscriptionId, T>),
@@ -377,9 +377,8 @@ struct UpdateCommand<T: Expression> {
 }
 struct EmitCommand<T: Expression> {
     subscription_id: SubscriptionId,
-    cache_key: HashId,
     program: Arc<Program>,
-    state: RuntimeState<T>,
+    state_id: usize,
     result: EvaluationResult<T>,
     cache_entries: LocalCacheEntries<T>,
 }
@@ -404,17 +403,15 @@ impl<T: Expression> RuntimeCommand<T> {
     }
     fn emit(
         subscription_id: SubscriptionId,
-        cache_key: HashId,
         program: Arc<Program>,
-        state: RuntimeState<T>,
+        state_id: usize,
         result: EvaluationResult<T>,
         cache_entries: LocalCacheEntries<T>,
     ) -> Self {
         let payload = EmitCommand {
             subscription_id,
-            cache_key,
             program,
-            state,
+            state_id,
             result,
             cache_entries,
         };
@@ -463,19 +460,16 @@ impl<T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile
             let allocator = allocator.clone();
             let commands = commands_tx.clone();
             let mut cache = cache;
-            let empty_result = create_pending_result(&factory, &allocator);
             async move {
                 while let Some(command) = commands_rx.recv().await {
                     let mut next_command = Some(command);
-                    let mut pending_retains = Vec::new();
                     let mut pending_releases = Vec::new();
                     let mut pending_updates = None;
                     let mut pending_gc = false;
                     while let Some(command) = next_command {
                         match command {
                             RuntimeCommand::Subscribe(command) => {
-                                let is_root = command.payload.initiators.is_none();
-                                let (subscription_id, cache_key) = process_subscribe_command(
+                                process_subscribe_command(
                                     command,
                                     &mut store,
                                     &mut cache,
@@ -485,14 +479,6 @@ impl<T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile
                                     &allocator,
                                     &interpreter_options,
                                 );
-                                let subscription_cache_key = cache.register_subscription(
-                                    subscription_id,
-                                    cache_key,
-                                    empty_result.clone(),
-                                );
-                                if is_root {
-                                    pending_retains.push(subscription_cache_key);
-                                }
                             }
                             RuntimeCommand::Unsubscribe(command) => {
                                 let subscription_id = command.payload.subscription_id;
@@ -518,13 +504,14 @@ impl<T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile
                                     &allocator,
                                     &compiler_options,
                                 );
-                                let (state, updated_keys) =
+                                let (state_id, state, updated_keys) =
                                     store.get_mut().unwrap().update_state(updates);
                                 match &mut pending_updates {
                                     None => {
-                                        pending_updates = Some((state, updated_keys));
+                                        pending_updates = Some((state_id, state, updated_keys));
                                     }
-                                    Some((pending_state, pending_updates)) => {
+                                    Some((pending_state_id, pending_state, pending_updates)) => {
+                                        *pending_state_id = state_id;
                                         *pending_state = state;
                                         pending_updates.extend(updated_keys)
                                     }
@@ -535,13 +522,14 @@ impl<T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile
                             RuntimeCommand::Update(command) => {
                                 let updates = command.updates;
 
-                                let (state, updated_keys) =
+                                let (state_id, state, updated_keys) =
                                     store.get_mut().unwrap().update_state(updates);
                                 match &mut pending_updates {
                                     None => {
-                                        pending_updates = Some((state, updated_keys));
+                                        pending_updates = Some((state_id, state, updated_keys));
                                     }
-                                    Some((pending_state, pending_updates)) => {
+                                    Some((pending_state_id, pending_state, pending_updates)) => {
+                                        *pending_state_id = state_id;
                                         *pending_state = state;
                                         pending_updates.extend(updated_keys)
                                     }
@@ -550,17 +538,11 @@ impl<T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile
                         }
                         next_command = next_queued_item(&mut commands_rx);
                     }
-                    for cache_key in pending_retains {
-                        cache.retain(cache_key);
-                    }
-                    for cache_key in pending_releases {
-                        cache.release(cache_key);
-                    }
                     if pending_gc {
                         gc(&mut store, &mut cache);
                     }
-                    if let Some((state, updated_keys)) = pending_updates {
-                        let _ = flush_tx.send(FlushPayload::new((state, updated_keys)));
+                    if let Some((state_id, state, updated_keys)) = pending_updates {
+                        let _ = flush_tx.send(FlushPayload::new((state_id, state, updated_keys)));
                     }
                 }
             }
@@ -656,15 +638,16 @@ where
             let updates = command.updates;
             // TODO: Avoid cloning program when sharing between interpreter and signal helpers
             let program = Arc::new(target.clone());
+            let state_id = store.state_id;
             let state = store.state.clone();
             async move {
                 let mut flush_receiver = flush.subscribe();
-
                 let (result, cache_entries) = evaluate_subscription(
                     subscription_id,
                     cache_key,
                     &program,
                     entry_point,
+                    state_id,
                     &state,
                     &factory,
                     &allocator,
@@ -681,9 +664,8 @@ where
                 let _ = commands
                     .send(RuntimeCommand::emit(
                         subscription_id,
-                        cache_key,
                         Arc::clone(&program),
-                        state,
+                        state_id,
                         result,
                         cache_entries,
                     ))
@@ -691,12 +673,14 @@ where
 
                 // TODO: Decrease subscription scheduling priority after initial result is emitted
                 while let Ok(state) = flush_receiver.recv().await {
-                    let (state, is_unchanged) = {
-                        let (state, updates) = state.as_ref();
+                    let (state_id, state, is_unchanged) = {
+                        let (state_id, state, updates) = state.as_ref();
+                        let mut latest_state_id = *state_id;
                         let mut latest_state = state.clone();
                         let mut accumulated_updates = HashSet::<StateToken>::new();
                         while let Ok(queued_state) = flush_receiver.try_recv() {
-                            let (next_state, next_updates) = queued_state.as_ref();
+                            let (state_id, next_state, next_updates) = queued_state.as_ref();
+                            latest_state_id = *state_id;
                             latest_state = next_state.clone();
                             accumulated_updates.extend(next_updates);
                         }
@@ -707,7 +691,7 @@ where
                             .copied()
                             .chain(accumulated_updates)
                             .any(|key| active_dependencies.contains(key));
-                        (latest_state, is_unchanged)
+                        (latest_state_id, latest_state, is_unchanged)
                     };
                     if is_unchanged {
                         continue;
@@ -718,6 +702,7 @@ where
                         cache_key,
                         &program,
                         entry_point,
+                        state_id,
                         &state,
                         &factory,
                         &allocator,
@@ -739,9 +724,8 @@ where
                     let _ = commands
                         .send(RuntimeCommand::emit(
                             subscription_id,
-                            cache_key,
                             Arc::clone(&program),
-                            state,
+                            state_id,
                             result,
                             cache_entries,
                         ))
@@ -761,6 +745,7 @@ fn evaluate_subscription<
     cache_key: HashId,
     program: &Program,
     entry_point: InstructionPointer,
+    state_id: usize,
     state: &(impl DynamicState<T> + Sync),
     factory: &(impl ExpressionFactory<T> + Sync),
     allocator: &(impl HeapAllocator<T> + Sync),
@@ -773,6 +758,7 @@ fn evaluate_subscription<
         cache_key,
         program,
         entry_point,
+        state_id,
         state,
         factory,
         allocator,
@@ -792,7 +778,7 @@ fn evaluate_subscription<
                 ),
                 DependencyList::empty(),
             ),
-            LocalCacheEntries::default(),
+            LocalCacheEntries::new(state),
         )
     });
     eprintln!(
@@ -892,13 +878,12 @@ where
     T::String: StringValue + Send + Sync,
 {
     let subscription_id = payload.subscription_id;
-    let cache_key = payload.cache_key;
-    let state = payload.state;
     let result = payload.result;
     let program = payload.program;
     let cache_entries = payload.cache_entries;
-    cache.apply_updates(cache_entries);
+    let query_state_id = payload.state_id;
     let store = store.get_mut().unwrap();
+    cache.apply_updates(cache_entries, query_state_id, store.state_id);
     let custom_signals = match factory.match_signal_term(result.result()) {
         Some(signal) => signal
             .signals()
@@ -930,13 +915,12 @@ where
                 commands,
             );
             store.register_signal_results(signal_results.iter().cloned());
-            cache.apply_updates(signal_results.iter().cloned().map(|(signal_id, value)| {
-                (
+            cache.extend(signal_results.iter().cloned().map(|(signal_id, value)| {
+                InterpreterCacheEntry::new(
                     signal_id,
-                    InterpreterCacheEntry::new(
-                        EvaluationResult::new(value, DependencyList::empty()),
-                        &state,
-                    ),
+                    EvaluationResult::new(value, DependencyList::empty()),
+                    store.state_id,
+                    &store.state,
                     Vec::new(),
                 )
             }));
@@ -944,8 +928,6 @@ where
         }
     };
     store.update_subscription_dependencies(subscription_id, result.dependencies());
-    ensure_cache_entries(result.dependencies(), cache, &state, factory, allocator);
-    cache.update_subscription_dependencies(subscription_id, cache_key, result.dependencies());
     let results = if let Some((signal_results, effects)) = handler_results {
         let (sync_updates, dispose_callbacks) = apply_effects(effects, commands);
         let outdated_dispose_callbacks = store.register_dispose_callbacks(dispose_callbacks);
@@ -1057,30 +1039,6 @@ where
     (signal_results, effects)
 }
 
-fn ensure_cache_entries<T: Expression>(
-    dependencies: impl IntoIterator<Item = InterpreterCacheKey>,
-    cache: &mut RuntimeCache<T>,
-    state: &impl DynamicState<T>,
-    factory: &impl ExpressionFactory<T>,
-    allocator: &impl HeapAllocator<T>,
-) {
-    let missing_dependencies = {
-        let cache = cache.cache.read();
-        dependencies
-            .into_iter()
-            .filter(|key| !cache.contains_key(key))
-            .collect::<Vec<_>>()
-    };
-    if missing_dependencies.is_empty() {
-        return;
-    }
-    let dummy_result = create_pending_result(factory, allocator);
-    let mut cache = cache.cache.write();
-    for key in missing_dependencies {
-        cache.store_result(key, state, dummy_result.clone(), Vec::new());
-    }
-}
-
 fn apply_effects<T: AsyncExpression>(
     effects: Vec<(SignalId, RuntimeEffect<T>)>,
     commands: &RuntimeCommandChannel<T>,
@@ -1156,38 +1114,42 @@ where
 fn gc<T: Expression>(store: &mut Mutex<RuntimeStore<T>>, cache: &mut RuntimeCache<T>) {
     let start_time = Instant::now();
     eprintln!("[Runtime] GC started");
-    {
-        eprint!("[Runtime] Purging cache entries...");
-        let start_time = Instant::now();
-        let metrics = cache.gc();
-        eprintln!("{:?} ({})", start_time.elapsed(), metrics);
-    }
+    let store = store.get_mut().unwrap();
     {
         eprintln!("[Runtime] Computing inactive subscriptions...");
         let start_time = Instant::now();
-        let dispose_callbacks = {
-            let store = store.get_mut().unwrap();
-            let (disposed_signal_ids, dispose_callbacks) = store.gc();
-            if !disposed_signal_ids.is_empty() {
-                store.state.remove_many(disposed_signal_ids.iter());
-            }
-            dispose_callbacks
-        };
+        let (disposed_signal_ids, dispose_callbacks) = store.gc();
+        if !disposed_signal_ids.is_empty() {
+            store.state.remove_many(disposed_signal_ids.iter());
+        }
         eprintln!(
-            "[Runtime] Inactive subscriptions computed in {:?}",
+            "[Runtime] Computed {} inactive subscriptions in {:?}",
+            disposed_signal_ids.len(),
             start_time.elapsed()
         );
         if !dispose_callbacks.is_empty() {
-            eprint!(
-                "[Runtime] Cleaning up {} signal effects...",
+            eprintln!(
+                "[Runtime] Cleaning up {} signal effects",
                 dispose_callbacks.len()
             );
-            let start_time = Instant::now();
             for dispose_callback in dispose_callbacks {
                 tokio::spawn(dispose_callback);
             }
-            eprintln!("{:?}", start_time.elapsed());
         }
+    }
+    {
+        eprintln!("[Runtime] Purging cache entries...");
+        let start_time = Instant::now();
+        let metrics = cache.gc(store
+            .subscriptions
+            .iter()
+            .map(|subscription| subscription.cache_key));
+        eprintln!(
+            "[Runtime] Purged {} cache entries in {:?} ({} remaining)",
+            metrics.purged,
+            start_time.elapsed(),
+            metrics.remaining
+        );
     }
     eprintln!("[Runtime] GC completed in {:?}", start_time.elapsed());
 }
@@ -1203,98 +1165,57 @@ impl<T: Expression> Default for RuntimeCache<T> {
         }
     }
 }
+impl<T: Expression> RuntimeCache<T> {
+    pub fn apply_updates(
+        &mut self,
+        entries: impl IntoIterator<Item = InterpreterCacheEntry<T>>,
+        state_id: usize,
+        latest_state_id: usize,
+    ) {
+        eprintln!("[Runtime] Applying cache updates");
+        let start_time = Instant::now();
+        self.cache
+            .write()
+            .apply_updates(entries, state_id, latest_state_id);
+        eprintln!(
+            "[Runtime] Applied cache updates in {:?}",
+            start_time.elapsed()
+        );
+    }
+    pub fn gc(&mut self, roots: impl IntoIterator<Item = HashId>) -> GcMetrics {
+        self.cache.write().gc(roots)
+    }
+}
 impl<T: Expression> InterpreterCache<T> for RuntimeCache<T> {
     fn retrieve_result(
         &self,
-        key: &InterpreterCacheKey,
+        key: HashId,
         state: &impl DynamicState<T>,
-    ) -> Option<(EvaluationResult<T>, Option<InterpreterCacheEntry<T>>)> {
+    ) -> Option<EvaluationResult<T>> {
         self.cache.read().retrieve_result(key, state)
     }
-    fn contains_key(&self, key: &InterpreterCacheKey) -> bool {
-        self.cache.read().contains_key(key)
+    fn contains(&self, key: HashId, state: &impl DynamicState<T>) -> bool {
+        self.cache.read().contains(key, state)
+    }
+    fn len(&self) -> usize {
+        self.cache.read().len()
     }
 }
-impl<T: Expression> RuntimeCache<T> {
-    pub fn new(
-        entries: impl IntoIterator<
-            Item = (
-                InterpreterCacheKey,
-                InterpreterCacheEntry<T>,
-                Vec<InterpreterCacheKey>,
-            ),
-        >,
-    ) -> Self {
-        Self {
-            cache: Arc::new(RwLock::new(DefaultInterpreterCache::new(entries))),
-        }
+impl<T: Expression> MutableInterpreterCache<T> for RuntimeCache<T> {
+    fn insert(&mut self, entry: InterpreterCacheEntry<T>) {
+        self.cache.write().insert(entry);
     }
-
-    pub fn register_subscription(
-        &mut self,
-        subscription_id: SubscriptionId,
-        cache_key: InterpreterCacheKey,
-        initial_result: EvaluationResult<T>,
-    ) -> HashId {
-        let subscription_cache_key = generate_subscription_cache_key(&subscription_id, &cache_key);
-        let empty_state = StateCache::default();
-        let mut cache = self.cache.write();
-        if !cache.contains_key(&cache_key) {
-            cache.store_result(cache_key, &empty_state, initial_result.clone(), Vec::new());
-        }
-        cache.store_result(
-            subscription_cache_key,
-            &empty_state,
-            initial_result,
-            vec![cache_key],
-        );
-        subscription_cache_key
+    fn update_state_hash(&mut self, key: HashId, state: &impl DynamicState<T>) {
+        self.cache.write().update_state_hash(key, state);
     }
-    pub fn update_subscription_dependencies(
-        &mut self,
-        subscription_id: SubscriptionId,
-        cache_key: HashId,
-        dependencies: &DependencyList,
-    ) {
-        let subscription_cache_key = generate_subscription_cache_key(&subscription_id, &cache_key);
-        let mut cache = self.cache.write();
-        let dependencies = once(cache_key)
-            .chain(
-                dependencies
-                    .iter()
-                    .filter(|state_token| cache.contains_key(state_token)),
-            )
-            .collect();
-        cache.replace_children(&subscription_cache_key, dependencies);
-    }
-    pub fn retain(&mut self, key: InterpreterCacheKey) {
-        self.cache.write().retain(key)
-    }
-    pub fn release(&mut self, key: InterpreterCacheKey) {
-        self.cache.write().release(key)
-    }
-    pub fn gc(&mut self) -> GcMetrics {
-        self.cache.write().gc()
-    }
-    pub fn apply_updates(
-        &mut self,
-        entries: impl IntoIterator<
-            Item = (
-                InterpreterCacheKey,
-                InterpreterCacheEntry<T>,
-                Vec<InterpreterCacheKey>,
-            ),
-        >,
-    ) {
-        let mut cache = self.cache.write();
-        for (key, result, subexpressions) in entries {
-            cache.set(key, result, subexpressions)
-        }
+    fn extend(&mut self, entries: impl IntoIterator<Item = InterpreterCacheEntry<T>>) {
+        self.cache.write().extend(entries);
     }
 }
 
 struct RuntimeStore<T: Expression> {
     state: RuntimeState<T>,
+    state_id: usize,
     subscriptions: Vec<Subscription>,
     subscription_counter: usize,
     subscription_cache: SubscriptionCache<T>,
@@ -1304,6 +1225,7 @@ impl<T: Expression> RuntimeStore<T> {
     fn new(state: RuntimeState<T>) -> Self {
         Self {
             state,
+            state_id: 0,
             subscriptions: Vec::default(),
             subscription_counter: 0,
             subscription_cache: SubscriptionCache::default(),
@@ -1367,7 +1289,7 @@ impl<T: Expression> RuntimeStore<T> {
     fn update_state(
         &mut self,
         updates: impl IntoIterator<Item = StateUpdate<T>>,
-    ) -> (RuntimeState<T>, Vec<StateToken>) {
+    ) -> (usize, RuntimeState<T>, Vec<StateToken>) {
         let updates = updates
             .into_iter()
             .filter_map(|update| {
@@ -1384,8 +1306,11 @@ impl<T: Expression> RuntimeStore<T> {
             })
             .collect::<Vec<_>>();
         let updated_keys = updates.iter().map(|(key, _)| *key).collect();
+        if !updates.is_empty() {
+            self.state_id += 1;
+        }
         self.state.extend(updates);
-        (self.state.clone(), updated_keys)
+        (self.state_id, self.state.clone(), updated_keys)
     }
     fn retrieve_signal_result(&self, signal: &Signal<T>) -> Option<&T> {
         self.subscription_cache.retrieve_signal_result(signal.id())
@@ -1572,16 +1497,6 @@ fn create_error_expression<T: Expression>(
         allocator.create_signal_list(errors.into_iter().map(|error| {
             allocator.create_signal(SignalType::Error, allocator.create_unit_list(error))
         })),
-    )
-}
-
-fn create_pending_result<T: Expression>(
-    factory: &impl ExpressionFactory<T>,
-    allocator: &impl HeapAllocator<T>,
-) -> EvaluationResult<T> {
-    EvaluationResult::new(
-        create_pending_expression(factory, allocator),
-        DependencyList::empty(),
     )
 }
 
