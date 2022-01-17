@@ -4,64 +4,52 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Context, Result};
+use http::{header, HeaderMap, Request};
 use reflex::{
     compiler::{Compile, CompilerOptions},
-    core::{
-        Applicable, Expression, ExpressionFactory, HeapAllocator, Reducible, Rewritable, Signal,
-        SignalType,
-    },
+    core::{Applicable, Reducible, Rewritable},
     interpreter::InterpreterOptions,
     stdlib::Stdlib,
 };
 use reflex_cli::{compile_entry_point, Syntax};
-use reflex_graphql::{
-    parse_graphql_operation, stdlib::Stdlib as GraphQlStdlib, GraphQlOperationPayload,
-    NoopGraphQlQueryTransform,
-};
-use reflex_handlers::{
-    debug_signal_handler,
-    utils::signal_capture::{SignalPlayback, SignalRecorder},
-    EitherHandler, SIGNAL_TYPE_FETCH, SIGNAL_TYPE_GRAPHQL,
-};
+use reflex_dispatcher::{compose_actors, Action, Actor, EitherActor, SerializableAction};
+use reflex_graphql::{stdlib::Stdlib as GraphQlStdlib, GraphQlOperationPayload};
 use reflex_js::stdlib::Stdlib as JsStdlib;
-use reflex_runtime::{
-    AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator, Runtime, RuntimeCache,
-    RuntimeState, SignalHandler, StreamExt,
+use reflex_json::{json, stdlib::Stdlib as JsonStdlib, JsonValue};
+use reflex_runtime::{AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator};
+
+use crate::{
+    logger::json::JsonActionLogger,
+    middleware::{LoggerMiddleware, ServerMiddleware},
+    server::{HttpGraphQlServerQueryTransform, NoopWebSocketGraphQlServerQueryTransform},
+    GraphQlWebServer, GraphQlWebServerAction,
 };
-
-use crate::compile_graphql_query;
-
-pub fn default_captured_signals() -> Vec<String> {
-    vec![
-        String::from(SIGNAL_TYPE_FETCH),
-        String::from(SIGNAL_TYPE_GRAPHQL),
-    ]
-}
 
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct ExecuteQueryCliOptions {
     pub graph_root: PathBuf,
     pub syntax: Syntax,
     pub query: String,
-    pub args: Option<String>,
-    pub capture_signals: Option<PathBuf>,
-    pub replay_signals: Option<PathBuf>,
-    pub captured_signals: Vec<String>,
-    pub unoptimized: bool,
+    pub variables: Option<String>,
+    pub headers: Option<HeaderMap>,
+    pub capture_effects: Option<PathBuf>,
+    pub replay_effects: Option<PathBuf>,
+    pub captured_effects: Vec<String>,
+    pub debug_actions: bool,
     pub debug_compiler: bool,
-    pub debug_signals: bool,
     pub debug_interpreter: bool,
     pub debug_stack: bool,
 }
 
-pub async fn cli<'de, T, TLoader>(
+pub async fn cli<'de, T, TFactory, TAllocator, TLoader, TMiddleware, TAction, TEnv, TTransform>(
     options: ExecuteQueryCliOptions,
-    env: Option<impl IntoIterator<Item = (String, String)>>,
-    signal_handler: impl SignalHandler<T>,
+    env: Option<TEnv>,
     module_loader: Option<TLoader>,
-    factory: &impl AsyncExpressionFactory<T>,
-    allocator: &impl AsyncHeapAllocator<T>,
-) -> Result<T>
+    middleware: TMiddleware,
+    factory: &TFactory,
+    allocator: &TAllocator,
+    query_transform: TTransform,
+) -> Result<String>
 where
     T: AsyncExpression
         + Rewritable<T>
@@ -70,17 +58,19 @@ where
         + Compile<T>
         + serde::Serialize
         + serde::Deserialize<'de>,
-    T::String: Send + Sync,
-    T::Builtin: From<Stdlib> + From<JsStdlib> + From<GraphQlStdlib>,
+    T::Builtin: From<Stdlib> + From<JsonStdlib> + From<JsStdlib> + From<GraphQlStdlib>,
+    TFactory: AsyncExpressionFactory<T> + Sync,
+    TAllocator: AsyncHeapAllocator<T> + Sync,
     TLoader: Fn(&str, &Path) -> Option<Result<T, String>> + 'static,
+    TMiddleware: Actor<TAction> + Send + 'static,
+    TAction: Action + SerializableAction + GraphQlWebServerAction<T> + Send + 'static,
+    TEnv: IntoIterator<Item = (String, String)>,
+    TTransform: HttpGraphQlServerQueryTransform + Send + 'static,
 {
-    let compiler_options = CompilerOptions {
-        debug: options.debug_compiler,
-        ..if options.unoptimized {
-            CompilerOptions::unoptimized()
-        } else {
-            CompilerOptions::default()
-        }
+    let compiler_options = if options.debug_compiler {
+        CompilerOptions::debug()
+    } else {
+        CompilerOptions::default()
     };
     let interpreter_options = InterpreterOptions {
         debug_instructions: options.debug_interpreter,
@@ -96,156 +86,87 @@ where
         factory,
         allocator,
     )?;
-    let query = parse_graphql_query(
-        &options.query,
-        options.args.as_ref().map(|arg| arg.as_str()),
-        factory,
-        allocator,
-    )?;
-    let operation_id = 0;
-    let (program, entry_point) = compile_graphql_query(
-        query,
-        &operation_id,
-        graph_root,
-        &compiler_options,
-        factory,
-        allocator,
-    )
-    .map_err(|err| anyhow!("{}", err))
-    .with_context(|| format!("Failed to compile GraphQL query"))?;
-    let signal_handler = create_signal_handler(signal_handler, &options)?;
-    let state = RuntimeState::default();
-    let cache = RuntimeCache::default();
-    let runtime = Runtime::new(
-        state,
-        &signal_handler,
-        cache,
-        factory,
-        allocator,
-        interpreter_options,
-        compiler_options,
-    );
-    let subscription = runtime
-        .subscribe(program, entry_point)
-        .await
-        .map_err(|err| anyhow!("{}", err))
-        .with_context(|| "GraphQL subscription failed")?;
-    let id = subscription.id();
-    let result = subscription
-        .into_stream()
-        .filter(|result| !is_pending_result(result, factory))
-        .next()
-        .await
-        .unwrap();
-    runtime.unsubscribe(id).await.unwrap();
-    Ok(result)
-}
-
-fn create_signal_handler<
-    'de,
-    T: AsyncExpression
-        + Rewritable<T>
-        + Reducible<T>
-        + Applicable<T>
-        + Compile<T>
-        + serde::Serialize
-        + serde::Deserialize<'de>,
->(
-    signal_handler: impl SignalHandler<T>,
-    options: &ExecuteQueryCliOptions,
-) -> Result<impl SignalHandler<T>>
-where
-    T::String: Send + Sync,
-{
-    if options.capture_signals.is_none()
-        && options.replay_signals.is_none()
-        && !options.debug_signals
-    {
-        Ok(EitherHandler::Left(signal_handler))
+    let middleware = if options.debug_actions {
+        EitherActor::Left(compose_actors(
+            LoggerMiddleware::new(JsonActionLogger::stderr()),
+            middleware,
+        ))
     } else {
-        let signal_handler = if let Some(path) = &options.replay_signals {
-            eprintln!(
-                "[CLI] Replaying signal results from {}:{}",
-                path.as_path().display(),
-                options
-                    .captured_signals
-                    .iter()
-                    .map(|signal_type| format!("\n  \"{}\"", signal_type))
-                    .collect::<String>()
-            );
-            let signal_playback =
-                SignalPlayback::new(options.captured_signals.iter().cloned(), path.as_path())
-                    .map_err(|err| anyhow!("{}", err))
-                    .with_context(|| format!("Failed to create signal playback handler"))?;
-            EitherHandler::Left(signal_playback.wrap_signal_handler(signal_handler))
-        } else {
-            EitherHandler::Right(signal_handler)
-        };
-        let signal_handler = if let Some(path) = &options.capture_signals {
-            eprintln!(
-                "[CLI] Recording signal results to {}:{}",
-                path.as_path().display(),
-                options
-                    .captured_signals
-                    .iter()
-                    .map(|signal_type| format!("\n  \"{}\"", signal_type))
-                    .collect::<String>()
-            );
-            let signal_recorder =
-                SignalRecorder::new(options.captured_signals.iter().cloned(), path.as_path())
-                    .map_err(|err| anyhow!("{}", err))
-                    .with_context(|| format!("Failed to create signal recorder handler"))?;
-            EitherHandler::Left(signal_recorder.wrap_signal_handler(signal_handler))
-        } else {
-            EitherHandler::Right(signal_handler)
-        };
-        let signal_handler = if options.debug_signals {
-            EitherHandler::Left(debug_signal_handler(signal_handler))
-        } else {
-            EitherHandler::Right(signal_handler)
-        };
-        Ok(EitherHandler::Right(signal_handler))
+        EitherActor::Right(middleware)
+    };
+    let app = GraphQlWebServer::<TAction>::new(
+        graph_root,
+        ServerMiddleware::post(middleware),
+        compiler_options,
+        interpreter_options,
+        factory.clone(),
+        allocator.clone(),
+        query_transform,
+        NoopWebSocketGraphQlServerQueryTransform,
+        get_http_query_metric_labels,
+        get_websocket_connection_metric_labels,
+        get_websocket_operation_metric_labels,
+    );
+    let query = options.query;
+    let variables = match options.variables {
+        None => serde_json::Value::Object(serde_json::Map::new()),
+        Some(variables) => serde_json::from_str(&variables)
+            .with_context(|| anyhow!("Invalid query parameters: {}", variables))?,
+    };
+    let result = app
+        .handle_http_request({
+            let request = Request::builder()
+                .method("POST")
+                .header(header::CONTENT_TYPE, "application/json");
+            let request = options
+                .headers
+                .into_iter()
+                .flatten()
+                .filter_map(|(key, value)| key.map(|key| (key, value)))
+                .fold(request, |request, (key, value)| request.header(key, value));
+            request
+                .body({
+                    json!({
+                        "query": query,
+                        "variables": variables,
+                    })
+                    .to_string()
+                    .into()
+                })
+                .with_context(|| anyhow!("Failed to create GraphQL request payload"))?
+        })
+        .await;
+    let status = result.status();
+    let body = result.into_body();
+    let bytes = hyper::body::to_bytes(body)
+        .await
+        .with_context(|| anyhow!("Invalid response body"))?;
+    let response = String::from_utf8(bytes.into_iter().collect())
+        .with_context(|| anyhow!("Invalid response encoding"))?;
+    if status.is_success() {
+        Ok(response)
+    } else {
+        Err(anyhow!("HTTP error {}:\n\n{}", status, response))
     }
 }
 
-fn parse_graphql_query<T: Expression>(
-    query: &str,
-    args: Option<&str>,
-    factory: &impl ExpressionFactory<T>,
-    allocator: &impl HeapAllocator<T>,
-) -> Result<T>
-where
-    T::Builtin: From<Stdlib> + From<GraphQlStdlib>,
-{
-    let args = args
-        .map(|args| {
-            serde_json::from_str(&args)
-                .map(|value| match value {
-                    serde_json::Value::Object(s) => s.into_iter().collect::<Vec<_>>(),
-                    _ => unreachable!(),
-                })
-                .with_context(|| format!("Failed to parse GraphQL arguments: {}", args))
-        })
-        .transpose()?;
-    let operation =
-        GraphQlOperationPayload::new(String::from(query), None, args, Option::<Vec<_>>::None);
-    parse_graphql_operation(
-        &operation,
-        factory,
-        allocator,
-        &NoopGraphQlQueryTransform {},
-    )
-    .map_err(|err| anyhow!("{}", err))
-    .with_context(|| format!("Failed to parse GraphQL operation"))
+fn get_http_query_metric_labels(
+    _operation: &GraphQlOperationPayload,
+    _headers: &HeaderMap,
+) -> Vec<(String, String)> {
+    Vec::new()
 }
 
-fn is_pending_result<T: Expression>(value: &T, factory: &impl ExpressionFactory<T>) -> bool {
-    factory
-        .match_signal_term(value)
-        .map(|signal| signal.signals().iter().any(is_pending_signal))
-        .unwrap_or(false)
+fn get_websocket_connection_metric_labels(
+    _connection_params: Option<&JsonValue>,
+    _headers: &HeaderMap,
+) -> Vec<(String, String)> {
+    Vec::new()
 }
 
-fn is_pending_signal<T: Expression>(value: &Signal<T>) -> bool {
-    matches!(value.signal_type(), SignalType::Pending)
+fn get_websocket_operation_metric_labels(
+    _operation_name: Option<&str>,
+    _operation: &GraphQlOperationPayload,
+) -> Vec<(String, String)> {
+    Vec::new()
 }

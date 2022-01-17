@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use std::path::Path;
+use std::{iter::empty, path::Path};
 
 use anyhow::{anyhow, Context, Result};
 use reflex::{
@@ -10,11 +10,14 @@ use reflex::{
     env::inject_env_vars,
     stdlib::Stdlib,
 };
-use reflex_graphql::graphql_loader;
+use reflex_handlers::{
+    imports::handler_imports, loader::graphql_loader, stdlib::Stdlib as HandlersStdlib,
+};
 use reflex_js::{
     builtin_imports, compose_module_loaders, create_js_env, create_module_loader, parse_module,
     static_module_loader, stdlib::Stdlib as JsStdlib,
 };
+use reflex_json::stdlib::Stdlib as JsonStdlib;
 
 use crate::{compile_graph_root, SyntaxParser};
 
@@ -28,13 +31,14 @@ pub fn default_js_loaders<'a, T: Expression + 'static>(
 ) -> impl Fn(&str, &Path) -> Option<Result<T, String>> + 'static
 where
     T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
-    T::Builtin: From<Stdlib> + From<JsStdlib>,
+    T::Builtin: From<Stdlib> + From<JsonStdlib> + From<JsStdlib> + From<HandlersStdlib>,
 {
     compose_module_loaders(
         static_module_loader(
             imports
                 .into_iter()
-                .chain(builtin_imports(factory, allocator)),
+                .chain(builtin_imports(factory, allocator))
+                .chain(handler_imports(factory, allocator)),
         ),
         graphql_loader(factory, allocator),
     )
@@ -45,7 +49,7 @@ pub fn create_js_script_parser<T: Expression + Rewritable<T> + 'static>(
     allocator: &(impl HeapAllocator<T> + Clone + 'static),
 ) -> impl SyntaxParser<T>
 where
-    T::Builtin: From<Stdlib> + From<JsStdlib>,
+    T::Builtin: From<Stdlib> + From<JsonStdlib> + From<JsStdlib>,
 {
     let env = create_js_env(factory, allocator);
     let factory = factory.clone();
@@ -59,12 +63,13 @@ pub fn create_js_module_parser<T: Expression + Rewritable<T> + 'static>(
     allocator: &(impl HeapAllocator<T> + Clone + 'static),
 ) -> impl SyntaxParser<T>
 where
-    T::Builtin: From<Stdlib> + From<JsStdlib>,
+    T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
+    T::Builtin: From<Stdlib> + From<JsonStdlib> + From<JsStdlib> + From<HandlersStdlib>,
 {
     let env = create_js_env(factory, allocator);
     let loader = create_module_loader(
         env.clone(),
-        Some(static_module_loader(builtin_imports(factory, allocator))),
+        Some(default_js_loaders(empty(), factory, allocator)),
         factory,
         allocator,
     );
@@ -84,7 +89,7 @@ pub fn compile_js_entry_point<T: Expression + Rewritable<T> + Reducible<T> + 'st
 ) -> Result<(Program, InstructionPointer)>
 where
     T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
-    T::Builtin: From<Stdlib> + From<JsStdlib>,
+    T::Builtin: From<Stdlib> + From<JsonStdlib> + From<JsStdlib>,
     TLoader: Fn(&str, &Path) -> Option<Result<T, String>> + 'static,
 {
     let input = std::fs::read_to_string(path).with_context(|| {

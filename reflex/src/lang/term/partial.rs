@@ -260,16 +260,7 @@ impl<T: Expression + Applicable<T> + Compile<T>> Compile<T> for PartialApplicati
 }
 impl<T: Expression> std::fmt::Display for PartialApplicationTerm<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "<partial:{}:{}>",
-            self.target,
-            self.args
-                .iter()
-                .map(|arg| format!("{}", arg))
-                .collect::<Vec<_>>()
-                .join(",")
-        )
+        write!(f, "<partial:{}:{}>", self.args.len(), self.target)
     }
 }
 

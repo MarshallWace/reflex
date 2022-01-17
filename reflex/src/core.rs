@@ -3,6 +3,8 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use std::convert::TryFrom;
+use std::rc::Rc;
+use std::sync::Arc;
 use std::{
     collections::{hash_map::DefaultHasher, BTreeSet, HashSet},
     hash::{Hash, Hasher},
@@ -739,6 +741,56 @@ impl<T: Hash> StateCache<T> {
         }
         result
     }
+    pub fn extend(&mut self, entries: impl IntoIterator<Item = (StateToken, T)>) {
+        let mut hasher = DefaultHasher::new();
+        hasher.write_u64(self.hash);
+        for (key, value) in entries {
+            hasher.write_u64(key);
+            hasher.write_u64(hash_object(&value));
+            self.set(key, value);
+        }
+        self.hash = hasher.finish();
+    }
+    pub fn len(&self) -> usize {
+        self.values.len()
+    }
+}
+impl<T: Hash> FromIterator<(StateToken, T)> for StateCache<T> {
+    fn from_iter<I: IntoIterator<Item = (StateToken, T)>>(iter: I) -> Self {
+        let mut hasher = DefaultHasher::new();
+        let mut values = FnvHashMap::default();
+        for (key, value) in iter {
+            hasher.write_u64(key);
+            std::hash::Hash::hash(&value, &mut hasher);
+            values.insert(key, value);
+        }
+        Self {
+            hash: hasher.finish(),
+            values,
+        }
+    }
+}
+impl<T: Hash> DynamicState<T> for Rc<StateCache<T>> {
+    fn id(&self) -> HashId {
+        (&**self).id()
+    }
+    fn has(&self, key: &StateToken) -> bool {
+        (&**self).has(key)
+    }
+    fn get(&self, key: &StateToken) -> Option<&T> {
+        (&**self).get(key)
+    }
+}
+impl<T: Hash> DynamicState<T> for Arc<StateCache<T>> {
+    fn id(&self) -> HashId {
+        (&**self).id()
+    }
+    fn has(&self, key: &StateToken) -> bool {
+        (&**self).has(key)
+    }
+    fn get(&self, key: &StateToken) -> Option<&T> {
+        (&**self).get(key)
+    }
 }
 
 pub fn hash_state_values<T: Expression>(
@@ -1007,7 +1059,7 @@ pub struct Signal<T: Expression> {
     args: ExpressionList<T>,
 }
 impl<T: Expression> Signal<T> {
-    pub(crate) fn new(signal_type: SignalType, args: ExpressionList<T>) -> Self {
+    pub fn new(signal_type: SignalType, args: ExpressionList<T>) -> Self {
         let hash = {
             let mut hasher = DefaultHasher::new();
             signal_type.hash(&mut hasher);

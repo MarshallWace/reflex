@@ -7,14 +7,11 @@ use reflex::{
     stdlib::Stdlib,
 };
 
-pub(crate) mod date;
-pub use date::import_date;
-pub(crate) mod http;
-pub use http::import_http;
-pub(crate) mod loader;
-pub use loader::import_loader;
+pub(crate) mod core;
 pub(crate) mod utils;
-pub use utils::import_utils;
+
+pub use self::core::import_core;
+pub use self::utils::import_utils;
 
 pub fn builtin_imports<T: Expression>(
     factory: &impl ExpressionFactory<T>,
@@ -24,9 +21,7 @@ where
     T::Builtin: From<Stdlib> + From<JsStdlib>,
 {
     vec![
-        ("reflex::date", import_date(factory, allocator)),
-        ("reflex::http", import_http(factory, allocator)),
-        ("reflex::loader", import_loader(factory, allocator)),
+        ("reflex::core", import_core(factory, allocator)),
         ("reflex::utils", import_utils(factory, allocator)),
     ]
 }

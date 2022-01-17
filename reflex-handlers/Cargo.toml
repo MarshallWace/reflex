@@ -9,16 +9,23 @@ edition = "2021"
 
 [dependencies]
 reflex = { path = "../reflex" }
+reflex-dispatcher = { path = "../reflex-dispatcher" }
 reflex-graphql = { path = "../reflex-graphql" }
 reflex-json = { path = "../reflex-json" }
 reflex-runtime = { path = "../reflex-runtime" }
-futures-util = "0.3"
-futures = "0.3"
+reflex-utils = { path = "../reflex-utils" }
+bytes = "1.1.0"
+crc = "2.0.0"
+futures = "*"
+http = "0.2.6"
 hyper = { version = "0.14", features = ["full"] }
 hyper-tls = "0.5.0"
-tokio = { version = "1", features = ["full"] }
-tokio-stream = { version = "0.1", features = ["sync"] }
-tokio-tungstenite = { version = "0.14" }
-uuid = { version = "0.8", features = ["v4"] }
-serde_json = "1.0"
+metrics = "0.18"
 serde = { version = "1.0", features = ["derive"] }
+strum = "0.22"
+strum_macros = "0.22"
+tokio = { version = "1", features = ["full", "tracing"] }
+tokio-stream = { version = "0.1", features = ["sync"] }
+tokio-tungstenite = { version = "0.17.1" }
+tonic = "0.6.2"
+uuid = { version = "1.0.0-alpha.1", features = ["v4", "fast-rng"] }

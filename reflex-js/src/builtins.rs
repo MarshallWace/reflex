@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
+use std::convert::{TryFrom, TryInto};
+
 use reflex::core::Uuid;
 use reflex::{
     core::{
@@ -10,19 +12,25 @@ use reflex::{
     },
     stdlib::Stdlib,
 };
+use reflex_json::stdlib::Stdlib as JsonStdlib;
 use serde::{Deserialize, Serialize};
-use std::convert::{TryFrom, TryInto};
 
 use crate::stdlib::Stdlib as JsStdlib;
 
 #[derive(Clone, Copy, Eq, PartialEq, Hash, Debug, Serialize, Deserialize)]
 pub enum JsBuiltins {
     Stdlib(Stdlib),
+    Json(JsonStdlib),
     Js(JsStdlib),
 }
 impl From<Stdlib> for JsBuiltins {
     fn from(builtin: Stdlib) -> Self {
         JsBuiltins::Stdlib(builtin)
+    }
+}
+impl From<JsonStdlib> for JsBuiltins {
+    fn from(target: JsonStdlib) -> Self {
+        JsBuiltins::Json(target)
     }
 }
 impl From<JsStdlib> for JsBuiltins {
@@ -34,6 +42,7 @@ impl JsBuiltins {
     pub fn entries() -> impl Iterator<Item = Self> {
         Stdlib::entries()
             .map(Self::Stdlib)
+            .chain(JsonStdlib::entries().map(Self::Json))
             .chain(JsStdlib::entries().map(Self::Js))
     }
 }
@@ -41,6 +50,7 @@ impl Uid for JsBuiltins {
     fn uid(&self) -> reflex::core::Uuid {
         match self {
             JsBuiltins::Stdlib(term) => term.uid(),
+            JsBuiltins::Json(term) => term.uid(),
             JsBuiltins::Js(term) => term.uid(),
         }
     }
@@ -49,6 +59,7 @@ impl Builtin for JsBuiltins {
     fn arity<T: Expression<Builtin = Self> + Applicable<T>>(&self) -> Option<Arity> {
         match self {
             JsBuiltins::Stdlib(term) => term.arity::<T>(),
+            JsBuiltins::Json(term) => term.arity::<T>(),
             JsBuiltins::Js(term) => term.arity::<T>(),
         }
     }
@@ -61,6 +72,7 @@ impl Builtin for JsBuiltins {
     ) -> Result<T, String> {
         match self {
             JsBuiltins::Stdlib(term) => term.apply(args, factory, allocator, cache),
+            JsBuiltins::Json(term) => term.apply(args, factory, allocator, cache),
             JsBuiltins::Js(term) => term.apply(args, factory, allocator, cache),
         }
     }
@@ -70,6 +82,7 @@ impl Builtin for JsBuiltins {
     ) -> bool {
         match self {
             JsBuiltins::Stdlib(term) => term.should_parallelize(args),
+            JsBuiltins::Json(term) => term.should_parallelize(args),
             JsBuiltins::Js(term) => term.should_parallelize(args),
         }
     }
@@ -78,6 +91,7 @@ impl std::fmt::Display for JsBuiltins {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Stdlib(target) => std::fmt::Display::fmt(target, f),
+            Self::Json(target) => std::fmt::Display::fmt(target, f),
             Self::Js(target) => std::fmt::Display::fmt(target, f),
         }
     }
@@ -87,6 +101,7 @@ impl TryFrom<Uuid> for JsBuiltins {
     fn try_from(value: Uuid) -> Result<Self, Self::Error> {
         TryInto::<Stdlib>::try_into(value)
             .map(Self::Stdlib)
+            .or_else(|_| TryInto::<JsonStdlib>::try_into(value).map(Self::Json))
             .or_else(|_| TryInto::<JsStdlib>::try_into(value).map(Self::Js))
     }
 }

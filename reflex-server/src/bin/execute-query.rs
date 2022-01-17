@@ -1,22 +1,28 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use std::path::PathBuf;
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use clap::Parser;
-use reflex::{
-    allocator::DefaultAllocator,
-    core::{ExpressionFactory, SerializeJson},
-    lang::SharedTermFactory,
+use reflex::{allocator::DefaultAllocator, lang::SharedTermFactory};
+use reflex_cli::{syntax::js::default_js_loaders, Syntax};
+use reflex_graphql::graphql_parser;
+use reflex_handlers::{
+    actor::{fetch::EFFECT_TYPE_FETCH, graphql::EFFECT_TYPE_GRAPHQL, grpc::EFFECT_TYPE_GRPC},
+    default_handlers,
 };
-use reflex_cli::{format_signal_result, syntax::js::default_js_loaders, Syntax};
-use reflex_graphql::graphql_imports;
-use reflex_handlers::builtin_signal_handler;
 use reflex_server::{
+    action::ServerCliAction,
     builtins::ServerBuiltins,
-    cli::execute_query::{cli, default_captured_signals, ExecuteQueryCliOptions},
+    cli::execute_query::{cli, ExecuteQueryCliOptions},
+    imports::server_imports,
+    GraphQlServerQueryTransform,
 };
+use reflex_utils::reconnect::NoopReconnectTimeout;
 
 /// Execute a GraphQL query against the provided graph root
 #[derive(Parser)]
@@ -27,30 +33,30 @@ pub struct Args {
     /// Graph definition syntax
     #[clap(long, default_value = "javascript")]
     syntax: Syntax,
+    /// Path to GraphQL schema SDL
+    #[clap(long)]
+    schema: Option<PathBuf>,
     /// GraphQL query
     #[clap(long)]
     query: String,
-    /// JSON-formatted GraphQL query arguments
+    /// JSON-formatted GraphQL query variables
     #[clap(long)]
-    args: Option<String>,
+    variables: Option<String>,
     /// Path to capture runtime signal playback file
     #[clap(long)]
-    capture_signals: Option<PathBuf>,
+    capture_effects: Option<PathBuf>,
     /// Path to previously-captured signal playback file
     #[clap(long)]
-    replay_signals: Option<PathBuf>,
+    replay_effects: Option<PathBuf>,
     /// Comma-separated list of captured signal types
     #[clap(long)]
-    captured_signals: Option<Vec<String>>,
-    /// Prevent static compiler optimizations
+    captured_effects: Option<Vec<String>>,
+    /// Log runtime actions
     #[clap(long)]
-    unoptimized: bool,
+    log: bool,
     /// Log compiler output
     #[clap(long)]
     debug_compiler: bool,
-    /// Log runtime signals
-    #[clap(long)]
-    debug_signals: bool,
     /// Log interpreter instructions
     #[clap(long)]
     debug_interpreter: bool,
@@ -64,47 +70,69 @@ impl Into<ExecuteQueryCliOptions> for Args {
             graph_root: self.graph_root,
             syntax: self.syntax,
             query: self.query,
-            args: self.args,
-            capture_signals: self.capture_signals,
-            replay_signals: self.replay_signals,
-            unoptimized: self.unoptimized,
+            variables: self.variables,
+            headers: None,
+            capture_effects: self.capture_effects,
+            replay_effects: self.replay_effects,
+            debug_actions: self.log,
             debug_compiler: self.debug_compiler,
-            debug_signals: self.debug_signals,
             debug_interpreter: self.debug_interpreter,
             debug_stack: self.debug_stack,
-            captured_signals: self
-                .captured_signals
-                .unwrap_or_else(|| default_captured_signals()),
+            captured_effects: self
+                .captured_effects
+                .unwrap_or_else(|| default_captured_effects()),
         }
     }
 }
 
+fn default_captured_effects() -> Vec<String> {
+    vec![
+        String::from(EFFECT_TYPE_FETCH),
+        String::from(EFFECT_TYPE_GRAPHQL),
+        String::from(EFFECT_TYPE_GRPC),
+    ]
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
+    let args = Args::parse();
+    let schema = if let Some(schema_path) = &args.schema {
+        Some(load_graphql_schema(schema_path.as_path())?)
+    } else {
+        None
+    };
     let factory = SharedTermFactory::<ServerBuiltins>::default();
     let allocator = DefaultAllocator::default();
-    let signal_handler = builtin_signal_handler(&factory, &allocator);
     let module_loader = Some(default_js_loaders(
-        graphql_imports(&factory, &allocator),
+        server_imports(&factory, &allocator),
         &factory,
         &allocator,
     ));
-    let result = cli(
-        Args::parse().into(),
-        Some(std::env::vars()),
-        signal_handler,
-        module_loader,
+    let middleware = default_handlers::<ServerCliAction<_>, _, _, _, _>(
         &factory,
         &allocator,
+        NoopReconnectTimeout,
+    );
+    let query_transform = GraphQlServerQueryTransform::new(schema)
+        .map_err(|err| anyhow!("{}", err))
+        .with_context(|| String::from("GraphQL schema error"))?;
+    cli(
+        args.into(),
+        Some(std::env::vars()),
+        module_loader,
+        middleware,
+        &factory,
+        &allocator,
+        query_transform,
     )
-    .await?;
-    let output = if let Some(signal) = factory.match_signal_term(&result) {
-        Err(anyhow!("{}", format_signal_result(signal, &factory)))
-    } else if let Ok(value) = result.to_json() {
-        Ok(format!("{}", value))
-    } else {
-        Err(anyhow!("Invalid query result: {}", result))
-    }?;
-    println!("{}", output);
-    Ok(())
+    .await
+    .map(|response| println!("{}", response))
+}
+
+fn load_graphql_schema(path: &Path) -> Result<graphql_parser::schema::Document<'static, String>> {
+    let source = fs::read_to_string(path)
+        .with_context(|| format!("Failed to load GraphQL schema: {}", path.to_string_lossy()))?;
+    graphql_parser::parse_schema(&source)
+        .map(|document| document.into_static())
+        .with_context(|| format!("Failed to load GraphQL schema: {}", path.to_string_lossy()))
 }

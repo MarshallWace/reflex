@@ -1,0 +1,13 @@
+[package]
+name = "reflex-dispatcher"
+version = "0.1.0"
+license = "Apache-2.0"
+authors = ["Marshall Wace LLP <opensource@mwam.com>", "Tim Kendrick <t.kendrick@mwam.com>"]
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+futures = "*"
+serde_json = "1.0"
+tokio = { version = "1", features = ["full", "tracing"] }

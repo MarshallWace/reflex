@@ -10,7 +10,9 @@ use reflex::{
 };
 use serde_json::{Map, Value};
 
-pub use serde_json::{Map as JsonMap, Value as JsonValue};
+pub mod stdlib;
+
+pub use serde_json::{json, Map as JsonMap, Value as JsonValue, Number as JsonNumber};
 
 pub fn json_object(properties: impl IntoIterator<Item = (String, JsonValue)>) -> JsonValue {
     JsonValue::Object(JsonMap::from_iter(properties))

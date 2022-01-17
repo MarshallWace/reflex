@@ -15,6 +15,7 @@ use reflex::{
     core::{Expression, ExpressionFactory, HeapAllocator, Rewritable},
     stdlib::Stdlib,
 };
+use reflex_json::stdlib::Stdlib as JsonStdlib;
 
 pub fn create_module_loader<T: Expression + Rewritable<T> + 'static>(
     env: Env<T>,
@@ -23,7 +24,7 @@ pub fn create_module_loader<T: Expression + Rewritable<T> + 'static>(
     allocator: &(impl HeapAllocator<T> + Clone + 'static),
 ) -> impl Fn(&str, &Path) -> Option<Result<T, String>>
 where
-    T::Builtin: From<Stdlib> + From<JsStdlib>,
+    T::Builtin: From<Stdlib> + From<JsonStdlib> + From<JsStdlib>,
 {
     let factory = factory.clone();
     let allocator = allocator.clone();
@@ -110,7 +111,7 @@ pub fn create_js_loader<T: Expression + Rewritable<T> + 'static>(
     allocator: &(impl HeapAllocator<T> + Clone),
 ) -> impl Fn(&str, &Path) -> Option<Result<T, String>>
 where
-    T::Builtin: From<Stdlib> + From<JsStdlib>,
+    T::Builtin: From<Stdlib> + From<JsonStdlib> + From<JsStdlib>,
 {
     let factory = factory.clone();
     let allocator = allocator.clone();
@@ -146,7 +147,7 @@ pub fn create_js_env<T: Expression + Rewritable<T>>(
     allocator: &impl HeapAllocator<T>,
 ) -> Env<T>
 where
-    T::Builtin: From<Stdlib> + From<JsStdlib>,
+    T::Builtin: From<Stdlib> + From<JsonStdlib> + From<JsStdlib>,
 {
     Env::new().with_globals(builtin_globals(factory, allocator))
 }

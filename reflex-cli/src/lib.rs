@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
+use std::{path::Path, str::FromStr};
+
 use anyhow::{anyhow, Result};
 use reflex::{
     compiler::{Compile, Compiler, CompilerMode, CompilerOptions, InstructionPointer, Program},
@@ -12,19 +14,11 @@ use reflex::{
     lang::{term::SignalTerm, ValueTerm},
     stdlib::Stdlib,
 };
+use reflex_handlers::stdlib::Stdlib as HandlersStdlib;
 use reflex_js::stdlib::Stdlib as JsStdlib;
-use std::{io::Write, path::Path, str::FromStr, time::Instant};
+use reflex_json::stdlib::Stdlib as JsonStdlib;
 
-pub mod cli {
-    pub mod compiler;
-}
-pub mod syntax {
-    pub mod bytecode;
-    pub mod js;
-    pub mod json;
-    pub mod sexpr;
-}
-use syntax::{
+use crate::syntax::{
     bytecode::compile_bytecode_entry_point,
     js::compile_js_entry_point,
     js::{create_js_module_parser, create_js_script_parser},
@@ -33,6 +27,18 @@ use syntax::{
     sexpr::compile_sexpr_entry_point,
     sexpr::create_sexpr_parser,
 };
+
+pub mod builtins;
+pub mod cli {
+    pub mod compiler;
+}
+pub mod repl;
+pub mod syntax {
+    pub mod bytecode;
+    pub mod js;
+    pub mod json;
+    pub mod sexpr;
+}
 
 #[derive(Eq, PartialEq, Clone, Copy, Debug)]
 pub enum Syntax {
@@ -74,8 +80,8 @@ pub fn create_parser<T>(
     allocator: &(impl HeapAllocator<T> + Clone + 'static),
 ) -> impl SyntaxParser<T>
 where
-    T: Expression + Reducible<T> + Rewritable<T> + 'static,
-    T::Builtin: From<Stdlib> + From<JsStdlib>,
+    T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T> + 'static,
+    T::Builtin: From<Stdlib> + From<JsonStdlib> + From<JsStdlib> + From<HandlersStdlib>,
 {
     match (syntax, entry_path) {
         (Syntax::JavaScript, None) => {
@@ -116,7 +122,7 @@ pub fn compile_entry_point<T, TLoader>(
 ) -> Result<(Program, InstructionPointer)>
 where
     T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T> + 'static,
-    T::Builtin: From<Stdlib> + From<JsStdlib>,
+    T::Builtin: From<Stdlib> + From<JsonStdlib> + From<JsStdlib>,
     TLoader: Fn(&str, &Path) -> Option<Result<T, String>> + 'static,
 {
     match syntax {
@@ -141,14 +147,10 @@ fn compile_graph_root<T: Expression + Rewritable<T> + Reducible<T> + Applicable<
     compiler_options: &CompilerOptions,
     compiler_mode: CompilerMode,
 ) -> Result<(Program, InstructionPointer)> {
-    eprint!("[Compiler] Compiling graph root...");
-    let _ = std::io::stdout().flush();
-    let start_time = Instant::now();
-    let compiled = Compiler::new(*compiler_options, None)
+    let program = Compiler::new(*compiler_options, None)
         .compile(&expression, compiler_mode, factory, allocator)
-        .map_err(|err| anyhow!("{}", err));
-    eprintln!(" {:?}", start_time.elapsed());
-    compiled.map(|program| (program, InstructionPointer::default()))
+        .map_err(|err| anyhow!("{}", err))?;
+    Ok((program, InstructionPointer::default()))
 }
 
 pub fn format_signal_result<T: Expression>(

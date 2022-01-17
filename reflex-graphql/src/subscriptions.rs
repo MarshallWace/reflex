@@ -24,43 +24,37 @@ impl GraphQlSubscriptionClientMessage {
             payload,
         })
     }
-    pub fn start(subscription_id: String, payload: GraphQlOperationPayload) -> Self {
+    pub fn start(operation_id: String, payload: GraphQlOperationPayload) -> Self {
         GraphQlSubscriptionClientMessage::Start(GraphQlSubscriptionStartMessage {
-            id: subscription_id,
+            id: operation_id,
             payload,
         })
     }
-    pub fn stop(subscription_id: String) -> Self {
-        GraphQlSubscriptionClientMessage::Stop(GraphQlSubscriptionStopMessage {
-            id: subscription_id,
-        })
+    pub fn stop(operation_id: String) -> Self {
+        GraphQlSubscriptionClientMessage::Stop(GraphQlSubscriptionStopMessage { id: operation_id })
     }
     pub fn update(
-        subscription_id: String,
+        operation_id: String,
         payload: impl IntoIterator<Item = (String, JsonValue)>,
     ) -> Self {
         GraphQlSubscriptionClientMessage::Update(GraphQlSubscriptionUpdateMessage {
-            id: subscription_id,
+            id: operation_id,
             payload: payload.into_iter().collect(),
         })
     }
     pub fn connection_terminate() -> Self {
         GraphQlSubscriptionClientMessage::ConnectionTerminate
     }
-    pub fn into_serialized(self) -> Result<String, String> {
+    pub fn into_json(self) -> JsonValue {
         match self {
-            Self::ConnectionInit(message) => Ok(serialize_message(
-                "connection_init",
-                None,
-                message.into_payload(),
-            )),
-            Self::Start(message) => Ok(serialize_message(
-                "start",
-                Some(message.id),
-                Some(message.payload.into_json()),
-            )),
-            Self::Stop(message) => Ok(serialize_message("stop", Some(message.id), None)),
-            Self::Update(message) => Ok(serialize_message(
+            Self::ConnectionInit(message) => {
+                serialize_message("connection_init", None, message.into_payload())
+            }
+            Self::Start(message) => {
+                serialize_message("start", Some(message.id), Some(message.payload.into_json()))
+            }
+            Self::Stop(message) => serialize_message("stop", Some(message.id), None),
+            Self::Update(message) => serialize_message(
                 "update",
                 Some(message.id),
                 Some(JsonValue::Object(JsonMap::from_iter(
@@ -69,8 +63,8 @@ impl GraphQlSubscriptionClientMessage {
                         .iter()
                         .map(|(key, value)| (key.clone(), value.clone())),
                 ))),
-            )),
-            Self::ConnectionTerminate => Ok(serialize_message("connection_terminate", None, None)),
+            ),
+            Self::ConnectionTerminate => serialize_message("connection_terminate", None, None),
         }
     }
 }
@@ -90,11 +84,11 @@ impl GraphQlSubscriptionConnectionInitMessage {
 
 #[derive(Clone, Debug)]
 pub struct GraphQlSubscriptionStartMessage {
-    id: SubscriptionId,
+    id: OperationId,
     payload: GraphQlOperationPayload,
 }
 impl GraphQlSubscriptionStartMessage {
-    pub fn subscription_id(&self) -> &SubscriptionId {
+    pub fn operation_id(&self) -> &OperationId {
         &self.id
     }
     pub fn payload(&self) -> &GraphQlOperationPayload {
@@ -104,21 +98,21 @@ impl GraphQlSubscriptionStartMessage {
 
 #[derive(Clone, Debug)]
 pub struct GraphQlSubscriptionStopMessage {
-    id: SubscriptionId,
+    id: OperationId,
 }
 impl GraphQlSubscriptionStopMessage {
-    pub fn subscription_id(&self) -> &SubscriptionId {
+    pub fn operation_id(&self) -> &OperationId {
         &self.id
     }
 }
 
 #[derive(Clone, Debug)]
 pub struct GraphQlSubscriptionUpdateMessage {
-    id: SubscriptionId,
+    id: OperationId,
     payload: HashMap<String, JsonValue>,
 }
 impl GraphQlSubscriptionUpdateMessage {
-    pub fn subscription_id(&self) -> &SubscriptionId {
+    pub fn operation_id(&self) -> &OperationId {
         &self.id
     }
     pub fn payload(&self) -> &HashMap<String, JsonValue> {
@@ -129,32 +123,32 @@ impl GraphQlSubscriptionUpdateMessage {
     }
 }
 
-pub type SubscriptionId = String;
+pub type OperationId = String;
 
 #[derive(Clone, Debug)]
 pub enum GraphQlSubscriptionServerMessage {
     ConnectionAck,
     ConnectionError(JsonValue),
-    Data(SubscriptionId, JsonValue),
-    Patch(SubscriptionId, JsonValue),
-    Error(SubscriptionId, JsonValue),
-    Complete(SubscriptionId),
+    Data(OperationId, JsonValue),
+    Patch(OperationId, JsonValue),
+    Error(OperationId, JsonValue),
+    Complete(OperationId),
     // TODO: Implement keepalive
     #[allow(dead_code)]
     ConnectionKeepAlive,
 }
 impl GraphQlSubscriptionServerMessage {
-    pub fn into_serialized(self) -> Result<String, String> {
+    pub fn into_json(self) -> JsonValue {
         match self {
-            Self::ConnectionAck => Ok(serialize_message("connection_ack", None, None)),
+            Self::ConnectionAck => serialize_message("connection_ack", None, None),
             Self::ConnectionError(error) => {
-                Ok(serialize_message("connection_error", None, Some(error)))
+                serialize_message("connection_error", None, Some(error))
             }
-            Self::Data(id, payload) => Ok(serialize_message("data", Some(id), Some(payload))),
-            Self::Patch(id, payload) => Ok(serialize_message("patch", Some(id), Some(payload))),
-            Self::Error(id, error) => Ok(serialize_message("error", Some(id), Some(error))),
-            Self::Complete(id) => Ok(serialize_message("complete", Some(id), None)),
-            Self::ConnectionKeepAlive => Ok(serialize_message("ka", None, None)),
+            Self::Data(id, payload) => serialize_message("data", Some(id), Some(payload)),
+            Self::Patch(id, payload) => serialize_message("patch", Some(id), Some(payload)),
+            Self::Error(id, error) => serialize_message("error", Some(id), Some(error)),
+            Self::Complete(id) => serialize_message("complete", Some(id), None),
+            Self::ConnectionKeepAlive => serialize_message("ka", None, None),
         }
     }
 }
@@ -163,7 +157,7 @@ fn serialize_message(
     message_type: &'static str,
     id: Option<String>,
     payload: Option<JsonValue>,
-) -> String {
+) -> JsonValue {
     let id = id.map(|id| String::from(id));
     let properties = vec![
         ("type", Some(JsonValue::String(String::from(message_type)))),
@@ -175,7 +169,6 @@ fn serialize_message(
             .into_iter()
             .filter_map(|(key, value)| value.map(|value| (String::from(key), value))),
     ))
-    .to_string()
 }
 
 pub fn deserialize_graphql_client_message(
@@ -239,7 +232,7 @@ fn deserialize_message_id(message: &JsonMap<String, JsonValue>) -> Result<String
     match message.get("id") {
         None => Err(String::from("Missing subscription ID")),
         Some(id) => match id {
-            JsonValue::String(subscription_id) => Ok(subscription_id.clone()),
+            JsonValue::String(operation_id) => Ok(operation_id.clone()),
             _ => Err(String::from("Invalid subscription ID")),
         },
     }

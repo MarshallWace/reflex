@@ -11,71 +11,136 @@ use reflex::{
     lang::{create_struct, term::SignalTerm, ValueTerm},
     stdlib::Stdlib,
 };
-use reflex_json::{json_array, json_object, sanitize, JsonValue};
+use reflex_json::{json_object, sanitize, JsonValue};
 
-pub use graphql_parser::query as graphql;
+pub use graphql_parser;
 
-mod imports;
-pub use imports::graphql_imports;
-mod loader;
-pub use loader::graphql_loader;
 mod operation;
-pub use operation::{deserialize_graphql_operation, GraphQlOperationPayload};
+pub use operation::{
+    deserialize_graphql_operation, graphql_variables_are_equal, GraphQlOperationPayload,
+    GraphQlQuery,
+};
 pub mod inject_args;
 pub mod stdlib;
+pub mod validate_query;
 use stdlib::Stdlib as GraphQlStdlib;
 pub mod subscriptions;
-pub type GraphQlAst<'a> = Document<'a, GraphQlText<'a>>;
-pub type GraphQlText<'a> = std::borrow::Cow<'a, str>;
 
 #[allow(type_alias_bounds)]
-type QueryVariables<'a, T: Expression> = HashMap<GraphQlText<'a>, T>;
-type QueryFragments<'src, 'a> =
-    HashMap<GraphQlText<'src>, &'a FragmentDefinition<'src, GraphQlText<'src>>>;
+type QueryVariables<'a, TText: Text<'a>, T: Expression> = HashMap<TText::Value, T>;
+#[allow(type_alias_bounds)]
+type QueryFragments<'src, 'a, TText: GraphQlText<'src>> =
+    HashMap<TText::Value, &'a FragmentDefinition<'src, TText>>;
 
-pub fn create_introspection_query_response<T: Expression>(
-    factory: &impl ExpressionFactory<T>,
-    allocator: &impl HeapAllocator<T>,
-) -> T {
-    factory.create_signal_term(allocator.create_signal_list(once(allocator.create_signal(
-        SignalType::Error,
-        allocator.create_unit_list(factory.create_value_term(ValueTerm::String(
-            allocator.create_static_string("Introspection query not yet implemented"),
-        ))),
-    ))))
+pub trait GraphQlQueryTransform {
+    fn transform<'src, T: GraphQlText<'src>>(
+        &self,
+        document: Document<'src, T>,
+    ) -> Result<Document<'src, T>, String>;
 }
 
-pub fn create_graphql_success_response<T: Expression>(
-    value: T,
+pub struct ChainedGraphQlQueryTransform<T1: GraphQlQueryTransform, T2: GraphQlQueryTransform> {
+    left: T1,
+    right: T2,
+}
+impl<T1: GraphQlQueryTransform, T2: GraphQlQueryTransform> GraphQlQueryTransform
+    for ChainedGraphQlQueryTransform<T1, T2>
+{
+    fn transform<'src, T: GraphQlText<'src>>(
+        &self,
+        document: Document<'src, T>,
+    ) -> Result<Document<'src, T>, String> {
+        let document = self.left.transform(document)?;
+        self.right.transform(document)
+    }
+}
+
+pub fn compose_graphql_transforms<T1: GraphQlQueryTransform, T2: GraphQlQueryTransform>(
+    left: T1,
+    right: T2,
+) -> ChainedGraphQlQueryTransform<T1, T2> {
+    ChainedGraphQlQueryTransform { left, right }
+}
+
+pub trait GraphQlText<'src>:
+    Text<'src, Value = Self>
+    + 'src
+    + From<&'src str>
+    + AsRef<str>
+    + PartialEq
+    + Eq
+    + PartialOrd
+    + Ord
+    + Clone
+    + ToString
+    + From<String>
+    + std::borrow::Borrow<str>
+    + std::hash::Hash
+    + std::fmt::Debug
+{
+}
+impl GraphQlText<'static> for String {}
+impl<'a> GraphQlText<'a> for Cow<'a, str> {}
+
+pub fn serialize_graphql_result_payload<T: Expression>(
+    result: &T,
     factory: &impl ExpressionFactory<T>,
-    allocator: &impl HeapAllocator<T>,
-) -> T {
-    create_struct(once((String::from("data"), value)), factory, allocator)
+) -> Result<JsonValue, Vec<JsonValue>> {
+    match factory.match_signal_term(result) {
+        Some(result) => {
+            let errors = serialize_json_signal_errors(result);
+            Err(if errors.is_empty() {
+                vec![create_json_error_object(
+                    String::from("Unknown error"),
+                    None,
+                )]
+            } else {
+                errors
+            })
+        }
+        None => match reflex_json::sanitize(result) {
+            Ok(result) => Ok(result),
+            Err(message) => Err(vec![create_json_error_object(message, None)]),
+        },
+    }
+}
+
+pub fn create_json_error_object(
+    message: String,
+    metadata: impl IntoIterator<Item = (String, JsonValue)>,
+) -> JsonValue {
+    json_object(once((String::from("message"), JsonValue::String(message))).chain(metadata))
+}
+
+pub fn create_graphql_success_response(result: JsonValue) -> JsonValue {
+    json_object(once((String::from("data"), result)))
 }
 
 pub fn create_graphql_error_response(errors: impl IntoIterator<Item = JsonValue>) -> JsonValue {
     json_object(once((
         String::from("errors"),
-        json_array(errors.into_iter().flat_map(parse_graphql_error_payload)),
+        JsonValue::Array(
+            errors
+                .into_iter()
+                .flat_map(normalize_graphql_error_payload)
+                .collect(),
+        ),
     )))
 }
 
-fn parse_graphql_error_payload(payload: JsonValue) -> Vec<JsonValue> {
+fn normalize_graphql_error_payload(payload: JsonValue) -> Vec<JsonValue> {
     match payload {
         JsonValue::Array(errors) => errors
             .into_iter()
-            .flat_map(parse_graphql_error_payload)
+            .flat_map(normalize_graphql_error_payload)
             .collect(),
         JsonValue::Object(_) => vec![payload],
+        JsonValue::String(message) => vec![create_json_error_object(message, None)],
         payload => vec![json_object(once((String::from("message"), payload)))],
     }
 }
 
-pub fn create_json_error_object(message: String) -> JsonValue {
-    json_object(once((String::from("message"), JsonValue::String(message))))
-}
-
-pub fn sanitize_signal_errors<T: Expression>(signal: &SignalTerm<T>) -> Vec<JsonValue> {
+pub fn serialize_json_signal_errors<T: Expression>(signal: &SignalTerm<T>) -> Vec<JsonValue> {
     signal
         .signals()
         .iter()
@@ -89,50 +154,19 @@ pub fn sanitize_signal_errors<T: Expression>(signal: &SignalTerm<T>) -> Vec<Json
                 .iter()
                 .next()
                 .and_then(|arg| sanitize(arg).ok())
+                .map(|value| match value {
+                    JsonValue::String(message) => create_json_error_object(message, None),
+                    _ => value,
+                })
                 .unwrap_or_else(|| JsonValue::Null)
         })
         .collect()
-}
-
-pub trait GraphQlQueryTransform {
-    fn transform<'a>(&self, document: GraphQlAst<'a>) -> Result<GraphQlAst<'a>, String>;
-}
-impl<T> GraphQlQueryTransform for T
-where
-    T: for<'a> Fn(GraphQlAst<'a>) -> Result<GraphQlAst<'a>, String>,
-{
-    fn transform<'a>(&self, document: GraphQlAst<'a>) -> Result<GraphQlAst<'a>, String> {
-        self(document)
-    }
-}
-
-pub trait AsyncGraphQlQueryTransform: GraphQlQueryTransform + Send + Sync + 'static {}
-impl<T> AsyncGraphQlQueryTransform for T where T: GraphQlQueryTransform + Send + Sync + 'static {}
-
-impl GraphQlQueryTransform for Box<dyn GraphQlQueryTransform> {
-    fn transform<'a>(&self, document: GraphQlAst<'a>) -> Result<GraphQlAst<'a>, String> {
-        (&**self).transform(document)
-    }
-}
-impl GraphQlQueryTransform for Box<dyn AsyncGraphQlQueryTransform> {
-    fn transform<'a>(&self, document: GraphQlAst<'a>) -> Result<GraphQlAst<'a>, String> {
-        (&**self).transform(document)
-    }
-}
-
-#[derive(Default)]
-pub struct NoopGraphQlQueryTransform {}
-impl GraphQlQueryTransform for NoopGraphQlQueryTransform {
-    fn transform<'a>(&self, document: GraphQlAst<'a>) -> Result<GraphQlAst<'a>, String> {
-        Ok(document)
-    }
 }
 
 pub fn parse_graphql_operation<T: Expression>(
     operation: &GraphQlOperationPayload,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-    transform: &impl GraphQlQueryTransform,
 ) -> Result<T, String>
 where
     T::Builtin: From<Stdlib> + From<GraphQlStdlib>,
@@ -143,46 +177,66 @@ where
             reflex_json::hydrate(value.clone(), factory, allocator).map(|value| (key, value))
         })
         .collect::<Result<Vec<_>, _>>()?;
-    parse(operation.query(), variables, factory, allocator, transform)
+    parse(operation.query(), variables, factory, allocator)
 }
 
-pub fn parse<'vars, T: Expression>(
-    source: &str,
+pub fn parse<'vars, 'a, T: Expression>(
+    query: &'a GraphQlQuery,
     variables: impl IntoIterator<Item = (&'vars str, T)>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-    transform: &impl GraphQlQueryTransform,
 ) -> Result<T, String>
 where
     T::Builtin: From<Stdlib> + From<GraphQlStdlib>,
 {
-    let variables = &variables
-        .into_iter()
-        .map(|(key, value)| (Cow::Owned(String::from(key)), value))
-        .collect::<QueryVariables<T>>();
-    match parse_query::<GraphQlText>(source) {
-        Ok(document) => {
-            let document = transform.transform(document)?;
-            let fragments = document
-                .definitions
-                .iter()
-                .filter_map(|definition| match definition {
-                    Definition::Fragment(fragment) => Some((fragment.name.clone(), fragment)),
-                    _ => None,
-                })
-                .collect::<QueryFragments>();
-            match get_root_operation(&document) {
-                Err(error) => Err(error),
-                Ok(operation) => {
-                    parse_operation(operation, variables, &fragments, factory, allocator)
-                }
-            }
-        }
-        Err(error) => Err(format!("{}", error)),
+    match query {
+        GraphQlQuery::Ast(query) => parse_ast_query(
+            query,
+            variables
+                .into_iter()
+                .map(|(key, value)| (String::from(key), value)),
+            factory,
+            allocator,
+        ),
+        GraphQlQuery::Source(query) => match parse_query::<std::borrow::Cow<'a, str>>(query) {
+            Ok(query) => parse_ast_query(
+                &query,
+                variables
+                    .into_iter()
+                    .map(|(key, value)| (Cow::Owned(String::from(key)), value)),
+                factory,
+                allocator,
+            ),
+            Err(error) => Err(format!("{}", error)),
+        },
     }
 }
 
-fn get_root_operation<'src, 'a, TText: Text<'src>>(
+pub fn parse_ast_query<'src, 'vars, T: Expression, TText: GraphQlText<'src>>(
+    query: &Document<'src, TText>,
+    variables: impl IntoIterator<Item = (TText::Value, T)> + 'vars,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> Result<T, String>
+where
+    T::Builtin: From<Stdlib> + From<GraphQlStdlib>,
+{
+    let variables = variables.into_iter().collect::<QueryVariables<TText, T>>();
+    let fragments = query
+        .definitions
+        .iter()
+        .filter_map(|definition| match definition {
+            Definition::Fragment(fragment) => Some((fragment.name.clone(), fragment)),
+            _ => None,
+        })
+        .collect::<QueryFragments<TText>>();
+    match get_root_operation(&query) {
+        Err(error) => Err(error),
+        Ok(operation) => parse_operation(operation, &variables, &fragments, factory, allocator),
+    }
+}
+
+fn get_root_operation<'src, 'a, TText: GraphQlText<'src>>(
     document: &'a Document<'src, TText>,
 ) -> Result<&'a OperationDefinition<'src, TText>, String> {
     let operations = document
@@ -200,10 +254,10 @@ fn get_root_operation<'src, 'a, TText: Text<'src>>(
     }
 }
 
-fn parse_operation<'src, T: Expression>(
-    operation: &OperationDefinition<'src, GraphQlText<'src>>,
-    variables: &QueryVariables<'src, T>,
-    fragments: &QueryFragments<'src, '_>,
+fn parse_operation<'src, T: Expression, TText: GraphQlText<'src>>(
+    operation: &OperationDefinition<'src, TText>,
+    variables: &QueryVariables<'src, TText, T>,
+    fragments: &QueryFragments<'src, '_, TText>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
 ) -> Result<T, String>
@@ -266,23 +320,23 @@ where
     )
 }
 
-fn parse_operation_variables<'src, T: Expression>(
-    variable_definitions: &[VariableDefinition<'src, GraphQlText<'src>>],
-    variables: &QueryVariables<'src, T>,
+fn parse_operation_variables<'src, T: Expression, TText: GraphQlText<'src>>(
+    variable_definitions: &[VariableDefinition<'src, TText>],
+    variables: &QueryVariables<'src, TText, T>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> Result<QueryVariables<'src, T>, String> {
+) -> Result<QueryVariables<'src, TText, T>, String> {
     variable_definitions
         .iter()
         .map(|definition| {
-            let value = variables.get(&definition.name).cloned();
+            let value = variables.get(definition.name.as_ref()).cloned();
             let value = match value {
                 Some(value) => Some(value),
                 None => match &definition.default_value {
                     Some(value) => Some(parse_value(
                         value,
-                        &QueryVariables::new(),
-                        &QueryFragments::new(),
+                        &QueryVariables::<TText, T>::new(),
+                        &QueryFragments::<TText>::new(),
                         factory,
                         allocator,
                     )?),
@@ -294,18 +348,18 @@ fn parse_operation_variables<'src, T: Expression>(
                 validate_variable(value, &definition.name, &definition.var_type, factory)?,
             ))
         })
-        .collect::<Result<QueryVariables<T>, _>>()
+        .collect::<Result<QueryVariables<TText, T>, _>>()
 }
 
-fn validate_variable<'src, T: Expression>(
+fn validate_variable<'src, T: Expression, TText: GraphQlText<'src>>(
     value: Option<T>,
-    name: &GraphQlText<'src>,
-    var_type: &Type<'src, GraphQlText<'src>>,
+    name: &TText,
+    var_type: &Type<'src, TText>,
     factory: &impl ExpressionFactory<T>,
 ) -> Result<T, String> {
     match var_type {
         Type::NonNullType(_) => {
-            value.ok_or_else(|| format!("Missing required query variable: {}", name))
+            value.ok_or_else(|| format!("Missing required query variable: {}", name.to_string()))
         }
         // TODO: Validate query variable types
         // TODO: Differentiate between missing optional variables and null values
@@ -313,10 +367,10 @@ fn validate_variable<'src, T: Expression>(
     }
 }
 
-fn parse_selection_set<'src, T: Expression>(
-    selection_set: &SelectionSet<'src, GraphQlText<'src>>,
-    variables: &QueryVariables<'src, T>,
-    fragments: &QueryFragments<'src, '_>,
+fn parse_selection_set<'src, T: Expression, TText: GraphQlText<'src>>(
+    selection_set: &SelectionSet<'src, TText>,
+    variables: &QueryVariables<'src, TText, T>,
+    fragments: &QueryFragments<'src, '_, TText>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
 ) -> Result<T, String>
@@ -362,10 +416,10 @@ where
     Ok(factory.create_builtin_term(GraphQlStdlib::FlattenDeep))
 }
 
-fn parse_selection_set_fields<'src, T: Expression>(
-    selection_set: &SelectionSet<'src, GraphQlText<'src>>,
-    variables: &QueryVariables<'src, T>,
-    fragments: &QueryFragments<'src, '_>,
+fn parse_selection_set_fields<'src, T: Expression, TText: GraphQlText<'src>>(
+    selection_set: &SelectionSet<'src, TText>,
+    variables: &QueryVariables<'src, TText, T>,
+    fragments: &QueryFragments<'src, '_, TText>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
 ) -> Result<Vec<(String, T)>, String>
@@ -376,19 +430,19 @@ where
         .items
         .iter()
         .flat_map(|field| match field {
+            // TODO: Support GraphQL @skip and @include directives
             Selection::Field(field) => {
                 match parse_field(field, variables, fragments, factory, allocator) {
                     Ok(result) => {
-                        let key = match field.alias.as_ref().unwrap_or(&field.name) {
-                            Cow::Owned(value) => String::from(value),
-                            Cow::Borrowed(value) => String::from(*value),
-                        };
+                        let key = field.alias.as_ref().unwrap_or(&field.name).to_string();
                         Either::Left(once(Ok((key, result))))
                     }
                     Err(error) => Either::Left(once(Err(error))),
                 }
             }
-            Selection::FragmentSpread(fragment) => match fragments.get(&fragment.fragment_name) {
+            Selection::FragmentSpread(fragment) => match fragments
+                .get(fragment.fragment_name.as_ref())
+            {
                 Some(fragment) => {
                     let fields =
                         parse_fragment_fields(fragment, variables, fragments, factory, allocator);
@@ -396,7 +450,7 @@ where
                 }
                 None => Either::Left(once(Err(format!(
                     "Invalid fragment name: {}",
-                    fragment.fragment_name
+                    fragment.fragment_name.to_string()
                 )))),
             },
             Selection::InlineFragment(_) => Either::Left(once(Err(String::from(
@@ -406,10 +460,10 @@ where
         .collect::<Result<Vec<_>, _>>()
 }
 
-fn parse_fragment_fields<'src, T: Expression>(
-    fragment: &FragmentDefinition<'src, GraphQlText<'src>>,
-    variables: &QueryVariables<'src, T>,
-    fragments: &QueryFragments<'src, '_>,
+fn parse_fragment_fields<'src, T: Expression, TText: GraphQlText<'src>>(
+    fragment: &FragmentDefinition<'src, TText>,
+    variables: &QueryVariables<'src, TText, T>,
+    fragments: &QueryFragments<'src, '_, TText>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
 ) -> impl IntoIterator<Item = Result<(String, T), String>>
@@ -428,10 +482,10 @@ where
     }
 }
 
-fn parse_field<'src, T: Expression>(
-    field: &Field<'src, GraphQlText<'src>>,
-    variables: &QueryVariables<'src, T>,
-    fragments: &QueryFragments<'src, '_>,
+fn parse_field<'src, T: Expression, TText: GraphQlText<'src>>(
+    field: &Field<'src, TText>,
+    variables: &QueryVariables<'src, TText, T>,
+    fragments: &QueryFragments<'src, '_, TText>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
 ) -> Result<T, String>
@@ -465,12 +519,9 @@ where
                     factory.create_builtin_term(Stdlib::Get),
                     allocator.create_pair(
                         factory.create_static_variable_term(0),
-                        factory.create_value_term(ValueTerm::String(allocator.create_string(
-                            match &field.name {
-                                Cow::Owned(value) => String::from(value),
-                                Cow::Borrowed(value) => String::from(*value),
-                            },
-                        ))),
+                        factory.create_value_term(ValueTerm::String(
+                            allocator.create_string(field.name.to_string()),
+                        )),
                     ),
                 );
                 match field_args {
@@ -482,10 +533,10 @@ where
     ))
 }
 
-fn parse_field_arguments<'src, T: Expression>(
-    args: &Vec<(GraphQlText<'src>, Value<'src, GraphQlText<'src>>)>,
-    variables: &QueryVariables<'src, T>,
-    fragments: &QueryFragments<'src, '_>,
+fn parse_field_arguments<'src, T: Expression, TText: GraphQlText<'src>>(
+    args: &Vec<(TText, Value<'src, TText>)>,
+    variables: &QueryVariables<'src, TText, T>,
+    fragments: &QueryFragments<'src, '_, TText>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
 ) -> Result<ExpressionList<T>, String> {
@@ -493,13 +544,7 @@ fn parse_field_arguments<'src, T: Expression>(
         .iter()
         .map(
             |(key, value)| match parse_value(value, variables, fragments, factory, allocator) {
-                Ok(value) => Ok((
-                    match key {
-                        Cow::Owned(value) => String::from(value),
-                        Cow::Borrowed(value) => String::from(*value),
-                    },
-                    value,
-                )),
+                Ok(value) => Ok((key.to_string(), value)),
                 Err(error) => Err(error),
             },
         )
@@ -508,17 +553,17 @@ fn parse_field_arguments<'src, T: Expression>(
     Ok(allocator.create_unit_list(arg))
 }
 
-fn parse_value<'src, T: Expression>(
-    value: &Value<'src, GraphQlText<'src>>,
-    variables: &QueryVariables<'src, T>,
-    fragments: &QueryFragments<'src, '_>,
+fn parse_value<'src, T: Expression, TText: GraphQlText<'src>>(
+    value: &Value<'src, TText>,
+    variables: &QueryVariables<'src, TText, T>,
+    fragments: &QueryFragments<'src, '_, TText>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
 ) -> Result<T, String> {
     match value {
-        Value::Variable(name) => match variables.get(name) {
+        Value::Variable(name) => match variables.get(name.as_ref()) {
             Some(value) => Ok(value.clone()),
-            None => Err(format!("Undeclared query variable: {}", name)),
+            None => Err(format!("Undeclared query variable: {}", name.to_string())),
         },
         Value::Int(value) => Ok(factory.create_value_term(ValueTerm::Int(
             value
@@ -534,10 +579,7 @@ fn parse_value<'src, T: Expression>(
         Value::Boolean(value) => Ok(factory.create_value_term(ValueTerm::Boolean(*value))),
         Value::Null => Ok(factory.create_value_term(ValueTerm::Null)),
         Value::Enum(value) => Ok(factory.create_value_term(ValueTerm::String(
-            allocator.create_string(match value {
-                Cow::Owned(value) => String::from(value),
-                Cow::Borrowed(value) => String::from(*value),
-            }),
+            allocator.create_string(value.to_string()),
         ))),
         Value::List(value) => {
             let values = value
@@ -551,13 +593,7 @@ fn parse_value<'src, T: Expression>(
                 .iter()
                 .map(|(key, value)| {
                     match parse_value(value, variables, fragments, factory, allocator) {
-                        Ok(value) => Ok((
-                            match key {
-                                Cow::Owned(value) => String::from(value),
-                                Cow::Borrowed(value) => String::from(*value),
-                            },
-                            value,
-                        )),
+                        Ok(value) => Ok((key.to_string(), value)),
                         Err(error) => Err(error),
                     }
                 })
@@ -600,7 +636,9 @@ mod tests {
     };
     use std::convert::{TryFrom, TryInto};
 
-    use super::{parse, stdlib::Stdlib as GraphQlStdlib, NoopGraphQlQueryTransform};
+    use crate::operation::GraphQlQuery;
+
+    use super::{parse, stdlib::Stdlib as GraphQlStdlib};
 
     #[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
     enum GraphQlTestBuiltins {
@@ -712,16 +750,17 @@ mod tests {
         );
         let variables = Vec::new();
         let query = parse(
-            "
+            &GraphQlQuery::Source(String::from(
+                "
                 query {
                     second
                     third
                 }
             ",
+            )),
             variables,
             &factory,
             &allocator,
-            &NoopGraphQlQueryTransform::default(),
         )
         .unwrap();
         let result = apply_query(query, root, &factory, &allocator);
@@ -812,16 +851,17 @@ mod tests {
         );
         let variables = Vec::new();
         let query = parse(
-            "
+            &GraphQlQuery::Source(String::from(
+                "
                 query {
                     second
                     third
                 }
             ",
+            )),
             variables,
             &factory,
             &allocator,
-            &NoopGraphQlQueryTransform::default(),
         )
         .unwrap();
         let result = apply_query(query, root, &factory, &allocator);
@@ -892,15 +932,16 @@ mod tests {
         );
         let variables = Vec::new();
         let query = parse(
-            "
+            &GraphQlQuery::Source(String::from(
+                "
                 query {
                     items
                 }
             ",
+            )),
             variables,
             &factory,
             &allocator,
-            &NoopGraphQlQueryTransform::default(),
         )
         .unwrap();
         let result = apply_query(query, root, &factory, &allocator);
@@ -1017,15 +1058,16 @@ mod tests {
         );
         let variables = Vec::new();
         let query = parse(
-            "
+            &GraphQlQuery::Source(String::from(
+                "
                 query {
                     items
                 }
             ",
+            )),
             variables,
             &factory,
             &allocator,
-            &NoopGraphQlQueryTransform::default(),
         )
         .unwrap();
         let result = apply_query(query, root, &factory, &allocator);

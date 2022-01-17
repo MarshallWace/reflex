@@ -1,18 +1,17 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use std::iter::empty;
-use std::path::PathBuf;
+use std::{iter::empty, path::PathBuf};
 
 use anyhow::Result;
 use clap::Parser;
-use reflex::allocator::DefaultAllocator;
-
-use reflex::lang::SharedTermFactory;
-use reflex_cli::cli::compiler::{cli, CompilerCliOptions, OutputFormat};
-use reflex_cli::syntax::js::default_js_loaders;
-use reflex_cli::Syntax;
-use reflex_js::builtins::JsBuiltins;
+use reflex::{allocator::DefaultAllocator, lang::SharedTermFactory};
+use reflex_cli::{
+    builtins::CliBuiltins,
+    cli::compiler::{cli, CompilerCliOptions, OutputFormat},
+    syntax::js::default_js_loaders,
+    Syntax,
+};
 
 /// Reflex bytecode compiler
 #[derive(Parser)]
@@ -54,7 +53,7 @@ impl Into<CompilerCliOptions> for Args {
 }
 
 fn main() -> Result<()> {
-    let factory = SharedTermFactory::<JsBuiltins>::default();
+    let factory = SharedTermFactory::<CliBuiltins>::default();
     let allocator = DefaultAllocator::default();
     let stdout = std::io::stdout();
     cli(

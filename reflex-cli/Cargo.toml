@@ -9,17 +9,24 @@ edition = "2021"
 
 [dependencies]
 reflex = { path = "../reflex" }
-reflex-handlers = { path = "../reflex-handlers" }
+reflex-dispatcher = { path = "../reflex-dispatcher" }
 reflex-js = { path = "../reflex-js" }
 reflex-json = { path = "../reflex-json" }
-reflex-graphql = { path = "../reflex-graphql" }
+reflex-handlers = { path = "../reflex-handlers" }
 reflex-runtime = { path = "../reflex-runtime" }
+reflex-utils = { path = "../reflex-utils" }
 anyhow = "1.0"
 clap = { version = "3.0", features = ["derive"] }
+futures = "*"
 rmp-serde = "0.15"
 serde_json = "1.0"
-tokio = { version = "1", features = ["full"] }
+tokio = { version = "1", features = ["full", "tracing"] }
+tokio-stream = { version = "0.1", features = ["sync"] }
 
 [[bin]]
 name = "reflexc"
 path = "src/bin/compiler.rs"
+
+[[bin]]
+name = "reflex-cli"
+path = "src/bin/reflex-cli.rs"

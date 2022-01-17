@@ -2,66 +2,82 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
-pub mod assign;
-pub mod fetch;
-pub mod graphql;
-pub mod increment;
+use actor::{
+    assign::AssignHandlerAction, fetch::FetchHandlerAction, graphql::GraphQlHandlerAction,
+    increment::IncrementHandlerAction, loader::LoaderHandlerAction, scan::ScanHandlerAction,
+    timeout::TimeoutHandlerAction, timestamp::TimestampHandlerAction,
+};
+use reflex::core::{Applicable, Expression};
+use reflex_dispatcher::{compose_actors, Action, Actor};
+use reflex_runtime::{AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator};
+use reflex_utils::reconnect::ReconnectTimeout;
+
+use crate::actor::{
+    assign::AssignHandler, fetch::FetchHandler, graphql::GraphQlHandler,
+    increment::IncrementHandler, loader::LoaderHandler, scan::ScanHandler, timeout::TimeoutHandler,
+    timestamp::TimestampHandler,
+};
+
+pub(crate) mod utils;
+
+pub mod action;
+pub mod actor;
+pub mod imports;
 pub mod loader;
-pub mod scan;
-pub mod timeout;
-pub mod timestamp;
+pub mod stdlib;
 
-pub use assign::*;
-pub use fetch::*;
-pub use graphql::*;
-pub use increment::*;
-pub use loader::*;
-pub use scan::*;
-pub use timeout::*;
-pub use timestamp::*;
-
-use reflex::{
-    compiler::Compile,
-    core::{Applicable, Reducible, Rewritable, Signal},
-    stdlib::Stdlib,
-};
-use reflex_runtime::{
-    AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator, SignalHandler,
-    SignalHandlerResult, SignalHelpers, SignalResult,
-};
-
-pub mod utils {
-    mod fetch;
-    pub(crate) use fetch::fetch;
-    pub(crate) mod graphql;
-    pub mod signal_capture;
+pub trait DefaultHandlersAction<T: Expression>:
+    Action
+    + AssignHandlerAction<T>
+    + FetchHandlerAction<T>
+    + GraphQlHandlerAction<T>
+    + IncrementHandlerAction<T>
+    + LoaderHandlerAction<T>
+    + ScanHandlerAction<T>
+    + TimeoutHandlerAction<T>
+    + TimestampHandlerAction<T>
+{
+}
+impl<T: Expression, TAction> DefaultHandlersAction<T> for TAction where
+    Self: Action
+        + AssignHandlerAction<T>
+        + FetchHandlerAction<T>
+        + GraphQlHandlerAction<T>
+        + IncrementHandlerAction<T>
+        + LoaderHandlerAction<T>
+        + ScanHandlerAction<T>
+        + TimeoutHandlerAction<T>
+        + TimestampHandlerAction<T>
+{
 }
 
-pub fn builtin_signal_handler<
-    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
->(
-    factory: &impl AsyncExpressionFactory<T>,
-    allocator: &impl AsyncHeapAllocator<T>,
-) -> impl SignalHandler<T>
+pub fn default_handlers<TAction, T, TFactory, TAllocator, TReconnect>(
+    factory: &TFactory,
+    allocator: &TAllocator,
+    reconnect_timeout: TReconnect,
+) -> impl Actor<TAction>
 where
-    T::String: Send + Sync,
-    T::Builtin: From<Stdlib>,
+    T: AsyncExpression + Applicable<T>,
+    TFactory: AsyncExpressionFactory<T> + Sync,
+    TAllocator: AsyncHeapAllocator<T> + Sync,
+    TReconnect: ReconnectTimeout,
+    TAction: DefaultHandlersAction<T> + Send + 'static,
 {
-    compose_signal_handlers(
-        assign::create_assign_signal_handler(factory, allocator),
-        compose_signal_handlers(
-            fetch::create_fetch_signal_handler(factory, allocator),
-            compose_signal_handlers(
-                graphql::create_graphql_signal_handler(factory, allocator),
-                compose_signal_handlers(
-                    increment::increment_signal_handler(factory, allocator),
-                    compose_signal_handlers(
-                        loader::create_loader_signal_handler(factory, allocator),
-                        compose_signal_handlers(
-                            scan::create_scan_handler(factory, allocator),
-                            compose_signal_handlers(
-                                timeout::create_timeout_signal_handler(factory, allocator),
-                                timestamp::create_timestamp_handler(factory, allocator),
+    compose_actors(
+        AssignHandler::new(factory.clone(), allocator.clone()),
+        compose_actors(
+            FetchHandler::new(factory.clone(), allocator.clone()),
+            compose_actors(
+                GraphQlHandler::new(factory.clone(), allocator.clone(), reconnect_timeout),
+                compose_actors(
+                    IncrementHandler::new(factory.clone(), allocator.clone()),
+                    compose_actors(
+                        LoaderHandler::new(factory.clone(), allocator.clone()),
+                        compose_actors(
+                            ScanHandler::new(factory.clone(), allocator.clone()),
+                            compose_actors(
+                                TimeoutHandler::new(factory.clone(), allocator.clone()),
+                                TimestampHandler::new(factory.clone(), allocator.clone()),
                             ),
                         ),
                     ),
@@ -69,98 +85,4 @@ where
             ),
         ),
     )
-}
-
-#[derive(Clone, Copy, Debug)]
-pub struct NoopSignalHandler;
-impl<T> SignalHandler<T> for NoopSignalHandler
-where
-    T: AsyncExpression + Compile<T>,
-    T::String: Send + Sync,
-{
-    fn handle(
-        &self,
-        _signal_type: &str,
-        _signals: &[&Signal<T>],
-        _helpers: &SignalHelpers<T>,
-    ) -> SignalHandlerResult<T> {
-        None
-    }
-}
-
-pub fn compose_signal_handlers<T>(
-    head: impl SignalHandler<T>,
-    tail: impl SignalHandler<T>,
-) -> impl SignalHandler<T>
-where
-    T: AsyncExpression + Compile<T>,
-    T::String: Send + Sync,
-{
-    move |signal_type: &str, signals: &[&Signal<T>], helpers: &SignalHelpers<T>| match head.handle(
-        signal_type,
-        signals,
-        helpers,
-    ) {
-        Some(result) => Some(result),
-        None => tail.handle(signal_type, signals, helpers),
-    }
-}
-
-pub fn debug_signal_handler<T>(handler: impl SignalHandler<T>) -> impl SignalHandler<T>
-where
-    T: AsyncExpression + Compile<T>,
-    T::String: Send + Sync,
-{
-    move |signal_type: &str, signals: &[&Signal<T>], helpers: &SignalHelpers<T>| {
-        eprintln!(
-            "[{}]{}",
-            signal_type,
-            if signals.len() == 1 {
-                String::new()
-            } else {
-                format!(" x {}", signals.len())
-            }
-        );
-        for signal in signals.iter() {
-            let args = signal.args();
-            if args.is_empty() {
-                eprintln!("  {}", signal.id(),);
-            } else {
-                eprintln!(
-                    "  {}: {}",
-                    signal.id(),
-                    args.iter()
-                        .map(|arg| format!("{}", arg))
-                        .collect::<Vec<_>>()
-                        .join(" ")
-                )
-            };
-        }
-        handler.handle(signal_type, signals, helpers)
-    }
-}
-
-#[derive(Clone, Copy, Debug)]
-pub enum EitherHandler<L, R> {
-    Left(L),
-    Right(R),
-}
-impl<T, L, R> SignalHandler<T> for EitherHandler<L, R>
-where
-    T: AsyncExpression + Compile<T>,
-    T::String: Send + Sync,
-    L: SignalHandler<T>,
-    R: SignalHandler<T>,
-{
-    fn handle(
-        &self,
-        signal_type: &str,
-        signals: &[&Signal<T>],
-        helpers: &SignalHelpers<T>,
-    ) -> reflex_runtime::SignalHandlerResult<T> {
-        match self {
-            Self::Left(handler) => handler.handle(signal_type, signals, helpers),
-            Self::Right(handler) => handler.handle(signal_type, signals, helpers),
-        }
-    }
 }

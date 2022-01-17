@@ -7,9 +7,10 @@ use reflex::core::{
     DependencyList, DynamicState, Evaluate, EvaluationCache, EvaluationResult, Expression,
     ExpressionFactory, HeapAllocator, Reducible, Rewritable,
 };
-use reflex_cli::{format_signal_result, SyntaxParser};
 
-pub(crate) fn run<T: Expression + Rewritable<T> + Reducible<T> + Evaluate<T>>(
+use crate::{format_signal_result, SyntaxParser};
+
+pub fn run<T: Expression + Rewritable<T> + Reducible<T> + Evaluate<T>>(
     parser: impl SyntaxParser<T>,
     state: &impl DynamicState<T>,
     factory: &impl ExpressionFactory<T>,
@@ -45,7 +46,7 @@ pub(crate) fn run<T: Expression + Rewritable<T> + Reducible<T> + Evaluate<T>>(
     Ok(())
 }
 
-pub(crate) fn eval<T: Expression + Evaluate<T>>(
+pub fn eval<T: Expression + Evaluate<T>>(
     expression: &T,
     state: &impl DynamicState<T>,
     factory: &impl ExpressionFactory<T>,

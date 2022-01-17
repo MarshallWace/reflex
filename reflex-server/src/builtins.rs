@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
+use std::convert::{TryFrom, TryInto};
+
 use reflex::{
     core::{
         Applicable, Arity, Builtin, EvaluationCache, Expression, ExpressionFactory, HeapAllocator,
@@ -10,19 +12,30 @@ use reflex::{
     stdlib::Stdlib,
 };
 use reflex_graphql::stdlib::Stdlib as GraphQlStdlib;
+use reflex_handlers::stdlib::Stdlib as HandlersStdlib;
 use reflex_js::stdlib::Stdlib as JsStdlib;
+use reflex_json::stdlib::Stdlib as JsonStdlib;
 use serde::{Deserialize, Serialize};
-use std::convert::{TryFrom, TryInto};
+
+use crate::stdlib::Stdlib as ServerStdlib;
 
 #[derive(Clone, Copy, Eq, PartialEq, Hash, Debug, Serialize, Deserialize)]
 pub enum ServerBuiltins {
     Stdlib(Stdlib),
+    Json(JsonStdlib),
     Js(JsStdlib),
     GraphQl(GraphQlStdlib),
+    Handlers(HandlersStdlib),
+    Server(ServerStdlib),
 }
 impl From<Stdlib> for ServerBuiltins {
     fn from(target: Stdlib) -> Self {
         ServerBuiltins::Stdlib(target)
+    }
+}
+impl From<JsonStdlib> for ServerBuiltins {
+    fn from(target: JsonStdlib) -> Self {
+        ServerBuiltins::Json(target)
     }
 }
 impl From<JsStdlib> for ServerBuiltins {
@@ -35,20 +48,36 @@ impl From<GraphQlStdlib> for ServerBuiltins {
         ServerBuiltins::GraphQl(target)
     }
 }
+impl From<HandlersStdlib> for ServerBuiltins {
+    fn from(target: HandlersStdlib) -> Self {
+        ServerBuiltins::Handlers(target)
+    }
+}
+impl From<ServerStdlib> for ServerBuiltins {
+    fn from(target: ServerStdlib) -> Self {
+        ServerBuiltins::Server(target)
+    }
+}
 impl ServerBuiltins {
     pub fn entries() -> impl Iterator<Item = Self> {
         Stdlib::entries()
             .map(Self::Stdlib)
+            .chain(JsonStdlib::entries().map(Self::Json))
             .chain(JsStdlib::entries().map(Self::Js))
             .chain(GraphQlStdlib::entries().map(Self::GraphQl))
+            .chain(HandlersStdlib::entries().map(Self::Handlers))
+            .chain(ServerStdlib::entries().map(Self::Server))
     }
 }
 impl Uid for ServerBuiltins {
     fn uid(&self) -> reflex::core::Uuid {
         match self {
             ServerBuiltins::Stdlib(term) => term.uid(),
+            ServerBuiltins::Json(term) => term.uid(),
             ServerBuiltins::Js(term) => term.uid(),
             ServerBuiltins::GraphQl(term) => term.uid(),
+            ServerBuiltins::Handlers(term) => term.uid(),
+            ServerBuiltins::Server(term) => term.uid(),
         }
     }
 }
@@ -57,16 +86,22 @@ impl TryFrom<Uuid> for ServerBuiltins {
     fn try_from(value: Uuid) -> Result<Self, Self::Error> {
         TryInto::<Stdlib>::try_into(value)
             .map(Self::Stdlib)
+            .or_else(|_| TryInto::<JsonStdlib>::try_into(value).map(Self::Json))
             .or_else(|_| TryInto::<JsStdlib>::try_into(value).map(Self::Js))
             .or_else(|_| TryInto::<GraphQlStdlib>::try_into(value).map(Self::GraphQl))
+            .or_else(|_| TryInto::<HandlersStdlib>::try_into(value).map(Self::Handlers))
+            .or_else(|_| TryInto::<ServerStdlib>::try_into(value).map(Self::Server))
     }
 }
 impl Builtin for ServerBuiltins {
     fn arity<T: Expression<Builtin = Self> + Applicable<T>>(&self) -> Option<Arity> {
         match self {
             ServerBuiltins::Stdlib(term) => term.arity::<T>(),
+            ServerBuiltins::Json(term) => term.arity::<T>(),
             ServerBuiltins::Js(term) => term.arity::<T>(),
             ServerBuiltins::GraphQl(term) => term.arity::<T>(),
+            ServerBuiltins::Handlers(term) => term.arity::<T>(),
+            ServerBuiltins::Server(term) => term.arity::<T>(),
         }
     }
     fn apply<T: Expression<Builtin = Self> + Applicable<T>>(
@@ -78,8 +113,11 @@ impl Builtin for ServerBuiltins {
     ) -> Result<T, String> {
         match self {
             ServerBuiltins::Stdlib(term) => term.apply(args, factory, allocator, cache),
+            ServerBuiltins::Json(term) => term.apply(args, factory, allocator, cache),
             ServerBuiltins::Js(term) => term.apply(args, factory, allocator, cache),
             ServerBuiltins::GraphQl(term) => term.apply(args, factory, allocator, cache),
+            ServerBuiltins::Handlers(term) => term.apply(args, factory, allocator, cache),
+            ServerBuiltins::Server(term) => term.apply(args, factory, allocator, cache),
         }
     }
     fn should_parallelize<T: Expression<Builtin = Self> + Applicable<T>>(
@@ -88,8 +126,11 @@ impl Builtin for ServerBuiltins {
     ) -> bool {
         match self {
             ServerBuiltins::Stdlib(term) => term.should_parallelize(args),
+            ServerBuiltins::Json(term) => term.should_parallelize(args),
             ServerBuiltins::Js(term) => term.should_parallelize(args),
             ServerBuiltins::GraphQl(term) => term.should_parallelize(args),
+            ServerBuiltins::Handlers(term) => term.should_parallelize(args),
+            ServerBuiltins::Server(term) => term.should_parallelize(args),
         }
     }
 }
@@ -97,8 +138,11 @@ impl std::fmt::Display for ServerBuiltins {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Stdlib(target) => std::fmt::Display::fmt(target, f),
+            Self::Json(target) => std::fmt::Display::fmt(target, f),
             Self::Js(target) => std::fmt::Display::fmt(target, f),
             Self::GraphQl(target) => std::fmt::Display::fmt(target, f),
+            Self::Handlers(target) => std::fmt::Display::fmt(target, f),
+            Self::Server(target) => std::fmt::Display::fmt(target, f),
         }
     }
 }

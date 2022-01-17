@@ -87,19 +87,16 @@ impl InterpreterOptions {
     }
 }
 
-pub fn execute<
-    'a,
-    T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + 'a + Send + Sync,
->(
+pub fn execute<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T>>(
     cache_key: HashId,
     program: &Program,
     entry_point: InstructionPointer,
     state_id: usize,
-    state: &(impl DynamicState<T> + Sync),
-    factory: &(impl ExpressionFactory<T> + Sync),
-    allocator: &(impl HeapAllocator<T> + Sync),
+    state: &impl DynamicState<T>,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
     options: &InterpreterOptions,
-    cache: &(impl InterpreterCache<T> + Sync),
+    cache: &impl InterpreterCache<T>,
 ) -> Result<(EvaluationResult<T>, LocalCacheEntries<T>), String> {
     match program.get(entry_point) {
         Some(&Instruction::Function { required_args, .. }) if required_args == 0 => Ok(()),
@@ -157,17 +154,14 @@ pub fn execute<
     }
 }
 
-fn evaluate_program_loop<
-    'a,
-    T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Send + Sync,
->(
+fn evaluate_program_loop<'a, T: Expression + Rewritable<T> + Reducible<T> + Applicable<T>>(
     state_id: usize,
-    state: &(impl DynamicState<T> + Sync),
+    state: &impl DynamicState<T>,
     stack: &mut VariableStack<T>,
     call_stack: &mut CallStack<T>,
-    factory: &(impl ExpressionFactory<T> + Sync),
-    allocator: &(impl HeapAllocator<T> + Sync),
-    cache: &(impl InterpreterCache<T> + Sync),
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+    cache: &impl InterpreterCache<T>,
     cache_entries: &mut MultithreadedCacheEntries<'a, T>,
     debug_instructions: bool,
     debug_stack: bool,
@@ -230,58 +224,22 @@ fn evaluate_program_loop<
                         resume_address,
                     } => {
                         let arity = get_function_arity(&target)?;
-
-                        if target.should_parallelize(&args) {
-                            let resolved_args = resolve_parallel_args(
-                                state_id,
-                                state,
-                                call_stack,
-                                arity,
-                                args,
-                                stack,
-                                factory,
-                                allocator,
-                                debug_instructions,
-                                debug_stack,
-                                cache,
-                                cache_entries,
-                            )?;
-                            stack.push(
-                                if let Some(signal) = get_short_circuit_signal(
-                                    &resolved_args,
-                                    &arity,
-                                    factory,
-                                    allocator,
-                                ) {
-                                    signal
-                                } else {
-                                    apply_function(
-                                        &target,
-                                        resolved_args.into_iter(),
-                                        factory,
-                                        allocator,
-                                    )?
-                                },
-                            );
-                            call_stack.update_program_counter(resume_address);
-                        } else {
-                            let results =
-                                fill_resolved_args(&args, &arity, Vec::with_capacity(args.len()));
-                            let next_arg = args.get(results.len()).unwrap().clone();
-                            call_stack
-                                .update_program_counter(call_stack.evaluate_arg_program_counter());
-                            call_stack.enter_application_arg_list(
-                                target,
-                                arity,
-                                caller_address,
-                                resume_address,
-                                args,
-                                results,
-                            );
-                            let expression_hash = next_arg.id();
-                            stack.push(next_arg);
-                            call_stack.enter_expression(expression_hash);
-                        }
+                        let results =
+                            fill_resolved_args(&args, &arity, Vec::with_capacity(args.len()));
+                        let next_arg = args.get(results.len()).unwrap().clone();
+                        call_stack
+                            .update_program_counter(call_stack.evaluate_arg_program_counter());
+                        call_stack.enter_application_arg_list(
+                            target,
+                            arity,
+                            caller_address,
+                            resume_address,
+                            args,
+                            results,
+                        );
+                        let expression_hash = next_arg.id();
+                        stack.push(next_arg);
+                        call_stack.enter_expression(expression_hash);
                     }
                     ExecutionResult::Advance => {
                         let previous_address = call_stack.program_counter();
@@ -1354,9 +1312,65 @@ impl<T: Iterator> ExactSizeIterator for WithExactSizeIterator<T> {
     }
 }
 
+#[allow(dead_code)]
+// Parallel interpreter execution deactivated indefinitely
+//
+// See commit bcfc57 for original implementation
+//
+// Usage:
+//
+// ```
+// match result {
+//     // ...
+//     ExecutionResult::ResolveApplicationArgs {
+//         target,
+//         caller_address,
+//         args,
+//         resume_address,
+//     } => {
+//         if target.should_parallelize(&args) {
+//             let resolved_args = resolve_parallel_args(
+//                 state_id,
+//                 state,
+//                 call_stack,
+//                 arity,
+//                 args,
+//                 stack,
+//                 factory,
+//                 allocator,
+//                 debug_instructions,
+//                 debug_stack,
+//                 cache,
+//                 cache_entries,
+//             )?;
+//             stack.push(
+//                 if let Some(signal) = get_short_circuit_signal(
+//                     &resolved_args,
+//                     &arity,
+//                     factory,
+//                     allocator,
+//                 ) {
+//                     signal
+//                 } else {
+//                     apply_function(
+//                         &target,
+//                         resolved_args.into_iter(),
+//                         factory,
+//                         allocator,
+//                     )?
+//                 },
+//             );
+//             call_stack.update_program_counter(resume_address);
+//         } else {
+//             // ...
+//         }
+//     }
+//     // ...
+// }
+// ```
 fn resolve_parallel_args<
     'a,
-    T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Sync + Send,
+    T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Send + Sync,
 >(
     state_id: usize,
     state: &(impl DynamicState<T> + Sync),
@@ -1503,18 +1517,18 @@ fn resolve_parallel_args<
 
 fn resolve_arg_within_new_stack<
     'a,
-    T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Sync + Send,
+    T: Expression + Rewritable<T> + Reducible<T> + Applicable<T>,
 >(
     arg: T,
     state_id: usize,
-    state: &(impl DynamicState<T> + Sync),
+    state: &impl DynamicState<T>,
     call_stack: &CallStack<T>,
     stack: &VariableStack<T>,
-    factory: &(impl ExpressionFactory<T> + Sync),
-    allocator: &(impl HeapAllocator<T> + Sync),
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
     debug_instructions: bool,
     debug_stack: bool,
-    cache: &(impl InterpreterCache<T> + Sync),
+    cache: &impl InterpreterCache<T>,
     cache_entries: &mut MultithreadedCacheEntries<'a, T>,
 ) -> (Result<T, String>, DependencyList, Vec<HashId>) {
     let capture_depth = arg.capture_depth();

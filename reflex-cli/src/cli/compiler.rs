@@ -19,6 +19,7 @@ use reflex::{
 
 use crate::{compile_entry_point, Syntax};
 use reflex_js::stdlib::Stdlib as JsStdlib;
+use reflex_json::stdlib::Stdlib as JsonStdlib;
 
 pub struct CompilerCliOptions {
     pub entry_point: PathBuf,
@@ -55,7 +56,7 @@ pub fn cli<T: Expression, TLoader>(
 ) -> Result<()>
 where
     T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T> + 'static,
-    T::Builtin: From<Stdlib> + From<JsStdlib>,
+    T::Builtin: From<Stdlib> + From<JsonStdlib> + From<JsStdlib>,
     TLoader: Fn(&str, &Path) -> Option<Result<T, String>> + 'static,
 {
     let path = options.entry_point;
