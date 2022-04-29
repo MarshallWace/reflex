@@ -1088,26 +1088,59 @@ where
 }
 #[derive(Debug, Serialize, Deserialize)]
 struct SerializedSignal<T: Expression> {
-    signal_type: SignalType,
+    signal_type: SerializedSignalType,
+    custom_type: Option<String>,
     args: ExpressionList<T>,
 }
 impl<'a, T: Expression> Into<SerializedSignal<T>> for &'a Signal<T> {
     fn into(self) -> SerializedSignal<T> {
-        let Signal {
-            signal_type, args, ..
-        } = self.clone();
-        SerializedSignal { signal_type, args }
+        let (signal_type, custom_type) = serialize_signal_type(&self.signal_type);
+        let args = self.args.clone();
+        SerializedSignal {
+            signal_type,
+            custom_type,
+            args,
+        }
     }
 }
 impl<T: Expression> Into<Signal<T>> for SerializedSignal<T> {
     fn into(self) -> Signal<T> {
-        let SerializedSignal { signal_type, args } = self;
+        let SerializedSignal {
+            signal_type,
+            custom_type,
+            args,
+        } = self;
+        let signal_type = deserialize_signal_type(signal_type, custom_type);
         Signal::new(signal_type, args)
+    }
+}
+#[derive(Debug, Serialize, Deserialize)]
+enum SerializedSignalType {
+    Error,
+    Pending,
+    Custom,
+}
+fn serialize_signal_type(signal_type: &SignalType) -> (SerializedSignalType, Option<String>) {
+    match signal_type {
+        SignalType::Pending => (SerializedSignalType::Pending, None),
+        SignalType::Error => (SerializedSignalType::Error, None),
+        SignalType::Custom(custom_type) => {
+            (SerializedSignalType::Custom, Some(custom_type.clone()))
+        }
+    }
+}
+fn deserialize_signal_type(
+    signal_type: SerializedSignalType,
+    custom_type: Option<String>,
+) -> SignalType {
+    match signal_type {
+        SerializedSignalType::Pending => SignalType::Pending,
+        SerializedSignalType::Error => SignalType::Error,
+        SerializedSignalType::Custom => SignalType::Custom(custom_type.unwrap_or(String::new())),
     }
 }
 
 #[derive(Hash, Eq, PartialEq, Clone, Debug, Serialize, Deserialize)]
-#[serde(tag = "type", content = "value")]
 pub enum SignalType {
     Error,
     Pending,
