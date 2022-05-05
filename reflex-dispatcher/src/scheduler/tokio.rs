@@ -10,10 +10,7 @@ use std::{
 };
 
 use futures::{Future, StreamExt};
-use tokio::{
-    sync::mpsc::{self, UnboundedSender},
-    task::JoinHandle,
-};
+use tokio::{sync::mpsc, task::JoinHandle};
 
 use crate::{
     Action, Actor, BoxedDisposeCallback, DisposeCallback, HandlerContext, MessageData,
@@ -25,8 +22,8 @@ pub struct TokioScheduler<TAction>
 where
     TAction: Action + Send + 'static,
 {
-    root_id: ProcessId,
-    commands: UnboundedSender<(StateOperation<TAction>, Option<(MessageOffset, ProcessId)>)>,
+    root_pid: ProcessId,
+    commands: mpsc::Sender<(StateOperation<TAction>, Option<(MessageOffset, ProcessId)>)>,
     task: JoinHandle<()>,
 }
 impl<TAction> Drop for TokioScheduler<TAction>
@@ -52,7 +49,7 @@ where
         let root_id = ProcessId::default();
         let (task, commands) = Self::listen(main, root_id);
         Self {
-            root_id,
+            root_pid: root_id,
             commands,
             task: tokio::spawn(task),
         }
@@ -62,12 +59,10 @@ where
         root_pid: ProcessId,
     ) -> (
         impl Future<Output = ()>,
-        UnboundedSender<(StateOperation<TAction>, Option<(MessageOffset, ProcessId)>)>,
+        mpsc::Sender<(StateOperation<TAction>, Option<(MessageOffset, ProcessId)>)>,
     ) {
-        let (commands_tx, mut commands_rx) = mpsc::unbounded_channel::<(
-            StateOperation<TAction>,
-            Option<(MessageOffset, ProcessId)>,
-        )>();
+        let (commands_tx, mut commands_rx) =
+            mpsc::channel::<(StateOperation<TAction>, Option<(MessageOffset, ProcessId)>)>(1024);
         let task = {
             let mut actor = actor;
             let child_commands = commands_tx.clone();
@@ -95,12 +90,13 @@ where
                                 let transition = actor.handle(&action, &metadata, &mut context);
                                 for operation in transition {
                                     let _ = child_commands
-                                        .send((operation, Some((metadata.offset, pid))));
+                                        .send((operation, Some((metadata.offset, pid))))
+                                        .await;
                                 }
                             } else if let Some(TokioProcess::Worker(worker)) =
                                 processes.get_mut(&pid)
                             {
-                                let _ = worker.inbox.send((action, metadata, context));
+                                let _ = worker.inbox.send((action, metadata, context)).await;
                             };
                         }
                         StateOperation::Task(pid, task) => {
@@ -111,7 +107,7 @@ where
                                         let results = child_commands.clone();
                                         async move {
                                             while let Some(operation) = stream.next().await {
-                                                let _ = results.send((operation, caller));
+                                                let _ = results.send((operation, caller)).await;
                                             }
                                         }
                                     }),
@@ -150,9 +146,13 @@ where
 {
     type Action = TAction;
     fn dispatch(&mut self, action: Self::Action) {
-        let _ = self
-            .commands
-            .send((StateOperation::Send(self.root_id, action), None));
+        let root_pid = self.root_pid;
+        let commands = self.commands.clone();
+        let _ = tokio::spawn(async move {
+            commands
+                .send((StateOperation::Send(root_pid, action), None))
+                .await
+        });
     }
 }
 
@@ -193,7 +193,7 @@ struct TokioWorker<TAction>
 where
     TAction: Action + Send + 'static,
 {
-    inbox: mpsc::UnboundedSender<(TAction, MessageData, TokioContext)>,
+    inbox: mpsc::Sender<(TAction, MessageData, TokioContext)>,
     task: JoinHandle<()>,
 }
 impl<TAction> Drop for TokioWorker<TAction>
@@ -210,12 +210,9 @@ where
 {
     fn new(
         factory: WorkerFactory<TAction>,
-        outbox: mpsc::UnboundedSender<(
-            StateOperation<TAction>,
-            Option<(MessageOffset, ProcessId)>,
-        )>,
+        outbox: mpsc::Sender<(StateOperation<TAction>, Option<(MessageOffset, ProcessId)>)>,
     ) -> Self {
-        let (inbox_tx, mut inbox_rx) = mpsc::unbounded_channel();
+        let (inbox_tx, mut inbox_rx) = mpsc::channel(1024);
         Self {
             inbox: inbox_tx,
             task: tokio::spawn({
@@ -242,7 +239,8 @@ where
                                     Ok((worker_instance, actions)) => {
                                         worker.replace(worker_instance);
                                         for (offset, operation) in actions {
-                                            let _ = outbox.send((operation, Some((offset, pid))));
+                                            let _ =
+                                                outbox.send((operation, Some((offset, pid)))).await;
                                         }
                                     }
                                     Err(err) => {
