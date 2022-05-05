@@ -204,7 +204,7 @@ where
             cache_key: _,
             query: _,
             state_index,
-            result: _,
+            result,
         } = action;
         let current_state_index = self.state.state_index;
         if state_index < current_state_index {
@@ -212,6 +212,9 @@ where
         }
         let start_time = Instant::now();
         self.state.cache.gc(once(self.cache_key));
+        if result.dependencies().len() < self.state.state_values.len() {
+            self.state.state_values.gc(result.dependencies());
+        }
         let elapsed_time = start_time.elapsed();
         histogram!(METRIC_QUERY_WORKER_GC_DURATION, elapsed_time.as_secs_f64());
         // TODO: Garbage-collect state values

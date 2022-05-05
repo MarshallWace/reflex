@@ -751,6 +751,20 @@ impl<T: Hash> StateCache<T> {
         }
         self.hash = hasher.finish();
     }
+    pub fn gc(&mut self, retained_keys: &DependencyList) {
+        let mut hasher = DefaultHasher::new();
+        hasher.write_u64(self.hash);
+        for key in self
+            .values
+            .keys()
+            .copied()
+            .filter(|key| !retained_keys.contains(*key))
+        {
+            hasher.write_u64(key);
+            hasher.write_u8(0);
+        }
+        self.hash = hasher.finish();
+    }
     pub fn len(&self) -> usize {
         self.values.len()
     }

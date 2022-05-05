@@ -199,6 +199,9 @@ impl<T: Expression> DefaultInterpreterCache<T> {
     pub fn gc(&mut self, roots: impl IntoIterator<Item = HashId>) -> GcMetrics {
         gc(&mut self.cache, roots)
     }
+    pub fn len(&self) -> usize {
+        self.cache.len()
+    }
 }
 impl<T: Expression> InterpreterCache<T> for DefaultInterpreterCache<T> {
     fn retrieve_result(
