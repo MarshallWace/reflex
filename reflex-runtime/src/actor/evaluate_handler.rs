@@ -488,8 +488,9 @@ where
         } else if let Some(action) = action.match_type() {
             self.handle_effect_emit(action, metadata, context)
         } else {
-            StateTransition::new(None)
+            None
         }
+        .unwrap_or_default()
     }
 }
 impl<T, TFactory, TAllocator> EvaluateHandler<T, TFactory, TAllocator>
@@ -503,7 +504,7 @@ where
         action: &EffectSubscribeAction<T>,
         _metadata: &MessageData,
         context: &mut impl HandlerContext,
-    ) -> StateTransition<TAction>
+    ) -> Option<StateTransition<TAction>>
     where
         TAction:
             Action + OutboundAction<EvaluateStartAction<T>> + OutboundAction<EffectEmitAction<T>>,
@@ -524,7 +525,7 @@ where
             &metric_labels
         );
         if effect_type != EFFECT_TYPE_EVALUATE {
-            return StateTransition::new(None);
+            return None;
         }
         let queries = effects.iter().filter_map(|effect| {
             parse_evaluate_effect_query(effect, &self.factory).map(|query| (effect, query))
@@ -589,18 +590,18 @@ where
                 .into(),
             ))
         };
-        StateTransition::new(
+        Some(StateTransition::new(
             emit_cached_results_action
                 .into_iter()
                 .chain(evaluate_start_actions),
-        )
+        ))
     }
     fn handle_effect_unsubscribe<TAction>(
         &mut self,
         action: &EffectUnsubscribeAction<T>,
         _metadata: &MessageData,
         context: &mut impl HandlerContext,
-    ) -> StateTransition<TAction>
+    ) -> Option<StateTransition<TAction>>
     where
         TAction: Action
             + OutboundAction<EvaluateStopAction<T>>
@@ -612,7 +613,7 @@ where
         } = action;
         decrement_gauge!(METRIC_ACTIVE_EFFECT_COUNT, effects.len() as f64, "effect_type" => String::from(effect_type));
         if effect_type != EFFECT_TYPE_EVALUATE {
-            return StateTransition::new(None);
+            return None;
         }
         let unsubscribed_workers = effects
             .iter()
@@ -686,14 +687,14 @@ where
         if !unsubscribed_workers.is_empty() {
             self.state.update_worker_status_metrics(&self.factory);
         }
-        StateTransition::new(actions)
+        Some(StateTransition::new(actions))
     }
     fn handle_evaluate_result<TAction>(
         &mut self,
         action: &EvaluateResultAction<T>,
         _metadata: &MessageData,
         context: &mut impl HandlerContext,
-    ) -> StateTransition<TAction>
+    ) -> Option<StateTransition<TAction>>
     where
         TAction: Action
             + OutboundAction<EffectSubscribeAction<T>>
@@ -711,171 +712,151 @@ where
             .state
             .workers
             .get(cache_key)
-            .map(|worker| worker.state_index);
-        match worker_state_index {
-            None => StateTransition::new(None),
-            Some(worker_state_index) => {
-                let is_outdated_action = match (state_index, worker_state_index) {
-                    (Some(state_index), Some(worker_state_index)) => {
-                        worker_state_index > *state_index
-                    }
-                    _ => false,
-                };
-                if is_outdated_action {
-                    StateTransition::new(None)
-                } else {
-                    let existing_effect_ids = self
-                        .state
-                        .combined_effects()
-                        .map(|effect| effect.id())
-                        .collect::<HashSet<_>>();
-                    // If this is the final remaining worker that has not yet consumed a given state payload, determine
-                    // the index of the next-oldest state update which still has yet to be consumed by every worker
-                    let updated_oldest_active_state_index = {
-                        let worker_state_index = self
-                            .state
-                            .workers
-                            .get(cache_key)
-                            .and_then(|worker| worker.state_index);
-                        if let Some(worker_state_index) = worker_state_index {
-                            let oldest_active_sibling_state_index = self
-                                .state
-                                .workers
-                                .iter()
-                                .filter(|(sibling_cache_key, _)| *sibling_cache_key != cache_key)
-                                .filter_map(|(_, worker)| worker.state_index)
-                                .min();
-                            match oldest_active_sibling_state_index {
-                                Some(oldest_state_index)
-                                    if worker_state_index < oldest_state_index =>
-                                {
-                                    Some(oldest_state_index)
-                                }
-                                _ => None,
-                            }
-                        } else {
-                            None
-                        }
-                    };
-                    match self.state.workers.get_mut(cache_key) {
-                        None => StateTransition::new(None),
-                        Some(worker) => {
-                            let added_effects =
-                                parse_expression_effects(result.result(), &self.factory)
-                                    .filter(|effect| !existing_effect_ids.contains(&effect.id()))
-                                    .cloned()
-                                    .collect::<Vec<_>>();
-                            for effect in added_effects.iter() {
-                                self.state.effects.insert(effect.id(), effect.clone());
-                            }
-                            let updated_status = WorkerStatus::Idle {
-                                latest_result: (worker_state_index, result.clone()),
-                            };
-                            let previous_status =
-                                std::mem::replace(&mut worker.status, updated_status);
-                            let previous_dependencies = match previous_status {
-                                WorkerStatus::Idle {
-                                    latest_result: (_, result),
-                                } => {
-                                    let (_, dependencies) = result.into_parts();
-                                    Some(dependencies)
-                                }
-                                WorkerStatus::Busy { previous_result } => {
-                                    previous_result.map(|(_, result)| {
-                                        let (_, dependencies) = result.into_parts();
-                                        dependencies
-                                    })
-                                }
-                            };
-                            let reevaluate_action = update_worker_state(
-                                worker,
-                                match previous_dependencies {
-                                    None => WorkerStateUpdateType::FirstResult,
-                                    Some(dependencies) => WorkerStateUpdateType::SubsequentResult {
-                                        previous_dependencies: dependencies,
-                                    },
-                                },
-                                &mut self.state.state_cache,
-                                context,
-                            );
-                            let effect_emit_action: Option<StateOperation<TAction>> =
-                                if is_pending_result(result.result(), &self.factory) {
-                                    None
-                                } else {
-                                    Some(StateOperation::Send(
-                                        context.pid(),
-                                        EffectEmitAction {
-                                            updates: vec![(
-                                                *cache_key,
-                                                StateUpdate::Value(create_evaluate_effect_result(
-                                                    result,
-                                                    &self.factory,
-                                                    &self.allocator,
-                                                )),
-                                            )],
-                                        }
-                                        .into(),
-                                    ))
-                                };
-                            let updated_effect_ids = self
-                                .state
-                                .combined_effects()
-                                .map(|effect| effect.id())
-                                .collect::<HashSet<_>>();
-                            let removed_effects = existing_effect_ids
-                                .iter()
-                                .filter(|effect_id| !updated_effect_ids.contains(effect_id))
-                                .filter_map(|effect_id| self.state.effects.remove(&effect_id))
-                                .collect::<Vec<_>>();
-                            if let Some(oldest_active_state_index) =
-                                updated_oldest_active_state_index
-                            {
-                                self.state
-                                    .state_cache
-                                    .delete_updates_before(oldest_active_state_index)
-                            }
-                            let effect_subscribe_actions = group_effects_by_type(added_effects)
-                                .map(|(effect_type, effects)| {
-                                    StateOperation::Send(
-                                        context.pid(),
-                                        EffectSubscribeAction {
-                                            effect_type,
-                                            effects,
-                                        }
-                                        .into(),
-                                    )
-                                });
-                            let effect_unsubscribe_actions = group_effects_by_type(removed_effects)
-                                .map(|(effect_type, effects)| {
-                                    StateOperation::Send(
-                                        context.pid(),
-                                        EffectUnsubscribeAction {
-                                            effect_type,
-                                            effects,
-                                        }
-                                        .into(),
-                                    )
-                                });
-                            let actions = effect_emit_action
-                                .into_iter()
-                                .chain(reevaluate_action)
-                                .chain(effect_subscribe_actions)
-                                .chain(effect_unsubscribe_actions)
-                                .collect::<Vec<_>>();
-                            self.state.update_worker_status_metrics(&self.factory);
-                            StateTransition::new(actions)
-                        }
-                    }
-                }
-            }
+            .map(|worker| worker.state_index)?;
+        let is_outdated_action = match (state_index, worker_state_index) {
+            (Some(state_index), Some(worker_state_index)) => worker_state_index > *state_index,
+            _ => false,
+        };
+        if is_outdated_action {
+            return None;
         }
+        let existing_effect_ids = self
+            .state
+            .combined_effects()
+            .map(|effect| effect.id())
+            .collect::<HashSet<_>>();
+        // If this is the final remaining worker that has not yet consumed a given state payload, determine
+        // the index of the next-oldest state update which still has yet to be consumed by every worker
+        let updated_oldest_active_state_index = {
+            let worker_state_index = self
+                .state
+                .workers
+                .get(cache_key)
+                .and_then(|worker| worker.state_index);
+            if let Some(worker_state_index) = worker_state_index {
+                let oldest_active_sibling_state_index = self
+                    .state
+                    .workers
+                    .iter()
+                    .filter(|(sibling_cache_key, _)| *sibling_cache_key != cache_key)
+                    .filter_map(|(_, worker)| worker.state_index)
+                    .min();
+                match oldest_active_sibling_state_index {
+                    Some(oldest_state_index) if worker_state_index < oldest_state_index => {
+                        Some(oldest_state_index)
+                    }
+                    _ => None,
+                }
+            } else {
+                None
+            }
+        };
+        let worker = self.state.workers.get_mut(cache_key)?;
+        let added_effects = parse_expression_effects(result.result(), &self.factory)
+            .filter(|effect| !existing_effect_ids.contains(&effect.id()))
+            .cloned()
+            .collect::<Vec<_>>();
+        for effect in added_effects.iter() {
+            self.state.effects.insert(effect.id(), effect.clone());
+        }
+        let updated_status = WorkerStatus::Idle {
+            latest_result: (worker_state_index, result.clone()),
+        };
+        let previous_status = std::mem::replace(&mut worker.status, updated_status);
+        let previous_dependencies = match previous_status {
+            WorkerStatus::Idle {
+                latest_result: (_, result),
+            } => {
+                let (_, dependencies) = result.into_parts();
+                Some(dependencies)
+            }
+            WorkerStatus::Busy { previous_result } => previous_result.map(|(_, result)| {
+                let (_, dependencies) = result.into_parts();
+                dependencies
+            }),
+        };
+        let reevaluate_action = update_worker_state(
+            worker,
+            match previous_dependencies {
+                None => WorkerStateUpdateType::FirstResult,
+                Some(dependencies) => WorkerStateUpdateType::SubsequentResult {
+                    previous_dependencies: dependencies,
+                },
+            },
+            &mut self.state.state_cache,
+            context,
+        );
+        let effect_emit_action: Option<StateOperation<TAction>> =
+            if is_pending_result(result.result(), &self.factory) {
+                None
+            } else {
+                Some(StateOperation::Send(
+                    context.pid(),
+                    EffectEmitAction {
+                        updates: vec![(
+                            *cache_key,
+                            StateUpdate::Value(create_evaluate_effect_result(
+                                result,
+                                &self.factory,
+                                &self.allocator,
+                            )),
+                        )],
+                    }
+                    .into(),
+                ))
+            };
+        let updated_effect_ids = self
+            .state
+            .combined_effects()
+            .map(|effect| effect.id())
+            .collect::<HashSet<_>>();
+        let removed_effects = existing_effect_ids
+            .iter()
+            .filter(|effect_id| !updated_effect_ids.contains(effect_id))
+            .filter_map(|effect_id| self.state.effects.remove(&effect_id))
+            .collect::<Vec<_>>();
+        if let Some(oldest_active_state_index) = updated_oldest_active_state_index {
+            self.state
+                .state_cache
+                .delete_updates_before(oldest_active_state_index)
+        }
+        let effect_subscribe_actions =
+            group_effects_by_type(added_effects).map(|(effect_type, effects)| {
+                StateOperation::Send(
+                    context.pid(),
+                    EffectSubscribeAction {
+                        effect_type,
+                        effects,
+                    }
+                    .into(),
+                )
+            });
+        let effect_unsubscribe_actions =
+            group_effects_by_type(removed_effects).map(|(effect_type, effects)| {
+                StateOperation::Send(
+                    context.pid(),
+                    EffectUnsubscribeAction {
+                        effect_type,
+                        effects,
+                    }
+                    .into(),
+                )
+            });
+        let actions = effect_emit_action
+            .into_iter()
+            .chain(reevaluate_action)
+            .chain(effect_subscribe_actions)
+            .chain(effect_unsubscribe_actions)
+            .collect::<Vec<_>>();
+        self.state.update_worker_status_metrics(&self.factory);
+        Some(StateTransition::new(actions))
     }
     fn handle_effect_emit<TAction>(
         &mut self,
         action: &EffectEmitAction<T>,
         metadata: &MessageData,
         context: &mut impl HandlerContext,
-    ) -> StateTransition<TAction>
+    ) -> Option<StateTransition<TAction>>
     where
         TAction: Action + OutboundAction<EvaluateStartAction<T>>,
     {
@@ -907,7 +888,7 @@ where
             (updated_state_tokens, updates)
         };
         if updated_state_tokens.is_empty() {
-            return StateTransition::new(None);
+            return None;
         }
         let state_index = metadata.offset;
         self.state.state_cache.apply_batch(state_index, updates);
@@ -924,20 +905,15 @@ where
                         .any(|state_token| updated_state_tokens.contains(&state_token)),
                     _ => false,
                 });
-        let actions = invalidated_workers
-            .filter_map(|worker| {
-                update_worker_state(
-                    worker,
-                    WorkerStateUpdateType::DependencyUpdate,
-                    &mut self.state.state_cache,
-                    context,
-                )
-            })
-            .collect::<Vec<_>>();
-        if actions.is_empty() {
-            return StateTransition::new(None);
-        }
-        StateTransition::new(actions)
+        let worker_update_actions = invalidated_workers.filter_map(|worker| {
+            update_worker_state(
+                worker,
+                WorkerStateUpdateType::DependencyUpdate,
+                &mut self.state.state_cache,
+                context,
+            )
+        });
+        Some(StateTransition::new(worker_update_actions))
     }
 }
 

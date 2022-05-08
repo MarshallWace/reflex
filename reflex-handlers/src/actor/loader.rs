@@ -298,8 +298,9 @@ where
         } else if let Some(action) = action.match_type() {
             self.handle_effect_emit(action, metadata, context)
         } else {
-            StateTransition::new(None)
+            None
         }
+        .unwrap_or_default()
     }
 }
 impl<T, TFactory, TAllocator> LoaderHandler<T, TFactory, TAllocator>
@@ -313,7 +314,7 @@ where
         action: &EffectSubscribeAction<T>,
         _metadata: &MessageData,
         context: &mut impl HandlerContext,
-    ) -> StateTransition<TAction>
+    ) -> Option<StateTransition<TAction>>
     where
         TAction: Action
             + 'static
@@ -325,7 +326,7 @@ where
             effects,
         } = action;
         if effect_type.as_str() != EFFECT_TYPE_LOADER {
-            return StateTransition::new(None);
+            return None;
         }
         let current_pid = context.pid();
         let (initial_values, effects_by_loader) = effects.iter().fold(
@@ -403,14 +404,16 @@ where
                 .into(),
             ))
         };
-        StateTransition::new(initial_values_action.into_iter().chain(load_action))
+        Some(StateTransition::new(
+            initial_values_action.into_iter().chain(load_action),
+        ))
     }
     fn handle_effect_unsubscribe<TAction>(
         &mut self,
         action: &EffectUnsubscribeAction<T>,
         _metadata: &MessageData,
         context: &mut impl HandlerContext,
-    ) -> StateTransition<TAction>
+    ) -> Option<StateTransition<TAction>>
     where
         TAction: Action + 'static + OutboundAction<EffectUnsubscribeAction<T>>,
     {
@@ -419,7 +422,7 @@ where
             effects,
         } = action;
         if effect_type.as_str() != EFFECT_TYPE_LOADER {
-            return StateTransition::new(None);
+            return None;
         }
         let current_pid = context.pid();
         let effects_by_loader = effects.iter().fold(
@@ -461,20 +464,20 @@ where
                 .into(),
             ))
         };
-        StateTransition::new(unsubscribe_action)
+        Some(StateTransition::new(unsubscribe_action))
     }
     fn handle_effect_emit<TAction>(
         &mut self,
         action: &EffectEmitAction<T>,
         _metadata: &MessageData,
         context: &mut impl HandlerContext,
-    ) -> StateTransition<TAction>
+    ) -> Option<StateTransition<TAction>>
     where
         TAction: Action + OutboundAction<EffectEmitAction<T>>,
     {
         let EffectEmitAction { updates } = action;
         if self.state.loaders.is_empty() {
-            return StateTransition::new(None);
+            return None;
         }
         let updates = updates
             .iter()
@@ -561,14 +564,15 @@ where
             })
             .flatten()
             .collect::<Vec<_>>();
-        if updates.is_empty() {
-            StateTransition::new(None)
+        let update_action = if updates.is_empty() {
+            None
         } else {
-            StateTransition::new(Some(StateOperation::Send(
+            Some(StateOperation::Send(
                 context.pid(),
                 EffectEmitAction { updates }.into(),
-            )))
-        }
+            ))
+        };
+        Some(StateTransition::new(update_action))
     }
 }
 

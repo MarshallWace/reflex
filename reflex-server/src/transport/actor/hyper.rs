@@ -1,7 +1,10 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use std::collections::{hash_map::Entry, HashMap};
+use std::{
+    collections::{hash_map::Entry, HashMap},
+    iter::once,
+};
 
 use bytes::Bytes;
 use futures::{future, Future, SinkExt, StreamExt};
@@ -132,8 +135,9 @@ where
         } else if let Some(action) = action.match_type() {
             self.handle_websocket_graphql_server_disconnect(action, metadata, context)
         } else {
-            StateTransition::new(None)
+            None
         }
+        .unwrap_or_default()
     }
 }
 impl HyperServer {
@@ -142,7 +146,7 @@ impl HyperServer {
         _action: &InitRuntimeAction,
         _metadata: &MessageData,
         context: &mut impl HandlerContext,
-    ) -> StateTransition<TAction>
+    ) -> Option<StateTransition<TAction>>
     where
         TAction: Action
             + Send
@@ -151,17 +155,17 @@ impl HyperServer {
             + OutboundAction<WebSocketServerConnectAction>
             + OutboundAction<WebSocketServerReceiveAction>,
     {
-        StateTransition::new(
-            self.listen(context.pid())
-                .map(|task| StateOperation::Task(context.generate_pid(), task)),
-        )
+        let listen_task = self.listen(context.pid())?;
+        let task_pid = context.generate_pid();
+        let listen_action = StateOperation::Task(task_pid, listen_task);
+        Some(StateTransition::new(once(listen_action)))
     }
     fn handle_http_graphql_server_response<TAction>(
         &mut self,
         action: &HttpServerResponseAction,
         _metadata: &MessageData,
         _context: &mut impl HandlerContext,
-    ) -> StateTransition<TAction>
+    ) -> Option<StateTransition<TAction>>
     where
         TAction: Action,
     {
@@ -173,14 +177,14 @@ impl HyperServer {
             *request_id,
             clone_response_wrapper(response).map(|_| response.body().clone()),
         ));
-        StateTransition::new(None)
+        None
     }
     fn handle_websocket_graphql_server_send<TAction>(
         &mut self,
         action: &WebSocketServerSendAction,
         _metadata: &MessageData,
         _context: &mut impl HandlerContext,
-    ) -> StateTransition<TAction>
+    ) -> Option<StateTransition<TAction>>
     where
         TAction: Action,
     {
@@ -193,14 +197,14 @@ impl HyperServer {
             *connection_id,
             message.clone(),
         ));
-        StateTransition::new(None)
+        None
     }
     fn handle_websocket_graphql_server_disconnect<TAction>(
         &mut self,
         action: &WebSocketServerDisconnectAction,
         _metadata: &MessageData,
         _context: &mut impl HandlerContext,
-    ) -> StateTransition<TAction>
+    ) -> Option<StateTransition<TAction>>
     where
         TAction: Action,
     {
@@ -208,7 +212,7 @@ impl HyperServer {
         let _ = self
             .commands
             .send(HyperChannelMessage::WebSocketDisconnect(*connection_id));
-        StateTransition::new(None)
+        None
     }
 }
 impl HyperServer {

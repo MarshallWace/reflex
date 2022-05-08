@@ -3,6 +3,7 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use std::{
     collections::{hash_map::Entry, HashMap},
+    iter::once,
     marker::PhantomData,
     sync::Once,
 };
@@ -123,8 +124,9 @@ where
         } else if let Some(action) = action.match_type() {
             self.handle_effect_emit(action, metadata, context)
         } else {
-            StateTransition::new(None)
+            None
         }
+        .unwrap_or_default()
     }
 }
 impl<T, TFactory, TAllocator> QueryManager<T, TFactory, TAllocator>
@@ -138,7 +140,7 @@ where
         action: &QuerySubscribeAction<T>,
         _metadata: &MessageData,
         context: &mut impl HandlerContext,
-    ) -> StateTransition<TAction>
+    ) -> Option<StateTransition<TAction>>
     where
         TAction:
             Action + OutboundAction<EffectSubscribeAction<T>> + OutboundAction<QueryEmitAction<T>>,
@@ -166,7 +168,7 @@ where
                         .into(),
                     )
                 });
-                StateTransition::new(emit_existing_result_action)
+                Some(StateTransition::new(emit_existing_result_action))
             }
             // For any queries that are not yet actively subscribed, create a new subscription
             Entry::Vacant(entry) => {
@@ -177,14 +179,15 @@ where
                     subscription_count: 1,
                 });
                 increment_gauge!(METRIC_ACTIVE_QUERY_COUNT, 1.0);
-                StateTransition::new(Some(StateOperation::Send(
+                let subscribe_action = StateOperation::Send(
                     context.pid(),
                     EffectSubscribeAction {
                         effect_type: String::from(EFFECT_TYPE_EVALUATE),
                         effects: vec![query_effect],
                     }
                     .into(),
-                )))
+                );
+                Some(StateTransition::new(once(subscribe_action)))
             }
         }
     }
@@ -193,7 +196,7 @@ where
         action: &QueryUnsubscribeAction<T>,
         _metadata: &MessageData,
         context: &mut impl HandlerContext,
-    ) -> StateTransition<TAction>
+    ) -> Option<StateTransition<TAction>>
     where
         TAction: Action + OutboundAction<EffectUnsubscribeAction<T>>,
     {
@@ -205,33 +208,32 @@ where
             &self.factory,
             &self.allocator,
         );
-        match self.state.subscriptions.entry(query_effect.id()) {
-            Entry::Vacant(_) => StateTransition::new(None),
-            Entry::Occupied(mut entry) => {
-                entry.get_mut().subscription_count -= 1;
-                if entry.get().subscription_count == 0 {
-                    let subscription = entry.remove();
-                    decrement_gauge!(METRIC_ACTIVE_QUERY_COUNT, 1.0);
-                    StateTransition::new(Some(StateOperation::Send(
-                        context.pid(),
-                        EffectUnsubscribeAction {
-                            effect_type: String::from(EFFECT_TYPE_EVALUATE),
-                            effects: vec![subscription.effect],
-                        }
-                        .into(),
-                    )))
-                } else {
-                    StateTransition::new(None)
-                }
-            }
+        let mut entry = match self.state.subscriptions.entry(query_effect.id()) {
+            Entry::Vacant(_) => None,
+            Entry::Occupied(entry) => Some(entry),
+        }?;
+        entry.get_mut().subscription_count -= 1;
+        if entry.get().subscription_count != 0 {
+            return None;
         }
+        let subscription = entry.remove();
+        decrement_gauge!(METRIC_ACTIVE_QUERY_COUNT, 1.0);
+        let unsubscribe_action = StateOperation::Send(
+            context.pid(),
+            EffectUnsubscribeAction {
+                effect_type: String::from(EFFECT_TYPE_EVALUATE),
+                effects: vec![subscription.effect],
+            }
+            .into(),
+        );
+        Some(StateTransition::new(once(unsubscribe_action)))
     }
     fn handle_effect_emit<TAction>(
         &mut self,
         action: &EffectEmitAction<T>,
         _metadata: &MessageData,
         context: &mut impl HandlerContext,
-    ) -> StateTransition<TAction>
+    ) -> Option<StateTransition<TAction>>
     where
         TAction: Action + OutboundAction<QueryEmitAction<T>>,
     {
@@ -250,11 +252,11 @@ where
                 Some((subscription.query.clone(), result))
             })
         };
-        let actions = updated_queries
+        let emit_actions = updated_queries
             .map(|(query, result)| {
                 StateOperation::Send(context.pid(), QueryEmitAction { query, result }.into())
             })
             .collect::<Vec<_>>();
-        StateTransition::new(actions)
+        Some(StateTransition::new(emit_actions))
     }
 }

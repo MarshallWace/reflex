@@ -91,8 +91,9 @@ where
         } else if let Some(action) = action.match_type() {
             self.handle_effect_unsubscribe(action, metadata, context)
         } else {
-            StateTransition::new(None)
+            None
         }
+        .unwrap_or_default()
     }
 }
 impl<T, TFactory, TAllocator> TimestampHandler<T, TFactory, TAllocator>
@@ -106,7 +107,7 @@ where
         action: &EffectSubscribeAction<T>,
         _metadata: &MessageData,
         context: &mut impl HandlerContext,
-    ) -> StateTransition<TAction>
+    ) -> Option<StateTransition<TAction>>
     where
         TAction: Action + Send + 'static + OutboundAction<EffectEmitAction<T>>,
     {
@@ -115,7 +116,7 @@ where
             effects,
         } = action;
         if effect_type.as_str() != EFFECT_TYPE_TIMESTAMP {
-            return StateTransition::new(None);
+            return None;
         }
         let current_pid = context.pid();
         let (initial_values, tasks): (Vec<_>, Vec<_>) =
@@ -171,18 +172,18 @@ where
                 .into(),
             ))
         };
-        StateTransition::new(
+        Some(StateTransition::new(
             initial_values_action
                 .into_iter()
                 .chain(tasks.into_iter().flatten()),
-        )
+        ))
     }
     fn handle_effect_unsubscribe<TAction>(
         &mut self,
         action: &EffectUnsubscribeAction<T>,
         _metadata: &MessageData,
         _context: &mut impl HandlerContext,
-    ) -> StateTransition<TAction>
+    ) -> Option<StateTransition<TAction>>
     where
         TAction: Action,
     {
@@ -191,16 +192,17 @@ where
             effects,
         } = action;
         if effect_type.as_str() != EFFECT_TYPE_TIMESTAMP {
-            return StateTransition::new(None);
+            return None;
         }
-        StateTransition::new(effects.iter().filter_map(|effect| {
+        let unsubscribe_actions = effects.iter().filter_map(|effect| {
             if let Entry::Occupied(entry) = self.state.tasks.entry(effect.id()) {
                 let pid = entry.remove();
                 Some(StateOperation::Kill(pid))
             } else {
                 None
             }
-        }))
+        });
+        Some(StateTransition::new(unsubscribe_actions))
     }
 }
 

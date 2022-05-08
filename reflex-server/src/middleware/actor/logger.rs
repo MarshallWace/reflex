@@ -31,6 +31,6 @@ where
         context: &mut impl HandlerContext,
     ) -> StateTransition<TAction> {
         self.logger.log(action, Some(metadata), Some(context));
-        StateTransition::new(None)
+        None.unwrap_or_default()
     }
 }

@@ -272,8 +272,9 @@ where
         if let Some(action) = action.match_type() {
             self.handle_effect_emit(action, metadata, context)
         } else {
-            StateTransition::new(None)
+            None
         }
+        .unwrap_or_default()
     }
 }
 impl<T, TFactory> QueryWatcherActor<T, TFactory>
@@ -286,7 +287,7 @@ where
         action: &EffectEmitAction<T>,
         _metadata: &MessageData,
         _context: &mut impl HandlerContext,
-    ) -> StateTransition<TAction>
+    ) -> Option<StateTransition<TAction>>
     where
         TAction: Action,
     {
@@ -301,7 +302,7 @@ where
         {
             let _ = self.results.send(update);
         }
-        StateTransition::new(None)
+        None
     }
 }
 
@@ -339,7 +340,7 @@ where
         _context: &mut impl HandlerContext,
     ) -> StateTransition<TAction> {
         self.log(action);
-        StateTransition::new(None)
+        None.unwrap_or_default()
     }
 }
 

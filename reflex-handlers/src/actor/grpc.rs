@@ -476,8 +476,9 @@ where
         } else if let Some(action) = action.match_type() {
             self.handle_grpc_handler_connect_error(action, metadata, context)
         } else {
-            StateTransition::new(None)
+            None
         }
+        .unwrap_or_default()
     }
 }
 impl<T, TFactory, TAllocator, TService, TClient, TConfig, TReconnect>
@@ -496,7 +497,7 @@ where
         action: &EffectSubscribeAction<T>,
         _metadata: &MessageData,
         context: &mut impl HandlerContext,
-    ) -> StateTransition<TAction>
+    ) -> Option<StateTransition<TAction>>
     where
         TAction: Action
             + Send
@@ -510,7 +511,7 @@ where
             effects,
         } = action;
         if effect_type.as_str() != EFFECT_TYPE_GRPC {
-            return StateTransition::new(None);
+            return None;
         }
         let (initial_values, tasks): (Vec<_>, Vec<_>) = effects
             .iter()
@@ -564,7 +565,7 @@ where
                 .into(),
             ))
         };
-        StateTransition::new(
+        Some(StateTransition::new(
             initial_values_action
                 .into_iter()
                 .chain(
@@ -574,14 +575,14 @@ where
                             connect_task.into_iter().chain(subscribe_task)
                         }),
                 ),
-        )
+        ))
     }
     fn handle_effect_unsubscribe<TAction>(
         &mut self,
         action: &EffectUnsubscribeAction<T>,
         _metadata: &MessageData,
         _context: &mut impl HandlerContext,
-    ) -> StateTransition<TAction>
+    ) -> Option<StateTransition<TAction>>
     where
         TAction: Action + 'static,
     {
@@ -590,7 +591,7 @@ where
             effects,
         } = action;
         if effect_type.as_str() != EFFECT_TYPE_GRPC {
-            return StateTransition::new(None);
+            return None;
         }
         let actions = effects
             .iter()
@@ -604,14 +605,14 @@ where
                 }
             })
             .flat_map(|(unsubscribe, disconnect)| unsubscribe.into_iter().chain(disconnect));
-        StateTransition::new(actions)
+        Some(StateTransition::new(actions))
     }
     fn handle_grpc_handler_connect_success<TAction>(
         &mut self,
         action: &GrpcHandlerConnectSuccessAction,
         _metadata: &MessageData,
         context: &mut impl HandlerContext,
-    ) -> StateTransition<TAction>
+    ) -> Option<StateTransition<TAction>>
     where
         TAction: Action + Send + 'static + OutboundAction<EffectEmitAction<T>>,
     {
@@ -620,76 +621,66 @@ where
             url: _,
         } = action;
         let connection_id = *connection_id;
-        let operation_actions = match self
+        let connection_state = self
             .state
             .active_connections
-            .get_mut(&GrpcConnectionId(connection_id))
-        {
-            None => None,
-            Some(connection_state) => {
-                let connection = match &mut connection_state.connection {
-                    GrpcConnection::Connected(..) => None,
-                    GrpcConnection::Pending(_, connection) => {
-                        connection.client.lock().unwrap().take().map(|client| {
-                            (
-                                client,
-                                std::mem::replace(&mut connection.pending_operations, Vec::new()),
-                            )
-                        })
-                    }
-                    GrpcConnection::Error(..) => None,
-                };
-                match connection {
-                    None => None,
-                    Some((client, pending_operations)) => {
-                        let (operation_tasks, operation_errors): (Vec<_>, Vec<_>) =
-                            partition_results(pending_operations.into_iter().filter_map({
-                                |operation| {
-                                    let effect_id = operation.effect_id;
-                                    match listen_grpc_operation(
-                                        client.clone(),
-                                        operation,
-                                        &self.factory,
-                                        &self.allocator,
-                                        context,
-                                    ) {
-                                        Err(update) => Some(Err(update)),
-                                        Ok((operation_task, task_pid)) => connection_state
-                                            .operations
-                                            .get_mut(&effect_id)
-                                            .map(|operation_state| {
-                                                *operation_state =
-                                                    GrpcOperationState::Active(task_pid);
-                                                Ok(operation_task)
-                                            }),
-                                    }
-                                }
-                            }));
-                        let error_action = if operation_errors.is_empty() {
-                            None
-                        } else {
-                            Some(StateOperation::Send(
-                                context.pid(),
-                                EffectEmitAction {
-                                    updates: operation_errors,
-                                }
-                                .into(),
-                            ))
-                        };
-                        connection_state.connection = GrpcConnection::Connected(client);
-                        Some(error_action.into_iter().chain(operation_tasks))
+            .get_mut(&GrpcConnectionId(connection_id))?;
+        let (client, pending_operations) = match &mut connection_state.connection {
+            GrpcConnection::Connected(..) => None,
+            GrpcConnection::Pending(_, connection) => {
+                connection.client.lock().unwrap().take().map(|client| {
+                    (
+                        client,
+                        std::mem::replace(&mut connection.pending_operations, Vec::new()),
+                    )
+                })
+            }
+            GrpcConnection::Error(..) => None,
+        }?;
+        let (operation_tasks, operation_errors): (Vec<_>, Vec<_>) =
+            partition_results(pending_operations.into_iter().filter_map({
+                |operation| {
+                    let effect_id = operation.effect_id;
+                    match listen_grpc_operation(
+                        client.clone(),
+                        operation,
+                        &self.factory,
+                        &self.allocator,
+                        context,
+                    ) {
+                        Err(update) => Some(Err(update)),
+                        Ok((operation_task, task_pid)) => connection_state
+                            .operations
+                            .get_mut(&effect_id)
+                            .map(|operation_state| {
+                                *operation_state = GrpcOperationState::Active(task_pid);
+                                Ok(operation_task)
+                            }),
                     }
                 }
-            }
+            }));
+        connection_state.connection = GrpcConnection::Connected(client);
+        let error_action = if operation_errors.is_empty() {
+            None
+        } else {
+            Some(StateOperation::Send(
+                context.pid(),
+                EffectEmitAction {
+                    updates: operation_errors,
+                }
+                .into(),
+            ))
         };
-        StateTransition::new(operation_actions.into_iter().flatten())
+        Some(StateTransition::new(
+            error_action.into_iter().chain(operation_tasks),
+        ))
     }
     fn handle_grpc_handler_connect_error<TAction>(
         &mut self,
         action: &GrpcHandlerConnectErrorAction,
         _metadata: &MessageData,
         context: &mut impl HandlerContext,
-    ) -> StateTransition<TAction>
+    ) -> Option<StateTransition<TAction>>
     where
         TAction: Action
             + Send
@@ -704,72 +695,56 @@ where
             error: _,
         } = action;
         let connection_id = GrpcConnectionId(*connection_id);
-        match self.state.active_connections.get_mut(&connection_id) {
-            None => StateTransition::new(None),
-            Some(connection_state) => {
-                let reconnect_action = match &mut connection_state.connection {
-                    GrpcConnection::Connected(..) => Ok(None),
-                    GrpcConnection::Pending(connection_pid, connection) => {
-                        let reconnect_timeout = self
-                            .reconnect_timeout
-                            .duration(connection.connection_attempt);
-                        match reconnect_timeout {
-                            None => Ok(None),
-                            Some(duration) => {
-                                connection.connection_attempt += 1;
-                                let connection = create_grpc_connect_task(
-                                    connection_id,
-                                    connection_state.service.clone(),
-                                    &self.config,
-                                    connection_state.url.clone(),
-                                    connection.client.clone(),
-                                    context,
-                                    if duration.is_zero() {
-                                        None
-                                    } else {
-                                        Some(duration)
-                                    },
+        let connection_state = self.state.active_connections.get_mut(&connection_id)?;
+        let (connection_pid, connection) = match &mut connection_state.connection {
+            GrpcConnection::Connected(..) | GrpcConnection::Error(..) => None,
+            GrpcConnection::Pending(connection_pid, connection) => {
+                Some((connection_pid, connection))
+            }
+        }?;
+        let reconnect_timeout = self
+            .reconnect_timeout
+            .duration(connection.connection_attempt)?;
+        connection.connection_attempt += 1;
+        let reconnect_task = create_grpc_connect_task(
+            connection_id,
+            connection_state.service.clone(),
+            &self.config,
+            connection_state.url.clone(),
+            connection.client.clone(),
+            context,
+            if reconnect_timeout.is_zero() {
+                None
+            } else {
+                Some(reconnect_timeout)
+            },
+        );
+        match reconnect_task {
+            Ok((task_pid, task)) => {
+                *connection_pid = task_pid;
+                Some(StateTransition::new(once(task)))
+            }
+            Err(message) => {
+                connection_state.connection = GrpcConnection::Error(message.clone());
+                Some(StateTransition::new(once(StateOperation::Send(
+                    context.pid(),
+                    EffectEmitAction {
+                        updates: connection_state
+                            .operations
+                            .keys()
+                            .cloned()
+                            .map({
+                                let error = create_error_message_expression(
+                                    message,
+                                    &self.factory,
+                                    &self.allocator,
                                 );
-                                match connection {
-                                    Ok((task_pid, task)) => {
-                                        *connection_pid = task_pid;
-                                        Ok(Some(task))
-                                    }
-                                    Err(message) => Err(message),
-                                }
-                            }
-                        }
+                                move |effect_id| (effect_id, StateUpdate::Value(error.clone()))
+                            })
+                            .collect(),
                     }
-                    GrpcConnection::Error(..) => Ok(None),
-                };
-                match reconnect_action {
-                    Ok(None) => StateTransition::new(None),
-                    Ok(Some(action)) => StateTransition::new(Some(action)),
-                    Err(message) => {
-                        connection_state.connection = GrpcConnection::Error(message.clone());
-                        StateTransition::new(Some(StateOperation::Send(
-                            context.pid(),
-                            EffectEmitAction {
-                                updates: connection_state
-                                    .operations
-                                    .keys()
-                                    .cloned()
-                                    .map({
-                                        let error = create_error_message_expression(
-                                            message,
-                                            &self.factory,
-                                            &self.allocator,
-                                        );
-                                        move |effect_id| {
-                                            (effect_id, StateUpdate::Value(error.clone()))
-                                        }
-                                    })
-                                    .collect(),
-                            }
-                            .into(),
-                        )))
-                    }
-                }
+                    .into(),
+                ))))
             }
         }
     }

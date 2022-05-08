@@ -4,6 +4,7 @@
 use std::{
     collections::{hash_map::Entry, HashMap},
     hash::Hash,
+    iter::once,
     marker::PhantomData,
     sync::{Arc, Once},
     time::Instant,
@@ -143,8 +144,9 @@ where
         } else if let Some(action) = action.match_type() {
             self.handle_evaluate_stop(action, metadata, context)
         } else {
-            StateTransition::new(None)
+            None
         }
+        .unwrap_or_default()
     }
 }
 impl<T, TFactory, TAllocator> BytecodeInterpreter<T, TFactory, TAllocator>
@@ -158,7 +160,7 @@ where
         action: &EvaluateStartAction<T>,
         _metadata: &MessageData,
         context: &mut impl HandlerContext,
-    ) -> StateTransition<TAction>
+    ) -> Option<StateTransition<TAction>>
     where
         TAction: Action
             + Send
@@ -179,15 +181,15 @@ where
         match self.state.workers.entry(*cache_key) {
             Entry::Occupied(entry) => {
                 let worker_pid = *entry.get();
-                StateTransition::new(Some(StateOperation::Send(
+                Some(StateTransition::new(once(StateOperation::Send(
                     worker_pid,
                     action.clone().into(),
-                )))
+                ))))
             }
             Entry::Vacant(entry) => {
                 let worker_pid = context.generate_pid();
                 entry.insert(worker_pid);
-                StateTransition::new([
+                Some(StateTransition::new([
                     StateOperation::Spawn(
                         worker_pid,
                         WorkerFactory::new({
@@ -228,7 +230,7 @@ where
                         }),
                     ),
                     StateOperation::Send(worker_pid, action.clone().into()),
-                ])
+                ]))
             }
         }
     }
@@ -237,7 +239,7 @@ where
         action: &EvaluateStopAction<T>,
         _metadata: &MessageData,
         _context: &mut impl HandlerContext,
-    ) -> StateTransition<TAction>
+    ) -> Option<StateTransition<TAction>>
     where
         TAction: Action,
     {
@@ -245,12 +247,8 @@ where
             cache_key,
             query: _,
         } = action;
-        if let Entry::Occupied(entry) = self.state.workers.entry(*cache_key) {
-            let pid = entry.remove();
-            StateTransition::new(Some(StateOperation::Kill(pid)))
-        } else {
-            StateTransition::new(None)
-        }
+        let worker_pid = self.state.workers.remove(cache_key)?;
+        Some(StateTransition::new(once(StateOperation::Kill(worker_pid))))
     }
 }
 

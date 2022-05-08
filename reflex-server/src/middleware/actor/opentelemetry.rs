@@ -145,8 +145,9 @@ where
         } else if let Some(action) = action.match_type() {
             self.handle_transaction_end(action, metadata, context)
         } else {
-            StateTransition::new(None)
+            None
         }
+        .unwrap_or_default()
     }
 }
 impl<T: Tracer> OpenTelemetryMiddleware<T>
@@ -158,7 +159,7 @@ where
         action: &TelemetryMiddlewareTransactionStartAction,
         _metadata: &MessageData,
         _context: &mut impl HandlerContext,
-    ) -> StateTransition<TAction>
+    ) -> Option<StateTransition<TAction>>
     where
         TAction: Action,
     {
@@ -204,14 +205,14 @@ where
                 entry.insert(context.with_span(span));
             }
         }
-        StateTransition::new(None)
+        None
     }
     fn handle_transaction_end<TAction>(
         &mut self,
         action: &TelemetryMiddlewareTransactionEndAction,
         _metadata: &MessageData,
         _context: &mut impl HandlerContext,
-    ) -> StateTransition<TAction>
+    ) -> Option<StateTransition<TAction>>
     where
         TAction: Action,
     {
@@ -221,6 +222,6 @@ where
                 context.span().end();
             }
         }
-        StateTransition::new(None)
+        None
     }
 }

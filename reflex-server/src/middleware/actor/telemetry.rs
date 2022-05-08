@@ -193,8 +193,9 @@ where
         } else if let Some(action) = action.match_type() {
             self.handle_effect_emit(action, metadata, context)
         } else {
-            StateTransition::new(None)
+            None
         }
+        .unwrap_or_default()
     }
 }
 impl<T, TFactory, TAllocator, TOperationLabels>
@@ -210,7 +211,7 @@ where
         action: &GraphQlServerSubscribeAction<T>,
         _metadata: &MessageData,
         context: &mut impl HandlerContext,
-    ) -> StateTransition<TAction>
+    ) -> Option<StateTransition<TAction>>
     where
         TAction: Action + OutboundAction<TelemetryMiddlewareTransactionStartAction>,
     {
@@ -219,39 +220,40 @@ where
             operation,
             ..
         } = action;
-        if let Entry::Vacant(entry) = self.state.active_queries.entry(*subscription_id) {
-            let traceparent = parse_graphql_operation_traceparent_extensions(operation);
-            let transaction_id = traceparent
-                .map(|transaction_id| transaction_id.generate_child())
-                .unwrap_or_else(|| Traceparent::generate());
-            let (transaction_name, transaction_attributes) =
-                (self.get_operation_transaction_labels)(operation);
-            entry.insert(TelemetryMiddlewareQueryState {
-                transaction_id,
-                effect_id: None,
-            });
-            StateTransition::new(Some(StateOperation::Send(
-                context.pid(),
-                TelemetryMiddlewareTransactionStartAction {
-                    transactions: vec![TelemetryTransaction {
-                        transaction_id,
-                        parent_ids: traceparent.into_iter().collect(),
-                        name: transaction_name,
-                        attributes: transaction_attributes,
-                    }],
-                }
-                .into(),
-            )))
-        } else {
-            StateTransition::new(None)
-        }
+        let entry = match self.state.active_queries.entry(*subscription_id) {
+            Entry::Vacant(entry) => Some(entry),
+            Entry::Occupied(_) => None,
+        }?;
+        let traceparent = parse_graphql_operation_traceparent_extensions(operation);
+        let transaction_id = traceparent
+            .map(|transaction_id| transaction_id.generate_child())
+            .unwrap_or_else(|| Traceparent::generate());
+        let (transaction_name, transaction_attributes) =
+            (self.get_operation_transaction_labels)(operation);
+        entry.insert(TelemetryMiddlewareQueryState {
+            transaction_id,
+            effect_id: None,
+        });
+        let transaction_start_action = StateOperation::Send(
+            context.pid(),
+            TelemetryMiddlewareTransactionStartAction {
+                transactions: vec![TelemetryTransaction {
+                    transaction_id,
+                    parent_ids: traceparent.into_iter().collect(),
+                    name: transaction_name,
+                    attributes: transaction_attributes,
+                }],
+            }
+            .into(),
+        );
+        Some(StateTransition::new(once(transaction_start_action)))
     }
     fn handle_graphql_parse<TAction>(
         &mut self,
         action: &GraphQlServerParseSuccessAction<T>,
         _metadata: &MessageData,
         _context: &mut impl HandlerContext,
-    ) -> StateTransition<TAction>
+    ) -> Option<StateTransition<TAction>>
     where
         TAction: Action,
     {
@@ -266,82 +268,80 @@ where
             &self.factory,
             &self.allocator,
         );
-        if let Some(query_state) = self.state.active_queries.get_mut(subscription_id) {
-            let effect_id = evaluate_effect.id();
-            let previous_effect_id = query_state.effect_id.replace(effect_id);
-            let is_unchanged = previous_effect_id
-                .map(|previous_effect_id| previous_effect_id == effect_id)
-                .unwrap_or(false);
-            if !is_unchanged {
-                if let Some(effect_id) = previous_effect_id {
-                    if let Some(effect_state) = self.state.effect_mappings.get_mut(&effect_id) {
-                        effect_state
-                            .parent_transactions
-                            .remove(&query_state.transaction_id);
-                    }
-                }
-                match self.state.effect_mappings.entry(effect_id) {
-                    Entry::Vacant(entry) => {
-                        entry.insert(TelemetryMiddlewareEffectState {
-                            effect: evaluate_effect,
-                            transaction_id: Some(query_state.generate_transaction_id()),
-                            query_result: Some(None),
-                            parent_transactions: once(query_state.transaction_id).collect(),
-                            subscription_count: 0,
-                            latest_value: None,
-                        });
-                    }
-                    Entry::Occupied(mut entry) => {
-                        entry
-                            .get_mut()
-                            .parent_transactions
-                            .insert(query_state.transaction_id);
-                    }
-                };
+        let query_state = self.state.active_queries.get_mut(subscription_id)?;
+        let effect_id = evaluate_effect.id();
+        let previous_effect_id = query_state.effect_id.replace(effect_id);
+        let is_unchanged = previous_effect_id
+            .map(|previous_effect_id| previous_effect_id == effect_id)
+            .unwrap_or(false);
+        if is_unchanged {
+            return None;
+        }
+        if let Some(effect_id) = previous_effect_id {
+            if let Some(effect_state) = self.state.effect_mappings.get_mut(&effect_id) {
+                effect_state
+                    .parent_transactions
+                    .remove(&query_state.transaction_id);
             }
         }
-        StateTransition::new(None)
+        match self.state.effect_mappings.entry(effect_id) {
+            Entry::Vacant(entry) => {
+                entry.insert(TelemetryMiddlewareEffectState {
+                    effect: evaluate_effect,
+                    transaction_id: Some(query_state.generate_transaction_id()),
+                    query_result: Some(None),
+                    parent_transactions: once(query_state.transaction_id).collect(),
+                    subscription_count: 0,
+                    latest_value: None,
+                });
+            }
+            Entry::Occupied(mut entry) => {
+                entry
+                    .get_mut()
+                    .parent_transactions
+                    .insert(query_state.transaction_id);
+            }
+        }
+        None
     }
     fn handle_graphql_unsubscribe<TAction>(
         &mut self,
         action: &GraphQlServerUnsubscribeAction<T>,
         _metadata: &MessageData,
         context: &mut impl HandlerContext,
-    ) -> StateTransition<TAction>
+    ) -> Option<StateTransition<TAction>>
     where
         TAction: Action + OutboundAction<TelemetryMiddlewareTransactionEndAction>,
     {
         let GraphQlServerUnsubscribeAction {
             subscription_id, ..
         } = action;
-        if let Some(query_state) = self.state.active_queries.remove(subscription_id) {
-            let TelemetryMiddlewareQueryState {
-                transaction_id,
-                effect_id,
-                ..
-            } = query_state;
-            if let Some(effect_id) = effect_id {
-                if let Some(effect_state) = self.state.effect_mappings.get_mut(&effect_id) {
-                    effect_state.parent_transactions.remove(&transaction_id);
-                }
+        let query_state = self.state.active_queries.remove(subscription_id)?;
+        let TelemetryMiddlewareQueryState {
+            transaction_id,
+            effect_id,
+            ..
+        } = query_state;
+        if let Some(effect_id) = effect_id {
+            if let Some(effect_state) = self.state.effect_mappings.get_mut(&effect_id) {
+                effect_state.parent_transactions.remove(&transaction_id);
             }
-            StateTransition::new(Some(StateOperation::Send(
-                context.pid(),
-                TelemetryMiddlewareTransactionEndAction {
-                    transaction_ids: vec![transaction_id],
-                }
-                .into(),
-            )))
-        } else {
-            StateTransition::new(None)
         }
+        let transaction_end_action = StateOperation::Send(
+            context.pid(),
+            TelemetryMiddlewareTransactionEndAction {
+                transaction_ids: vec![transaction_id],
+            }
+            .into(),
+        );
+        Some(StateTransition::new(once(transaction_end_action)))
     }
     fn handle_effect_subscribe<TAction>(
         &mut self,
         action: &EffectSubscribeAction<T>,
         _metadata: &MessageData,
         context: &mut impl HandlerContext,
-    ) -> StateTransition<TAction>
+    ) -> Option<StateTransition<TAction>>
     where
         TAction: Action
             + OutboundAction<TelemetryMiddlewareTransactionStartAction>
@@ -411,14 +411,14 @@ where
                 .into(),
             ))
         };
-        StateTransition::new(transaction_start_action)
+        Some(StateTransition::new(transaction_start_action))
     }
     fn handle_effect_unsubscribe<TAction>(
         &mut self,
         action: &EffectUnsubscribeAction<T>,
         _metadata: &MessageData,
         context: &mut impl HandlerContext,
-    ) -> StateTransition<TAction>
+    ) -> Option<StateTransition<TAction>>
     where
         TAction: Action + OutboundAction<TelemetryMiddlewareTransactionEndAction>,
     {
@@ -454,14 +454,14 @@ where
                 .into(),
             ))
         };
-        StateTransition::new(transaction_end_action)
+        Some(StateTransition::new(transaction_end_action))
     }
     fn handle_evaluate_result<TAction>(
         &mut self,
         action: &EvaluateResultAction<T>,
         _metadata: &MessageData,
         _context: &mut impl HandlerContext,
-    ) -> StateTransition<TAction>
+    ) -> Option<StateTransition<TAction>>
     where
         TAction: Action,
     {
@@ -473,7 +473,7 @@ where
             &self.factory,
             &self.allocator,
         );
-        if let Some((query_transaction_id, previous_result)) = self
+        let (query_transaction_id, previous_result) = self
             .state
             .effect_mappings
             .get_mut(&evaluate_effect.id())
@@ -482,68 +482,62 @@ where
                     .query_result
                     .replace(Some(result.clone()));
                 (query_effect_state.transaction_id, previous_result)
-            })
-        {
-            for effect in get_query_result_effects(result.result(), &self.factory) {
-                match self.state.effect_mappings.entry(effect.id()) {
-                    Entry::Vacant(entry) => {
-                        let effect_transaction_id = query_transaction_id
-                            .map(|transaction_id| transaction_id.generate_child())
-                            .unwrap_or_else(|| Traceparent::generate());
-                        entry.insert(TelemetryMiddlewareEffectState {
-                            effect: effect.clone(),
-                            transaction_id: Some(effect_transaction_id),
-                            parent_transactions: query_transaction_id.into_iter().collect(),
-                            query_result: parse_evaluate_effect_query(effect, &self.factory)
-                                .map(|_| None),
-                            subscription_count: 0,
-                            latest_value: None,
-                        });
-                    }
-                    Entry::Occupied(mut entry) => {
-                        let effect_state = entry.get_mut();
-                        if let Some(query_transaction_id) = query_transaction_id {
-                            effect_state
-                                .parent_transactions
-                                .insert(query_transaction_id);
-                        }
-                    }
+            })?;
+        for effect in get_query_result_effects(result.result(), &self.factory) {
+            match self.state.effect_mappings.entry(effect.id()) {
+                Entry::Vacant(entry) => {
+                    let effect_transaction_id = query_transaction_id
+                        .map(|transaction_id| transaction_id.generate_child())
+                        .unwrap_or_else(|| Traceparent::generate());
+                    entry.insert(TelemetryMiddlewareEffectState {
+                        effect: effect.clone(),
+                        transaction_id: Some(effect_transaction_id),
+                        parent_transactions: query_transaction_id.into_iter().collect(),
+                        query_result: parse_evaluate_effect_query(effect, &self.factory)
+                            .map(|_| None),
+                        subscription_count: 0,
+                        latest_value: None,
+                    });
                 }
-            }
-            if let Some(transaction_id) = query_transaction_id {
-                let previous_dependencies = previous_result.and_then(|result| {
-                    result.map(|result| {
-                        let (_, dependencies) = result.into_parts();
-                        dependencies
-                    })
-                });
-                let Diff {
-                    added: added_dependencies,
-                    removed: removed_dependencies,
-                } = get_dependency_diff(
-                    Some(result.dependencies()),
-                    previous_dependencies.as_ref(),
-                );
-                for state_token in removed_dependencies {
-                    if let Some(effect_state) = self.state.effect_mappings.get_mut(&state_token) {
-                        effect_state.parent_transactions.remove(&transaction_id);
-                    }
-                }
-                for state_token in added_dependencies {
-                    if let Some(effect_state) = self.state.effect_mappings.get_mut(&state_token) {
-                        effect_state.parent_transactions.insert(transaction_id);
+                Entry::Occupied(mut entry) => {
+                    let effect_state = entry.get_mut();
+                    if let Some(query_transaction_id) = query_transaction_id {
+                        effect_state
+                            .parent_transactions
+                            .insert(query_transaction_id);
                     }
                 }
             }
         }
-        StateTransition::new(None)
+        let transaction_id = query_transaction_id?;
+        let previous_dependencies = previous_result.and_then(|result| {
+            result.map(|result| {
+                let (_, dependencies) = result.into_parts();
+                dependencies
+            })
+        });
+        let Diff {
+            added: added_dependencies,
+            removed: removed_dependencies,
+        } = get_dependency_diff(Some(result.dependencies()), previous_dependencies.as_ref());
+        for state_token in removed_dependencies {
+            if let Some(effect_state) = self.state.effect_mappings.get_mut(&state_token) {
+                effect_state.parent_transactions.remove(&transaction_id);
+            }
+        }
+        for state_token in added_dependencies {
+            if let Some(effect_state) = self.state.effect_mappings.get_mut(&state_token) {
+                effect_state.parent_transactions.insert(transaction_id);
+            }
+        }
+        None
     }
     fn handle_effect_emit<TAction>(
         &mut self,
         action: &EffectEmitAction<T>,
         _metadata: &MessageData,
         context: &mut impl HandlerContext,
-    ) -> StateTransition<TAction>
+    ) -> Option<StateTransition<TAction>>
     where
         TAction: Action
             + OutboundAction<TelemetryMiddlewareTransactionStartAction>
@@ -706,12 +700,12 @@ where
                 .into(),
             ))
         };
-        StateTransition::new(
+        Some(StateTransition::new(
             completed_transactions_end_action
                 .into_iter()
                 .chain(effect_transaction_start_action)
                 .chain(effect_transaction_end_action),
-        )
+        ))
     }
 }
 

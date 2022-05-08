@@ -3,6 +3,7 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use std::{
     collections::{hash_map::Entry, HashMap},
+    iter::once,
     marker::PhantomData,
     string::FromUtf8Error,
     sync::Once,
@@ -186,8 +187,9 @@ where
         } else if let Some(action) = action.match_type() {
             self.handle_graphql_emit(action, metadata, context)
         } else {
-            StateTransition::new(None)
+            None
         }
+        .unwrap_or_default()
     }
 }
 impl<T, TFactory, TTransform, TQueryMetricLabels>
@@ -203,7 +205,7 @@ where
         action: &HttpServerRequestAction,
         _metadata: &MessageData,
         context: &mut impl HandlerContext,
-    ) -> StateTransition<TAction>
+    ) -> Option<StateTransition<TAction>>
     where
         TAction: Action
             + OutboundAction<HttpServerResponseAction>
@@ -214,52 +216,48 @@ where
             request,
         } = action;
         let request_id = *request_id;
-        match self.state.requests.entry(request_id) {
-            Entry::Occupied(_) => StateTransition::new(None),
-            Entry::Vacant(entry) => {
-                let operation = match parse_graphql_request(request) {
-                    Err(message) => Err((StatusCode::BAD_REQUEST, message)),
-                    Ok(operation) => self.transform.transform(operation, request),
-                };
-                match operation {
-                    Err((status_code, message)) => {
-                        StateTransition::new(Some(StateOperation::Send(
-                            context.pid(),
-                            HttpServerResponseAction {
-                                request_id,
-                                response: create_json_http_response(
-                                    status_code,
-                                    None,
-                                    &JsonValue::from(message),
-                                ),
-                            }
-                            .into(),
-                        )))
-                    }
-                    Ok(operation) => {
-                        let metric_labels =
-                            (self.get_query_metric_labels)(&operation, request.headers());
-                        increment_counter!(METRIC_GRAPHQL_HTTP_TOTAL_REQUEST_COUNT, &metric_labels,);
-                        increment_gauge!(
-                            METRIC_GRAPHQL_HTTP_ACTIVE_REQUEST_COUNT,
-                            1.0,
-                            &metric_labels,
-                        );
-                        entry.insert(HttpGraphQlRequest {
-                            etag: parse_request_etag(&request),
-                            metric_labels,
-                        });
-                        StateTransition::new(Some(StateOperation::Send(
-                            context.pid(),
-                            GraphQlServerSubscribeAction {
-                                subscription_id: request_id,
-                                operation,
-                                _expression: Default::default(),
-                            }
-                            .into(),
-                        )))
-                    }
+        let entry = match self.state.requests.entry(request_id) {
+            Entry::Occupied(_) => None,
+            Entry::Vacant(entry) => Some(entry),
+        }?;
+        let operation = match parse_graphql_request(request) {
+            Err(message) => Err((StatusCode::BAD_REQUEST, message)),
+            Ok(operation) => self.transform.transform(operation, request),
+        };
+        match operation {
+            Err((status_code, message)) => Some(StateTransition::new(once(StateOperation::Send(
+                context.pid(),
+                HttpServerResponseAction {
+                    request_id,
+                    response: create_json_http_response(
+                        status_code,
+                        None,
+                        &JsonValue::from(message),
+                    ),
                 }
+                .into(),
+            )))),
+            Ok(operation) => {
+                let metric_labels = (self.get_query_metric_labels)(&operation, request.headers());
+                increment_counter!(METRIC_GRAPHQL_HTTP_TOTAL_REQUEST_COUNT, &metric_labels,);
+                increment_gauge!(
+                    METRIC_GRAPHQL_HTTP_ACTIVE_REQUEST_COUNT,
+                    1.0,
+                    &metric_labels,
+                );
+                entry.insert(HttpGraphQlRequest {
+                    etag: parse_request_etag(&request),
+                    metric_labels,
+                });
+                Some(StateTransition::new(once(StateOperation::Send(
+                    context.pid(),
+                    GraphQlServerSubscribeAction {
+                        subscription_id: request_id,
+                        operation,
+                        _expression: Default::default(),
+                    }
+                    .into(),
+                ))))
             }
         }
     }
@@ -268,7 +266,7 @@ where
         action: &GraphQlServerParseErrorAction<T>,
         _metadata: &MessageData,
         context: &mut impl HandlerContext,
-    ) -> StateTransition<TAction>
+    ) -> Option<StateTransition<TAction>>
     where
         TAction: Action + OutboundAction<HttpServerResponseAction>,
     {
@@ -278,43 +276,39 @@ where
             operation,
             ..
         } = action;
-        match self.state.requests.remove(subscription_id) {
-            None => StateTransition::new(None),
-            Some(request) => {
-                let HttpGraphQlRequest { metric_labels, .. } = request;
-                decrement_gauge!(
-                    METRIC_GRAPHQL_HTTP_ACTIVE_REQUEST_COUNT,
-                    1.0,
-                    &metric_labels
-                );
-                let response = create_json_http_response(
-                    StatusCode::BAD_REQUEST,
-                    None,
-                    &create_graphql_error_response(Some(json_object([
-                        (
-                            String::from("message"),
-                            JsonValue::String(String::from(message)),
-                        ),
-                        (String::from("operation"), operation.clone().into_json()),
-                    ]))),
-                );
-                StateTransition::new(Some(StateOperation::Send(
-                    context.pid(),
-                    HttpServerResponseAction {
-                        request_id: *subscription_id,
-                        response,
-                    }
-                    .into(),
-                )))
+        let request = self.state.requests.remove(subscription_id)?;
+        let HttpGraphQlRequest { metric_labels, .. } = request;
+        decrement_gauge!(
+            METRIC_GRAPHQL_HTTP_ACTIVE_REQUEST_COUNT,
+            1.0,
+            &metric_labels
+        );
+        let response = create_json_http_response(
+            StatusCode::BAD_REQUEST,
+            None,
+            &create_graphql_error_response(Some(json_object([
+                (
+                    String::from("message"),
+                    JsonValue::String(String::from(message)),
+                ),
+                (String::from("operation"), operation.clone().into_json()),
+            ]))),
+        );
+        Some(StateTransition::new(once(StateOperation::Send(
+            context.pid(),
+            HttpServerResponseAction {
+                request_id: *subscription_id,
+                response,
             }
-        }
+            .into(),
+        ))))
     }
     fn handle_graphql_emit<TAction>(
         &mut self,
         action: &GraphQlServerEmitAction<T>,
         _metadata: &MessageData,
         context: &mut impl HandlerContext,
-    ) -> StateTransition<TAction>
+    ) -> Option<StateTransition<TAction>>
     where
         TAction: Action
             + OutboundAction<GraphQlServerUnsubscribeAction<T>>
@@ -324,57 +318,51 @@ where
             subscription_id,
             result,
         } = action;
-        let subscription_id = *subscription_id;
-        match self.state.requests.entry(subscription_id) {
-            Entry::Vacant(_) => StateTransition::new(None),
-            Entry::Occupied(entry) => {
-                let request = entry.remove();
-                let HttpGraphQlRequest {
-                    metric_labels,
-                    etag,
-                } = request;
-                decrement_gauge!(
-                    METRIC_GRAPHQL_HTTP_ACTIVE_REQUEST_COUNT,
-                    1.0,
-                    &metric_labels
-                );
-                let response_etag = format_response_etag(result.id());
-                let response = match etag {
-                    Some(request_etag) if request_etag == response_etag => {
-                        create_http_response(StatusCode::NOT_MODIFIED, None, None)
-                    }
-                    _ => {
-                        let payload = serialize_graphql_result_payload(result, &self.factory);
-                        create_json_http_response(
-                            StatusCode::OK,
-                            create_etag_header(&response_etag).ok(),
-                            &match payload {
-                                Ok(payload) => create_graphql_success_response(payload),
-                                Err(errors) => create_graphql_error_response(errors),
-                            },
-                        )
-                    }
-                };
-                StateTransition::new([
-                    StateOperation::Send(
-                        context.pid(),
-                        GraphQlServerUnsubscribeAction {
-                            subscription_id,
-                            _expression: Default::default(),
-                        }
-                        .into(),
-                    ),
-                    StateOperation::Send(
-                        context.pid(),
-                        HttpServerResponseAction {
-                            request_id: subscription_id,
-                            response,
-                        }
-                        .into(),
-                    ),
-                ])
+        let request = self.state.requests.remove(subscription_id)?;
+        let HttpGraphQlRequest {
+            metric_labels,
+            etag,
+        } = request;
+        decrement_gauge!(
+            METRIC_GRAPHQL_HTTP_ACTIVE_REQUEST_COUNT,
+            1.0,
+            &metric_labels
+        );
+        let response_etag = format_response_etag(result.id());
+        let response = match etag {
+            Some(request_etag) if request_etag == response_etag => {
+                create_http_response(StatusCode::NOT_MODIFIED, None, None)
             }
-        }
+            _ => {
+                let payload = serialize_graphql_result_payload(result, &self.factory);
+                create_json_http_response(
+                    StatusCode::OK,
+                    create_etag_header(&response_etag).ok(),
+                    &match payload {
+                        Ok(payload) => create_graphql_success_response(payload),
+                        Err(errors) => create_graphql_error_response(errors),
+                    },
+                )
+            }
+        };
+        Some(StateTransition::new([
+            StateOperation::Send(
+                context.pid(),
+                GraphQlServerUnsubscribeAction {
+                    subscription_id: *subscription_id,
+                    _expression: Default::default(),
+                }
+                .into(),
+            ),
+            StateOperation::Send(
+                context.pid(),
+                HttpServerResponseAction {
+                    request_id: *subscription_id,
+                    response,
+                }
+                .into(),
+            ),
+        ]))
     }
 }
 

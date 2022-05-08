@@ -69,8 +69,9 @@ where
         if let Some(action) = action.match_type() {
             self.handle_effect_subscribe(action, metadata, context)
         } else {
-            StateTransition::new(None)
+            None
         }
+        .unwrap_or_default()
     }
 }
 impl<T, TFactory, TAllocator> AssignHandler<T, TFactory, TAllocator>
@@ -84,7 +85,7 @@ where
         action: &EffectSubscribeAction<T>,
         _metadata: &MessageData,
         context: &mut impl HandlerContext,
-    ) -> StateTransition<TAction>
+    ) -> Option<StateTransition<TAction>>
     where
         TAction: Action + 'static + OutboundAction<EffectEmitAction<T>>,
     {
@@ -93,7 +94,7 @@ where
             effects,
         } = action;
         if effect_type.as_str() != EFFECT_TYPE_ASSIGN {
-            return StateTransition::new(None);
+            return None;
         }
         let current_pid = context.pid();
         let updates = effects
@@ -118,10 +119,10 @@ where
                 update.into_iter().chain(once((state_token, result)))
             })
             .collect();
-        StateTransition::new(Some(StateOperation::Send(
+        Some(StateTransition::new(once(StateOperation::Send(
             current_pid,
             EffectEmitAction { updates }.into(),
-        )))
+        ))))
     }
 }
 
