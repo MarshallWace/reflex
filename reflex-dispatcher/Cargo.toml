@@ -9,5 +9,6 @@ edition = "2021"
 
 [dependencies]
 futures = "*"
+metrics = "0.18"
 serde_json = "1.0"
 tokio = { version = "1", features = ["full", "tracing"] }

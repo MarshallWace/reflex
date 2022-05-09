@@ -5,11 +5,12 @@ use std::{
     collections::{hash_map::Entry, HashMap},
     sync::{
         atomic::{AtomicUsize, Ordering},
-        Arc,
+        Arc, Once,
     },
 };
 
 use futures::{Future, StreamExt};
+use metrics::{describe_gauge, gauge, Unit};
 use tokio::{sync::mpsc, task::JoinHandle};
 
 use crate::{
@@ -17,6 +18,26 @@ use crate::{
     MessageOffset, ProcessId, Scheduler, StateOperation, WorkerContext, WorkerFactory,
     WorkerMessageQueue,
 };
+
+pub const METRIC_EVENT_BUS_CAPACITY: &'static str = "event_bus_capacity";
+pub const METRIC_EVENT_BUS_QUEUED_MESSAGES: &'static str = "event_bus_queued_messages";
+
+static INIT_METRICS: Once = Once::new();
+
+fn init_metrics() {
+    INIT_METRICS.call_once(|| {
+        describe_gauge!(
+            METRIC_EVENT_BUS_CAPACITY,
+            Unit::Count,
+            "Event bus queue capacity"
+        );
+        describe_gauge!(
+            METRIC_EVENT_BUS_QUEUED_MESSAGES,
+            Unit::Count,
+            "Number of event bus messages currently queued awaiting processing"
+        );
+    });
+}
 
 pub struct TokioScheduler<TAction>
 where
@@ -46,8 +67,9 @@ where
     TAction: Action + Send + 'static,
 {
     pub fn new(main: impl Actor<TAction> + Send + 'static) -> Self {
+        init_metrics();
         let root_id = ProcessId::default();
-        let (task, commands) = Self::listen(main, root_id);
+        let (task, commands) = Self::listen(main, root_id, 1024);
         Self {
             root_pid: root_id,
             commands,
@@ -57,12 +79,22 @@ where
     fn listen(
         actor: impl Actor<TAction>,
         root_pid: ProcessId,
+        buffer_capacity: usize,
     ) -> (
         impl Future<Output = ()>,
         mpsc::Sender<(StateOperation<TAction>, Option<(MessageOffset, ProcessId)>)>,
     ) {
-        let (commands_tx, mut commands_rx) =
-            mpsc::channel::<(StateOperation<TAction>, Option<(MessageOffset, ProcessId)>)>(1024);
+        let (commands_tx, mut commands_rx) = mpsc::channel::<(
+            StateOperation<TAction>,
+            Option<(MessageOffset, ProcessId)>,
+        )>(buffer_capacity);
+        let metric_labels = [("pid", format!("{}", usize::from(root_pid)))];
+        gauge!(
+            METRIC_EVENT_BUS_CAPACITY,
+            buffer_capacity as f64,
+            &metric_labels
+        );
+        gauge!(METRIC_EVENT_BUS_QUEUED_MESSAGES, 0.0, &metric_labels);
         let task = {
             let mut actor = actor;
             let child_commands = commands_tx.clone();
@@ -71,6 +103,11 @@ where
                 let next_pid = Arc::new(AtomicUsize::new(root_pid.next().into()));
                 let mut processes = HashMap::<ProcessId, TokioProcess<TAction>>::default();
                 while let Some((operation, caller)) = commands_rx.recv().await {
+                    gauge!(
+                        METRIC_EVENT_BUS_QUEUED_MESSAGES,
+                        (buffer_capacity - child_commands.capacity()) as f64,
+                        &metric_labels
+                    );
                     match operation {
                         StateOperation::Send(pid, action) => {
                             let metadata = MessageData {

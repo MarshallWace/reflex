@@ -37,6 +37,7 @@ use crate::{
 pub const EFFECT_TYPE_EVALUATE: &'static str = "reflex::core::evaluate";
 
 pub const METRIC_STATE_ENTRY_COUNT: &'static str = "state_entry_count";
+pub const METRIC_QUEUED_UPDATE_BATCH_COUNT: &'static str = "state_pending_update_batch_count";
 pub const METRIC_STATE_GC_DURATION: &'static str = "state_gc_duration";
 pub const METRIC_TOTAL_EFFECT_COUNT: &'static str = "total_effect_count";
 pub const METRIC_ACTIVE_EFFECT_COUNT: &'static str = "active_effect_count";
@@ -55,6 +56,11 @@ fn init_metrics() {
             METRIC_STATE_ENTRY_COUNT,
             Unit::Count,
             "Active global state entry count"
+        );
+        describe_gauge!(
+            METRIC_QUEUED_UPDATE_BATCH_COUNT,
+            Unit::Count,
+            "Queued worker state update batch count"
         );
         describe_histogram!(
             METRIC_STATE_GC_DURATION,
@@ -434,6 +440,7 @@ impl<T: Expression> GlobalStateCache<T> {
         {
             self.update_batches.pop_front();
         }
+        self.update_state_cache_metrics();
     }
     fn gc(&mut self, retained_keys: impl IntoIterator<Item = StateToken>) {
         // TODO: [perf] Compare performance of rebuilding new state cache vs removing keys from existing cache
@@ -452,6 +459,10 @@ impl<T: Expression> GlobalStateCache<T> {
     }
     fn update_state_cache_metrics(&self) {
         gauge!(METRIC_STATE_ENTRY_COUNT, self.combined_state.len() as f64);
+        gauge!(
+            METRIC_QUEUED_UPDATE_BATCH_COUNT,
+            self.update_batches.len() as f64
+        );
     }
 }
 
