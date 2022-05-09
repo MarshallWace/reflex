@@ -485,7 +485,7 @@ where
                     None => None,
                     Some((socket, pending_messages)) => {
                         let (mut socket_tx, socket_rx) = socket.split();
-                        let listen_task = listen_websocket_connection(socket_rx).map({
+                        let listen_rx = listen_websocket_connection(socket_rx).map({
                             let current_pid = context.pid();
                             move |message| {
                                 StateOperation::Send(
@@ -498,7 +498,7 @@ where
                                 )
                             }
                         });
-                        let (client_messages, send_task) = {
+                        let (listen_tx, messages_tx) = {
                             let (messages_tx, mut messages_rx) =
                                 mpsc::channel::<GraphQlSubscriptionClientMessage>(32);
                             let send_task = async move {
@@ -510,24 +510,26 @@ where
                             }
                             .into_stream()
                             .flat_map(|_| stream::empty());
-                            (messages_tx, send_task)
+                            (send_task, messages_tx)
+                        };
+                        let dispatch_initial_messages = {
+                            let outbox = messages_tx.clone();
+                            async move {
+                                for message in pending_messages {
+                                    let _ = outbox.send(message).await;
+                                }
+                            }
                         };
                         let combined_task = stream::select(
-                            listen_task,
-                            stream::select(send_task, {
-                                let client_messages = client_messages.clone();
-                                async move {
-                                    for message in pending_messages {
-                                        let _ = client_messages.send(message).await;
-                                    }
-                                }
+                            stream::select(listen_rx, listen_tx),
+                            dispatch_initial_messages
+                                .map(|_| stream::empty())
                                 .into_stream()
-                                .flat_map(|_| stream::empty())
-                            }),
+                                .flatten(),
                         );
                         let task_pid = context.generate_pid();
                         connection_state.connection =
-                            WebSocketConnection::Connected(task_pid, client_messages);
+                            WebSocketConnection::Connected(task_pid, messages_tx);
                         Some(StateOperation::Task(
                             task_pid,
                             OperationStream::new(Box::pin(combined_task)),
