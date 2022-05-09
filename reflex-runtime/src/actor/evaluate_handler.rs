@@ -697,7 +697,8 @@ where
         if has_unsubscribed_effects {
             self.state.state_cache.gc(remaining_effect_ids);
         }
-        if !unsubscribed_workers.is_empty() {
+        let has_unsubscribed_workers = !unsubscribed_workers.is_empty();
+        if has_unsubscribed_workers {
             self.state.gc_worker_state_history();
             self.state.update_worker_status_metrics(&self.factory);
         }

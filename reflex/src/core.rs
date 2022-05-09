@@ -754,15 +754,16 @@ impl<T: Hash> StateCache<T> {
     pub fn gc(&mut self, retained_keys: &DependencyList) {
         let mut hasher = DefaultHasher::new();
         hasher.write_u64(self.hash);
-        for key in self
-            .values
-            .keys()
-            .copied()
-            .filter(|key| !retained_keys.contains(*key))
-        {
-            hasher.write_u64(key);
-            hasher.write_u8(0);
-        }
+        self.values.retain(|key, _| {
+            if retained_keys.contains(*key) {
+                true
+            } else {
+                hasher.write_u64(*key);
+                hasher.write_u8(0);
+                false
+            }
+        });
+        self.values.shrink_to_fit();
         self.hash = hasher.finish();
     }
     pub fn len(&self) -> usize {

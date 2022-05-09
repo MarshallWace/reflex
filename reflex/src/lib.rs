@@ -4,7 +4,6 @@
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use std::{
     collections::VecDeque,
-    convert::identity,
     iter::{once, FromIterator},
 };
 
@@ -96,7 +95,7 @@ impl<K: Eq + Copy + std::fmt::Debug + std::hash::Hash + 'static, V> DependencyCa
         self.cache.contains_key(key)
     }
     pub fn get(&self, key: &K) -> Option<&V> {
-        self.cache.get(key).map(|entry| entry.value())
+        self.cache.get(key).map(|entry| &entry.value)
     }
     pub fn set(&mut self, key: K, value: V, children: Vec<K>) {
         let (retain_count, existing_children, added_children) = match self.cache.remove(&key) {
@@ -220,39 +219,13 @@ impl<K: Eq + Copy + std::fmt::Debug + std::hash::Hash + 'static, V> DependencyCa
             }
         }
     }
-    pub fn gc<I: FromIterator<(K, V)>>(&mut self) -> I {
-        let disposed_keys = self
-            .cache
-            .iter()
-            .filter_map(|(key, value)| {
-                if value.retain_count == 0 {
-                    Some(*key)
-                } else {
-                    None
-                }
-            })
-            .collect::<Vec<_>>();
-        disposed_keys
-            .into_iter()
-            .map(|key| {
-                self.cache
-                    .remove(&key)
-                    .map(|entry| (key, entry.into_value()))
-            })
-            .filter_map(identity)
-            .collect::<I>()
+    pub fn gc(&mut self) {
+        self.cache.retain(|_, value| value.retain_count > 0);
+        self.cache.shrink_to_fit();
     }
 }
 struct DependencyCacheEntry<K, V> {
     value: V,
     retain_count: usize,
     children: Vec<K>,
-}
-impl<K, V> DependencyCacheEntry<K, V> {
-    fn value(&self) -> &V {
-        &self.value
-    }
-    fn into_value(self) -> V {
-        self.value
-    }
 }

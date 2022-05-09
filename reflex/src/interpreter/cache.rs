@@ -141,6 +141,7 @@ fn gc<'a, T: Expression>(
             false
         }
     });
+    cache_entries.shrink_to_fit();
     let num_remaining = cache_entries.len();
     let num_disposed = existing_size - num_remaining;
     GcMetrics {
