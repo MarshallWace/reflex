@@ -18,7 +18,7 @@ use reflex_handlers::{
 use reflex_server::{
     action::ServerCliAction,
     builtins::ServerBuiltins,
-    cli::execute_query::{cli, ExecuteQueryCliOptions},
+    cli::execute_query::{cli, ExecuteQueryCliOptions, NoopHttpMiddleware},
     imports::server_imports,
     GraphQlServerQueryTransform,
 };
@@ -124,6 +124,7 @@ async fn main() -> Result<()> {
         &factory,
         &allocator,
         query_transform,
+        NoopHttpMiddleware,
     )
     .await
     .map(|response| println!("{}", response))

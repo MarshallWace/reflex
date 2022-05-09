@@ -4,7 +4,8 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Context, Result};
-use http::{header, HeaderMap, Request};
+use futures::{future, Future, FutureExt};
+use http::{header, HeaderMap, Request, Response};
 use reflex::{
     compiler::{Compile, CompilerOptions},
     core::{Applicable, Reducible, Rewritable},
@@ -25,6 +26,8 @@ use crate::{
     GraphQlWebServer, GraphQlWebServerAction,
 };
 
+pub use hyper::Body;
+
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct ExecuteQueryCliOptions {
     pub graph_root: PathBuf,
@@ -41,7 +44,20 @@ pub struct ExecuteQueryCliOptions {
     pub debug_stack: bool,
 }
 
-pub async fn cli<'de, T, TFactory, TAllocator, TLoader, TMiddleware, TAction, TEnv, TTransform>(
+pub async fn cli<
+    'de,
+    T,
+    TFactory,
+    TAllocator,
+    TLoader,
+    TMiddleware,
+    TAction,
+    TEnv,
+    TTransform,
+    THttpMiddleware,
+    THttpPre,
+    THttpPost,
+>(
     options: ExecuteQueryCliOptions,
     env: Option<TEnv>,
     module_loader: Option<TLoader>,
@@ -49,6 +65,7 @@ pub async fn cli<'de, T, TFactory, TAllocator, TLoader, TMiddleware, TAction, TE
     factory: &TFactory,
     allocator: &TAllocator,
     query_transform: TTransform,
+    http_middleware: THttpMiddleware,
 ) -> Result<String>
 where
     T: AsyncExpression
@@ -63,6 +80,9 @@ where
     TAllocator: AsyncHeapAllocator<T> + Sync,
     TLoader: Fn(&str, &Path) -> Option<Result<T, String>> + 'static,
     TMiddleware: Actor<TAction> + Send + 'static,
+    THttpMiddleware: HttpMiddleware<THttpPre, THttpPost>,
+    THttpPre: Future<Output = Request<Body>>,
+    THttpPost: Future<Output = Response<Body>>,
     TAction: Action + SerializableAction + GraphQlWebServerAction<T> + Send + 'static,
     TEnv: IntoIterator<Item = (String, String)>,
     TTransform: HttpGraphQlServerQueryTransform + Send + 'static,
@@ -94,6 +114,33 @@ where
     } else {
         EitherActor::Right(middleware)
     };
+    let query = options.query;
+    let variables = match options.variables {
+        None => serde_json::Value::Object(serde_json::Map::new()),
+        Some(variables) => serde_json::from_str(&variables)
+            .with_context(|| anyhow!("Invalid query parameters: {}", variables))?,
+    };
+    let request = {
+        let request = Request::builder()
+            .method("POST")
+            .header(header::CONTENT_TYPE, "application/json");
+        let request = options
+            .headers
+            .into_iter()
+            .flatten()
+            .filter_map(|(key, value)| key.map(|key| (key, value)))
+            .fold(request, |request, (key, value)| request.header(key, value));
+        request
+            .body({
+                json!({
+                    "query": query,
+                    "variables": variables,
+                })
+                .to_string()
+                .into()
+            })
+            .with_context(|| anyhow!("Failed to create GraphQL request payload"))
+    }?;
     let app = GraphQlWebServer::<TAction>::new(
         graph_root,
         ServerMiddleware::post(middleware),
@@ -107,37 +154,15 @@ where
         get_websocket_connection_metric_labels,
         get_websocket_operation_metric_labels,
     );
-    let query = options.query;
-    let variables = match options.variables {
-        None => serde_json::Value::Object(serde_json::Map::new()),
-        Some(variables) => serde_json::from_str(&variables)
-            .with_context(|| anyhow!("Invalid query parameters: {}", variables))?,
+    let response = {
+        let mut http_middleware = http_middleware;
+        let request = http_middleware.pre(request).await;
+        let response = app.handle_http_request(request).await;
+        let response = http_middleware.post(response).await;
+        response
     };
-    let result = app
-        .handle_http_request({
-            let request = Request::builder()
-                .method("POST")
-                .header(header::CONTENT_TYPE, "application/json");
-            let request = options
-                .headers
-                .into_iter()
-                .flatten()
-                .filter_map(|(key, value)| key.map(|key| (key, value)))
-                .fold(request, |request, (key, value)| request.header(key, value));
-            request
-                .body({
-                    json!({
-                        "query": query,
-                        "variables": variables,
-                    })
-                    .to_string()
-                    .into()
-                })
-                .with_context(|| anyhow!("Failed to create GraphQL request payload"))?
-        })
-        .await;
-    let status = result.status();
-    let body = result.into_body();
+    let status = response.status();
+    let body = response.into_body();
     let bytes = hyper::body::to_bytes(body)
         .await
         .with_context(|| anyhow!("Invalid response body"))?;
@@ -169,4 +194,52 @@ fn get_websocket_operation_metric_labels(
     _operation: &GraphQlOperationPayload,
 ) -> Vec<(String, String)> {
     Vec::new()
+}
+
+pub trait HttpMiddleware<
+    TPre: Future<Output = Request<Body>>,
+    TPost: Future<Output = Response<Body>>,
+>
+{
+    fn pre(&mut self, req: Request<Body>) -> TPre;
+    fn post(&mut self, res: Response<Body>) -> TPost;
+}
+
+pub struct NoopHttpMiddleware;
+impl HttpMiddleware<future::Ready<Request<Body>>, future::Ready<Response<Body>>>
+    for NoopHttpMiddleware
+{
+    fn pre(&mut self, req: Request<Body>) -> future::Ready<Request<Body>> {
+        future::ready(req)
+    }
+    fn post(&mut self, res: Response<Body>) -> future::Ready<Response<Body>> {
+        future::ready(res)
+    }
+}
+
+impl<T, TPre, TPost>
+    HttpMiddleware<
+        future::Either<TPre, future::Ready<Request<Body>>>,
+        future::Either<TPost, future::Ready<Response<Body>>>,
+    > for Option<T>
+where
+    T: HttpMiddleware<TPre, TPost>,
+    TPre: Future<Output = Request<Body>>,
+    TPost: Future<Output = Response<Body>>,
+{
+    fn pre(&mut self, req: Request<Body>) -> future::Either<TPre, future::Ready<Request<Body>>> {
+        match self {
+            Some(inner) => inner.pre(req).left_future(),
+            None => future::ready(req).right_future(),
+        }
+    }
+    fn post(
+        &mut self,
+        res: Response<Body>,
+    ) -> future::Either<TPost, future::Ready<Response<Body>>> {
+        match self {
+            Some(inner) => inner.post(res).left_future(),
+            None => future::ready(res).right_future(),
+        }
+    }
 }
