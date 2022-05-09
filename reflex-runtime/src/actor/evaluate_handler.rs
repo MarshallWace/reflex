@@ -300,6 +300,15 @@ impl<T: Expression> EvaluateHandlerState<T> {
             )
         })
     }
+    fn gc_worker_state_history(&mut self) {
+        let oldest_active_state_index = self
+            .workers
+            .values()
+            .filter_map(|worker| worker.state_index)
+            .min();
+        self.state_cache
+            .delete_outdated_update_batches(oldest_active_state_index);
+    }
     fn update_worker_status_metrics(&self, factory: &impl ExpressionFactory<T>) {
         let (num_pending_workers, num_error_workers, num_blocked_workers) =
             self.workers.iter().fold(
@@ -431,14 +440,18 @@ impl<T: Expression> GlobalStateCache<T> {
                     .map(|(state_token, value)| (*state_token, value.clone()))
             })
     }
-    fn delete_updates_before(&mut self, state_index: MessageOffset) {
-        while self
-            .update_batches
-            .get(0)
-            .map(|(cached_index, _)| *cached_index < state_index)
-            .unwrap_or(false)
-        {
-            self.update_batches.pop_front();
+    fn delete_outdated_update_batches(&mut self, active_state_index: Option<MessageOffset>) {
+        if let Some(state_index) = active_state_index {
+            while self
+                .update_batches
+                .get(0)
+                .map(|(cached_index, _)| *cached_index <= state_index)
+                .unwrap_or(false)
+            {
+                self.update_batches.pop_front();
+            }
+        } else {
+            self.update_batches.clear();
         }
         self.update_state_cache_metrics();
     }
@@ -685,6 +698,7 @@ where
             self.state.state_cache.gc(remaining_effect_ids);
         }
         if !unsubscribed_workers.is_empty() {
+            self.state.gc_worker_state_history();
             self.state.update_worker_status_metrics(&self.factory);
         }
         Some(StateTransition::new(actions))
@@ -725,32 +739,6 @@ where
             .combined_effects()
             .map(|effect| effect.id())
             .collect::<HashSet<_>>();
-        // If this is the final remaining worker that has not yet consumed a given state payload, determine
-        // the index of the next-oldest state update which still has yet to be consumed by every worker
-        let updated_oldest_active_state_index = {
-            let worker_state_index = self
-                .state
-                .workers
-                .get(cache_key)
-                .and_then(|worker| worker.state_index);
-            if let Some(worker_state_index) = worker_state_index {
-                let oldest_active_sibling_state_index = self
-                    .state
-                    .workers
-                    .iter()
-                    .filter(|(sibling_cache_key, _)| *sibling_cache_key != cache_key)
-                    .filter_map(|(_, worker)| worker.state_index)
-                    .min();
-                match oldest_active_sibling_state_index {
-                    Some(oldest_state_index) if worker_state_index < oldest_state_index => {
-                        Some(oldest_state_index)
-                    }
-                    _ => None,
-                }
-            } else {
-                None
-            }
-        };
         let worker = self.state.workers.get_mut(cache_key)?;
         let added_effects = parse_expression_effects(result.result(), &self.factory)
             .filter(|effect| !existing_effect_ids.contains(&effect.id()))
@@ -775,17 +763,21 @@ where
                 dependencies
             }),
         };
-        let reevaluate_action = update_worker_state(
-            worker,
-            match previous_dependencies {
-                None => WorkerStateUpdateType::FirstResult,
-                Some(dependencies) => WorkerStateUpdateType::SubsequentResult {
-                    previous_dependencies: dependencies,
+        let reevaluate_action = {
+            let reevaluate_action = update_worker_state(
+                worker,
+                match previous_dependencies {
+                    None => WorkerStateUpdateType::FirstResult,
+                    Some(dependencies) => WorkerStateUpdateType::SubsequentResult {
+                        previous_dependencies: dependencies,
+                    },
                 },
-            },
-            &mut self.state.state_cache,
-            context,
-        );
+                &mut self.state.state_cache,
+                context,
+            );
+            self.state.gc_worker_state_history();
+            reevaluate_action
+        };
         let effect_emit_action: Option<StateOperation<TAction>> =
             if is_pending_result(result.result(), &self.factory) {
                 None
@@ -815,11 +807,6 @@ where
             .filter(|effect_id| !updated_effect_ids.contains(effect_id))
             .filter_map(|effect_id| self.state.effects.remove(&effect_id))
             .collect::<Vec<_>>();
-        if let Some(oldest_active_state_index) = updated_oldest_active_state_index {
-            self.state
-                .state_cache
-                .delete_updates_before(oldest_active_state_index)
-        }
         let effect_subscribe_actions =
             group_effects_by_type(added_effects).map(|(effect_type, effects)| {
                 StateOperation::Send(
@@ -905,14 +892,17 @@ where
                         .any(|state_token| updated_state_tokens.contains(&state_token)),
                     _ => false,
                 });
-        let worker_update_actions = invalidated_workers.filter_map(|worker| {
-            update_worker_state(
-                worker,
-                WorkerStateUpdateType::DependencyUpdate,
-                &mut self.state.state_cache,
-                context,
-            )
-        });
+        let worker_update_actions = invalidated_workers
+            .filter_map(|worker| {
+                update_worker_state(
+                    worker,
+                    WorkerStateUpdateType::DependencyUpdate,
+                    &mut self.state.state_cache,
+                    context,
+                )
+            })
+            .collect::<Vec<_>>();
+        self.state.gc_worker_state_history();
         Some(StateTransition::new(worker_update_actions))
     }
 }
