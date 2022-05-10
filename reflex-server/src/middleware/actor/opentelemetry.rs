@@ -10,13 +10,19 @@ use std::{
 use bytes::Bytes;
 use futures::Future;
 use http::{header::HeaderName, HeaderValue, Request, Response};
+use hyper::Body;
 use opentelemetry::{
-    trace::{SpanContext, TraceContextExt, TraceError, TraceFlags, TraceState, Tracer},
+    trace::{SpanContext, TraceContextExt, TraceFlags, TraceState, Tracer},
     Context, KeyValue,
 };
 use opentelemetry_otlp::WithExportConfig;
 use reflex_dispatcher::{
     Action, Actor, HandlerContext, InboundAction, MessageData, StateTransition,
+};
+use reflex_handlers::utils::tls::{
+    create_https_client,
+    hyper::{body::HttpBody, client::connect::Connect},
+    native_tls::{self, Certificate},
 };
 
 use crate::{
@@ -27,11 +33,36 @@ use crate::{
     utils::traceparent::Traceparent,
 };
 
+#[derive(Debug)]
+pub enum OpenTelemetryClientError {
+    Certificate(native_tls::Error),
+    Tracer(opentelemetry::trace::TraceError),
+}
+impl std::fmt::Display for OpenTelemetryClientError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Certificate(err) => std::fmt::Display::fmt(err, f),
+            Self::Tracer(err) => std::fmt::Display::fmt(err, f),
+        }
+    }
+}
+impl std::error::Error for OpenTelemetryClientError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Certificate(err) => err.source(),
+            Self::Tracer(err) => err.source(),
+        }
+    }
+}
+
 pub fn create_http_otlp_tracer(
     resource_attributes: impl IntoIterator<Item = KeyValue>,
     endpoint: impl Into<String>,
     http_headers: impl IntoIterator<Item = (HeaderName, HeaderValue)>,
-) -> Result<opentelemetry::sdk::trace::Tracer, TraceError> {
+    tls_cert: Option<Certificate>,
+) -> Result<opentelemetry::sdk::trace::Tracer, OpenTelemetryClientError> {
+    let client =
+        create_https_client::<Body>(tls_cert).map_err(OpenTelemetryClientError::Certificate)?;
     let headers = http_headers
         .into_iter()
         .filter_map(|(key, value)| {
@@ -45,7 +76,7 @@ pub fn create_http_otlp_tracer(
         .http()
         .with_endpoint(endpoint)
         .with_headers(headers)
-        .with_http_client(HyperHttpClient);
+        .with_http_client(OpenTelemetryHyperClient(client));
     opentelemetry_otlp::new_pipeline()
         .tracing()
         .with_exporter(exporter)
@@ -54,11 +85,18 @@ pub fn create_http_otlp_tracer(
                 .with_resource(opentelemetry::sdk::Resource::new(resource_attributes)),
         )
         .install_batch(opentelemetry::runtime::Tokio)
+        .map_err(OpenTelemetryClientError::Tracer)
 }
 
-#[derive(Debug)]
-struct HyperHttpClient;
-impl opentelemetry_http::HttpClient for HyperHttpClient {
+#[derive(Clone)]
+struct OpenTelemetryHyperClient<C, B>(hyper::Client<C, B>);
+impl<C, B> opentelemetry_http::HttpClient for OpenTelemetryHyperClient<C, B>
+where
+    C: Connect + Clone + Send + Sync + 'static,
+    B: HttpBody + From<Vec<u8>> + Send + 'static,
+    B::Data: Send,
+    B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+{
     fn send<'a: 'async_trait, 'async_trait>(
         &'a self,
         request: Request<Vec<u8>>,
@@ -72,21 +110,23 @@ impl opentelemetry_http::HttpClient for HyperHttpClient {
     where
         Self: 'async_trait,
     {
-        Box::pin({
-            let https = hyper_tls::HttpsConnector::new();
-            let client = hyper::Client::builder().build::<_, hyper::Body>(https);
-            async move {
-                let result = client
-                    .request(request.map(|body| hyper::Body::from(body)))
-                    .await
-                    .map_err(Box::new)?;
-                let (response_headers, response_body) = result.into_parts();
-                let response_body = hyper::body::to_bytes(response_body)
-                    .await
-                    .map_err(Box::new)?;
-                Ok(Response::from_parts(response_headers, response_body))
-            }
+        Box::pin(async move {
+            let Self(client) = self;
+            let result = client
+                .request(request.map(|body| body.into()))
+                .await
+                .map_err(Box::new)?;
+            let (response_headers, response_body) = result.into_parts();
+            let response_body = hyper::body::to_bytes(response_body)
+                .await
+                .map_err(Box::new)?;
+            Ok(Response::from_parts(response_headers, response_body))
         })
+    }
+}
+impl<C, B> std::fmt::Debug for OpenTelemetryHyperClient<C, B> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Debug::fmt(&self.0, f)
     }
 }
 

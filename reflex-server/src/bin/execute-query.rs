@@ -14,6 +14,7 @@ use reflex_graphql::graphql_parser;
 use reflex_handlers::{
     actor::{fetch::EFFECT_TYPE_FETCH, graphql::EFFECT_TYPE_GRAPHQL, grpc::EFFECT_TYPE_GRPC},
     default_handlers,
+    utils::tls::{create_https_client, native_tls::Certificate},
 };
 use reflex_server::{
     action::ServerCliAction,
@@ -42,6 +43,9 @@ pub struct Args {
     /// JSON-formatted GraphQL query variables
     #[clap(long)]
     variables: Option<String>,
+    /// Path to custom TLS certificate
+    #[clap(long)]
+    tls_cert: Option<PathBuf>,
     /// Path to capture runtime signal playback file
     #[clap(long)]
     capture_effects: Option<PathBuf>,
@@ -101,6 +105,12 @@ async fn main() -> Result<()> {
     } else {
         None
     };
+    let tls_cert = args
+        .tls_cert
+        .as_ref()
+        .map(|path| load_tls_cert(path.as_path()))
+        .transpose()?;
+    let https_client = create_https_client(tls_cert)?;
     let factory = SharedTermFactory::<ServerBuiltins>::default();
     let allocator = DefaultAllocator::default();
     let module_loader = Some(default_js_loaders(
@@ -108,7 +118,8 @@ async fn main() -> Result<()> {
         &factory,
         &allocator,
     ));
-    let middleware = default_handlers::<ServerCliAction<_>, _, _, _, _>(
+    let middleware = default_handlers::<ServerCliAction<_>, _, _, _, _, _>(
+        https_client,
         &factory,
         &allocator,
         NoopReconnectTimeout,
@@ -136,4 +147,15 @@ fn load_graphql_schema(path: &Path) -> Result<graphql_parser::schema::Document<'
     graphql_parser::parse_schema(&source)
         .map(|document| document.into_static())
         .with_context(|| format!("Failed to load GraphQL schema: {}", path.to_string_lossy()))
+}
+
+fn load_tls_cert(path: &Path) -> Result<Certificate> {
+    let source = fs::read_to_string(path)
+        .with_context(|| format!("Failed to load TLS certificate: {}", path.to_string_lossy()))?;
+    Certificate::from_pem(source.as_bytes()).with_context(|| {
+        format!(
+            "Failed to parse TLS certificate: {}",
+            path.to_string_lossy()
+        )
+    })
 }

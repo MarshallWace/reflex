@@ -23,7 +23,10 @@ use reflex::{
 use reflex_cli::{compile_entry_point, syntax::js::default_js_loaders, Syntax};
 use reflex_dispatcher::{compose_actors, scheduler::sync::SyncContext, EitherActor};
 use reflex_graphql::{graphql_parser, GraphQlOperationPayload};
-use reflex_handlers::default_handlers;
+use reflex_handlers::{
+    default_handlers,
+    utils::tls::{create_https_client, native_tls::Certificate},
+};
 use reflex_json::JsonValue;
 use reflex_server::{
     action::ServerCliAction,
@@ -59,6 +62,9 @@ struct Args {
     /// Port on which to expose Prometheus HTTP metrics
     #[clap(long)]
     metrics_port: Option<u16>,
+    /// Path to custom TLS certificate
+    #[clap(long)]
+    tls_cert: Option<PathBuf>,
     /// Log runtime actions
     #[clap(long)]
     log: Option<LogFormat>,
@@ -111,6 +117,12 @@ pub async fn main() -> Result<()> {
             .install()
             .with_context(|| anyhow!("Failed to initialize Prometheus metrics endpoint"))?;
     }
+    let tls_cert = args
+        .tls_cert
+        .as_ref()
+        .map(|path| load_tls_cert(path.as_path()))
+        .transpose()?;
+    let https_client = create_https_client(tls_cert)?;
     let schema = if let Some(schema_path) = &args.schema {
         Some(load_graphql_schema(schema_path.as_path())?)
     } else {
@@ -119,6 +131,7 @@ pub async fn main() -> Result<()> {
     let factory = SharedTermFactory::<ServerBuiltins>::default();
     let allocator = DefaultAllocator::default();
     let middleware = default_handlers(
+        https_client,
         &factory,
         &allocator,
         FibonacciReconnectTimeout {
@@ -249,4 +262,15 @@ fn load_graphql_schema(path: &Path) -> Result<graphql_parser::schema::Document<'
     graphql_parser::parse_schema(&source)
         .map(|document| document.into_static())
         .with_context(|| format!("Failed to load GraphQL schema: {}", path.to_string_lossy()))
+}
+
+fn load_tls_cert(path: &Path) -> Result<Certificate> {
+    let source = fs::read_to_string(path)
+        .with_context(|| format!("Failed to load TLS certificate: {}", path.to_string_lossy()))?;
+    Certificate::from_pem(source.as_bytes()).with_context(|| {
+        format!(
+            "Failed to parse TLS certificate: {}",
+            path.to_string_lossy()
+        )
+    })
 }

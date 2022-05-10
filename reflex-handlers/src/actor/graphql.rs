@@ -14,6 +14,7 @@ use http::{
     header::{self, CONTENT_TYPE},
     HeaderValue, Uri,
 };
+use hyper::Body;
 use metrics::{
     decrement_gauge, describe_counter, describe_gauge, increment_counter, increment_gauge, Unit,
 };
@@ -113,29 +114,39 @@ impl<T: Expression, TAction> GraphQlHandlerAction<T> for TAction where
 {
 }
 
-pub struct GraphQlHandler<T, TFactory, TAllocator, TReconnect>
+pub struct GraphQlHandler<T, TConnect, TFactory, TAllocator, TReconnect>
 where
     T: Expression,
+    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
     TFactory: ExpressionFactory<T>,
     TAllocator: HeapAllocator<T>,
     TReconnect: ReconnectTimeout,
 {
+    client: hyper::Client<TConnect, Body>,
     factory: TFactory,
     allocator: TAllocator,
     state: GraphQlHandlerState,
     reconnect_timeout: TReconnect,
     _expression: PhantomData<T>,
 }
-impl<T, TFactory, TAllocator, TReconnect> GraphQlHandler<T, TFactory, TAllocator, TReconnect>
+impl<T, TConnect, TFactory, TAllocator, TReconnect>
+    GraphQlHandler<T, TConnect, TFactory, TAllocator, TReconnect>
 where
     T: Expression,
+    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
     TFactory: ExpressionFactory<T>,
     TAllocator: HeapAllocator<T>,
     TReconnect: ReconnectTimeout,
 {
-    pub fn new(factory: TFactory, allocator: TAllocator, reconnect_timeout: TReconnect) -> Self {
+    pub fn new(
+        client: hyper::Client<TConnect, Body>,
+        factory: TFactory,
+        allocator: TAllocator,
+        reconnect_timeout: TReconnect,
+    ) -> Self {
         init_metrics();
         Self {
+            client,
             factory,
             allocator,
             reconnect_timeout,
@@ -267,10 +278,11 @@ impl std::fmt::Display for GraphQlOperationId {
     }
 }
 
-impl<T, TFactory, TAllocator, TAction, TReconnect> Actor<TAction>
-    for GraphQlHandler<T, TFactory, TAllocator, TReconnect>
+impl<T, TConnect, TFactory, TAllocator, TAction, TReconnect> Actor<TAction>
+    for GraphQlHandler<T, TConnect, TFactory, TAllocator, TReconnect>
 where
     T: AsyncExpression,
+    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
     TFactory: AsyncExpressionFactory<T>,
     TAllocator: AsyncHeapAllocator<T>,
     TReconnect: ReconnectTimeout,
@@ -298,9 +310,11 @@ where
         .unwrap_or_default()
     }
 }
-impl<T, TFactory, TAllocator, TReconnect> GraphQlHandler<T, TFactory, TAllocator, TReconnect>
+impl<T, TConnect, TFactory, TAllocator, TReconnect>
+    GraphQlHandler<T, TConnect, TFactory, TAllocator, TReconnect>
 where
     T: AsyncExpression,
+    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
     TFactory: AsyncExpressionFactory<T>,
     TAllocator: AsyncHeapAllocator<T>,
     TReconnect: ReconnectTimeout,
@@ -758,7 +772,13 @@ where
         TAction: Action + 'static + OutboundAction<EffectEmitAction<T>>,
     {
         let operation_name = operation.operation_name().map(String::from);
-        match fetch_http_graphql_request(url.as_str(), operation, &self.factory, &self.allocator) {
+        match fetch_http_graphql_request(
+            self.client.clone(),
+            url.as_str(),
+            operation,
+            &self.factory,
+            &self.allocator,
+        ) {
             Ok(request) => {
                 // TODO: Allow configurable GraphQL effect metric labels
                 let metric_labels = [
@@ -1104,12 +1124,16 @@ where
     (task_pid, task)
 }
 
-fn fetch_http_graphql_request<T: AsyncExpression>(
+fn fetch_http_graphql_request<T: AsyncExpression, TConnect>(
+    client: hyper::Client<TConnect, Body>,
     url: &str,
     operation: GraphQlOperationPayload,
     factory: &impl AsyncExpressionFactory<T>,
     allocator: &impl AsyncHeapAllocator<T>,
-) -> Result<impl Future<Output = T>, FetchError> {
+) -> Result<impl Future<Output = T>, FetchError>
+where
+    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
+{
     let request = FetchRequest {
         url: String::from(url),
         method: String::from("POST"),
@@ -1118,7 +1142,7 @@ fn fetch_http_graphql_request<T: AsyncExpression>(
     };
     let factory = factory.clone();
     let allocator = allocator.clone();
-    let request = fetch(&request)?;
+    let request = fetch(client, &request)?;
     Ok(async move {
         request
             .await

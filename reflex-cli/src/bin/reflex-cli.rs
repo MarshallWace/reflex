@@ -9,7 +9,11 @@ use reflex_dispatcher::{
     InboundAction, MessageData, NamedAction, Scheduler, SerializableAction, SerializedAction,
     StateTransition,
 };
-use reflex_handlers::{action::graphql::*, default_handlers};
+use reflex_handlers::{
+    action::graphql::*,
+    default_handlers,
+    utils::tls::{create_https_client, native_tls::Certificate},
+};
 use reflex_json::{JsonMap, JsonValue};
 use reflex_runtime::{
     action::{effect::*, evaluate::*, query::*, RuntimeAction},
@@ -24,7 +28,10 @@ use reflex_runtime::{
     QueryInvalidationStrategy, StateUpdate,
 };
 use reflex_utils::reconnect::NoopReconnectTimeout;
-use std::path::{Path, PathBuf};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
@@ -51,6 +58,9 @@ struct Args {
     /// Entry point syntax
     #[clap(long, default_value = "javascript")]
     syntax: Syntax,
+    /// Path to custom TLS certificate
+    #[clap(long)]
+    tls_cert: Option<PathBuf>,
     /// Log runtime actions
     #[clap(long)]
     log: bool,
@@ -83,6 +93,12 @@ pub async fn main() -> Result<()> {
     if syntax == Syntax::Bytecode {
         return Err(anyhow!("CLI is not yet supported for bytecode"));
     }
+    let tls_cert = args
+        .tls_cert
+        .as_ref()
+        .map(|path| load_tls_cert(path.as_path()))
+        .transpose()?;
+    let https_client = create_https_client(tls_cert)?;
     match input_path {
         None => {
             let state = StateCache::default();
@@ -159,7 +175,8 @@ pub async fn main() -> Result<()> {
                 let (watcher_middleware, subscribe_action, mut results_stream) =
                     create_query_watcher(expression, &factory, &allocator);
                 let handlers =
-                    default_handlers::<CliAction<CachedSharedTerm<CliBuiltins>>, _, _, _, _>(
+                    default_handlers::<CliAction<CachedSharedTerm<CliBuiltins>>, _, _, _, _, _>(
+                        https_client,
                         &factory,
                         &allocator,
                         NoopReconnectTimeout,
@@ -357,7 +374,7 @@ fn format_signal_errors<T: Expression>(
 }
 
 fn read_file(path: &Path) -> Result<String> {
-    std::fs::read_to_string(path).with_context(|| format!("Failed to read path {}", path.display()))
+    fs::read_to_string(path).with_context(|| format!("Failed to read path {}", path.display()))
 }
 
 fn clear_escape_sequence() -> &'static str {
@@ -674,4 +691,15 @@ impl<'a, T: Expression> From<&'a CliAction<T>>
     fn from(value: &'a CliAction<T>) -> Self {
         Option::<&'a GraphQlHandlerAction>::from(value).and_then(|value| value.into())
     }
+}
+
+fn load_tls_cert(path: &Path) -> Result<Certificate> {
+    let source = fs::read_to_string(path)
+        .with_context(|| format!("Failed to load TLS certificate: {}", path.to_string_lossy()))?;
+    Certificate::from_pem(source.as_bytes()).with_context(|| {
+        format!(
+            "Failed to parse TLS certificate: {}",
+            path.to_string_lossy()
+        )
+    })
 }

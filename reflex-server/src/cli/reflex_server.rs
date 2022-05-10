@@ -30,6 +30,7 @@ use reflex::{
     stdlib::Stdlib,
 };
 use reflex_graphql::{stdlib::Stdlib as GraphQlStdlib, GraphQlOperationPayload};
+use reflex_handlers::utils::tls::native_tls::Certificate;
 use reflex_js::stdlib::Stdlib as JsStdlib;
 use reflex_json::{stdlib::Stdlib as JsonStdlib, JsonMap, JsonValue};
 use reflex_runtime::{AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator};
@@ -57,11 +58,22 @@ pub struct ReflexServerCliOptions {
     pub address: SocketAddr,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct OpenTelemetryHttpConfig {
     pub endpoint: String,
     pub http_headers: Vec<(HeaderName, HeaderValue)>,
     pub resource_attributes: Vec<KeyValue>,
+    pub tls_cert: Option<Certificate>,
+}
+impl std::fmt::Debug for OpenTelemetryHttpConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OpenTelemetryHttpConfig")
+            .field("endpoint", &self.endpoint)
+            .field("http_headers", &self.http_headers)
+            .field("resource_attributes", &self.resource_attributes)
+            .field("tls_cert", &format!("{:?}", self.tls_cert.is_some()))
+            .finish()
+    }
 }
 impl OpenTelemetryHttpConfig {
     pub fn parse_env(args: std::env::Vars) -> Result<Option<OpenTelemetryHttpConfig>> {
@@ -85,8 +97,15 @@ impl OpenTelemetryHttpConfig {
                     resource_attributes,
                     endpoint: String::from(endpoint),
                     http_headers,
+                    tls_cert: None,
                 }))
             }
+        }
+    }
+    pub fn with_tls_cert(self, tls_cert: Certificate) -> Self {
+        Self {
+            tls_cert: Some(tls_cert),
+            ..self
         }
     }
     pub fn into_middleware<
@@ -107,8 +126,9 @@ impl OpenTelemetryHttpConfig {
             resource_attributes,
             endpoint,
             http_headers,
+            tls_cert,
         } = self;
-        let tracer = create_http_otlp_tracer(resource_attributes, endpoint, http_headers)
+        let tracer = create_http_otlp_tracer(resource_attributes, endpoint, http_headers, tls_cert)
             .map_err(|err| anyhow!("{}", err))
             .with_context(|| anyhow!("Failed to initialize OpenTelemetry agent"))?;
         Ok(compose_actors(

@@ -9,10 +9,9 @@ use http::{
     header::HeaderName, method::InvalidMethod, uri::InvalidUri, HeaderValue, Method, StatusCode,
 };
 use hyper::{Body, Request, Uri};
-use hyper_tls::HttpsConnector;
 
 #[derive(Eq, PartialEq, Hash, Debug)]
-pub(crate) struct FetchRequest {
+pub struct FetchRequest {
     pub url: String,
     pub method: String,
     pub headers: Vec<(HeaderName, HeaderValue)>,
@@ -20,12 +19,23 @@ pub(crate) struct FetchRequest {
 }
 
 #[derive(Debug)]
-pub(crate) enum FetchError {
+pub enum FetchError {
     InvalidUri(InvalidUri, String),
     InvalidMethod(InvalidMethod, String),
     InvalidRequestBody(http::Error),
     NetworkError(hyper::Error),
     InvalidResponseBody(hyper::Error),
+}
+impl std::error::Error for FetchError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            FetchError::InvalidUri(err, _) => err.source(),
+            FetchError::InvalidMethod(err, _) => err.source(),
+            FetchError::InvalidRequestBody(err) => err.source(),
+            FetchError::NetworkError(err) => err.source(),
+            FetchError::InvalidResponseBody(err) => err.source(),
+        }
+    }
 }
 impl std::fmt::Display for FetchError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -41,11 +51,13 @@ impl std::fmt::Display for FetchError {
     }
 }
 
-pub(crate) fn fetch(
+pub fn fetch<T>(
+    client: hyper::Client<T, hyper::Body>,
     request: &FetchRequest,
-) -> Result<impl Future<Output = Result<(StatusCode, Bytes), FetchError>>, FetchError> {
-    let https = HttpsConnector::new();
-    let client = hyper::Client::builder().build::<_, hyper::Body>(https);
+) -> Result<impl Future<Output = Result<(StatusCode, Bytes), FetchError>>, FetchError>
+where
+    T: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
+{
     let url = request
         .url
         .parse::<Uri>()

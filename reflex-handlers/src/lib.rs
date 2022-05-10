@@ -7,6 +7,7 @@ use actor::{
     increment::IncrementHandlerAction, loader::LoaderHandlerAction, scan::ScanHandlerAction,
     timeout::TimeoutHandlerAction, timestamp::TimestampHandlerAction,
 };
+use hyper::Body;
 use reflex::core::{Applicable, Expression};
 use reflex_dispatcher::{compose_actors, Action, Actor};
 use reflex_runtime::{AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator};
@@ -18,13 +19,12 @@ use crate::actor::{
     timestamp::TimestampHandler,
 };
 
-pub(crate) mod utils;
-
 pub mod action;
 pub mod actor;
 pub mod imports;
 pub mod loader;
 pub mod stdlib;
+pub mod utils;
 
 pub trait DefaultHandlersAction<T: Expression>:
     Action
@@ -51,7 +51,8 @@ impl<T: Expression, TAction> DefaultHandlersAction<T> for TAction where
 {
 }
 
-pub fn default_handlers<TAction, T, TFactory, TAllocator, TReconnect>(
+pub fn default_handlers<TAction, T, TFactory, TAllocator, TConnect, TReconnect>(
+    https_client: hyper::Client<TConnect, Body>,
     factory: &TFactory,
     allocator: &TAllocator,
     reconnect_timeout: TReconnect,
@@ -60,15 +61,21 @@ where
     T: AsyncExpression + Applicable<T>,
     TFactory: AsyncExpressionFactory<T> + Sync,
     TAllocator: AsyncHeapAllocator<T> + Sync,
+    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
     TReconnect: ReconnectTimeout,
     TAction: DefaultHandlersAction<T> + Send + 'static,
 {
     compose_actors(
         AssignHandler::new(factory.clone(), allocator.clone()),
         compose_actors(
-            FetchHandler::new(factory.clone(), allocator.clone()),
+            FetchHandler::new(https_client.clone(), factory.clone(), allocator.clone()),
             compose_actors(
-                GraphQlHandler::new(factory.clone(), allocator.clone(), reconnect_timeout),
+                GraphQlHandler::new(
+                    https_client,
+                    factory.clone(),
+                    allocator.clone(),
+                    reconnect_timeout,
+                ),
                 compose_actors(
                     IncrementHandler::new(factory.clone(), allocator.clone()),
                     compose_actors(

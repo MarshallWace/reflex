@@ -12,6 +12,7 @@ use std::{
 use bytes::Bytes;
 use futures::{stream, FutureExt, StreamExt};
 use http::{header::HeaderName, HeaderValue, StatusCode};
+use hyper::Body;
 use metrics::{
     decrement_gauge, describe_counter, describe_gauge, increment_counter, increment_gauge, Unit,
 };
@@ -71,29 +72,37 @@ impl<T: Expression, TAction> FetchHandlerAction<T> for TAction where
 {
 }
 
-pub struct FetchHandler<T, TFactory, TAllocator>
+pub struct FetchHandler<T, TConnect, TFactory, TAllocator>
 where
     T: Expression,
+    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
     TFactory: ExpressionFactory<T>,
     TAllocator: HeapAllocator<T>,
 {
+    client: hyper::Client<TConnect, Body>,
     factory: TFactory,
     allocator: TAllocator,
     state: FetchHandlerState,
     _expression: PhantomData<T>,
 }
-impl<T, TFactory, TAllocator> FetchHandler<T, TFactory, TAllocator>
+impl<T, TConnect, TFactory, TAllocator> FetchHandler<T, TConnect, TFactory, TAllocator>
 where
     T: Expression,
     TFactory: ExpressionFactory<T>,
     TAllocator: HeapAllocator<T>,
+    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
 {
-    pub fn new(factory: TFactory, allocator: TAllocator) -> Self {
+    pub fn new(
+        client: hyper::Client<TConnect, Body>,
+        factory: TFactory,
+        allocator: TAllocator,
+    ) -> Self {
         init_metrics();
         Self {
             state: Default::default(),
             factory,
             allocator,
+            client,
             _expression: Default::default(),
         }
     }
@@ -109,11 +118,13 @@ struct RequestState {
     metric_labels: Arc<Mutex<Option<[(&'static str, String); 2]>>>,
 }
 
-impl<T, TFactory, TAllocator, TAction> Actor<TAction> for FetchHandler<T, TFactory, TAllocator>
+impl<T, TConnect, TFactory, TAllocator, TAction> Actor<TAction>
+    for FetchHandler<T, TConnect, TFactory, TAllocator>
 where
     T: AsyncExpression,
     TFactory: AsyncExpressionFactory<T>,
     TAllocator: AsyncHeapAllocator<T>,
+    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
     TAction: Action + Send + 'static + FetchHandlerAction<T>,
 {
     fn handle(
@@ -132,11 +143,12 @@ where
         .unwrap_or_default()
     }
 }
-impl<T, TFactory, TAllocator> FetchHandler<T, TFactory, TAllocator>
+impl<T, TConnect, TFactory, TAllocator> FetchHandler<T, TConnect, TFactory, TAllocator>
 where
     T: AsyncExpression,
     TFactory: AsyncExpressionFactory<T>,
     TAllocator: AsyncHeapAllocator<T>,
+    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
 {
     fn handle_effect_subscribe<TAction>(
         &mut self,
@@ -174,6 +186,7 @@ where
                         );
                         if let Entry::Vacant(entry) = self.state.tasks.entry(state_token) {
                             match create_fetch_task(
+                                self.client.clone(),
                                 state_token,
                                 &request,
                                 &self.factory,
@@ -273,7 +286,8 @@ where
     }
 }
 
-fn create_fetch_task<T: Expression, TAction>(
+fn create_fetch_task<T: Expression, TConnect, TAction>(
+    client: hyper::Client<TConnect, Body>,
     state_token: StateToken,
     request: &FetchRequest,
     factory: &(impl ExpressionFactory<T> + Send + Clone + 'static),
@@ -282,10 +296,11 @@ fn create_fetch_task<T: Expression, TAction>(
     metric_labels: [(&'static str, String); 2],
 ) -> Result<(RequestState, OperationStream<TAction>), T>
 where
+    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
     TAction: Action + Send + 'static + OutboundAction<EffectEmitAction<T>>,
 {
-    let request =
-        fetch(request).map_err(|err| create_fetch_error_expression(err, factory, allocator))?;
+    let request = fetch(client, request)
+        .map_err(|err| create_fetch_error_expression(err, factory, allocator))?;
     let task_pid = context.generate_pid();
     let shared_metric_labels = Arc::new(Mutex::new(Some(metric_labels)));
     let stream = request
