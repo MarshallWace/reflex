@@ -40,12 +40,13 @@ use crate::{
     middleware::{
         create_http_otlp_tracer, OpenTelemetryMiddleware, OpenTelemetryMiddlewareAction,
         ServerMiddleware, TelemetryMiddleware, TelemetryMiddlewareAction,
+        TelemetryMiddlewareMetricNames,
     },
     server::actor::{
         http_graphql_server::HttpGraphQlServerQueryTransform,
         websocket_graphql_server::WebSocketGraphQlServerQueryTransform,
     },
-    GraphQlWebServer, GraphQlWebServerAction,
+    GraphQlWebServer, GraphQlWebServerAction, GraphQlWebServerMetricNames,
 };
 
 pub use reflex;
@@ -118,6 +119,7 @@ impl OpenTelemetryHttpConfig {
         ) -> (String, Vec<(String, String)>),
         factory: &impl AsyncExpressionFactory<T>,
         allocator: &impl AsyncHeapAllocator<T>,
+        metric_names: TelemetryMiddlewareMetricNames,
     ) -> Result<impl Actor<TAction>>
     where
         T: Applicable<T>,
@@ -136,6 +138,7 @@ impl OpenTelemetryHttpConfig {
                 factory.clone(),
                 allocator.clone(),
                 get_operation_transaction_labels,
+                metric_names,
             ),
             OpenTelemetryMiddleware::new(tracer),
         ))
@@ -152,6 +155,7 @@ pub fn cli<T, TFactory, TAllocator, TAction, TPre, TPost>(
     interpreter_options: InterpreterOptions,
     transform_http: impl HttpGraphQlServerQueryTransform + Send + 'static,
     transform_ws: impl WebSocketGraphQlServerQueryTransform + Send + 'static,
+    metric_names: GraphQlWebServerMetricNames,
     get_http_query_metric_labels: impl Fn(&GraphQlOperationPayload, &HeaderMap) -> Vec<(String, String)>
         + Send
         + 'static,
@@ -186,6 +190,7 @@ where
             allocator.clone(),
             transform_http,
             transform_ws,
+            metric_names,
             get_http_query_metric_labels,
             get_websocket_connection_metric_labels,
             get_websocket_operation_metric_labels,

@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use std::{iter::once, sync::Once, time::Instant};
+use std::{iter::once, time::Instant};
 
 use metrics::{
     counter, decrement_gauge, describe_counter, describe_gauge, histogram, increment_counter,
@@ -27,43 +27,54 @@ use crate::server::action::graphql_server::{
     GraphQlServerParseSuccessAction, GraphQlServerSubscribeAction, GraphQlServerUnsubscribeAction,
 };
 
-pub const METRIC_GRAPHQL_TOTAL_OPERATION_COUNT: &'static str = "graphql_total_operation_count";
-pub const METRIC_GRAPHQL_ACTIVE_OPERATION_COUNT: &'static str = "graphql_active_operation_count";
-pub const METRIC_GRAPHQL_ERROR_PAYLOAD_COUNT: &'static str = "graphql_error_payload_count";
-pub const METRIC_GRAPHQL_SUCCESS_PAYLOAD_COUNT: &'static str = "graphql_success_payload_count";
-pub const METRIC_GRAPHQL_INITIAL_RESPONSE_DURATION: &'static str =
-    "graphql_initial_response_duration";
-
-static INIT_METRICS: Once = Once::new();
-
-fn init_metrics() {
-    INIT_METRICS.call_once(|| {
+#[derive(Clone, Copy, Debug)]
+pub struct GraphQlServerMetricNames {
+    pub graphql_total_operation_count: &'static str,
+    pub graphql_active_operation_count: &'static str,
+    pub graphql_error_payload_count: &'static str,
+    pub graphql_success_payload_count: &'static str,
+    pub graphql_initial_response_duration: &'static str,
+}
+impl GraphQlServerMetricNames {
+    fn init(self) -> Self {
         describe_counter!(
-            METRIC_GRAPHQL_TOTAL_OPERATION_COUNT,
+            self.graphql_total_operation_count,
             Unit::Count,
             "Total number of GraphQL operations"
         );
         describe_gauge!(
-            METRIC_GRAPHQL_ACTIVE_OPERATION_COUNT,
+            self.graphql_active_operation_count,
             Unit::Count,
             "Active GraphQL operation count"
         );
         describe_counter!(
-            METRIC_GRAPHQL_ERROR_PAYLOAD_COUNT,
+            self.graphql_error_payload_count,
             Unit::Count,
             "Total number of GraphQL error payloads emitted"
         );
         describe_counter!(
-            METRIC_GRAPHQL_SUCCESS_PAYLOAD_COUNT,
+            self.graphql_success_payload_count,
             Unit::Count,
             "Total number of GraphQL success payloads emitted"
         );
         describe_gauge!(
-            METRIC_GRAPHQL_INITIAL_RESPONSE_DURATION,
+            self.graphql_initial_response_duration,
             Unit::Milliseconds,
             "GraphQL initial response duration (ms)"
         );
-    });
+        self
+    }
+}
+impl Default for GraphQlServerMetricNames {
+    fn default() -> Self {
+        Self {
+            graphql_total_operation_count: "graphql_total_operation_count",
+            graphql_active_operation_count: "graphql_active_operation_count",
+            graphql_error_payload_count: "graphql_error_payload_count",
+            graphql_success_payload_count: "graphql_success_payload_count",
+            graphql_initial_response_duration: "graphql_initial_response_duration",
+        }
+    }
 }
 
 pub(crate) struct GraphQlServer<T, TFactory, TAllocator, TMetricLabels>
@@ -77,6 +88,7 @@ where
     factory: TFactory,
     allocator: TAllocator,
     state: GraphQlServerState<T>,
+    metric_names: GraphQlServerMetricNames,
     get_operation_metric_labels: TMetricLabels,
 }
 impl<T, TFactory, TAllocator, TMetricLabels> GraphQlServer<T, TFactory, TAllocator, TMetricLabels>
@@ -90,12 +102,13 @@ where
     pub(crate) fn new(
         factory: TFactory,
         allocator: TAllocator,
+        metric_names: GraphQlServerMetricNames,
         get_operation_metric_labels: TMetricLabels,
     ) -> Self {
-        init_metrics();
         Self {
             factory,
             allocator,
+            metric_names: metric_names.init(),
             get_operation_metric_labels,
             state: Default::default(),
         }
@@ -244,10 +257,25 @@ where
                 ),
             ])),
             Ok(query) => {
-                increment_counter!(METRIC_GRAPHQL_TOTAL_OPERATION_COUNT, &metric_labels);
-                increment_gauge!(METRIC_GRAPHQL_ACTIVE_OPERATION_COUNT, 1.0, &metric_labels);
-                counter!(METRIC_GRAPHQL_SUCCESS_PAYLOAD_COUNT, 0, &metric_labels);
-                counter!(METRIC_GRAPHQL_ERROR_PAYLOAD_COUNT, 0, &metric_labels);
+                increment_counter!(
+                    self.metric_names.graphql_total_operation_count,
+                    &metric_labels
+                );
+                increment_gauge!(
+                    self.metric_names.graphql_active_operation_count,
+                    1.0,
+                    &metric_labels
+                );
+                counter!(
+                    self.metric_names.graphql_success_payload_count,
+                    0,
+                    &metric_labels
+                );
+                counter!(
+                    self.metric_names.graphql_error_payload_count,
+                    0,
+                    &metric_labels
+                );
                 if let Some(existing_entry) = self
                     .state
                     .operations
@@ -332,7 +360,7 @@ where
             .subscriptions
             .remove(subscription_index);
         decrement_gauge!(
-            METRIC_GRAPHQL_ACTIVE_OPERATION_COUNT,
+            self.metric_names.graphql_active_operation_count,
             1.0,
             &removed_subscription.metric_labels
         );
@@ -454,11 +482,15 @@ where
                         &updated_operation,
                     );
                     decrement_gauge!(
-                        METRIC_GRAPHQL_ACTIVE_OPERATION_COUNT,
+                        self.metric_names.graphql_active_operation_count,
                         1.0,
                         &previous_metric_labels
                     );
-                    increment_gauge!(METRIC_GRAPHQL_ACTIVE_OPERATION_COUNT, 1.0, &metric_labels);
+                    increment_gauge!(
+                        self.metric_names.graphql_active_operation_count,
+                        1.0,
+                        &metric_labels
+                    );
                     if self.state.operations[operation_index]
                         .subscriptions
                         .is_empty()
@@ -604,15 +636,21 @@ where
         })?;
         if let Some(duration) = duration {
             histogram!(
-                METRIC_GRAPHQL_INITIAL_RESPONSE_DURATION,
+                self.metric_names.graphql_initial_response_duration,
                 duration.as_millis() as f64,
                 &*metric_labels
             );
         }
         if is_error_result_payload(result, &self.factory) {
-            increment_counter!(METRIC_GRAPHQL_ERROR_PAYLOAD_COUNT, &*metric_labels);
+            increment_counter!(
+                self.metric_names.graphql_error_payload_count,
+                &*metric_labels
+            );
         } else {
-            increment_counter!(METRIC_GRAPHQL_SUCCESS_PAYLOAD_COUNT, &*metric_labels);
+            increment_counter!(
+                self.metric_names.graphql_success_payload_count,
+                &*metric_labels
+            );
         }
         None
     }

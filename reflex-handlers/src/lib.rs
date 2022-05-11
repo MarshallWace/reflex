@@ -3,9 +3,14 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use actor::{
-    assign::AssignHandlerAction, fetch::FetchHandlerAction, graphql::GraphQlHandlerAction,
-    increment::IncrementHandlerAction, loader::LoaderHandlerAction, scan::ScanHandlerAction,
-    timeout::TimeoutHandlerAction, timestamp::TimestampHandlerAction,
+    assign::AssignHandlerAction,
+    fetch::{FetchHandlerAction, FetchHandlerMetricNames},
+    graphql::{GraphQlHandlerAction, GraphQlHandlerMetricNames},
+    increment::IncrementHandlerAction,
+    loader::{LoaderHandlerAction, LoaderHandlerMetricNames},
+    scan::ScanHandlerAction,
+    timeout::TimeoutHandlerAction,
+    timestamp::TimestampHandlerAction,
 };
 use hyper::Body;
 use reflex::core::{Applicable, Expression};
@@ -51,11 +56,19 @@ impl<T: Expression, TAction> DefaultHandlersAction<T> for TAction where
 {
 }
 
+#[derive(Default, Clone, Copy, Debug)]
+pub struct DefaultHandlersMetricNames {
+    pub fetch_handler: FetchHandlerMetricNames,
+    pub graphql_handler: GraphQlHandlerMetricNames,
+    pub loader_handler: LoaderHandlerMetricNames,
+}
+
 pub fn default_handlers<TAction, T, TFactory, TAllocator, TConnect, TReconnect>(
     https_client: hyper::Client<TConnect, Body>,
     factory: &TFactory,
     allocator: &TAllocator,
     reconnect_timeout: TReconnect,
+    metric_names: DefaultHandlersMetricNames,
 ) -> impl Actor<TAction>
 where
     T: AsyncExpression + Applicable<T>,
@@ -68,18 +81,28 @@ where
     compose_actors(
         AssignHandler::new(factory.clone(), allocator.clone()),
         compose_actors(
-            FetchHandler::new(https_client.clone(), factory.clone(), allocator.clone()),
+            FetchHandler::new(
+                https_client.clone(),
+                factory.clone(),
+                allocator.clone(),
+                metric_names.fetch_handler,
+            ),
             compose_actors(
                 GraphQlHandler::new(
                     https_client,
                     factory.clone(),
                     allocator.clone(),
                     reconnect_timeout,
+                    metric_names.graphql_handler,
                 ),
                 compose_actors(
                     IncrementHandler::new(factory.clone(), allocator.clone()),
                     compose_actors(
-                        LoaderHandler::new(factory.clone(), allocator.clone()),
+                        LoaderHandler::new(
+                            factory.clone(),
+                            allocator.clone(),
+                            metric_names.loader_handler,
+                        ),
                         compose_actors(
                             ScanHandler::new(factory.clone(), allocator.clone()),
                             compose_actors(

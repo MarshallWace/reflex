@@ -5,7 +5,6 @@ use std::{
     collections::{hash_map::Entry, HashMap, HashSet},
     iter::once,
     marker::PhantomData,
-    sync::Once,
 };
 
 use metrics::{decrement_gauge, describe_gauge, increment_gauge, Unit};
@@ -31,18 +30,27 @@ use reflex_runtime::{
 
 pub const EFFECT_TYPE_LOADER: &'static str = "reflex::loader";
 
-pub const METRIC_LOADER_ENTITY_COUNT: &'static str = "loader_effect_entity_count";
-
-static INIT_METRICS: Once = Once::new();
-
-fn init_metrics() {
-    INIT_METRICS.call_once(|| {
+#[derive(Clone, Copy, Debug)]
+pub struct LoaderHandlerMetricNames {
+    pub loader_effect_entity_count: &'static str,
+}
+impl LoaderHandlerMetricNames {
+    fn init(self) -> Self {
         describe_gauge!(
-            METRIC_LOADER_ENTITY_COUNT,
+            self.loader_effect_entity_count,
             Unit::Count,
             "Active loader entity count"
         );
-    });
+
+        self
+    }
+}
+impl Default for LoaderHandlerMetricNames {
+    fn default() -> Self {
+        Self {
+            loader_effect_entity_count: "loader_effect_entity_count",
+        }
+    }
 }
 
 pub trait LoaderHandlerAction<T: Expression>:
@@ -74,6 +82,7 @@ where
 {
     factory: TFactory,
     allocator: TAllocator,
+    metric_names: LoaderHandlerMetricNames,
     state: LoaderHandlerState<T>,
     _expression: PhantomData<T>,
 }
@@ -83,10 +92,15 @@ where
     TFactory: ExpressionFactory<T>,
     TAllocator: HeapAllocator<T>,
 {
-    pub fn new(factory: TFactory, allocator: TAllocator) -> Self {
+    pub fn new(
+        factory: TFactory,
+        allocator: TAllocator,
+        metric_names: LoaderHandlerMetricNames,
+    ) -> Self {
         Self {
             factory,
             allocator,
+            metric_names: metric_names.init(),
             state: Default::default(),
             _expression: Default::default(),
         }
@@ -135,7 +149,6 @@ impl<T: Expression> Default for LoaderHandlerState<T> {
 }
 impl<T: Expression> LoaderState<T> {
     fn new(name: String) -> Self {
-        init_metrics();
         Self {
             name,
             active_batches: Default::default(),
@@ -154,6 +167,7 @@ impl<T: Expression> LoaderHandlerState<T> {
         keys: impl IntoIterator<Item = LoaderEntitySubscription<T>>,
         factory: &impl ExpressionFactory<T>,
         allocator: &impl HeapAllocator<T>,
+        metric_names: LoaderHandlerMetricNames,
     ) -> impl IntoIterator<Item = Signal<T>> {
         let loader_state = match self.loaders.entry(loader.clone()) {
             Entry::Occupied(entry) => entry.into_mut(),
@@ -193,7 +207,7 @@ impl<T: Expression> LoaderHandlerState<T> {
         let num_added_keys = loader_state.active_keys.len() - num_previous_keys;
         let metric_labels = [("loader_name", name)];
         increment_gauge!(
-            METRIC_LOADER_ENTITY_COUNT,
+            metric_names.loader_effect_entity_count,
             num_added_keys as f64,
             &metric_labels
         );
@@ -216,6 +230,7 @@ impl<T: Expression> LoaderHandlerState<T> {
             Item = LoaderEntitySubscription<T>,
             IntoIter = impl Iterator<Item = LoaderEntitySubscription<T>> + 'a,
         >,
+        metric_names: LoaderHandlerMetricNames,
     ) -> impl IntoIterator<Item = Signal<T>> {
         let (num_previous_keys, unsubscribed_effects) = match self.loaders.get_mut(&loader) {
             None => (None, None),
@@ -254,7 +269,7 @@ impl<T: Expression> LoaderHandlerState<T> {
                 .map(|loader_state| num_previous_keys - loader_state.active_keys.len())
         });
         if let Some(num_removed_keys) = num_removed_keys {
-            decrement_gauge!(METRIC_LOADER_ENTITY_COUNT, num_removed_keys as f64, "loader_name" => name);
+            decrement_gauge!(metric_names.loader_effect_entity_count, num_removed_keys as f64, "loader_name" => name);
         }
         unsubscribed_effects
     }
@@ -377,8 +392,14 @@ where
         let load_effects = effects_by_loader
             .into_iter()
             .flat_map(|(loader, (name, subscriptions))| {
-                self.state
-                    .subscribe(name, loader, subscriptions, &self.factory, &self.allocator)
+                self.state.subscribe(
+                    name,
+                    loader,
+                    subscriptions,
+                    &self.factory,
+                    &self.allocator,
+                    self.metric_names,
+                )
             })
             .collect::<Vec<_>>();
         let initial_values_action = if initial_values.is_empty() {
@@ -449,7 +470,8 @@ where
         let unsubscribe_effects = effects_by_loader
             .into_iter()
             .flat_map(|(loader, (name, subscriptions))| {
-                self.state.unsubscribe(name, loader, subscriptions)
+                self.state
+                    .unsubscribe(name, loader, subscriptions, self.metric_names)
             })
             .collect::<Vec<_>>();
         let unsubscribe_action = if unsubscribe_effects.is_empty() {

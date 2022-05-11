@@ -5,24 +5,26 @@ use anyhow::{anyhow, Context, Result};
 use clap::Parser;
 use futures::{Stream, StreamExt};
 use reflex_dispatcher::{
-    compose_actors, scheduler::tokio::TokioScheduler, Action, Actor, EitherActor, HandlerContext,
-    InboundAction, MessageData, NamedAction, Scheduler, SerializableAction, SerializedAction,
-    StateTransition,
+    compose_actors,
+    scheduler::tokio::{TokioScheduler, TokioSchedulerMetricNames},
+    Action, Actor, EitherActor, HandlerContext, InboundAction, MessageData, NamedAction, Scheduler,
+    SerializableAction, SerializedAction, StateTransition,
 };
 use reflex_handlers::{
     action::graphql::*,
     default_handlers,
     utils::tls::{create_https_client, native_tls::Certificate},
+    DefaultHandlersMetricNames,
 };
 use reflex_json::{JsonMap, JsonValue};
 use reflex_runtime::{
     action::{effect::*, evaluate::*, query::*, RuntimeAction},
     actor::{
-        bytecode_interpreter::BytecodeInterpreter,
+        bytecode_interpreter::{BytecodeInterpreter, BytecodeInterpreterMetricNames},
         evaluate_handler::{
             create_evaluate_effect, parse_evaluate_effect_result, EFFECT_TYPE_EVALUATE,
         },
-        RuntimeActor,
+        RuntimeActor, RuntimeMetricNames,
     },
     AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator, QueryEvaluationMode,
     QueryInvalidationStrategy, StateUpdate,
@@ -180,16 +182,22 @@ pub async fn main() -> Result<()> {
                         &factory,
                         &allocator,
                         NoopReconnectTimeout,
+                        DefaultHandlersMetricNames::default(),
                     );
                 let app = compose_actors(
                     compose_actors(
-                        RuntimeActor::new(factory.clone(), allocator.clone()),
+                        RuntimeActor::new(
+                            factory.clone(),
+                            allocator.clone(),
+                            RuntimeMetricNames::default(),
+                        ),
                         BytecodeInterpreter::new(
                             (Program::new([]), InstructionPointer::default()),
                             compiler_options,
                             interpreter_options,
                             factory.clone(),
                             allocator,
+                            BytecodeInterpreterMetricNames::default(),
                         ),
                     ),
                     compose_actors(handlers, watcher_middleware),
@@ -199,7 +207,7 @@ pub async fn main() -> Result<()> {
                 } else {
                     EitherActor::Right(app)
                 };
-                let mut scheduler = TokioScheduler::new(app);
+                let mut scheduler = TokioScheduler::new(app, TokioSchedulerMetricNames::default());
                 scheduler.dispatch(subscribe_action.into());
                 while let Some(result) = results_stream.next().await {
                     let (result, _dependencies) = result.into_parts();

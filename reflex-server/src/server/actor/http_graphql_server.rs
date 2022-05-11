@@ -6,7 +6,6 @@ use std::{
     iter::once,
     marker::PhantomData,
     string::FromUtf8Error,
-    sync::Once,
 };
 
 use bytes::Bytes;
@@ -42,26 +41,33 @@ use crate::server::{
     utils::{create_http_response, create_json_http_response},
 };
 
-pub const METRIC_GRAPHQL_HTTP_TOTAL_REQUEST_COUNT: &'static str =
-    "graphql_http_total_request_count";
-pub const METRIC_GRAPHQL_HTTP_ACTIVE_REQUEST_COUNT: &'static str =
-    "graphql_http_active_request_count";
-
-static INIT_METRICS: Once = Once::new();
-
-fn init_metrics() {
-    INIT_METRICS.call_once(|| {
+#[derive(Clone, Copy, Debug)]
+pub struct HttpGraphQlServerMetricNames {
+    pub graphql_http_total_request_count: &'static str,
+    pub graphql_http_active_request_count: &'static str,
+}
+impl HttpGraphQlServerMetricNames {
+    fn init(self) -> Self {
         describe_counter!(
-            METRIC_GRAPHQL_HTTP_TOTAL_REQUEST_COUNT,
+            self.graphql_http_total_request_count,
             Unit::Count,
             "Total GraphQL HTTP request count"
         );
         describe_gauge!(
-            METRIC_GRAPHQL_HTTP_ACTIVE_REQUEST_COUNT,
+            self.graphql_http_active_request_count,
             Unit::Count,
             "Active GraphQL HTTP request count"
         );
-    });
+        self
+    }
+}
+impl Default for HttpGraphQlServerMetricNames {
+    fn default() -> Self {
+        Self {
+            graphql_http_total_request_count: "graphql_http_total_request_count",
+            graphql_http_active_request_count: "graphql_http_active_request_count",
+        }
+    }
 }
 
 pub trait HttpGraphQlServerQueryTransform {
@@ -128,6 +134,7 @@ where
 {
     factory: TFactory,
     transform: TTransform,
+    metric_names: HttpGraphQlServerMetricNames,
     get_query_metric_labels: TQueryMetricLabels,
     state: HttpGraphQlServerState,
     _expression: PhantomData<T>,
@@ -143,12 +150,13 @@ where
     pub(crate) fn new(
         factory: TFactory,
         transform: TTransform,
+        metric_names: HttpGraphQlServerMetricNames,
         get_query_metric_labels: TQueryMetricLabels,
     ) -> Self {
-        init_metrics();
         Self {
             factory,
             transform,
+            metric_names: metric_names.init(),
             get_query_metric_labels,
             state: Default::default(),
             _expression: Default::default(),
@@ -239,9 +247,12 @@ where
             )))),
             Ok(operation) => {
                 let metric_labels = (self.get_query_metric_labels)(&operation, request.headers());
-                increment_counter!(METRIC_GRAPHQL_HTTP_TOTAL_REQUEST_COUNT, &metric_labels,);
+                increment_counter!(
+                    self.metric_names.graphql_http_total_request_count,
+                    &metric_labels,
+                );
                 increment_gauge!(
-                    METRIC_GRAPHQL_HTTP_ACTIVE_REQUEST_COUNT,
+                    self.metric_names.graphql_http_active_request_count,
                     1.0,
                     &metric_labels,
                 );
@@ -279,7 +290,7 @@ where
         let request = self.state.requests.remove(subscription_id)?;
         let HttpGraphQlRequest { metric_labels, .. } = request;
         decrement_gauge!(
-            METRIC_GRAPHQL_HTTP_ACTIVE_REQUEST_COUNT,
+            self.metric_names.graphql_http_active_request_count,
             1.0,
             &metric_labels
         );
@@ -324,7 +335,7 @@ where
             etag,
         } = request;
         decrement_gauge!(
-            METRIC_GRAPHQL_HTTP_ACTIVE_REQUEST_COUNT,
+            self.metric_names.graphql_http_active_request_count,
             1.0,
             &metric_labels
         );

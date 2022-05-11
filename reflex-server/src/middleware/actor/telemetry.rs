@@ -4,7 +4,6 @@
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet},
     iter::once,
-    sync::Once,
 };
 
 use metrics::{describe_counter, increment_counter, Unit};
@@ -47,14 +46,22 @@ use crate::{
     },
 };
 
-pub const METRIC_TOTAL_ACTION_COUNT: &'static str = "total_action_count";
-
-static INIT_METRICS: Once = Once::new();
-
-fn init_metrics() {
-    INIT_METRICS.call_once(|| {
-        describe_counter!(METRIC_TOTAL_ACTION_COUNT, Unit::Count, "Total action count");
-    });
+#[derive(Clone, Copy, Debug)]
+pub struct TelemetryMiddlewareMetricNames {
+    pub total_action_count: &'static str,
+}
+impl TelemetryMiddlewareMetricNames {
+    fn init(self) -> Self {
+        describe_counter!(self.total_action_count, Unit::Count, "Total action count");
+        self
+    }
+}
+impl Default for TelemetryMiddlewareMetricNames {
+    fn default() -> Self {
+        Self {
+            total_action_count: "total_action_count",
+        }
+    }
 }
 
 pub trait TelemetryMiddlewareAction<T: Expression>:
@@ -97,6 +104,7 @@ where
     allocator: TAllocator,
     state: TelemetryMiddlewareState<T>,
     get_operation_transaction_labels: TOperationLabels,
+    metric_names: TelemetryMiddlewareMetricNames,
 }
 impl<T, TFactory, TAllocator, TOperationLabels>
     TelemetryMiddleware<T, TFactory, TAllocator, TOperationLabels>
@@ -110,12 +118,13 @@ where
         factory: TFactory,
         allocator: TAllocator,
         get_operation_transaction_labels: TOperationLabels,
+        metric_names: TelemetryMiddlewareMetricNames,
     ) -> Self {
-        init_metrics();
         Self {
             factory,
             allocator,
             get_operation_transaction_labels,
+            metric_names: metric_names.init(),
             state: Default::default(),
         }
     }
@@ -177,7 +186,7 @@ where
         context: &mut impl HandlerContext,
     ) -> StateTransition<TAction> {
         let metric_labels = [("type", action.name())];
-        increment_counter!(METRIC_TOTAL_ACTION_COUNT, &metric_labels);
+        increment_counter!(self.metric_names.total_action_count, &metric_labels);
         if let Some(action) = action.match_type() {
             self.handle_graphql_subscribe(action, metadata, context)
         } else if let Some(action) = action.match_type() {

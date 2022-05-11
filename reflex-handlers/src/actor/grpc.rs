@@ -6,7 +6,7 @@ use std::{
     iter::once,
     pin::Pin,
     str::FromStr,
-    sync::{Arc, Mutex, Once},
+    sync::{Arc, Mutex},
     time::Duration,
 };
 
@@ -48,31 +48,40 @@ pub mod schema;
 
 pub const EFFECT_TYPE_GRPC: &'static str = "reflex::grpc";
 
-pub const METRIC_GRPC_EFFECT_CONNECTION_COUNT: &'static str = "grpc_effect_connection_count";
-pub const METRIC_GRPC_EFFECT_TOTAL_REQUEST_COUNT: &'static str = "grpc_effect_total_request_count";
-pub const METRIC_GRPC_EFFECT_ACTIVE_REQUEST_COUNT: &'static str =
-    "grpc_effect_active_request_count";
-
-static INIT_METRICS: Once = Once::new();
-
-fn init_metrics() {
-    INIT_METRICS.call_once(|| {
+#[derive(Clone, Copy, Debug)]
+pub struct GrpcHandlerMetricNames {
+    pub grpc_effect_connection_count: &'static str,
+    pub grpc_effect_total_request_count: &'static str,
+    pub grpc_effect_active_request_count: &'static str,
+}
+impl GrpcHandlerMetricNames {
+    fn init(self) -> Self {
         describe_gauge!(
-            METRIC_GRPC_EFFECT_CONNECTION_COUNT,
+            self.grpc_effect_connection_count,
             Unit::Count,
             "Active gRPC effect connection count"
         );
         describe_counter!(
-            METRIC_GRPC_EFFECT_TOTAL_REQUEST_COUNT,
+            self.grpc_effect_total_request_count,
             Unit::Count,
             "Total gRPC effect operation count"
         );
         describe_gauge!(
-            METRIC_GRPC_EFFECT_ACTIVE_REQUEST_COUNT,
+            self.grpc_effect_active_request_count,
             Unit::Count,
             "Active gRPC effect operation count"
         );
-    });
+        self
+    }
+}
+impl Default for GrpcHandlerMetricNames {
+    fn default() -> Self {
+        Self {
+            grpc_effect_connection_count: "grpc_effect_connection_count",
+            grpc_effect_total_request_count: "grpc_effect_total_request_count",
+            grpc_effect_active_request_count: "grpc_effect_active_request_count",
+        }
+    }
 }
 
 pub trait GrpcConfig {
@@ -130,6 +139,7 @@ where
     allocator: TAllocator,
     reconnect_timeout: TReconnect,
     config: TConfig,
+    metric_names: GrpcHandlerMetricNames,
     state: GrpcHandlerState<T, TService, TClient>,
 }
 impl<T, TFactory, TAllocator, TService, TClient, TConfig, TReconnect>
@@ -149,8 +159,8 @@ where
         allocator: TAllocator,
         reconnect_timeout: TReconnect,
         config: TConfig,
+        metric_names: GrpcHandlerMetricNames,
     ) -> Self {
-        init_metrics();
         Self {
             services: services
                 .into_iter()
@@ -160,6 +170,7 @@ where
             allocator,
             reconnect_timeout,
             config,
+            metric_names: metric_names.init(),
             state: Default::default(),
         }
     }
@@ -788,8 +799,15 @@ where
             ("url", String::from(url.as_str())),
             ("method", String::from(request.method.as_str())),
         ];
-        increment_counter!(METRIC_GRPC_EFFECT_TOTAL_REQUEST_COUNT, &metric_labels);
-        increment_gauge!(METRIC_GRPC_EFFECT_ACTIVE_REQUEST_COUNT, 1.0, &metric_labels);
+        increment_counter!(
+            self.metric_names.grpc_effect_total_request_count,
+            &metric_labels
+        );
+        increment_gauge!(
+            self.metric_names.grpc_effect_active_request_count,
+            1.0,
+            &metric_labels
+        );
         self.state.active_requests.insert(
             effect.id(),
             GrpcRequestState {
@@ -840,7 +858,11 @@ where
                         }
                     };
                     let metric_labels = [("url", String::from(url.as_str()))];
-                    increment_gauge!(METRIC_GRPC_EFFECT_CONNECTION_COUNT, 1.0, &metric_labels);
+                    increment_gauge!(
+                        self.metric_names.grpc_effect_connection_count,
+                        1.0,
+                        &metric_labels
+                    );
                     let connection_state = entry.insert(GrpcConnectionState {
                         service,
                         protocol,
@@ -906,7 +928,11 @@ where
             connection_id,
             metric_labels,
         } = self.state.active_requests.remove(&effect.id())?;
-        decrement_gauge!(METRIC_GRPC_EFFECT_ACTIVE_REQUEST_COUNT, 1.0, &metric_labels);
+        decrement_gauge!(
+            self.metric_names.grpc_effect_active_request_count,
+            1.0,
+            &metric_labels
+        );
         let (unsubscribe_action, is_final_subscription) = {
             let connection_state = self.state.active_connections.get_mut(&connection_id)?;
             let operation_state = connection_state.operations.remove(&effect.id())?;
@@ -930,7 +956,11 @@ where
                         ..
                     } = connection_state;
                     let metric_labels = [("url", String::from(url.as_str()))];
-                    decrement_gauge!(METRIC_GRPC_EFFECT_CONNECTION_COUNT, 1.0, &metric_labels);
+                    decrement_gauge!(
+                        self.metric_names.grpc_effect_connection_count,
+                        1.0,
+                        &metric_labels
+                    );
                     self.state
                         .active_connection_mappings
                         .remove(&(protocol, url));

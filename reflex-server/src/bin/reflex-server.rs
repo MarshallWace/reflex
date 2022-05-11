@@ -26,6 +26,7 @@ use reflex_graphql::{graphql_parser, GraphQlOperationPayload};
 use reflex_handlers::{
     default_handlers,
     utils::tls::{create_https_client, native_tls::Certificate},
+    DefaultHandlersMetricNames,
 };
 use reflex_json::JsonValue;
 use reflex_server::{
@@ -36,12 +37,12 @@ use reflex_server::{
     },
     imports::server_imports,
     logger::{formatted::FormattedLogger, json::JsonActionLogger, ActionLogger, EitherLogger},
-    middleware::{LoggerMiddleware, ServerMiddleware},
+    middleware::{LoggerMiddleware, ServerMiddleware, TelemetryMiddlewareMetricNames},
     server::action::init::{
         InitGraphRootAction, InitHttpServerAction, InitOpenTelemetryAction,
         InitPrometheusMetricsAction,
     },
-    GraphQlServerQueryTransform,
+    GraphQlServerQueryTransform, GraphQlWebServerMetricNames,
 };
 use reflex_utils::reconnect::FibonacciReconnectTimeout;
 
@@ -138,6 +139,7 @@ pub async fn main() -> Result<()> {
             units: Duration::from_secs(1),
             max_timeout: Duration::from_secs(30),
         },
+        DefaultHandlersMetricNames::default(),
     );
     let middleware = match OpenTelemetryHttpConfig::parse_env(std::env::vars())? {
         None => EitherActor::Left(middleware),
@@ -150,7 +152,12 @@ pub async fn main() -> Result<()> {
             );
             EitherActor::Right(compose_actors(
                 middleware,
-                config.into_middleware(get_operation_transaction_labels, &factory, &allocator)?,
+                config.into_middleware(
+                    get_operation_transaction_labels,
+                    &factory,
+                    &allocator,
+                    TelemetryMiddlewareMetricNames::default(),
+                )?,
             ))
         }
     };
@@ -214,6 +221,7 @@ pub async fn main() -> Result<()> {
         interpreter_options,
         query_transform.clone(),
         query_transform,
+        GraphQlWebServerMetricNames::default(),
         get_http_query_metric_labels,
         get_websocket_connection_metric_labels,
         get_websocket_operation_metric_labels,

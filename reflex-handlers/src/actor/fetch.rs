@@ -6,7 +6,7 @@ use std::{
     iter::once,
     marker::PhantomData,
     str::FromStr,
-    sync::{Arc, Mutex, Once},
+    sync::{Arc, Mutex},
 };
 
 use bytes::Bytes;
@@ -35,26 +35,33 @@ use crate::utils::fetch::{fetch, FetchError, FetchRequest};
 
 pub const EFFECT_TYPE_FETCH: &'static str = "reflex::fetch";
 
-pub const METRIC_FETCH_EFFECT_TOTAL_REQUEST_COUNT: &'static str =
-    "fetch_effect_total_request_count";
-pub const METRIC_FETCH_EFFECT_ACTIVE_REQUEST_COUNT: &'static str =
-    "fetch_effect_active_request_count";
-
-static INIT_METRICS: Once = Once::new();
-
-fn init_metrics() {
-    INIT_METRICS.call_once(|| {
+#[derive(Clone, Copy, Debug)]
+pub struct FetchHandlerMetricNames {
+    pub fetch_effect_total_request_count: &'static str,
+    pub fetch_effect_active_request_count: &'static str,
+}
+impl FetchHandlerMetricNames {
+    fn init(self) -> Self {
         describe_counter!(
-            METRIC_FETCH_EFFECT_TOTAL_REQUEST_COUNT,
+            self.fetch_effect_total_request_count,
             Unit::Count,
             "Total Fetch effect request count"
         );
         describe_gauge!(
-            METRIC_FETCH_EFFECT_ACTIVE_REQUEST_COUNT,
+            self.fetch_effect_active_request_count,
             Unit::Count,
             "Active Fetch effect request count"
         );
-    });
+        self
+    }
+}
+impl Default for FetchHandlerMetricNames {
+    fn default() -> Self {
+        Self {
+            fetch_effect_total_request_count: "fetch_effect_total_request_count",
+            fetch_effect_active_request_count: "fetch_effect_active_request_count",
+        }
+    }
 }
 
 pub trait FetchHandlerAction<T: Expression>:
@@ -83,6 +90,7 @@ where
     factory: TFactory,
     allocator: TAllocator,
     state: FetchHandlerState,
+    metric_names: FetchHandlerMetricNames,
     _expression: PhantomData<T>,
 }
 impl<T, TConnect, TFactory, TAllocator> FetchHandler<T, TConnect, TFactory, TAllocator>
@@ -96,13 +104,14 @@ where
         client: hyper::Client<TConnect, Body>,
         factory: TFactory,
         allocator: TAllocator,
+        metric_names: FetchHandlerMetricNames,
     ) -> Self {
-        init_metrics();
         Self {
             state: Default::default(),
             factory,
             allocator,
             client,
+            metric_names: metric_names.init(),
             _expression: Default::default(),
         }
     }
@@ -178,9 +187,12 @@ where
                             ("method", request.method.clone()),
                             ("url", request.url.clone()),
                         ];
-                        increment_counter!(METRIC_FETCH_EFFECT_TOTAL_REQUEST_COUNT, &metric_labels);
+                        increment_counter!(
+                            self.metric_names.fetch_effect_total_request_count,
+                            &metric_labels
+                        );
                         increment_gauge!(
-                            METRIC_FETCH_EFFECT_ACTIVE_REQUEST_COUNT,
+                            self.metric_names.fetch_effect_active_request_count,
                             1.0,
                             &metric_labels
                         );
@@ -192,6 +204,7 @@ where
                                 &self.factory,
                                 &self.allocator,
                                 context,
+                                self.metric_names,
                                 metric_labels,
                             ) {
                                 Err(err) => Some(((state_token, StateUpdate::Value(err)), None)),
@@ -273,7 +286,7 @@ where
                     .and_then(|mut metric_labels| metric_labels.take())
                 {
                     decrement_gauge!(
-                        METRIC_FETCH_EFFECT_ACTIVE_REQUEST_COUNT,
+                        self.metric_names.fetch_effect_active_request_count,
                         1.0,
                         &metric_labels
                     );
@@ -293,6 +306,7 @@ fn create_fetch_task<T: Expression, TConnect, TAction>(
     factory: &(impl ExpressionFactory<T> + Send + Clone + 'static),
     allocator: &(impl HeapAllocator<T> + Send + Clone + 'static),
     context: &mut impl HandlerContext,
+    metric_names: FetchHandlerMetricNames,
     metric_labels: [(&'static str, String); 2],
 ) -> Result<(RequestState, OperationStream<TAction>), T>
 where
@@ -316,7 +330,7 @@ where
                     .and_then(|mut metric_labels| metric_labels.take())
                 {
                     decrement_gauge!(
-                        METRIC_FETCH_EFFECT_ACTIVE_REQUEST_COUNT,
+                        metric_names.fetch_effect_active_request_count,
                         1.0,
                         &metric_labels
                     );

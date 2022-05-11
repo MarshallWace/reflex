@@ -5,7 +5,6 @@ use std::{
     collections::{hash_map::Entry, HashMap, HashSet, VecDeque},
     iter::once,
     marker::PhantomData,
-    sync::Once,
     time::Instant,
 };
 
@@ -36,69 +35,81 @@ use crate::{
 
 pub const EFFECT_TYPE_EVALUATE: &'static str = "reflex::core::evaluate";
 
-pub const METRIC_STATE_ENTRY_COUNT: &'static str = "state_entry_count";
-pub const METRIC_QUEUED_UPDATE_BATCH_COUNT: &'static str = "state_pending_update_batch_count";
-pub const METRIC_STATE_GC_DURATION: &'static str = "state_gc_duration";
-pub const METRIC_TOTAL_EFFECT_COUNT: &'static str = "total_effect_count";
-pub const METRIC_ACTIVE_EFFECT_COUNT: &'static str = "active_effect_count";
-pub const METRIC_ACTIVE_QUERY_WORKER_COUNT: &'static str = "active_query_worker_count";
-pub const METRIC_PENDING_QUERY_WORKER_COUNT: &'static str = "pending_query_worker_count";
-pub const METRIC_ERROR_QUERY_WORKER_COUNT: &'static str = "error_query_worker_count";
-pub const METRIC_BLOCKED_QUERY_WORKER_COUNT: &'static str = "blocked_query_worker_count";
-pub const METRIC_QUERY_WORKER_CACHE_ENTRY_COUNT: &'static str =
-    "active_query_worker_cache_entry_count";
-
-static INIT_METRICS: Once = Once::new();
-
-fn init_metrics() {
-    INIT_METRICS.call_once(|| {
+#[derive(Clone, Copy, Debug)]
+pub struct EvaluateHandlerMetricNames {
+    pub state_entry_count: &'static str,
+    pub state_pending_update_batch_count: &'static str,
+    pub state_gc_duration: &'static str,
+    pub total_effect_count: &'static str,
+    pub active_effect_count: &'static str,
+    pub active_query_worker_count: &'static str,
+    pub pending_query_worker_count: &'static str,
+    pub error_query_worker_count: &'static str,
+    pub blocked_query_worker_count: &'static str,
+    pub active_query_worker_cache_entry_count: &'static str,
+}
+impl EvaluateHandlerMetricNames {
+    fn init(self) -> Self {
         describe_gauge!(
-            METRIC_STATE_ENTRY_COUNT,
+            self.state_entry_count,
             Unit::Count,
             "Active global state entry count"
         );
         describe_gauge!(
-            METRIC_QUEUED_UPDATE_BATCH_COUNT,
+            self.state_pending_update_batch_count,
             Unit::Count,
             "Queued worker state update batch count"
         );
         describe_histogram!(
-            METRIC_STATE_GC_DURATION,
+            self.state_gc_duration,
             Unit::Seconds,
             "Global state garbage collection duration (seconds)"
         );
-        describe_counter!(METRIC_TOTAL_EFFECT_COUNT, Unit::Count, "Total effect count");
+        describe_counter!(self.total_effect_count, Unit::Count, "Total effect count");
+        describe_gauge!(self.active_effect_count, Unit::Count, "Active effect count");
         describe_gauge!(
-            METRIC_ACTIVE_EFFECT_COUNT,
-            Unit::Count,
-            "Active effect count"
-        );
-        describe_gauge!(
-            METRIC_ACTIVE_QUERY_WORKER_COUNT,
+            self.active_query_worker_count,
             Unit::Count,
             "Active query worker count"
         );
         describe_gauge!(
-            METRIC_PENDING_QUERY_WORKER_COUNT,
+            self.pending_query_worker_count,
             Unit::Count,
             "Pending query worker count"
         );
         describe_gauge!(
-            METRIC_ERROR_QUERY_WORKER_COUNT,
+            self.error_query_worker_count,
             Unit::Count,
             "Errored query worker count"
         );
         describe_gauge!(
-            METRIC_BLOCKED_QUERY_WORKER_COUNT,
+            self.blocked_query_worker_count,
             Unit::Count,
             "Blocked query worker count"
         );
         describe_gauge!(
-            METRIC_QUERY_WORKER_CACHE_ENTRY_COUNT,
+            self.active_query_worker_cache_entry_count,
             Unit::Count,
             "Active query worker cache entry count"
         );
-    });
+        self
+    }
+}
+impl Default for EvaluateHandlerMetricNames {
+    fn default() -> Self {
+        Self {
+            state_entry_count: "state_entry_count",
+            state_pending_update_batch_count: "state_pending_update_batch_count",
+            state_gc_duration: "state_gc_duration",
+            total_effect_count: "total_effect_count",
+            active_effect_count: "active_effect_count",
+            active_query_worker_count: "active_query_worker_count",
+            pending_query_worker_count: "pending_query_worker_count",
+            error_query_worker_count: "error_query_worker_count",
+            blocked_query_worker_count: "blocked_query_worker_count",
+            active_query_worker_cache_entry_count: "active_query_worker_cache_entry_count",
+        }
+    }
 }
 
 pub fn create_evaluate_effect<T: Expression>(
@@ -216,6 +227,7 @@ where
 {
     factory: TFactory,
     allocator: TAllocator,
+    metric_names: EvaluateHandlerMetricNames,
     state: EvaluateHandlerState<T>,
     _expression: PhantomData<T>,
 }
@@ -225,11 +237,15 @@ where
     TFactory: ExpressionFactory<T>,
     TAllocator: HeapAllocator<T>,
 {
-    pub(crate) fn new(factory: TFactory, allocator: TAllocator) -> Self {
-        init_metrics();
+    pub(crate) fn new(
+        factory: TFactory,
+        allocator: TAllocator,
+        metric_names: EvaluateHandlerMetricNames,
+    ) -> Self {
         Self {
             factory,
             allocator,
+            metric_names: metric_names.init(),
             state: Default::default(),
             _expression: Default::default(),
         }
@@ -300,16 +316,20 @@ impl<T: Expression> EvaluateHandlerState<T> {
             )
         })
     }
-    fn gc_worker_state_history(&mut self) {
+    fn gc_worker_state_history(&mut self, metric_names: EvaluateHandlerMetricNames) {
         let oldest_active_state_index = self
             .workers
             .values()
             .filter_map(|worker| worker.state_index)
             .min();
         self.state_cache
-            .delete_outdated_update_batches(oldest_active_state_index);
+            .delete_outdated_update_batches(oldest_active_state_index, metric_names);
     }
-    fn update_worker_status_metrics(&self, factory: &impl ExpressionFactory<T>) {
+    fn update_worker_status_metrics(
+        &self,
+        factory: &impl ExpressionFactory<T>,
+        metric_names: EvaluateHandlerMetricNames,
+    ) {
         let (num_pending_workers, num_error_workers, num_blocked_workers) =
             self.workers.iter().fold(
                 (0, 0, 0),
@@ -323,12 +343,15 @@ impl<T: Expression> EvaluateHandlerState<T> {
                 },
             );
         gauge!(
-            METRIC_PENDING_QUERY_WORKER_COUNT,
+            metric_names.pending_query_worker_count,
             num_pending_workers as f64
         );
-        gauge!(METRIC_ERROR_QUERY_WORKER_COUNT, num_error_workers as f64);
         gauge!(
-            METRIC_BLOCKED_QUERY_WORKER_COUNT,
+            metric_names.error_query_worker_count,
+            num_error_workers as f64
+        );
+        gauge!(
+            metric_names.blocked_query_worker_count,
             num_blocked_workers as f64
         );
     }
@@ -406,13 +429,18 @@ impl<T: Expression> WorkerState<T> {
     }
 }
 impl<T: Expression> GlobalStateCache<T> {
-    fn apply_batch(&mut self, state_index: MessageOffset, updates: Vec<(StateToken, T)>) {
+    fn apply_batch(
+        &mut self,
+        state_index: MessageOffset,
+        updates: Vec<(StateToken, T)>,
+        metric_names: EvaluateHandlerMetricNames,
+    ) {
         self.state_index = Some(state_index);
         for (key, value) in updates.iter() {
             self.combined_state.set(*key, value.clone());
         }
         self.update_batches.push_back((state_index, updates));
-        self.update_state_cache_metrics();
+        self.update_state_cache_metrics(metric_names);
     }
     fn get_current_value(&self, state_token: StateToken) -> Option<(StateToken, T)> {
         self.combined_state
@@ -440,7 +468,11 @@ impl<T: Expression> GlobalStateCache<T> {
                     .map(|(state_token, value)| (*state_token, value.clone()))
             })
     }
-    fn delete_outdated_update_batches(&mut self, active_state_index: Option<MessageOffset>) {
+    fn delete_outdated_update_batches(
+        &mut self,
+        active_state_index: Option<MessageOffset>,
+        metric_names: EvaluateHandlerMetricNames,
+    ) {
         if let Some(state_index) = active_state_index {
             while self
                 .update_batches
@@ -453,9 +485,13 @@ impl<T: Expression> GlobalStateCache<T> {
         } else {
             self.update_batches.clear();
         }
-        self.update_state_cache_metrics();
+        self.update_state_cache_metrics(metric_names);
     }
-    fn gc(&mut self, retained_keys: impl IntoIterator<Item = StateToken>) {
+    fn gc(
+        &mut self,
+        retained_keys: impl IntoIterator<Item = StateToken>,
+        metric_names: EvaluateHandlerMetricNames,
+    ) {
         // TODO: [perf] Compare performance of rebuilding new state cache vs removing keys from existing cache
         let start_time = Instant::now();
         self.combined_state = retained_keys
@@ -467,13 +503,16 @@ impl<T: Expression> GlobalStateCache<T> {
             })
             .collect();
         let elapsed_time = start_time.elapsed();
-        histogram!(METRIC_STATE_GC_DURATION, elapsed_time.as_secs_f64());
-        self.update_state_cache_metrics();
+        histogram!(metric_names.state_gc_duration, elapsed_time.as_secs_f64());
+        self.update_state_cache_metrics(metric_names);
     }
-    fn update_state_cache_metrics(&self) {
-        gauge!(METRIC_STATE_ENTRY_COUNT, self.combined_state.len() as f64);
+    fn update_state_cache_metrics(&self, metric_names: EvaluateHandlerMetricNames) {
         gauge!(
-            METRIC_QUEUED_UPDATE_BATCH_COUNT,
+            metric_names.state_entry_count,
+            self.combined_state.len() as f64
+        );
+        gauge!(
+            metric_names.state_pending_update_batch_count,
             self.update_batches.len() as f64
         );
     }
@@ -528,12 +567,12 @@ where
         } = action;
         let metric_labels = [("effect_type", String::from(effect_type))];
         counter!(
-            METRIC_TOTAL_EFFECT_COUNT,
+            self.metric_names.total_effect_count,
             effects.len() as u64,
             &metric_labels
         );
         increment_gauge!(
-            METRIC_ACTIVE_EFFECT_COUNT,
+            self.metric_names.active_effect_count,
             effects.len() as f64,
             &metric_labels
         );
@@ -560,9 +599,13 @@ where
                         }
                         // For any queries that are not yet subscribed, kick off evaluation of that query
                         Entry::Vacant(entry) => {
-                            increment_gauge!(METRIC_ACTIVE_QUERY_WORKER_COUNT, 1.0);
+                            increment_gauge!(self.metric_names.active_query_worker_count, 1.0);
                             let metric_labels = [("worker_id", format!("{}", effect.id()))];
-                            gauge!(METRIC_QUERY_WORKER_CACHE_ENTRY_COUNT, 0.0, &metric_labels);
+                            gauge!(
+                                self.metric_names.active_query_worker_cache_entry_count,
+                                0.0,
+                                &metric_labels
+                            );
                             entry.insert(WorkerState {
                                 subscription_count: 1,
                                 effect: effect.clone(),
@@ -624,7 +667,7 @@ where
             effect_type,
             effects,
         } = action;
-        decrement_gauge!(METRIC_ACTIVE_EFFECT_COUNT, effects.len() as f64, "effect_type" => String::from(effect_type));
+        decrement_gauge!(self.metric_names.active_effect_count, effects.len() as f64, "effect_type" => String::from(effect_type));
         if effect_type != EFFECT_TYPE_EVALUATE {
             return None;
         }
@@ -643,9 +686,9 @@ where
                 };
                 if updated_subscription_count == 0 {
                     let (_, subscription) = existing_entry.remove_entry();
-                    decrement_gauge!(METRIC_ACTIVE_QUERY_WORKER_COUNT, 1.0);
+                    decrement_gauge!(self.metric_names.active_query_worker_count, 1.0);
                     gauge!(
-                        METRIC_QUERY_WORKER_CACHE_ENTRY_COUNT,
+                        self.metric_names.active_query_worker_cache_entry_count,
                         0.0,
                         &subscription.metric_labels,
                     );
@@ -695,12 +738,15 @@ where
         let actions = stop_actions.chain(unsubscribe_actions).collect::<Vec<_>>();
         let has_unsubscribed_effects = !actions.is_empty();
         if has_unsubscribed_effects {
-            self.state.state_cache.gc(remaining_effect_ids);
+            self.state
+                .state_cache
+                .gc(remaining_effect_ids, self.metric_names);
         }
         let has_unsubscribed_workers = !unsubscribed_workers.is_empty();
         if has_unsubscribed_workers {
-            self.state.gc_worker_state_history();
-            self.state.update_worker_status_metrics(&self.factory);
+            self.state.gc_worker_state_history(self.metric_names);
+            self.state
+                .update_worker_status_metrics(&self.factory, self.metric_names);
         }
         Some(StateTransition::new(actions))
     }
@@ -775,8 +821,9 @@ where
                 },
                 &mut self.state.state_cache,
                 context,
+                self.metric_names,
             );
-            self.state.gc_worker_state_history();
+            self.state.gc_worker_state_history(self.metric_names);
             reevaluate_action
         };
         let effect_emit_action: Option<StateOperation<TAction>> =
@@ -836,7 +883,8 @@ where
             .chain(effect_subscribe_actions)
             .chain(effect_unsubscribe_actions)
             .collect::<Vec<_>>();
-        self.state.update_worker_status_metrics(&self.factory);
+        self.state
+            .update_worker_status_metrics(&self.factory, self.metric_names);
         Some(StateTransition::new(actions))
     }
     fn handle_effect_emit<TAction>(
@@ -879,7 +927,9 @@ where
             return None;
         }
         let state_index = metadata.offset;
-        self.state.state_cache.apply_batch(state_index, updates);
+        self.state
+            .state_cache
+            .apply_batch(state_index, updates, self.metric_names);
         let invalidated_workers =
             self.state
                 .workers
@@ -900,10 +950,11 @@ where
                     WorkerStateUpdateType::DependencyUpdate,
                     &mut self.state.state_cache,
                     context,
+                    self.metric_names,
                 )
             })
             .collect::<Vec<_>>();
-        self.state.gc_worker_state_history();
+        self.state.gc_worker_state_history(self.metric_names);
         Some(StateTransition::new(worker_update_actions))
     }
 }
@@ -920,6 +971,7 @@ fn update_worker_state<T: Expression, TAction>(
     update_type: WorkerStateUpdateType,
     global_state: &mut GlobalStateCache<T>,
     context: &impl HandlerContext,
+    metric_names: EvaluateHandlerMetricNames,
 ) -> Option<StateOperation<TAction>>
 where
     TAction: Action + OutboundAction<EvaluateStartAction<T>>,
@@ -968,7 +1020,7 @@ where
         return None;
     }
     gauge!(
-        METRIC_QUERY_WORKER_CACHE_ENTRY_COUNT,
+        metric_names.active_query_worker_cache_entry_count,
         worker.state_values.len() as f64,
         &worker.metric_labels
     );

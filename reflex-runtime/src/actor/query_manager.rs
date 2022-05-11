@@ -5,7 +5,6 @@ use std::{
     collections::{hash_map::Entry, HashMap},
     iter::once,
     marker::PhantomData,
-    sync::Once,
 };
 
 use metrics::{decrement_gauge, describe_gauge, increment_gauge, Unit};
@@ -28,14 +27,22 @@ use crate::{
     QueryEvaluationMode, QueryInvalidationStrategy, StateUpdate,
 };
 
-pub const METRIC_ACTIVE_QUERY_COUNT: &'static str = "active_query_count";
-
-static INIT_METRICS: Once = Once::new();
-
-fn init_metrics() {
-    INIT_METRICS.call_once(|| {
-        describe_gauge!(METRIC_ACTIVE_QUERY_COUNT, Unit::Count, "Active query count");
-    });
+#[derive(Clone, Copy, Debug)]
+pub struct QueryManagerMetricNames {
+    pub active_query_count: &'static str,
+}
+impl QueryManagerMetricNames {
+    fn init(self) -> Self {
+        describe_gauge!(self.active_query_count, Unit::Count, "Active query count");
+        self
+    }
+}
+impl Default for QueryManagerMetricNames {
+    fn default() -> Self {
+        Self {
+            active_query_count: "active_query_count",
+        }
+    }
 }
 
 pub trait QueryManagerAction<T: Expression>:
@@ -67,6 +74,7 @@ where
 {
     factory: TFactory,
     allocator: TAllocator,
+    metric_names: QueryManagerMetricNames,
     state: QueryManagerState<T>,
     _expression: PhantomData<T>,
 }
@@ -76,11 +84,15 @@ where
     TFactory: ExpressionFactory<T>,
     TAllocator: HeapAllocator<T>,
 {
-    pub(crate) fn new(factory: TFactory, allocator: TAllocator) -> Self {
-        init_metrics();
+    pub(crate) fn new(
+        factory: TFactory,
+        allocator: TAllocator,
+        metric_names: QueryManagerMetricNames,
+    ) -> Self {
         Self {
             factory,
             allocator,
+            metric_names: metric_names.init(),
             state: Default::default(),
             _expression: Default::default(),
         }
@@ -178,7 +190,7 @@ where
                     result: None,
                     subscription_count: 1,
                 });
-                increment_gauge!(METRIC_ACTIVE_QUERY_COUNT, 1.0);
+                increment_gauge!(self.metric_names.active_query_count, 1.0);
                 let subscribe_action = StateOperation::Send(
                     context.pid(),
                     EffectSubscribeAction {
@@ -217,7 +229,7 @@ where
             return None;
         }
         let subscription = entry.remove();
-        decrement_gauge!(METRIC_ACTIVE_QUERY_COUNT, 1.0);
+        decrement_gauge!(self.metric_names.active_query_count, 1.0);
         let unsubscribe_action = StateOperation::Send(
             context.pid(),
             EffectUnsubscribeAction {

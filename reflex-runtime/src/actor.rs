@@ -13,6 +13,12 @@ pub mod query_manager;
 use self::evaluate_handler::*;
 use self::query_manager::*;
 
+#[derive(Default, Clone, Copy, Debug)]
+pub struct RuntimeMetricNames {
+    pub query_manager: QueryManagerMetricNames,
+    pub evaluate_handler: EvaluateHandlerMetricNames,
+}
+
 pub trait RuntimeAction<T: Expression>:
     Action + QueryManagerAction<T> + EvaluateHandlerAction<T>
 {
@@ -41,11 +47,15 @@ where
     TAllocator: HeapAllocator<T> + Clone,
     TAction: RuntimeAction<T>,
 {
-    pub fn new(factory: TFactory, allocator: TAllocator) -> Self {
+    pub fn new(factory: TFactory, allocator: TAllocator, metric_names: RuntimeMetricNames) -> Self {
         Self {
             inner: compose_actors(
-                QueryManager::new(factory.clone(), allocator.clone()),
-                EvaluateHandler::new(factory, allocator),
+                QueryManager::new(
+                    factory.clone(),
+                    allocator.clone(),
+                    metric_names.query_manager,
+                ),
+                EvaluateHandler::new(factory, allocator, metric_names.evaluate_handler),
             ),
         }
     }

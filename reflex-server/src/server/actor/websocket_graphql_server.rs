@@ -5,7 +5,6 @@ use std::{
     collections::{hash_map::Entry, HashMap},
     iter::{empty, once},
     marker::PhantomData,
-    sync::Once,
     time::Duration,
 };
 
@@ -42,26 +41,34 @@ use crate::server::action::{
     },
 };
 
-pub const METRIC_GRAPHQL_WEBSOCKET_CONNECTION_COUNT: &'static str =
-    "graphql_websocket_connection_count";
-pub const METRIC_GRAPHQL_WEBSOCKET_INITIALIZED_CONNECTION_COUNT: &'static str =
-    "graphql_websocket_initialized_connection_count";
-
-static INIT_METRICS: Once = Once::new();
-
-fn init_metrics() {
-    INIT_METRICS.call_once(|| {
+#[derive(Clone, Copy, Debug)]
+pub struct WebSocketGraphQlServerMetricNames {
+    pub graphql_websocket_connection_count: &'static str,
+    pub graphql_websocket_initialized_connection_count: &'static str,
+}
+impl WebSocketGraphQlServerMetricNames {
+    fn init(self) -> Self {
         describe_gauge!(
-            METRIC_GRAPHQL_WEBSOCKET_CONNECTION_COUNT,
+            self.graphql_websocket_connection_count,
             Unit::Count,
             "Active client GraphQL Web Socket connection count"
         );
         describe_gauge!(
-            METRIC_GRAPHQL_WEBSOCKET_INITIALIZED_CONNECTION_COUNT,
+            self.graphql_websocket_initialized_connection_count,
             Unit::Count,
             "Active initialized client GraphQL Web Socket connection count"
         );
-    });
+        self
+    }
+}
+impl Default for WebSocketGraphQlServerMetricNames {
+    fn default() -> Self {
+        Self {
+            graphql_websocket_connection_count: "graphql_websocket_connection_count",
+            graphql_websocket_initialized_connection_count:
+                "graphql_websocket_initialized_connection_count",
+        }
+    }
 }
 
 pub trait WebSocketGraphQlServerQueryTransform {
@@ -142,6 +149,7 @@ where
 {
     factory: TFactory,
     transform: TTransform,
+    metric_names: WebSocketGraphQlServerMetricNames,
     get_connection_metric_labels: TMetricLabels,
     state: WebSocketGraphQlServerState<T>,
     _expression: PhantomData<T>,
@@ -157,12 +165,13 @@ where
     pub(crate) fn new(
         factory: TFactory,
         transform: TTransform,
+        metric_names: WebSocketGraphQlServerMetricNames,
         get_connection_metric_labels: TMetricLabels,
     ) -> Self {
-        init_metrics();
         Self {
             factory,
             transform,
+            metric_names: metric_names.init(),
             get_connection_metric_labels,
             state: Default::default(),
             _expression: Default::default(),
@@ -325,7 +334,7 @@ where
             Entry::Vacant(entry) => Some(entry),
             Entry::Occupied(_) => None,
         }?;
-        increment_gauge!(METRIC_GRAPHQL_WEBSOCKET_CONNECTION_COUNT, 1.0,);
+        increment_gauge!(self.metric_names.graphql_websocket_connection_count, 1.0,);
         entry.insert(WebSocketGraphQlConnection {
             request: clone_request_wrapper(request),
             initialized_state: Default::default(),
@@ -390,13 +399,15 @@ where
         );
         if let Some(previous_metric_labels) = previous_metric_labels {
             decrement_gauge!(
-                METRIC_GRAPHQL_WEBSOCKET_INITIALIZED_CONNECTION_COUNT,
+                self.metric_names
+                    .graphql_websocket_initialized_connection_count,
                 1.0,
                 &previous_metric_labels
             );
         }
         increment_gauge!(
-            METRIC_GRAPHQL_WEBSOCKET_INITIALIZED_CONNECTION_COUNT,
+            self.metric_names
+                .graphql_websocket_initialized_connection_count,
             1.0,
             &metric_labels
         );
@@ -604,12 +615,13 @@ where
             .map(|initialized_state| initialized_state.metric_labels);
         if let Some(previous_metric_labels) = previous_metric_labels {
             decrement_gauge!(
-                METRIC_GRAPHQL_WEBSOCKET_INITIALIZED_CONNECTION_COUNT,
+                self.metric_names
+                    .graphql_websocket_initialized_connection_count,
                 1.0,
                 &previous_metric_labels
             );
         }
-        decrement_gauge!(METRIC_GRAPHQL_WEBSOCKET_CONNECTION_COUNT, 1.0);
+        decrement_gauge!(self.metric_names.graphql_websocket_connection_count, 1.0);
         Some(StateTransition::new(
             connection
                 .operations

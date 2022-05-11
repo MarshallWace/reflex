@@ -6,7 +6,7 @@ use std::{
     hash::Hash,
     iter::once,
     marker::PhantomData,
-    sync::{Arc, Once},
+    sync::Arc,
     time::Instant,
 };
 
@@ -33,30 +33,40 @@ use crate::{
     AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator, QueryEvaluationMode,
 };
 
-pub const METRIC_QUERY_WORKER_COMPILE_DURATION: &'static str = "query_worker_compile_duration";
-pub const METRIC_QUERY_WORKER_EVALUATE_DURATION: &'static str = "query_worker_evaluate_duration";
-pub const METRIC_QUERY_WORKER_GC_DURATION: &'static str = "query_worker_gc_duration";
-
-static INIT_METRICS: Once = Once::new();
-
-fn init_metrics() {
-    INIT_METRICS.call_once(|| {
+#[derive(Clone, Copy, Debug)]
+pub struct BytecodeInterpreterMetricNames {
+    pub query_worker_compile_duration: &'static str,
+    pub query_worker_evaluate_duration: &'static str,
+    pub query_worker_gc_duration: &'static str,
+}
+impl BytecodeInterpreterMetricNames {
+    fn init(self) -> Self {
         describe_histogram!(
-            METRIC_QUERY_WORKER_COMPILE_DURATION,
+            self.query_worker_compile_duration,
             Unit::Seconds,
             "Worker query compilation duration (seconds)"
         );
         describe_histogram!(
-            METRIC_QUERY_WORKER_EVALUATE_DURATION,
+            self.query_worker_evaluate_duration,
             Unit::Seconds,
             "Worker query evaluation duration (seconds)"
         );
         describe_histogram!(
-            METRIC_QUERY_WORKER_GC_DURATION,
+            self.query_worker_gc_duration,
             Unit::Seconds,
             "Worker garbage collection duration (seconds)"
         );
-    });
+        self
+    }
+}
+impl Default for BytecodeInterpreterMetricNames {
+    fn default() -> Self {
+        Self {
+            query_worker_compile_duration: "query_worker_compile_duration",
+            query_worker_evaluate_duration: "query_worker_evaluate_duration",
+            query_worker_gc_duration: "query_worker_gc_duration",
+        }
+    }
 }
 
 pub trait BytecodeInterpreterAction<T: Expression>:
@@ -91,6 +101,7 @@ where
     interpreter_options: InterpreterOptions,
     factory: TFactory,
     allocator: TAllocator,
+    metric_names: BytecodeInterpreterMetricNames,
     state: BytecodeInterpreterState,
     _expression: PhantomData<T>,
 }
@@ -106,14 +117,15 @@ where
         interpreter_options: InterpreterOptions,
         factory: TFactory,
         allocator: TAllocator,
+        metric_names: BytecodeInterpreterMetricNames,
     ) -> Self {
-        init_metrics();
         Self {
             graph_root: Arc::new(graph_root),
             compiler_options,
             interpreter_options,
             factory,
             allocator,
+            metric_names: metric_names.init(),
             state: Default::default(),
             _expression: Default::default(),
         }
@@ -201,6 +213,7 @@ where
                             let graph_root = self.graph_root.clone();
                             let factory = self.factory.clone();
                             let allocator = self.allocator.clone();
+                            let metric_names = self.metric_names;
                             move || {
                                 let start_time = Instant::now();
                                 let graph_root = compile_graphql_query(
@@ -215,7 +228,7 @@ where
                                 .unwrap_or_else(create_compiler_error_program);
                                 let elapsed_time = start_time.elapsed();
                                 histogram!(
-                                    METRIC_QUERY_WORKER_COMPILE_DURATION,
+                                    metric_names.query_worker_compile_duration,
                                     elapsed_time.as_secs_f64()
                                 );
                                 BytecodeWorker {
@@ -224,6 +237,7 @@ where
                                     interpreter_options,
                                     factory,
                                     allocator,
+                                    metric_names,
                                     state: Default::default(),
                                 }
                             }

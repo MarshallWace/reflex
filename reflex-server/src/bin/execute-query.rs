@@ -15,13 +15,14 @@ use reflex_handlers::{
     actor::{fetch::EFFECT_TYPE_FETCH, graphql::EFFECT_TYPE_GRAPHQL, grpc::EFFECT_TYPE_GRPC},
     default_handlers,
     utils::tls::{create_https_client, native_tls::Certificate},
+    DefaultHandlersMetricNames,
 };
 use reflex_server::{
     action::ServerCliAction,
     builtins::ServerBuiltins,
     cli::execute_query::{cli, ExecuteQueryCliOptions, NoopHttpMiddleware},
     imports::server_imports,
-    GraphQlServerQueryTransform,
+    GraphQlServerQueryTransform, GraphQlWebServerMetricNames,
 };
 use reflex_utils::reconnect::NoopReconnectTimeout;
 
@@ -123,6 +124,7 @@ async fn main() -> Result<()> {
         &factory,
         &allocator,
         NoopReconnectTimeout,
+        DefaultHandlersMetricNames::default(),
     );
     let query_transform = GraphQlServerQueryTransform::new(schema)
         .map_err(|err| anyhow!("{}", err))
@@ -136,6 +138,7 @@ async fn main() -> Result<()> {
         &allocator,
         query_transform,
         NoopHttpMiddleware,
+        GraphQlWebServerMetricNames::default(),
     )
     .await
     .map(|response| println!("{}", response))

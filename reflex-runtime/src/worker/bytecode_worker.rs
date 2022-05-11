@@ -21,9 +21,7 @@ use reflex_dispatcher::{
 
 use crate::{
     action::evaluate::{EvaluateResultAction, EvaluateStartAction},
-    actor::bytecode_interpreter::{
-        METRIC_QUERY_WORKER_EVALUATE_DURATION, METRIC_QUERY_WORKER_GC_DURATION,
-    },
+    actor::bytecode_interpreter::BytecodeInterpreterMetricNames,
     AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator, QueryInvalidationStrategy,
 };
 
@@ -55,6 +53,7 @@ where
     pub interpreter_options: InterpreterOptions,
     pub factory: TFactory,
     pub allocator: TAllocator,
+    pub metric_names: BytecodeInterpreterMetricNames,
     pub state: BytecodeWorkerState<T>,
 }
 
@@ -149,7 +148,7 @@ where
         );
         let elapsed_time = start_time.elapsed();
         histogram!(
-            METRIC_QUERY_WORKER_EVALUATE_DURATION,
+            self.metric_names.query_worker_evaluate_duration,
             elapsed_time.as_secs_f64()
         );
         let result = match result {
@@ -216,7 +215,10 @@ where
             self.state.state_values.gc(result.dependencies());
         }
         let elapsed_time = start_time.elapsed();
-        histogram!(METRIC_QUERY_WORKER_GC_DURATION, elapsed_time.as_secs_f64());
+        histogram!(
+            self.metric_names.query_worker_gc_duration,
+            elapsed_time.as_secs_f64()
+        );
         // TODO: Garbage-collect state values
         WorkerTransition::new(None)
     }

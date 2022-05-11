@@ -5,7 +5,7 @@ use std::{
     collections::{hash_map::Entry, HashMap},
     iter::once,
     marker::PhantomData,
-    sync::{Arc, Mutex, Once},
+    sync::{Arc, Mutex},
     time::Duration,
 };
 
@@ -59,32 +59,40 @@ use crate::{
 
 pub const EFFECT_TYPE_GRAPHQL: &'static str = "reflex::graphql";
 
-pub const METRIC_GRAPHQL_EFFECT_CONNECTION_COUNT: &'static str = "graphql_effect_connection_count";
-pub const METRIC_GRAPHQL_EFFECT_TOTAL_OPERATION_COUNT: &'static str =
-    "graphql_effect_total_operation_count";
-pub const METRIC_GRAPHQL_EFFECT_ACTIVE_OPERATION_COUNT: &'static str =
-    "graphql_effect_active_operation_count";
-
-static INIT_METRICS: Once = Once::new();
-
-fn init_metrics() {
-    INIT_METRICS.call_once(|| {
+#[derive(Clone, Copy, Debug)]
+pub struct GraphQlHandlerMetricNames {
+    pub graphql_effect_connection_count: &'static str,
+    pub graphql_effect_total_operation_count: &'static str,
+    pub graphql_effect_active_operation_count: &'static str,
+}
+impl GraphQlHandlerMetricNames {
+    fn init(self) -> Self {
         describe_gauge!(
-            METRIC_GRAPHQL_EFFECT_CONNECTION_COUNT,
+            self.graphql_effect_connection_count,
             Unit::Count,
             "Active GraphQL effect Web Socket connection count"
         );
         describe_counter!(
-            METRIC_GRAPHQL_EFFECT_TOTAL_OPERATION_COUNT,
+            self.graphql_effect_total_operation_count,
             Unit::Count,
             "Total GraphQL effect operation count"
         );
         describe_gauge!(
-            METRIC_GRAPHQL_EFFECT_ACTIVE_OPERATION_COUNT,
+            self.graphql_effect_active_operation_count,
             Unit::Count,
             "Active GraphQL effect operation count"
         );
-    });
+        self
+    }
+}
+impl Default for GraphQlHandlerMetricNames {
+    fn default() -> Self {
+        Self {
+            graphql_effect_connection_count: "graphql_effect_connection_count",
+            graphql_effect_total_operation_count: "graphql_effect_total_operation_count",
+            graphql_effect_active_operation_count: "graphql_effect_active_operation_count",
+        }
+    }
 }
 
 pub trait GraphQlHandlerAction<T: Expression>:
@@ -127,6 +135,7 @@ where
     allocator: TAllocator,
     state: GraphQlHandlerState,
     reconnect_timeout: TReconnect,
+    metric_names: GraphQlHandlerMetricNames,
     _expression: PhantomData<T>,
 }
 impl<T, TConnect, TFactory, TAllocator, TReconnect>
@@ -143,14 +152,15 @@ where
         factory: TFactory,
         allocator: TAllocator,
         reconnect_timeout: TReconnect,
+        metric_names: GraphQlHandlerMetricNames,
     ) -> Self {
-        init_metrics();
         Self {
             client,
             factory,
             allocator,
             reconnect_timeout,
             state: Default::default(),
+            metric_names: metric_names.init(),
             _expression: Default::default(),
         }
     }
@@ -789,9 +799,12 @@ where
                         operation_name.unwrap_or_else(|| String::from("<null>")),
                     ),
                 ];
-                increment_counter!(METRIC_GRAPHQL_EFFECT_TOTAL_OPERATION_COUNT, &metric_labels);
+                increment_counter!(
+                    self.metric_names.graphql_effect_total_operation_count,
+                    &metric_labels
+                );
                 increment_gauge!(
-                    METRIC_GRAPHQL_EFFECT_ACTIVE_OPERATION_COUNT,
+                    self.metric_names.graphql_effect_active_operation_count,
                     1.0,
                     &metric_labels
                 );
@@ -810,6 +823,7 @@ where
                         Box::pin(request.map({
                             let effect_id = effect.id();
                             let current_pid = context.pid();
+                            let metric_names = self.metric_names;
                             move |result| {
                                 if let Some(metric_labels) = shared_metric_labels
                                     .lock()
@@ -817,7 +831,7 @@ where
                                     .and_then(|mut metric_labels| metric_labels.take())
                                 {
                                     decrement_gauge!(
-                                        METRIC_GRAPHQL_EFFECT_ACTIVE_OPERATION_COUNT,
+                                        metric_names.graphql_effect_active_operation_count,
                                         1.0,
                                         &metric_labels
                                     );
@@ -859,7 +873,7 @@ where
             .and_then(|mut metric_labels| metric_labels.take())
         {
             decrement_gauge!(
-                METRIC_GRAPHQL_EFFECT_ACTIVE_OPERATION_COUNT,
+                self.metric_names.graphql_effect_active_operation_count,
                 1.0,
                 &metric_labels
             );
@@ -888,7 +902,11 @@ where
             Entry::Occupied(entry) => *entry.get(),
             Entry::Vacant(entry) => {
                 let metric_labels = [("url", String::from(url.as_str()))];
-                increment_gauge!(METRIC_GRAPHQL_EFFECT_CONNECTION_COUNT, 1.0, &metric_labels);
+                increment_gauge!(
+                    self.metric_names.graphql_effect_connection_count,
+                    1.0,
+                    &metric_labels
+                );
                 *entry.insert(GraphQlConnectionId(Uuid::new_v4()))
             }
         };
@@ -936,9 +954,12 @@ where
                         String::from(operation.operation_name().unwrap_or("<null>")),
                     ),
                 ];
-                increment_counter!(METRIC_GRAPHQL_EFFECT_TOTAL_OPERATION_COUNT, &metric_labels);
+                increment_counter!(
+                    self.metric_names.graphql_effect_total_operation_count,
+                    &metric_labels
+                );
                 increment_gauge!(
-                    METRIC_GRAPHQL_EFFECT_ACTIVE_OPERATION_COUNT,
+                    self.metric_names.graphql_effect_active_operation_count,
                     1.0,
                     &metric_labels
                 );
@@ -979,7 +1000,7 @@ where
             } = connection_state.operations.remove(&effect.id())?;
             connection_state.effects.remove(&operation_id);
             decrement_gauge!(
-                METRIC_GRAPHQL_EFFECT_ACTIVE_OPERATION_COUNT,
+                self.metric_names.graphql_effect_active_operation_count,
                 1.0,
                 &metric_labels
             );
@@ -1012,7 +1033,7 @@ where
                     if let Some(_) = self.state.websocket_connection_mappings.remove(&url) {
                         let metric_labels = [("url", String::from(url.as_str()))];
                         decrement_gauge!(
-                            METRIC_GRAPHQL_EFFECT_CONNECTION_COUNT,
+                            self.metric_names.graphql_effect_connection_count,
                             1.0,
                             &metric_labels
                         );

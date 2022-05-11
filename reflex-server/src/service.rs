@@ -17,13 +17,16 @@ use reflex::{
     stdlib::Stdlib,
 };
 use reflex_dispatcher::{
-    compose_actors, scheduler::tokio::TokioScheduler, Action, Actor, InboundAction, OutboundAction,
-    Scheduler,
+    compose_actors,
+    scheduler::tokio::{TokioScheduler, TokioSchedulerMetricNames},
+    Action, Actor, InboundAction, OutboundAction, Scheduler,
 };
 use reflex_graphql::{stdlib::Stdlib as GraphQlStdlib, GraphQlOperationPayload};
 use reflex_json::JsonValue;
 use reflex_runtime::{
-    actor::bytecode_interpreter::{BytecodeInterpreter, BytecodeInterpreterAction},
+    actor::bytecode_interpreter::{
+        BytecodeInterpreter, BytecodeInterpreterAction, BytecodeInterpreterMetricNames,
+    },
     AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator,
 };
 
@@ -34,7 +37,7 @@ use crate::{
         actor::{
             http_graphql_server::HttpGraphQlServerQueryTransform,
             websocket_graphql_server::WebSocketGraphQlServerQueryTransform, ServerAction,
-            ServerActor,
+            ServerActor, ServerMetricNames,
         },
         playground::handle_playground_http_request,
         utils::{create_http_response, get_cors_headers},
@@ -61,6 +64,13 @@ impl<T: Expression, TAction> GraphQlWebServerAction<T> for TAction where
 {
 }
 
+#[derive(Default, Clone, Copy, Debug)]
+pub struct GraphQlWebServerMetricNames {
+    pub server: ServerMetricNames,
+    pub interpreter: BytecodeInterpreterMetricNames,
+    pub scheduler: TokioSchedulerMetricNames,
+}
+
 pub struct GraphQlWebServer<TAction: Action + Send + 'static> {
     commands: HyperServerCommandChannel,
     _runtime: TokioScheduler<TAction>,
@@ -75,6 +85,7 @@ impl<TAction: Action + Send + 'static> GraphQlWebServer<TAction> {
         allocator: impl AsyncHeapAllocator<T>,
         transform_http: impl HttpGraphQlServerQueryTransform + Send + 'static,
         transform_ws: impl WebSocketGraphQlServerQueryTransform + Send + 'static,
+        metric_names: GraphQlWebServerMetricNames,
         get_http_query_metric_labels: impl Fn(&GraphQlOperationPayload, &HeaderMap) -> Vec<(String, String)>
             + Send
             + 'static,
@@ -94,30 +105,35 @@ impl<TAction: Action + Send + 'static> GraphQlWebServer<TAction> {
     {
         let server = HyperServer::default();
         let commands = server.command_channel();
-        let mut runtime = TokioScheduler::<TAction>::new(compose_actors(
-            middleware.pre,
+        let mut runtime = TokioScheduler::<TAction>::new(
             compose_actors(
-                ServerActor::new(
-                    factory.clone(),
-                    allocator.clone(),
-                    transform_http,
-                    transform_ws,
-                    get_http_query_metric_labels,
-                    get_websocket_connection_metric_labels,
-                    get_websocket_operation_metric_labels,
-                ),
+                middleware.pre,
                 compose_actors(
-                    BytecodeInterpreter::new(
-                        graph_root,
-                        compiler_options,
-                        interpreter_options,
-                        factory,
-                        allocator,
+                    ServerActor::new(
+                        factory.clone(),
+                        allocator.clone(),
+                        transform_http,
+                        transform_ws,
+                        metric_names.server,
+                        get_http_query_metric_labels,
+                        get_websocket_connection_metric_labels,
+                        get_websocket_operation_metric_labels,
                     ),
-                    compose_actors(server, middleware.post),
+                    compose_actors(
+                        BytecodeInterpreter::new(
+                            graph_root,
+                            compiler_options,
+                            interpreter_options,
+                            factory,
+                            allocator,
+                            metric_names.interpreter,
+                        ),
+                        compose_actors(server, middleware.post),
+                    ),
                 ),
             ),
-        ));
+            metric_names.scheduler,
+        );
         runtime.dispatch(
             InitRuntimeAction {
                 timestamp: SystemTime::now(),

@@ -23,7 +23,7 @@ use crate::{
     logger::json::JsonActionLogger,
     middleware::{LoggerMiddleware, ServerMiddleware},
     server::{HttpGraphQlServerQueryTransform, NoopWebSocketGraphQlServerQueryTransform},
-    GraphQlWebServer, GraphQlWebServerAction,
+    GraphQlWebServer, GraphQlWebServerAction, GraphQlWebServerMetricNames,
 };
 
 pub use hyper::Body;
@@ -66,6 +66,7 @@ pub async fn cli<
     allocator: &TAllocator,
     query_transform: TTransform,
     http_middleware: THttpMiddleware,
+    metric_names: GraphQlWebServerMetricNames,
 ) -> Result<String>
 where
     T: AsyncExpression
@@ -150,6 +151,7 @@ where
         allocator.clone(),
         query_transform,
         NoopWebSocketGraphQlServerQueryTransform,
+        metric_names,
         get_http_query_metric_labels,
         get_websocket_connection_metric_labels,
         get_websocket_operation_metric_labels,
