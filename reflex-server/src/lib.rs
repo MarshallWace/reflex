@@ -14,10 +14,10 @@ pub mod logger;
 pub mod middleware;
 pub mod server;
 pub mod stdlib;
+pub mod utils;
 
 pub(crate) mod service;
 pub(crate) mod transport;
-pub(crate) mod utils;
 
 use reflex_graphql::{
     create_json_error_object, graphql_parser, validate_query::ValidateQueryGraphQlTransform,

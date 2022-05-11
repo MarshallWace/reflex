@@ -7,6 +7,8 @@ use reflex_json::{JsonMap, JsonValue};
 
 use crate::{logger::ActionLogger, utils::sanitize::sanitize_json_value};
 
+pub use chrono;
+
 pub trait JsonLoggerAction: Action + SerializableAction {}
 impl<TAction> JsonLoggerAction for TAction where Self: Action + SerializableAction {}
 
