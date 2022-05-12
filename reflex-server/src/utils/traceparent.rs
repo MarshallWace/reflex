@@ -64,23 +64,23 @@ fn parse_trace_flags(input: &str) -> Option<(TraceFlags, &str)> {
 }
 
 fn parse_trace_id(input: &str) -> Option<(TraceId, &str)> {
-    let value = TraceId::from_hex(&input[0..32]).ok()?;
+    let value = TraceId::from_hex(input.get(0..32)?).ok()?;
     Some((value, &input[32..]))
 }
 
 fn parse_span_id(input: &str) -> Option<(SpanId, &str)> {
-    let value = SpanId::from_hex(&input[0..32]).ok()?;
-    Some((value, &input[32..]))
+    let value = SpanId::from_hex(input.get(0..16)?).ok()?;
+    Some((value, &input[16..]))
 }
 
 fn parse_hyphen(input: &str) -> Option<&str> {
-    match &input[0..1] {
+    match input.get(0..1)? {
         "-" => Some(&input[1..]),
         _ => None,
     }
 }
 
 fn parse_hex_u8(input: &str) -> Option<(u8, &str)> {
-    let value = input[0..2].parse::<u8>().ok()?;
+    let value = input.get(0..2)?.parse::<u8>().ok()?;
     Some((value, &input[2..]))
 }
