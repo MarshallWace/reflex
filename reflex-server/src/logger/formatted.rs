@@ -74,9 +74,27 @@ impl<T: Expression> FormattedLogger<T, std::io::Stdout> {
         Self::new(std::io::stdout(), prefix)
     }
 }
+impl<T: Expression> Clone for FormattedLogger<T, std::io::Stdout> {
+    fn clone(&self) -> Self {
+        Self {
+            prefix: self.prefix.clone(),
+            output: std::io::stdout(),
+            _expression: Default::default(),
+        }
+    }
+}
 impl<T: Expression> FormattedLogger<T, std::io::Stderr> {
     pub fn stderr(prefix: impl Into<String>) -> Self {
         Self::new(std::io::stderr(), prefix)
+    }
+}
+impl<T: Expression> Clone for FormattedLogger<T, std::io::Stderr> {
+    fn clone(&self) -> Self {
+        Self {
+            prefix: self.prefix.clone(),
+            output: std::io::stderr(),
+            _expression: Default::default(),
+        }
     }
 }
 impl<T: Expression, TOut: std::io::Write, TAction: FormattedLoggerAction<T>> ActionLogger<TAction>

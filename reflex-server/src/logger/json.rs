@@ -29,9 +29,25 @@ impl JsonActionLogger<std::io::Stdout> {
         Self::new(std::io::stdout())
     }
 }
+impl Clone for JsonActionLogger<std::io::Stdout> {
+    fn clone(&self) -> Self {
+        Self {
+            startup_time: self.startup_time,
+            output: std::io::stdout(),
+        }
+    }
+}
 impl JsonActionLogger<std::io::Stderr> {
     pub fn stderr() -> Self {
         Self::new(std::io::stderr())
+    }
+}
+impl Clone for JsonActionLogger<std::io::Stderr> {
+    fn clone(&self) -> Self {
+        Self {
+            startup_time: self.startup_time,
+            output: std::io::stderr(),
+        }
     }
 }
 impl<TOut: std::io::Write, TAction: JsonLoggerAction> ActionLogger<TAction>

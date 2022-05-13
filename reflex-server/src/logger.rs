@@ -19,6 +19,18 @@ pub enum EitherLogger<T1, T2> {
     Left(T1),
     Right(T2),
 }
+impl<T1, T2> Clone for EitherLogger<T1, T2>
+where
+    T1: Clone,
+    T2: Clone,
+{
+    fn clone(&self) -> Self {
+        match self {
+            Self::Left(inner) => Self::Left(inner.clone()),
+            Self::Right(inner) => Self::Right(inner.clone()),
+        }
+    }
+}
 
 impl<T1: ActionLogger<T>, T2: ActionLogger<T>, T: Action> ActionLogger<T> for EitherLogger<T1, T2> {
     fn log(
