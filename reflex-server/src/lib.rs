@@ -2,11 +2,17 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
+use std::sync::{Arc, Mutex};
+
 pub use ::bytes;
 pub use ::http;
 pub use ::metrics;
 pub use ::metrics_exporter_prometheus;
+pub use ::opentelemetry;
+
 use http::StatusCode;
+use logger::ActionLogger;
+use middleware::action::opentelemetry::OpenTelemetryMiddlewareErrorAction;
 
 pub mod action;
 pub mod imports;
@@ -19,6 +25,7 @@ pub mod utils;
 pub(crate) mod service;
 pub(crate) mod transport;
 
+use reflex_dispatcher::{scheduler::sync::SyncContext, Action, OutboundAction};
 use reflex_graphql::{
     create_json_error_object, graphql_parser, validate_query::ValidateQueryGraphQlTransform,
     GraphQlOperationPayload, GraphQlQuery, GraphQlQueryTransform,
@@ -100,4 +107,26 @@ pub fn apply_graphql_query_transform(
         variables,
         extensions,
     ))
+}
+
+pub fn register_opentelemetry_error_logger<TAction>(
+    logger: impl ActionLogger<TAction> + Send + Sync + 'static,
+) -> Result<(), OpenTelemetryMiddlewareErrorAction>
+where
+    TAction: Action + OutboundAction<OpenTelemetryMiddlewareErrorAction>,
+{
+    opentelemetry::global::set_error_handler({
+        let logger = Arc::new(Mutex::new(logger));
+        move |error| {
+            if let Ok(mut logger) = logger.lock() {
+                let action = OpenTelemetryMiddlewareErrorAction {
+                    error: format!("{}", error),
+                };
+                logger.log(&(action.into()), None, Option::<&SyncContext>::None)
+            }
+        }
+    })
+    .map_err(|err| OpenTelemetryMiddlewareErrorAction {
+        error: format!("{}", err),
+    })
 }

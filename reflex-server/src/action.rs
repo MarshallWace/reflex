@@ -7,7 +7,10 @@ use reflex_handlers::action::{graphql::*, grpc::*};
 use reflex_runtime::action::{effect::*, evaluate::*, query::*, RuntimeAction};
 
 use crate::{
-    middleware::action::telemetry::*,
+    middleware::action::{
+        opentelemetry::{OpenTelemetryMiddlewareAction, OpenTelemetryMiddlewareErrorAction},
+        telemetry::*,
+    },
     server::action::{graphql_server::*, http_server::*, init::*, websocket_server::*},
 };
 
@@ -18,6 +21,7 @@ pub enum ServerCliAction<T: Expression> {
     WebSocketServer(WebSocketServerAction),
     GraphQlServer(GraphQlServerAction<T>),
     TelemetryMiddleware(TelemetryMiddlewareAction),
+    OpenTelemetryMiddleware(OpenTelemetryMiddlewareAction),
     GraphQlHandler(GraphQlHandlerAction),
     GrpcHandler(GrpcHandlerAction),
     Init(InitAction),
@@ -31,6 +35,7 @@ impl<T: Expression> NamedAction for ServerCliAction<T> {
             Self::WebSocketServer(action) => action.name(),
             Self::GraphQlServer(action) => action.name(),
             Self::TelemetryMiddleware(action) => action.name(),
+            Self::OpenTelemetryMiddleware(action) => action.name(),
             Self::GraphQlHandler(action) => action.name(),
             Self::GrpcHandler(action) => action.name(),
             Self::Init(action) => action.name(),
@@ -45,6 +50,7 @@ impl<T: Expression> SerializableAction for ServerCliAction<T> {
             Self::WebSocketServer(action) => action.serialize(),
             Self::GraphQlServer(action) => action.serialize(),
             Self::TelemetryMiddleware(action) => action.serialize(),
+            Self::OpenTelemetryMiddleware(action) => action.serialize(),
             Self::GraphQlHandler(action) => action.serialize(),
             Self::GrpcHandler(action) => action.serialize(),
             Self::Init(action) => action.serialize(),
@@ -157,6 +163,28 @@ impl<'a, T: Expression> From<&'a ServerCliAction<T>> for Option<&'a TelemetryMid
     fn from(value: &'a ServerCliAction<T>) -> Self {
         match value {
             ServerCliAction::TelemetryMiddleware(value) => Some(value),
+            _ => None,
+        }
+    }
+}
+
+impl<T: Expression> From<OpenTelemetryMiddlewareAction> for ServerCliAction<T> {
+    fn from(value: OpenTelemetryMiddlewareAction) -> Self {
+        Self::OpenTelemetryMiddleware(value)
+    }
+}
+impl<T: Expression> From<ServerCliAction<T>> for Option<OpenTelemetryMiddlewareAction> {
+    fn from(value: ServerCliAction<T>) -> Self {
+        match value {
+            ServerCliAction::OpenTelemetryMiddleware(value) => Some(value),
+            _ => None,
+        }
+    }
+}
+impl<'a, T: Expression> From<&'a ServerCliAction<T>> for Option<&'a OpenTelemetryMiddlewareAction> {
+    fn from(value: &'a ServerCliAction<T>) -> Self {
+        match value {
+            ServerCliAction::OpenTelemetryMiddleware(value) => Some(value),
             _ => None,
         }
     }
@@ -673,6 +701,24 @@ impl<'a, T: Expression> From<&'a ServerCliAction<T>>
 {
     fn from(value: &'a ServerCliAction<T>) -> Self {
         Option::<&'a TelemetryMiddlewareAction>::from(value).and_then(|value| value.into())
+    }
+}
+
+impl<T: Expression> From<OpenTelemetryMiddlewareErrorAction> for ServerCliAction<T> {
+    fn from(value: OpenTelemetryMiddlewareErrorAction) -> Self {
+        OpenTelemetryMiddlewareAction::from(value).into()
+    }
+}
+impl<T: Expression> From<ServerCliAction<T>> for Option<OpenTelemetryMiddlewareErrorAction> {
+    fn from(value: ServerCliAction<T>) -> Self {
+        Option::<OpenTelemetryMiddlewareAction>::from(value).and_then(|value| value.into())
+    }
+}
+impl<'a, T: Expression> From<&'a ServerCliAction<T>>
+    for Option<&'a OpenTelemetryMiddlewareErrorAction>
+{
+    fn from(value: &'a ServerCliAction<T>) -> Self {
+        Option::<&'a OpenTelemetryMiddlewareAction>::from(value).and_then(|value| value.into())
     }
 }
 
