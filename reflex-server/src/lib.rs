@@ -91,10 +91,10 @@ pub fn apply_graphql_query_transform(
     transform: &impl GraphQlQueryTransform,
 ) -> Result<GraphQlOperationPayload, (StatusCode, String)> {
     let (query, operation_name, variables, extensions) = operation.into_parts();
-    let query = query
+    let (query, extensions) = query
         .into_ast()
         .map_err(|err| format!("{}", err))
-        .and_then(|query| transform.transform(query))
+        .and_then(|query| transform.transform(query, extensions))
         .map_err(|err| {
             (
                 StatusCode::BAD_REQUEST,

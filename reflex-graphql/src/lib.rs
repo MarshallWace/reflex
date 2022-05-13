@@ -11,7 +11,7 @@ use reflex::{
     lang::{create_struct, term::SignalTerm, ValueTerm},
     stdlib::Stdlib,
 };
-use reflex_json::{json_object, sanitize, JsonValue};
+use reflex_json::{json_object, sanitize, JsonMap, JsonValue};
 
 pub use graphql_parser;
 
@@ -20,8 +20,8 @@ pub use operation::{
     deserialize_graphql_operation, graphql_variables_are_equal, GraphQlOperationPayload,
     GraphQlQuery,
 };
-pub mod inject_args;
 pub mod stdlib;
+pub mod transform;
 pub mod validate_query;
 use stdlib::Stdlib as GraphQlStdlib;
 pub mod subscriptions;
@@ -36,7 +36,8 @@ pub trait GraphQlQueryTransform {
     fn transform<'src, T: GraphQlText<'src>>(
         &self,
         document: Document<'src, T>,
-    ) -> Result<Document<'src, T>, String>;
+        extensions: GraphQlExtensions,
+    ) -> Result<(Document<'src, T>, GraphQlExtensions), String>;
 }
 
 pub struct ChainedGraphQlQueryTransform<T1: GraphQlQueryTransform, T2: GraphQlQueryTransform> {
@@ -49,9 +50,10 @@ impl<T1: GraphQlQueryTransform, T2: GraphQlQueryTransform> GraphQlQueryTransform
     fn transform<'src, T: GraphQlText<'src>>(
         &self,
         document: Document<'src, T>,
-    ) -> Result<Document<'src, T>, String> {
-        let document = self.left.transform(document)?;
-        self.right.transform(document)
+        extensions: GraphQlExtensions,
+    ) -> Result<(Document<'src, T>, GraphQlExtensions), String> {
+        let (document, extensions) = self.left.transform(document, extensions)?;
+        self.right.transform(document, extensions)
     }
 }
 
@@ -81,6 +83,8 @@ pub trait GraphQlText<'src>:
 }
 impl GraphQlText<'static> for String {}
 impl<'a> GraphQlText<'a> for Cow<'a, str> {}
+
+pub type GraphQlExtensions = JsonMap<String, JsonValue>;
 
 pub fn serialize_graphql_result_payload<T: Expression>(
     result: &T,

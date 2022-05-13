@@ -9,7 +9,7 @@ use graphql_parser::query::{
 };
 use reflex_json::JsonValue;
 
-use crate::{get_root_operation, GraphQlQueryTransform, GraphQlText};
+use crate::{get_root_operation, GraphQlExtensions, GraphQlQueryTransform, GraphQlText};
 
 #[derive(Clone, PartialEq, Debug)]
 pub struct InjectedQueryArguments {
@@ -251,11 +251,14 @@ impl GraphQlQueryTransform for InjectQueryArgumentsGraphQlTransform {
     fn transform<'src, T: GraphQlText<'src>>(
         &self,
         document: Document<'src, T>,
-    ) -> Result<Document<'src, T>, String> {
-        inject_document_arguments(&document, &self.arguments).map(|transformed| match transformed {
-            Some(document) => document,
-            None => document,
-        })
+        extensions: GraphQlExtensions,
+    ) -> Result<(Document<'src, T>, GraphQlExtensions), String> {
+        inject_document_arguments(&document, &self.arguments)
+            .map(|transformed| match transformed {
+                Some(document) => document,
+                None => document,
+            })
+            .map(|document| (document, extensions))
     }
 }
 
@@ -579,9 +582,9 @@ mod tests {
     ) {
         let input = parse_query::<Cow<str>>(input).unwrap();
         let expected = parse_query::<Cow<str>>(expected).unwrap();
-        let result = transform.transform(input);
+        let result = transform.transform(input, Default::default());
         assert_eq!(
-            result.map(|result| format!("{}", result)),
+            result.map(|(result, _)| format!("{}", result)),
             Ok(format!("{}", expected))
         );
     }

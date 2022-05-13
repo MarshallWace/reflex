@@ -8,7 +8,7 @@ use std::{
 
 use graphql_parser::{query, schema};
 
-use crate::{get_root_operation, GraphQlQueryTransform, GraphQlText};
+use crate::{get_root_operation, GraphQlExtensions, GraphQlQueryTransform, GraphQlText};
 
 #[derive(Clone, Debug)]
 struct SchemaTypes<'src, T: GraphQlText<'src>> {
@@ -58,11 +58,14 @@ impl<'schema, TSchema: GraphQlText<'schema>> GraphQlQueryTransform
     fn transform<'query, TQuery: GraphQlText<'query>>(
         &self,
         document: query::Document<'query, TQuery>,
-    ) -> Result<query::Document<'query, TQuery>, String> {
-        validate_document(&document, &self.schema_types).map(|transformed| match transformed {
-            Some(document) => document,
-            None => document,
-        })
+        extensions: GraphQlExtensions,
+    ) -> Result<(query::Document<'query, TQuery>, GraphQlExtensions), String> {
+        validate_document(&document, &self.schema_types)
+            .map(|transformed| match transformed {
+                Some(document) => document,
+                None => document,
+            })
+            .map(|document| (document, extensions))
     }
 }
 
@@ -832,9 +835,9 @@ mod tests {
     ) {
         let input = parse_query::<Cow<str>>(input).unwrap();
         let expected = parse_query::<Cow<str>>(expected).unwrap();
-        let result = transform.transform(input);
+        let result = transform.transform(input, Default::default());
         assert_eq!(
-            result.map(|result| format!("{}", result)),
+            result.map(|(result, _)| format!("{}", result)),
             Ok(format!("{}", expected))
         );
     }

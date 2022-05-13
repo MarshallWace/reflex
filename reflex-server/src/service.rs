@@ -92,7 +92,7 @@ impl<TAction: Action + Send + 'static> GraphQlWebServer<TAction> {
         get_websocket_connection_metric_labels: impl Fn(Option<&JsonValue>, &HeaderMap) -> Vec<(String, String)>
             + Send
             + 'static,
-        get_websocket_operation_metric_labels: impl Fn(Option<&str>, &GraphQlOperationPayload) -> Vec<(String, String)>
+        get_operation_metric_labels: impl Fn(Option<&str>, &GraphQlOperationPayload) -> Vec<(String, String)>
             + Send
             + 'static,
     ) -> Self
@@ -117,7 +117,7 @@ impl<TAction: Action + Send + 'static> GraphQlWebServer<TAction> {
                         metric_names.server,
                         get_http_query_metric_labels,
                         get_websocket_connection_metric_labels,
-                        get_websocket_operation_metric_labels,
+                        get_operation_metric_labels,
                     ),
                     compose_actors(
                         BytecodeInterpreter::new(

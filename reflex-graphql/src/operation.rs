@@ -10,6 +10,8 @@ use graphql_parser::{
 };
 use reflex_json::{deserialize, JsonMap, JsonValue};
 
+use crate::GraphQlExtensions;
+
 pub fn deserialize_graphql_operation(data: &str) -> Result<GraphQlOperationPayload, String> {
     match deserialize(data) {
         Err(error) => Err(error),
@@ -25,7 +27,7 @@ pub struct GraphQlOperationPayload {
     query: GraphQlQuery,
     operation_name: Option<String>,
     variables: HashMap<String, JsonValue>,
-    extensions: HashMap<String, JsonValue>,
+    extensions: GraphQlExtensions,
 }
 #[derive(Clone, Debug)]
 pub enum GraphQlQuery {
@@ -115,7 +117,7 @@ impl GraphQlOperationPayload {
         GraphQlQuery,
         Option<String>,
         impl IntoIterator<Item = (String, JsonValue)>,
-        impl IntoIterator<Item = (String, JsonValue)>,
+        GraphQlExtensions,
     ) {
         (
             self.query,
@@ -143,7 +145,7 @@ impl GraphQlOperationPayload {
             ),
             (
                 String::from("extensions"),
-                JsonValue::Object(JsonMap::from_iter(self.extensions)),
+                JsonValue::Object(self.extensions),
             ),
         ]))
     }
