@@ -12,8 +12,8 @@ use reflex::core::{
     EvaluationResult, Expression, ExpressionFactory, HeapAllocator, Signal, StateToken,
 };
 use reflex_dispatcher::{
-    Action, Actor, HandlerContext, InboundAction, MessageData, OutboundAction, StateOperation,
-    StateTransition,
+    Action, Actor, ActorTransition, HandlerContext, InboundAction, MessageData, OutboundAction,
+    StateOperation, StateTransition,
 };
 
 use crate::{
@@ -66,7 +66,7 @@ impl<T: Expression, TAction> QueryManagerAction<T> for TAction where
 {
 }
 
-pub(crate) struct QueryManager<T, TFactory, TAllocator>
+pub struct QueryManager<T, TFactory, TAllocator>
 where
     T: Expression,
     TFactory: ExpressionFactory<T>,
@@ -75,7 +75,6 @@ where
     factory: TFactory,
     allocator: TAllocator,
     metric_names: QueryManagerMetricNames,
-    state: QueryManagerState<T>,
     _expression: PhantomData<T>,
 }
 impl<T, TFactory, TAllocator> QueryManager<T, TFactory, TAllocator>
@@ -93,13 +92,12 @@ where
             factory,
             allocator,
             metric_names: metric_names.init(),
-            state: Default::default(),
             _expression: Default::default(),
         }
     }
 }
 
-struct QueryManagerState<T: Expression> {
+pub struct QueryManagerState<T: Expression> {
     subscriptions: HashMap<StateToken, QuerySubscription<T>>,
 }
 impl<T: Expression> Default for QueryManagerState<T> {
@@ -123,22 +121,29 @@ where
     TAllocator: HeapAllocator<T>,
     TAction: QueryManagerAction<T>,
 {
+    type State = QueryManagerState<T>;
+    fn init(&self) -> Self::State {
+        Default::default()
+    }
     fn handle(
-        &mut self,
+        &self,
+        state: Self::State,
         action: &TAction,
         metadata: &MessageData,
         context: &mut impl HandlerContext,
-    ) -> StateTransition<TAction> {
-        if let Some(action) = action.match_type() {
-            self.handle_query_subscribe(action, metadata, context)
+    ) -> ActorTransition<Self::State, TAction> {
+        let mut state = state;
+        let actions = if let Some(action) = action.match_type() {
+            self.handle_query_subscribe(&mut state, action, metadata, context)
         } else if let Some(action) = action.match_type() {
-            self.handle_query_unsubscribe(action, metadata, context)
+            self.handle_query_unsubscribe(&mut state, action, metadata, context)
         } else if let Some(action) = action.match_type() {
-            self.handle_effect_emit(action, metadata, context)
+            self.handle_effect_emit(&mut state, action, metadata, context)
         } else {
             None
         }
-        .unwrap_or_default()
+        .unwrap_or_default();
+        ActorTransition::new(state, actions)
     }
 }
 impl<T, TFactory, TAllocator> QueryManager<T, TFactory, TAllocator>
@@ -148,7 +153,8 @@ where
     TAllocator: HeapAllocator<T>,
 {
     fn handle_query_subscribe<TAction>(
-        &mut self,
+        &self,
+        state: &mut QueryManagerState<T>,
         action: &QuerySubscribeAction<T>,
         _metadata: &MessageData,
         context: &mut impl HandlerContext,
@@ -165,7 +171,7 @@ where
             &self.factory,
             &self.allocator,
         );
-        match self.state.subscriptions.entry(query_effect.id()) {
+        match state.subscriptions.entry(query_effect.id()) {
             // For any queries that are already actively subscribed, emit the latest result if one exists
             // (this is necessary because the caller that triggered this action might be expecting a result)
             Entry::Occupied(mut entry) => {
@@ -204,7 +210,8 @@ where
         }
     }
     fn handle_query_unsubscribe<TAction>(
-        &mut self,
+        &self,
+        state: &mut QueryManagerState<T>,
         action: &QueryUnsubscribeAction<T>,
         _metadata: &MessageData,
         context: &mut impl HandlerContext,
@@ -220,7 +227,7 @@ where
             &self.factory,
             &self.allocator,
         );
-        let mut entry = match self.state.subscriptions.entry(query_effect.id()) {
+        let mut entry = match state.subscriptions.entry(query_effect.id()) {
             Entry::Vacant(_) => None,
             Entry::Occupied(entry) => Some(entry),
         }?;
@@ -241,7 +248,8 @@ where
         Some(StateTransition::new(once(unsubscribe_action)))
     }
     fn handle_effect_emit<TAction>(
-        &mut self,
+        &self,
+        state: &mut QueryManagerState<T>,
         action: &EffectEmitAction<T>,
         _metadata: &MessageData,
         context: &mut impl HandlerContext,
@@ -252,7 +260,7 @@ where
         let EffectEmitAction { updates } = action;
         let updated_queries = {
             updates.iter().filter_map(|(state_token, update)| {
-                let subscription = self.state.subscriptions.get_mut(state_token)?;
+                let subscription = state.subscriptions.get_mut(state_token)?;
                 let effect_result = match update {
                     StateUpdate::Value(value) => value.clone(),
                     StateUpdate::Patch(updater) => {

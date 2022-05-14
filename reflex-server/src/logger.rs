@@ -6,10 +6,11 @@ use reflex_dispatcher::{Action, HandlerContext, MessageData};
 pub mod formatted;
 pub mod json;
 
-pub trait ActionLogger<T: Action> {
+pub trait ActionLogger {
+    type Action: Action;
     fn log(
         &mut self,
-        action: &T,
+        action: &Self::Action,
         metadata: Option<&MessageData>,
         context: Option<&impl HandlerContext>,
     );
@@ -32,10 +33,13 @@ where
     }
 }
 
-impl<T1: ActionLogger<T>, T2: ActionLogger<T>, T: Action> ActionLogger<T> for EitherLogger<T1, T2> {
+impl<T1: ActionLogger<Action = TAction>, T2: ActionLogger<Action = TAction>, TAction: Action>
+    ActionLogger for EitherLogger<T1, T2>
+{
+    type Action = TAction;
     fn log(
         &mut self,
-        action: &T,
+        action: &Self::Action,
         metadata: Option<&MessageData>,
         context: Option<&impl HandlerContext>,
     ) {

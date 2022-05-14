@@ -4,6 +4,7 @@
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet},
     iter::once,
+    marker::PhantomData,
 };
 
 use metrics::{describe_counter, increment_counter, Unit};
@@ -15,8 +16,8 @@ use reflex::{
     hash::HashId,
 };
 use reflex_dispatcher::{
-    Action, Actor, HandlerContext, InboundAction, MessageData, NamedAction, OutboundAction,
-    StateOperation, StateTransition,
+    Action, Actor, ActorTransition, HandlerContext, InboundAction, MessageData, NamedAction,
+    OutboundAction, StateOperation, StateTransition,
 };
 use reflex_graphql::GraphQlOperationPayload;
 use reflex_json::JsonValue;
@@ -102,9 +103,9 @@ where
 {
     factory: TFactory,
     allocator: TAllocator,
-    state: TelemetryMiddlewareState<T>,
     get_operation_transaction_labels: TOperationLabels,
     metric_names: TelemetryMiddlewareMetricNames,
+    _expression: PhantomData<T>,
 }
 impl<T, TFactory, TAllocator, TOperationLabels>
     TelemetryMiddleware<T, TFactory, TAllocator, TOperationLabels>
@@ -125,12 +126,12 @@ where
             allocator,
             get_operation_transaction_labels,
             metric_names: metric_names.init(),
-            state: Default::default(),
+            _expression: Default::default(),
         }
     }
 }
 
-struct TelemetryMiddlewareState<T: Expression> {
+pub struct TelemetryMiddlewareState<T: Expression> {
     active_queries: HashMap<Uuid, TelemetryMiddlewareQueryState>,
     effect_mappings: HashMap<HashId, TelemetryMiddlewareEffectState<T>>,
 }
@@ -179,32 +180,39 @@ where
     TOperationLabels: Fn(&GraphQlOperationPayload) -> (String, Vec<(String, String)>),
     TAction: TelemetryMiddlewareAction<T>,
 {
+    type State = TelemetryMiddlewareState<T>;
+    fn init(&self) -> Self::State {
+        Default::default()
+    }
     fn handle(
-        &mut self,
+        &self,
+        state: Self::State,
         action: &TAction,
         metadata: &MessageData,
         context: &mut impl HandlerContext,
-    ) -> StateTransition<TAction> {
+    ) -> ActorTransition<Self::State, TAction> {
         let metric_labels = [("type", action.name())];
         increment_counter!(self.metric_names.total_action_count, &metric_labels);
-        if let Some(action) = action.match_type() {
-            self.handle_graphql_subscribe(action, metadata, context)
+        let mut state = state;
+        let actions = if let Some(action) = action.match_type() {
+            self.handle_graphql_subscribe(&mut state, action, metadata, context)
         } else if let Some(action) = action.match_type() {
-            self.handle_graphql_unsubscribe(action, metadata, context)
+            self.handle_graphql_unsubscribe(&mut state, action, metadata, context)
         } else if let Some(action) = action.match_type() {
-            self.handle_graphql_parse(action, metadata, context)
+            self.handle_graphql_parse(&mut state, action, metadata, context)
         } else if let Some(action) = action.match_type() {
-            self.handle_effect_subscribe(action, metadata, context)
+            self.handle_effect_subscribe(&mut state, action, metadata, context)
         } else if let Some(action) = action.match_type() {
-            self.handle_effect_unsubscribe(action, metadata, context)
+            self.handle_effect_unsubscribe(&mut state, action, metadata, context)
         } else if let Some(action) = action.match_type() {
-            self.handle_evaluate_result(action, metadata, context)
+            self.handle_evaluate_result(&mut state, action, metadata, context)
         } else if let Some(action) = action.match_type() {
-            self.handle_effect_emit(action, metadata, context)
+            self.handle_effect_emit(&mut state, action, metadata, context)
         } else {
             None
         }
-        .unwrap_or_default()
+        .unwrap_or_default();
+        ActorTransition::new(state, actions)
     }
 }
 impl<T, TFactory, TAllocator, TOperationLabels>
@@ -216,7 +224,8 @@ where
     TOperationLabels: Fn(&GraphQlOperationPayload) -> (String, Vec<(String, String)>),
 {
     fn handle_graphql_subscribe<TAction>(
-        &mut self,
+        &self,
+        state: &mut TelemetryMiddlewareState<T>,
         action: &GraphQlServerSubscribeAction<T>,
         _metadata: &MessageData,
         context: &mut impl HandlerContext,
@@ -229,7 +238,7 @@ where
             operation,
             ..
         } = action;
-        let entry = match self.state.active_queries.entry(*subscription_id) {
+        let entry = match state.active_queries.entry(*subscription_id) {
             Entry::Vacant(entry) => Some(entry),
             Entry::Occupied(_) => None,
         }?;
@@ -258,7 +267,8 @@ where
         Some(StateTransition::new(once(transaction_start_action)))
     }
     fn handle_graphql_parse<TAction>(
-        &mut self,
+        &self,
+        state: &mut TelemetryMiddlewareState<T>,
         action: &GraphQlServerParseSuccessAction<T>,
         _metadata: &MessageData,
         _context: &mut impl HandlerContext,
@@ -277,7 +287,7 @@ where
             &self.factory,
             &self.allocator,
         );
-        let query_state = self.state.active_queries.get_mut(subscription_id)?;
+        let query_state = state.active_queries.get_mut(subscription_id)?;
         let effect_id = evaluate_effect.id();
         let previous_effect_id = query_state.effect_id.replace(effect_id);
         let is_unchanged = previous_effect_id
@@ -287,13 +297,13 @@ where
             return None;
         }
         if let Some(effect_id) = previous_effect_id {
-            if let Some(effect_state) = self.state.effect_mappings.get_mut(&effect_id) {
+            if let Some(effect_state) = state.effect_mappings.get_mut(&effect_id) {
                 effect_state
                     .parent_transactions
                     .remove(&query_state.transaction_id);
             }
         }
-        match self.state.effect_mappings.entry(effect_id) {
+        match state.effect_mappings.entry(effect_id) {
             Entry::Vacant(entry) => {
                 entry.insert(TelemetryMiddlewareEffectState {
                     effect: evaluate_effect,
@@ -314,7 +324,8 @@ where
         None
     }
     fn handle_graphql_unsubscribe<TAction>(
-        &mut self,
+        &self,
+        state: &mut TelemetryMiddlewareState<T>,
         action: &GraphQlServerUnsubscribeAction<T>,
         _metadata: &MessageData,
         context: &mut impl HandlerContext,
@@ -325,14 +336,14 @@ where
         let GraphQlServerUnsubscribeAction {
             subscription_id, ..
         } = action;
-        let query_state = self.state.active_queries.remove(subscription_id)?;
+        let query_state = state.active_queries.remove(subscription_id)?;
         let TelemetryMiddlewareQueryState {
             transaction_id,
             effect_id,
             ..
         } = query_state;
         if let Some(effect_id) = effect_id {
-            if let Some(effect_state) = self.state.effect_mappings.get_mut(&effect_id) {
+            if let Some(effect_state) = state.effect_mappings.get_mut(&effect_id) {
                 effect_state.parent_transactions.remove(&transaction_id);
             }
         }
@@ -346,7 +357,8 @@ where
         Some(StateTransition::new(once(transaction_end_action)))
     }
     fn handle_effect_subscribe<TAction>(
-        &mut self,
+        &self,
+        state: &mut TelemetryMiddlewareState<T>,
         action: &EffectSubscribeAction<T>,
         _metadata: &MessageData,
         context: &mut impl HandlerContext,
@@ -362,52 +374,50 @@ where
         } = action;
         let subscribed_transactions = effects
             .iter()
-            .filter_map(
-                |effect| match self.state.effect_mappings.entry(effect.id()) {
-                    Entry::Vacant(entry) => {
-                        let transaction_id = Traceparent::generate();
-                        let effect_name = format_effect_label(effect);
-                        let effect_attributes = format_effect_attributes(effect);
-                        entry.insert(TelemetryMiddlewareEffectState {
-                            effect: effect.clone(),
-                            transaction_id: Some(transaction_id),
-                            parent_transactions: Default::default(),
-                            query_result: parse_evaluate_effect_query(effect, &self.factory)
-                                .map(|_| None),
-                            subscription_count: 1,
-                            latest_value: None,
-                        });
-                        Some(TelemetryTransaction {
-                            transaction_id,
-                            parent_ids: Default::default(),
-                            name: effect_name,
-                            attributes: effect_attributes,
-                        })
-                    }
-                    Entry::Occupied(mut entry) => {
-                        entry.get_mut().subscription_count += 1;
-                        let effect_state = entry.get();
-                        let is_first_subscription = effect_state.subscription_count == 1;
-                        if is_first_subscription {
-                            match effect_state.transaction_id {
-                                Some(transaction_id) => Some(TelemetryTransaction {
-                                    transaction_id,
-                                    parent_ids: effect_state
-                                        .parent_transactions
-                                        .iter()
-                                        .cloned()
-                                        .collect(),
-                                    name: format_effect_label(effect),
-                                    attributes: format_effect_attributes(effect),
-                                }),
-                                None => None,
-                            }
-                        } else {
-                            None
+            .filter_map(|effect| match state.effect_mappings.entry(effect.id()) {
+                Entry::Vacant(entry) => {
+                    let transaction_id = Traceparent::generate();
+                    let effect_name = format_effect_label(effect);
+                    let effect_attributes = format_effect_attributes(effect);
+                    entry.insert(TelemetryMiddlewareEffectState {
+                        effect: effect.clone(),
+                        transaction_id: Some(transaction_id),
+                        parent_transactions: Default::default(),
+                        query_result: parse_evaluate_effect_query(effect, &self.factory)
+                            .map(|_| None),
+                        subscription_count: 1,
+                        latest_value: None,
+                    });
+                    Some(TelemetryTransaction {
+                        transaction_id,
+                        parent_ids: Default::default(),
+                        name: effect_name,
+                        attributes: effect_attributes,
+                    })
+                }
+                Entry::Occupied(mut entry) => {
+                    entry.get_mut().subscription_count += 1;
+                    let effect_state = entry.get();
+                    let is_first_subscription = effect_state.subscription_count == 1;
+                    if is_first_subscription {
+                        match effect_state.transaction_id {
+                            Some(transaction_id) => Some(TelemetryTransaction {
+                                transaction_id,
+                                parent_ids: effect_state
+                                    .parent_transactions
+                                    .iter()
+                                    .cloned()
+                                    .collect(),
+                                name: format_effect_label(effect),
+                                attributes: format_effect_attributes(effect),
+                            }),
+                            None => None,
                         }
+                    } else {
+                        None
                     }
-                },
-            )
+                }
+            })
             .collect::<Vec<_>>();
         let transaction_start_action = if subscribed_transactions.is_empty() {
             None
@@ -423,7 +433,8 @@ where
         Some(StateTransition::new(transaction_start_action))
     }
     fn handle_effect_unsubscribe<TAction>(
-        &mut self,
+        &self,
+        state: &mut TelemetryMiddlewareState<T>,
         action: &EffectUnsubscribeAction<T>,
         _metadata: &MessageData,
         context: &mut impl HandlerContext,
@@ -437,20 +448,18 @@ where
         } = action;
         let unsubscribed_transaction_ids = effects
             .iter()
-            .filter_map(
-                |effect| match self.state.effect_mappings.entry(effect.id()) {
-                    Entry::Vacant(_) => None,
-                    Entry::Occupied(mut entry) => {
-                        entry.get_mut().subscription_count -= 1;
-                        if entry.get().subscription_count == 0 {
-                            let effect_state = entry.remove();
-                            effect_state.transaction_id
-                        } else {
-                            None
-                        }
+            .filter_map(|effect| match state.effect_mappings.entry(effect.id()) {
+                Entry::Vacant(_) => None,
+                Entry::Occupied(mut entry) => {
+                    entry.get_mut().subscription_count -= 1;
+                    if entry.get().subscription_count == 0 {
+                        let effect_state = entry.remove();
+                        effect_state.transaction_id
+                    } else {
+                        None
                     }
-                },
-            )
+                }
+            })
             .collect::<Vec<_>>();
         let transaction_end_action = if unsubscribed_transaction_ids.is_empty() {
             None
@@ -466,7 +475,8 @@ where
         Some(StateTransition::new(transaction_end_action))
     }
     fn handle_evaluate_result<TAction>(
-        &mut self,
+        &self,
+        state: &mut TelemetryMiddlewareState<T>,
         action: &EvaluateResultAction<T>,
         _metadata: &MessageData,
         _context: &mut impl HandlerContext,
@@ -482,8 +492,7 @@ where
             &self.factory,
             &self.allocator,
         );
-        let (query_transaction_id, previous_result) = self
-            .state
+        let (query_transaction_id, previous_result) = state
             .effect_mappings
             .get_mut(&evaluate_effect.id())
             .map(|query_effect_state| {
@@ -493,7 +502,7 @@ where
                 (query_effect_state.transaction_id, previous_result)
             })?;
         for effect in get_query_result_effects(result.result(), &self.factory) {
-            match self.state.effect_mappings.entry(effect.id()) {
+            match state.effect_mappings.entry(effect.id()) {
                 Entry::Vacant(entry) => {
                     let effect_transaction_id = query_transaction_id
                         .map(|transaction_id| transaction_id.generate_child())
@@ -530,19 +539,20 @@ where
             removed: removed_dependencies,
         } = get_dependency_diff(Some(result.dependencies()), previous_dependencies.as_ref());
         for state_token in removed_dependencies {
-            if let Some(effect_state) = self.state.effect_mappings.get_mut(&state_token) {
+            if let Some(effect_state) = state.effect_mappings.get_mut(&state_token) {
                 effect_state.parent_transactions.remove(&transaction_id);
             }
         }
         for state_token in added_dependencies {
-            if let Some(effect_state) = self.state.effect_mappings.get_mut(&state_token) {
+            if let Some(effect_state) = state.effect_mappings.get_mut(&state_token) {
                 effect_state.parent_transactions.insert(transaction_id);
             }
         }
         None
     }
     fn handle_effect_emit<TAction>(
-        &mut self,
+        &self,
+        state: &mut TelemetryMiddlewareState<T>,
         action: &EffectEmitAction<T>,
         _metadata: &MessageData,
         context: &mut impl HandlerContext,
@@ -555,8 +565,7 @@ where
         let EffectEmitAction { updates } = action;
         let (completed_transaction_ids, reemitted_effects): (Vec<_>, Vec<_>) =
             partition_results(updates.iter().filter_map(|(effect_id, update)| {
-                let update = self
-                    .state
+                let update = state
                     .effect_mappings
                     .get_mut(effect_id)
                     .map(|effect_state| {
@@ -584,7 +593,7 @@ where
                     Ok(completed_transaction_id) => match completed_transaction_id {
                         None => None,
                         Some(completed_transaction_id) => {
-                            for effect_state in self.state.effect_mappings.values_mut() {
+                            for effect_state in state.effect_mappings.values_mut() {
                                 effect_state
                                     .parent_transactions
                                     .remove(&completed_transaction_id);
@@ -634,47 +643,41 @@ where
                     })
                     .unzip();
             let dependent_query_transactions =
-                self.state
-                    .active_queries
-                    .values()
-                    .filter_map(|query_state| {
-                        let query_effect_id = query_state.effect_id?;
-                        let query_effect_state =
-                            self.state.effect_mappings.get_mut(&query_effect_id)?;
-                        let latest_query_result =
-                            query_effect_state.query_result.as_ref()?.as_ref()?;
-                        let query_dependencies = latest_query_result.dependencies();
-                        if query_dependencies.is_empty() {
-                            return None;
-                        }
-                        // TODO: [perf] Investigate less brute-force approaches for determining affected queries
-                        let updated_dependency_ids = updated_effect_transaction_ids
-                            .iter()
-                            .filter_map(|(effect_id, transaction_id)| {
-                                if query_dependencies.contains(*effect_id) {
-                                    Some(*transaction_id)
-                                } else {
-                                    None
-                                }
-                            })
-                            .collect::<Vec<_>>();
-                        query_effect_state
-                            .parent_transactions
-                            .extend(updated_dependency_ids.iter().copied());
-                        if query_effect_state.transaction_id.is_none() {
-                            let query_transaction_id =
-                                updated_dependency_ids.first()?.generate_child();
-                            query_effect_state.transaction_id = Some(query_transaction_id);
-                            Some(TelemetryTransaction {
-                                transaction_id: query_transaction_id,
-                                parent_ids: updated_dependency_ids,
-                                name: format_effect_label(&query_effect_state.effect),
-                                attributes: format_effect_attributes(&query_effect_state.effect),
-                            })
-                        } else {
-                            return None;
-                        }
-                    });
+                state.active_queries.values().filter_map(|query_state| {
+                    let query_effect_id = query_state.effect_id?;
+                    let query_effect_state = state.effect_mappings.get_mut(&query_effect_id)?;
+                    let latest_query_result = query_effect_state.query_result.as_ref()?.as_ref()?;
+                    let query_dependencies = latest_query_result.dependencies();
+                    if query_dependencies.is_empty() {
+                        return None;
+                    }
+                    // TODO: [perf] Investigate less brute-force approaches for determining affected queries
+                    let updated_dependency_ids = updated_effect_transaction_ids
+                        .iter()
+                        .filter_map(|(effect_id, transaction_id)| {
+                            if query_dependencies.contains(*effect_id) {
+                                Some(*transaction_id)
+                            } else {
+                                None
+                            }
+                        })
+                        .collect::<Vec<_>>();
+                    query_effect_state
+                        .parent_transactions
+                        .extend(updated_dependency_ids.iter().copied());
+                    if query_effect_state.transaction_id.is_none() {
+                        let query_transaction_id = updated_dependency_ids.first()?.generate_child();
+                        query_effect_state.transaction_id = Some(query_transaction_id);
+                        Some(TelemetryTransaction {
+                            transaction_id: query_transaction_id,
+                            parent_ids: updated_dependency_ids,
+                            name: format_effect_label(&query_effect_state.effect),
+                            attributes: format_effect_attributes(&query_effect_state.effect),
+                        })
+                    } else {
+                        return None;
+                    }
+                });
             let end_transaction_ids = effect_transactions
                 .iter()
                 .chain(once(&update_transaction))

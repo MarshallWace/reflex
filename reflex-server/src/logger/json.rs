@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+use std::marker::PhantomData;
+
 use chrono::{DateTime, Duration, SecondsFormat, Utc};
 use reflex_dispatcher::{Action, HandlerContext, MessageData, SerializableAction};
 use reflex_json::{JsonMap, JsonValue};
@@ -10,52 +12,67 @@ use crate::{logger::ActionLogger, utils::sanitize::sanitize_json_value};
 pub use chrono;
 
 pub trait JsonLoggerAction: Action + SerializableAction {}
-impl<TAction> JsonLoggerAction for TAction where Self: Action + SerializableAction {}
+impl<TAction: Action + SerializableAction> JsonLoggerAction for TAction {}
 
-pub struct JsonActionLogger<TOut: std::io::Write> {
+pub struct JsonActionLogger<TOut: std::io::Write, TAction: JsonLoggerAction> {
     startup_time: StartupTime,
     output: TOut,
+    _action: PhantomData<TAction>,
 }
-impl<T: std::io::Write> JsonActionLogger<T> {
-    pub fn new(output: T) -> Self {
+impl<TOut: std::io::Write, TAction: JsonLoggerAction> JsonActionLogger<TOut, TAction> {
+    pub fn new(output: TOut) -> Self {
         Self {
             output,
             startup_time: StartupTime::default(),
+            _action: Default::default(),
         }
     }
 }
-impl JsonActionLogger<std::io::Stdout> {
+impl<TAction: JsonLoggerAction> JsonActionLogger<std::io::Stdout, TAction> {
     pub fn stdout() -> Self {
+        Default::default()
+    }
+}
+impl<TAction: JsonLoggerAction> Default for JsonActionLogger<std::io::Stdout, TAction> {
+    fn default() -> Self {
         Self::new(std::io::stdout())
     }
 }
-impl Clone for JsonActionLogger<std::io::Stdout> {
+impl<TAction: JsonLoggerAction> Clone for JsonActionLogger<std::io::Stdout, TAction> {
     fn clone(&self) -> Self {
         Self {
             startup_time: self.startup_time,
             output: std::io::stdout(),
+            _action: Default::default(),
         }
     }
 }
-impl JsonActionLogger<std::io::Stderr> {
+impl<TAction: JsonLoggerAction> JsonActionLogger<std::io::Stderr, TAction> {
     pub fn stderr() -> Self {
+        Default::default()
+    }
+}
+impl<TAction: JsonLoggerAction> Default for JsonActionLogger<std::io::Stderr, TAction> {
+    fn default() -> Self {
         Self::new(std::io::stderr())
     }
 }
-impl Clone for JsonActionLogger<std::io::Stderr> {
+impl<TAction: JsonLoggerAction> Clone for JsonActionLogger<std::io::Stderr, TAction> {
     fn clone(&self) -> Self {
         Self {
             startup_time: self.startup_time,
             output: std::io::stderr(),
+            _action: Default::default(),
         }
     }
 }
-impl<TOut: std::io::Write, TAction: JsonLoggerAction> ActionLogger<TAction>
-    for JsonActionLogger<TOut>
+impl<TOut: std::io::Write, TAction: JsonLoggerAction> ActionLogger
+    for JsonActionLogger<TOut, TAction>
 {
+    type Action = TAction;
     fn log(
         &mut self,
-        action: &TAction,
+        action: &Self::Action,
         metadata: Option<&MessageData>,
         context: Option<&impl HandlerContext>,
     ) {

@@ -13,8 +13,8 @@ use http::{HeaderMap, Request};
 use metrics::{decrement_gauge, describe_gauge, increment_gauge, Unit};
 use reflex::core::{Expression, ExpressionFactory, Uuid};
 use reflex_dispatcher::{
-    Action, Actor, HandlerContext, InboundAction, MessageData, OperationStream, OutboundAction,
-    ProcessId, StateOperation, StateTransition,
+    Action, Actor, ActorTransition, HandlerContext, InboundAction, MessageData, OperationStream,
+    OutboundAction, ProcessId, StateOperation, StateTransition,
 };
 use reflex_graphql::{
     create_graphql_error_response, create_graphql_success_response, create_json_error_object,
@@ -151,7 +151,6 @@ where
     transform: TTransform,
     metric_names: WebSocketGraphQlServerMetricNames,
     get_connection_metric_labels: TMetricLabels,
-    state: WebSocketGraphQlServerState<T>,
     _expression: PhantomData<T>,
 }
 impl<T, TFactory, TTransform, TMetricLabels>
@@ -173,13 +172,12 @@ where
             transform,
             metric_names: metric_names.init(),
             get_connection_metric_labels,
-            state: Default::default(),
             _expression: Default::default(),
         }
     }
 }
 
-struct WebSocketGraphQlServerState<T: Expression> {
+pub struct WebSocketGraphQlServerState<T: Expression> {
     connections: HashMap<Uuid, WebSocketGraphQlConnection<T>>,
     _expression: PhantomData<T>,
 }
@@ -286,26 +284,35 @@ where
     TMetricLabels: Fn(Option<&JsonValue>, &HeaderMap) -> Vec<(String, String)>,
     TAction: WebSocketGraphQlServerAction<T> + Send + 'static,
 {
+    type State = WebSocketGraphQlServerState<T>;
+    fn init(&self) -> Self::State {
+        Default::default()
+    }
     fn handle(
-        &mut self,
+        &self,
+        state: Self::State,
         action: &TAction,
         metadata: &MessageData,
         context: &mut impl HandlerContext,
-    ) -> StateTransition<TAction> {
-        if let Some(action) = action.match_type() {
-            self.handle_websocket_graphql_server_connect(action, metadata, context)
+    ) -> ActorTransition<Self::State, TAction> {
+        let mut state = state;
+        let actions = if let Some(action) = action.match_type() {
+            self.handle_websocket_graphql_server_connect(&mut state, action, metadata, context)
         } else if let Some(action) = action.match_type() {
-            self.handle_websocket_graphql_server_receive(action, metadata, context)
+            self.handle_websocket_graphql_server_receive(&mut state, action, metadata, context)
         } else if let Some(action) = action.match_type() {
-            self.handle_graphql_parse_error(action, metadata, context)
+            self.handle_graphql_parse_error(&mut state, action, metadata, context)
         } else if let Some(action) = action.match_type() {
-            self.handle_graphql_emit_action(action, metadata, context)
+            self.handle_graphql_emit_action(&mut state, action, metadata, context)
         } else if let Some(action) = action.match_type() {
-            self.handle_websocket_graphql_throttle_timeout_action(action, metadata, context)
+            self.handle_websocket_graphql_throttle_timeout_action(
+                &mut state, action, metadata, context,
+            )
         } else {
             None
         }
-        .unwrap_or_default()
+        .unwrap_or_default();
+        ActorTransition::new(state, actions)
     }
 }
 impl<T, TFactory, TTransform, TMetricLabels>
@@ -317,7 +324,8 @@ where
     TMetricLabels: Fn(Option<&JsonValue>, &HeaderMap) -> Vec<(String, String)>,
 {
     fn handle_websocket_graphql_server_connect<TAction>(
-        &mut self,
+        &self,
+        state: &mut WebSocketGraphQlServerState<T>,
         action: &WebSocketServerConnectAction,
         _metadata: &MessageData,
         _context: &mut impl HandlerContext,
@@ -330,7 +338,7 @@ where
             request,
         } = action;
         let connection_id = *connection_id;
-        let entry = match self.state.connections.entry(connection_id) {
+        let entry = match state.connections.entry(connection_id) {
             Entry::Vacant(entry) => Some(entry),
             Entry::Occupied(_) => None,
         }?;
@@ -343,7 +351,8 @@ where
         None
     }
     fn handle_websocket_graphql_server_receive<TAction>(
-        &mut self,
+        &self,
+        state: &mut WebSocketGraphQlServerState<T>,
         action: &WebSocketServerReceiveAction,
         metadata: &MessageData,
         context: &mut impl HandlerContext,
@@ -359,22 +368,29 @@ where
         match &action.message {
             GraphQlSubscriptionClientMessage::ConnectionInit(message) => self
                 .handle_websocket_graphql_server_receive_connection_init(
-                    message, action, metadata, context,
+                    state, message, action, metadata, context,
                 ),
             GraphQlSubscriptionClientMessage::Start(message) => self
-                .handle_websocket_graphql_server_receive_start(message, action, metadata, context),
+                .handle_websocket_graphql_server_receive_start(
+                    state, message, action, metadata, context,
+                ),
             GraphQlSubscriptionClientMessage::Stop(message) => self
-                .handle_websocket_graphql_server_receive_stop(message, action, metadata, context),
+                .handle_websocket_graphql_server_receive_stop(
+                    state, message, action, metadata, context,
+                ),
             GraphQlSubscriptionClientMessage::Update(message) => self
-                .handle_websocket_graphql_server_receive_update(message, action, metadata, context),
+                .handle_websocket_graphql_server_receive_update(
+                    state, message, action, metadata, context,
+                ),
             GraphQlSubscriptionClientMessage::ConnectionTerminate => self
                 .handle_websocket_graphql_server_receive_connection_terminate(
-                    action, metadata, context,
+                    state, action, metadata, context,
                 ),
         }
     }
     fn handle_websocket_graphql_server_receive_connection_init<TAction>(
-        &mut self,
+        &self,
+        state: &mut WebSocketGraphQlServerState<T>,
         message: &GraphQlSubscriptionConnectionInitMessage,
         action: &WebSocketServerReceiveAction,
         _metadata: &MessageData,
@@ -387,7 +403,7 @@ where
             connection_id,
             message: _,
         } = action;
-        let connection = self.state.connections.get_mut(connection_id)?;
+        let connection = state.connections.get_mut(connection_id)?;
         let connection_params = message.payload().cloned();
         let previous_metric_labels = connection
             .initialized_state
@@ -428,7 +444,8 @@ where
         Some(StateTransition::new(once(connection_ack_action)))
     }
     fn handle_websocket_graphql_server_receive_start<TAction>(
-        &mut self,
+        &self,
+        state: &mut WebSocketGraphQlServerState<T>,
         message: &GraphQlSubscriptionStartMessage,
         action: &WebSocketServerReceiveAction,
         _metadata: &MessageData,
@@ -443,7 +460,7 @@ where
             connection_id,
             message: _,
         } = action;
-        let connection = self.state.connections.get_mut(connection_id)?;
+        let connection = state.connections.get_mut(connection_id)?;
         let operation = if connection.has_operation(message.operation_id()) {
             Err(create_json_error_object(
                 format!("Subscription ID already exists: {}", message.operation_id()),
@@ -495,7 +512,8 @@ where
         }
     }
     fn handle_websocket_graphql_server_receive_stop<TAction>(
-        &mut self,
+        &self,
+        state: &mut WebSocketGraphQlServerState<T>,
         message: &GraphQlSubscriptionStopMessage,
         action: &WebSocketServerReceiveAction,
         _metadata: &MessageData,
@@ -510,7 +528,7 @@ where
             connection_id,
             message: _,
         } = action;
-        let connection = self.state.connections.get_mut(connection_id)?;
+        let connection = state.connections.get_mut(connection_id)?;
         if let Some(operation) = connection.remove_operation(message.operation_id()) {
             Some(StateTransition::new([
                 StateOperation::Send(
@@ -550,7 +568,8 @@ where
         }
     }
     fn handle_websocket_graphql_server_receive_update<TAction>(
-        &mut self,
+        &self,
+        state: &mut WebSocketGraphQlServerState<T>,
         message: &GraphQlSubscriptionUpdateMessage,
         action: &WebSocketServerReceiveAction,
         _metadata: &MessageData,
@@ -565,7 +584,7 @@ where
             connection_id,
             message: _,
         } = action;
-        let connection = self.state.connections.get_mut(connection_id)?;
+        let connection = state.connections.get_mut(connection_id)?;
         if let Some(operation) = connection.find_operation(message.operation_id()) {
             Some(StateTransition::new(once(StateOperation::Send(
                 context.pid(),
@@ -593,7 +612,8 @@ where
         }
     }
     fn handle_websocket_graphql_server_receive_connection_terminate<TAction>(
-        &mut self,
+        &self,
+        state: &mut WebSocketGraphQlServerState<T>,
         action: &WebSocketServerReceiveAction,
         _metadata: &MessageData,
         context: &mut impl HandlerContext,
@@ -608,7 +628,7 @@ where
             connection_id,
             message: _,
         } = action;
-        let mut connection = self.state.connections.remove(connection_id)?;
+        let mut connection = state.connections.remove(connection_id)?;
         let previous_metric_labels = connection
             .initialized_state
             .take()
@@ -646,7 +666,8 @@ where
         ))
     }
     fn handle_graphql_parse_error<TAction>(
-        &mut self,
+        &self,
+        state: &mut WebSocketGraphQlServerState<T>,
         action: &GraphQlServerParseErrorAction<T>,
         _metadata: &MessageData,
         context: &mut impl HandlerContext,
@@ -660,7 +681,7 @@ where
             operation,
             ..
         } = action;
-        let (connection_id, subscription) = self.state.remove_subscription(subscription_id)?;
+        let (connection_id, subscription) = state.remove_subscription(subscription_id)?;
         Some(StateTransition::new(once(StateOperation::Send(
             context.pid(),
             WebSocketServerSendAction {
@@ -680,7 +701,8 @@ where
         ))))
     }
     fn handle_graphql_emit_action<TAction>(
-        &mut self,
+        &self,
+        state: &mut WebSocketGraphQlServerState<T>,
         action: &GraphQlServerEmitAction<T>,
         _metadata: &MessageData,
         context: &mut impl HandlerContext,
@@ -696,7 +718,7 @@ where
             subscription_id,
             result,
         } = action;
-        let (connection_id, subscription) = self.state.find_subscription_mut(subscription_id)?;
+        let (connection_id, subscription) = state.find_subscription_mut(subscription_id)?;
         let is_unchanged = subscription
             .diff_result
             .as_ref()
@@ -749,7 +771,8 @@ where
         }
     }
     fn handle_websocket_graphql_throttle_timeout_action<TAction>(
-        &mut self,
+        &self,
+        state: &mut WebSocketGraphQlServerState<T>,
         action: &WebSocketServerThrottleTimeoutAction,
         _metadata: &MessageData,
         context: &mut impl HandlerContext,
@@ -761,7 +784,7 @@ where
             + OutboundAction<WebSocketServerThrottleTimeoutAction>,
     {
         let WebSocketServerThrottleTimeoutAction { subscription_id } = action;
-        let (connection_id, subscription) = self.state.find_subscription_mut(subscription_id)?;
+        let (connection_id, subscription) = state.find_subscription_mut(subscription_id)?;
         let ThrottleState { result, task_pid } = subscription
             .throttle
             .as_mut()

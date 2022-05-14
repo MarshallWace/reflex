@@ -16,8 +16,8 @@ use reflex::{
     lang::{term::SignalTerm, ValueTerm},
 };
 use reflex_dispatcher::{
-    Action, Actor, HandlerContext, InboundAction, MessageData, OutboundAction, StateOperation,
-    StateTransition,
+    Action, Actor, ActorTransition, HandlerContext, InboundAction, MessageData, OutboundAction,
+    StateOperation, StateTransition,
 };
 use reflex_runtime::{
     action::effect::{EffectEmitAction, EffectSubscribeAction, EffectUnsubscribeAction},
@@ -83,7 +83,6 @@ where
     factory: TFactory,
     allocator: TAllocator,
     metric_names: LoaderHandlerMetricNames,
-    state: LoaderHandlerState<T>,
     _expression: PhantomData<T>,
 }
 impl<T, TFactory, TAllocator> LoaderHandler<T, TFactory, TAllocator>
@@ -101,13 +100,12 @@ where
             factory,
             allocator,
             metric_names: metric_names.init(),
-            state: Default::default(),
             _expression: Default::default(),
         }
     }
 }
 
-struct LoaderHandlerState<T: Expression> {
+pub struct LoaderHandlerState<T: Expression> {
     loaders: HashMap<T, LoaderState<T>>,
     /// Maps the combined loader batch evaluate effect ID to the loader expression (used as the key to the loaders hashmap)
     loader_effect_mappings: HashMap<StateToken, T>,
@@ -300,22 +298,29 @@ where
     TAllocator: AsyncHeapAllocator<T>,
     TAction: LoaderHandlerAction<T> + 'static,
 {
+    type State = LoaderHandlerState<T>;
+    fn init(&self) -> Self::State {
+        Default::default()
+    }
     fn handle(
-        &mut self,
+        &self,
+        state: Self::State,
         action: &TAction,
         metadata: &MessageData,
         context: &mut impl HandlerContext,
-    ) -> StateTransition<TAction> {
-        if let Some(action) = action.match_type() {
-            self.handle_effect_subscribe(action, metadata, context)
+    ) -> ActorTransition<Self::State, TAction> {
+        let mut state = state;
+        let actions = if let Some(action) = action.match_type() {
+            self.handle_effect_subscribe(&mut state, action, metadata, context)
         } else if let Some(action) = action.match_type() {
-            self.handle_effect_unsubscribe(action, metadata, context)
+            self.handle_effect_unsubscribe(&mut state, action, metadata, context)
         } else if let Some(action) = action.match_type() {
-            self.handle_effect_emit(action, metadata, context)
+            self.handle_effect_emit(&mut state, action, metadata, context)
         } else {
             None
         }
-        .unwrap_or_default()
+        .unwrap_or_default();
+        ActorTransition::new(state, actions)
     }
 }
 impl<T, TFactory, TAllocator> LoaderHandler<T, TFactory, TAllocator>
@@ -325,7 +330,8 @@ where
     TAllocator: AsyncHeapAllocator<T>,
 {
     fn handle_effect_subscribe<TAction>(
-        &mut self,
+        &self,
+        state: &mut LoaderHandlerState<T>,
         action: &EffectSubscribeAction<T>,
         _metadata: &MessageData,
         context: &mut impl HandlerContext,
@@ -392,7 +398,7 @@ where
         let load_effects = effects_by_loader
             .into_iter()
             .flat_map(|(loader, (name, subscriptions))| {
-                self.state.subscribe(
+                state.subscribe(
                     name,
                     loader,
                     subscriptions,
@@ -430,7 +436,8 @@ where
         ))
     }
     fn handle_effect_unsubscribe<TAction>(
-        &mut self,
+        &self,
+        state: &mut LoaderHandlerState<T>,
         action: &EffectUnsubscribeAction<T>,
         _metadata: &MessageData,
         context: &mut impl HandlerContext,
@@ -470,8 +477,7 @@ where
         let unsubscribe_effects = effects_by_loader
             .into_iter()
             .flat_map(|(loader, (name, subscriptions))| {
-                self.state
-                    .unsubscribe(name, loader, subscriptions, self.metric_names)
+                state.unsubscribe(name, loader, subscriptions, self.metric_names)
             })
             .collect::<Vec<_>>();
         let unsubscribe_action = if unsubscribe_effects.is_empty() {
@@ -489,7 +495,8 @@ where
         Some(StateTransition::new(unsubscribe_action))
     }
     fn handle_effect_emit<TAction>(
-        &mut self,
+        &self,
+        state: &mut LoaderHandlerState<T>,
         action: &EffectEmitAction<T>,
         _metadata: &MessageData,
         context: &mut impl HandlerContext,
@@ -498,14 +505,14 @@ where
         TAction: Action + OutboundAction<EffectEmitAction<T>>,
     {
         let EffectEmitAction { updates } = action;
-        if self.state.loaders.is_empty() {
+        if state.loaders.is_empty() {
             return None;
         }
         let updates = updates
             .iter()
             .filter_map(|(updated_state_token, update)| {
-                let loader = self.state.loader_effect_mappings.get(updated_state_token)?;
-                let loader_state = self.state.loaders.get_mut(loader)?;
+                let loader = state.loader_effect_mappings.get(updated_state_token)?;
+                let loader_state = state.loaders.get_mut(loader)?;
                 let batch_keys = loader_state
                     .batch_effect_mappings
                     .get(updated_state_token)?;

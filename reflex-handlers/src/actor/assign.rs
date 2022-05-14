@@ -9,8 +9,8 @@ use reflex::{
     lang::ValueTerm,
 };
 use reflex_dispatcher::{
-    Action, Actor, HandlerContext, InboundAction, MessageData, OutboundAction, StateOperation,
-    StateTransition,
+    Action, Actor, ActorTransition, HandlerContext, InboundAction, MessageData, OutboundAction,
+    StateOperation, StateTransition,
 };
 use reflex_runtime::{
     action::effect::{EffectEmitAction, EffectSubscribeAction},
@@ -53,6 +53,9 @@ where
     }
 }
 
+#[derive(Default)]
+pub struct AssignHandlerState;
+
 impl<T, TFactory, TAllocator, TAction> Actor<TAction> for AssignHandler<T, TFactory, TAllocator>
 where
     T: Expression + Send + 'static,
@@ -60,18 +63,25 @@ where
     TAllocator: HeapAllocator<T> + Clone + Send + 'static,
     TAction: AssignHandlerAction<T> + 'static,
 {
+    type State = AssignHandlerState;
+    fn init(&self) -> Self::State {
+        Default::default()
+    }
     fn handle(
-        &mut self,
+        &self,
+        state: Self::State,
         action: &TAction,
         metadata: &MessageData,
         context: &mut impl HandlerContext,
-    ) -> StateTransition<TAction> {
-        if let Some(action) = action.match_type() {
-            self.handle_effect_subscribe(action, metadata, context)
+    ) -> ActorTransition<Self::State, TAction> {
+        let mut state = state;
+        let actions = if let Some(action) = action.match_type() {
+            self.handle_effect_subscribe(&mut state, action, metadata, context)
         } else {
             None
         }
-        .unwrap_or_default()
+        .unwrap_or_default();
+        ActorTransition::new(state, actions)
     }
 }
 impl<T, TFactory, TAllocator> AssignHandler<T, TFactory, TAllocator>
@@ -81,7 +91,8 @@ where
     TAllocator: HeapAllocator<T> + Clone + Send + 'static,
 {
     fn handle_effect_subscribe<TAction>(
-        &mut self,
+        &self,
+        _state: &mut AssignHandlerState,
         action: &EffectSubscribeAction<T>,
         _metadata: &MessageData,
         context: &mut impl HandlerContext,

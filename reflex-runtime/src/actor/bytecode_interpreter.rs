@@ -23,8 +23,8 @@ use reflex::{
     interpreter::InterpreterOptions,
 };
 use reflex_dispatcher::{
-    Action, Actor, HandlerContext, InboundAction, MessageData, OutboundAction, ProcessId,
-    StateOperation, StateTransition, WorkerFactory,
+    Action, Actor, ActorTransition, HandlerContext, InboundAction, MessageData, OutboundAction,
+    ProcessId, StateOperation, StateTransition, WorkerFactory,
 };
 
 use crate::{
@@ -102,7 +102,6 @@ where
     factory: TFactory,
     allocator: TAllocator,
     metric_names: BytecodeInterpreterMetricNames,
-    state: BytecodeInterpreterState,
     _expression: PhantomData<T>,
 }
 impl<T, TFactory, TAllocator> BytecodeInterpreter<T, TFactory, TAllocator>
@@ -126,14 +125,13 @@ where
             factory,
             allocator,
             metric_names: metric_names.init(),
-            state: Default::default(),
             _expression: Default::default(),
         }
     }
 }
 
 #[derive(Default)]
-struct BytecodeInterpreterState {
+pub struct BytecodeInterpreterState {
     workers: HashMap<HashId, ProcessId>,
 }
 
@@ -145,20 +143,27 @@ where
     TAllocator: AsyncHeapAllocator<T>,
     TAction: BytecodeInterpreterAction<T> + Send + 'static,
 {
+    type State = BytecodeInterpreterState;
+    fn init(&self) -> Self::State {
+        Default::default()
+    }
     fn handle(
-        &mut self,
+        &self,
+        state: Self::State,
         action: &TAction,
         metadata: &MessageData,
         context: &mut impl HandlerContext,
-    ) -> StateTransition<TAction> {
-        if let Some(action) = action.match_type() {
-            self.handle_evaluate_start(action, metadata, context)
+    ) -> ActorTransition<Self::State, TAction> {
+        let mut state = state;
+        let actions = if let Some(action) = action.match_type() {
+            self.handle_evaluate_start(&mut state, action, metadata, context)
         } else if let Some(action) = action.match_type() {
-            self.handle_evaluate_stop(action, metadata, context)
+            self.handle_evaluate_stop(&mut state, action, metadata, context)
         } else {
             None
         }
-        .unwrap_or_default()
+        .unwrap_or_default();
+        ActorTransition::new(state, actions)
     }
 }
 impl<T, TFactory, TAllocator> BytecodeInterpreter<T, TFactory, TAllocator>
@@ -168,7 +173,8 @@ where
     TAllocator: AsyncHeapAllocator<T>,
 {
     fn handle_evaluate_start<TAction>(
-        &mut self,
+        &self,
+        state: &mut BytecodeInterpreterState,
         action: &EvaluateStartAction<T>,
         _metadata: &MessageData,
         context: &mut impl HandlerContext,
@@ -190,7 +196,7 @@ where
             state_index: _,
             state_updates: _,
         } = action;
-        match self.state.workers.entry(*cache_key) {
+        match state.workers.entry(*cache_key) {
             Entry::Occupied(entry) => {
                 let worker_pid = *entry.get();
                 Some(StateTransition::new(once(StateOperation::Send(
@@ -249,7 +255,8 @@ where
         }
     }
     fn handle_evaluate_stop<TAction>(
-        &mut self,
+        &self,
+        state: &mut BytecodeInterpreterState,
         action: &EvaluateStopAction<T>,
         _metadata: &MessageData,
         _context: &mut impl HandlerContext,
@@ -261,7 +268,7 @@ where
             cache_key,
             query: _,
         } = action;
-        let worker_pid = self.state.workers.remove(cache_key)?;
+        let worker_pid = state.workers.remove(cache_key)?;
         Some(StateTransition::new(once(StateOperation::Kill(worker_pid))))
     }
 }

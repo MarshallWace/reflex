@@ -90,6 +90,7 @@ impl Into<ReflexServerCliOptions> for Args {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
 enum LogFormat {
     Json,
 }
@@ -258,7 +259,7 @@ fn get_websocket_operation_metric_labels(
 }
 
 fn log_server_action<T: Expression>(
-    logger: &mut impl ActionLogger<ServerCliAction<T>>,
+    logger: &mut impl ActionLogger<Action = ServerCliAction<T>>,
     action: impl Into<ServerCliAction<T>>,
 ) {
     logger.log(&(action.into()), None, Option::<&SyncContext>::None)

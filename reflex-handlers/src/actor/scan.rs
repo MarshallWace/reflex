@@ -17,8 +17,8 @@ use reflex::{
     lang::ValueTerm,
 };
 use reflex_dispatcher::{
-    Action, Actor, HandlerContext, InboundAction, MessageData, OutboundAction, StateOperation,
-    StateTransition,
+    Action, Actor, ActorTransition, HandlerContext, InboundAction, MessageData, OutboundAction,
+    StateOperation, StateTransition,
 };
 use reflex_runtime::{
     action::effect::{EffectEmitAction, EffectSubscribeAction, EffectUnsubscribeAction},
@@ -62,7 +62,6 @@ where
 {
     factory: TFactory,
     allocator: TAllocator,
-    state: ScanHandlerState<T>,
     _expression: PhantomData<T>,
 }
 impl<T, TFactory, TAllocator> ScanHandler<T, TFactory, TAllocator>
@@ -75,13 +74,12 @@ where
         Self {
             factory,
             allocator,
-            state: Default::default(),
             _expression: Default::default(),
         }
     }
 }
 
-struct ScanHandlerState<T: Expression> {
+pub struct ScanHandlerState<T: Expression> {
     effect_state: HashMap<StateToken, ScanHandlerReducerState<T>>,
     /// Maps the child evaluate effect ID to the parent state effect ID
     effect_mappings: HashMap<StateToken, StateToken>,
@@ -207,22 +205,29 @@ where
     TAllocator: HeapAllocator<T> + Clone + Send + 'static,
     TAction: ScanHandlerAction<T> + 'static,
 {
+    type State = ScanHandlerState<T>;
+    fn init(&self) -> Self::State {
+        Default::default()
+    }
     fn handle(
-        &mut self,
+        &self,
+        state: Self::State,
         action: &TAction,
         metadata: &MessageData,
         context: &mut impl HandlerContext,
-    ) -> StateTransition<TAction> {
-        if let Some(action) = action.match_type() {
-            self.handle_effect_subscribe(action, metadata, context)
+    ) -> ActorTransition<Self::State, TAction> {
+        let mut state = state;
+        let actions = if let Some(action) = action.match_type() {
+            self.handle_effect_subscribe(&mut state, action, metadata, context)
         } else if let Some(action) = action.match_type() {
-            self.handle_effect_unsubscribe(action, metadata, context)
+            self.handle_effect_unsubscribe(&mut state, action, metadata, context)
         } else if let Some(action) = action.match_type() {
-            self.handle_effect_emit(action, metadata, context)
+            self.handle_effect_emit(&mut state, action, metadata, context)
         } else {
             None
         }
-        .unwrap_or_default()
+        .unwrap_or_default();
+        ActorTransition::new(state, actions)
     }
 }
 impl<T, TFactory, TAllocator> ScanHandler<T, TFactory, TAllocator>
@@ -232,7 +237,8 @@ where
     TAllocator: HeapAllocator<T> + Clone + Send + 'static,
 {
     fn handle_effect_subscribe<TAction>(
-        &mut self,
+        &self,
+        state: &mut ScanHandlerState<T>,
         action: &EffectSubscribeAction<T>,
         _metadata: &MessageData,
         context: &mut impl HandlerContext,
@@ -258,8 +264,7 @@ where
                 match parse_scan_effect_args(effect) {
                     Ok(args) => {
                         if let Some(action) =
-                            self.state
-                                .subscribe(effect, args, &self.factory, &self.allocator)
+                            state.subscribe(effect, args, &self.factory, &self.allocator)
                         {
                             Some((
                                 (
@@ -307,7 +312,8 @@ where
         ))
     }
     fn handle_effect_unsubscribe<TAction>(
-        &mut self,
+        &self,
+        state: &mut ScanHandlerState<T>,
         action: &EffectUnsubscribeAction<T>,
         _metadata: &MessageData,
         context: &mut impl HandlerContext,
@@ -324,7 +330,7 @@ where
         }
         let current_pid = context.pid();
         let unsubscribe_actions = effects.iter().filter_map(|effect| {
-            if let Some(operation) = self.state.unsubscribe(effect) {
+            if let Some(operation) = state.unsubscribe(effect) {
                 Some(StateOperation::Send(current_pid, operation))
             } else {
                 None
@@ -333,7 +339,8 @@ where
         Some(StateTransition::new(unsubscribe_actions))
     }
     fn handle_effect_emit<TAction>(
-        &mut self,
+        &self,
+        state: &mut ScanHandlerState<T>,
         action: &EffectEmitAction<T>,
         _metadata: &MessageData,
         context: &mut impl HandlerContext,
@@ -342,14 +349,14 @@ where
         TAction: Action + OutboundAction<EffectEmitAction<T>>,
     {
         let EffectEmitAction { updates } = action;
-        if self.state.effect_state.is_empty() {
+        if state.effect_state.is_empty() {
             return None;
         }
         let updates = updates
             .iter()
             .filter_map(|(updated_state_token, update)| {
-                let scan_effect_id = self.state.effect_mappings.get(updated_state_token)?;
-                let reducer_state = self.state.effect_state.get_mut(scan_effect_id)?;
+                let scan_effect_id = state.effect_mappings.get(updated_state_token)?;
+                let reducer_state = state.effect_state.get_mut(scan_effect_id)?;
                 let updated_state_token = *updated_state_token;
                 if updated_state_token == reducer_state.source_effect.id() {
                     // The source input has emitted, so trigger the next reducer iteration

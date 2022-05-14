@@ -111,7 +111,7 @@ impl OpenTelemetryHttpConfig {
     }
     pub fn into_middleware<
         T: AsyncExpression,
-        TAction: TelemetryMiddlewareAction<T> + OpenTelemetryMiddlewareAction,
+        TAction: TelemetryMiddlewareAction<T> + OpenTelemetryMiddlewareAction + Send,
     >(
         self,
         get_operation_transaction_labels: impl Fn(
@@ -120,7 +120,7 @@ impl OpenTelemetryHttpConfig {
         factory: &impl AsyncExpressionFactory<T>,
         allocator: &impl AsyncHeapAllocator<T>,
         metric_names: TelemetryMiddlewareMetricNames,
-    ) -> Result<impl Actor<TAction>>
+    ) -> Result<impl Actor<TAction, State = impl Send>>
     where
         T: Applicable<T>,
     {
@@ -177,7 +177,9 @@ where
     TFactory: AsyncExpressionFactory<T>,
     TAllocator: AsyncHeapAllocator<T>,
     TPre: Actor<TAction> + Send + 'static,
+    TPre::State: Send,
     TPost: Actor<TAction> + Send + 'static,
+    TPost::State: Send,
     TAction: GraphQlWebServerAction<T> + Send + 'static,
 {
     let service = make_service_fn({

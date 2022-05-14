@@ -55,54 +55,69 @@ impl<T: Expression, TAction> FormattedLoggerAction<T> for TAction where
 {
 }
 
-pub struct FormattedLogger<T: Expression, TOut: std::io::Write> {
+pub struct FormattedLogger<T: Expression, TOut: std::io::Write, TAction: FormattedLoggerAction<T>> {
     prefix: String,
     output: TOut,
     _expression: PhantomData<T>,
+    _action: PhantomData<TAction>,
 }
-impl<T: Expression, TOut: std::io::Write> FormattedLogger<T, TOut> {
+impl<T: Expression, TOut: std::io::Write, TAction: FormattedLoggerAction<T>>
+    FormattedLogger<T, TOut, TAction>
+{
     pub fn new(output: TOut, prefix: impl Into<String>) -> Self {
         Self {
             prefix: prefix.into(),
             output,
             _expression: Default::default(),
+            _action: Default::default(),
         }
     }
 }
-impl<T: Expression> FormattedLogger<T, std::io::Stdout> {
+impl<T: Expression, TAction: FormattedLoggerAction<T>>
+    FormattedLogger<T, std::io::Stdout, TAction>
+{
     pub fn stdout(prefix: impl Into<String>) -> Self {
         Self::new(std::io::stdout(), prefix)
     }
 }
-impl<T: Expression> Clone for FormattedLogger<T, std::io::Stdout> {
+impl<T: Expression, TAction: FormattedLoggerAction<T>> Clone
+    for FormattedLogger<T, std::io::Stdout, TAction>
+{
     fn clone(&self) -> Self {
         Self {
             prefix: self.prefix.clone(),
             output: std::io::stdout(),
             _expression: Default::default(),
+            _action: Default::default(),
         }
     }
 }
-impl<T: Expression> FormattedLogger<T, std::io::Stderr> {
+impl<T: Expression, TAction: FormattedLoggerAction<T>>
+    FormattedLogger<T, std::io::Stderr, TAction>
+{
     pub fn stderr(prefix: impl Into<String>) -> Self {
         Self::new(std::io::stderr(), prefix)
     }
 }
-impl<T: Expression> Clone for FormattedLogger<T, std::io::Stderr> {
+impl<T: Expression, TAction: FormattedLoggerAction<T>> Clone
+    for FormattedLogger<T, std::io::Stderr, TAction>
+{
     fn clone(&self) -> Self {
         Self {
             prefix: self.prefix.clone(),
             output: std::io::stderr(),
             _expression: Default::default(),
+            _action: Default::default(),
         }
     }
 }
-impl<T: Expression, TOut: std::io::Write, TAction: FormattedLoggerAction<T>> ActionLogger<TAction>
-    for FormattedLogger<T, TOut>
+impl<T: Expression, TOut: std::io::Write, TAction: FormattedLoggerAction<T>> ActionLogger
+    for FormattedLogger<T, TOut, TAction>
 {
+    type Action = TAction;
     fn log(
         &mut self,
-        action: &TAction,
+        action: &Self::Action,
         _metadata: Option<&MessageData>,
         _context: Option<&impl HandlerContext>,
     ) {

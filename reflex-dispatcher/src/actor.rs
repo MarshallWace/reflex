@@ -6,24 +6,33 @@ use std::marker::PhantomData;
 use futures::StreamExt;
 
 use crate::{
-    Action, Actor, HandlerContext, InboundAction, MessageData, OperationStream, OutboundAction,
-    StateOperation, StateTransition, Worker, WorkerContext, WorkerFactory, WorkerMessageQueue,
-    WorkerTransition,
+    Action, Actor, ActorTransition, HandlerContext, InboundAction, MessageData, OperationStream,
+    OutboundAction, StateOperation, StateTransition, Worker, WorkerContext, WorkerFactory,
+    WorkerMessageQueue, WorkerTransition,
 };
 
 pub struct NoopActor;
 impl<T: Action> Actor<T> for NoopActor {
+    type State = ();
+    fn init(&self) -> Self::State {
+        ()
+    }
     fn handle(
-        &mut self,
+        &self,
+        state: Self::State,
         _action: &T,
         _metadata: &MessageData,
         _context: &mut impl HandlerContext,
-    ) -> StateTransition<T> {
-        StateTransition::new(None)
+    ) -> ActorTransition<Self::State, T> {
+        ActorTransition::new(state, Default::default())
     }
 }
 
 pub enum EitherActor<T1, T2> {
+    Left(T1),
+    Right(T2),
+}
+pub enum EitherActorState<T1, T2> {
     Left(T1),
     Right(T2),
 }
@@ -33,15 +42,30 @@ where
     T2: Actor<TAction>,
     TAction: Action,
 {
+    type State = EitherActorState<T1::State, T2::State>;
+    fn init(&self) -> Self::State {
+        match self {
+            Self::Left(actor) => Self::State::Left(actor.init()),
+            Self::Right(actor) => Self::State::Right(actor.init()),
+        }
+    }
     fn handle(
-        &mut self,
+        &self,
+        state: Self::State,
         action: &TAction,
         metadata: &MessageData,
         context: &mut impl HandlerContext,
-    ) -> StateTransition<TAction> {
-        match self {
-            Self::Left(actor) => actor.handle(action, metadata, context),
-            Self::Right(actor) => actor.handle(action, metadata, context),
+    ) -> ActorTransition<Self::State, TAction> {
+        match (self, state) {
+            (Self::Left(actor), Self::State::Left(state)) => {
+                let (state, actions) = actor.handle(state, action, metadata, context).into_parts();
+                ActorTransition::new(Self::State::Left(state), actions)
+            }
+            (Self::Right(actor), Self::State::Right(state)) => {
+                let (state, actions) = actor.handle(state, action, metadata, context).into_parts();
+                ActorTransition::new(Self::State::Right(state), actions)
+            }
+            (_, state) => ActorTransition::new(state, Default::default()),
         }
     }
 }
@@ -76,16 +100,28 @@ where
     TInner: Action + Send + 'static,
     TActor: Actor<TInner>,
 {
+    type State = TActor::State;
+    fn init(&self) -> Self::State {
+        self.actor.init()
+    }
     fn handle(
-        &mut self,
+        &self,
+        state: Self::State,
         action: &TOuter,
         metadata: &MessageData,
         context: &mut impl HandlerContext,
-    ) -> StateTransition<TOuter> {
+    ) -> ActorTransition<Self::State, TOuter> {
         if let Some(action) = action.match_type() {
-            transform_state_transition(self.actor.handle(action, metadata, context))
+            let (state, actions) = self
+                .actor
+                .handle(state, action, metadata, context)
+                .into_parts();
+            ActorTransition::new(
+                state,
+                StateTransition::new(actions.into_iter().map(transform_state_operation)),
+            )
         } else {
-            StateTransition::new(None)
+            ActorTransition::new(state, Default::default())
         }
     }
 }
@@ -130,16 +166,6 @@ where
             transform_worker_transition(self.worker.handle(actions, context))
         }
     }
-}
-
-fn transform_state_transition<TOuter, TInner>(
-    transition: StateTransition<TInner>,
-) -> StateTransition<TOuter>
-where
-    TOuter: Action + InboundAction<TInner> + OutboundAction<TInner> + Send + 'static,
-    TInner: Action + Send + 'static,
-{
-    StateTransition::new(transition.into_iter().map(transform_state_operation))
 }
 
 fn transform_worker_transition<TOuter, TInner>(
@@ -203,18 +229,49 @@ impl<T: Action, T1: Actor<T>, T2: Actor<T>> ChainedActor<T, T1, T2> {
         }
     }
 }
-impl<T: Action, T1: Actor<T>, T2: Actor<T>> Actor<T> for ChainedActor<T, T1, T2> {
+pub struct ChainedActorState<TAction: Action, T1: Actor<TAction>, T2: Actor<TAction>> {
+    left: T1::State,
+    right: T2::State,
+    _action: PhantomData<TAction>,
+}
+impl<TAction: Action, T1: Actor<TAction>, T2: Actor<TAction>> Actor<TAction>
+    for ChainedActor<TAction, T1, T2>
+{
+    type State = ChainedActorState<TAction, T1, T2>;
+    fn init(&self) -> Self::State {
+        Self::State {
+            left: self.left.init(),
+            right: self.right.init(),
+            _action: Default::default(),
+        }
+    }
     fn handle(
-        &mut self,
-        action: &T,
+        &self,
+        state: Self::State,
+        action: &TAction,
         metadata: &MessageData,
         context: &mut impl HandlerContext,
-    ) -> StateTransition<T> {
-        StateTransition::new(
-            self.left
-                .handle(action, metadata, context)
-                .into_iter()
-                .chain(self.right.handle(action, metadata, context)),
+    ) -> ActorTransition<Self::State, TAction> {
+        let Self::State {
+            left: left_state,
+            right: right_state,
+            ..
+        } = state;
+        let (left_state, left_actions) = self
+            .left
+            .handle(left_state, action, metadata, context)
+            .into_parts();
+        let (right_state, right_actions) = self
+            .right
+            .handle(right_state, action, metadata, context)
+            .into_parts();
+        ActorTransition::new(
+            Self::State {
+                left: left_state,
+                right: right_state,
+                _action: Default::default(),
+            },
+            StateTransition::new(left_actions.into_iter().chain(right_actions)),
         )
     }
 }

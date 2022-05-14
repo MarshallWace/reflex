@@ -1,14 +1,21 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+use std::{
+    fs,
+    iter::once,
+    marker::PhantomData,
+    path::{Path, PathBuf},
+};
+
 use anyhow::{anyhow, Context, Result};
 use clap::Parser;
-use futures::{Stream, StreamExt};
+use futures::{stream, StreamExt};
 use reflex_dispatcher::{
     compose_actors,
     scheduler::tokio::{TokioScheduler, TokioSchedulerMetricNames},
-    Action, Actor, EitherActor, HandlerContext, InboundAction, MessageData, NamedAction, Scheduler,
-    SerializableAction, SerializedAction, StateTransition,
+    Action, Actor, ActorTransition, EitherActor, HandlerContext, Matcher, MessageData, NamedAction,
+    SerializableAction, SerializedAction,
 };
 use reflex_handlers::{
     action::graphql::*,
@@ -30,12 +37,6 @@ use reflex_runtime::{
     QueryInvalidationStrategy, StateUpdate,
 };
 use reflex_utils::reconnect::NoopReconnectTimeout;
-use std::{
-    fs,
-    path::{Path, PathBuf},
-};
-use tokio::sync::mpsc;
-use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use reflex::{
     allocator::DefaultAllocator,
@@ -43,9 +44,8 @@ use reflex::{
     compiler::{
         hash_program_root, Compiler, CompilerMode, CompilerOptions, InstructionPointer, Program,
     },
-    core::{EvaluationResult, Expression, ExpressionFactory, StateCache},
+    core::{Expression, ExpressionFactory, Signal, StateCache},
     env::inject_env_vars,
-    hash::HashId,
     interpreter::{execute, DefaultInterpreterCache, InterpreterOptions},
     lang::{term::SignalTerm, CachedSharedTerm, SharedTermFactory, ValueTerm},
 };
@@ -170,12 +170,11 @@ pub async fn main() -> Result<()> {
                 )
             })?;
             let (output, dependencies) = result.into_parts();
-
             if dependencies.is_empty() {
                 println!("{}", output);
             } else {
-                let (watcher_middleware, subscribe_action, mut results_stream) =
-                    create_query_watcher(expression, &factory, &allocator);
+                let (evaluate_effect, subscribe_action) =
+                    create_query(expression, &factory, &allocator);
                 let handlers =
                     default_handlers::<CliAction<CachedSharedTerm<CliBuiltins>>, _, _, _, _, _>(
                         https_client,
@@ -200,19 +199,41 @@ pub async fn main() -> Result<()> {
                             BytecodeInterpreterMetricNames::default(),
                         ),
                     ),
-                    compose_actors(handlers, watcher_middleware),
+                    handlers,
                 );
                 let app = if debug_actions {
                     EitherActor::Left(compose_actors(app, DebugActor::stderr()))
                 } else {
                     EitherActor::Right(app)
                 };
-                let mut scheduler = TokioScheduler::new(app, TokioSchedulerMetricNames::default());
-                scheduler.dispatch(subscribe_action.into());
-                while let Some(result) = results_stream.next().await {
-                    let (result, _dependencies) = result.into_parts();
-                    let output = match factory.match_signal_term(&result) {
-                        None => format!("{}", result),
+                let scheduler = TokioScheduler::new(app, TokioSchedulerMetricNames::default());
+                let mut results_stream = tokio::spawn(scheduler.subscribe({
+                    let factory = factory.clone();
+                    move |action| {
+                        let EffectEmitAction { updates } = action.match_type()?;
+                        let update = updates
+                            .iter()
+                            .filter(|(key, _)| *key == evaluate_effect.id())
+                            .filter_map({
+                                let factory = factory.clone();
+                                move |(_, value)| match value {
+                                    StateUpdate::Value(value) => {
+                                        parse_evaluate_effect_result(value, &factory)
+                                    }
+                                    StateUpdate::Patch(_) => None,
+                                }
+                            })
+                            .next()?;
+                        Some(update.result().clone())
+                    }
+                }))
+                .await
+                .unwrap();
+                let _ =
+                    tokio::spawn(scheduler.dispatch(stream::iter(once(subscribe_action.into()))));
+                while let Some(value) = results_stream.next().await {
+                    let output = match factory.match_signal_term(&value) {
+                        None => format!("{}", value),
                         Some(signal) => format_signal_errors(signal)
                             .into_iter()
                             .map(|error| format!(" - {}", error))
@@ -227,7 +248,7 @@ pub async fn main() -> Result<()> {
     Ok(())
 }
 
-fn create_query_watcher<
+fn create_query<
     T: AsyncExpression,
     TFactory: AsyncExpressionFactory<T>,
     TAllocator: AsyncHeapAllocator<T>,
@@ -235,11 +256,7 @@ fn create_query_watcher<
     query: T,
     factory: &TFactory,
     allocator: &TAllocator,
-) -> (
-    QueryWatcherActor<T, TFactory>,
-    EffectSubscribeAction<T>,
-    impl Stream<Item = EvaluationResult<T>>,
-) {
+) -> (Signal<T>, EffectSubscribeAction<T>) {
     let evaluate_effect = create_evaluate_effect(
         query,
         QueryEvaluationMode::Standalone,
@@ -247,94 +264,17 @@ fn create_query_watcher<
         factory,
         allocator,
     );
-    let effect_id = evaluate_effect.id();
     let subscribe_action = EffectSubscribeAction {
         effect_type: String::from(EFFECT_TYPE_EVALUATE),
-        effects: vec![evaluate_effect],
+        effects: vec![evaluate_effect.clone()],
     };
-    let (results_tx, results_rx) = mpsc::unbounded_channel();
-    (
-        QueryWatcherActor::new(effect_id, results_tx, factory.clone()),
-        subscribe_action,
-        UnboundedReceiverStream::new(results_rx),
-    )
+    (evaluate_effect, subscribe_action)
 }
 
-struct QueryWatcherActor<T: Expression, TFactory: ExpressionFactory<T>> {
-    effect_id: HashId,
-    factory: TFactory,
-    results: mpsc::UnboundedSender<EvaluationResult<T>>,
-}
-impl<T, TFactory> QueryWatcherActor<T, TFactory>
-where
-    T: Expression,
-    TFactory: ExpressionFactory<T>,
-{
-    fn new(
-        effect_id: HashId,
-        results: mpsc::UnboundedSender<EvaluationResult<T>>,
-        factory: TFactory,
-    ) -> Self {
-        Self {
-            effect_id,
-            results,
-            factory,
-        }
-    }
-}
-impl<T, TFactory, TAction> Actor<TAction> for QueryWatcherActor<T, TFactory>
-where
-    T: Expression,
-    TFactory: ExpressionFactory<T>,
-    TAction: Action + InboundAction<EffectEmitAction<T>>,
-{
-    fn handle(
-        &mut self,
-        action: &TAction,
-        metadata: &MessageData,
-        context: &mut impl HandlerContext,
-    ) -> StateTransition<TAction> {
-        if let Some(action) = action.match_type() {
-            self.handle_effect_emit(action, metadata, context)
-        } else {
-            None
-        }
-        .unwrap_or_default()
-    }
-}
-impl<T, TFactory> QueryWatcherActor<T, TFactory>
-where
-    T: Expression,
-    TFactory: ExpressionFactory<T>,
-{
-    fn handle_effect_emit<TAction>(
-        &self,
-        action: &EffectEmitAction<T>,
-        _metadata: &MessageData,
-        _context: &mut impl HandlerContext,
-    ) -> Option<StateTransition<TAction>>
-    where
-        TAction: Action,
-    {
-        for update in action
-            .updates
-            .iter()
-            .filter(|(key, _)| *key == self.effect_id)
-            .filter_map(|(_, value)| match value {
-                StateUpdate::Value(value) => parse_evaluate_effect_result(value, &self.factory),
-                StateUpdate::Patch(_) => None,
-            })
-        {
-            let _ = self.results.send(update);
-        }
-        None
-    }
-}
-
-struct DebugActor<T: std::io::Write> {
+struct DebugActorLogger<T: std::io::Write> {
     output: T,
 }
-impl<T: std::io::Write> DebugActor<T> {
+impl<T: std::io::Write> DebugActorLogger<T> {
     pub fn new(output: T) -> Self {
         Self { output }
     }
@@ -348,24 +288,54 @@ impl<T: std::io::Write> DebugActor<T> {
         );
     }
 }
-impl DebugActor<std::io::Stderr> {
+impl DebugActorLogger<std::io::Stderr> {
     pub fn stderr() -> Self {
         Self::new(std::io::stderr())
     }
 }
-impl<T, TAction> Actor<TAction> for DebugActor<T>
+
+struct DebugActor<TOutput: std::io::Write> {
+    _logger: PhantomData<DebugActorLogger<TOutput>>,
+}
+impl DebugActor<std::io::Stderr> {
+    fn stderr() -> Self {
+        Self {
+            _logger: Default::default(),
+        }
+    }
+}
+
+struct DebugActorState<TOutput: std::io::Write> {
+    logger: DebugActorLogger<TOutput>,
+}
+impl Default for DebugActorState<std::io::Stderr> {
+    fn default() -> Self {
+        Self {
+            logger: DebugActorLogger::stderr(),
+        }
+    }
+}
+
+impl<TAction, TOutput> Actor<TAction> for DebugActor<TOutput>
 where
-    T: std::io::Write,
     TAction: Action + SerializableAction,
+    TOutput: std::io::Write,
+    DebugActorState<TOutput>: Default,
 {
+    type State = DebugActorState<TOutput>;
+    fn init(&self) -> Self::State {
+        Default::default()
+    }
     fn handle(
-        &mut self,
+        &self,
+        state: Self::State,
         action: &TAction,
         _metadata: &MessageData,
         _context: &mut impl HandlerContext,
-    ) -> StateTransition<TAction> {
-        self.log(action);
-        None.unwrap_or_default()
+    ) -> ActorTransition<Self::State, TAction> {
+        let mut state = state;
+        state.logger.log(action);
+        ActorTransition::new(state, Default::default())
     }
 }
 

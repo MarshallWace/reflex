@@ -69,13 +69,13 @@ pub fn default_handlers<TAction, T, TFactory, TAllocator, TConnect, TReconnect>(
     allocator: &TAllocator,
     reconnect_timeout: TReconnect,
     metric_names: DefaultHandlersMetricNames,
-) -> impl Actor<TAction>
+) -> impl Actor<TAction, State = impl Send> + Send
 where
     T: AsyncExpression + Applicable<T>,
     TFactory: AsyncExpressionFactory<T> + Sync,
     TAllocator: AsyncHeapAllocator<T> + Sync,
     TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
-    TReconnect: ReconnectTimeout,
+    TReconnect: ReconnectTimeout + Send,
     TAction: DefaultHandlersAction<T> + Send + 'static,
 {
     compose_actors(

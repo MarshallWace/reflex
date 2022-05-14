@@ -1705,8 +1705,11 @@ version = "0.1.0"
 dependencies = [
  "futures",
  "metrics",
+ "pin-project",
  "serde_json",
  "tokio",
+ "tokio-stream",
+ "tokio-util 0.7.1",
 ]
 
 [[package]]

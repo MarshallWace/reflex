@@ -23,8 +23,8 @@ use reflex::{
     lang::ValueTerm,
 };
 use reflex_dispatcher::{
-    Action, Actor, HandlerContext, InboundAction, MessageData, OperationStream, OutboundAction,
-    ProcessId, StateOperation, StateTransition,
+    Action, Actor, ActorTransition, HandlerContext, InboundAction, MessageData, OperationStream,
+    OutboundAction, ProcessId, StateOperation, StateTransition,
 };
 use reflex_runtime::{
     action::effect::{EffectEmitAction, EffectSubscribeAction, EffectUnsubscribeAction},
@@ -89,7 +89,6 @@ where
     client: hyper::Client<TConnect, Body>,
     factory: TFactory,
     allocator: TAllocator,
-    state: FetchHandlerState,
     metric_names: FetchHandlerMetricNames,
     _expression: PhantomData<T>,
 }
@@ -107,7 +106,6 @@ where
         metric_names: FetchHandlerMetricNames,
     ) -> Self {
         Self {
-            state: Default::default(),
             factory,
             allocator,
             client,
@@ -118,7 +116,7 @@ where
 }
 
 #[derive(Default)]
-struct FetchHandlerState {
+pub struct FetchHandlerState {
     tasks: HashMap<StateToken, RequestState>,
 }
 
@@ -136,20 +134,27 @@ where
     TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
     TAction: Action + Send + 'static + FetchHandlerAction<T>,
 {
+    type State = FetchHandlerState;
+    fn init(&self) -> Self::State {
+        Default::default()
+    }
     fn handle(
-        &mut self,
+        &self,
+        state: Self::State,
         action: &TAction,
         metadata: &MessageData,
         context: &mut impl HandlerContext,
-    ) -> StateTransition<TAction> {
-        if let Some(action) = action.match_type() {
-            self.handle_effect_subscribe(action, metadata, context)
+    ) -> ActorTransition<Self::State, TAction> {
+        let mut state = state;
+        let actions = if let Some(action) = action.match_type() {
+            self.handle_effect_subscribe(&mut state, action, metadata, context)
         } else if let Some(action) = action.match_type() {
-            self.handle_effect_unsubscribe(action, metadata, context)
+            self.handle_effect_unsubscribe(&mut state, action, metadata, context)
         } else {
             None
         }
-        .unwrap_or_default()
+        .unwrap_or_default();
+        ActorTransition::new(state, actions)
     }
 }
 impl<T, TConnect, TFactory, TAllocator> FetchHandler<T, TConnect, TFactory, TAllocator>
@@ -160,7 +165,8 @@ where
     TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
 {
     fn handle_effect_subscribe<TAction>(
-        &mut self,
+        &self,
+        state: &mut FetchHandlerState,
         action: &EffectSubscribeAction<T>,
         _metadata: &MessageData,
         context: &mut impl HandlerContext,
@@ -196,7 +202,7 @@ where
                             1.0,
                             &metric_labels
                         );
-                        if let Entry::Vacant(entry) = self.state.tasks.entry(state_token) {
+                        if let Entry::Vacant(entry) = state.tasks.entry(state_token) {
                             match create_fetch_task(
                                 self.client.clone(),
                                 state_token,
@@ -259,7 +265,8 @@ where
         ))
     }
     fn handle_effect_unsubscribe<TAction>(
-        &mut self,
+        &self,
+        state: &mut FetchHandlerState,
         action: &EffectUnsubscribeAction<T>,
         _metadata: &MessageData,
         _context: &mut impl HandlerContext,
@@ -275,7 +282,7 @@ where
             return None;
         }
         Some(StateTransition::new(effects.iter().filter_map(|effect| {
-            if let Entry::Occupied(entry) = self.state.tasks.entry(effect.id()) {
+            if let Entry::Occupied(entry) = state.tasks.entry(effect.id()) {
                 let RequestState {
                     task_pid,
                     metric_labels,

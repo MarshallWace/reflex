@@ -25,8 +25,8 @@ use reflex::{
     lang::ValueTerm,
 };
 use reflex_dispatcher::{
-    Action, Actor, HandlerContext, InboundAction, MessageData, OperationStream, OutboundAction,
-    ProcessId, StateOperation, StateTransition,
+    Action, Actor, ActorTransition, HandlerContext, InboundAction, MessageData, OperationStream,
+    OutboundAction, ProcessId, StateOperation, StateTransition,
 };
 use reflex_graphql::{
     create_json_error_object,
@@ -128,12 +128,11 @@ where
     TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
     TFactory: ExpressionFactory<T>,
     TAllocator: HeapAllocator<T>,
-    TReconnect: ReconnectTimeout,
+    TReconnect: ReconnectTimeout + Send,
 {
     client: hyper::Client<TConnect, Body>,
     factory: TFactory,
     allocator: TAllocator,
-    state: GraphQlHandlerState,
     reconnect_timeout: TReconnect,
     metric_names: GraphQlHandlerMetricNames,
     _expression: PhantomData<T>,
@@ -145,7 +144,7 @@ where
     TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
     TFactory: ExpressionFactory<T>,
     TAllocator: HeapAllocator<T>,
-    TReconnect: ReconnectTimeout,
+    TReconnect: ReconnectTimeout + Send,
 {
     pub fn new(
         client: hyper::Client<TConnect, Body>,
@@ -159,14 +158,13 @@ where
             factory,
             allocator,
             reconnect_timeout,
-            state: Default::default(),
             metric_names: metric_names.init(),
             _expression: Default::default(),
         }
     }
 }
 
-struct GraphQlHandlerState {
+pub struct GraphQlHandlerState {
     http_requests: HashMap<StateToken, HttpRequestState>,
     websocket_requests: HashMap<StateToken, GraphQlConnectionId>,
     websocket_connections: HashMap<GraphQlConnectionId, WebSocketConnectionState>,
@@ -295,29 +293,42 @@ where
     TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
     TFactory: AsyncExpressionFactory<T>,
     TAllocator: AsyncHeapAllocator<T>,
-    TReconnect: ReconnectTimeout,
+    TReconnect: ReconnectTimeout + Send,
     TAction: GraphQlHandlerAction<T> + Send + 'static,
 {
+    type State = GraphQlHandlerState;
+    fn init(&self) -> Self::State {
+        Default::default()
+    }
     fn handle(
-        &mut self,
+        &self,
+        state: GraphQlHandlerState,
         action: &TAction,
         metadata: &MessageData,
         context: &mut impl HandlerContext,
-    ) -> StateTransition<TAction> {
-        if let Some(action) = action.match_type() {
-            self.handle_effect_subscribe(action, metadata, context)
+    ) -> ActorTransition<Self::State, TAction> {
+        let mut state = state;
+        let actions = if let Some(action) = action.match_type() {
+            self.handle_effect_subscribe(&mut state, action, metadata, context)
         } else if let Some(action) = action.match_type() {
-            self.handle_effect_unsubscribe(action, metadata, context)
+            self.handle_effect_unsubscribe(&mut state, action, metadata, context)
         } else if let Some(action) = action.match_type() {
-            self.handle_graphql_handler_websocket_connect_success(action, metadata, context)
+            self.handle_graphql_handler_websocket_connect_success(
+                &mut state, action, metadata, context,
+            )
         } else if let Some(action) = action.match_type() {
-            self.handle_graphql_handler_websocket_connect_error(action, metadata, context)
+            self.handle_graphql_handler_websocket_connect_error(
+                &mut state, action, metadata, context,
+            )
         } else if let Some(action) = action.match_type() {
-            self.handle_graphql_handler_websocket_server_message(action, metadata, context)
+            self.handle_graphql_handler_websocket_server_message(
+                &mut state, action, metadata, context,
+            )
         } else {
             None
         }
-        .unwrap_or_default()
+        .unwrap_or_default();
+        ActorTransition::new(state, actions)
     }
 }
 impl<T, TConnect, TFactory, TAllocator, TReconnect>
@@ -327,10 +338,11 @@ where
     TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
     TFactory: AsyncExpressionFactory<T>,
     TAllocator: AsyncHeapAllocator<T>,
-    TReconnect: ReconnectTimeout,
+    TReconnect: ReconnectTimeout + Send,
 {
     fn handle_effect_subscribe<TAction>(
-        &mut self,
+        &self,
+        state: &mut GraphQlHandlerState,
         action: &EffectSubscribeAction<T>,
         _metadata: &MessageData,
         context: &mut impl HandlerContext,
@@ -360,6 +372,7 @@ where
                         if is_websocket_url(&args.url) {
                             let (connect_action, subscribe_action) = self
                                 .subscribe_websocket_operation(
+                                    state,
                                     effect,
                                     args.url,
                                     args.operation,
@@ -377,6 +390,7 @@ where
                             )
                         } else {
                             match self.subscribe_http_operation(
+                                state,
                                 effect,
                                 args.url,
                                 args.operation,
@@ -437,7 +451,8 @@ where
         ))
     }
     fn handle_effect_unsubscribe<TAction>(
-        &mut self,
+        &self,
+        state: &mut GraphQlHandlerState,
         action: &EffectUnsubscribeAction<T>,
         _metadata: &MessageData,
         context: &mut impl HandlerContext,
@@ -455,13 +470,13 @@ where
         let actions = effects
             .iter()
             .filter_map(|effect| {
-                if self.state.http_requests.contains_key(&effect.id()) {
+                if state.http_requests.contains_key(&effect.id()) {
                     let unsubscribe_action = None;
-                    let disconnect_action = self.unsubscribe_http_operation(effect)?;
+                    let disconnect_action = self.unsubscribe_http_operation(state, effect)?;
                     Some((unsubscribe_action, Some(disconnect_action)))
-                } else if self.state.websocket_requests.contains_key(&effect.id()) {
+                } else if state.websocket_requests.contains_key(&effect.id()) {
                     let (unsubscribe_action, disconnect_action) =
-                        self.unsubscribe_websocket_operation(effect, context)?;
+                        self.unsubscribe_websocket_operation(state, effect, context)?;
                     Some((unsubscribe_action, disconnect_action))
                 } else {
                     None
@@ -471,7 +486,8 @@ where
         Some(StateTransition::new(actions))
     }
     fn handle_graphql_handler_websocket_connect_success<TAction>(
-        &mut self,
+        &self,
+        state: &mut GraphQlHandlerState,
         action: &GraphQlHandlerWebSocketConnectSuccessAction,
         _metadata: &MessageData,
         context: &mut impl HandlerContext,
@@ -485,11 +501,9 @@ where
             url: _,
         } = action;
         let connection_id = *connection_id;
-        let connection_state = self
-            .state
+        let connection_state = state
             .websocket_connections
             .get_mut(&GraphQlConnectionId(connection_id))?;
-
         let (socket, pending_messages) = match &mut connection_state.connection {
             WebSocketConnection::Connected(..) => None,
             WebSocketConnection::Pending(_, connection) => {
@@ -506,7 +520,7 @@ where
             }
         }?;
         let (mut socket_tx, socket_rx) = socket.split();
-        let listen_rx = listen_websocket_connection(socket_rx).map({
+        let listen_task = listen_websocket_connection(socket_rx).map({
             let current_pid = context.pid();
             move |message| {
                 StateOperation::Send(
@@ -519,7 +533,7 @@ where
                 )
             }
         });
-        let (listen_tx, messages_tx) = {
+        let (client_messages, send_task) = {
             let (messages_tx, mut messages_rx) =
                 mpsc::channel::<GraphQlSubscriptionClientMessage>(32);
             let send_task = async move {
@@ -530,32 +544,31 @@ where
             }
             .into_stream()
             .flat_map(|_| stream::empty());
-            (send_task, messages_tx)
-        };
-        let dispatch_initial_messages = {
-            let outbox = messages_tx.clone();
-            async move {
-                for message in pending_messages {
-                    let _ = outbox.send(message).await;
-                }
-            }
+            (messages_tx, send_task)
         };
         let combined_task = stream::select(
-            stream::select(listen_rx, listen_tx),
-            dispatch_initial_messages
-                .map(|_| stream::empty())
+            listen_task,
+            stream::select(send_task, {
+                let client_messages = client_messages.clone();
+                async move {
+                    for message in pending_messages {
+                        let _ = client_messages.send(message).await;
+                    }
+                }
                 .into_stream()
-                .flatten(),
+                .flat_map(|_| stream::empty())
+            }),
         );
         let task_pid = context.generate_pid();
-        connection_state.connection = WebSocketConnection::Connected(task_pid, messages_tx);
+        connection_state.connection = WebSocketConnection::Connected(task_pid, client_messages);
         Some(StateTransition::new(once(StateOperation::Task(
             task_pid,
             OperationStream::new(Box::pin(combined_task)),
         ))))
     }
     fn handle_graphql_handler_websocket_connect_error<TAction>(
-        &mut self,
+        &self,
+        state: &mut GraphQlHandlerState,
         action: &GraphQlHandlerWebSocketConnectErrorAction,
         _metadata: &MessageData,
         context: &mut impl HandlerContext,
@@ -574,7 +587,7 @@ where
             error: _,
         } = action;
         let connection_id = GraphQlConnectionId(*connection_id);
-        let connection_state = self.state.websocket_connections.get_mut(&connection_id)?;
+        let connection_state = state.websocket_connections.get_mut(&connection_id)?;
         let (connection_pid, connection) = match &mut connection_state.connection {
             WebSocketConnection::Connected(..) => None,
             WebSocketConnection::Pending(connection_pid, connection) => {
@@ -600,7 +613,8 @@ where
         Some(StateTransition::new(once(task)))
     }
     fn handle_graphql_handler_websocket_server_message<TAction>(
-        &mut self,
+        &self,
+        state: &mut GraphQlHandlerState,
         action: &GraphQlHandlerWebSocketServerMessageAction,
         metadata: &MessageData,
         context: &mut impl HandlerContext,
@@ -613,61 +627,48 @@ where
             message,
         } = action;
         let connection_id = GraphQlConnectionId(*connection_id);
-        let connection_state = self.state.websocket_connections.get_mut(&connection_id)?;
+        let connection_state = state.websocket_connections.get_mut(&connection_id)?;
         match message {
-            GraphQlSubscriptionServerMessage::ConnectionError(payload) => {
-                Self::handle_graphql_handler_websocket_server_message_connection_error(
+            GraphQlSubscriptionServerMessage::ConnectionError(payload) => self
+                .handle_graphql_handler_websocket_server_message_connection_error(
                     connection_state,
                     payload,
-                    &self.factory,
-                    &self.allocator,
                     metadata,
                     context,
-                )
-            }
-            GraphQlSubscriptionServerMessage::Data(operation_id, payload) => {
-                Self::handle_graphql_handler_websocket_server_message_data(
+                ),
+            GraphQlSubscriptionServerMessage::Data(operation_id, payload) => self
+                .handle_graphql_handler_websocket_server_message_data(
                     connection_state,
                     operation_id.as_str(),
                     payload,
-                    &self.factory,
-                    &self.allocator,
                     metadata,
                     context,
-                )
-            }
-            GraphQlSubscriptionServerMessage::Patch(operation_id, payload) => {
-                Self::handle_graphql_handler_websocket_server_message_patch(
+                ),
+            GraphQlSubscriptionServerMessage::Patch(operation_id, payload) => self
+                .handle_graphql_handler_websocket_server_message_patch(
                     connection_state,
                     operation_id.as_str(),
                     payload,
-                    &self.factory,
-                    &self.allocator,
                     metadata,
                     context,
-                )
-            }
-            GraphQlSubscriptionServerMessage::Error(operation_id, payload) => {
-                Self::handle_graphql_handler_websocket_server_message_error(
+                ),
+            GraphQlSubscriptionServerMessage::Error(operation_id, payload) => self
+                .handle_graphql_handler_websocket_server_message_error(
                     connection_state,
                     operation_id.as_str(),
                     payload,
-                    &self.factory,
-                    &self.allocator,
                     metadata,
                     context,
-                )
-            }
+                ),
             GraphQlSubscriptionServerMessage::Complete(_operation_id) => None,
             GraphQlSubscriptionServerMessage::ConnectionAck
             | GraphQlSubscriptionServerMessage::ConnectionKeepAlive => None,
         }
     }
     fn handle_graphql_handler_websocket_server_message_connection_error<TAction>(
+        &self,
         connection_state: &mut WebSocketConnectionState,
         payload: &JsonValue,
-        factory: &impl ExpressionFactory<T>,
-        allocator: &impl HeapAllocator<T>,
         _metadata: &MessageData,
         context: &mut impl HandlerContext,
     ) -> Option<StateTransition<TAction>>
@@ -677,7 +678,8 @@ where
         if connection_state.operations.is_empty() {
             None
         } else {
-            let value = parse_graphql_error_payload(payload.clone(), factory, allocator);
+            let value =
+                parse_graphql_error_payload(payload.clone(), &self.factory, &self.allocator);
             Some(StateTransition::new(once(StateOperation::Send(
                 context.pid(),
                 EffectEmitAction {
@@ -692,11 +694,10 @@ where
         }
     }
     fn handle_graphql_handler_websocket_server_message_data<TAction>(
+        &self,
         connection_state: &mut WebSocketConnectionState,
         operation_id: &str,
         payload: &JsonValue,
-        factory: &impl ExpressionFactory<T>,
-        allocator: &impl HeapAllocator<T>,
         _metadata: &MessageData,
         context: &mut impl HandlerContext,
     ) -> Option<StateTransition<TAction>>
@@ -707,7 +708,7 @@ where
             let operation_id = GraphQlOperationId(uuid);
             connection_state.effects.get_mut(&operation_id)
         })?;
-        let value = parse_graphql_data_payload(payload.clone(), factory, allocator);
+        let value = parse_graphql_data_payload(payload.clone(), &self.factory, &self.allocator);
         Some(StateTransition::new(once(StateOperation::Send(
             context.pid(),
             EffectEmitAction {
@@ -717,11 +718,10 @@ where
         ))))
     }
     fn handle_graphql_handler_websocket_server_message_patch<TAction>(
+        &self,
         connection_state: &mut WebSocketConnectionState,
         operation_id: &str,
         _payload: &JsonValue,
-        factory: &impl ExpressionFactory<T>,
-        allocator: &impl HeapAllocator<T>,
         _metadata: &MessageData,
         context: &mut impl HandlerContext,
     ) -> Option<StateTransition<TAction>>
@@ -735,8 +735,8 @@ where
         // TODO: Support patch messages in graphql client handler
         let value = create_error_message_expression(
             format!("GraphQL patch message not implemented"),
-            factory,
-            allocator,
+            &self.factory,
+            &self.allocator,
         );
         Some(StateTransition::new(once(StateOperation::Send(
             context.pid(),
@@ -747,11 +747,10 @@ where
         ))))
     }
     fn handle_graphql_handler_websocket_server_message_error<TAction>(
+        &self,
         connection_state: &mut WebSocketConnectionState,
         operation_id: &str,
         payload: &JsonValue,
-        factory: &impl ExpressionFactory<T>,
-        allocator: &impl HeapAllocator<T>,
         _metadata: &MessageData,
         context: &mut impl HandlerContext,
     ) -> Option<StateTransition<TAction>>
@@ -762,7 +761,7 @@ where
             let operation_id = GraphQlOperationId(uuid);
             connection_state.effects.get_mut(&operation_id)
         })?;
-        let value = parse_graphql_error_payload(payload.clone(), factory, allocator);
+        let value = parse_graphql_error_payload(payload.clone(), &self.factory, &self.allocator);
         Some(StateTransition::new(once(StateOperation::Send(
             context.pid(),
             EffectEmitAction {
@@ -772,7 +771,8 @@ where
         ))))
     }
     fn subscribe_http_operation<TAction>(
-        &mut self,
+        &self,
+        state: &mut GraphQlHandlerState,
         effect: &Signal<T>,
         url: GraphQlConnectionUrl,
         operation: GraphQlOperationPayload,
@@ -810,7 +810,7 @@ where
                 );
                 let shared_metric_labels = Arc::new(Mutex::new(Some(metric_labels)));
                 let task_pid = context.generate_pid();
-                self.state.http_requests.insert(
+                state.http_requests.insert(
                     effect.id(),
                     HttpRequestState {
                         task_pid,
@@ -857,7 +857,8 @@ where
         }
     }
     fn unsubscribe_http_operation<TAction>(
-        &mut self,
+        &self,
+        state: &mut GraphQlHandlerState,
         effect: &Signal<T>,
     ) -> Option<StateOperation<TAction>>
     where
@@ -866,7 +867,7 @@ where
         let HttpRequestState {
             task_pid,
             metric_labels,
-        } = self.state.http_requests.remove(&effect.id())?;
+        } = state.http_requests.remove(&effect.id())?;
         if let Some(metric_labels) = metric_labels
             .lock()
             .ok()
@@ -881,7 +882,8 @@ where
         Some(StateOperation::Kill(task_pid))
     }
     fn subscribe_websocket_operation<TAction>(
-        &mut self,
+        &self,
+        state: &mut GraphQlHandlerState,
         effect: &Signal<T>,
         url: GraphQlConnectionUrl,
         operation: GraphQlOperationPayload,
@@ -898,7 +900,7 @@ where
             + OutboundAction<GraphQlHandlerWebSocketConnectErrorAction>
             + OutboundAction<GraphQlHandlerWebSocketServerMessageAction>,
     {
-        let connection_id = match self.state.websocket_connection_mappings.entry(url.clone()) {
+        let connection_id = match state.websocket_connection_mappings.entry(url.clone()) {
             Entry::Occupied(entry) => *entry.get(),
             Entry::Vacant(entry) => {
                 let metric_labels = [("url", String::from(url.as_str()))];
@@ -910,11 +912,9 @@ where
                 *entry.insert(GraphQlConnectionId(Uuid::new_v4()))
             }
         };
-        self.state
-            .websocket_requests
-            .insert(effect.id(), connection_id);
+        state.websocket_requests.insert(effect.id(), connection_id);
         let (connection_state, connect_task) =
-            match self.state.websocket_connections.entry(connection_id) {
+            match state.websocket_connections.entry(connection_id) {
                 Entry::Occupied(entry) => (entry.into_mut(), None),
                 Entry::Vacant(entry) => {
                     let connection = Arc::new(Mutex::new(None));
@@ -981,7 +981,8 @@ where
         (connect_task, subscribe_task)
     }
     fn unsubscribe_websocket_operation<TAction>(
-        &mut self,
+        &self,
+        state: &mut GraphQlHandlerState,
         effect: &Signal<T>,
         context: &mut impl HandlerContext,
     ) -> Option<(
@@ -991,9 +992,9 @@ where
     where
         TAction: Action + 'static,
     {
-        let connection_id = self.state.websocket_requests.remove(&effect.id())?;
+        let connection_id = state.websocket_requests.remove(&effect.id())?;
         let (unsubscribe_action, is_final_subscription) = {
-            let connection_state = self.state.websocket_connections.get_mut(&connection_id)?;
+            let connection_state = state.websocket_connections.get_mut(&connection_id)?;
             let WebSocketOperationState {
                 operation_id,
                 metric_labels,
@@ -1019,7 +1020,7 @@ where
             (unsubscribe_action, is_final_subscription)
         };
         let disconnect_action = if is_final_subscription {
-            self.state
+            state
                 .websocket_connections
                 .remove(&connection_id)
                 .map(|connection_state| {
@@ -1030,7 +1031,7 @@ where
                         WebSocketConnection::Pending(task_pid, ..) => task_pid,
                         WebSocketConnection::Connected(task_pid, ..) => task_pid,
                     };
-                    if let Some(_) = self.state.websocket_connection_mappings.remove(&url) {
+                    if let Some(_) = state.websocket_connection_mappings.remove(&url) {
                         let metric_labels = [("url", String::from(url.as_str()))];
                         decrement_gauge!(
                             self.metric_names.graphql_effect_connection_count,

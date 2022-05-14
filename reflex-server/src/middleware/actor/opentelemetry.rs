@@ -17,7 +17,7 @@ use opentelemetry::{
 };
 use opentelemetry_otlp::WithExportConfig;
 use reflex_dispatcher::{
-    Action, Actor, HandlerContext, InboundAction, MessageData, StateTransition,
+    Action, Actor, ActorTransition, HandlerContext, InboundAction, MessageData, StateTransition,
 };
 use reflex_handlers::utils::tls::{
     create_https_client,
@@ -145,18 +145,14 @@ impl<TAction> OpenTelemetryMiddlewareAction for TAction where
 
 pub struct OpenTelemetryMiddleware<T: Tracer> {
     tracer: T,
-    state: OpenTelemetryMiddlewareState,
 }
 impl<T: Tracer> OpenTelemetryMiddleware<T> {
     pub fn new(tracer: T) -> Self {
-        Self {
-            tracer,
-            state: Default::default(),
-        }
+        Self { tracer }
     }
 }
 
-struct OpenTelemetryMiddlewareState {
+pub struct OpenTelemetryMiddlewareState {
     active_spans: HashMap<Traceparent, Context>,
 }
 impl Default for OpenTelemetryMiddlewareState {
@@ -174,20 +170,27 @@ where
         + InboundAction<TelemetryMiddlewareTransactionStartAction>
         + InboundAction<TelemetryMiddlewareTransactionEndAction>,
 {
+    type State = OpenTelemetryMiddlewareState;
+    fn init(&self) -> Self::State {
+        Default::default()
+    }
     fn handle(
-        &mut self,
+        &self,
+        state: Self::State,
         action: &TAction,
         metadata: &MessageData,
         context: &mut impl HandlerContext,
-    ) -> StateTransition<TAction> {
-        if let Some(action) = action.match_type() {
-            self.handle_transaction_start(action, metadata, context)
+    ) -> ActorTransition<Self::State, TAction> {
+        let mut state = state;
+        let actions = if let Some(action) = action.match_type() {
+            self.handle_transaction_start(&mut state, action, metadata, context)
         } else if let Some(action) = action.match_type() {
-            self.handle_transaction_end(action, metadata, context)
+            self.handle_transaction_end(&mut state, action, metadata, context)
         } else {
             None
         }
-        .unwrap_or_default()
+        .unwrap_or_default();
+        ActorTransition::new(state, actions)
     }
 }
 impl<T: Tracer> OpenTelemetryMiddleware<T>
@@ -195,7 +198,8 @@ where
     T::Span: Send + Sync + 'static,
 {
     fn handle_transaction_start<TAction>(
-        &mut self,
+        &self,
+        state: &mut OpenTelemetryMiddlewareState,
         action: &TelemetryMiddlewareTransactionStartAction,
         _metadata: &MessageData,
         _context: &mut impl HandlerContext,
@@ -215,7 +219,7 @@ where
             let parent_id = parent_ids.first();
             let context = match parent_id {
                 None => Context::new(),
-                Some(traceparent) => match self.state.active_spans.get(traceparent) {
+                Some(traceparent) => match state.active_spans.get(traceparent) {
                     Some(context) => context.clone(),
                     None => Context::new().with_remote_span_context(SpanContext::new(
                         traceparent.trace_id,
@@ -226,7 +230,7 @@ where
                     )),
                 },
             };
-            if let Entry::Vacant(entry) = self.state.active_spans.entry(*transaction_id) {
+            if let Entry::Vacant(entry) = state.active_spans.entry(*transaction_id) {
                 let span = self
                     .tracer
                     .span_builder(String::from(name))
@@ -248,7 +252,8 @@ where
         None
     }
     fn handle_transaction_end<TAction>(
-        &mut self,
+        &self,
+        state: &mut OpenTelemetryMiddlewareState,
         action: &TelemetryMiddlewareTransactionEndAction,
         _metadata: &MessageData,
         _context: &mut impl HandlerContext,
@@ -258,7 +263,7 @@ where
     {
         let TelemetryMiddlewareTransactionEndAction { transaction_ids } = action;
         for transaction_id in transaction_ids.iter() {
-            if let Some(context) = self.state.active_spans.remove(transaction_id) {
+            if let Some(context) = state.active_spans.remove(transaction_id) {
                 context.span().end();
             }
         }

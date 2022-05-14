@@ -20,8 +20,8 @@ use reflex::{
     lang::ValueTerm,
 };
 use reflex_dispatcher::{
-    Action, Actor, HandlerContext, InboundAction, MessageData, MessageOffset, OutboundAction,
-    StateOperation, StateTransition,
+    Action, Actor, ActorTransition, HandlerContext, InboundAction, MessageData, MessageOffset,
+    OutboundAction, StateOperation, StateTransition,
 };
 use reflex_utils::partition_results;
 
@@ -219,7 +219,7 @@ impl<T: Expression, TAction> EvaluateHandlerAction<T> for TAction where
 {
 }
 
-pub(crate) struct EvaluateHandler<T, TFactory, TAllocator>
+pub struct EvaluateHandler<T, TFactory, TAllocator>
 where
     T: Expression,
     TFactory: ExpressionFactory<T>,
@@ -228,7 +228,6 @@ where
     factory: TFactory,
     allocator: TAllocator,
     metric_names: EvaluateHandlerMetricNames,
-    state: EvaluateHandlerState<T>,
     _expression: PhantomData<T>,
 }
 impl<T, TFactory, TAllocator> EvaluateHandler<T, TFactory, TAllocator>
@@ -246,13 +245,12 @@ where
             factory,
             allocator,
             metric_names: metric_names.init(),
-            state: Default::default(),
             _expression: Default::default(),
         }
     }
 }
 
-struct EvaluateHandlerState<T: Expression> {
+pub struct EvaluateHandlerState<T: Expression> {
     workers: HashMap<StateToken, WorkerState<T>>,
     // TODO: Use expressions as state tokens, removing need to map state tokens back to originating effects
     effects: HashMap<StateToken, Signal<T>>,
@@ -525,24 +523,31 @@ where
     TAllocator: HeapAllocator<T>,
     TAction: EvaluateHandlerAction<T>,
 {
+    type State = EvaluateHandlerState<T>;
+    fn init(&self) -> Self::State {
+        Default::default()
+    }
     fn handle(
-        &mut self,
+        &self,
+        state: Self::State,
         action: &TAction,
         metadata: &MessageData,
         context: &mut impl HandlerContext,
-    ) -> StateTransition<TAction> {
-        if let Some(action) = action.match_type() {
-            self.handle_effect_subscribe(action, metadata, context)
+    ) -> ActorTransition<Self::State, TAction> {
+        let mut state = state;
+        let actions = if let Some(action) = action.match_type() {
+            self.handle_effect_subscribe(&mut state, action, metadata, context)
         } else if let Some(action) = action.match_type() {
-            self.handle_effect_unsubscribe(action, metadata, context)
+            self.handle_effect_unsubscribe(&mut state, action, metadata, context)
         } else if let Some(action) = action.match_type() {
-            self.handle_evaluate_result(action, metadata, context)
+            self.handle_evaluate_result(&mut state, action, metadata, context)
         } else if let Some(action) = action.match_type() {
-            self.handle_effect_emit(action, metadata, context)
+            self.handle_effect_emit(&mut state, action, metadata, context)
         } else {
             None
         }
-        .unwrap_or_default()
+        .unwrap_or_default();
+        ActorTransition::new(state, actions)
     }
 }
 impl<T, TFactory, TAllocator> EvaluateHandler<T, TFactory, TAllocator>
@@ -552,7 +557,8 @@ where
     TAllocator: HeapAllocator<T>,
 {
     fn handle_effect_subscribe<TAction>(
-        &mut self,
+        &self,
+        state: &mut EvaluateHandlerState<T>,
         action: &EffectSubscribeAction<T>,
         _metadata: &MessageData,
         context: &mut impl HandlerContext,
@@ -587,7 +593,7 @@ where
             partition_results(queries.filter_map(
                 |(effect, (query, evaluation_mode, invalidation_strategy))| {
                     let cache_key = effect.id();
-                    match self.state.workers.entry(cache_key) {
+                    match state.workers.entry(cache_key) {
                         // For any queries that are already subscribed, re-emit the latest cached value if one exists
                         // (this is necessary because the caller that triggered this action might be expecting a result)
                         Entry::Occupied(mut entry) => {
@@ -653,7 +659,8 @@ where
         ))
     }
     fn handle_effect_unsubscribe<TAction>(
-        &mut self,
+        &self,
+        state: &mut EvaluateHandlerState<T>,
         action: &EffectUnsubscribeAction<T>,
         _metadata: &MessageData,
         context: &mut impl HandlerContext,
@@ -675,7 +682,7 @@ where
             .iter()
             .flat_map(|effect| {
                 let cache_key = effect.id();
-                let mut existing_entry = match self.state.workers.entry(cache_key) {
+                let mut existing_entry = match state.workers.entry(cache_key) {
                     Entry::Occupied(entry) => Some(entry),
                     _ => None,
                 }?;
@@ -698,8 +705,7 @@ where
                 }
             })
             .collect::<Vec<_>>();
-        let remaining_effect_ids = self
-            .state
+        let remaining_effect_ids = state
             .combined_effects()
             .map(|effect| effect.id())
             .collect::<HashSet<_>>();
@@ -708,13 +714,13 @@ where
             .map(|(_, worker)| &worker.effect)
             .filter(|effect| !remaining_effect_ids.contains(&effect.id()));
         for effect in removed_worker_effects {
-            self.state.effects.remove(&effect.id());
+            state.effects.remove(&effect.id());
         }
         let removed_effects = unsubscribed_workers
             .iter()
             .flat_map(|(_, worker)| worker.dependencies_iter())
             .filter(|state_token| !remaining_effect_ids.contains(&state_token))
-            .filter_map(|removed_effect_id| self.state.effects.remove(&removed_effect_id));
+            .filter_map(|removed_effect_id| state.effects.remove(&removed_effect_id));
         let removed_queries = unsubscribed_workers
             .iter()
             .map(|(cache_key, worker)| (*cache_key, worker.query.clone()));
@@ -738,20 +744,20 @@ where
         let actions = stop_actions.chain(unsubscribe_actions).collect::<Vec<_>>();
         let has_unsubscribed_effects = !actions.is_empty();
         if has_unsubscribed_effects {
-            self.state
+            state
                 .state_cache
                 .gc(remaining_effect_ids, self.metric_names);
         }
         let has_unsubscribed_workers = !unsubscribed_workers.is_empty();
         if has_unsubscribed_workers {
-            self.state.gc_worker_state_history(self.metric_names);
-            self.state
-                .update_worker_status_metrics(&self.factory, self.metric_names);
+            state.gc_worker_state_history(self.metric_names);
+            state.update_worker_status_metrics(&self.factory, self.metric_names);
         }
         Some(StateTransition::new(actions))
     }
     fn handle_evaluate_result<TAction>(
-        &mut self,
+        &self,
+        state: &mut EvaluateHandlerState<T>,
         action: &EvaluateResultAction<T>,
         _metadata: &MessageData,
         context: &mut impl HandlerContext,
@@ -769,8 +775,7 @@ where
             state_index,
             result,
         } = action;
-        let worker_state_index = self
-            .state
+        let worker_state_index = state
             .workers
             .get(cache_key)
             .map(|worker| worker.state_index)?;
@@ -781,18 +786,17 @@ where
         if is_outdated_action {
             return None;
         }
-        let existing_effect_ids = self
-            .state
+        let existing_effect_ids = state
             .combined_effects()
             .map(|effect| effect.id())
             .collect::<HashSet<_>>();
-        let worker = self.state.workers.get_mut(cache_key)?;
+        let worker = state.workers.get_mut(cache_key)?;
         let added_effects = parse_expression_effects(result.result(), &self.factory)
             .filter(|effect| !existing_effect_ids.contains(&effect.id()))
             .cloned()
             .collect::<Vec<_>>();
         for effect in added_effects.iter() {
-            self.state.effects.insert(effect.id(), effect.clone());
+            state.effects.insert(effect.id(), effect.clone());
         }
         let updated_status = WorkerStatus::Idle {
             latest_result: (worker_state_index, result.clone()),
@@ -819,11 +823,11 @@ where
                         previous_dependencies: dependencies,
                     },
                 },
-                &mut self.state.state_cache,
+                &mut state.state_cache,
                 context,
                 self.metric_names,
             );
-            self.state.gc_worker_state_history(self.metric_names);
+            state.gc_worker_state_history(self.metric_names);
             reevaluate_action
         };
         let effect_emit_action: Option<StateOperation<TAction>> =
@@ -845,15 +849,14 @@ where
                     .into(),
                 ))
             };
-        let updated_effect_ids = self
-            .state
+        let updated_effect_ids = state
             .combined_effects()
             .map(|effect| effect.id())
             .collect::<HashSet<_>>();
         let removed_effects = existing_effect_ids
             .iter()
             .filter(|effect_id| !updated_effect_ids.contains(effect_id))
-            .filter_map(|effect_id| self.state.effects.remove(&effect_id))
+            .filter_map(|effect_id| state.effects.remove(&effect_id))
             .collect::<Vec<_>>();
         let effect_subscribe_actions =
             group_effects_by_type(added_effects).map(|(effect_type, effects)| {
@@ -883,12 +886,12 @@ where
             .chain(effect_subscribe_actions)
             .chain(effect_unsubscribe_actions)
             .collect::<Vec<_>>();
-        self.state
-            .update_worker_status_metrics(&self.factory, self.metric_names);
+        state.update_worker_status_metrics(&self.factory, self.metric_names);
         Some(StateTransition::new(actions))
     }
     fn handle_effect_emit<TAction>(
-        &mut self,
+        &self,
+        state: &mut EvaluateHandlerState<T>,
         action: &EffectEmitAction<T>,
         metadata: &MessageData,
         context: &mut impl HandlerContext,
@@ -900,12 +903,12 @@ where
         let (updated_state_tokens, updates) = if updates.is_empty() {
             (HashSet::<StateToken>::default(), Vec::default())
         } else {
-            let existing_state = &self.state.state_cache.combined_state;
+            let existing_state = &state.state_cache.combined_state;
             let updates = updates.iter().filter_map(|(state_token, update)| {
                 let updated_value = match update {
                     StateUpdate::Value(value) => value.clone(),
                     StateUpdate::Patch(updater) => {
-                        updater(self.state.state_cache.combined_state.get(state_token))
+                        updater(state.state_cache.combined_state.get(state_token))
                     }
                 };
                 let is_unchanged = existing_state
@@ -927,11 +930,11 @@ where
             return None;
         }
         let state_index = metadata.offset;
-        self.state
+        state
             .state_cache
             .apply_batch(state_index, updates, self.metric_names);
         let invalidated_workers =
-            self.state
+            state
                 .workers
                 .values_mut()
                 .filter(|worker| match &worker.status {
@@ -948,13 +951,13 @@ where
                 update_worker_state(
                     worker,
                     WorkerStateUpdateType::DependencyUpdate,
-                    &mut self.state.state_cache,
+                    &mut state.state_cache,
                     context,
                     self.metric_names,
                 )
             })
             .collect::<Vec<_>>();
-        self.state.gc_worker_state_history(self.metric_names);
+        state.gc_worker_state_history(self.metric_names);
         Some(StateTransition::new(worker_update_actions))
     }
 }

@@ -196,7 +196,7 @@ pub struct GraphQlServerSubscribeAction<T: Expression> {
 impl<T: Expression> Action for GraphQlServerSubscribeAction<T> {}
 impl<T: Expression> NamedAction for GraphQlServerSubscribeAction<T> {
     fn name(&self) -> &'static str {
-        "GraphQlSubscribeAction"
+        "GraphQlServerSubscribeAction"
     }
 }
 impl<T: Expression> SerializableAction for GraphQlServerSubscribeAction<T> {
@@ -245,7 +245,7 @@ pub struct GraphQlServerUnsubscribeAction<T: Expression> {
 impl<T: Expression> Action for GraphQlServerUnsubscribeAction<T> {}
 impl<T: Expression> NamedAction for GraphQlServerUnsubscribeAction<T> {
     fn name(&self) -> &'static str {
-        "GraphQlUnsubscribeAction"
+        "GraphQlServerUnsubscribeAction"
     }
 }
 impl<T: Expression> SerializableAction for GraphQlServerUnsubscribeAction<T> {
@@ -266,7 +266,7 @@ pub struct GraphQlServerModifyAction<T: Expression> {
 impl<T: Expression> Action for GraphQlServerModifyAction<T> {}
 impl<T: Expression> NamedAction for GraphQlServerModifyAction<T> {
     fn name(&self) -> &'static str {
-        "GraphQlModifyAction"
+        "GraphQlServerModifyAction"
     }
 }
 impl<T: Expression> SerializableAction for GraphQlServerModifyAction<T> {
@@ -296,7 +296,7 @@ pub struct GraphQlServerParseSuccessAction<T: Expression> {
 impl<T: Expression> Action for GraphQlServerParseSuccessAction<T> {}
 impl<T: Expression> NamedAction for GraphQlServerParseSuccessAction<T> {
     fn name(&self) -> &'static str {
-        "GraphQlParseSuccessAction"
+        "GraphQlServerParseSuccessAction"
     }
 }
 impl<T: Expression> SerializableAction for GraphQlServerParseSuccessAction<T> {
@@ -321,7 +321,7 @@ pub struct GraphQlServerParseErrorAction<T: Expression> {
 impl<T: Expression> Action for GraphQlServerParseErrorAction<T> {}
 impl<T: Expression> NamedAction for GraphQlServerParseErrorAction<T> {
     fn name(&self) -> &'static str {
-        "GraphQlParseErrorAction"
+        "GraphQlServerParseErrorAction"
     }
 }
 impl<T: Expression> SerializableAction for GraphQlServerParseErrorAction<T> {
@@ -371,7 +371,7 @@ pub struct GraphQlServerEmitAction<T: Expression> {
 impl<T: Expression> Action for GraphQlServerEmitAction<T> {}
 impl<T: Expression> NamedAction for GraphQlServerEmitAction<T> {
     fn name(&self) -> &'static str {
-        "GraphQlEmitAction"
+        "GraphQlServerEmitAction"
     }
 }
 impl<T: Expression> SerializableAction for GraphQlServerEmitAction<T> {

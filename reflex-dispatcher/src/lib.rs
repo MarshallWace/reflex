@@ -9,6 +9,8 @@ use futures::{
 };
 use serde_json::{Map as JsonMap, Value as JsonValue};
 
+pub mod utils;
+
 mod actor;
 pub mod scheduler;
 
@@ -85,12 +87,15 @@ impl IntoIterator for SerializedAction {
 }
 
 pub trait Actor<T: Action> {
+    type State;
+    fn init(&self) -> Self::State;
     fn handle(
-        &mut self,
+        &self,
+        state: Self::State,
         action: &T,
         metadata: &MessageData,
         context: &mut impl HandlerContext,
-    ) -> StateTransition<T>;
+    ) -> ActorTransition<Self::State, T>;
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -125,33 +130,48 @@ impl From<MessageOffset> for JsonValue {
     }
 }
 
-pub struct StateTransition<T: Action> {
-    operations: Vec<StateOperation<T>>,
-}
+pub struct StateTransition<T: Action>(Vec<StateOperation<T>>);
 impl<T: Action> Default for StateTransition<T> {
     fn default() -> Self {
-        Self {
-            operations: Default::default(),
-        }
+        Self(Default::default())
     }
 }
 impl<T: Action> StateTransition<T> {
-    pub fn new(operations: impl IntoIterator<Item = StateOperation<T>>) -> Self {
-        Self {
-            operations: operations.into_iter().collect(),
-        }
+    pub fn new(actions: impl IntoIterator<Item = StateOperation<T>>) -> Self {
+        Self::from_iter(actions)
     }
     pub fn append(self, other: StateTransition<T>) -> StateTransition<T> {
-        let mut combined = self;
-        combined.operations.extend(other.operations);
-        combined
+        let Self(mut actions) = self;
+        let Self(other_actions) = other;
+        actions.extend(other_actions);
+        Self(actions)
+    }
+}
+impl<A: Action> FromIterator<StateOperation<A>> for StateTransition<A> {
+    fn from_iter<T: IntoIterator<Item = StateOperation<A>>>(iter: T) -> Self {
+        Self(iter.into_iter().collect())
     }
 }
 impl<T: Action> IntoIterator for StateTransition<T> {
     type Item = StateOperation<T>;
     type IntoIter = std::vec::IntoIter<StateOperation<T>>;
     fn into_iter(self) -> Self::IntoIter {
-        self.operations.into_iter()
+        let Self(actions) = self;
+        actions.into_iter()
+    }
+}
+
+pub struct ActorTransition<S, T: Action> {
+    state: S,
+    actions: StateTransition<T>,
+}
+impl<S, T: Action> ActorTransition<S, T> {
+    pub fn new(state: S, actions: StateTransition<T>) -> Self {
+        Self { state, actions }
+    }
+    pub fn into_parts(self) -> (S, StateTransition<T>) {
+        let Self { state, actions } = self;
+        (state, actions)
     }
 }
 
@@ -245,7 +265,6 @@ impl<T: Action + 'static> OperationStream<T> {
 
 pub trait Scheduler {
     type Action: Action;
-    fn dispatch(&mut self, action: Self::Action);
 }
 
 #[derive(PartialEq, Eq, Hash, Clone, Copy, Default, Debug)]

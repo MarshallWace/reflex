@@ -21,8 +21,8 @@ use reflex::{
     hash::HashId,
 };
 use reflex_dispatcher::{
-    Action, Actor, HandlerContext, InboundAction, MessageData, OutboundAction, StateOperation,
-    StateTransition,
+    Action, Actor, ActorTransition, HandlerContext, InboundAction, MessageData, OutboundAction,
+    StateOperation, StateTransition,
 };
 use reflex_graphql::{
     create_graphql_error_response, create_graphql_success_response, deserialize_graphql_operation,
@@ -136,7 +136,6 @@ where
     transform: TTransform,
     metric_names: HttpGraphQlServerMetricNames,
     get_query_metric_labels: TQueryMetricLabels,
-    state: HttpGraphQlServerState,
     _expression: PhantomData<T>,
 }
 impl<T, TFactory, TTransform, TQueryMetricLabels>
@@ -158,14 +157,13 @@ where
             transform,
             metric_names: metric_names.init(),
             get_query_metric_labels,
-            state: Default::default(),
             _expression: Default::default(),
         }
     }
 }
 
 #[derive(Default)]
-struct HttpGraphQlServerState {
+pub struct HttpGraphQlServerState {
     requests: HashMap<Uuid, HttpGraphQlRequest>,
 }
 struct HttpGraphQlRequest {
@@ -182,22 +180,29 @@ where
     TQueryMetricLabels: Fn(&GraphQlOperationPayload, &HeaderMap) -> Vec<(String, String)>,
     TAction: HttpGraphQlServerAction<T>,
 {
+    type State = HttpGraphQlServerState;
+    fn init(&self) -> Self::State {
+        Default::default()
+    }
     fn handle(
-        &mut self,
+        &self,
+        state: Self::State,
         action: &TAction,
         metadata: &MessageData,
         context: &mut impl HandlerContext,
-    ) -> StateTransition<TAction> {
-        if let Some(action) = action.match_type() {
-            self.handle_http_server_request(action, metadata, context)
+    ) -> ActorTransition<Self::State, TAction> {
+        let mut state = state;
+        let actions = if let Some(action) = action.match_type() {
+            self.handle_http_server_request(&mut state, action, metadata, context)
         } else if let Some(action) = action.match_type() {
-            self.handle_graphql_parse_error(action, metadata, context)
+            self.handle_graphql_parse_error(&mut state, action, metadata, context)
         } else if let Some(action) = action.match_type() {
-            self.handle_graphql_emit(action, metadata, context)
+            self.handle_graphql_emit(&mut state, action, metadata, context)
         } else {
             None
         }
-        .unwrap_or_default()
+        .unwrap_or_default();
+        ActorTransition::new(state, actions)
     }
 }
 impl<T, TFactory, TTransform, TQueryMetricLabels>
@@ -209,7 +214,8 @@ where
     TQueryMetricLabels: Fn(&GraphQlOperationPayload, &HeaderMap) -> Vec<(String, String)>,
 {
     fn handle_http_server_request<TAction>(
-        &mut self,
+        &self,
+        state: &mut HttpGraphQlServerState,
         action: &HttpServerRequestAction,
         _metadata: &MessageData,
         context: &mut impl HandlerContext,
@@ -224,7 +230,7 @@ where
             request,
         } = action;
         let request_id = *request_id;
-        let entry = match self.state.requests.entry(request_id) {
+        let entry = match state.requests.entry(request_id) {
             Entry::Occupied(_) => None,
             Entry::Vacant(entry) => Some(entry),
         }?;
@@ -273,7 +279,8 @@ where
         }
     }
     fn handle_graphql_parse_error<TAction>(
-        &mut self,
+        &self,
+        state: &mut HttpGraphQlServerState,
         action: &GraphQlServerParseErrorAction<T>,
         _metadata: &MessageData,
         context: &mut impl HandlerContext,
@@ -287,7 +294,7 @@ where
             operation,
             ..
         } = action;
-        let request = self.state.requests.remove(subscription_id)?;
+        let request = state.requests.remove(subscription_id)?;
         let HttpGraphQlRequest { metric_labels, .. } = request;
         decrement_gauge!(
             self.metric_names.graphql_http_active_request_count,
@@ -315,7 +322,8 @@ where
         ))))
     }
     fn handle_graphql_emit<TAction>(
-        &mut self,
+        &self,
+        state: &mut HttpGraphQlServerState,
         action: &GraphQlServerEmitAction<T>,
         _metadata: &MessageData,
         context: &mut impl HandlerContext,
@@ -329,7 +337,7 @@ where
             subscription_id,
             result,
         } = action;
-        let request = self.state.requests.remove(subscription_id)?;
+        let request = state.requests.remove(subscription_id)?;
         let HttpGraphQlRequest {
             metric_labels,
             etag,

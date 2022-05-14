@@ -3,7 +3,6 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use std::iter::once;
 
-use bytes::Bytes;
 use http::{
     header::{self, HeaderName},
     HeaderValue, Request, Response, StatusCode,
@@ -33,11 +32,11 @@ pub(crate) fn clone_response_wrapper<T>(response: &Response<T>) -> Response<()> 
     result
 }
 
-pub(crate) fn create_json_http_response(
+pub(crate) fn create_json_http_response<T: From<String> + Default>(
     status: StatusCode,
     headers: impl IntoIterator<Item = (HeaderName, HeaderValue)>,
     body: &JsonValue,
-) -> Response<Bytes> {
+) -> Response<T> {
     create_http_response(
         status,
         headers
@@ -51,14 +50,17 @@ fn create_content_type_header(value: &'static str) -> (HeaderName, HeaderValue) 
     (header::CONTENT_TYPE, HeaderValue::from_static(value))
 }
 
-pub(crate) fn create_http_response(
+pub(crate) fn create_http_response<T>(
     status: StatusCode,
     headers: impl IntoIterator<Item = (HeaderName, HeaderValue)>,
     body: Option<String>,
-) -> Response<Bytes> {
+) -> Response<T>
+where
+    T: From<String> + Default,
+{
     let body = match body {
-        Some(contents) => Bytes::from(contents),
-        None => Bytes::default(),
+        Some(contents) => contents.into(),
+        None => Default::default(),
     };
     let mut response = Response::new(body);
     *response.status_mut() = status;

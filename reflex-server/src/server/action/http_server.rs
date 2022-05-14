@@ -92,7 +92,7 @@ impl Clone for HttpServerRequestAction {
 impl Action for HttpServerRequestAction {}
 impl NamedAction for HttpServerRequestAction {
     fn name(&self) -> &'static str {
-        "HttpGraphQlServerRequestAction"
+        "HttpServerRequestAction"
     }
 }
 impl SerializableAction for HttpServerRequestAction {
@@ -120,7 +120,7 @@ impl Clone for HttpServerResponseAction {
 impl Action for HttpServerResponseAction {}
 impl NamedAction for HttpServerResponseAction {
     fn name(&self) -> &'static str {
-        "HttpGraphQlServerResponseAction"
+        "HttpServerResponseAction"
     }
 }
 impl SerializableAction for HttpServerResponseAction {

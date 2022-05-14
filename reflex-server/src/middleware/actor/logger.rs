@@ -3,34 +3,69 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use std::marker::PhantomData;
 
-use reflex_dispatcher::{Action, Actor, HandlerContext, MessageData, StateTransition};
+use reflex_dispatcher::{Action, Actor, ActorTransition, HandlerContext, MessageData};
 
 use crate::logger::ActionLogger;
 
-pub struct LoggerMiddleware<T: ActionLogger<TAction>, TAction: Action> {
-    logger: T,
-    _action: PhantomData<TAction>,
+pub trait LoggerMiddlewareFactory<T: ActionLogger> {
+    fn create(&self) -> T;
 }
-impl<T: ActionLogger<TAction>, TAction: Action> LoggerMiddleware<T, TAction> {
-    pub fn new(logger: T) -> Self {
+impl<T> LoggerMiddlewareFactory<T> for T
+where
+    T: ActionLogger + Clone,
+{
+    fn create(&self) -> T {
+        self.clone()
+    }
+}
+
+pub struct LoggerMiddleware<TFactory, TLogger>
+where
+    TFactory: LoggerMiddlewareFactory<TLogger>,
+    TLogger: ActionLogger,
+{
+    factory: TFactory,
+    _logger: PhantomData<TLogger>,
+}
+impl<TFactory, TLogger> LoggerMiddleware<TFactory, TLogger>
+where
+    TFactory: LoggerMiddlewareFactory<TLogger>,
+    TLogger: ActionLogger,
+{
+    pub fn new(factory: TFactory) -> Self {
         Self {
-            logger,
-            _action: Default::default(),
+            factory,
+            _logger: Default::default(),
         }
     }
 }
-impl<T, TAction> Actor<TAction> for LoggerMiddleware<T, TAction>
+
+#[derive(Default)]
+pub struct LoggerMiddlewareState<TLogger: ActionLogger> {
+    logger: TLogger,
+}
+
+impl<TFactory, TLogger, TAction> Actor<TAction> for LoggerMiddleware<TFactory, TLogger>
 where
-    T: ActionLogger<TAction>,
+    TFactory: LoggerMiddlewareFactory<TLogger>,
+    TLogger: ActionLogger<Action = TAction>,
     TAction: Action,
 {
+    type State = LoggerMiddlewareState<TLogger>;
+    fn init(&self) -> Self::State {
+        LoggerMiddlewareState {
+            logger: self.factory.create(),
+        }
+    }
     fn handle(
-        &mut self,
+        &self,
+        state: Self::State,
         action: &TAction,
         metadata: &MessageData,
         context: &mut impl HandlerContext,
-    ) -> StateTransition<TAction> {
-        self.logger.log(action, Some(metadata), Some(context));
-        None.unwrap_or_default()
+    ) -> ActorTransition<Self::State, TAction> {
+        let mut state = state;
+        state.logger.log(action, Some(metadata), Some(context));
+        ActorTransition::new(state, Default::default())
     }
 }

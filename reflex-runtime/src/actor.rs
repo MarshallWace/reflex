@@ -2,9 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use reflex::core::{Expression, ExpressionFactory, HeapAllocator};
-use reflex_dispatcher::{
-    compose_actors, Action, Actor, ChainedActor, HandlerContext, MessageData, StateTransition,
-};
+use reflex_dispatcher::{compose_actors, Action, Actor, ChainedActor, HandlerContext, MessageData};
+use reflex_dispatcher::{ActorTransition, ChainedActorState};
 
 pub mod bytecode_interpreter;
 pub mod evaluate_handler;
@@ -68,12 +67,21 @@ where
     TAllocator: HeapAllocator<T> + Clone,
     TAction: RuntimeAction<T>,
 {
+    type State = ChainedActorState<
+        TAction,
+        QueryManager<T, TFactory, TAllocator>,
+        EvaluateHandler<T, TFactory, TAllocator>,
+    >;
+    fn init(&self) -> Self::State {
+        self.inner.init()
+    }
     fn handle(
-        &mut self,
+        &self,
+        state: Self::State,
         action: &TAction,
         metadata: &MessageData,
         context: &mut impl HandlerContext,
-    ) -> StateTransition<TAction> {
-        self.inner.handle(action, metadata, context)
+    ) -> ActorTransition<Self::State, TAction> {
+        self.inner.handle(state, action, metadata, context)
     }
 }

@@ -47,31 +47,13 @@ where
     TAction: Action + Send + 'static,
     TRunner: TaskRunner<TAction>,
 {
-    main: TActor,
+    actor: TActor,
+    state: Option<TActor::State>,
     root_pid: ProcessId,
     next_pid: ProcessId,
     next_offset: MessageOffset,
     processes: HashMap<ProcessId, SyncProcess<TAction>>,
     task_runner: TRunner,
-}
-impl<TActor, TAction, TRunner> SyncScheduler<TActor, TAction, TRunner>
-where
-    TActor: Actor<TAction>,
-    TAction: Action + Send + 'static,
-    TRunner: TaskRunner<TAction>,
-{
-    pub fn new(main: TActor, runner: TRunner) -> Self {
-        let root_pid = ProcessId::default();
-        let next_pid = root_pid.next();
-        Self {
-            main,
-            root_pid,
-            next_pid,
-            task_runner: runner,
-            processes: Default::default(),
-            next_offset: Default::default(),
-        }
-    }
 }
 impl<TActor, TAction, TRunner> Scheduler for SyncScheduler<TActor, TAction, TRunner>
 where
@@ -80,7 +62,28 @@ where
     TRunner: TaskRunner<TAction>,
 {
     type Action = TAction;
-    fn dispatch(&mut self, action: Self::Action) {
+}
+impl<TActor, TAction, TRunner> SyncScheduler<TActor, TAction, TRunner>
+where
+    TActor: Actor<TAction>,
+    TAction: Action + Send + 'static,
+    TRunner: TaskRunner<TAction>,
+{
+    pub fn new(actor: TActor, runner: TRunner) -> Self {
+        let root_pid = ProcessId::default();
+        let next_pid = root_pid.next();
+        let initial_state = actor.init();
+        Self {
+            actor,
+            state: Some(initial_state),
+            root_pid,
+            next_pid,
+            task_runner: runner,
+            processes: Default::default(),
+            next_offset: Default::default(),
+        }
+    }
+    pub fn dispatch(&mut self, action: TAction) {
         let mut queue = VecDeque::default();
         queue.push_back((StateOperation::Send(self.root_pid, action), None));
         while let Some((operation, caller)) = queue.pop_front() {
@@ -100,9 +103,13 @@ where
                         next_pid: self.next_pid,
                     };
                     if pid == self.root_pid {
-                        let transition = self.main.handle(&action, &metadata, &mut context);
+                        let (updated_state, actions) = self
+                            .actor
+                            .handle(self.state.take().unwrap(), &action, &metadata, &mut context)
+                            .into_parts();
+                        self.state.replace(updated_state);
                         queue.extend(
-                            transition
+                            actions
                                 .into_iter()
                                 .map(|operation| (operation, Some((metadata.offset, pid)))),
                         );

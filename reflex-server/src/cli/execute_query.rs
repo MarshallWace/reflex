@@ -82,6 +82,7 @@ where
     TLoader: Fn(&str, &Path) -> Option<Result<T, String>> + 'static,
     TMiddleware: Actor<TAction> + Send + 'static,
     THttpMiddleware: HttpMiddleware<THttpPre, THttpPost>,
+    TMiddleware::State: Send,
     THttpPre: Future<Output = Request<Body>>,
     THttpPost: Future<Output = Response<Body>>,
     TAction: Action + SerializableAction + GraphQlWebServerAction<T> + Send + 'static,
@@ -159,15 +160,14 @@ where
     let response = {
         let mut http_middleware = http_middleware;
         let request = http_middleware.pre(request).await;
-        let response = app.handle_http_request(request).await;
+        let response = app.handle_graphql_http_request(request).await;
         let response = http_middleware.post(response).await;
         response
     };
     let status = response.status();
-    let body = response.into_body();
-    let bytes = hyper::body::to_bytes(body)
+    let bytes = hyper::body::to_bytes(response.into_body())
         .await
-        .with_context(|| anyhow!("Invalid response body"))?;
+        .with_context(|| anyhow!("Invalid response encoding"))?;
     let response = String::from_utf8(bytes.into_iter().collect())
         .with_context(|| anyhow!("Invalid response encoding"))?;
     if status.is_success() {

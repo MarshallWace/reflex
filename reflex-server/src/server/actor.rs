@@ -7,7 +7,8 @@ use reflex::{
     stdlib::Stdlib,
 };
 use reflex_dispatcher::{
-    compose_actors, Action, Actor, ChainedActor, HandlerContext, MessageData, StateTransition,
+    compose_actors, Action, Actor, ActorTransition, ChainedActor, ChainedActorState,
+    HandlerContext, MessageData,
 };
 use reflex_graphql::{stdlib::Stdlib as GraphQlStdlib, GraphQlOperationPayload};
 use reflex_json::JsonValue;
@@ -203,12 +204,29 @@ where
     TOperationMetricLabels: Fn(Option<&str>, &GraphQlOperationPayload) -> Vec<(String, String)>,
     TAction: ServerAction<T> + Send + 'static,
 {
+    type State = ChainedActorState<
+        TAction,
+        ChainedActor<
+            TAction,
+            HttpGraphQlServer<T, TFactory, TTransformHttp, THttpMetricLabels>,
+            WebSocketGraphQlServer<T, TFactory, TTransformWs, TConnectionMetricLabels>,
+        >,
+        ChainedActor<
+            TAction,
+            GraphQlServer<T, TFactory, TAllocator, TOperationMetricLabels>,
+            RuntimeActor<T, TFactory, TAllocator, TAction>,
+        >,
+    >;
+    fn init(&self) -> Self::State {
+        self.inner.init()
+    }
     fn handle(
-        &mut self,
+        &self,
+        state: Self::State,
         action: &TAction,
         metadata: &MessageData,
         context: &mut impl HandlerContext,
-    ) -> StateTransition<TAction> {
-        self.inner.handle(action, metadata, context)
+    ) -> ActorTransition<Self::State, TAction> {
+        self.inner.handle(state, action, metadata, context)
     }
 }

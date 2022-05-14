@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use std::{iter::once, time::Instant};
+use std::{iter::once, marker::PhantomData, time::Instant};
 
 use metrics::{
     counter, decrement_gauge, describe_counter, describe_gauge, histogram, increment_counter,
@@ -12,8 +12,8 @@ use reflex::{
     stdlib::Stdlib,
 };
 use reflex_dispatcher::{
-    Action, Actor, HandlerContext, InboundAction, MessageData, OutboundAction, StateOperation,
-    StateTransition,
+    Action, Actor, ActorTransition, HandlerContext, InboundAction, MessageData, OutboundAction,
+    StateOperation, StateTransition,
 };
 use reflex_graphql::{
     graphql_variables_are_equal, stdlib::Stdlib as GraphQlStdlib, GraphQlOperationPayload,
@@ -87,9 +87,9 @@ where
 {
     factory: TFactory,
     allocator: TAllocator,
-    state: GraphQlServerState<T>,
     metric_names: GraphQlServerMetricNames,
     get_operation_metric_labels: TMetricLabels,
+    _expression: PhantomData<T>,
 }
 impl<T, TFactory, TAllocator, TMetricLabels> GraphQlServer<T, TFactory, TAllocator, TMetricLabels>
 where
@@ -110,12 +110,12 @@ where
             allocator,
             metric_names: metric_names.init(),
             get_operation_metric_labels,
-            state: Default::default(),
+            _expression: Default::default(),
         }
     }
 }
 
-struct GraphQlServerState<T: Expression> {
+pub struct GraphQlServerState<T: Expression> {
     operations: Vec<GraphQlOperationState<T>>,
 }
 impl<T: Expression> Default for GraphQlServerState<T> {
@@ -179,26 +179,33 @@ where
     TMetricLabels: Fn(Option<&str>, &GraphQlOperationPayload) -> Vec<(String, String)>,
     TAction: GraphQlServerAction<T>,
 {
+    type State = GraphQlServerState<T>;
+    fn init(&self) -> Self::State {
+        Default::default()
+    }
     fn handle(
-        &mut self,
+        &self,
+        state: Self::State,
         action: &TAction,
         metadata: &MessageData,
         context: &mut impl HandlerContext,
-    ) -> StateTransition<TAction> {
-        if let Some(action) = action.match_type() {
-            self.handle_graphql_subscribe(action, metadata, context)
+    ) -> ActorTransition<Self::State, TAction> {
+        let mut state = state;
+        let actions = if let Some(action) = action.match_type() {
+            self.handle_graphql_subscribe(&mut state, action, metadata, context)
         } else if let Some(action) = action.match_type() {
-            self.handle_graphql_unsubscribe(action, metadata, context)
+            self.handle_graphql_unsubscribe(&mut state, action, metadata, context)
         } else if let Some(action) = action.match_type() {
-            self.handle_graphql_modify(action, metadata, context)
+            self.handle_graphql_modify(&mut state, action, metadata, context)
         } else if let Some(action) = action.match_type() {
-            self.handle_graphql_emit(action, metadata, context)
+            self.handle_graphql_emit(&mut state, action, metadata, context)
         } else if let Some(action) = action.match_type() {
-            self.handle_query_emit(action, metadata, context)
+            self.handle_query_emit(&mut state, action, metadata, context)
         } else {
             None
         }
-        .unwrap_or_default()
+        .unwrap_or_default();
+        ActorTransition::new(state, actions)
     }
 }
 impl<T, TFactory, TAllocator, TMetricLabels> GraphQlServer<T, TFactory, TAllocator, TMetricLabels>
@@ -210,7 +217,8 @@ where
     TMetricLabels: Fn(Option<&str>, &GraphQlOperationPayload) -> Vec<(String, String)>,
 {
     fn handle_graphql_subscribe<TAction>(
-        &mut self,
+        &self,
+        state: &mut GraphQlServerState<T>,
         action: &GraphQlServerSubscribeAction<T>,
         _metadata: &MessageData,
         context: &mut impl HandlerContext,
@@ -276,8 +284,7 @@ where
                     0,
                     &metric_labels
                 );
-                if let Some(existing_entry) = self
-                    .state
+                if let Some(existing_entry) = state
                     .operations
                     .iter_mut()
                     .find(|entry| entry.query.id() == query.id())
@@ -305,7 +312,7 @@ where
                             .map(|(key, value)| (String::from(key), value.clone())),
                         None,
                     );
-                    self.state.operations.push(GraphQlOperationState {
+                    state.operations.push(GraphQlOperationState {
                         operation: sanitized_operation,
                         query: query.clone(),
                         result: None,
@@ -332,7 +339,8 @@ where
         }
     }
     fn handle_graphql_unsubscribe<TAction>(
-        &mut self,
+        &self,
+        state: &mut GraphQlServerState<T>,
         action: &GraphQlServerUnsubscribeAction<T>,
         _metadata: &MessageData,
         context: &mut impl HandlerContext,
@@ -344,8 +352,7 @@ where
             subscription_id,
             _expression,
         } = action;
-        let (operation_index, subscription_index, existing_operation_state) = self
-            .state
+        let (operation_index, subscription_index, existing_operation_state) = state
             .operations
             .iter_mut()
             .enumerate()
@@ -368,7 +375,7 @@ where
         if has_remaining_subscriptions {
             return None;
         }
-        let removed_operation_state = self.state.operations.remove(operation_index);
+        let removed_operation_state = state.operations.remove(operation_index);
         Some(StateTransition::new(Some(StateOperation::Send(
             context.pid(),
             QueryUnsubscribeAction {
@@ -378,7 +385,8 @@ where
         ))))
     }
     fn handle_graphql_modify<TAction>(
-        &mut self,
+        &self,
+        state: &mut GraphQlServerState<T>,
         action: &GraphQlServerModifyAction<T>,
         _metadata: &MessageData,
         context: &mut impl HandlerContext,
@@ -395,8 +403,7 @@ where
             variables,
             _expression: _,
         } = action;
-        let (operation_index, subscription_index, updated_operation) = self
-            .state
+        let (operation_index, subscription_index, updated_operation) = state
             .operations
             .iter()
             .enumerate()
@@ -462,11 +469,11 @@ where
                 ),
             ])),
             Ok(query) => {
-                let existing_expression = &self.state.operations[operation_index].query;
+                let existing_expression = &state.operations[operation_index].query;
                 if existing_expression.id() == query.id() {
                     None
                 } else {
-                    let existing_subscription = self.state.operations[operation_index]
+                    let existing_subscription = state.operations[operation_index]
                         .subscriptions
                         .remove(subscription_index);
                     let GraphQlSubscriptionState {
@@ -491,14 +498,10 @@ where
                         1.0,
                         &metric_labels
                     );
-                    if self.state.operations[operation_index]
-                        .subscriptions
-                        .is_empty()
-                    {
-                        self.state.operations.remove(operation_index);
+                    if state.operations[operation_index].subscriptions.is_empty() {
+                        state.operations.remove(operation_index);
                     }
-                    if let Some(existing_entry) = self
-                        .state
+                    if let Some(existing_entry) = state
                         .operations
                         .iter_mut()
                         .find(|entry| entry.query.id() == query.id())
@@ -518,7 +521,7 @@ where
                             .into(),
                         ))))
                     } else {
-                        self.state.operations.push(GraphQlOperationState {
+                        state.operations.push(GraphQlOperationState {
                             operation: updated_operation,
                             query: query.clone(),
                             result: None,
@@ -549,7 +552,8 @@ where
         }
     }
     fn handle_query_emit<TAction>(
-        &mut self,
+        &self,
+        state: &mut GraphQlServerState<T>,
         action: &QueryEmitAction<T>,
         _metadata: &MessageData,
         context: &mut impl HandlerContext,
@@ -557,8 +561,7 @@ where
     where
         TAction: Action + OutboundAction<GraphQlServerEmitAction<T>>,
     {
-        let updated_queries = self
-            .state
+        let updated_queries = state
             .operations
             .iter_mut()
             .map(|connection| {
@@ -601,7 +604,8 @@ where
         Some(StateTransition::new(actions))
     }
     fn handle_graphql_emit<TAction>(
-        &mut self,
+        &self,
+        state: &mut GraphQlServerState<T>,
         action: &GraphQlServerEmitAction<T>,
         _metadata: &MessageData,
         _context: &mut impl HandlerContext,
@@ -616,7 +620,7 @@ where
             subscription_id,
             result,
         } = action;
-        let (metric_labels, duration) = self.state.operations.iter_mut().find_map(|operation| {
+        let (metric_labels, duration) = state.operations.iter_mut().find_map(|operation| {
             operation
                 .subscriptions
                 .iter_mut()

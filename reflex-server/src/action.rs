@@ -877,19 +877,3 @@ impl<'a, T: Expression> From<&'a ServerCliAction<T>> for Option<&'a InitHttpServ
         Option::<&'a InitAction>::from(value).and_then(|value| value.into())
     }
 }
-
-impl<T: Expression> From<InitRuntimeAction> for ServerCliAction<T> {
-    fn from(value: InitRuntimeAction) -> Self {
-        InitAction::from(value).into()
-    }
-}
-impl<T: Expression> From<ServerCliAction<T>> for Option<InitRuntimeAction> {
-    fn from(value: ServerCliAction<T>) -> Self {
-        Option::<InitAction>::from(value).and_then(|value| value.into())
-    }
-}
-impl<'a, T: Expression> From<&'a ServerCliAction<T>> for Option<&'a InitRuntimeAction> {
-    fn from(value: &'a ServerCliAction<T>) -> Self {
-        Option::<&'a InitAction>::from(value).and_then(|value| value.into())
-    }
-}

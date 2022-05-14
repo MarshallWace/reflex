@@ -14,8 +14,8 @@ use reflex::{
     lang::ValueTerm,
 };
 use reflex_dispatcher::{
-    Action, Actor, HandlerContext, InboundAction, MessageData, OperationStream, OutboundAction,
-    ProcessId, StateOperation, StateTransition,
+    Action, Actor, ActorTransition, HandlerContext, InboundAction, MessageData, OperationStream,
+    OutboundAction, ProcessId, StateOperation, StateTransition,
 };
 use reflex_runtime::{
     action::effect::{EffectEmitAction, EffectSubscribeAction, EffectUnsubscribeAction},
@@ -48,7 +48,6 @@ where
 {
     factory: TFactory,
     allocator: TAllocator,
-    state: TimeoutHandlerState,
     _expression: PhantomData<T>,
 }
 impl<T, TFactory, TAllocator> TimeoutHandler<T, TFactory, TAllocator>
@@ -61,14 +60,13 @@ where
         Self {
             factory,
             allocator,
-            state: Default::default(),
             _expression: Default::default(),
         }
     }
 }
 
 #[derive(Default)]
-struct TimeoutHandlerState {
+pub struct TimeoutHandlerState {
     tasks: HashMap<StateToken, ProcessId>,
 }
 
@@ -79,20 +77,27 @@ where
     TAllocator: AsyncHeapAllocator<T>,
     TAction: TimeoutHandlerAction<T> + Send + 'static,
 {
+    type State = TimeoutHandlerState;
+    fn init(&self) -> Self::State {
+        Default::default()
+    }
     fn handle(
-        &mut self,
+        &self,
+        state: Self::State,
         action: &TAction,
         metadata: &MessageData,
         context: &mut impl HandlerContext,
-    ) -> StateTransition<TAction> {
-        if let Some(action) = action.match_type() {
-            self.handle_effect_subscribe(action, metadata, context)
+    ) -> ActorTransition<Self::State, TAction> {
+        let mut state = state;
+        let actions = if let Some(action) = action.match_type() {
+            self.handle_effect_subscribe(&mut state, action, metadata, context)
         } else if let Some(action) = action.match_type() {
-            self.handle_effect_unsubscribe(action, metadata, context)
+            self.handle_effect_unsubscribe(&mut state, action, metadata, context)
         } else {
             None
         }
-        .unwrap_or_default()
+        .unwrap_or_default();
+        ActorTransition::new(state, actions)
     }
 }
 impl<T, TFactory, TAllocator> TimeoutHandler<T, TFactory, TAllocator>
@@ -102,7 +107,8 @@ where
     TAllocator: AsyncHeapAllocator<T>,
 {
     fn handle_effect_subscribe<TAction>(
-        &mut self,
+        &self,
+        state: &mut TimeoutHandlerState,
         action: &EffectSubscribeAction<T>,
         _metadata: &MessageData,
         context: &mut impl HandlerContext,
@@ -132,7 +138,7 @@ where
                             None,
                         )),
                         Some(duration) => {
-                            if let Entry::Vacant(entry) = self.state.tasks.entry(state_token) {
+                            if let Entry::Vacant(entry) = state.tasks.entry(state_token) {
                                 let (task_pid, task) = create_timeout_task(
                                     state_token,
                                     duration,
@@ -187,7 +193,8 @@ where
         ))
     }
     fn handle_effect_unsubscribe<TAction>(
-        &mut self,
+        &self,
+        state: &mut TimeoutHandlerState,
         action: &EffectUnsubscribeAction<T>,
         _metadata: &MessageData,
         _context: &mut impl HandlerContext,
@@ -203,7 +210,7 @@ where
             return None;
         }
         let unsubscribe_actions = effects.iter().filter_map(|effect| {
-            if let Entry::Occupied(entry) = self.state.tasks.entry(effect.id()) {
+            if let Entry::Occupied(entry) = state.tasks.entry(effect.id()) {
                 let pid = entry.remove();
                 Some(StateOperation::Kill(pid))
             } else {

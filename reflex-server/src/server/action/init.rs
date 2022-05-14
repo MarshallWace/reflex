@@ -1,12 +1,8 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use std::{
-    net::SocketAddr,
-    time::{Duration, SystemTime},
-};
+use std::{net::SocketAddr, time::Duration};
 
-use chrono::{DateTime, SecondsFormat, Utc};
 use reflex_dispatcher::{Action, NamedAction, SerializableAction, SerializedAction};
 use reflex_json::{JsonMap, JsonValue};
 
@@ -18,7 +14,6 @@ pub enum InitAction {
     OpenTelemetry(InitOpenTelemetryAction),
     GraphRoot(InitGraphRootAction),
     HttpServer(InitHttpServerAction),
-    Runtime(InitRuntimeAction),
 }
 impl Action for InitAction {}
 impl NamedAction for InitAction {
@@ -28,7 +23,6 @@ impl NamedAction for InitAction {
             Self::OpenTelemetry(action) => action.name(),
             Self::GraphRoot(action) => action.name(),
             Self::HttpServer(action) => action.name(),
-            Self::Runtime(action) => action.name(),
         }
     }
 }
@@ -39,7 +33,6 @@ impl SerializableAction for InitAction {
             Self::OpenTelemetry(action) => action.serialize(),
             Self::GraphRoot(action) => action.serialize(),
             Self::HttpServer(action) => action.serialize(),
-            Self::Runtime(action) => action.serialize(),
         }
     }
 }
@@ -127,28 +120,6 @@ impl<'a> From<&'a InitAction> for Option<&'a InitHttpServerAction> {
     fn from(value: &'a InitAction) -> Self {
         match value {
             InitAction::HttpServer(value) => Some(value),
-            _ => None,
-        }
-    }
-}
-
-impl From<InitRuntimeAction> for InitAction {
-    fn from(value: InitRuntimeAction) -> Self {
-        Self::Runtime(value)
-    }
-}
-impl From<InitAction> for Option<InitRuntimeAction> {
-    fn from(value: InitAction) -> Self {
-        match value {
-            InitAction::Runtime(value) => Some(value),
-            _ => None,
-        }
-    }
-}
-impl<'a> From<&'a InitAction> for Option<&'a InitRuntimeAction> {
-    fn from(value: &'a InitAction) -> Self {
-        match value {
-            InitAction::Runtime(value) => Some(value),
             _ => None,
         }
     }
@@ -259,27 +230,4 @@ impl SerializableAction for InitHttpServerAction {
             ("port", JsonValue::from(self.address.port())),
         ])
     }
-}
-
-#[derive(Clone, Debug)]
-pub struct InitRuntimeAction {
-    pub timestamp: SystemTime,
-}
-impl Action for InitRuntimeAction {}
-impl NamedAction for InitRuntimeAction {
-    fn name(&self) -> &'static str {
-        "InitRuntimeAction"
-    }
-}
-impl SerializableAction for InitRuntimeAction {
-    fn serialize(&self) -> SerializedAction {
-        SerializedAction::from_iter([(
-            "timestamp",
-            JsonValue::String(format_utc_timestamp(self.timestamp)),
-        )])
-    }
-}
-
-fn format_utc_timestamp(timestamp: SystemTime) -> String {
-    DateTime::<Utc>::from(timestamp).to_rfc3339_opts(SecondsFormat::Millis, true)
 }

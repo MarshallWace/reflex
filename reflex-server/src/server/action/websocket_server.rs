@@ -167,7 +167,7 @@ impl Clone for WebSocketServerConnectAction {
 impl Action for WebSocketServerConnectAction {}
 impl NamedAction for WebSocketServerConnectAction {
     fn name(&self) -> &'static str {
-        "WebSocketGraphQlServerConnectAction"
+        "WebSocketServerConnectAction"
     }
 }
 impl SerializableAction for WebSocketServerConnectAction {
@@ -187,7 +187,7 @@ pub struct WebSocketServerReceiveAction {
 impl Action for WebSocketServerReceiveAction {}
 impl NamedAction for WebSocketServerReceiveAction {
     fn name(&self) -> &'static str {
-        "WebSocketGraphQlServerReceiveAction"
+        "WebSocketServerReceiveAction"
     }
 }
 impl SerializableAction for WebSocketServerReceiveAction {
@@ -209,7 +209,7 @@ pub struct WebSocketServerSendAction {
 }
 impl NamedAction for WebSocketServerSendAction {
     fn name(&self) -> &'static str {
-        "WebSocketGraphQlServerSendAction"
+        "WebSocketServerSendAction"
     }
 }
 impl Action for WebSocketServerSendAction {}
@@ -255,7 +255,7 @@ pub struct WebSocketServerDisconnectAction {
 impl Action for WebSocketServerDisconnectAction {}
 impl NamedAction for WebSocketServerDisconnectAction {
     fn name(&self) -> &'static str {
-        "WebSocketGraphQlServerDisconnectAction"
+        "WebSocketServerDisconnectAction"
     }
 }
 impl SerializableAction for WebSocketServerDisconnectAction {
@@ -274,7 +274,7 @@ pub struct WebSocketServerThrottleTimeoutAction {
 impl Action for WebSocketServerThrottleTimeoutAction {}
 impl NamedAction for WebSocketServerThrottleTimeoutAction {
     fn name(&self) -> &'static str {
-        "WebSocketGraphQlServerThrottleTimeoutAction"
+        "WebSocketServerThrottleTimeoutAction"
     }
 }
 impl SerializableAction for WebSocketServerThrottleTimeoutAction {

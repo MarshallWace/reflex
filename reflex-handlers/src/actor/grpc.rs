@@ -4,6 +4,7 @@
 use std::{
     collections::{hash_map::Entry, HashMap},
     iter::once,
+    marker::PhantomData,
     pin::Pin,
     str::FromStr,
     sync::{Arc, Mutex},
@@ -24,8 +25,8 @@ use reflex::{
     stdlib::Stdlib,
 };
 use reflex_dispatcher::{
-    Action, Actor, HandlerContext, InboundAction, MessageData, OperationStream, OutboundAction,
-    ProcessId, StateOperation, StateTransition,
+    Action, Actor, ActorTransition, HandlerContext, InboundAction, MessageData, OperationStream,
+    OutboundAction, ProcessId, StateOperation, StateTransition,
 };
 use reflex_runtime::{
     action::effect::{EffectEmitAction, EffectSubscribeAction, EffectUnsubscribeAction},
@@ -132,7 +133,7 @@ where
     TService: GrpcService<TClient> + 'static,
     TClient: GrpcClient + 'static,
     TConfig: GrpcConfig + 'static,
-    TReconnect: ReconnectTimeout,
+    TReconnect: ReconnectTimeout + Send,
 {
     services: HashMap<GrpcServiceId, TService>,
     factory: TFactory,
@@ -140,7 +141,8 @@ where
     reconnect_timeout: TReconnect,
     config: TConfig,
     metric_names: GrpcHandlerMetricNames,
-    state: GrpcHandlerState<T, TService, TClient>,
+    _expression: PhantomData<T>,
+    _client: PhantomData<TClient>,
 }
 impl<T, TFactory, TAllocator, TService, TClient, TConfig, TReconnect>
     GrpcHandler<T, TFactory, TAllocator, TService, TClient, TConfig, TReconnect>
@@ -151,7 +153,7 @@ where
     TService: GrpcService<TClient> + 'static,
     TClient: GrpcClient + 'static,
     TConfig: GrpcConfig,
-    TReconnect: ReconnectTimeout,
+    TReconnect: ReconnectTimeout + Send,
 {
     pub fn new(
         services: impl IntoIterator<Item = TService>,
@@ -171,12 +173,13 @@ where
             reconnect_timeout,
             config,
             metric_names: metric_names.init(),
-            state: Default::default(),
+            _expression: Default::default(),
+            _client: Default::default(),
         }
     }
 }
 
-struct GrpcHandlerState<T, TService, TClient>
+pub struct GrpcHandlerState<T, TService, TClient>
 where
     T: AsyncExpression + Rewritable<T> + Reducible<T>,
     TService: GrpcService<TClient> + 'static,
@@ -469,27 +472,34 @@ where
     TService: GrpcService<TClient> + 'static,
     TClient: GrpcClient + 'static,
     TConfig: GrpcConfig,
-    TReconnect: ReconnectTimeout,
+    TReconnect: ReconnectTimeout + Send,
     TAction: GrpcHandlerAction<T> + Send + 'static,
 {
+    type State = GrpcHandlerState<T, TService, TClient>;
+    fn init(&self) -> Self::State {
+        Default::default()
+    }
     fn handle(
-        &mut self,
+        &self,
+        state: Self::State,
         action: &TAction,
         metadata: &MessageData,
         context: &mut impl HandlerContext,
-    ) -> StateTransition<TAction> {
-        if let Some(action) = action.match_type() {
-            self.handle_effect_subscribe(action, metadata, context)
+    ) -> ActorTransition<Self::State, TAction> {
+        let mut state = state;
+        let actions = if let Some(action) = action.match_type() {
+            self.handle_effect_subscribe(&mut state, action, metadata, context)
         } else if let Some(action) = action.match_type() {
-            self.handle_effect_unsubscribe(action, metadata, context)
+            self.handle_effect_unsubscribe(&mut state, action, metadata, context)
         } else if let Some(action) = action.match_type() {
-            self.handle_grpc_handler_connect_success(action, metadata, context)
+            self.handle_grpc_handler_connect_success(&mut state, action, metadata, context)
         } else if let Some(action) = action.match_type() {
-            self.handle_grpc_handler_connect_error(action, metadata, context)
+            self.handle_grpc_handler_connect_error(&mut state, action, metadata, context)
         } else {
             None
         }
-        .unwrap_or_default()
+        .unwrap_or_default();
+        ActorTransition::new(state, actions)
     }
 }
 impl<T, TFactory, TAllocator, TService, TClient, TConfig, TReconnect>
@@ -501,10 +511,11 @@ where
     TService: GrpcService<TClient> + 'static,
     TClient: GrpcClient + 'static,
     TConfig: GrpcConfig,
-    TReconnect: ReconnectTimeout,
+    TReconnect: ReconnectTimeout + Send,
 {
     fn handle_effect_subscribe<TAction>(
-        &mut self,
+        &self,
+        state: &mut GrpcHandlerState<T, TService, TClient>,
         action: &EffectSubscribeAction<T>,
         _metadata: &MessageData,
         context: &mut impl HandlerContext,
@@ -530,6 +541,7 @@ where
                 let state_token = effect.id();
                 match parse_grpc_effect_args(effect, &self.factory).and_then(|args| {
                     self.subscribe_grpc_operation(
+                        state,
                         effect,
                         args.protocol,
                         args.url,
@@ -589,7 +601,8 @@ where
         ))
     }
     fn handle_effect_unsubscribe<TAction>(
-        &mut self,
+        &self,
+        state: &mut GrpcHandlerState<T, TService, TClient>,
         action: &EffectUnsubscribeAction<T>,
         _metadata: &MessageData,
         _context: &mut impl HandlerContext,
@@ -607,9 +620,9 @@ where
         let actions = effects
             .iter()
             .filter_map(|effect| {
-                if self.state.active_requests.contains_key(&effect.id()) {
+                if state.active_requests.contains_key(&effect.id()) {
                     let (unsubscribe_action, disconnect_action) =
-                        self.unsubscribe_grpc_operation(effect)?;
+                        self.unsubscribe_grpc_operation(state, effect)?;
                     Some((unsubscribe_action, disconnect_action))
                 } else {
                     None
@@ -619,7 +632,8 @@ where
         Some(StateTransition::new(actions))
     }
     fn handle_grpc_handler_connect_success<TAction>(
-        &mut self,
+        &self,
+        state: &mut GrpcHandlerState<T, TService, TClient>,
         action: &GrpcHandlerConnectSuccessAction,
         _metadata: &MessageData,
         context: &mut impl HandlerContext,
@@ -632,8 +646,7 @@ where
             url: _,
         } = action;
         let connection_id = *connection_id;
-        let connection_state = self
-            .state
+        let connection_state = state
             .active_connections
             .get_mut(&GrpcConnectionId(connection_id))?;
         let (client, pending_operations) = match &mut connection_state.connection {
@@ -687,7 +700,8 @@ where
         ))
     }
     fn handle_grpc_handler_connect_error<TAction>(
-        &mut self,
+        &self,
+        state: &mut GrpcHandlerState<T, TService, TClient>,
         action: &GrpcHandlerConnectErrorAction,
         _metadata: &MessageData,
         context: &mut impl HandlerContext,
@@ -706,7 +720,7 @@ where
             error: _,
         } = action;
         let connection_id = GrpcConnectionId(*connection_id);
-        let connection_state = self.state.active_connections.get_mut(&connection_id)?;
+        let connection_state = state.active_connections.get_mut(&connection_id)?;
         let (connection_pid, connection) = match &mut connection_state.connection {
             GrpcConnection::Connected(..) | GrpcConnection::Error(..) => None,
             GrpcConnection::Pending(connection_pid, connection) => {
@@ -760,7 +774,8 @@ where
         }
     }
     fn subscribe_grpc_operation<TAction>(
-        &mut self,
+        &self,
+        state: &mut GrpcHandlerState<T, TService, TClient>,
         effect: &Signal<T>,
         protocol: GrpcServiceId,
         url: GrpcServiceUrl,
@@ -787,8 +802,7 @@ where
             .get(&protocol)
             .cloned()
             .ok_or_else(|| format!("Unrecognized gRPC service identifier: {}", protocol))?;
-        let connection_id = match self
-            .state
+        let connection_id = match state
             .active_connection_mappings
             .entry((protocol.clone(), url.clone()))
         {
@@ -808,71 +822,70 @@ where
             1.0,
             &metric_labels
         );
-        self.state.active_requests.insert(
+        state.active_requests.insert(
             effect.id(),
             GrpcRequestState {
                 connection_id,
                 metric_labels,
             },
         );
-        let (connection_state, connect_task) =
-            match self.state.active_connections.entry(connection_id) {
-                Entry::Occupied(entry) => (entry.into_mut(), None),
-                Entry::Vacant(entry) => {
-                    let client = Arc::new(Mutex::new(None));
-                    let connection = create_grpc_connect_task(
-                        connection_id,
-                        service.clone(),
-                        &self.config,
-                        url.clone(),
-                        client.clone(),
-                        context,
-                        None,
-                    );
-                    let (connection, connect_action) = match connection {
-                        Ok((task_pid, connect_task)) => (
-                            GrpcConnection::Pending(
-                                task_pid,
-                                PendingGrpcConnection {
-                                    client,
-                                    pending_operations: Vec::new(),
-                                    connection_attempt: 0,
-                                },
-                            ),
-                            connect_task,
+        let (connection_state, connect_task) = match state.active_connections.entry(connection_id) {
+            Entry::Occupied(entry) => (entry.into_mut(), None),
+            Entry::Vacant(entry) => {
+                let client = Arc::new(Mutex::new(None));
+                let connection = create_grpc_connect_task(
+                    connection_id,
+                    service.clone(),
+                    &self.config,
+                    url.clone(),
+                    client.clone(),
+                    context,
+                    None,
+                );
+                let (connection, connect_action) = match connection {
+                    Ok((task_pid, connect_task)) => (
+                        GrpcConnection::Pending(
+                            task_pid,
+                            PendingGrpcConnection {
+                                client,
+                                pending_operations: Vec::new(),
+                                connection_attempt: 0,
+                            },
                         ),
-                        Err(message) => {
-                            let error = create_error_message_expression(
-                                message.clone(),
-                                &self.factory,
-                                &self.allocator,
-                            );
-                            let error_task = StateOperation::Send(
-                                context.pid(),
-                                EffectEmitAction {
-                                    updates: vec![(effect.id(), StateUpdate::Value(error))],
-                                }
-                                .into(),
-                            );
-                            (GrpcConnection::Error(message), error_task)
-                        }
-                    };
-                    let metric_labels = [("url", String::from(url.as_str()))];
-                    increment_gauge!(
-                        self.metric_names.grpc_effect_connection_count,
-                        1.0,
-                        &metric_labels
-                    );
-                    let connection_state = entry.insert(GrpcConnectionState {
-                        service,
-                        protocol,
-                        url,
-                        operations: Default::default(),
-                        connection,
-                    });
-                    (connection_state, Some(connect_action))
-                }
-            };
+                        connect_task,
+                    ),
+                    Err(message) => {
+                        let error = create_error_message_expression(
+                            message.clone(),
+                            &self.factory,
+                            &self.allocator,
+                        );
+                        let error_task = StateOperation::Send(
+                            context.pid(),
+                            EffectEmitAction {
+                                updates: vec![(effect.id(), StateUpdate::Value(error))],
+                            }
+                            .into(),
+                        );
+                        (GrpcConnection::Error(message), error_task)
+                    }
+                };
+                let metric_labels = [("url", String::from(url.as_str()))];
+                increment_gauge!(
+                    self.metric_names.grpc_effect_connection_count,
+                    1.0,
+                    &metric_labels
+                );
+                let connection_state = entry.insert(GrpcConnectionState {
+                    service,
+                    protocol,
+                    url,
+                    operations: Default::default(),
+                    connection,
+                });
+                (connection_state, Some(connect_action))
+            }
+        };
         let operation = PendingGrpcOperation {
             effect_id: effect.id(),
             request,
@@ -915,7 +928,8 @@ where
         Ok((connect_task, subscribe_task))
     }
     fn unsubscribe_grpc_operation<TAction>(
-        &mut self,
+        &self,
+        state: &mut GrpcHandlerState<T, TService, TClient>,
         effect: &Signal<T>,
     ) -> Option<(
         Option<StateOperation<TAction>>,
@@ -927,14 +941,14 @@ where
         let GrpcRequestState {
             connection_id,
             metric_labels,
-        } = self.state.active_requests.remove(&effect.id())?;
+        } = state.active_requests.remove(&effect.id())?;
         decrement_gauge!(
             self.metric_names.grpc_effect_active_request_count,
             1.0,
             &metric_labels
         );
         let (unsubscribe_action, is_final_subscription) = {
-            let connection_state = self.state.active_connections.get_mut(&connection_id)?;
+            let connection_state = state.active_connections.get_mut(&connection_id)?;
             let operation_state = connection_state.operations.remove(&effect.id())?;
             let is_final_subscription = connection_state.operations.is_empty();
             let task_pid = match operation_state {
@@ -945,7 +959,7 @@ where
             (unsubscribe_action, is_final_subscription)
         };
         let disconnect_action = if is_final_subscription {
-            self.state
+            state
                 .active_connections
                 .remove(&connection_id)
                 .and_then(|connection_state| {
@@ -961,9 +975,7 @@ where
                         1.0,
                         &metric_labels
                     );
-                    self.state
-                        .active_connection_mappings
-                        .remove(&(protocol, url));
+                    state.active_connection_mappings.remove(&(protocol, url));
                     let connection_pid = connection.dispose();
                     connection_pid.map(StateOperation::Kill)
                 })
