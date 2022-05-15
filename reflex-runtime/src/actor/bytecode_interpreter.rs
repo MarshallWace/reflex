@@ -3,71 +3,29 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use std::{
     collections::{hash_map::Entry, HashMap},
-    hash::Hash,
     iter::once,
     marker::PhantomData,
     sync::Arc,
-    time::Instant,
 };
 
-use metrics::{describe_histogram, histogram, Unit};
 use reflex::{
-    compiler::{
-        create_main_function, Compile, Compiler, CompilerMode, CompilerOptions, Instruction,
-        InstructionPointer, Program,
-    },
-    core::{
-        Applicable, Expression, ExpressionFactory, HeapAllocator, Reducible, Rewritable, SignalType,
-    },
-    hash::{hash_object, HashId},
+    compiler::{Compile, CompilerOptions, InstructionPointer, Program},
+    core::{Applicable, Expression, Reducible, Rewritable},
+    hash::HashId,
     interpreter::InterpreterOptions,
 };
 use reflex_dispatcher::{
     Action, Actor, ActorTransition, HandlerContext, InboundAction, MessageData, OutboundAction,
-    ProcessId, StateOperation, StateTransition, WorkerFactory,
+    ProcessId, StateOperation, StateTransition,
 };
 
 use crate::{
     action::evaluate::{EvaluateResultAction, EvaluateStartAction, EvaluateStopAction},
-    worker::bytecode_worker::{BytecodeWorker, BytecodeWorkerAction},
-    AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator, QueryEvaluationMode,
+    worker::bytecode_worker::{
+        BytecodeWorkerAction, BytecodeWorkerFactory, BytecodeWorkerMetricNames,
+    },
+    AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator,
 };
-
-#[derive(Clone, Copy, Debug)]
-pub struct BytecodeInterpreterMetricNames {
-    pub query_worker_compile_duration: &'static str,
-    pub query_worker_evaluate_duration: &'static str,
-    pub query_worker_gc_duration: &'static str,
-}
-impl BytecodeInterpreterMetricNames {
-    fn init(self) -> Self {
-        describe_histogram!(
-            self.query_worker_compile_duration,
-            Unit::Seconds,
-            "Worker query compilation duration (seconds)"
-        );
-        describe_histogram!(
-            self.query_worker_evaluate_duration,
-            Unit::Seconds,
-            "Worker query evaluation duration (seconds)"
-        );
-        describe_histogram!(
-            self.query_worker_gc_duration,
-            Unit::Seconds,
-            "Worker garbage collection duration (seconds)"
-        );
-        self
-    }
-}
-impl Default for BytecodeInterpreterMetricNames {
-    fn default() -> Self {
-        Self {
-            query_worker_compile_duration: "query_worker_compile_duration",
-            query_worker_evaluate_duration: "query_worker_evaluate_duration",
-            query_worker_gc_duration: "query_worker_gc_duration",
-        }
-    }
-}
 
 pub trait BytecodeInterpreterAction<T: Expression>:
     Action
@@ -101,7 +59,7 @@ where
     interpreter_options: InterpreterOptions,
     factory: TFactory,
     allocator: TAllocator,
-    metric_names: BytecodeInterpreterMetricNames,
+    metric_names: BytecodeWorkerMetricNames,
     _expression: PhantomData<T>,
 }
 impl<T, TFactory, TAllocator> BytecodeInterpreter<T, TFactory, TAllocator>
@@ -116,7 +74,7 @@ where
         interpreter_options: InterpreterOptions,
         factory: TFactory,
         allocator: TAllocator,
-        metric_names: BytecodeInterpreterMetricNames,
+        metric_names: BytecodeWorkerMetricNames,
     ) -> Self {
         Self {
             graph_root: Arc::new(graph_root),
@@ -207,47 +165,21 @@ where
             Entry::Vacant(entry) => {
                 let worker_pid = context.generate_pid();
                 entry.insert(worker_pid);
+
                 Some(StateTransition::new([
-                    StateOperation::Spawn(
+                    StateOperation::spawn(
                         worker_pid,
-                        WorkerFactory::new({
-                            let cache_key = *cache_key;
-                            let query = query.clone();
-                            let evaluation_mode = *evaluation_mode;
-                            let compiler_options = self.compiler_options;
-                            let interpreter_options = self.interpreter_options;
-                            let graph_root = self.graph_root.clone();
-                            let factory = self.factory.clone();
-                            let allocator = self.allocator.clone();
-                            let metric_names = self.metric_names;
-                            move || {
-                                let start_time = Instant::now();
-                                let graph_root = compile_graphql_query(
-                                    &query,
-                                    &query,
-                                    &graph_root,
-                                    evaluation_mode,
-                                    &compiler_options,
-                                    &factory,
-                                    &allocator,
-                                )
-                                .unwrap_or_else(create_compiler_error_program);
-                                let elapsed_time = start_time.elapsed();
-                                histogram!(
-                                    metric_names.query_worker_compile_duration,
-                                    elapsed_time.as_secs_f64()
-                                );
-                                BytecodeWorker {
-                                    cache_key,
-                                    graph_root,
-                                    interpreter_options,
-                                    factory,
-                                    allocator,
-                                    metric_names,
-                                    state: Default::default(),
-                                }
-                            }
-                        }),
+                        BytecodeWorkerFactory {
+                            cache_key: *cache_key,
+                            query: query.clone(),
+                            evaluation_mode: *evaluation_mode,
+                            compiler_options: self.compiler_options,
+                            interpreter_options: self.interpreter_options,
+                            graph_root: self.graph_root.clone(),
+                            factory: self.factory.clone(),
+                            allocator: self.allocator.clone(),
+                            metric_names: self.metric_names,
+                        },
                     ),
                     StateOperation::Send(worker_pid, action.clone().into()),
                 ]))
@@ -271,97 +203,4 @@ where
         let worker_pid = state.workers.remove(cache_key)?;
         Some(StateTransition::new(once(StateOperation::Kill(worker_pid))))
     }
-}
-
-pub fn compile_graphql_query<
-    T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
->(
-    query: &T,
-    operation_id: &impl Hash,
-    graph_root: &(Program, InstructionPointer),
-    evaluation_mode: QueryEvaluationMode,
-    compiler_options: &CompilerOptions,
-    factory: &impl ExpressionFactory<T>,
-    allocator: &impl HeapAllocator<T>,
-) -> Result<(Program, InstructionPointer), String> {
-    let (graph_factory, graph_factory_address) = graph_root;
-    let mut program = Compiler::new(*compiler_options, Some(graph_factory.clone())).compile(
-        query,
-        CompilerMode::Function,
-        factory,
-        allocator,
-    )?;
-    match evaluation_mode {
-        QueryEvaluationMode::Query => {
-            let entry_point = InstructionPointer::new(program.len());
-            let query_factory_address = InstructionPointer::new(graph_factory.len());
-            let graph_factory_address = *graph_factory_address;
-            let graph_factory_hash = get_compiled_function_hash(graph_factory_address, &program)?;
-            let query_factory_hash = get_compiled_function_hash(query_factory_address, &program)?;
-            program.extend(create_query_entry_point_function(
-                (graph_factory_address, graph_factory_hash),
-                (query_factory_address, query_factory_hash),
-                operation_id,
-            ));
-            Ok((program, entry_point))
-        }
-        QueryEvaluationMode::Standalone => {
-            Ok((program, InstructionPointer::new(graph_factory.len())))
-        }
-    }
-}
-
-fn create_query_entry_point_function(
-    graph_factory: (InstructionPointer, HashId),
-    query_factory: (InstructionPointer, HashId),
-    operation_id: &impl Hash,
-) -> Program {
-    let (graph_factory_address, graph_factory_hash) = graph_factory;
-    let (query_factory_address, query_factory_hash) = query_factory;
-    create_main_function([
-        Instruction::PushHash {
-            value: hash_object(operation_id),
-        },
-        Instruction::Call {
-            target_address: graph_factory_address,
-            target_hash: graph_factory_hash,
-            num_args: 0,
-        },
-        Instruction::Apply { num_args: 1 },
-        Instruction::Evaluate,
-        Instruction::Call {
-            target_address: query_factory_address,
-            target_hash: query_factory_hash,
-            num_args: 0,
-        },
-        Instruction::Apply { num_args: 1 },
-        Instruction::Evaluate,
-        Instruction::Return,
-    ])
-}
-
-fn create_compiler_error_program(message: String) -> (Program, InstructionPointer) {
-    let program = create_main_function([
-        Instruction::PushString { value: message },
-        Instruction::PushSignal {
-            signal_type: SignalType::Error,
-            num_args: 1,
-        },
-        Instruction::Return,
-    ]);
-    let entry_point = InstructionPointer::default();
-    (program, entry_point)
-}
-
-fn get_compiled_function_hash(
-    address: InstructionPointer,
-    program: &Program,
-) -> Result<HashId, String> {
-    program
-        .get(address)
-        .and_then(|instruction| match instruction {
-            &Instruction::Function { hash, .. } => Some(hash),
-            _ => None,
-        })
-        .ok_or_else(|| format!("Target address is not a function: {:x}", address))
 }

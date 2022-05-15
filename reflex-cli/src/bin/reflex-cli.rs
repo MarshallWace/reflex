@@ -27,12 +27,13 @@ use reflex_json::{JsonMap, JsonValue};
 use reflex_runtime::{
     action::{effect::*, evaluate::*, query::*, RuntimeAction},
     actor::{
-        bytecode_interpreter::{BytecodeInterpreter, BytecodeInterpreterMetricNames},
+        bytecode_interpreter::BytecodeInterpreter,
         evaluate_handler::{
             create_evaluate_effect, parse_evaluate_effect_result, EFFECT_TYPE_EVALUATE,
         },
         RuntimeActor, RuntimeMetricNames,
     },
+    worker::bytecode_worker::BytecodeWorkerMetricNames,
     AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator, QueryEvaluationMode,
     QueryInvalidationStrategy, StateUpdate,
 };
@@ -196,7 +197,7 @@ pub async fn main() -> Result<()> {
                             interpreter_options,
                             factory.clone(),
                             allocator,
-                            BytecodeInterpreterMetricNames::default(),
+                            BytecodeWorkerMetricNames::default(),
                         ),
                     ),
                     handlers,

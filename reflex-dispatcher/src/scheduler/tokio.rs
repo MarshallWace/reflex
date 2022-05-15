@@ -19,7 +19,7 @@ use tokio_util::sync::{PollSendError, PollSender};
 use crate::{
     utils::with_unsubscribe_callback::WithUnsubscribeCallback, Action, Actor, BoxedDisposeCallback,
     DisposeCallback, HandlerContext, MessageData, MessageOffset, ProcessId, Scheduler,
-    StateOperation, WorkerContext, WorkerFactory, WorkerMessageQueue,
+    StateOperation, Worker, WorkerContext, WorkerFactory, WorkerMessageQueue,
 };
 
 #[derive(Clone, Copy, Debug)]
@@ -411,7 +411,12 @@ impl<TAction> TokioWorker<TAction>
 where
     TAction: Action + Send + 'static,
 {
-    fn new(factory: WorkerFactory<TAction>, outbox: mpsc::Sender<TokioCommand<TAction>>) -> Self {
+    fn new(
+        factory: impl WorkerFactory<TAction, Worker = impl Worker<TAction> + Send + 'static>
+            + Send
+            + 'static,
+        outbox: mpsc::Sender<TokioCommand<TAction>>,
+    ) -> Self {
         let (inbox_tx, mut inbox_rx) = mpsc::channel(1024);
         Self {
             inbox: inbox_tx,

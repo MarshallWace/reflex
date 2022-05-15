@@ -35,9 +35,8 @@ use reflex_graphql::{
 };
 use reflex_json::JsonValue;
 use reflex_runtime::{
-    actor::bytecode_interpreter::{
-        BytecodeInterpreter, BytecodeInterpreterAction, BytecodeInterpreterMetricNames,
-    },
+    actor::bytecode_interpreter::{BytecodeInterpreter, BytecodeInterpreterAction},
+    worker::bytecode_worker::BytecodeWorkerMetricNames,
     AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator,
 };
 use uuid::Uuid;
@@ -95,7 +94,7 @@ impl<T: Expression, TAction> GraphQlWebServerAction<T> for TAction where
 #[derive(Default, Clone, Copy, Debug)]
 pub struct GraphQlWebServerMetricNames {
     pub server: ServerMetricNames,
-    pub interpreter: BytecodeInterpreterMetricNames,
+    pub interpreter: BytecodeWorkerMetricNames,
     pub scheduler: TokioSchedulerMetricNames,
 }
 

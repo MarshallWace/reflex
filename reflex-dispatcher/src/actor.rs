@@ -126,30 +126,77 @@ where
     }
 }
 
-struct FilteredWorker<TOuter, TInner>
-where
-    TOuter: Action + InboundAction<TInner> + OutboundAction<TInner>,
-    TInner: Action,
-{
-    worker: Box<dyn Worker<TInner> + Send + 'static>,
-    _outer: PhantomData<TOuter>,
-}
-impl<TOuter, TInner> FilteredWorker<TOuter, TInner>
-where
-    TOuter: Action + InboundAction<TInner> + OutboundAction<TInner>,
-    TInner: Action,
-{
-    fn new(worker: Box<dyn Worker<TInner> + Send + 'static>) -> Self {
-        Self {
-            worker,
-            _outer: Default::default(),
-        }
-    }
-}
-impl<TOuter, TInner> Worker<TOuter> for FilteredWorker<TOuter, TInner>
+struct FilteredWorkerFactory<TOuter, TInner, TFactory, TWorker>
 where
     TOuter: Action + InboundAction<TInner> + OutboundAction<TInner> + Send + 'static,
     TInner: Action + Send + 'static,
+    TFactory: WorkerFactory<TInner, Worker = TWorker> + Send + 'static,
+    TWorker: Worker<TInner> + Send + 'static,
+{
+    factory: TFactory,
+    _outer: PhantomData<TOuter>,
+    _inner: PhantomData<TInner>,
+    _worker: PhantomData<TWorker>,
+}
+impl<TOuter, TInner, TFactory, TWorker> FilteredWorkerFactory<TOuter, TInner, TFactory, TWorker>
+where
+    TOuter: Action + InboundAction<TInner> + OutboundAction<TInner> + Send + 'static,
+    TInner: Action + Send + 'static,
+    TFactory: WorkerFactory<TInner, Worker = TWorker> + Send + 'static,
+    TWorker: Worker<TInner> + Send + 'static,
+{
+    fn new(factory: TFactory) -> Self {
+        Self {
+            factory,
+            _outer: Default::default(),
+            _inner: Default::default(),
+            _worker: Default::default(),
+        }
+    }
+}
+impl<TOuter, TInner, TFactory, TWorker> WorkerFactory<TOuter>
+    for FilteredWorkerFactory<TOuter, TInner, TFactory, TWorker>
+where
+    TOuter: Action + InboundAction<TInner> + OutboundAction<TInner> + Send + 'static,
+    TInner: Action + Send + 'static,
+    TFactory: WorkerFactory<TInner, Worker = TWorker> + Send + 'static,
+    TWorker: Worker<TInner> + Send + 'static,
+{
+    type Worker = FilteredWorker<TOuter, TInner, TWorker>;
+    fn create(&self) -> Self::Worker {
+        FilteredWorker::new(self.factory.create())
+    }
+}
+
+struct FilteredWorker<TOuter, TInner, TWorker>
+where
+    TOuter: Action + InboundAction<TInner> + OutboundAction<TInner>,
+    TInner: Action,
+    TWorker: Worker<TInner>,
+{
+    worker: TWorker,
+    _outer: PhantomData<TOuter>,
+    _inner: PhantomData<TInner>,
+}
+impl<TOuter, TInner, TWorker> FilteredWorker<TOuter, TInner, TWorker>
+where
+    TOuter: Action + InboundAction<TInner> + OutboundAction<TInner>,
+    TInner: Action,
+    TWorker: Worker<TInner>,
+{
+    fn new(worker: TWorker) -> Self {
+        Self {
+            worker,
+            _outer: Default::default(),
+            _inner: Default::default(),
+        }
+    }
+}
+impl<TOuter, TInner, TWorker> Worker<TOuter> for FilteredWorker<TOuter, TInner, TWorker>
+where
+    TOuter: Action + InboundAction<TInner> + OutboundAction<TInner> + Send + 'static,
+    TInner: Action + Send + 'static,
+    TWorker: Worker<TInner>,
 {
     fn handle(
         &mut self,
@@ -207,9 +254,9 @@ where
                 ),
             )
         }
-        StateOperation::Spawn(pid, factory) => StateOperation::<TOuter>::Spawn(
+        StateOperation::Spawn(pid, factory) => StateOperation::<TOuter>::spawn(
             pid,
-            WorkerFactory::new(|| FilteredWorker::<TOuter, TInner>::new(factory.create())),
+            FilteredWorkerFactory::<TOuter, TInner, _, _>::new(factory),
         ),
         StateOperation::Kill(pid) => StateOperation::<TOuter>::Kill(pid),
     }

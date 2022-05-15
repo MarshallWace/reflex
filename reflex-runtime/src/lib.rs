@@ -11,7 +11,7 @@ use reflex::{
 
 pub mod action;
 pub mod actor;
-pub(crate) mod worker;
+pub mod worker;
 
 pub trait AsyncExpression: Expression + Send + 'static {}
 impl<T> AsyncExpression for T

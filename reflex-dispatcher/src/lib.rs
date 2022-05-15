@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use std::collections::VecDeque;
+use std::{collections::VecDeque, marker::PhantomData};
 
 use futures::{
     future::{self, AbortHandle, Abortable},
@@ -178,8 +178,19 @@ impl<S, T: Action> ActorTransition<S, T> {
 pub enum StateOperation<T: Action> {
     Send(ProcessId, T),
     Task(ProcessId, OperationStream<T>),
-    Spawn(ProcessId, WorkerFactory<T>),
+    Spawn(
+        ProcessId,
+        Box<dyn WorkerFactory<T, Worker = WorkerInstance<T>> + Send + 'static>,
+    ),
     Kill(ProcessId),
+}
+impl<T: Action + Send + 'static> StateOperation<T> {
+    pub fn spawn(
+        pid: ProcessId,
+        worker: impl WorkerFactory<T, Worker = impl Worker<T> + Send + 'static> + Send + 'static,
+    ) -> Self {
+        Self::Spawn(pid, Box::new(BoxedWorkerFactory::new(worker)))
+    }
 }
 
 pub type DisposeFuture = Box<dyn Future<Output = ()> + Send + Unpin + 'static>;
@@ -354,23 +365,70 @@ impl<T: Action> IntoIterator for WorkerTransition<T> {
     }
 }
 
-pub struct WorkerFactory<TAction: Action> {
-    factory: Box<dyn FnOnce() -> WorkerInstance<TAction> + Send + 'static>,
+pub trait WorkerFactory<TAction: Action + Send + 'static> {
+    type Worker: Worker<TAction>;
+    fn create(&self) -> Self::Worker;
 }
-impl<TAction: Action + Send + 'static> WorkerFactory<TAction> {
-    pub fn new<T: Worker<TAction> + Send + 'static>(
-        factory: impl FnOnce() -> T + Send + 'static,
-    ) -> Self {
+impl<TWorker, TAction> WorkerFactory<TAction>
+    for Box<dyn WorkerFactory<TAction, Worker = TWorker> + Send + 'static>
+where
+    TWorker: Worker<TAction> + Send + 'static,
+    TAction: Action + Send + 'static,
+{
+    type Worker = WorkerInstance<TAction>;
+    fn create(&self) -> Self::Worker {
+        let inner = &**self;
+        Box::new(inner.create())
+    }
+}
+pub struct BoxedWorkerFactory<TFactory, TWorker, TAction>
+where
+    TFactory: WorkerFactory<TAction, Worker = TWorker>,
+    TWorker: Worker<TAction>,
+    TAction: Action + Send + 'static,
+{
+    factory: TFactory,
+    _worker: PhantomData<TWorker>,
+    _action: PhantomData<TAction>,
+}
+impl<TFactory, TWorker, TAction> BoxedWorkerFactory<TFactory, TWorker, TAction>
+where
+    TFactory: WorkerFactory<TAction, Worker = TWorker>,
+    TWorker: Worker<TAction> + Send + 'static,
+    TAction: Action + Send + 'static,
+{
+    pub fn new(factory: TFactory) -> Self {
         Self {
-            factory: Box::new(|| Box::new(factory())),
+            factory,
+            _worker: Default::default(),
+            _action: Default::default(),
         }
     }
-    pub(crate) fn create(self) -> Box<dyn Worker<TAction> + Send + 'static> {
-        (self.factory)()
+}
+impl<TFactory, TWorker, TAction> WorkerFactory<TAction>
+    for BoxedWorkerFactory<TFactory, TWorker, TAction>
+where
+    TFactory: WorkerFactory<TAction, Worker = TWorker>,
+    TWorker: Worker<TAction> + Send + 'static,
+    TAction: Action + Send + 'static,
+{
+    type Worker = WorkerInstance<TAction>;
+    fn create(&self) -> Self::Worker {
+        Box::new(self.factory.create())
     }
 }
 
 pub type WorkerInstance<TAction> = Box<dyn Worker<TAction> + Send + 'static>;
+impl<TAction: Action + Send + 'static> Worker<TAction> for WorkerInstance<TAction> {
+    fn handle(
+        &mut self,
+        queue: WorkerMessageQueue<TAction>,
+        context: &mut WorkerContext,
+    ) -> WorkerTransition<TAction> {
+        let inner = &mut **self;
+        inner.handle(queue, context)
+    }
+}
 
 pub fn compose_actors<T: Action, T1: Actor<T>, T2: Actor<T>>(
     left: T1,
