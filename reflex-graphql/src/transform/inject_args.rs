@@ -37,7 +37,7 @@ type QueryFragments<'src, 'a, T> = HashMap<&'a T, &'a FragmentDefinition<'src, T
 /// # Examples
 ///
 /// ```
-/// use reflex_graphql::inject_args::{parse_argument_template, InjectQueryArgumentsGraphQlTransform};
+/// use reflex_graphql::transform::inject_args::{parse_argument_template, InjectQueryArgumentsGraphQlTransform};
 ///
 /// let template = graphql_parser::parse_query("
 ///     query {
@@ -217,7 +217,7 @@ fn parse_field_argument_template<'src>(
 /// # Examples
 ///
 /// ```
-/// use reflex_graphql::inject_args::{parse_argument_template, InjectQueryArgumentsGraphQlTransform};
+/// use reflex_graphql::transform::inject_args::{parse_argument_template, InjectQueryArgumentsGraphQlTransform};
 ///
 /// let template = graphql_parser::parse_query("
 ///     query {
