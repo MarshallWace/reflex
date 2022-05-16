@@ -14,6 +14,7 @@ use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 
 pub use construct::*;
+pub use date_constructor::*;
 pub use dispatch::*;
 pub use encode_uri_component::*;
 pub use format_error_message::*;
@@ -30,6 +31,7 @@ pub use throw::*;
 pub use to_string::*;
 
 mod construct;
+mod date_constructor;
 mod dispatch;
 mod encode_uri_component;
 mod format_error_message;
@@ -49,6 +51,7 @@ mod to_string;
 #[serde(tag = "type")]
 pub enum Stdlib {
     Construct,
+    DateConstructor,
     Dispatch,
     EncodeUriComponent,
     FormatErrorMessage,
@@ -74,6 +77,7 @@ impl Uid for Stdlib {
     fn uid(&self) -> Uuid {
         match self {
             Self::Construct => Uid::uid(&Construct {}),
+            Self::DateConstructor => Uid::uid(&DateConstructor {}),
             Self::Dispatch => Uid::uid(&Dispatch {}),
             Self::EncodeUriComponent => Uid::uid(&EncodeUriComponent {}),
             Self::FormatErrorMessage => Uid::uid(&FormatErrorMessage {}),
@@ -97,6 +101,7 @@ impl TryFrom<Uuid> for Stdlib {
     fn try_from(value: Uuid) -> Result<Self, Self::Error> {
         match value {
             Construct::UUID => Ok(Self::Construct),
+            DateConstructor::UUID => Ok(Self::DateConstructor),
             Dispatch::UUID => Ok(Self::Dispatch),
             EncodeUriComponent::UUID => Ok(Self::EncodeUriComponent),
             FormatErrorMessage::UUID => Ok(Self::FormatErrorMessage),
@@ -123,6 +128,7 @@ impl Stdlib {
     {
         match self {
             Self::Construct => Applicable::<T>::arity(&Construct {}),
+            Self::DateConstructor => Applicable::<T>::arity(&DateConstructor {}),
             Self::Dispatch => Applicable::<T>::arity(&Dispatch {}),
             Self::EncodeUriComponent => Applicable::<T>::arity(&EncodeUriComponent {}),
             Self::FormatErrorMessage => Applicable::<T>::arity(&FormatErrorMessage {}),
@@ -146,6 +152,7 @@ impl Stdlib {
     {
         match self {
             Self::Construct => Applicable::<T>::should_parallelize(&Construct {}, args),
+            Self::DateConstructor => Applicable::<T>::should_parallelize(&DateConstructor {}, args),
             Self::Dispatch => Applicable::<T>::should_parallelize(&Dispatch {}, args),
             Self::EncodeUriComponent => {
                 Applicable::<T>::should_parallelize(&EncodeUriComponent {}, args)
@@ -182,6 +189,9 @@ impl Stdlib {
         match self {
             Self::Construct => {
                 Applicable::<T>::apply(&Construct {}, args, factory, allocator, cache)
+            }
+            Self::DateConstructor => {
+                Applicable::<T>::apply(&DateConstructor {}, args, factory, allocator, cache)
             }
             Self::Dispatch => Applicable::<T>::apply(&Dispatch {}, args, factory, allocator, cache),
             Self::EncodeUriComponent => {

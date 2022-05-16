@@ -1757,6 +1757,7 @@ dependencies = [
 name = "reflex-js"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "reflex",
  "reflex-json",
  "serde",

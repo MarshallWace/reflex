@@ -9,6 +9,7 @@ use reflex::{
 use reflex_json::stdlib::Stdlib as JsonStdlib;
 
 pub(crate) mod boolean;
+pub(crate) mod date;
 pub(crate) mod error;
 pub(crate) mod json;
 pub(crate) mod map;
@@ -19,6 +20,7 @@ pub(crate) mod set;
 pub(crate) mod string;
 
 pub use self::boolean::global_boolean;
+pub use self::date::global_date;
 pub use self::error::{global_aggregate_error, global_error};
 pub use self::json::global_json;
 pub use self::map::global_map;
@@ -44,6 +46,7 @@ where
         ("Math", global_math(factory, allocator)),
         ("Map", global_map(factory)),
         ("Set", global_set(factory)),
+        ("Date", global_date(factory)),
         ("JSON", global_json(factory, allocator)),
         ("isFinite", factory.create_builtin_term(JsStdlib::IsFinite)),
         (
