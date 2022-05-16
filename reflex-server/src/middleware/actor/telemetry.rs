@@ -171,6 +171,9 @@ impl TelemetryMiddlewareQueryState {
     }
 }
 
+// TODO: support async update transactions
+const EMIT_ASYNC_ASYNC_TRANSACTIONS: bool = false;
+
 impl<T, TFactory, TAllocator, TOperationLabels, TAction> Actor<TAction>
     for TelemetryMiddleware<T, TFactory, TAllocator, TOperationLabels>
 where
@@ -616,6 +619,7 @@ where
         };
         let (effect_start_transactions, effect_end_transaction_ids) = if reemitted_effects
             .is_empty()
+            || !EMIT_ASYNC_ASYNC_TRANSACTIONS
         {
             (Vec::new(), Vec::new())
         } else {

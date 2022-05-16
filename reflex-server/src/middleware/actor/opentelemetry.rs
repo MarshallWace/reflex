@@ -141,11 +141,7 @@ where
         Box::pin(async move {
             let Self(client) = self;
             let response = client
-                .request(
-                    request
-                        // .map(|body| body.into())
-                        .map(|_| "foo".as_bytes().iter().cloned().collect::<Vec<_>>().into()),
-                )
+                .request(request.map(|body| body.into()))
                 .await
                 .map_err(Box::new)?;
             let (response_headers, response_body) = response.into_parts();
