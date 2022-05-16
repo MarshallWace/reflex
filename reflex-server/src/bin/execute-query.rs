@@ -14,7 +14,7 @@ use reflex_graphql::graphql_parser;
 use reflex_handlers::{
     actor::{fetch::EFFECT_TYPE_FETCH, graphql::EFFECT_TYPE_GRAPHQL, grpc::EFFECT_TYPE_GRPC},
     default_handlers,
-    utils::tls::{create_https_client, native_tls::Certificate},
+    utils::tls::{create_https_client, tokio_native_tls::native_tls::Certificate},
     DefaultHandlersMetricNames,
 };
 use reflex_server::{

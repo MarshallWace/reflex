@@ -20,7 +20,7 @@ use reflex_dispatcher::{
 use reflex_handlers::{
     action::graphql::*,
     default_handlers,
-    utils::tls::{create_https_client, native_tls::Certificate},
+    utils::tls::{create_https_client, tokio_native_tls::native_tls::Certificate},
     DefaultHandlersMetricNames,
 };
 use reflex_json::{JsonMap, JsonValue};

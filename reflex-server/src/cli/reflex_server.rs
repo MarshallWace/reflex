@@ -4,8 +4,10 @@
 use std::{
     collections::{HashMap, VecDeque},
     convert::Infallible,
+    fs,
     iter::once,
     net::SocketAddr,
+    path::Path,
     str::FromStr,
     sync::Arc,
 };
@@ -30,7 +32,7 @@ use reflex::{
     stdlib::Stdlib,
 };
 use reflex_graphql::{stdlib::Stdlib as GraphQlStdlib, GraphQlOperationPayload};
-use reflex_handlers::utils::tls::native_tls::Certificate;
+use reflex_handlers::{actor::grpc::tonic, utils::tls::tokio_native_tls::native_tls};
 use reflex_js::stdlib::Stdlib as JsStdlib;
 use reflex_json::{stdlib::Stdlib as JsonStdlib, JsonMap, JsonValue};
 use reflex_runtime::{AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator};
@@ -38,9 +40,9 @@ use reflex_runtime::{AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator
 use crate::{
     graphql_service,
     middleware::{
-        create_http_otlp_tracer, OpenTelemetryMiddleware, OpenTelemetryMiddlewareAction,
-        ServerMiddleware, TelemetryMiddleware, TelemetryMiddlewareAction,
-        TelemetryMiddlewareMetricNames,
+        create_grpc_otlp_tracer, create_http_otlp_tracer, OpenTelemetryMiddleware,
+        OpenTelemetryMiddlewareAction, ServerMiddleware, TelemetryMiddleware,
+        TelemetryMiddlewareAction, TelemetryMiddlewareMetricNames,
     },
     server::actor::{
         http_graphql_server::HttpGraphQlServerQueryTransform,
@@ -59,54 +61,68 @@ pub struct ReflexServerCliOptions {
     pub address: SocketAddr,
 }
 
-#[derive(Clone)]
-pub struct OpenTelemetryHttpConfig {
-    pub endpoint: String,
-    pub http_headers: Vec<(HeaderName, HeaderValue)>,
-    pub resource_attributes: Vec<KeyValue>,
-    pub tls_cert: Option<Certificate>,
+#[derive(Clone, Debug)]
+pub enum OpenTelemetryConfig {
+    Http(OpenTelemetryHttpConfig),
+    Grpc(OpenTelemetryGrpcConfig),
 }
-impl std::fmt::Debug for OpenTelemetryHttpConfig {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("OpenTelemetryHttpConfig")
-            .field("endpoint", &self.endpoint)
-            .field("http_headers", &self.http_headers)
-            .field("resource_attributes", &self.resource_attributes)
-            .field("tls_cert", &format!("{:?}", self.tls_cert.is_some()))
-            .finish()
-    }
-}
-impl OpenTelemetryHttpConfig {
-    pub fn parse_env(args: std::env::Vars) -> Result<Option<OpenTelemetryHttpConfig>> {
+impl OpenTelemetryConfig {
+    pub fn parse_env(args: std::env::Vars) -> Result<Option<Self>> {
+        // See https://github.com/open-telemetry/opentelemetry-java/blob/main/sdk-extensions/autoconfigure/README.md#otlp-exporter-span-metric-and-log-exporters
         let named_args = args.into_iter().collect::<HashMap<_, _>>();
         match named_args.get("OTEL_EXPORTER_OTLP_ENDPOINT") {
             None => Ok(None),
             Some(endpoint) => {
-                let resource_attributes =
-                    if let Some(env_var) = named_args.get("OTEL_RESOURCE_ATTRIBUTES") {
-                        parse_otlp_resource_attributes(env_var)?
-                    } else {
-                        Default::default()
-                    };
+                let protocol = if let Some(env_var) = named_args.get("OTEL_EXPORTER_OTLP_PROTOCOL")
+                {
+                    parse_otlp_protocol(env_var)?
+                } else {
+                    Default::default()
+                };
                 let http_headers =
                     if let Some(env_var) = named_args.get("OTEL_EXPORTER_OTLP_HEADERS") {
                         parse_otlp_http_headers(env_var)?
                     } else {
                         Default::default()
                     };
-                Ok(Some(OpenTelemetryHttpConfig {
-                    resource_attributes,
-                    endpoint: String::from(endpoint),
-                    http_headers,
-                    tls_cert: None,
-                }))
+                let tls_cert =
+                    if let Some(env_var) = named_args.get("OTEL_EXPORTER_OTLP_CERTIFICATE") {
+                        load_otlp_certificate(env_var.as_str()).map(Some)?
+                    } else {
+                        Default::default()
+                    };
+                let resource_attributes =
+                    if let Some(env_var) = named_args.get("OTEL_RESOURCE_ATTRIBUTES") {
+                        parse_otlp_resource_attributes(env_var)?
+                    } else {
+                        Default::default()
+                    };
+                match protocol {
+                    OpenTelemetryProtocol::Grpc => {
+                        let tls_cert = tls_cert
+                            .as_ref()
+                            .map(|tls_cert| parse_tonic_tls_cert(tls_cert))
+                            .transpose()?;
+                        Ok(Some(Self::Grpc(OpenTelemetryGrpcConfig {
+                            endpoint: String::from(endpoint),
+                            tls_cert,
+                            resource_attributes,
+                        })))
+                    }
+                    OpenTelemetryProtocol::Http => {
+                        let tls_cert = tls_cert
+                            .as_ref()
+                            .map(|tls_cert| parse_hyper_tls_cert(tls_cert))
+                            .transpose()?;
+                        Ok(Some(Self::Http(OpenTelemetryHttpConfig {
+                            endpoint: String::from(endpoint),
+                            http_headers,
+                            tls_cert,
+                            resource_attributes,
+                        })))
+                    }
+                }
             }
-        }
-    }
-    pub fn with_tls_cert(self, tls_cert: Certificate) -> Self {
-        Self {
-            tls_cert: Some(tls_cert),
-            ..self
         }
     }
     pub fn into_middleware<
@@ -124,15 +140,27 @@ impl OpenTelemetryHttpConfig {
     where
         T: Applicable<T>,
     {
-        let Self {
-            resource_attributes,
-            endpoint,
-            http_headers,
-            tls_cert,
-        } = self;
-        let tracer = create_http_otlp_tracer(resource_attributes, endpoint, http_headers, tls_cert)
-            .map_err(|err| anyhow!("{}", err))
-            .with_context(|| anyhow!("Failed to initialize OpenTelemetry agent"))?;
+        let tracer = match self {
+            Self::Http(config) => {
+                let OpenTelemetryHttpConfig {
+                    endpoint,
+                    http_headers,
+                    resource_attributes,
+                    tls_cert,
+                } = config;
+                create_http_otlp_tracer(endpoint, http_headers, tls_cert, resource_attributes)
+            }
+            Self::Grpc(config) => {
+                let OpenTelemetryGrpcConfig {
+                    endpoint,
+                    resource_attributes,
+                    tls_cert,
+                } = config;
+                create_grpc_otlp_tracer(endpoint, tls_cert, resource_attributes)
+            }
+        }
+        .map_err(|err| anyhow!("{}", err))
+        .with_context(|| anyhow!("Failed to initialize OpenTelemetry agent"))?;
         Ok(compose_actors(
             TelemetryMiddleware::new(
                 factory.clone(),
@@ -142,6 +170,40 @@ impl OpenTelemetryHttpConfig {
             ),
             OpenTelemetryMiddleware::new(tracer),
         ))
+    }
+}
+
+#[derive(Clone)]
+pub struct OpenTelemetryHttpConfig {
+    pub endpoint: String,
+    pub http_headers: Vec<(HeaderName, HeaderValue)>,
+    pub resource_attributes: Vec<KeyValue>,
+    pub tls_cert: Option<native_tls::Certificate>,
+}
+impl std::fmt::Debug for OpenTelemetryHttpConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OpenTelemetryHttpConfig")
+            .field("endpoint", &self.endpoint)
+            .field("http_headers", &self.http_headers)
+            .field("resource_attributes", &self.resource_attributes)
+            .field("tls_cert", &format!("{:?}", self.tls_cert.is_some()))
+            .finish()
+    }
+}
+
+#[derive(Clone)]
+pub struct OpenTelemetryGrpcConfig {
+    pub endpoint: String,
+    pub resource_attributes: Vec<KeyValue>,
+    pub tls_cert: Option<tonic::transport::Certificate>,
+}
+impl std::fmt::Debug for OpenTelemetryGrpcConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OpenTelemetryGrpcConfig")
+            .field("endpoint", &self.endpoint)
+            .field("resource_attributes", &self.resource_attributes)
+            .field("tls_cert", &format!("{:?}", self.tls_cert.is_some()))
+            .finish()
     }
 }
 
@@ -253,6 +315,25 @@ pub fn get_operation_transaction_labels(
     (transaction_label, transaction_attributes)
 }
 
+enum OpenTelemetryProtocol {
+    Grpc,
+    Http,
+}
+impl Default for OpenTelemetryProtocol {
+    fn default() -> Self {
+        Self::Grpc
+    }
+}
+fn parse_otlp_protocol(input: &str) -> Result<OpenTelemetryProtocol> {
+    match input {
+        "grpc" => Ok(OpenTelemetryProtocol::Grpc),
+        "http/protobuf" => Ok(OpenTelemetryProtocol::Http),
+        _ => Err(anyhow!(
+            "Failed to parse OpenTelemetry protocol (allowed values: \"grpc\", \"http/protobuf\")"
+        )),
+    }
+}
+
 fn parse_otlp_resource_attributes(input: &str) -> Result<Vec<KeyValue>> {
     let parse_key = take_while1(|chr| chr != '=');
     let parse_equals = tag("=");
@@ -307,6 +388,23 @@ fn parse_otlp_http_headers(input: &str) -> Result<Vec<(HeaderName, HeaderValue)>
         Err(err) => Err(anyhow!("Parse error: {}", err)),
     }
     .with_context(|| anyhow!("Failed to parse OpenTelemetry HTTP headers"))
+}
+
+fn load_otlp_certificate(path: impl AsRef<Path>) -> Result<Vec<u8>> {
+    fs::read(path.as_ref()).with_context(|| {
+        format!(
+            "Failed to load Opentelemetry TLS certificate: {}",
+            path.as_ref().to_string_lossy()
+        )
+    })
+}
+
+fn parse_hyper_tls_cert(pem: &[u8]) -> Result<native_tls::Certificate> {
+    native_tls::Certificate::from_pem(pem).context("Failed to parse TLS certificate")
+}
+
+fn parse_tonic_tls_cert(pem: &[u8]) -> Result<tonic::transport::Certificate> {
+    Ok(tonic::transport::Certificate::from_pem(pem))
 }
 
 pub fn flatten_json_fields(

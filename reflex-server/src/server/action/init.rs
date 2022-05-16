@@ -6,7 +6,7 @@ use std::{net::SocketAddr, time::Duration};
 use reflex_dispatcher::{Action, NamedAction, SerializableAction, SerializedAction};
 use reflex_json::{JsonMap, JsonValue};
 
-use crate::cli::reflex_server::OpenTelemetryHttpConfig;
+use crate::cli::reflex_server::OpenTelemetryConfig;
 
 #[derive(Clone, Debug)]
 pub enum InitAction {
@@ -146,7 +146,7 @@ impl SerializableAction for InitPrometheusMetricsAction {
 
 #[derive(Clone, Debug)]
 pub struct InitOpenTelemetryAction {
-    pub config: OpenTelemetryHttpConfig,
+    pub config: OpenTelemetryConfig,
 }
 impl<'a> Action for InitOpenTelemetryAction {}
 impl<'a> NamedAction for InitOpenTelemetryAction {
@@ -156,37 +156,60 @@ impl<'a> NamedAction for InitOpenTelemetryAction {
 }
 impl<'a> SerializableAction for InitOpenTelemetryAction {
     fn serialize(&self) -> SerializedAction {
-        SerializedAction::from_iter([
-            (
-                "endpoint",
-                JsonValue::String(self.config.endpoint.as_str().into()),
-            ),
-            (
-                "http_headers",
-                JsonValue::Object(JsonMap::from_iter(self.config.http_headers.iter().map(
-                    |(key, value)| {
-                        (
-                            String::from(key.as_str()),
-                            match value.to_str() {
-                                Ok(value) => JsonValue::String(value.into()),
-                                Err(_) => JsonValue::Null,
-                            },
-                        )
-                    },
-                ))),
-            ),
-            (
-                "resource_attributes",
-                JsonValue::Object(JsonMap::from_iter(
-                    self.config.resource_attributes.iter().map(|variable| {
-                        (
-                            String::from(variable.key.as_str()),
-                            JsonValue::String(variable.value.as_str().into()),
-                        )
-                    }),
-                )),
-            ),
-        ])
+        match &self.config {
+            OpenTelemetryConfig::Http(config) => SerializedAction::from_iter([
+                ("protocol", JsonValue::String(String::from("http/protobuf"))),
+                (
+                    "endpoint",
+                    JsonValue::String(config.endpoint.as_str().into()),
+                ),
+                (
+                    "http_headers",
+                    JsonValue::Object(JsonMap::from_iter(config.http_headers.iter().map(
+                        |(key, value)| {
+                            (
+                                String::from(key.as_str()),
+                                match value.to_str() {
+                                    Ok(value) => JsonValue::String(value.into()),
+                                    Err(_) => JsonValue::Null,
+                                },
+                            )
+                        },
+                    ))),
+                ),
+                ("tls_cert", JsonValue::Bool(config.tls_cert.is_some())),
+                (
+                    "resource_attributes",
+                    JsonValue::Object(JsonMap::from_iter(config.resource_attributes.iter().map(
+                        |variable| {
+                            (
+                                String::from(variable.key.as_str()),
+                                JsonValue::String(variable.value.as_str().into()),
+                            )
+                        },
+                    ))),
+                ),
+            ]),
+            OpenTelemetryConfig::Grpc(config) => SerializedAction::from_iter([
+                ("protocol", JsonValue::String(String::from("grpc"))),
+                (
+                    "endpoint",
+                    JsonValue::String(config.endpoint.as_str().into()),
+                ),
+                ("tls_cert", JsonValue::Bool(config.tls_cert.is_some())),
+                (
+                    "resource_attributes",
+                    JsonValue::Object(JsonMap::from_iter(config.resource_attributes.iter().map(
+                        |variable| {
+                            (
+                                String::from(variable.key.as_str()),
+                                JsonValue::String(variable.value.as_str().into()),
+                            )
+                        },
+                    ))),
+                ),
+            ]),
+        }
     }
 }
 

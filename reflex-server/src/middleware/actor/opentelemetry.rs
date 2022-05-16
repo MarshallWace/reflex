@@ -15,14 +15,17 @@ use opentelemetry::{
     trace::{SpanContext, TraceContextExt, TraceFlags, TraceState, Tracer},
     Context, KeyValue,
 };
-use opentelemetry_otlp::WithExportConfig;
+use opentelemetry_otlp::{SpanExporterBuilder, WithExportConfig};
 use reflex_dispatcher::{
     Action, Actor, ActorTransition, HandlerContext, InboundAction, MessageData, StateTransition,
 };
-use reflex_handlers::utils::tls::{
-    create_https_client,
-    hyper::{body::HttpBody, client::connect::Connect},
-    native_tls::{self, Certificate},
+use reflex_handlers::{
+    actor::grpc::tonic::{self, transport::ClientTlsConfig},
+    utils::tls::{
+        create_https_client,
+        hyper::{body::HttpBody, client::connect::Connect},
+        tokio_native_tls::native_tls,
+    },
 };
 
 use crate::{
@@ -55,15 +58,31 @@ impl std::error::Error for OpenTelemetryClientError {
     }
 }
 
-pub fn create_http_otlp_tracer(
+pub fn create_grpc_otlp_tracer(
+    endpoint: impl Into<String>,
+    tls_cert: Option<tonic::transport::Certificate>,
     resource_attributes: impl IntoIterator<Item = KeyValue>,
+) -> Result<opentelemetry::sdk::trace::Tracer, OpenTelemetryClientError> {
+    let exporter = opentelemetry_otlp::new_exporter()
+        .tonic()
+        .with_endpoint(endpoint);
+    let exporter = if let Some(tls_cert) = tls_cert {
+        exporter.with_tls_config(ClientTlsConfig::new().ca_certificate(tls_cert))
+    } else {
+        exporter
+    };
+    create_otlp_tracer(exporter, resource_attributes)
+}
+
+pub fn create_http_otlp_tracer(
     endpoint: impl Into<String>,
     http_headers: impl IntoIterator<Item = (HeaderName, HeaderValue)>,
-    tls_cert: Option<Certificate>,
+    tls_cert: Option<native_tls::Certificate>,
+    resource_attributes: impl IntoIterator<Item = KeyValue>,
 ) -> Result<opentelemetry::sdk::trace::Tracer, OpenTelemetryClientError> {
     let client =
         create_https_client::<Body>(tls_cert).map_err(OpenTelemetryClientError::Certificate)?;
-    let headers = http_headers
+    let http_headers = http_headers
         .into_iter()
         .filter_map(|(key, value)| {
             value
@@ -72,11 +91,20 @@ pub fn create_http_otlp_tracer(
                 .map(|value| (String::from(key.as_str()), String::from(value)))
         })
         .collect();
-    let exporter = opentelemetry_otlp::new_exporter()
-        .http()
-        .with_endpoint(endpoint)
-        .with_headers(headers)
-        .with_http_client(OpenTelemetryHyperClient(client));
+    create_otlp_tracer(
+        opentelemetry_otlp::new_exporter()
+            .http()
+            .with_endpoint(endpoint)
+            .with_headers(http_headers)
+            .with_http_client(OpenTelemetryHyperClient(client)),
+        resource_attributes,
+    )
+}
+
+fn create_otlp_tracer(
+    exporter: impl Into<SpanExporterBuilder>,
+    resource_attributes: impl IntoIterator<Item = KeyValue>,
+) -> Result<opentelemetry::sdk::trace::Tracer, OpenTelemetryClientError> {
     opentelemetry_otlp::new_pipeline()
         .tracing()
         .with_exporter(exporter)
@@ -112,11 +140,15 @@ where
     {
         Box::pin(async move {
             let Self(client) = self;
-            let result = client
-                .request(request.map(|body| body.into()))
+            let response = client
+                .request(
+                    request
+                        // .map(|body| body.into())
+                        .map(|_| "foo".as_bytes().iter().cloned().collect::<Vec<_>>().into()),
+                )
                 .await
                 .map_err(Box::new)?;
-            let (response_headers, response_body) = result.into_parts();
+            let (response_headers, response_body) = response.into_parts();
             let response_body = hyper::body::to_bytes(response_body)
                 .await
                 .map_err(Box::new)?;

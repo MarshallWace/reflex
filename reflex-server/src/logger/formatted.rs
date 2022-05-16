@@ -16,7 +16,9 @@ use reflex_runtime::{
 };
 
 use crate::{
+    cli::reflex_server::OpenTelemetryConfig,
     logger::ActionLogger,
+    middleware::action::opentelemetry::OpenTelemetryMiddlewareErrorAction,
     server::action::{
         graphql_server::GraphQlServerSubscribeAction,
         init::{
@@ -32,6 +34,7 @@ pub trait FormattedLoggerAction<T: Expression>:
     + InboundAction<InitHttpServerAction>
     + InboundAction<InitOpenTelemetryAction>
     + InboundAction<InitPrometheusMetricsAction>
+    + InboundAction<OpenTelemetryMiddlewareErrorAction>
     + InboundAction<GraphQlServerSubscribeAction<T>>
     + InboundAction<EffectSubscribeAction<T>>
     + InboundAction<GraphQlHandlerWebSocketConnectSuccessAction>
@@ -46,6 +49,7 @@ impl<T: Expression, TAction> FormattedLoggerAction<T> for TAction where
         + InboundAction<InitHttpServerAction>
         + InboundAction<InitOpenTelemetryAction>
         + InboundAction<InitPrometheusMetricsAction>
+        + InboundAction<OpenTelemetryMiddlewareErrorAction>
         + InboundAction<GraphQlServerSubscribeAction<T>>
         + InboundAction<EffectSubscribeAction<T>>
         + InboundAction<GraphQlHandlerWebSocketConnectSuccessAction>
@@ -137,8 +141,15 @@ fn format_action_message<T: Expression, TAction: FormattedLoggerAction<T>>(
         ))
     } else if let Option::<&InitOpenTelemetryAction>::Some(action) = action.match_type() {
         Some(format!(
-            "Publishing to OpenTelemetry collector {}",
-            action.config.endpoint,
+            "Publishing to OpenTelemetry {} collector {}",
+            match &action.config {
+                OpenTelemetryConfig::Http(_) => "HTTP",
+                OpenTelemetryConfig::Grpc(_) => "gRPC",
+            },
+            match &action.config {
+                OpenTelemetryConfig::Http(config) => &config.endpoint,
+                OpenTelemetryConfig::Grpc(config) => &config.endpoint,
+            },
         ))
     } else if let Option::<&InitGraphRootAction>::Some(action) = action.match_type() {
         Some(format!(
@@ -150,6 +161,9 @@ fn format_action_message<T: Expression, TAction: FormattedLoggerAction<T>>(
             "Listening for incoming GraphQL HTTP requests on http://{}/",
             action.address,
         ))
+    } else if let Option::<&OpenTelemetryMiddlewareErrorAction>::Some(action) = action.match_type()
+    {
+        Some(format!("OpenTelemetry error: {}", action.error))
     } else if let Option::<&GraphQlServerSubscribeAction<T>>::Some(action) = action.match_type() {
         Some(format!(
             "Handling GraphQL operation: {}",

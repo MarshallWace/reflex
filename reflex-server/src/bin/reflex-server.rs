@@ -25,7 +25,7 @@ use reflex_dispatcher::{compose_actors, scheduler::sync::SyncContext, EitherActo
 use reflex_graphql::{graphql_parser, GraphQlOperationPayload};
 use reflex_handlers::{
     default_handlers,
-    utils::tls::{create_https_client, native_tls::Certificate},
+    utils::tls::{create_https_client, tokio_native_tls::native_tls::Certificate},
     DefaultHandlersMetricNames,
 };
 use reflex_json::JsonValue;
@@ -142,7 +142,7 @@ pub async fn main() -> Result<()> {
         },
         DefaultHandlersMetricNames::default(),
     );
-    let middleware = match OpenTelemetryHttpConfig::parse_env(std::env::vars())? {
+    let middleware = match OpenTelemetryConfig::parse_env(std::env::vars())? {
         None => EitherActor::Left(middleware),
         Some(config) => {
             log_server_action(

@@ -3,8 +3,9 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use hyper::{body::HttpBody, client::HttpConnector};
 
+use tokio_native_tls::native_tls;
+
 pub use hyper;
-pub use hyper_tls::native_tls;
 pub use tokio_native_tls;
 
 pub fn create_https_client<TBody>(
