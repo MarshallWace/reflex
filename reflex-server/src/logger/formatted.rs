@@ -1,9 +1,12 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use std::marker::PhantomData;
+use std::{
+    collections::{hash_map::Entry, HashMap},
+    marker::PhantomData,
+};
 
-use reflex::core::Expression;
+use reflex::core::{Expression, SignalType, StateToken};
 use reflex_dispatcher::{Action, HandlerContext, InboundAction, MessageData};
 use reflex_handlers::action::{
     graphql::{
@@ -12,7 +15,8 @@ use reflex_handlers::action::{
     grpc::{GrpcHandlerConnectErrorAction, GrpcHandlerConnectSuccessAction},
 };
 use reflex_runtime::{
-    action::effect::EffectSubscribeAction, actor::evaluate_handler::EFFECT_TYPE_EVALUATE,
+    action::effect::{EffectEmitAction, EffectSubscribeAction, EffectUnsubscribeAction},
+    actor::evaluate_handler::EFFECT_TYPE_EVALUATE,
 };
 
 use crate::{
@@ -37,6 +41,8 @@ pub trait FormattedLoggerAction<T: Expression>:
     + InboundAction<OpenTelemetryMiddlewareErrorAction>
     + InboundAction<GraphQlServerSubscribeAction<T>>
     + InboundAction<EffectSubscribeAction<T>>
+    + InboundAction<EffectUnsubscribeAction<T>>
+    + InboundAction<EffectEmitAction<T>>
     + InboundAction<GraphQlHandlerWebSocketConnectSuccessAction>
     + InboundAction<GraphQlHandlerWebSocketConnectErrorAction>
     + InboundAction<GrpcHandlerConnectSuccessAction>
@@ -52,6 +58,8 @@ impl<T: Expression, TAction> FormattedLoggerAction<T> for TAction where
         + InboundAction<OpenTelemetryMiddlewareErrorAction>
         + InboundAction<GraphQlServerSubscribeAction<T>>
         + InboundAction<EffectSubscribeAction<T>>
+        + InboundAction<EffectUnsubscribeAction<T>>
+        + InboundAction<EffectEmitAction<T>>
         + InboundAction<GraphQlHandlerWebSocketConnectSuccessAction>
         + InboundAction<GraphQlHandlerWebSocketConnectErrorAction>
         + InboundAction<GrpcHandlerConnectSuccessAction>
@@ -62,6 +70,7 @@ impl<T: Expression, TAction> FormattedLoggerAction<T> for TAction where
 pub struct FormattedLogger<T: Expression, TOut: std::io::Write, TAction: FormattedLoggerAction<T>> {
     prefix: String,
     output: TOut,
+    active_effects: HashMap<StateToken, String>,
     _expression: PhantomData<T>,
     _action: PhantomData<TAction>,
 }
@@ -72,6 +81,7 @@ impl<T: Expression, TOut: std::io::Write, TAction: FormattedLoggerAction<T>>
         Self {
             prefix: prefix.into(),
             output,
+            active_effects: Default::default(),
             _expression: Default::default(),
             _action: Default::default(),
         }
@@ -91,6 +101,7 @@ impl<T: Expression, TAction: FormattedLoggerAction<T>> Clone
         Self {
             prefix: self.prefix.clone(),
             output: std::io::stdout(),
+            active_effects: Default::default(),
             _expression: Default::default(),
             _action: Default::default(),
         }
@@ -110,6 +121,7 @@ impl<T: Expression, TAction: FormattedLoggerAction<T>> Clone
         Self {
             prefix: self.prefix.clone(),
             output: std::io::stderr(),
+            active_effects: Default::default(),
             _expression: Default::default(),
             _action: Default::default(),
         }
@@ -125,7 +137,36 @@ impl<T: Expression, TOut: std::io::Write, TAction: FormattedLoggerAction<T>> Act
         _metadata: Option<&MessageData>,
         _context: Option<&impl HandlerContext>,
     ) {
-        if let Some(message) = format_action_message(action) {
+        if let Some(EffectSubscribeAction {
+            effect_type,
+            effects,
+        }) = action.match_type()
+        {
+            if effect_type.as_str() != EFFECT_TYPE_EVALUATE {
+                self.active_effects
+                    .extend(
+                        effects
+                            .iter()
+                            .filter_map(|effect| match &effect.signal_type() {
+                                SignalType::Custom(signal_type) => {
+                                    Some((effect.id(), signal_type.clone()))
+                                }
+                                _ => None,
+                            }),
+                    );
+            }
+        } else if let Some(EffectUnsubscribeAction {
+            effect_type,
+            effects,
+        }) = action.match_type()
+        {
+            if effect_type.as_str() != EFFECT_TYPE_EVALUATE {
+                for effect in effects.iter() {
+                    self.active_effects.remove(&effect.id());
+                }
+            }
+        }
+        if let Some(message) = format_action_message(action, &self.active_effects) {
             let _ = writeln!(self.output, "[{}] {}", self.prefix, message);
         }
     }
@@ -133,6 +174,7 @@ impl<T: Expression, TOut: std::io::Write, TAction: FormattedLoggerAction<T>> Act
 
 fn format_action_message<T: Expression, TAction: FormattedLoggerAction<T>>(
     action: &TAction,
+    active_effects: &HashMap<StateToken, String>,
 ) -> Option<String> {
     if let Option::<&InitPrometheusMetricsAction>::Some(action) = action.match_type() {
         Some(format!(
@@ -191,11 +233,9 @@ fn format_action_message<T: Expression, TAction: FormattedLoggerAction<T>>(
             action.url, action.error,
         ))
     } else if let Option::<&EffectSubscribeAction<T>>::Some(action) = action.match_type() {
-        if action.effect_type.as_str() == EFFECT_TYPE_EVALUATE {
-            None
-        } else {
+        if action.effect_type.as_str() != EFFECT_TYPE_EVALUATE {
             Some(format!(
-                "Processing effect: {}{}",
+                "Effect subscribed: {}{}",
                 action.effect_type,
                 if action.effects.len() > 1 {
                     format!(" x {}", action.effects.len())
@@ -203,8 +243,65 @@ fn format_action_message<T: Expression, TAction: FormattedLoggerAction<T>>(
                     String::new()
                 },
             ))
+        } else {
+            None
+        }
+    } else if let Option::<&EffectUnsubscribeAction<T>>::Some(action) = action.match_type() {
+        if action.effect_type.as_str() != EFFECT_TYPE_EVALUATE {
+            Some(format!(
+                "Effect unsubscribed: {}{}",
+                action.effect_type,
+                if action.effects.len() > 1 {
+                    format!(" x {}", action.effects.len())
+                } else {
+                    String::new()
+                },
+            ))
+        } else {
+            None
+        }
+    } else if let Option::<&EffectEmitAction<T>>::Some(action) = action.match_type() {
+        let effect_counts_by_type =
+            count_occurrences(action.updates.iter().filter_map(|(key, _)| {
+                active_effects
+                    .get(key)
+                    .map(|signal_type| signal_type.as_str())
+                    .filter(|effect_type| *effect_type != EFFECT_TYPE_EVALUATE)
+            }));
+        match effect_counts_by_type.len() {
+            0 => None,
+            1 => {
+                let (effect_type, count) = effect_counts_by_type.into_iter().next().unwrap();
+                Some(format!("Effect emitted: {} x {}", effect_type, count))
+            }
+            _ => Some(format!(
+                "Effect emitted:\n{}",
+                effect_counts_by_type
+                    .into_iter()
+                    .map(|(effect_type, count)| format!(" {} x {}", effect_type, count,))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            )),
         }
     } else {
         None
     }
+}
+
+fn count_occurrences<T: Eq + std::hash::Hash>(
+    values: impl IntoIterator<Item = T>,
+) -> HashMap<T, usize> {
+    values
+        .into_iter()
+        .fold(HashMap::<T, usize>::new(), |mut results, value| {
+            match results.entry(value) {
+                Entry::Occupied(mut entry) => {
+                    *entry.get_mut() += 1;
+                }
+                Entry::Vacant(entry) => {
+                    entry.insert(1);
+                }
+            }
+            results
+        })
 }
