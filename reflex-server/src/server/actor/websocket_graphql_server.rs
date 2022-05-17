@@ -24,21 +24,24 @@ use reflex_graphql::{
         GraphQlSubscriptionServerMessage, GraphQlSubscriptionStartMessage,
         GraphQlSubscriptionStopMessage, GraphQlSubscriptionUpdateMessage, OperationId,
     },
-    GraphQlOperationPayload,
+    GraphQlOperationPayload, GraphQlQueryTransform,
 };
 use reflex_json::{json_object, JsonMap, JsonNumber, JsonValue};
 use tokio::time::sleep;
 
-use crate::server::action::{
-    graphql_server::{
-        GraphQlServerEmitAction, GraphQlServerModifyAction, GraphQlServerParseErrorAction,
-        GraphQlServerSubscribeAction, GraphQlServerUnsubscribeAction,
+use crate::{
+    server::action::{
+        graphql_server::{
+            GraphQlServerEmitAction, GraphQlServerModifyAction, GraphQlServerParseErrorAction,
+            GraphQlServerSubscribeAction, GraphQlServerUnsubscribeAction,
+        },
+        websocket_server::{
+            WebSocketServerConnectAction, WebSocketServerDisconnectAction,
+            WebSocketServerReceiveAction, WebSocketServerSendAction,
+            WebSocketServerThrottleTimeoutAction,
+        },
     },
-    websocket_server::{
-        WebSocketServerConnectAction, WebSocketServerDisconnectAction,
-        WebSocketServerReceiveAction, WebSocketServerSendAction,
-        WebSocketServerThrottleTimeoutAction,
-    },
+    utils::transform::apply_graphql_query_transform,
 };
 
 #[derive(Clone, Copy, Debug)]
@@ -81,19 +84,20 @@ pub trait WebSocketGraphQlServerQueryTransform {
 }
 impl<T> WebSocketGraphQlServerQueryTransform for T
 where
-    T: Fn(
-        GraphQlOperationPayload,
-        &Request<()>,
-        Option<&JsonValue>,
-    ) -> Result<GraphQlOperationPayload, JsonValue>,
+    T: GraphQlQueryTransform,
 {
     fn transform(
         &self,
         operation: GraphQlOperationPayload,
-        request: &Request<()>,
-        connection_params: Option<&JsonValue>,
+        _request: &Request<()>,
+        _connection_params: Option<&JsonValue>,
     ) -> Result<GraphQlOperationPayload, JsonValue> {
-        self(operation, request, connection_params)
+        apply_graphql_query_transform(operation, self).map_err(|(status, message)| {
+            create_json_error_object(
+                message,
+                [(String::from("status"), JsonValue::from(status.as_u16()))],
+            )
+        })
     }
 }
 
@@ -106,6 +110,78 @@ impl WebSocketGraphQlServerQueryTransform for NoopWebSocketGraphQlServerQueryTra
         _connection_params: Option<&JsonValue>,
     ) -> Result<GraphQlOperationPayload, JsonValue> {
         Ok(operation)
+    }
+}
+pub enum EitherWebSocketGraphQlServerQueryTransform<
+    T1: WebSocketGraphQlServerQueryTransform,
+    T2: WebSocketGraphQlServerQueryTransform,
+> {
+    Left(T1),
+    Right(T2),
+}
+impl<T1, T2> Clone for EitherWebSocketGraphQlServerQueryTransform<T1, T2>
+where
+    T1: WebSocketGraphQlServerQueryTransform + Clone,
+    T2: WebSocketGraphQlServerQueryTransform + Clone,
+{
+    fn clone(&self) -> Self {
+        match self {
+            Self::Left(inner) => Self::Left(inner.clone()),
+            Self::Right(inner) => Self::Right(inner.clone()),
+        }
+    }
+}
+impl<T1, T2> WebSocketGraphQlServerQueryTransform
+    for EitherWebSocketGraphQlServerQueryTransform<T1, T2>
+where
+    T1: WebSocketGraphQlServerQueryTransform,
+    T2: WebSocketGraphQlServerQueryTransform,
+{
+    fn transform(
+        &self,
+        operation: GraphQlOperationPayload,
+        request: &Request<()>,
+        connection_params: Option<&JsonValue>,
+    ) -> Result<GraphQlOperationPayload, JsonValue> {
+        match self {
+            Self::Left(inner) => inner.transform(operation, request, connection_params),
+            Self::Right(inner) => inner.transform(operation, request, connection_params),
+        }
+    }
+}
+pub struct ChainedWebSocketGraphQlServerQueryTransform<
+    T1: WebSocketGraphQlServerQueryTransform,
+    T2: WebSocketGraphQlServerQueryTransform,
+> {
+    pub left: T1,
+    pub right: T2,
+}
+impl<T1, T2> Clone for ChainedWebSocketGraphQlServerQueryTransform<T1, T2>
+where
+    T1: WebSocketGraphQlServerQueryTransform + Clone,
+    T2: WebSocketGraphQlServerQueryTransform + Clone,
+{
+    fn clone(&self) -> Self {
+        Self {
+            left: self.left.clone(),
+            right: self.right.clone(),
+        }
+    }
+}
+impl<T1, T2> WebSocketGraphQlServerQueryTransform
+    for ChainedWebSocketGraphQlServerQueryTransform<T1, T2>
+where
+    T1: WebSocketGraphQlServerQueryTransform,
+    T2: WebSocketGraphQlServerQueryTransform,
+{
+    fn transform(
+        &self,
+        operation: GraphQlOperationPayload,
+        request: &Request<()>,
+        connection_params: Option<&JsonValue>,
+    ) -> Result<GraphQlOperationPayload, JsonValue> {
+        let operation = self.left.transform(operation, request, connection_params)?;
+        self.right.transform(operation, request, connection_params)
     }
 }
 

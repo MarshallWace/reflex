@@ -26,19 +26,22 @@ use reflex_dispatcher::{
 };
 use reflex_graphql::{
     create_graphql_error_response, create_graphql_success_response, deserialize_graphql_operation,
-    serialize_graphql_result_payload, GraphQlOperationPayload, GraphQlQuery,
+    serialize_graphql_result_payload, GraphQlOperationPayload, GraphQlQuery, GraphQlQueryTransform,
 };
 use reflex_json::{json_object, JsonValue};
 
-use crate::server::{
-    action::{
-        graphql_server::{
-            GraphQlServerEmitAction, GraphQlServerParseErrorAction, GraphQlServerSubscribeAction,
-            GraphQlServerUnsubscribeAction,
+use crate::{
+    server::{
+        action::{
+            graphql_server::{
+                GraphQlServerEmitAction, GraphQlServerParseErrorAction,
+                GraphQlServerSubscribeAction, GraphQlServerUnsubscribeAction,
+            },
+            http_server::{HttpServerRequestAction, HttpServerResponseAction},
         },
-        http_server::{HttpServerRequestAction, HttpServerResponseAction},
+        utils::{create_http_response, create_json_http_response},
     },
-    utils::{create_http_response, create_json_http_response},
+    utils::transform::apply_graphql_query_transform,
 };
 
 #[derive(Clone, Copy, Debug)]
@@ -79,20 +82,16 @@ pub trait HttpGraphQlServerQueryTransform {
 }
 impl<T> HttpGraphQlServerQueryTransform for T
 where
-    T: Fn(
-        GraphQlOperationPayload,
-        &Request<Bytes>,
-    ) -> Result<GraphQlOperationPayload, (StatusCode, String)>,
+    T: GraphQlQueryTransform,
 {
     fn transform(
         &self,
         operation: GraphQlOperationPayload,
-        request: &Request<Bytes>,
+        _request: &Request<Bytes>,
     ) -> Result<GraphQlOperationPayload, (StatusCode, String)> {
-        self(operation, request)
+        apply_graphql_query_transform(operation, self)
     }
 }
-
 pub struct NoopHttpGraphQlServerQueryTransform;
 impl HttpGraphQlServerQueryTransform for NoopHttpGraphQlServerQueryTransform {
     fn transform(
@@ -101,6 +100,74 @@ impl HttpGraphQlServerQueryTransform for NoopHttpGraphQlServerQueryTransform {
         _request: &Request<Bytes>,
     ) -> Result<GraphQlOperationPayload, (StatusCode, String)> {
         Ok(operation)
+    }
+}
+pub enum EitherHttpGraphQlServerQueryTransform<
+    T1: HttpGraphQlServerQueryTransform,
+    T2: HttpGraphQlServerQueryTransform,
+> {
+    Left(T1),
+    Right(T2),
+}
+impl<T1, T2> Clone for EitherHttpGraphQlServerQueryTransform<T1, T2>
+where
+    T1: HttpGraphQlServerQueryTransform + Clone,
+    T2: HttpGraphQlServerQueryTransform + Clone,
+{
+    fn clone(&self) -> Self {
+        match self {
+            Self::Left(inner) => Self::Left(inner.clone()),
+            Self::Right(inner) => Self::Right(inner.clone()),
+        }
+    }
+}
+impl<T1, T2> HttpGraphQlServerQueryTransform for EitherHttpGraphQlServerQueryTransform<T1, T2>
+where
+    T1: HttpGraphQlServerQueryTransform,
+    T2: HttpGraphQlServerQueryTransform,
+{
+    fn transform(
+        &self,
+        operation: GraphQlOperationPayload,
+        request: &Request<Bytes>,
+    ) -> Result<GraphQlOperationPayload, (StatusCode, String)> {
+        match self {
+            Self::Left(inner) => inner.transform(operation, request),
+            Self::Right(inner) => inner.transform(operation, request),
+        }
+    }
+}
+pub struct ChainedHttpGraphQlServerQueryTransform<
+    T1: HttpGraphQlServerQueryTransform,
+    T2: HttpGraphQlServerQueryTransform,
+> {
+    pub left: T1,
+    pub right: T2,
+}
+impl<T1, T2> Clone for ChainedHttpGraphQlServerQueryTransform<T1, T2>
+where
+    T1: HttpGraphQlServerQueryTransform + Clone,
+    T2: HttpGraphQlServerQueryTransform + Clone,
+{
+    fn clone(&self) -> Self {
+        Self {
+            left: self.left.clone(),
+            right: self.right.clone(),
+        }
+    }
+}
+impl<T1, T2> HttpGraphQlServerQueryTransform for ChainedHttpGraphQlServerQueryTransform<T1, T2>
+where
+    T1: HttpGraphQlServerQueryTransform,
+    T2: HttpGraphQlServerQueryTransform,
+{
+    fn transform(
+        &self,
+        operation: GraphQlOperationPayload,
+        request: &Request<Bytes>,
+    ) -> Result<GraphQlOperationPayload, (StatusCode, String)> {
+        let operation = self.left.transform(operation, request)?;
+        self.right.transform(operation, request)
     }
 }
 

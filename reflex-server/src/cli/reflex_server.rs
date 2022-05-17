@@ -16,7 +16,7 @@ use opentelemetry::KeyValue;
 use reflex_dispatcher::{compose_actors, Actor};
 
 use anyhow::{anyhow, Context, Result};
-use futures::Future;
+use futures::{future, Future};
 use http::{header::HeaderName, HeaderMap, HeaderValue};
 use hyper::{server::conn::AddrStream, service::make_service_fn, Server};
 use nom::{
@@ -31,7 +31,7 @@ use reflex::{
     interpreter::InterpreterOptions,
     stdlib::Stdlib,
 };
-use reflex_graphql::{stdlib::Stdlib as GraphQlStdlib, GraphQlOperationPayload};
+use reflex_graphql::{graphql_parser, stdlib::Stdlib as GraphQlStdlib, GraphQlOperationPayload};
 use reflex_handlers::{actor::grpc::tonic, utils::tls::tokio_native_tls::native_tls};
 use reflex_js::stdlib::Stdlib as JsStdlib;
 use reflex_json::{stdlib::Stdlib as JsonStdlib, JsonMap, JsonValue};
@@ -209,8 +209,9 @@ impl std::fmt::Debug for OpenTelemetryGrpcConfig {
 
 pub fn cli<T, TFactory, TAllocator, TAction, TPre, TPost>(
     args: ReflexServerCliOptions,
-    middleware: ServerMiddleware<TAction, TPre, TPost>,
     graph_root: (Program, InstructionPointer),
+    schema: Option<graphql_parser::schema::Document<'static, String>>,
+    middleware: ServerMiddleware<TAction, TPre, TPost>,
     factory: &TFactory,
     allocator: &TAllocator,
     compiler_options: CompilerOptions,
@@ -244,28 +245,33 @@ where
     TPost::State: Send,
     TAction: GraphQlWebServerAction<T> + Send + 'static,
 {
+    let app = GraphQlWebServer::new(
+        graph_root,
+        schema,
+        middleware,
+        compiler_options,
+        interpreter_options,
+        factory.clone(),
+        allocator.clone(),
+        transform_http,
+        transform_ws,
+        metric_names,
+        get_http_query_metric_labels,
+        get_websocket_connection_metric_labels,
+        get_websocket_operation_metric_labels,
+    )
+    .map_err(|err| anyhow!(err))
+    .context("Failed to initialize server")?;
     let service = make_service_fn({
-        let app = Arc::new(GraphQlWebServer::new(
-            graph_root,
-            middleware,
-            compiler_options,
-            interpreter_options,
-            factory.clone(),
-            allocator.clone(),
-            transform_http,
-            transform_ws,
-            metric_names,
-            get_http_query_metric_labels,
-            get_websocket_connection_metric_labels,
-            get_websocket_operation_metric_labels,
-        ));
+        let app = Arc::new(app);
         move |_socket: &AddrStream| {
             let app = Arc::clone(&app);
-            async move { Ok::<_, Infallible>(graphql_service(Arc::clone(&app))) }
+            let service = graphql_service(app);
+            future::ready(Ok::<_, Infallible>(service))
         }
     });
     let server = Server::try_bind(&args.address)
-        .with_context(|| anyhow!("Failed to bind server address"))?
+        .with_context(|| "Failed to bind server address")?
         .serve(service);
     Ok(server)
 }

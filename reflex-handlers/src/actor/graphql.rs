@@ -122,13 +122,14 @@ impl<T: Expression, TAction> GraphQlHandlerAction<T> for TAction where
 {
 }
 
+#[derive(Clone)]
 pub struct GraphQlHandler<T, TConnect, TFactory, TAllocator, TReconnect>
 where
-    T: Expression,
+    T: AsyncExpression,
     TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
-    TFactory: ExpressionFactory<T>,
+    TFactory: AsyncExpressionFactory<T>,
     TAllocator: HeapAllocator<T>,
-    TReconnect: ReconnectTimeout + Send,
+    TReconnect: ReconnectTimeout + Send + Clone,
 {
     client: hyper::Client<TConnect, Body>,
     factory: TFactory,
@@ -140,11 +141,11 @@ where
 impl<T, TConnect, TFactory, TAllocator, TReconnect>
     GraphQlHandler<T, TConnect, TFactory, TAllocator, TReconnect>
 where
-    T: Expression,
+    T: AsyncExpression,
     TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
-    TFactory: ExpressionFactory<T>,
-    TAllocator: HeapAllocator<T>,
-    TReconnect: ReconnectTimeout + Send,
+    TFactory: AsyncExpressionFactory<T>,
+    TAllocator: AsyncHeapAllocator<T>,
+    TReconnect: ReconnectTimeout + Send + Clone,
 {
     pub fn new(
         client: hyper::Client<TConnect, Body>,
@@ -293,7 +294,7 @@ where
     TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
     TFactory: AsyncExpressionFactory<T>,
     TAllocator: AsyncHeapAllocator<T>,
-    TReconnect: ReconnectTimeout + Send,
+    TReconnect: ReconnectTimeout + Send + Clone,
     TAction: GraphQlHandlerAction<T> + Send + 'static,
 {
     type State = GraphQlHandlerState;
@@ -338,7 +339,7 @@ where
     TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
     TFactory: AsyncExpressionFactory<T>,
     TAllocator: AsyncHeapAllocator<T>,
-    TReconnect: ReconnectTimeout + Send,
+    TReconnect: ReconnectTimeout + Send + Clone,
 {
     fn handle_effect_subscribe<TAction>(
         &self,

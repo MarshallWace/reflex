@@ -1,20 +1,19 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use anyhow::{anyhow, Context, Result};
 use futures::{future, Future, FutureExt};
 use http::{header, HeaderMap, Request, Response};
 use reflex::{
-    compiler::{Compile, CompilerOptions},
+    compiler::{Compile, CompilerOptions, InstructionPointer, Program},
     core::{Applicable, Reducible, Rewritable},
     interpreter::InterpreterOptions,
     stdlib::Stdlib,
 };
-use reflex_cli::{compile_entry_point, Syntax};
 use reflex_dispatcher::{compose_actors, Action, Actor, EitherActor, SerializableAction};
-use reflex_graphql::{stdlib::Stdlib as GraphQlStdlib, GraphQlOperationPayload};
+use reflex_graphql::{graphql_parser, stdlib::Stdlib as GraphQlStdlib, GraphQlOperationPayload};
 use reflex_js::stdlib::Stdlib as JsStdlib;
 use reflex_json::{json, stdlib::Stdlib as JsonStdlib, JsonValue};
 use reflex_runtime::{AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator};
@@ -30,8 +29,6 @@ pub use hyper::Body;
 
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct ExecuteQueryCliOptions {
-    pub graph_root: PathBuf,
-    pub syntax: Syntax,
     pub query: String,
     pub variables: Option<String>,
     pub headers: Option<HeaderMap>,
@@ -46,21 +43,19 @@ pub struct ExecuteQueryCliOptions {
 
 pub async fn cli<
     'de,
+    TAction,
     T,
     TFactory,
     TAllocator,
-    TLoader,
     TMiddleware,
-    TAction,
-    TEnv,
     TTransform,
     THttpMiddleware,
     THttpPre,
     THttpPost,
 >(
     options: ExecuteQueryCliOptions,
-    env: Option<TEnv>,
-    module_loader: Option<TLoader>,
+    graph_root: (Program, InstructionPointer),
+    schema: Option<graphql_parser::schema::Document<'static, String>>,
     middleware: TMiddleware,
     factory: &TFactory,
     allocator: &TAllocator,
@@ -79,14 +74,12 @@ where
     T::Builtin: From<Stdlib> + From<JsonStdlib> + From<JsStdlib> + From<GraphQlStdlib>,
     TFactory: AsyncExpressionFactory<T> + Sync,
     TAllocator: AsyncHeapAllocator<T> + Sync,
-    TLoader: Fn(&str, &Path) -> Option<Result<T, String>> + 'static,
     TMiddleware: Actor<TAction> + Send + 'static,
     THttpMiddleware: HttpMiddleware<THttpPre, THttpPost>,
     TMiddleware::State: Send,
     THttpPre: Future<Output = Request<Body>>,
     THttpPost: Future<Output = Response<Body>>,
     TAction: Action + SerializableAction + GraphQlWebServerAction<T> + Send + 'static,
-    TEnv: IntoIterator<Item = (String, String)>,
     TTransform: HttpGraphQlServerQueryTransform + Send + 'static,
 {
     let compiler_options = if options.debug_compiler {
@@ -99,15 +92,6 @@ where
         debug_stack: options.debug_stack,
         ..InterpreterOptions::default()
     };
-    let graph_root = compile_entry_point(
-        options.graph_root.as_path(),
-        options.syntax,
-        env,
-        module_loader,
-        &compiler_options,
-        factory,
-        allocator,
-    )?;
     let middleware = if options.debug_actions {
         EitherActor::Left(compose_actors(
             LoggerMiddleware::new(JsonActionLogger::stderr()),
@@ -145,6 +129,7 @@ where
     }?;
     let app = GraphQlWebServer::<TAction>::new(
         graph_root,
+        schema,
         ServerMiddleware::post(middleware),
         compiler_options,
         interpreter_options,
@@ -156,7 +141,9 @@ where
         get_http_query_metric_labels,
         get_websocket_connection_metric_labels,
         get_websocket_operation_metric_labels,
-    );
+    )
+    .map_err(|err| anyhow!(err))
+    .context("Failed to initialize server")?;
     let response = {
         let mut http_middleware = http_middleware;
         let request = http_middleware.pre(request).await;

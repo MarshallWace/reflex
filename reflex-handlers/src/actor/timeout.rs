@@ -40,11 +40,12 @@ impl<T: Expression, TAction> TimeoutHandlerAction<T> for TAction where
 {
 }
 
+#[derive(Clone)]
 pub struct TimeoutHandler<T, TFactory, TAllocator>
 where
-    T: Expression,
-    TFactory: ExpressionFactory<T>,
-    TAllocator: HeapAllocator<T>,
+    T: AsyncExpression,
+    TFactory: AsyncExpressionFactory<T>,
+    TAllocator: AsyncHeapAllocator<T>,
 {
     factory: TFactory,
     allocator: TAllocator,
@@ -52,9 +53,9 @@ where
 }
 impl<T, TFactory, TAllocator> TimeoutHandler<T, TFactory, TAllocator>
 where
-    T: Expression,
-    TFactory: ExpressionFactory<T>,
-    TAllocator: HeapAllocator<T>,
+    T: AsyncExpression,
+    TFactory: AsyncExpressionFactory<T>,
+    TAllocator: AsyncHeapAllocator<T>,
 {
     pub fn new(factory: TFactory, allocator: TAllocator) -> Self {
         Self {

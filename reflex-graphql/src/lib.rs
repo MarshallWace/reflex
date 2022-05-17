@@ -40,9 +40,64 @@ pub trait GraphQlQueryTransform {
     ) -> Result<(Document<'src, T>, GraphQlExtensions), String>;
 }
 
+#[derive(Clone, Copy)]
+pub struct NoopGraphQlQueryTransform;
+impl GraphQlQueryTransform for NoopGraphQlQueryTransform {
+    fn transform<'src, T: GraphQlText<'src>>(
+        &self,
+        document: Document<'src, T>,
+        extensions: GraphQlExtensions,
+    ) -> Result<(Document<'src, T>, GraphQlExtensions), String> {
+        Ok((document, extensions))
+    }
+}
+
+pub enum EitherGraphQlQueryTransform<T1: GraphQlQueryTransform, T2: GraphQlQueryTransform> {
+    Left(T1),
+    Right(T2),
+}
+impl<T1, T2> Clone for EitherGraphQlQueryTransform<T1, T2>
+where
+    T1: GraphQlQueryTransform + Clone,
+    T2: GraphQlQueryTransform + Clone,
+{
+    fn clone(&self) -> Self {
+        match self {
+            Self::Left(inner) => Self::Left(inner.clone()),
+            Self::Right(inner) => Self::Right(inner.clone()),
+        }
+    }
+}
+impl<T1: GraphQlQueryTransform, T2: GraphQlQueryTransform> GraphQlQueryTransform
+    for EitherGraphQlQueryTransform<T1, T2>
+{
+    fn transform<'src, T: GraphQlText<'src>>(
+        &self,
+        document: Document<'src, T>,
+        extensions: GraphQlExtensions,
+    ) -> Result<(Document<'src, T>, GraphQlExtensions), String> {
+        match self {
+            Self::Left(inner) => inner.transform(document, extensions),
+            Self::Right(inner) => inner.transform(document, extensions),
+        }
+    }
+}
+
 pub struct ChainedGraphQlQueryTransform<T1: GraphQlQueryTransform, T2: GraphQlQueryTransform> {
     left: T1,
     right: T2,
+}
+impl<T1, T2> Clone for ChainedGraphQlQueryTransform<T1, T2>
+where
+    T1: GraphQlQueryTransform + Clone,
+    T2: GraphQlQueryTransform + Clone,
+{
+    fn clone(&self) -> Self {
+        Self {
+            left: self.left.clone(),
+            right: self.right.clone(),
+        }
+    }
 }
 impl<T1: GraphQlQueryTransform, T2: GraphQlQueryTransform> GraphQlQueryTransform
     for ChainedGraphQlQueryTransform<T1, T2>

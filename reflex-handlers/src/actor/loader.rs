@@ -74,11 +74,12 @@ impl<T: Expression, TAction> LoaderHandlerAction<T> for TAction where
 {
 }
 
+#[derive(Clone)]
 pub struct LoaderHandler<T, TFactory, TAllocator>
 where
-    T: Expression,
-    TFactory: ExpressionFactory<T>,
-    TAllocator: HeapAllocator<T>,
+    T: AsyncExpression,
+    TFactory: AsyncExpressionFactory<T>,
+    TAllocator: AsyncHeapAllocator<T>,
 {
     factory: TFactory,
     allocator: TAllocator,
@@ -87,9 +88,9 @@ where
 }
 impl<T, TFactory, TAllocator> LoaderHandler<T, TFactory, TAllocator>
 where
-    T: Expression,
-    TFactory: ExpressionFactory<T>,
-    TAllocator: HeapAllocator<T>,
+    T: AsyncExpression,
+    TFactory: AsyncExpressionFactory<T>,
+    TAllocator: AsyncHeapAllocator<T>,
 {
     pub fn new(
         factory: TFactory,

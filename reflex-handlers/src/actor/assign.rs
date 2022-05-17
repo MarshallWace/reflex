@@ -14,7 +14,7 @@ use reflex_dispatcher::{
 };
 use reflex_runtime::{
     action::effect::{EffectEmitAction, EffectSubscribeAction},
-    StateUpdate,
+    AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator, StateUpdate,
 };
 
 pub const EFFECT_TYPE_ASSIGN: &'static str = "reflex::assign";
@@ -28,11 +28,12 @@ impl<T: Expression, TAction> AssignHandlerAction<T> for TAction where
 {
 }
 
+#[derive(Clone)]
 pub struct AssignHandler<T, TFactory, TAllocator>
 where
-    T: Expression,
-    TFactory: ExpressionFactory<T>,
-    TAllocator: HeapAllocator<T>,
+    T: AsyncExpression,
+    TFactory: AsyncExpressionFactory<T>,
+    TAllocator: AsyncHeapAllocator<T>,
 {
     factory: TFactory,
     allocator: TAllocator,
@@ -40,9 +41,9 @@ where
 }
 impl<T, TFactory, TAllocator> AssignHandler<T, TFactory, TAllocator>
 where
-    T: Expression,
-    TFactory: ExpressionFactory<T>,
-    TAllocator: HeapAllocator<T>,
+    T: AsyncExpression,
+    TFactory: AsyncExpressionFactory<T>,
+    TAllocator: AsyncHeapAllocator<T>,
 {
     pub fn new(factory: TFactory, allocator: TAllocator) -> Self {
         Self {
@@ -58,9 +59,9 @@ pub struct AssignHandlerState;
 
 impl<T, TFactory, TAllocator, TAction> Actor<TAction> for AssignHandler<T, TFactory, TAllocator>
 where
-    T: Expression + Send + 'static,
-    TFactory: ExpressionFactory<T> + Clone + Send + 'static,
-    TAllocator: HeapAllocator<T> + Clone + Send + 'static,
+    T: AsyncExpression,
+    TFactory: AsyncExpressionFactory<T>,
+    TAllocator: AsyncHeapAllocator<T>,
     TAction: AssignHandlerAction<T> + 'static,
 {
     type State = AssignHandlerState;
@@ -86,9 +87,9 @@ where
 }
 impl<T, TFactory, TAllocator> AssignHandler<T, TFactory, TAllocator>
 where
-    T: Expression + Send + 'static,
-    TFactory: ExpressionFactory<T> + Clone + Send + 'static,
-    TAllocator: HeapAllocator<T> + Clone + Send + 'static,
+    T: AsyncExpression,
+    TFactory: AsyncExpressionFactory<T>,
+    TAllocator: AsyncHeapAllocator<T>,
 {
     fn handle_effect_subscribe<TAction>(
         &self,

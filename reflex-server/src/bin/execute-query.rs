@@ -6,11 +6,11 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result};
 use clap::Parser;
-use reflex::{allocator::DefaultAllocator, lang::SharedTermFactory};
-use reflex_cli::{syntax::js::default_js_loaders, Syntax};
-use reflex_graphql::graphql_parser;
+use reflex::{allocator::DefaultAllocator, compiler::CompilerOptions, lang::SharedTermFactory};
+use reflex_cli::{compile_entry_point, syntax::js::default_js_loaders, Syntax};
+use reflex_graphql::{graphql_parser, NoopGraphQlQueryTransform};
 use reflex_handlers::{
     actor::{fetch::EFFECT_TYPE_FETCH, graphql::EFFECT_TYPE_GRAPHQL, grpc::EFFECT_TYPE_GRPC},
     default_handlers,
@@ -22,7 +22,7 @@ use reflex_server::{
     builtins::ServerBuiltins,
     cli::execute_query::{cli, ExecuteQueryCliOptions, NoopHttpMiddleware},
     imports::server_imports,
-    GraphQlServerQueryTransform, GraphQlWebServerMetricNames,
+    GraphQlWebServerMetricNames,
 };
 use reflex_utils::reconnect::NoopReconnectTimeout;
 
@@ -72,8 +72,6 @@ pub struct Args {
 impl Into<ExecuteQueryCliOptions> for Args {
     fn into(self) -> ExecuteQueryCliOptions {
         ExecuteQueryCliOptions {
-            graph_root: self.graph_root,
-            syntax: self.syntax,
             query: self.query,
             variables: self.variables,
             headers: None,
@@ -114,11 +112,25 @@ async fn main() -> Result<()> {
     let https_client = create_https_client(tls_cert)?;
     let factory = SharedTermFactory::<ServerBuiltins>::default();
     let allocator = DefaultAllocator::default();
+    let compiler_options = CompilerOptions {
+        debug: args.debug_compiler,
+        ..Default::default()
+    };
     let module_loader = Some(default_js_loaders(
         server_imports(&factory, &allocator),
         &factory,
         &allocator,
     ));
+    let env = Some(std::env::vars());
+    let graph_root = compile_entry_point(
+        args.graph_root.as_path(),
+        args.syntax,
+        env,
+        module_loader,
+        &compiler_options,
+        &factory,
+        &allocator,
+    )?;
     let middleware = default_handlers::<ServerCliAction<_>, _, _, _, _, _>(
         https_client,
         &factory,
@@ -126,17 +138,14 @@ async fn main() -> Result<()> {
         NoopReconnectTimeout,
         DefaultHandlersMetricNames::default(),
     );
-    let query_transform = GraphQlServerQueryTransform::new(schema)
-        .map_err(|err| anyhow!("{}", err))
-        .with_context(|| String::from("GraphQL schema error"))?;
     cli(
         args.into(),
-        Some(std::env::vars()),
-        module_loader,
+        graph_root,
+        schema,
         middleware,
         &factory,
         &allocator,
-        query_transform,
+        NoopGraphQlQueryTransform,
         NoopHttpMiddleware,
         GraphQlWebServerMetricNames::default(),
     )

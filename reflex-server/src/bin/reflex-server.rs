@@ -22,7 +22,7 @@ use reflex::{
 };
 use reflex_cli::{compile_entry_point, syntax::js::default_js_loaders, Syntax};
 use reflex_dispatcher::{compose_actors, scheduler::sync::SyncContext, EitherActor};
-use reflex_graphql::{graphql_parser, GraphQlOperationPayload};
+use reflex_graphql::{graphql_parser, GraphQlOperationPayload, NoopGraphQlQueryTransform};
 use reflex_handlers::{
     default_handlers,
     utils::tls::{create_https_client, tokio_native_tls::native_tls::Certificate},
@@ -33,7 +33,7 @@ use reflex_server::{
     action::ServerCliAction,
     builtins::ServerBuiltins,
     cli::reflex_server::{
-        cli, get_operation_transaction_labels, OpenTelemetryHttpConfig, ReflexServerCliOptions,
+        cli, get_operation_transaction_labels, OpenTelemetryConfig, ReflexServerCliOptions,
     },
     imports::server_imports,
     logger::{formatted::FormattedLogger, json::JsonActionLogger, ActionLogger, EitherLogger},
@@ -42,7 +42,7 @@ use reflex_server::{
         InitGraphRootAction, InitHttpServerAction, InitOpenTelemetryAction,
         InitPrometheusMetricsAction,
     },
-    GraphQlServerQueryTransform, GraphQlWebServerMetricNames,
+    GraphQlWebServerMetricNames,
 };
 use reflex_utils::reconnect::FibonacciReconnectTimeout;
 
@@ -207,21 +207,19 @@ pub async fn main() -> Result<()> {
         },
     );
     let middleware = compose_actors(LoggerMiddleware::new(logger), middleware);
-    let query_transform = GraphQlServerQueryTransform::new(schema)
-        .map_err(|err| anyhow!("{}", err))
-        .with_context(|| String::from("GraphQL schema error"))?;
     let server = cli(
         config,
+        graph_root,
+        schema,
         ServerMiddleware::<ServerCliAction<CachedSharedTerm<ServerBuiltins>>, _, _>::post(
             middleware,
         ),
-        graph_root,
         &factory,
         &allocator,
         compiler_options,
         interpreter_options,
-        query_transform.clone(),
-        query_transform,
+        NoopGraphQlQueryTransform,
+        NoopGraphQlQueryTransform,
         GraphQlWebServerMetricNames::default(),
         get_http_query_metric_labels,
         get_websocket_connection_metric_labels,

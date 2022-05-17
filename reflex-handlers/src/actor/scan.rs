@@ -25,7 +25,8 @@ use reflex_runtime::{
     actor::evaluate_handler::{
         create_evaluate_effect, parse_evaluate_effect_result, EFFECT_TYPE_EVALUATE,
     },
-    QueryEvaluationMode, QueryInvalidationStrategy, StateUpdate,
+    AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator, QueryEvaluationMode,
+    QueryInvalidationStrategy, StateUpdate,
 };
 
 pub const EFFECT_TYPE_SCAN: &'static str = "reflex::scan";
@@ -54,11 +55,12 @@ impl<T: Expression, TAction> ScanHandlerAction<T> for TAction where
 {
 }
 
+#[derive(Clone)]
 pub struct ScanHandler<T, TFactory, TAllocator>
 where
-    T: Expression,
-    TFactory: ExpressionFactory<T>,
-    TAllocator: HeapAllocator<T>,
+    T: AsyncExpression,
+    TFactory: AsyncExpressionFactory<T>,
+    TAllocator: AsyncHeapAllocator<T>,
 {
     factory: TFactory,
     allocator: TAllocator,
@@ -66,9 +68,9 @@ where
 }
 impl<T, TFactory, TAllocator> ScanHandler<T, TFactory, TAllocator>
 where
-    T: Expression,
-    TFactory: ExpressionFactory<T>,
-    TAllocator: HeapAllocator<T>,
+    T: AsyncExpression,
+    TFactory: AsyncExpressionFactory<T>,
+    TAllocator: AsyncHeapAllocator<T>,
 {
     pub fn new(factory: TFactory, allocator: TAllocator) -> Self {
         Self {
@@ -200,9 +202,9 @@ struct ScanHandlerReducerState<T: Expression> {
 
 impl<T, TFactory, TAllocator, TAction> Actor<TAction> for ScanHandler<T, TFactory, TAllocator>
 where
-    T: Expression + Send + 'static,
-    TFactory: ExpressionFactory<T> + Clone + Send + 'static,
-    TAllocator: HeapAllocator<T> + Clone + Send + 'static,
+    T: AsyncExpression,
+    TFactory: AsyncExpressionFactory<T>,
+    TAllocator: AsyncHeapAllocator<T>,
     TAction: ScanHandlerAction<T> + 'static,
 {
     type State = ScanHandlerState<T>;
@@ -232,9 +234,9 @@ where
 }
 impl<T, TFactory, TAllocator> ScanHandler<T, TFactory, TAllocator>
 where
-    T: Expression + Send + 'static,
-    TFactory: ExpressionFactory<T> + Clone + Send + 'static,
-    TAllocator: HeapAllocator<T> + Clone + Send + 'static,
+    T: AsyncExpression,
+    TFactory: AsyncExpressionFactory<T>,
+    TAllocator: AsyncHeapAllocator<T>,
 {
     fn handle_effect_subscribe<TAction>(
         &self,

@@ -79,12 +79,13 @@ impl<T: Expression, TAction> FetchHandlerAction<T> for TAction where
 {
 }
 
+#[derive(Clone)]
 pub struct FetchHandler<T, TConnect, TFactory, TAllocator>
 where
-    T: Expression,
+    T: AsyncExpression,
     TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
-    TFactory: ExpressionFactory<T>,
-    TAllocator: HeapAllocator<T>,
+    TFactory: AsyncExpressionFactory<T>,
+    TAllocator: AsyncHeapAllocator<T>,
 {
     client: hyper::Client<TConnect, Body>,
     factory: TFactory,
@@ -94,9 +95,9 @@ where
 }
 impl<T, TConnect, TFactory, TAllocator> FetchHandler<T, TConnect, TFactory, TAllocator>
 where
-    T: Expression,
-    TFactory: ExpressionFactory<T>,
-    TAllocator: HeapAllocator<T>,
+    T: AsyncExpression,
+    TFactory: AsyncExpressionFactory<T>,
+    TAllocator: AsyncHeapAllocator<T>,
     TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
 {
     pub fn new(

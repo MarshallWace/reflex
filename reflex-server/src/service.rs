@@ -25,7 +25,7 @@ use reflex_dispatcher::{
     Action, Actor, InboundAction, OutboundAction,
 };
 use reflex_graphql::{
-    create_json_error_object,
+    create_json_error_object, graphql_parser,
     stdlib::Stdlib as GraphQlStdlib,
     subscriptions::{
         deserialize_graphql_client_message, GraphQlSubscriptionClientMessage,
@@ -104,6 +104,7 @@ pub struct GraphQlWebServer<TAction: Action + Send + 'static> {
 impl<TAction: Action + Send + 'static> GraphQlWebServer<TAction> {
     pub fn new<T, TPre, TPost>(
         graph_root: (Program, InstructionPointer),
+        schema: Option<graphql_parser::schema::Document<'static, String>>,
         middleware: ServerMiddleware<TAction, TPre, TPost>,
         compiler_options: CompilerOptions,
         interpreter_options: InterpreterOptions,
@@ -121,7 +122,7 @@ impl<TAction: Action + Send + 'static> GraphQlWebServer<TAction> {
         get_operation_metric_labels: impl Fn(Option<&str>, &GraphQlOperationPayload) -> Vec<(String, String)>
             + Send
             + 'static,
-    ) -> Self
+    ) -> Result<Self, String>
     where
         T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
         T::Builtin: From<Stdlib> + From<GraphQlStdlib> + 'static,
@@ -131,20 +132,22 @@ impl<TAction: Action + Send + 'static> GraphQlWebServer<TAction> {
         TPost::State: Send,
         TAction: GraphQlWebServerAction<T> + Send + 'static,
     {
+        let server = ServerActor::new(
+            schema,
+            factory.clone(),
+            allocator.clone(),
+            transform_http,
+            transform_ws,
+            metric_names.server,
+            get_http_query_metric_labels,
+            get_websocket_connection_metric_labels,
+            get_operation_metric_labels,
+        )?;
         let runtime = TokioScheduler::<TAction>::new(
             compose_actors(
                 middleware.pre,
                 compose_actors(
-                    ServerActor::new(
-                        factory.clone(),
-                        allocator.clone(),
-                        transform_http,
-                        transform_ws,
-                        metric_names.server,
-                        get_http_query_metric_labels,
-                        get_websocket_connection_metric_labels,
-                        get_operation_metric_labels,
-                    ),
+                    server,
                     compose_actors(
                         BytecodeInterpreter::new(
                             graph_root,
@@ -160,7 +163,7 @@ impl<TAction: Action + Send + 'static> GraphQlWebServer<TAction> {
             ),
             metric_names.scheduler,
         );
-        Self { runtime }
+        Ok(Self { runtime })
     }
     pub fn handle_graphql_http_request(
         &self,

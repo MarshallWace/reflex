@@ -11,6 +11,7 @@ use crate::{
     WorkerMessageQueue, WorkerTransition,
 };
 
+#[derive(Clone, Copy)]
 pub struct NoopActor;
 impl<T: Action> Actor<T> for NoopActor {
     type State = ();
@@ -31,6 +32,18 @@ impl<T: Action> Actor<T> for NoopActor {
 pub enum EitherActor<T1, T2> {
     Left(T1),
     Right(T2),
+}
+impl<T1, T2> Clone for EitherActor<T1, T2>
+where
+    T1: Clone,
+    T2: Clone,
+{
+    fn clone(&self) -> Self {
+        match self {
+            Self::Left(inner) => Self::Left(inner.clone()),
+            Self::Right(inner) => Self::Right(inner.clone()),
+        }
+    }
 }
 pub enum EitherActorState<T1, T2> {
     Left(T1),
@@ -79,6 +92,20 @@ where
     actor: TActor,
     _outer: PhantomData<TOuter>,
     _inner: PhantomData<TInner>,
+}
+impl<TOuter, TInner, TActor> Clone for FilteredActor<TOuter, TInner, TActor>
+where
+    TOuter: Action + InboundAction<TInner> + OutboundAction<TInner>,
+    TInner: Action,
+    TActor: Actor<TInner> + Clone,
+{
+    fn clone(&self) -> Self {
+        Self {
+            actor: self.actor.clone(),
+            _outer: Default::default(),
+            _inner: Default::default(),
+        }
+    }
 }
 impl<TOuter, TInner, TActor> FilteredActor<TOuter, TInner, TActor>
 where
@@ -266,6 +293,20 @@ pub struct ChainedActor<TAction: Action, T1: Actor<TAction>, T2: Actor<TAction>>
     left: T1,
     right: T2,
     _action: PhantomData<TAction>,
+}
+impl<TAction, T1, T2> Clone for ChainedActor<TAction, T1, T2>
+where
+    TAction: Action,
+    T1: Actor<TAction> + Clone,
+    T2: Actor<TAction> + Clone,
+{
+    fn clone(&self) -> Self {
+        Self {
+            left: self.left.clone(),
+            right: self.right.clone(),
+            _action: Default::default(),
+        }
+    }
 }
 impl<T: Action, T1: Actor<T>, T2: Actor<T>> ChainedActor<T, T1, T2> {
     pub fn new(left: T1, right: T2) -> Self {

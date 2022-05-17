@@ -2,4 +2,5 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 pub mod sanitize;
-pub(crate) mod traceparent;
+pub mod traceparent;
+pub mod transform;

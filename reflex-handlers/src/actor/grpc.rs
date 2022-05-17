@@ -125,6 +125,7 @@ impl<T: Expression, TAction> GrpcHandlerAction<T> for TAction where
 {
 }
 
+#[derive(Clone)]
 pub struct GrpcHandler<T, TFactory, TAllocator, TService, TClient, TConfig, TReconnect>
 where
     T: AsyncExpression + Rewritable<T> + Reducible<T>,
