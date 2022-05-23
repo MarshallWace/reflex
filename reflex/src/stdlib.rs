@@ -32,6 +32,7 @@ pub use entries::*;
 pub use eq::*;
 pub use equal::*;
 pub use filter::*;
+pub use flatten::*;
 pub use floor::*;
 pub use get::*;
 pub use gt::*;
@@ -88,6 +89,7 @@ mod entries;
 mod eq;
 mod equal;
 mod filter;
+mod flatten;
 mod floor;
 mod get;
 mod gt;
@@ -160,6 +162,7 @@ pub enum Stdlib {
     Eq,
     Equal,
     Filter,
+    Flatten,
     Floor,
     Get,
     Gt,
@@ -240,6 +243,7 @@ impl TryFrom<Uuid> for Stdlib {
             Eq::UUID => Ok(Self::Eq),
             Equal::UUID => Ok(Self::Equal),
             Filter::UUID => Ok(Self::Filter),
+            Flatten::UUID => Ok(Self::Flatten),
             Floor::UUID => Ok(Self::Floor),
             Get::UUID => Ok(Self::Get),
             Gt::UUID => Ok(Self::Gt),
@@ -317,6 +321,7 @@ impl Uid for Stdlib {
             Self::Eq => Uid::uid(&Eq {}),
             Self::Equal => Uid::uid(&Equal {}),
             Self::Filter => Uid::uid(&Filter {}),
+            Self::Flatten => Uid::uid(&Flatten {}),
             Self::Floor => Uid::uid(&Floor {}),
             Self::Get => Uid::uid(&Get {}),
             Self::Gt => Uid::uid(&Gt {}),
@@ -396,6 +401,7 @@ impl Stdlib {
             Self::Eq => Applicable::<T>::arity(&Eq {}),
             Self::Equal => Applicable::<T>::arity(&Equal {}),
             Self::Filter => Applicable::<T>::arity(&Filter {}),
+            Self::Flatten => Applicable::<T>::arity(&Flatten {}),
             Self::Floor => Applicable::<T>::arity(&Floor {}),
             Self::Get => Applicable::<T>::arity(&Get {}),
             Self::Gt => Applicable::<T>::arity(&Gt {}),
@@ -501,6 +507,7 @@ impl Stdlib {
             Self::Eq => Applicable::<T>::apply(&Eq {}, args, factory, allocator, cache),
             Self::Equal => Applicable::<T>::apply(&Equal {}, args, factory, allocator, cache),
             Self::Filter => Applicable::<T>::apply(&Filter {}, args, factory, allocator, cache),
+            Self::Flatten => Applicable::<T>::apply(&Flatten {}, args, factory, allocator, cache),
             Self::Floor => Applicable::<T>::apply(&Floor {}, args, factory, allocator, cache),
             Self::Get => Applicable::<T>::apply(&Get {}, args, factory, allocator, cache),
             Self::Gt => Applicable::<T>::apply(&Gt {}, args, factory, allocator, cache),
@@ -606,6 +613,7 @@ impl Stdlib {
             Self::Eq => Applicable::<T>::should_parallelize(&Eq {}, args),
             Self::Equal => Applicable::<T>::should_parallelize(&Equal {}, args),
             Self::Filter => Applicable::<T>::should_parallelize(&Filter {}, args),
+            Self::Flatten => Applicable::<T>::should_parallelize(&Flatten {}, args),
             Self::Floor => Applicable::<T>::should_parallelize(&Floor {}, args),
             Self::Get => Applicable::<T>::should_parallelize(&Get {}, args),
             Self::Gt => Applicable::<T>::should_parallelize(&Gt {}, args),

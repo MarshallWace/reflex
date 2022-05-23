@@ -50,7 +50,7 @@ where
         let fallback = args.next().unwrap();
         let builtin_method = match factory.match_value_term(&method_name) {
             Some(ValueTerm::String(method_name)) => {
-                get_builtin_field(Some(&target), method_name.as_str(), factory)
+                get_builtin_field(Some(&target), method_name.as_str(), factory, allocator)
             }
             _ => None,
         };
@@ -68,6 +68,7 @@ pub(crate) fn get_builtin_field<T: Expression>(
     target: Option<&T>,
     method: &str,
     factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
 ) -> Option<T>
 where
     T::Builtin: From<Stdlib>,
@@ -89,7 +90,7 @@ where
                 .map(|target| factory.match_vector_term(target))
                 .is_some()
         {
-            get_builtin_vector_field(method, factory)
+            get_builtin_vector_field(method, factory, allocator)
         } else {
             None
         }
@@ -135,6 +136,7 @@ where
 fn get_builtin_vector_field<T: Expression>(
     method: &str,
     factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
 ) -> Option<T>
 where
     T::Builtin: From<Stdlib>,
@@ -144,6 +146,22 @@ where
         "filter" => Some(factory.create_builtin_term(Stdlib::Filter)),
         "keys" => Some(factory.create_builtin_term(Stdlib::Keys)),
         "map" => Some(factory.create_builtin_term(Stdlib::Map)),
+        "flatMap" => Some(factory.create_lambda_term(
+            2,
+            factory.create_application_term(
+                factory.create_builtin_term(Stdlib::Flatten),
+                allocator.create_unit_list(factory.create_application_term(
+                    factory.create_builtin_term(Stdlib::ResolveShallow),
+                    allocator.create_unit_list(factory.create_application_term(
+                        factory.create_builtin_term(Stdlib::Map),
+                        allocator.create_pair(
+                            factory.create_static_variable_term(1),
+                            factory.create_static_variable_term(0),
+                        ),
+                    )),
+                )),
+            ),
+        )),
         "push" => Some(factory.create_builtin_term(Stdlib::Push)),
         "reduce" => Some(factory.create_builtin_term(Stdlib::Reduce)),
         "slice" => Some(factory.create_builtin_term(Stdlib::Slice)),

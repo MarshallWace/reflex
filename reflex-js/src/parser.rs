@@ -1849,7 +1849,8 @@ where
     T::Builtin: From<Stdlib> + From<JsStdlib>,
 {
     let target = parse_expression(target, scope, env, factory, allocator)?;
-    let is_potential_builtin_method = get_builtin_field(None, method_name, factory).is_some();
+    let is_potential_builtin_method =
+        get_builtin_field(None, method_name, factory, allocator).is_some();
     if is_potential_builtin_method {
         let method =
             factory.create_value_term(ValueTerm::String(allocator.create_string(method_name)));
