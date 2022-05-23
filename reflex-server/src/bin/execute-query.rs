@@ -10,7 +10,7 @@ use anyhow::{Context, Result};
 use clap::Parser;
 use reflex::{allocator::DefaultAllocator, compiler::CompilerOptions, lang::SharedTermFactory};
 use reflex_cli::{compile_entry_point, syntax::js::default_js_loaders, Syntax};
-use reflex_graphql::{graphql_parser, NoopGraphQlQueryTransform};
+use reflex_graphql::{parse_graphql_schema, GraphQlSchema, NoopGraphQlQueryTransform};
 use reflex_handlers::{
     actor::{fetch::EFFECT_TYPE_FETCH, graphql::EFFECT_TYPE_GRAPHQL, grpc::EFFECT_TYPE_GRPC},
     default_handlers,
@@ -153,11 +153,10 @@ async fn main() -> Result<()> {
     .map(|response| println!("{}", response))
 }
 
-fn load_graphql_schema(path: &Path) -> Result<graphql_parser::schema::Document<'static, String>> {
+fn load_graphql_schema(path: &Path) -> Result<GraphQlSchema> {
     let source = fs::read_to_string(path)
         .with_context(|| format!("Failed to load GraphQL schema: {}", path.to_string_lossy()))?;
-    graphql_parser::parse_schema(&source)
-        .map(|document| document.into_static())
+    parse_graphql_schema(&source)
         .with_context(|| format!("Failed to load GraphQL schema: {}", path.to_string_lossy()))
 }
 

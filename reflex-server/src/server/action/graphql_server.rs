@@ -5,7 +5,7 @@ use std::{collections::HashMap, marker::PhantomData};
 
 use reflex::core::{Expression, Uuid};
 use reflex_dispatcher::{Action, NamedAction, SerializableAction, SerializedAction};
-use reflex_graphql::GraphQlOperationPayload;
+use reflex_graphql::GraphQlOperation;
 use reflex_json::JsonValue;
 
 #[derive(Clone, Debug)]
@@ -190,7 +190,7 @@ impl<'a, T: Expression> From<&'a GraphQlServerAction<T>>
 #[derive(Clone, Debug)]
 pub struct GraphQlServerSubscribeAction<T: Expression> {
     pub subscription_id: Uuid,
-    pub operation: GraphQlOperationPayload,
+    pub operation: GraphQlOperation,
     pub _expression: PhantomData<T>,
 }
 impl<T: Expression> Action for GraphQlServerSubscribeAction<T> {}
@@ -315,7 +315,7 @@ impl<T: Expression> SerializableAction for GraphQlServerParseSuccessAction<T> {
 pub struct GraphQlServerParseErrorAction<T: Expression> {
     pub subscription_id: Uuid,
     pub message: String,
-    pub operation: GraphQlOperationPayload,
+    pub operation: GraphQlOperation,
     pub _expression: PhantomData<T>,
 }
 impl<T: Expression> Action for GraphQlServerParseErrorAction<T> {}

@@ -31,7 +31,7 @@ use reflex::{
     interpreter::InterpreterOptions,
     stdlib::Stdlib,
 };
-use reflex_graphql::{graphql_parser, stdlib::Stdlib as GraphQlStdlib, GraphQlOperationPayload};
+use reflex_graphql::{stdlib::Stdlib as GraphQlStdlib, GraphQlOperation, GraphQlSchema};
 use reflex_handlers::{actor::grpc::tonic, utils::tls::tokio_native_tls::native_tls};
 use reflex_js::stdlib::Stdlib as JsStdlib;
 use reflex_json::{stdlib::Stdlib as JsonStdlib, JsonMap, JsonValue};
@@ -130,9 +130,7 @@ impl OpenTelemetryConfig {
         TAction: TelemetryMiddlewareAction<T> + OpenTelemetryMiddlewareAction + Send,
     >(
         self,
-        get_operation_transaction_labels: impl Fn(
-            &GraphQlOperationPayload,
-        ) -> (String, Vec<(String, String)>),
+        get_operation_transaction_labels: impl Fn(&GraphQlOperation) -> (String, Vec<(String, String)>),
         factory: &impl AsyncExpressionFactory<T>,
         allocator: &impl AsyncHeapAllocator<T>,
         metric_names: TelemetryMiddlewareMetricNames,
@@ -210,7 +208,7 @@ impl std::fmt::Debug for OpenTelemetryGrpcConfig {
 pub fn cli<T, TFactory, TAllocator, TAction, TPre, TPost>(
     args: ReflexServerCliOptions,
     graph_root: (Program, InstructionPointer),
-    schema: Option<graphql_parser::schema::Document<'static, String>>,
+    schema: Option<GraphQlSchema>,
     middleware: ServerMiddleware<TAction, TPre, TPost>,
     factory: &TFactory,
     allocator: &TAllocator,
@@ -219,13 +217,13 @@ pub fn cli<T, TFactory, TAllocator, TAction, TPre, TPost>(
     transform_http: impl HttpGraphQlServerQueryTransform + Send + 'static,
     transform_ws: impl WebSocketGraphQlServerQueryTransform + Send + 'static,
     metric_names: GraphQlWebServerMetricNames,
-    get_http_query_metric_labels: impl Fn(&GraphQlOperationPayload, &HeaderMap) -> Vec<(String, String)>
+    get_http_query_metric_labels: impl Fn(&GraphQlOperation, &HeaderMap) -> Vec<(String, String)>
         + Send
         + 'static,
     get_websocket_connection_metric_labels: impl Fn(Option<&JsonValue>, &HeaderMap) -> Vec<(String, String)>
         + Send
         + 'static,
-    get_websocket_operation_metric_labels: impl Fn(Option<&str>, &GraphQlOperationPayload) -> Vec<(String, String)>
+    get_websocket_operation_metric_labels: impl Fn(Option<&str>, &GraphQlOperation) -> Vec<(String, String)>
         + Send
         + 'static,
 ) -> Result<impl Future<Output = Result<(), hyper::Error>>>
@@ -277,7 +275,7 @@ where
 }
 
 pub fn get_operation_transaction_labels(
-    operation: &GraphQlOperationPayload,
+    operation: &GraphQlOperation,
 ) -> (String, Vec<(String, String)>) {
     let transaction_label = format!(
         "GraphQL {}",

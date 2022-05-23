@@ -26,8 +26,8 @@ pub(crate) mod service;
 
 use reflex_dispatcher::{scheduler::sync::SyncContext, Action, OutboundAction};
 use reflex_graphql::{
-    create_json_error_object, graphql_parser, validate_query::ValidateQueryGraphQlTransform,
-    GraphQlOperationPayload, GraphQlQuery, GraphQlQueryTransform,
+    create_json_error_object, validate::ValidateQueryGraphQlTransform, GraphQlOperation,
+    GraphQlQueryTransform, GraphQlSchemaTypes,
 };
 use reflex_json::JsonValue;
 use server::{HttpGraphQlServerQueryTransform, WebSocketGraphQlServerQueryTransform};
@@ -44,20 +44,18 @@ pub struct GraphQlServerQueryTransform {
     validate: Option<ValidateQueryGraphQlTransform<'static, String>>,
 }
 impl GraphQlServerQueryTransform {
-    pub fn new(
-        schema: Option<graphql_parser::schema::Document<'static, String>>,
-    ) -> Result<Self, String> {
-        Ok(Self {
-            validate: schema.map(ValidateQueryGraphQlTransform::new).transpose()?,
-        })
+    pub fn new(schema_types: Option<GraphQlSchemaTypes<'static, String>>) -> Self {
+        Self {
+            validate: schema_types.map(ValidateQueryGraphQlTransform::new),
+        }
     }
 }
 impl HttpGraphQlServerQueryTransform for GraphQlServerQueryTransform {
     fn transform(
         &self,
-        operation: GraphQlOperationPayload,
+        operation: GraphQlOperation,
         _request: &http::Request<bytes::Bytes>,
-    ) -> Result<GraphQlOperationPayload, (http::StatusCode, String)> {
+    ) -> Result<GraphQlOperation, (http::StatusCode, String)> {
         if let Some(validate) = &self.validate {
             apply_graphql_query_transform(operation, validate)
         } else {
@@ -68,10 +66,10 @@ impl HttpGraphQlServerQueryTransform for GraphQlServerQueryTransform {
 impl WebSocketGraphQlServerQueryTransform for GraphQlServerQueryTransform {
     fn transform(
         &self,
-        operation: GraphQlOperationPayload,
+        operation: GraphQlOperation,
         _request: &http::Request<()>,
         _connection_params: Option<&JsonValue>,
-    ) -> Result<GraphQlOperationPayload, JsonValue> {
+    ) -> Result<GraphQlOperation, JsonValue> {
         if let Some(validate) = &self.validate {
             apply_graphql_query_transform(operation, validate).map_err(|(status, message)| {
                 create_json_error_object(
@@ -86,22 +84,18 @@ impl WebSocketGraphQlServerQueryTransform for GraphQlServerQueryTransform {
 }
 
 pub fn apply_graphql_query_transform(
-    operation: GraphQlOperationPayload,
+    operation: GraphQlOperation,
     transform: &impl GraphQlQueryTransform,
-) -> Result<GraphQlOperationPayload, (StatusCode, String)> {
+) -> Result<GraphQlOperation, (StatusCode, String)> {
     let (query, operation_name, variables, extensions) = operation.into_parts();
-    let (query, extensions) = query
-        .into_ast()
-        .map_err(|err| format!("{}", err))
-        .and_then(|query| transform.transform(query, extensions))
-        .map_err(|err| {
-            (
-                StatusCode::BAD_REQUEST,
-                format!("GraphQL query transformation failed: {}", err),
-            )
-        })?;
-    Ok(GraphQlOperationPayload::new(
-        GraphQlQuery::Ast(query),
+    let (query, extensions) = transform.transform(query, extensions).map_err(|err| {
+        (
+            StatusCode::BAD_REQUEST,
+            format!("GraphQL query transformation failed: {}", err),
+        )
+    })?;
+    Ok(GraphQlOperation::new(
+        query,
         operation_name,
         variables,
         extensions,

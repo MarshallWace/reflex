@@ -22,7 +22,9 @@ use reflex::{
 };
 use reflex_cli::{compile_entry_point, syntax::js::default_js_loaders, Syntax};
 use reflex_dispatcher::{compose_actors, scheduler::sync::SyncContext, EitherActor};
-use reflex_graphql::{graphql_parser, GraphQlOperationPayload, NoopGraphQlQueryTransform};
+use reflex_graphql::{
+    parse_graphql_schema, GraphQlOperation, GraphQlSchema, NoopGraphQlQueryTransform,
+};
 use reflex_handlers::{
     default_handlers,
     utils::tls::{create_https_client, tokio_native_tls::native_tls::Certificate},
@@ -230,7 +232,7 @@ pub async fn main() -> Result<()> {
 }
 
 fn get_http_query_metric_labels(
-    operation: &GraphQlOperationPayload,
+    operation: &GraphQlOperation,
     _headers: &HeaderMap,
 ) -> Vec<(String, String)> {
     vec![(
@@ -248,7 +250,7 @@ fn get_websocket_connection_metric_labels(
 
 fn get_websocket_operation_metric_labels(
     operation_name: Option<&str>,
-    _operation: &GraphQlOperationPayload,
+    _operation: &GraphQlOperation,
 ) -> Vec<(String, String)> {
     vec![(
         String::from("operation_name"),
@@ -263,11 +265,10 @@ fn log_server_action<T: Expression>(
     logger.log(&(action.into()), None, Option::<&SyncContext>::None)
 }
 
-fn load_graphql_schema(path: &Path) -> Result<graphql_parser::schema::Document<'static, String>> {
+fn load_graphql_schema(path: &Path) -> Result<GraphQlSchema> {
     let source = fs::read_to_string(path)
         .with_context(|| format!("Failed to load GraphQL schema: {}", path.to_string_lossy()))?;
-    graphql_parser::parse_schema(&source)
-        .map(|document| document.into_static())
+    parse_graphql_schema(&source)
         .with_context(|| format!("Failed to load GraphQL schema: {}", path.to_string_lossy()))
 }
 

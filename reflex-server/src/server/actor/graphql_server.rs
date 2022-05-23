@@ -16,7 +16,7 @@ use reflex_dispatcher::{
     StateOperation, StateTransition,
 };
 use reflex_graphql::{
-    graphql_variables_are_equal, stdlib::Stdlib as GraphQlStdlib, GraphQlOperationPayload,
+    graphql_variables_are_equal, stdlib::Stdlib as GraphQlStdlib, GraphQlOperation,
 };
 use reflex_runtime::action::query::{
     QueryEmitAction, QuerySubscribeAction, QueryUnsubscribeAction,
@@ -83,7 +83,7 @@ where
     T::Builtin: From<Stdlib> + From<GraphQlStdlib>,
     TFactory: ExpressionFactory<T>,
     TAllocator: HeapAllocator<T>,
-    TMetricLabels: Fn(Option<&str>, &GraphQlOperationPayload) -> Vec<(String, String)>,
+    TMetricLabels: Fn(Option<&str>, &GraphQlOperation) -> Vec<(String, String)>,
 {
     factory: TFactory,
     allocator: TAllocator,
@@ -97,7 +97,7 @@ where
     T::Builtin: From<Stdlib> + From<GraphQlStdlib>,
     TFactory: ExpressionFactory<T>,
     TAllocator: HeapAllocator<T>,
-    TMetricLabels: Fn(Option<&str>, &GraphQlOperationPayload) -> Vec<(String, String)>,
+    TMetricLabels: Fn(Option<&str>, &GraphQlOperation) -> Vec<(String, String)>,
 {
     pub(crate) fn new(
         factory: TFactory,
@@ -126,7 +126,7 @@ impl<T: Expression> Default for GraphQlServerState<T> {
     }
 }
 struct GraphQlOperationState<T: Expression> {
-    operation: GraphQlOperationPayload,
+    operation: GraphQlOperation,
     query: T,
     result: Option<EvaluationResult<T>>,
     subscriptions: Vec<GraphQlSubscriptionState>,
@@ -176,7 +176,7 @@ where
     T::Builtin: From<Stdlib> + From<GraphQlStdlib>,
     TFactory: ExpressionFactory<T>,
     TAllocator: HeapAllocator<T>,
-    TMetricLabels: Fn(Option<&str>, &GraphQlOperationPayload) -> Vec<(String, String)>,
+    TMetricLabels: Fn(Option<&str>, &GraphQlOperation) -> Vec<(String, String)>,
     TAction: GraphQlServerAction<T>,
 {
     type State = GraphQlServerState<T>;
@@ -198,7 +198,7 @@ where
         } else if let Some(action) = action.match_type() {
             self.handle_graphql_modify(&mut state, action, metadata, context)
         } else if let Some(action) = action.match_type() {
-            self.handle_graphql_emit(&mut state, action, metadata, context)
+            self.handle_graphql_server_emit(&mut state, action, metadata, context)
         } else if let Some(action) = action.match_type() {
             self.handle_query_emit(&mut state, action, metadata, context)
         } else {
@@ -214,7 +214,7 @@ where
     T::Builtin: From<Stdlib> + From<GraphQlStdlib>,
     TFactory: ExpressionFactory<T>,
     TAllocator: HeapAllocator<T>,
-    TMetricLabels: Fn(Option<&str>, &GraphQlOperationPayload) -> Vec<(String, String)>,
+    TMetricLabels: Fn(Option<&str>, &GraphQlOperation) -> Vec<(String, String)>,
 {
     fn handle_graphql_subscribe<TAction>(
         &self,
@@ -304,7 +304,7 @@ where
                         .into(),
                     ))))
                 } else {
-                    let sanitized_operation = GraphQlOperationPayload::new(
+                    let sanitized_operation = GraphQlOperation::new(
                         operation.query().clone(),
                         None,
                         operation
@@ -434,7 +434,7 @@ where
                     Some((
                         entry_index,
                         subscription_index,
-                        GraphQlOperationPayload::new(
+                        GraphQlOperation::new(
                             entry.operation.query().clone(),
                             None,
                             updated_variables,
@@ -603,7 +603,7 @@ where
         });
         Some(StateTransition::new(actions))
     }
-    fn handle_graphql_emit<TAction>(
+    fn handle_graphql_server_emit<TAction>(
         &self,
         state: &mut GraphQlServerState<T>,
         action: &GraphQlServerEmitAction<T>,

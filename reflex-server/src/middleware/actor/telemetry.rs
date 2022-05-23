@@ -19,7 +19,7 @@ use reflex_dispatcher::{
     Action, Actor, ActorTransition, HandlerContext, InboundAction, MessageData, NamedAction,
     OutboundAction, StateOperation, StateTransition,
 };
-use reflex_graphql::GraphQlOperationPayload;
+use reflex_graphql::GraphQlOperation;
 use reflex_json::JsonValue;
 use reflex_runtime::{
     action::{
@@ -99,7 +99,7 @@ where
     T: Expression,
     TFactory: ExpressionFactory<T>,
     TAllocator: HeapAllocator<T>,
-    TOperationLabels: Fn(&GraphQlOperationPayload) -> (String, Vec<(String, String)>),
+    TOperationLabels: Fn(&GraphQlOperation) -> (String, Vec<(String, String)>),
 {
     factory: TFactory,
     allocator: TAllocator,
@@ -113,7 +113,7 @@ where
     T: Expression,
     TFactory: ExpressionFactory<T>,
     TAllocator: HeapAllocator<T>,
-    TOperationLabels: Fn(&GraphQlOperationPayload) -> (String, Vec<(String, String)>),
+    TOperationLabels: Fn(&GraphQlOperation) -> (String, Vec<(String, String)>),
 {
     pub fn new(
         factory: TFactory,
@@ -180,7 +180,7 @@ where
     T: Expression,
     TFactory: ExpressionFactory<T>,
     TAllocator: HeapAllocator<T>,
-    TOperationLabels: Fn(&GraphQlOperationPayload) -> (String, Vec<(String, String)>),
+    TOperationLabels: Fn(&GraphQlOperation) -> (String, Vec<(String, String)>),
     TAction: TelemetryMiddlewareAction<T>,
 {
     type State = TelemetryMiddlewareState<T>;
@@ -224,7 +224,7 @@ where
     T: Expression,
     TFactory: ExpressionFactory<T>,
     TAllocator: HeapAllocator<T>,
-    TOperationLabels: Fn(&GraphQlOperationPayload) -> (String, Vec<(String, String)>),
+    TOperationLabels: Fn(&GraphQlOperation) -> (String, Vec<(String, String)>),
 {
     fn handle_graphql_subscribe<TAction>(
         &self,
@@ -789,10 +789,10 @@ fn get_dependency_diff<'a>(
 }
 
 fn parse_graphql_operation_traceparent_extensions(
-    operation: &GraphQlOperationPayload,
+    operation: &GraphQlOperation,
 ) -> Option<Traceparent> {
     match operation.extension("traceparent") {
-        Some(JsonValue::String(value)) => parse_traceparent(value),
+        Some(JsonValue::String(value)) => parse_traceparent(value.as_str()),
         _ => None,
     }
 }

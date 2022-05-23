@@ -9,7 +9,7 @@ use graphql_parser::query::{
 };
 use reflex_json::JsonValue;
 
-use crate::{get_root_operation, GraphQlExtensions, GraphQlQueryTransform, GraphQlText};
+use crate::{get_query_root_operation, GraphQlExtensions, GraphQlQueryTransform, GraphQlText};
 
 #[derive(Clone, PartialEq, Debug)]
 pub struct InjectedQueryArguments {
@@ -274,7 +274,7 @@ fn inject_document_arguments<'src, T: GraphQlText<'src>>(
             _ => None,
         })
         .collect::<QueryFragments<'src, '_, T>>();
-    get_root_operation(document).and_then(|operation| {
+    get_query_root_operation(document).and_then(|operation| {
         match inject_operation_arguments(operation, arguments, &fragments) {
             None => Ok(None),
             Some(operation) => {

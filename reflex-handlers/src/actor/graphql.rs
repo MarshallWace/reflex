@@ -34,7 +34,7 @@ use reflex_graphql::{
         deserialize_graphql_server_message, GraphQlSubscriptionClientMessage,
         GraphQlSubscriptionServerMessage,
     },
-    GraphQlOperationPayload, GraphQlQuery,
+    GraphQlOperationPayload,
 };
 use reflex_json::JsonValue;
 use reflex_runtime::{
@@ -371,14 +371,8 @@ where
                 match parse_graphql_effect_args(effect, &self.factory) {
                     Ok(args) => {
                         if is_websocket_url(&args.url) {
-                            let (connect_action, subscribe_action) = self
-                                .subscribe_websocket_operation(
-                                    state,
-                                    effect,
-                                    args.url,
-                                    args.operation,
-                                    context,
-                                );
+                            let (connect_action, subscribe_action) =
+                                self.subscribe_websocket_operation(state, effect, args, context);
                             (
                                 (
                                     state_token,
@@ -390,13 +384,7 @@ where
                                 (connect_action, subscribe_action),
                             )
                         } else {
-                            match self.subscribe_http_operation(
-                                state,
-                                effect,
-                                args.url,
-                                args.operation,
-                                context,
-                            ) {
+                            match self.subscribe_http_operation(state, effect, args, context) {
                                 Ok(subscribe_action) => {
                                     let connect_action = None;
                                     (
@@ -775,14 +763,14 @@ where
         &self,
         state: &mut GraphQlHandlerState,
         effect: &Signal<T>,
-        url: GraphQlConnectionUrl,
-        operation: GraphQlOperationPayload,
+        operation: GraphQlEffectArgs,
         context: &mut impl HandlerContext,
     ) -> Result<StateOperation<TAction>, T>
     where
         TAction: Action + 'static + OutboundAction<EffectEmitAction<T>>,
     {
-        let operation_name = operation.operation_name().map(String::from);
+        let GraphQlEffectArgs { url, operation } = operation;
+        let operation_name = operation.operation_name.clone();
         match fetch_http_graphql_request(
             self.client.clone(),
             url.as_str(),
@@ -886,8 +874,7 @@ where
         &self,
         state: &mut GraphQlHandlerState,
         effect: &Signal<T>,
-        url: GraphQlConnectionUrl,
-        operation: GraphQlOperationPayload,
+        operation: GraphQlEffectArgs,
         context: &mut impl HandlerContext,
     ) -> (
         Option<StateOperation<TAction>>,
@@ -901,6 +888,7 @@ where
             + OutboundAction<GraphQlHandlerWebSocketConnectErrorAction>
             + OutboundAction<GraphQlHandlerWebSocketServerMessageAction>,
     {
+        let GraphQlEffectArgs { url, operation } = operation;
         let connection_id = match state.websocket_connection_mappings.entry(url.clone()) {
             Entry::Occupied(entry) => *entry.get(),
             Entry::Vacant(entry) => {
@@ -952,7 +940,13 @@ where
                     ("url", String::from(connection_state.url.as_str())),
                     (
                         "operation_name",
-                        String::from(operation.operation_name().unwrap_or("<null>")),
+                        String::from(
+                            operation
+                                .operation_name
+                                .as_ref()
+                                .map(|value| value.as_str())
+                                .unwrap_or("<null>"),
+                        ),
                     ),
                 ];
                 increment_counter!(
@@ -1209,32 +1203,26 @@ where
 fn parse_graphql_response_payload(data: JsonValue) -> Result<JsonValue, Vec<JsonValue>> {
     let result = match data {
         JsonValue::Object(value) => {
-            let result = value
+            let (data, errors) = value
                 .into_iter()
-                .fold(Ok((None, None)), |results, (key, value)| {
-                    let (data, errors) = results?;
+                .fold((None, None), |results, (key, value)| {
+                    let (data, errors) = results;
                     match key.as_str() {
                         "data" => match &value {
-                            JsonValue::Object(_) => Ok((Some(value), errors)),
-                            _ => Ok((data, errors)),
+                            JsonValue::Object(_) => (Some(value), errors),
+                            _ => (data, errors),
                         },
                         "errors" => match value {
-                            JsonValue::Array(errors) => Ok((data, Some(errors))),
-                            _ => Ok((data, errors)),
+                            JsonValue::Array(errors) => (data, Some(errors)),
+                            _ => (data, errors),
                         },
-                        _ => Ok((data, errors)),
+                        _ => (data, errors),
                     }
                 });
-            match result {
-                Err(error) => Some(Err(vec![create_json_error_object(error, None)])),
-                Ok(result) => {
-                    let (data, errors) = result;
-                    match (data, errors) {
-                        (_, Some(errors)) => Some(Err(errors)),
-                        (Some(data), None) => Some(Ok(data)),
-                        _ => None,
-                    }
-                }
+            match (data, errors) {
+                (_, Some(errors)) => Some(Err(errors)),
+                (Some(data), None) => Some(Ok(data)),
+                _ => None,
             }
         }
         _ => None,
@@ -1351,15 +1339,14 @@ fn parse_graphql_effect_args<T: Expression>(
     let _token = args.next().unwrap();
     match (url, query, operation_name, variables, extensions) {
         (Some(url), Some(query), Some(operation_name), Some(variables), Some(extensions)) => {
-            let operation = GraphQlOperationPayload::new(
-                GraphQlQuery::Source(query),
-                operation_name,
-                variables,
-                extensions,
-            );
             Ok(GraphQlEffectArgs {
                 url: GraphQlConnectionUrl(url),
-                operation,
+                operation: GraphQlOperationPayload {
+                    query,
+                    operation_name,
+                    variables: variables.into_iter().collect(),
+                    extensions: extensions.into_iter().collect(),
+                },
             })
         }
         _ => Err(format!(

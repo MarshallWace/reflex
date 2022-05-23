@@ -8,7 +8,7 @@ use std::{
 
 use reflex_json::{deserialize, JsonMap, JsonValue};
 
-use crate::operation::{parse_graphql_operation_payload, GraphQlOperationPayload};
+use crate::{parse_graphql_operation_payload, GraphQlOperationPayload};
 
 #[derive(Clone, Debug)]
 pub enum GraphQlSubscriptionClientMessage {
@@ -262,7 +262,9 @@ fn deserialize_client_start_message(
     let id = deserialize_message_id(&message)?;
     let payload = deserialize_message_payload(message)?;
     let payload = match payload {
-        JsonValue::Object(payload) => parse_graphql_operation_payload(&payload),
+        JsonValue::Object(payload) => {
+            parse_graphql_operation_payload(&payload).map_err(|err| format!("{}", err))
+        }
         _ => Err(String::from("Invalid message payload")),
     }?;
     Ok(GraphQlSubscriptionClientMessage::start(id, payload))

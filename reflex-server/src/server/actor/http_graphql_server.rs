@@ -26,7 +26,8 @@ use reflex_dispatcher::{
 };
 use reflex_graphql::{
     create_graphql_error_response, create_graphql_success_response, deserialize_graphql_operation,
-    serialize_graphql_result_payload, GraphQlOperationPayload, GraphQlQuery, GraphQlQueryTransform,
+    serialize_graphql_result_payload, validate::validate_graphql_result, GraphQlOperation,
+    GraphQlOperationPayload, GraphQlQuery, GraphQlQueryTransform, GraphQlSchemaTypes,
 };
 use reflex_json::{json_object, JsonValue};
 
@@ -76,9 +77,9 @@ impl Default for HttpGraphQlServerMetricNames {
 pub trait HttpGraphQlServerQueryTransform {
     fn transform(
         &self,
-        operation: GraphQlOperationPayload,
+        operation: GraphQlOperation,
         request: &Request<Bytes>,
-    ) -> Result<GraphQlOperationPayload, (StatusCode, String)>;
+    ) -> Result<GraphQlOperation, (StatusCode, String)>;
 }
 impl<T> HttpGraphQlServerQueryTransform for T
 where
@@ -86,9 +87,9 @@ where
 {
     fn transform(
         &self,
-        operation: GraphQlOperationPayload,
+        operation: GraphQlOperation,
         _request: &Request<Bytes>,
-    ) -> Result<GraphQlOperationPayload, (StatusCode, String)> {
+    ) -> Result<GraphQlOperation, (StatusCode, String)> {
         apply_graphql_query_transform(operation, self)
     }
 }
@@ -96,9 +97,9 @@ pub struct NoopHttpGraphQlServerQueryTransform;
 impl HttpGraphQlServerQueryTransform for NoopHttpGraphQlServerQueryTransform {
     fn transform(
         &self,
-        operation: GraphQlOperationPayload,
+        operation: GraphQlOperation,
         _request: &Request<Bytes>,
-    ) -> Result<GraphQlOperationPayload, (StatusCode, String)> {
+    ) -> Result<GraphQlOperation, (StatusCode, String)> {
         Ok(operation)
     }
 }
@@ -128,9 +129,9 @@ where
 {
     fn transform(
         &self,
-        operation: GraphQlOperationPayload,
+        operation: GraphQlOperation,
         request: &Request<Bytes>,
-    ) -> Result<GraphQlOperationPayload, (StatusCode, String)> {
+    ) -> Result<GraphQlOperation, (StatusCode, String)> {
         match self {
             Self::Left(inner) => inner.transform(operation, request),
             Self::Right(inner) => inner.transform(operation, request),
@@ -163,9 +164,9 @@ where
 {
     fn transform(
         &self,
-        operation: GraphQlOperationPayload,
+        operation: GraphQlOperation,
         request: &Request<Bytes>,
-    ) -> Result<GraphQlOperationPayload, (StatusCode, String)> {
+    ) -> Result<GraphQlOperation, (StatusCode, String)> {
         let operation = self.left.transform(operation, request)?;
         self.right.transform(operation, request)
     }
@@ -197,8 +198,9 @@ where
     T: Expression,
     TFactory: ExpressionFactory<T>,
     TTransform: HttpGraphQlServerQueryTransform,
-    TQueryMetricLabels: Fn(&GraphQlOperationPayload, &HeaderMap) -> Vec<(String, String)>,
+    TQueryMetricLabels: Fn(&GraphQlOperation, &HeaderMap) -> Vec<(String, String)>,
 {
+    schema_types: Option<GraphQlSchemaTypes<'static, String>>,
     factory: TFactory,
     transform: TTransform,
     metric_names: HttpGraphQlServerMetricNames,
@@ -211,15 +213,17 @@ where
     T: Expression,
     TFactory: ExpressionFactory<T>,
     TTransform: HttpGraphQlServerQueryTransform,
-    TQueryMetricLabels: Fn(&GraphQlOperationPayload, &HeaderMap) -> Vec<(String, String)>,
+    TQueryMetricLabels: Fn(&GraphQlOperation, &HeaderMap) -> Vec<(String, String)>,
 {
     pub(crate) fn new(
+        schema_types: Option<GraphQlSchemaTypes<'static, String>>,
         factory: TFactory,
         transform: TTransform,
         metric_names: HttpGraphQlServerMetricNames,
         get_query_metric_labels: TQueryMetricLabels,
     ) -> Self {
         Self {
+            schema_types,
             factory,
             transform,
             metric_names: metric_names.init(),
@@ -234,6 +238,7 @@ pub struct HttpGraphQlServerState {
     requests: HashMap<Uuid, HttpGraphQlRequest>,
 }
 struct HttpGraphQlRequest {
+    query: Option<GraphQlQuery>,
     etag: Option<String>,
     metric_labels: Vec<(String, String)>,
 }
@@ -244,7 +249,7 @@ where
     T: Expression,
     TFactory: ExpressionFactory<T>,
     TTransform: HttpGraphQlServerQueryTransform,
-    TQueryMetricLabels: Fn(&GraphQlOperationPayload, &HeaderMap) -> Vec<(String, String)>,
+    TQueryMetricLabels: Fn(&GraphQlOperation, &HeaderMap) -> Vec<(String, String)>,
     TAction: HttpGraphQlServerAction<T>,
 {
     type State = HttpGraphQlServerState;
@@ -264,7 +269,7 @@ where
         } else if let Some(action) = action.match_type() {
             self.handle_graphql_parse_error(&mut state, action, metadata, context)
         } else if let Some(action) = action.match_type() {
-            self.handle_graphql_emit(&mut state, action, metadata, context)
+            self.handle_graphql_server_emit(&mut state, action, metadata, context)
         } else {
             None
         }
@@ -278,7 +283,7 @@ where
     T: Expression,
     TFactory: ExpressionFactory<T>,
     TTransform: HttpGraphQlServerQueryTransform,
-    TQueryMetricLabels: Fn(&GraphQlOperationPayload, &HeaderMap) -> Vec<(String, String)>,
+    TQueryMetricLabels: Fn(&GraphQlOperation, &HeaderMap) -> Vec<(String, String)>,
 {
     fn handle_http_server_request<TAction>(
         &self,
@@ -330,6 +335,10 @@ where
                     &metric_labels,
                 );
                 entry.insert(HttpGraphQlRequest {
+                    query: self
+                        .schema_types
+                        .as_ref()
+                        .map(|_| operation.query().clone()),
                     etag: parse_request_etag(&request),
                     metric_labels,
                 });
@@ -388,7 +397,7 @@ where
             .into(),
         ))))
     }
-    fn handle_graphql_emit<TAction>(
+    fn handle_graphql_server_emit<TAction>(
         &self,
         state: &mut HttpGraphQlServerState,
         action: &GraphQlServerEmitAction<T>,
@@ -408,6 +417,7 @@ where
         let HttpGraphQlRequest {
             metric_labels,
             etag,
+            query,
         } = request;
         decrement_gauge!(
             self.metric_names.graphql_http_active_request_count,
@@ -420,7 +430,18 @@ where
                 create_http_response(StatusCode::NOT_MODIFIED, None, None)
             }
             _ => {
-                let payload = serialize_graphql_result_payload(result, &self.factory);
+                let payload =
+                    serialize_graphql_result_payload(result, &self.factory).and_then(|payload| {
+                        let query = query.as_ref();
+                        let schema_types = self.schema_types.as_ref();
+                        match (query, schema_types) {
+                            (Some(query), Some(schema_types)) => {
+                                validate_graphql_result(&payload, query, schema_types)
+                                    .map(|_| payload)
+                            }
+                            _ => Ok(payload),
+                        }
+                    });
                 create_json_http_response(
                     StatusCode::OK,
                     create_etag_header(&response_etag).ok(),
@@ -452,7 +473,7 @@ where
     }
 }
 
-fn parse_graphql_request(request: &Request<Bytes>) -> Result<GraphQlOperationPayload, String> {
+fn parse_graphql_request(request: &Request<Bytes>) -> Result<GraphQlOperation, String> {
     let content_type_header = request
         .headers()
         .get(header::CONTENT_TYPE)
@@ -460,7 +481,7 @@ fn parse_graphql_request(request: &Request<Bytes>) -> Result<GraphQlOperationPay
     let content_type = content_type_header
         .to_str()
         .map_err(|_| String::from("Invalid Content-Type header"))?;
-    match content_type {
+    let operation = match content_type {
         "application/graphql" => parse_plain_graphql_request_body(
             request.body(),
             request
@@ -470,27 +491,44 @@ fn parse_graphql_request(request: &Request<Bytes>) -> Result<GraphQlOperationPay
         ),
         "application/json" => parse_json_graphql_request_body(request.body()),
         _ => Err(String::from("Unsupported Content-Type header")),
-    }
+    }?;
+    let GraphQlOperationPayload {
+        query,
+        operation_name,
+        variables,
+        extensions,
+    } = operation;
+    let query = reflex_graphql::parse_graphql_query(&query).map_err(|err| format!("{}", err))?;
+    Ok(GraphQlOperation::new(
+        query,
+        operation_name,
+        variables,
+        extensions,
+    ))
 }
 
 fn parse_plain_graphql_request_body(
     body: &Bytes,
     operation_name: Option<String>,
 ) -> Result<GraphQlOperationPayload, String> {
-    let body = parse_request_body(body).map_err(|_| String::from("Invalid request body"))?;
-    Ok(GraphQlOperationPayload::new(
-        GraphQlQuery::Source(body),
+    let query = parse_request_body(body).map_err(|_| String::from("Invalid request body"))?;
+    Ok(GraphQlOperationPayload {
+        query,
         operation_name,
-        None,
-        None,
-    ))
+        variables: Default::default(),
+        extensions: Default::default(),
+    })
 }
 
 fn parse_json_graphql_request_body(body: &Bytes) -> Result<GraphQlOperationPayload, String> {
-    let body = parse_request_body(body).map_err(|_| String::from("Invalid request body"))?;
-    match deserialize_graphql_operation(&body) {
+    let json = parse_request_body(body).map_err(|_| String::from("Invalid request body"))?;
+    match deserialize_graphql_operation(&json) {
         Err(error) => Err(error),
-        Ok(operation) => match operation.operation_name() {
+        Ok(operation) => match operation
+            .operation_name
+            .as_ref()
+            .map(|value| value.as_str())
+        {
             Some("IntrospectionQuery") => {
                 Err(String::from("Introspection query not yet implemented"))
             }

@@ -5,7 +5,7 @@
 use std::{borrow::Cow, collections::HashMap, iter::once};
 
 use either::Either;
-use graphql_parser::{parse_query, query::*};
+use graphql_parser::query::*;
 use reflex::{
     core::{Expression, ExpressionFactory, ExpressionList, HeapAllocator, SignalType},
     lang::{create_struct, term::SignalTerm, ValueTerm},
@@ -16,13 +16,10 @@ use reflex_json::{json_object, sanitize, JsonMap, JsonValue};
 pub use graphql_parser;
 
 mod operation;
-pub use operation::{
-    deserialize_graphql_operation, graphql_variables_are_equal, GraphQlOperationPayload,
-    GraphQlQuery,
-};
+pub use operation::{graphql_variables_are_equal, GraphQlOperation};
 pub mod stdlib;
 pub mod transform;
-pub mod validate_query;
+pub mod validate;
 use stdlib::Stdlib as GraphQlStdlib;
 pub mod subscriptions;
 
@@ -49,6 +46,19 @@ impl GraphQlQueryTransform for NoopGraphQlQueryTransform {
         extensions: GraphQlExtensions,
     ) -> Result<(Document<'src, T>, GraphQlExtensions), String> {
         Ok((document, extensions))
+    }
+}
+
+impl<TInner: GraphQlQueryTransform> GraphQlQueryTransform for Option<TInner> {
+    fn transform<'src, T: GraphQlText<'src>>(
+        &self,
+        document: Document<'src, T>,
+        extensions: GraphQlExtensions,
+    ) -> Result<(Document<'src, T>, GraphQlExtensions), String> {
+        match self {
+            Some(inner) => inner.transform(document, extensions),
+            None => Ok((document, extensions)),
+        }
     }
 }
 
@@ -139,7 +149,146 @@ pub trait GraphQlText<'src>:
 impl GraphQlText<'static> for String {}
 impl<'a> GraphQlText<'a> for Cow<'a, str> {}
 
+pub type GraphQlSchema = graphql_parser::schema::Document<'static, String>;
+
+#[derive(Clone, Debug)]
+pub struct GraphQlSchemaTypes<'a, T: GraphQlText<'a>> {
+    types: HashMap<String, graphql_parser::schema::TypeDefinition<'a, T>>,
+    query: Option<String>,
+    mutation: Option<String>,
+    subscription: Option<String>,
+}
+impl<'a, T: GraphQlText<'a>> GraphQlSchemaTypes<'a, T> {
+    fn get_type(&self, name: &str) -> Option<&graphql_parser::schema::TypeDefinition<'a, T>> {
+        self.types.get(name)
+    }
+}
+
+pub type GraphQlQuery = graphql_parser::query::Document<'static, String>;
+pub type GraphQlVariables = JsonMap<String, JsonValue>;
 pub type GraphQlExtensions = JsonMap<String, JsonValue>;
+
+#[derive(Clone, Debug)]
+pub struct GraphQlOperationPayload {
+    pub query: String,
+    pub operation_name: Option<String>,
+    pub variables: GraphQlVariables,
+    pub extensions: GraphQlExtensions,
+}
+impl GraphQlOperationPayload {
+    pub fn into_json(self) -> JsonValue {
+        JsonValue::Object(JsonMap::from_iter(vec![
+            (String::from("query"), JsonValue::String(self.query)),
+            (
+                String::from("operationName"),
+                match self.operation_name {
+                    Some(operation_name) => JsonValue::String(operation_name),
+                    None => JsonValue::Null,
+                },
+            ),
+            (String::from("variables"), JsonValue::Object(self.variables)),
+            (
+                String::from("extensions"),
+                JsonValue::Object(self.extensions),
+            ),
+        ]))
+    }
+}
+
+pub fn deserialize_graphql_operation(data: &str) -> Result<GraphQlOperationPayload, String> {
+    match reflex_json::deserialize(data) {
+        Err(error) => Err(error),
+        Ok(value) => match value {
+            JsonValue::Object(payload) => {
+                parse_graphql_operation_payload(&payload).map_err(|err| format!("{}", err))
+            }
+            _ => Err(String::from("Invalid request payload")),
+        },
+    }
+}
+
+pub(crate) fn parse_graphql_operation_payload(
+    payload: &JsonMap<String, JsonValue>,
+) -> Result<GraphQlOperationPayload, ParseOperationPayloadError> {
+    let query = match payload.get("query") {
+        None => Err(ParseOperationPayloadError::MissingQuery),
+        Some(value) => match value {
+            JsonValue::String(value) => Ok(String::from(value)),
+            _ => Err(ParseOperationPayloadError::InvalidQuery(value)),
+        },
+    }?;
+    let operation_name = match payload.get("operationName") {
+        None => Ok(None),
+        Some(value) => match value {
+            JsonValue::String(value) => Ok(Some(String::from(value))),
+            JsonValue::Null => Ok(None),
+            _ => Err(ParseOperationPayloadError::InvalidOperationName(value)),
+        },
+    }?;
+    let variables = match payload.get("variables") {
+        None => Ok(Default::default()),
+        Some(JsonValue::Object(variables)) => Ok(variables.clone()),
+        Some(value) => Err(ParseOperationPayloadError::InvalidVariables(value)),
+    }?;
+    let extensions = match payload.get("extensions") {
+        None => Ok(Default::default()),
+        Some(JsonValue::Object(extensions)) => Ok(extensions.clone()),
+        Some(value) => Err(ParseOperationPayloadError::InvalidExtensions(value)),
+    }?;
+    Ok(GraphQlOperationPayload {
+        query,
+        operation_name,
+        variables,
+        extensions,
+    })
+}
+
+pub(crate) enum ParseOperationPayloadError<'a> {
+    MissingQuery,
+    InvalidQuery(&'a JsonValue),
+    InvalidOperationName(&'a JsonValue),
+    InvalidVariables(&'a JsonValue),
+    InvalidExtensions(&'a JsonValue),
+}
+impl<'a> std::error::Error for ParseOperationPayloadError<'a> {}
+impl<'a> std::fmt::Debug for ParseOperationPayloadError<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::MissingQuery => write!(f, "MissingQuery"),
+            Self::InvalidQuery(_) => f.debug_tuple("InvalidQuery").finish(),
+            Self::InvalidOperationName(_) => f.debug_tuple("InvalidOperationName").finish(),
+            Self::InvalidVariables(_) => f.debug_tuple("InvalidVariables").finish(),
+            Self::InvalidExtensions(_) => f.debug_tuple("InvalidExtensions").finish(),
+        }
+    }
+}
+impl<'a> std::fmt::Display for ParseOperationPayloadError<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ParseOperationPayloadError::MissingQuery => write!(f, "Missing query"),
+            ParseOperationPayloadError::InvalidQuery(_) => write!(f, "Invalid query"),
+            ParseOperationPayloadError::InvalidOperationName(_) => {
+                write!(f, "Invalid operation name")
+            }
+            ParseOperationPayloadError::InvalidVariables(_) => {
+                write!(f, "Invalid variables")
+            }
+            ParseOperationPayloadError::InvalidExtensions(_) => {
+                write!(f, "Invalid extensions")
+            }
+        }
+    }
+}
+
+pub fn parse_graphql_query(query: &str) -> Result<GraphQlQuery, graphql_parser::query::ParseError> {
+    graphql_parser::parse_query::<String>(query).map(|document| document.into_static())
+}
+
+pub fn parse_graphql_schema(
+    schema: &str,
+) -> Result<GraphQlSchema, graphql_parser::schema::ParseError> {
+    graphql_parser::parse_schema::<String>(schema).map(|document| document.into_static())
+}
 
 pub fn serialize_graphql_result_payload<T: Expression>(
     result: &T,
@@ -165,10 +314,10 @@ pub fn serialize_graphql_result_payload<T: Expression>(
 }
 
 pub fn create_json_error_object(
-    message: String,
+    message: impl Into<String>,
     metadata: impl IntoIterator<Item = (String, JsonValue)>,
 ) -> JsonValue {
-    json_object(once((String::from("message"), JsonValue::String(message))).chain(metadata))
+    json_object(once((String::from("message"), JsonValue::String(message.into()))).chain(metadata))
 }
 
 pub fn create_graphql_success_response(result: JsonValue) -> JsonValue {
@@ -223,7 +372,7 @@ pub fn serialize_json_signal_errors<T: Expression>(signal: &SignalTerm<T>) -> Ve
 }
 
 pub fn parse_graphql_operation<T: Expression>(
-    operation: &GraphQlOperationPayload,
+    operation: &GraphQlOperation,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
 ) -> Result<T, String>
@@ -233,14 +382,15 @@ where
     let variables = operation
         .variables()
         .map(|(key, value)| {
-            reflex_json::hydrate(value.clone(), factory, allocator).map(|value| (key, value))
+            reflex_json::hydrate(value.clone(), factory, allocator)
+                .map(|value| (String::from(key), value))
         })
         .collect::<Result<Vec<_>, _>>()?;
-    parse(operation.query(), variables, factory, allocator)
+    parse_ast_query(operation.query(), variables, factory, allocator)
 }
 
 pub fn parse<'vars, 'a, T: Expression>(
-    query: &'a GraphQlQuery,
+    query: &'a str,
     variables: impl IntoIterator<Item = (&'vars str, T)>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
@@ -248,30 +398,20 @@ pub fn parse<'vars, 'a, T: Expression>(
 where
     T::Builtin: From<Stdlib> + From<GraphQlStdlib>,
 {
-    match query {
-        GraphQlQuery::Ast(query) => parse_ast_query(
-            query,
+    match graphql_parser::parse_query::<std::borrow::Cow<'a, str>>(query) {
+        Ok(query) => parse_ast_query(
+            &query,
             variables
                 .into_iter()
-                .map(|(key, value)| (String::from(key), value)),
+                .map(|(key, value)| (Cow::Owned(String::from(key)), value)),
             factory,
             allocator,
         ),
-        GraphQlQuery::Source(query) => match parse_query::<std::borrow::Cow<'a, str>>(query) {
-            Ok(query) => parse_ast_query(
-                &query,
-                variables
-                    .into_iter()
-                    .map(|(key, value)| (Cow::Owned(String::from(key)), value)),
-                factory,
-                allocator,
-            ),
-            Err(error) => Err(format!("{}", error)),
-        },
+        Err(error) => Err(format!("{}", error)),
     }
 }
 
-pub fn parse_ast_query<'src, 'vars, T: Expression, TText: GraphQlText<'src>>(
+fn parse_ast_query<'src, 'vars, T: Expression, TText: GraphQlText<'src>>(
     query: &Document<'src, TText>,
     variables: impl IntoIterator<Item = (TText::Value, T)> + 'vars,
     factory: &impl ExpressionFactory<T>,
@@ -289,13 +429,15 @@ where
             _ => None,
         })
         .collect::<QueryFragments<TText>>();
-    match get_root_operation(&query) {
+    match get_query_root_operation(&query) {
         Err(error) => Err(error),
-        Ok(operation) => parse_operation(operation, &variables, &fragments, factory, allocator),
+        Ok(operation_root) => {
+            parse_operation(operation_root, &variables, &fragments, factory, allocator)
+        }
     }
 }
 
-fn get_root_operation<'src, 'a, TText: GraphQlText<'src>>(
+fn get_query_root_operation<'src, 'a, TText: GraphQlText<'src>>(
     document: &'a Document<'src, TText>,
 ) -> Result<&'a OperationDefinition<'src, TText>, String> {
     let operations = document
@@ -314,7 +456,7 @@ fn get_root_operation<'src, 'a, TText: GraphQlText<'src>>(
 }
 
 fn parse_operation<'src, T: Expression, TText: GraphQlText<'src>>(
-    operation: &OperationDefinition<'src, TText>,
+    operation_root: &OperationDefinition<'src, TText>,
     variables: &QueryVariables<'src, TText, T>,
     fragments: &QueryFragments<'src, '_, TText>,
     factory: &impl ExpressionFactory<T>,
@@ -323,7 +465,7 @@ fn parse_operation<'src, T: Expression, TText: GraphQlText<'src>>(
 where
     T::Builtin: From<Stdlib> + From<GraphQlStdlib>,
 {
-    let (selection_set, variable_definitions) = match operation {
+    let (selection_set, variable_definitions) = match operation_root {
         OperationDefinition::Query(operation) => (
             &operation.selection_set,
             Some(&operation.variable_definitions),
@@ -345,7 +487,7 @@ where
         allocator,
     )?;
     let shape = parse_selection_set(selection_set, &variables, fragments, factory, allocator)?;
-    let operation_type = match operation {
+    let operation_type = match operation_root {
         OperationDefinition::Query(_) | OperationDefinition::SelectionSet(_) => "query",
         OperationDefinition::Mutation(_) => "mutation",
         OperationDefinition::Subscription(_) => "subscription",
@@ -695,8 +837,6 @@ mod tests {
     };
     use std::convert::{TryFrom, TryInto};
 
-    use crate::operation::GraphQlQuery;
-
     use super::{parse, stdlib::Stdlib as GraphQlStdlib};
 
     #[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
@@ -809,14 +949,12 @@ mod tests {
         );
         let variables = Vec::new();
         let query = parse(
-            &GraphQlQuery::Source(String::from(
-                "
+            "
                 query {
                     second
                     third
                 }
             ",
-            )),
             variables,
             &factory,
             &allocator,
@@ -910,14 +1048,12 @@ mod tests {
         );
         let variables = Vec::new();
         let query = parse(
-            &GraphQlQuery::Source(String::from(
-                "
+            "
                 query {
                     second
                     third
                 }
             ",
-            )),
             variables,
             &factory,
             &allocator,
@@ -991,13 +1127,11 @@ mod tests {
         );
         let variables = Vec::new();
         let query = parse(
-            &GraphQlQuery::Source(String::from(
-                "
+            "
                 query {
                     items
                 }
             ",
-            )),
             variables,
             &factory,
             &allocator,
@@ -1117,13 +1251,11 @@ mod tests {
         );
         let variables = Vec::new();
         let query = parse(
-            &GraphQlQuery::Source(String::from(
-                "
+            "
                 query {
                     items
                 }
             ",
-            )),
             variables,
             &factory,
             &allocator,

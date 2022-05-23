@@ -18,13 +18,14 @@ use reflex_dispatcher::{
 };
 use reflex_graphql::{
     create_graphql_error_response, create_graphql_success_response, create_json_error_object,
-    serialize_graphql_result_payload,
+    parse_graphql_query, serialize_graphql_result_payload,
     subscriptions::{
         GraphQlSubscriptionClientMessage, GraphQlSubscriptionConnectionInitMessage,
         GraphQlSubscriptionServerMessage, GraphQlSubscriptionStartMessage,
         GraphQlSubscriptionStopMessage, GraphQlSubscriptionUpdateMessage, OperationId,
     },
-    GraphQlOperationPayload, GraphQlQueryTransform,
+    validate::validate_graphql_result,
+    GraphQlOperation, GraphQlQuery, GraphQlQueryTransform, GraphQlSchemaTypes,
 };
 use reflex_json::{json_object, JsonMap, JsonNumber, JsonValue};
 use tokio::time::sleep;
@@ -77,10 +78,10 @@ impl Default for WebSocketGraphQlServerMetricNames {
 pub trait WebSocketGraphQlServerQueryTransform {
     fn transform(
         &self,
-        operation: GraphQlOperationPayload,
+        operation: GraphQlOperation,
         request: &Request<()>,
         connection_params: Option<&JsonValue>,
-    ) -> Result<GraphQlOperationPayload, JsonValue>;
+    ) -> Result<GraphQlOperation, JsonValue>;
 }
 impl<T> WebSocketGraphQlServerQueryTransform for T
 where
@@ -88,10 +89,10 @@ where
 {
     fn transform(
         &self,
-        operation: GraphQlOperationPayload,
+        operation: GraphQlOperation,
         _request: &Request<()>,
         _connection_params: Option<&JsonValue>,
-    ) -> Result<GraphQlOperationPayload, JsonValue> {
+    ) -> Result<GraphQlOperation, JsonValue> {
         apply_graphql_query_transform(operation, self).map_err(|(status, message)| {
             create_json_error_object(
                 message,
@@ -105,10 +106,10 @@ pub struct NoopWebSocketGraphQlServerQueryTransform;
 impl WebSocketGraphQlServerQueryTransform for NoopWebSocketGraphQlServerQueryTransform {
     fn transform(
         &self,
-        operation: GraphQlOperationPayload,
+        operation: GraphQlOperation,
         _request: &Request<()>,
         _connection_params: Option<&JsonValue>,
-    ) -> Result<GraphQlOperationPayload, JsonValue> {
+    ) -> Result<GraphQlOperation, JsonValue> {
         Ok(operation)
     }
 }
@@ -139,10 +140,10 @@ where
 {
     fn transform(
         &self,
-        operation: GraphQlOperationPayload,
+        operation: GraphQlOperation,
         request: &Request<()>,
         connection_params: Option<&JsonValue>,
-    ) -> Result<GraphQlOperationPayload, JsonValue> {
+    ) -> Result<GraphQlOperation, JsonValue> {
         match self {
             Self::Left(inner) => inner.transform(operation, request, connection_params),
             Self::Right(inner) => inner.transform(operation, request, connection_params),
@@ -176,10 +177,10 @@ where
 {
     fn transform(
         &self,
-        operation: GraphQlOperationPayload,
+        operation: GraphQlOperation,
         request: &Request<()>,
         connection_params: Option<&JsonValue>,
-    ) -> Result<GraphQlOperationPayload, JsonValue> {
+    ) -> Result<GraphQlOperation, JsonValue> {
         let operation = self.left.transform(operation, request, connection_params)?;
         self.right.transform(operation, request, connection_params)
     }
@@ -223,6 +224,7 @@ where
     TTransform: WebSocketGraphQlServerQueryTransform,
     TMetricLabels: Fn(Option<&JsonValue>, &HeaderMap) -> Vec<(String, String)>,
 {
+    schema_types: Option<GraphQlSchemaTypes<'static, String>>,
     factory: TFactory,
     transform: TTransform,
     metric_names: WebSocketGraphQlServerMetricNames,
@@ -238,12 +240,14 @@ where
     TMetricLabels: Fn(Option<&JsonValue>, &HeaderMap) -> Vec<(String, String)>,
 {
     pub(crate) fn new(
+        schema_types: Option<GraphQlSchemaTypes<'static, String>>,
         factory: TFactory,
         transform: TTransform,
         metric_names: WebSocketGraphQlServerMetricNames,
         get_connection_metric_labels: TMetricLabels,
     ) -> Self {
         Self {
+            schema_types,
             factory,
             transform,
             metric_names: metric_names.init(),
@@ -277,6 +281,7 @@ struct WebSocketGraphQlInitializedConnectionState {
 struct WebSocketGraphQlOperation<T: Expression> {
     operation_id: OperationId,
     subscription_id: Uuid,
+    query: Option<GraphQlQuery>,
     /// Previous result payload if this is a diff stream (empty before first result emitted)
     diff_result: Option<Option<(T, JsonValue)>>,
     /// Throttle duration and active throttle state if this is a throttled stream
@@ -543,15 +548,27 @@ where
                 None,
             ))
         } else {
-            let operation = message.payload().clone();
-            self.transform.transform(
-                operation,
-                &connection.request,
-                connection
-                    .initialized_state
-                    .as_ref()
-                    .and_then(|initialized_state| initialized_state.connection_params.as_ref()),
-            )
+            let operation = message.payload();
+            parse_graphql_query(&operation.query)
+                .map_err(|err| create_json_error_object(format!("Invalid query: {}", err), None))
+                .and_then(|query| {
+                    let operation = GraphQlOperation::new(
+                        query,
+                        operation.operation_name.clone(),
+                        operation.variables.clone(),
+                        operation.extensions.clone(),
+                    );
+                    self.transform.transform(
+                        operation,
+                        &connection.request,
+                        connection
+                            .initialized_state
+                            .as_ref()
+                            .and_then(|initialized_state| {
+                                initialized_state.connection_params.as_ref()
+                            }),
+                    )
+                })
         };
         match operation {
             Err(err) => Some(StateTransition::new(once(StateOperation::Send(
@@ -564,9 +581,14 @@ where
             )))),
             Ok(operation) => {
                 let subscription_id = Uuid::new_v4();
+                let validation_query = self
+                    .schema_types
+                    .as_ref()
+                    .map(|_| operation.query().clone());
                 connection.operations.push(WebSocketGraphQlOperation {
                     operation_id: message.operation_id().clone(),
                     subscription_id,
+                    query: validation_query,
                     diff_result: if is_diff_subscription(&operation) {
                         Some(None)
                     } else {
@@ -809,6 +831,8 @@ where
                 let update_message = get_subscription_result_payload(
                     result,
                     &subscription.operation_id,
+                    subscription.query.as_ref(),
+                    self.schema_types.as_ref(),
                     subscription.diff_result.as_mut(),
                     &self.factory,
                 )?;
@@ -868,6 +892,8 @@ where
         let update_message = get_subscription_result_payload(
             &result,
             &subscription.operation_id,
+            subscription.query.as_ref(),
+            self.schema_types.as_ref(),
             subscription.diff_result.as_mut(),
             &self.factory,
         );
@@ -891,10 +917,20 @@ where
 fn get_subscription_result_payload<T: Expression>(
     result: &T,
     operation_id: &OperationId,
+    query: Option<&GraphQlQuery>,
+    schema_types: Option<&GraphQlSchemaTypes<'static, String>>,
     diff_result: Option<&mut Option<(T, JsonValue)>>,
     factory: &impl ExpressionFactory<T>,
 ) -> Option<GraphQlSubscriptionServerMessage> {
-    let result_payload = serialize_graphql_result_payload(result, factory);
+    let result_payload =
+        serialize_graphql_result_payload(result, factory).and_then(|payload| {
+            match (query, schema_types) {
+                (Some(query), Some(schema_types)) => {
+                    validate_graphql_result(&payload, query, schema_types).map(|_| payload)
+                }
+                _ => Ok(payload),
+            }
+        });
     // TODO: perform diff on unserialized result payloads to allow fast dirty-checking of branches
     let previous_result_payload = if let Some(previous_result) = diff_result {
         std::mem::replace(
@@ -928,7 +964,7 @@ fn get_subscription_result_payload<T: Expression>(
     }
 }
 
-fn is_diff_subscription(operation: &GraphQlOperationPayload) -> bool {
+fn is_diff_subscription(operation: &GraphQlOperation) -> bool {
     operation
         .extension("diff")
         .map(|value| match value {
@@ -938,7 +974,7 @@ fn is_diff_subscription(operation: &GraphQlOperationPayload) -> bool {
         .unwrap_or(false)
 }
 
-fn get_subscription_throttle_duration(operation: &GraphQlOperationPayload) -> Option<Duration> {
+fn get_subscription_throttle_duration(operation: &GraphQlOperation) -> Option<Duration> {
     operation
         .extension("throttle")
         .and_then(|value| match value {

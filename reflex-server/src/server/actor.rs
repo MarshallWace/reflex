@@ -11,8 +11,9 @@ use reflex_dispatcher::{
     HandlerContext, MessageData,
 };
 use reflex_graphql::{
-    graphql_parser, stdlib::Stdlib as GraphQlStdlib, validate_query::ValidateQueryGraphQlTransform,
-    EitherGraphQlQueryTransform, GraphQlOperationPayload, NoopGraphQlQueryTransform,
+    stdlib::Stdlib as GraphQlStdlib,
+    validate::{parse_graphql_schema_types, ValidateQueryGraphQlTransform},
+    GraphQlOperation, GraphQlSchema,
 };
 use reflex_json::JsonValue;
 use reflex_runtime::{
@@ -86,9 +87,9 @@ pub(crate) struct ServerActor<
     TAllocator: HeapAllocator<T> + Clone,
     TTransformHttp: HttpGraphQlServerQueryTransform,
     TTransformWs: WebSocketGraphQlServerQueryTransform,
-    THttpMetricLabels: Fn(&GraphQlOperationPayload, &HeaderMap) -> Vec<(String, String)>,
+    THttpMetricLabels: Fn(&GraphQlOperation, &HeaderMap) -> Vec<(String, String)>,
     TConnectionMetricLabels: Fn(Option<&JsonValue>, &HeaderMap) -> Vec<(String, String)>,
-    TOperationMetricLabels: Fn(Option<&str>, &GraphQlOperationPayload) -> Vec<(String, String)>,
+    TOperationMetricLabels: Fn(Option<&str>, &GraphQlOperation) -> Vec<(String, String)>,
     TAction: ServerAction<T> + Send + 'static,
 {
     inner: ChainedActor<
@@ -99,10 +100,7 @@ pub(crate) struct ServerActor<
                 T,
                 TFactory,
                 ChainedHttpGraphQlServerQueryTransform<
-                    EitherGraphQlQueryTransform<
-                        ValidateQueryGraphQlTransform<'static, String>,
-                        NoopGraphQlQueryTransform,
-                    >,
+                    Option<ValidateQueryGraphQlTransform<'static, String>>,
                     TTransformHttp,
                 >,
                 THttpMetricLabels,
@@ -111,10 +109,7 @@ pub(crate) struct ServerActor<
                 T,
                 TFactory,
                 ChainedWebSocketGraphQlServerQueryTransform<
-                    EitherGraphQlQueryTransform<
-                        ValidateQueryGraphQlTransform<'static, String>,
-                        NoopGraphQlQueryTransform,
-                    >,
+                    Option<ValidateQueryGraphQlTransform<'static, String>>,
                     TTransformWs,
                 >,
                 TConnectionMetricLabels,
@@ -156,13 +151,13 @@ where
     TAllocator: HeapAllocator<T> + Clone,
     TTransformHttp: HttpGraphQlServerQueryTransform,
     TTransformWs: WebSocketGraphQlServerQueryTransform,
-    THttpMetricLabels: Fn(&GraphQlOperationPayload, &HeaderMap) -> Vec<(String, String)>,
+    THttpMetricLabels: Fn(&GraphQlOperation, &HeaderMap) -> Vec<(String, String)>,
     TConnectionMetricLabels: Fn(Option<&JsonValue>, &HeaderMap) -> Vec<(String, String)>,
-    TOperationMetricLabels: Fn(Option<&str>, &GraphQlOperationPayload) -> Vec<(String, String)>,
+    TOperationMetricLabels: Fn(Option<&str>, &GraphQlOperation) -> Vec<(String, String)>,
     TAction: ServerAction<T> + Send + 'static,
 {
     pub fn new(
-        schema: Option<graphql_parser::schema::Document<'static, String>>,
+        schema: Option<GraphQlSchema>,
         factory: TFactory,
         allocator: TAllocator,
         transform_http: TTransformHttp,
@@ -172,11 +167,13 @@ where
         get_websocket_connection_metric_labels: TConnectionMetricLabels,
         get_operation_metric_labels: TOperationMetricLabels,
     ) -> Result<Self, String> {
-        let validate_query_transform = create_graphql_validate_query_transform(schema)?;
+        let schema_types = schema.map(parse_graphql_schema_types).transpose()?;
+        let validate_query_transform = schema_types.clone().map(ValidateQueryGraphQlTransform::new);
         Ok(Self {
             inner: compose_actors(
                 compose_actors(
                     HttpGraphQlServer::new(
+                        schema_types.clone(),
                         factory.clone(),
                         ChainedHttpGraphQlServerQueryTransform {
                             left: validate_query_transform.clone(),
@@ -186,6 +183,7 @@ where
                         get_http_query_metric_labels,
                     ),
                     WebSocketGraphQlServer::new(
+                        schema_types,
                         factory.clone(),
                         ChainedWebSocketGraphQlServerQueryTransform {
                             left: validate_query_transform,
@@ -237,9 +235,9 @@ where
     TAllocator: HeapAllocator<T> + Clone,
     TTransformHttp: HttpGraphQlServerQueryTransform,
     TTransformWs: WebSocketGraphQlServerQueryTransform,
-    THttpMetricLabels: Fn(&GraphQlOperationPayload, &HeaderMap) -> Vec<(String, String)>,
+    THttpMetricLabels: Fn(&GraphQlOperation, &HeaderMap) -> Vec<(String, String)>,
     TConnectionMetricLabels: Fn(Option<&JsonValue>, &HeaderMap) -> Vec<(String, String)>,
-    TOperationMetricLabels: Fn(Option<&str>, &GraphQlOperationPayload) -> Vec<(String, String)>,
+    TOperationMetricLabels: Fn(Option<&str>, &GraphQlOperation) -> Vec<(String, String)>,
     TAction: ServerAction<T> + Send + 'static,
 {
     type State = ChainedActorState<
@@ -250,10 +248,7 @@ where
                 T,
                 TFactory,
                 ChainedHttpGraphQlServerQueryTransform<
-                    EitherGraphQlQueryTransform<
-                        ValidateQueryGraphQlTransform<'static, String>,
-                        NoopGraphQlQueryTransform,
-                    >,
+                    Option<ValidateQueryGraphQlTransform<'static, String>>,
                     TTransformHttp,
                 >,
                 THttpMetricLabels,
@@ -262,10 +257,7 @@ where
                 T,
                 TFactory,
                 ChainedWebSocketGraphQlServerQueryTransform<
-                    EitherGraphQlQueryTransform<
-                        ValidateQueryGraphQlTransform<'static, String>,
-                        NoopGraphQlQueryTransform,
-                    >,
+                    Option<ValidateQueryGraphQlTransform<'static, String>>,
                     TTransformWs,
                 >,
                 TConnectionMetricLabels,
@@ -289,22 +281,4 @@ where
     ) -> ActorTransition<Self::State, TAction> {
         self.inner.handle(state, action, metadata, context)
     }
-}
-
-fn create_graphql_validate_query_transform(
-    schema: Option<graphql_parser::schema::Document<'static, String>>,
-) -> Result<
-    EitherGraphQlQueryTransform<
-        ValidateQueryGraphQlTransform<'static, String>,
-        NoopGraphQlQueryTransform,
-    >,
-    String,
-> {
-    schema
-        .map(ValidateQueryGraphQlTransform::new)
-        .transpose()
-        .map(|transform| match transform {
-            Some(transform) => EitherGraphQlQueryTransform::Left(transform),
-            None => EitherGraphQlQueryTransform::Right(NoopGraphQlQueryTransform),
-        })
 }

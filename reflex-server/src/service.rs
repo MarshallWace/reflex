@@ -25,13 +25,13 @@ use reflex_dispatcher::{
     Action, Actor, InboundAction, OutboundAction,
 };
 use reflex_graphql::{
-    create_json_error_object, graphql_parser,
+    create_json_error_object,
     stdlib::Stdlib as GraphQlStdlib,
     subscriptions::{
         deserialize_graphql_client_message, GraphQlSubscriptionClientMessage,
         GraphQlSubscriptionServerMessage,
     },
-    GraphQlOperationPayload,
+    GraphQlOperation, GraphQlSchema,
 };
 use reflex_json::JsonValue;
 use reflex_runtime::{
@@ -104,7 +104,7 @@ pub struct GraphQlWebServer<TAction: Action + Send + 'static> {
 impl<TAction: Action + Send + 'static> GraphQlWebServer<TAction> {
     pub fn new<T, TPre, TPost>(
         graph_root: (Program, InstructionPointer),
-        schema: Option<graphql_parser::schema::Document<'static, String>>,
+        schema: Option<GraphQlSchema>,
         middleware: ServerMiddleware<TAction, TPre, TPost>,
         compiler_options: CompilerOptions,
         interpreter_options: InterpreterOptions,
@@ -113,13 +113,13 @@ impl<TAction: Action + Send + 'static> GraphQlWebServer<TAction> {
         transform_http: impl HttpGraphQlServerQueryTransform + Send + 'static,
         transform_ws: impl WebSocketGraphQlServerQueryTransform + Send + 'static,
         metric_names: GraphQlWebServerMetricNames,
-        get_http_query_metric_labels: impl Fn(&GraphQlOperationPayload, &HeaderMap) -> Vec<(String, String)>
+        get_http_query_metric_labels: impl Fn(&GraphQlOperation, &HeaderMap) -> Vec<(String, String)>
             + Send
             + 'static,
         get_websocket_connection_metric_labels: impl Fn(Option<&JsonValue>, &HeaderMap) -> Vec<(String, String)>
             + Send
             + 'static,
-        get_operation_metric_labels: impl Fn(Option<&str>, &GraphQlOperationPayload) -> Vec<(String, String)>
+        get_operation_metric_labels: impl Fn(Option<&str>, &GraphQlOperation) -> Vec<(String, String)>
             + Send
             + 'static,
     ) -> Result<Self, String>

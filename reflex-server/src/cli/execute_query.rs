@@ -13,7 +13,7 @@ use reflex::{
     stdlib::Stdlib,
 };
 use reflex_dispatcher::{compose_actors, Action, Actor, EitherActor, SerializableAction};
-use reflex_graphql::{graphql_parser, stdlib::Stdlib as GraphQlStdlib, GraphQlOperationPayload};
+use reflex_graphql::{stdlib::Stdlib as GraphQlStdlib, GraphQlOperation, GraphQlSchema};
 use reflex_js::stdlib::Stdlib as JsStdlib;
 use reflex_json::{json, stdlib::Stdlib as JsonStdlib, JsonValue};
 use reflex_runtime::{AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator};
@@ -55,7 +55,7 @@ pub async fn cli<
 >(
     options: ExecuteQueryCliOptions,
     graph_root: (Program, InstructionPointer),
-    schema: Option<graphql_parser::schema::Document<'static, String>>,
+    schema: Option<GraphQlSchema>,
     middleware: TMiddleware,
     factory: &TFactory,
     allocator: &TAllocator,
@@ -165,7 +165,7 @@ where
 }
 
 fn get_http_query_metric_labels(
-    _operation: &GraphQlOperationPayload,
+    _operation: &GraphQlOperation,
     _headers: &HeaderMap,
 ) -> Vec<(String, String)> {
     Vec::new()
@@ -180,7 +180,7 @@ fn get_websocket_connection_metric_labels(
 
 fn get_websocket_operation_metric_labels(
     _operation_name: Option<&str>,
-    _operation: &GraphQlOperationPayload,
+    _operation: &GraphQlOperation,
 ) -> Vec<(String, String)> {
     Vec::new()
 }
