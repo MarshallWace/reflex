@@ -11,20 +11,20 @@ use reflex::{
     },
     core::{
         Applicable, DependencyList, EvaluationResult, Expression, ExpressionFactory, HeapAllocator,
-        Reducible, Rewritable, SignalType, StateCache,
+        Reducible, Rewritable, Signal, SignalType, StateCache,
     },
     hash::{hash_object, HashId},
     interpreter::{execute, DefaultInterpreterCache, InterpreterOptions, MutableInterpreterCache},
     lang::ValueTerm,
 };
 use reflex_dispatcher::{
-    find_latest_typed_message, Action, HandlerContext, InboundAction, MessageData, MessageOffset,
-    OutboundAction, StateOperation, Worker, WorkerContext, WorkerFactory, WorkerMessageQueue,
-    WorkerTransition,
+    find_earliest_typed_message, find_latest_typed_message, Action, HandlerContext, InboundAction,
+    MessageData, MessageOffset, OutboundAction, StateOperation, Worker, WorkerContext,
+    WorkerFactory, WorkerMessageQueue, WorkerTransition,
 };
 
 use crate::{
-    action::evaluate::{EvaluateResultAction, EvaluateStartAction},
+    action::evaluate::{EvaluateResultAction, EvaluateStartAction, EvaluateUpdateAction},
     AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator, QueryEvaluationMode,
     QueryInvalidationStrategy,
 };
@@ -68,16 +68,20 @@ impl Default for BytecodeWorkerMetricNames {
 pub trait BytecodeWorkerAction<T: Expression>:
     Action
     + InboundAction<EvaluateStartAction<T>>
+    + InboundAction<EvaluateUpdateAction<T>>
     + InboundAction<EvaluateResultAction<T>>
     + OutboundAction<EvaluateStartAction<T>>
+    + OutboundAction<EvaluateUpdateAction<T>>
     + OutboundAction<EvaluateResultAction<T>>
 {
 }
 impl<T: Expression, TAction> BytecodeWorkerAction<T> for TAction where
     Self: Action
         + InboundAction<EvaluateStartAction<T>>
+        + InboundAction<EvaluateUpdateAction<T>>
         + InboundAction<EvaluateResultAction<T>>
         + OutboundAction<EvaluateStartAction<T>>
+        + OutboundAction<EvaluateUpdateAction<T>>
         + OutboundAction<EvaluateResultAction<T>>
 {
 }
@@ -88,9 +92,10 @@ where
     TFactory: AsyncExpressionFactory<T>,
     TAllocator: AsyncHeapAllocator<T>,
 {
-    pub cache_key: HashId,
+    pub cache_id: HashId,
     pub query: T,
     pub evaluation_mode: QueryEvaluationMode,
+    pub invalidation_strategy: QueryInvalidationStrategy,
     pub compiler_options: CompilerOptions,
     pub interpreter_options: InterpreterOptions,
     pub graph_root: Arc<(Program, InstructionPointer)>,
@@ -125,9 +130,10 @@ where
             elapsed_time.as_secs_f64()
         );
         BytecodeWorker {
-            cache_key: self.cache_key,
+            cache_id: self.cache_id,
             graph_root: graph_root,
             interpreter_options: self.interpreter_options,
+            invalidation_strategy: self.invalidation_strategy,
             factory: self.factory.clone(),
             allocator: self.allocator.clone(),
             metric_names: self.metric_names,
@@ -142,9 +148,10 @@ where
     TFactory: AsyncExpressionFactory<T>,
     TAllocator: AsyncHeapAllocator<T>,
 {
-    pub cache_key: HashId,
+    pub cache_id: HashId,
     pub graph_root: (Program, InstructionPointer),
     pub interpreter_options: InterpreterOptions,
+    pub invalidation_strategy: QueryInvalidationStrategy,
     pub factory: TFactory,
     pub allocator: TAllocator,
     pub metric_names: BytecodeWorkerMetricNames,
@@ -184,18 +191,25 @@ where
         queue: WorkerMessageQueue<TAction>,
         context: &mut WorkerContext,
     ) -> WorkerTransition<TAction> {
-        sort_worker_message_queue(queue).into_iter().fold(
-            WorkerTransition::new(None),
-            |transition, (action, metadata)| {
-                transition.append(match action.try_into_type() {
-                    Ok(action) => self.handle_evaluate_start(action, metadata, context),
-                    Err(action) => match action.try_into_type() {
-                        Ok(action) => self.handle_evaluate_result(action, metadata, context),
-                        Err(_action) => WorkerTransition::new(None),
-                    },
-                })
-            },
-        )
+        sort_worker_message_queue(queue, self.invalidation_strategy)
+            .into_iter()
+            .fold(
+                WorkerTransition::new(None),
+                |transition, (action, metadata)| {
+                    transition.append(match action.try_into_type() {
+                        Ok(action) => self.handle_evaluate_start(action, metadata, context),
+                        Err(action) => match action.try_into_type() {
+                            Ok(action) => self.handle_evaluate_update(action, metadata, context),
+                            Err(action) => match action.try_into_type() {
+                                Ok(action) => {
+                                    self.handle_evaluate_result(action, metadata, context)
+                                }
+                                Err(_action) => WorkerTransition::new(None),
+                            },
+                        },
+                    })
+                },
+            )
     }
 }
 impl<T, TFactory, TAllocator> BytecodeWorker<T, TFactory, TAllocator>
@@ -213,11 +227,28 @@ where
     where
         TAction: Action + OutboundAction<EvaluateResultAction<T>>,
     {
-        let EvaluateStartAction {
-            cache_key,
-            query,
-            evaluation_mode: _,
-            invalidation_strategy: _,
+        let EvaluateStartAction { cache_id, .. } = action;
+        self.handle_evaluate_update(
+            EvaluateUpdateAction {
+                cache_id,
+                state_index: Default::default(),
+                state_updates: Default::default(),
+            },
+            metadata,
+            context,
+        )
+    }
+    fn handle_evaluate_update<TAction>(
+        &mut self,
+        action: EvaluateUpdateAction<T>,
+        metadata: MessageData,
+        context: &mut impl HandlerContext,
+    ) -> WorkerTransition<TAction>
+    where
+        TAction: Action + OutboundAction<EvaluateResultAction<T>>,
+    {
+        let EvaluateUpdateAction {
+            cache_id,
             state_index,
             state_updates,
         } = action;
@@ -228,12 +259,13 @@ where
                 .map(|(state_token, value)| (*state_token, value.clone())),
         );
         let (program, entry_point) = &self.graph_root;
+        let state_id = state_index.map(|value| value.into()).unwrap_or(0);
         let start_time = Instant::now();
         let result = execute(
-            self.cache_key,
+            self.cache_id,
             program,
             *entry_point,
-            state_index.map(|value| value.into()).unwrap_or(0),
+            state_id,
             &self.state.state_values,
             &self.factory,
             &self.allocator,
@@ -255,32 +287,26 @@ where
                 DependencyList::empty(),
             ),
         };
-        let emit_result_operation = context.caller_pid().map(|parent_pid| {
-            StateOperation::Send(
-                parent_pid,
-                EvaluateResultAction {
-                    cache_key,
-                    query: query.clone(),
-                    state_index,
-                    result: result.clone(),
-                }
-                .into(),
-            )
-        });
-        let internal_gc_operation = StateOperation::Send(
-            context.pid(),
-            EvaluateResultAction {
-                cache_key,
-                query,
-                state_index,
-                result,
-            }
-            .into(),
-        );
+        let result_action = EvaluateResultAction {
+            cache_id,
+            state_index,
+            result: result.clone(),
+        };
+        let internal_gc_action = if is_blocked_result(&result, &self.factory) {
+            None
+        } else {
+            Some(StateOperation::Send(
+                context.pid(),
+                result_action.clone().into(),
+            ))
+        };
+        let emit_result_operation = context
+            .caller_pid()
+            .map(|parent_pid| StateOperation::Send(parent_pid, result_action.into()));
         WorkerTransition::new(
             emit_result_operation
                 .into_iter()
-                .chain(once(internal_gc_operation))
+                .chain(internal_gc_action)
                 .map(|operation| (metadata.offset, operation)),
         )
     }
@@ -294,8 +320,7 @@ where
         TAction: Action,
     {
         let EvaluateResultAction {
-            cache_key: _,
-            query: _,
+            cache_id: _,
             state_index,
             result,
         } = action;
@@ -304,7 +329,7 @@ where
             return WorkerTransition::new(None);
         }
         let start_time = Instant::now();
-        self.state.cache.gc(once(self.cache_key));
+        self.state.cache.gc(once(self.cache_id));
         if result.dependencies().len() < self.state.state_values.len() {
             self.state.state_values.gc(result.dependencies());
         }
@@ -318,15 +343,32 @@ where
     }
 }
 
+fn is_blocked_result<T: Expression>(
+    result: &EvaluationResult<T>,
+    factory: &impl ExpressionFactory<T>,
+) -> bool {
+    factory
+        .match_signal_term(result.result())
+        .map(|term| term.signals().iter().any(is_custom_signal))
+        .unwrap_or(false)
+}
+
+fn is_custom_signal<T: Expression>(signal: &Signal<T>) -> bool {
+    matches!(signal.signal_type(), SignalType::Custom(_))
+}
+
 fn sort_worker_message_queue<T, TAction>(
     inbox: WorkerMessageQueue<TAction>,
+    invalidation_strategy: QueryInvalidationStrategy,
 ) -> WorkerMessageQueue<TAction>
 where
     T: Expression,
     TAction: Action
         + InboundAction<EvaluateStartAction<T>>
+        + InboundAction<EvaluateUpdateAction<T>>
         + InboundAction<EvaluateResultAction<T>>
         + OutboundAction<EvaluateStartAction<T>>
+        + OutboundAction<EvaluateUpdateAction<T>>
         + OutboundAction<EvaluateResultAction<T>>,
 {
     inbox.into_iter().fold(
@@ -334,8 +376,18 @@ where
         |queue, (action, metadata)| match action.try_into_type() {
             Ok(action) => enqueue_evaluate_start(queue, action, metadata),
             Err(action) => match action.try_into_type() {
-                Ok(action) => enqueue_evaluate_result(queue, action, metadata),
-                Err(_) => queue,
+                Ok(action) => match invalidation_strategy {
+                    QueryInvalidationStrategy::Exact => {
+                        enqueue_evaluate_update_unbatched(queue, action, metadata)
+                    }
+                    QueryInvalidationStrategy::CombineUpdateBatches => {
+                        enqueue_evaluate_update_batched(queue, action, metadata)
+                    }
+                },
+                Err(action) => match action.try_into_type() {
+                    Ok(action) => enqueue_evaluate_result(queue, action, metadata),
+                    Err(_) => queue,
+                },
             },
         },
     )
@@ -351,31 +403,33 @@ where
     TAction:
         Action + InboundAction<EvaluateStartAction<T>> + OutboundAction<EvaluateStartAction<T>>,
 {
-    match &action.invalidation_strategy {
-        QueryInvalidationStrategy::Exact => {
-            enqueue_evaluate_start_unbatched(queue, action, metadata)
-        }
-        QueryInvalidationStrategy::CombineUpdateBatches => {
-            enqueue_evaluate_start_batched(queue, action, metadata)
-        }
-    }
+    let mut queue = queue;
+    let (earliest_start_message, preceding_actions) =
+        find_earliest_typed_message::<EvaluateStartAction<T>, TAction>(&mut queue);
+    let start_message = match earliest_start_message {
+        Some((action, metadata)) => (action.into(), metadata),
+        None => (action.into(), metadata),
+    };
+    queue.extend(preceding_actions);
+    queue.push_front(start_message);
+    queue
 }
 
-fn enqueue_evaluate_start_unbatched<T, TAction>(
+fn enqueue_evaluate_update_unbatched<T, TAction>(
     queue: WorkerMessageQueue<TAction>,
-    action: EvaluateStartAction<T>,
+    action: EvaluateUpdateAction<T>,
     metadata: MessageData,
 ) -> WorkerMessageQueue<TAction>
 where
     T: Expression,
     TAction:
-        Action + InboundAction<EvaluateStartAction<T>> + OutboundAction<EvaluateStartAction<T>>,
+        Action + InboundAction<EvaluateUpdateAction<T>> + OutboundAction<EvaluateUpdateAction<T>>,
 {
     let mut queue = queue;
-    let (latest_start_message, trailing_actions) =
-        find_latest_typed_message::<EvaluateStartAction<T>, TAction>(&mut queue);
-    if let Some((latest_start_action, _previous_metadata)) = latest_start_message {
-        queue.push_back((latest_start_action.into(), metadata));
+    let (latest_update_message, trailing_actions) =
+        find_latest_typed_message::<EvaluateUpdateAction<T>, TAction>(&mut queue);
+    if let Some((latest_update_action, _previous_metadata)) = latest_update_message {
+        queue.push_back((latest_update_action.into(), metadata));
         queue.push_back((action.into(), metadata));
         queue.extend(trailing_actions);
     } else {
@@ -385,21 +439,21 @@ where
     queue
 }
 
-fn enqueue_evaluate_start_batched<T, TAction>(
+fn enqueue_evaluate_update_batched<T, TAction>(
     queue: WorkerMessageQueue<TAction>,
-    action: EvaluateStartAction<T>,
+    action: EvaluateUpdateAction<T>,
     metadata: MessageData,
 ) -> WorkerMessageQueue<TAction>
 where
     T: Expression,
     TAction:
-        Action + InboundAction<EvaluateStartAction<T>> + OutboundAction<EvaluateStartAction<T>>,
+        Action + InboundAction<EvaluateUpdateAction<T>> + OutboundAction<EvaluateUpdateAction<T>>,
 {
     let mut queue = queue;
-    let (latest_start_message, trailing_actions) =
-        find_latest_typed_message::<EvaluateStartAction<T>, TAction>(&mut queue);
-    if let Some((latest_start_action, _previous_metadata)) = latest_start_message {
-        let mut combined_state_updates = latest_start_action.state_updates;
+    let (latest_update_message, trailing_actions) =
+        find_latest_typed_message::<EvaluateUpdateAction<T>, TAction>(&mut queue);
+    if let Some((latest_update_action, _previous_metadata)) = latest_update_message {
+        let mut combined_state_updates = latest_update_action.state_updates;
         combined_state_updates.extend(
             action
                 .state_updates
@@ -407,11 +461,8 @@ where
                 .map(|(state_token, value)| (*state_token, value.clone())),
         );
         queue.push_back((
-            EvaluateStartAction {
-                cache_key: action.cache_key,
-                query: action.query,
-                evaluation_mode: action.evaluation_mode,
-                invalidation_strategy: action.invalidation_strategy,
+            EvaluateUpdateAction {
+                cache_id: action.cache_id,
                 state_index: action.state_index,
                 state_updates: combined_state_updates,
             }

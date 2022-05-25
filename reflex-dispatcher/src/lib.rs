@@ -437,6 +437,23 @@ pub fn compose_actors<T: Action, T1: Actor<T>, T2: Actor<T>>(
     ChainedActor::new(left, right)
 }
 
+pub fn find_earliest_typed_message<'a, T: Action, TAction: Action + InboundAction<T>>(
+    queue: &mut WorkerMessageQueue<TAction>,
+) -> (Option<(T, MessageData)>, WorkerMessageQueue<TAction>) {
+    let mut preceding_actions = WorkerMessageQueue::default();
+    while let Some((action, metadata)) = queue.pop_front() {
+        match action.try_into_type() {
+            Ok(action) => {
+                return (Some((action, metadata)), preceding_actions);
+            }
+            Err(action) => {
+                preceding_actions.push_back((action, metadata));
+            }
+        }
+    }
+    (None, preceding_actions)
+}
+
 pub fn find_latest_typed_message<'a, T: Action, TAction: Action + InboundAction<T>>(
     queue: &mut WorkerMessageQueue<TAction>,
 ) -> (Option<(T, MessageData)>, WorkerMessageQueue<TAction>) {

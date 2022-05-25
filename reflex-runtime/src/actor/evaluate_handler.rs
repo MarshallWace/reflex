@@ -28,7 +28,9 @@ use reflex_utils::partition_results;
 use crate::{
     action::{
         effect::{EffectEmitAction, EffectSubscribeAction, EffectUnsubscribeAction},
-        evaluate::{EvaluateResultAction, EvaluateStartAction, EvaluateStopAction},
+        evaluate::{
+            EvaluateResultAction, EvaluateStartAction, EvaluateStopAction, EvaluateUpdateAction,
+        },
     },
     QueryEvaluationMode, QueryInvalidationStrategy, StateUpdate,
 };
@@ -202,7 +204,8 @@ pub trait EvaluateHandlerAction<T: Expression>:
     + OutboundAction<EffectUnsubscribeAction<T>>
     + OutboundAction<EffectEmitAction<T>>
     + OutboundAction<EvaluateStartAction<T>>
-    + OutboundAction<EvaluateStopAction<T>>
+    + OutboundAction<EvaluateUpdateAction<T>>
+    + OutboundAction<EvaluateStopAction>
 {
 }
 impl<T: Expression, TAction> EvaluateHandlerAction<T> for TAction where
@@ -215,7 +218,8 @@ impl<T: Expression, TAction> EvaluateHandlerAction<T> for TAction where
         + OutboundAction<EffectUnsubscribeAction<T>>
         + OutboundAction<EffectEmitAction<T>>
         + OutboundAction<EvaluateStartAction<T>>
-        + OutboundAction<EvaluateStopAction<T>>
+        + OutboundAction<EvaluateUpdateAction<T>>
+        + OutboundAction<EvaluateStopAction>
 {
 }
 
@@ -268,9 +272,6 @@ impl<T: Expression> Default for EvaluateHandlerState<T> {
 struct WorkerState<T: Expression> {
     subscription_count: usize,
     effect: Signal<T>,
-    query: T,
-    evaluation_mode: QueryEvaluationMode,
-    invalidation_strategy: QueryInvalidationStrategy,
     status: WorkerStatus<T>,
     state_index: Option<MessageOffset>,
     state_values: HashMap<StateToken, T>,
@@ -615,9 +616,6 @@ where
                             entry.insert(WorkerState {
                                 subscription_count: 1,
                                 effect: effect.clone(),
-                                query: query.clone(),
-                                evaluation_mode,
-                                invalidation_strategy,
                                 status: WorkerStatus::Busy {
                                     previous_result: None,
                                 },
@@ -628,12 +626,10 @@ where
                             Some(Ok(StateOperation::Send(
                                 current_pid,
                                 EvaluateStartAction {
-                                    cache_key,
+                                    cache_id: cache_key,
                                     query: query.clone(),
                                     evaluation_mode,
                                     invalidation_strategy,
-                                    state_index: None,
-                                    state_updates: Default::default(),
                                 }
                                 .into(),
                             )))
@@ -667,7 +663,7 @@ where
     ) -> Option<StateTransition<TAction>>
     where
         TAction: Action
-            + OutboundAction<EvaluateStopAction<T>>
+            + OutboundAction<EvaluateStopAction>
             + OutboundAction<EffectUnsubscribeAction<T>>,
     {
         let EffectUnsubscribeAction {
@@ -721,13 +717,14 @@ where
             .flat_map(|(_, worker)| worker.dependencies_iter())
             .filter(|state_token| !remaining_effect_ids.contains(&state_token))
             .filter_map(|removed_effect_id| state.effects.remove(&removed_effect_id));
-        let removed_queries = unsubscribed_workers
-            .iter()
-            .map(|(cache_key, worker)| (*cache_key, worker.query.clone()));
-        let stop_actions = removed_queries.map(|(cache_key, query)| {
+        let removed_queries = unsubscribed_workers.iter().map(|(cache_key, _)| *cache_key);
+        let stop_actions = removed_queries.map(|cache_key| {
             StateOperation::Send(
                 context.pid(),
-                EvaluateStopAction { cache_key, query }.into(),
+                EvaluateStopAction {
+                    cache_id: cache_key,
+                }
+                .into(),
             )
         });
         let unsubscribe_actions =
@@ -766,12 +763,11 @@ where
         TAction: Action
             + OutboundAction<EffectSubscribeAction<T>>
             + OutboundAction<EffectUnsubscribeAction<T>>
-            + OutboundAction<EvaluateStartAction<T>>
+            + OutboundAction<EvaluateUpdateAction<T>>
             + OutboundAction<EffectEmitAction<T>>,
     {
         let EvaluateResultAction {
-            cache_key,
-            query: _,
+            cache_id: cache_key,
             state_index,
             result,
         } = action;
@@ -897,7 +893,7 @@ where
         context: &mut impl HandlerContext,
     ) -> Option<StateTransition<TAction>>
     where
-        TAction: Action + OutboundAction<EvaluateStartAction<T>>,
+        TAction: Action + OutboundAction<EvaluateUpdateAction<T>>,
     {
         let EffectEmitAction { updates } = action;
         let (updated_state_tokens, updates) = if updates.is_empty() {
@@ -977,7 +973,7 @@ fn update_worker_state<T: Expression, TAction>(
     metric_names: EvaluateHandlerMetricNames,
 ) -> Option<StateOperation<TAction>>
 where
-    TAction: Action + OutboundAction<EvaluateStartAction<T>>,
+    TAction: Action + OutboundAction<EvaluateUpdateAction<T>>,
 {
     let dependencies = worker.dependencies().cloned()?;
     let updates = match update_type {
@@ -1041,11 +1037,8 @@ where
     };
     Some(StateOperation::Send(
         context.pid(),
-        EvaluateStartAction {
-            cache_key: worker.effect.id(),
-            query: worker.query.clone(),
-            evaluation_mode: worker.evaluation_mode,
-            invalidation_strategy: worker.invalidation_strategy,
+        EvaluateUpdateAction {
+            cache_id: worker.effect.id(),
             state_index: worker.state_index,
             state_updates: updates,
         }

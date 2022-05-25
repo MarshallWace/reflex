@@ -352,17 +352,33 @@ impl<'a, T: Expression> From<&'a ServerCliAction<T>> for Option<&'a EvaluateStar
     }
 }
 
-impl<T: Expression> From<EvaluateStopAction<T>> for ServerCliAction<T> {
-    fn from(value: EvaluateStopAction<T>) -> Self {
+impl<T: Expression> From<EvaluateUpdateAction<T>> for ServerCliAction<T> {
+    fn from(value: EvaluateUpdateAction<T>) -> Self {
         EvaluateAction::from(value).into()
     }
 }
-impl<T: Expression> From<ServerCliAction<T>> for Option<EvaluateStopAction<T>> {
+impl<T: Expression> From<ServerCliAction<T>> for Option<EvaluateUpdateAction<T>> {
     fn from(value: ServerCliAction<T>) -> Self {
         Option::<EvaluateAction<T>>::from(value).and_then(|value| value.into())
     }
 }
-impl<'a, T: Expression> From<&'a ServerCliAction<T>> for Option<&'a EvaluateStopAction<T>> {
+impl<'a, T: Expression> From<&'a ServerCliAction<T>> for Option<&'a EvaluateUpdateAction<T>> {
+    fn from(value: &'a ServerCliAction<T>) -> Self {
+        Option::<&'a EvaluateAction<T>>::from(value).and_then(|value| value.into())
+    }
+}
+
+impl<T: Expression> From<EvaluateStopAction> for ServerCliAction<T> {
+    fn from(value: EvaluateStopAction) -> Self {
+        EvaluateAction::from(value).into()
+    }
+}
+impl<T: Expression> From<ServerCliAction<T>> for Option<EvaluateStopAction> {
+    fn from(value: ServerCliAction<T>) -> Self {
+        Option::<EvaluateAction<T>>::from(value).and_then(|value| value.into())
+    }
+}
+impl<'a, T: Expression> From<&'a ServerCliAction<T>> for Option<&'a EvaluateStopAction> {
     fn from(value: &'a ServerCliAction<T>) -> Self {
         Option::<&'a EvaluateAction<T>>::from(value).and_then(|value| value.into())
     }

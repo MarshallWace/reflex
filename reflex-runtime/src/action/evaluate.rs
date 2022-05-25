@@ -2,10 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use reflex::core::{EvaluationResult, Expression, StateToken};
-use reflex_dispatcher::{
-    Action, MessageOffset, NamedAction, SerializableAction,
-    SerializedAction,
-};
+use reflex_dispatcher::{Action, MessageOffset, NamedAction, SerializableAction, SerializedAction};
 use reflex_json::JsonValue;
 
 use crate::{QueryEvaluationMode, QueryInvalidationStrategy};
@@ -13,7 +10,8 @@ use crate::{QueryEvaluationMode, QueryInvalidationStrategy};
 #[derive(Clone, Debug)]
 pub enum EvaluateAction<T: Expression> {
     Start(EvaluateStartAction<T>),
-    Stop(EvaluateStopAction<T>),
+    Update(EvaluateUpdateAction<T>),
+    Stop(EvaluateStopAction),
     Result(EvaluateResultAction<T>),
 }
 impl<T: Expression> Action for EvaluateAction<T> {}
@@ -21,6 +19,7 @@ impl<T: Expression> NamedAction for EvaluateAction<T> {
     fn name(&self) -> &'static str {
         match self {
             Self::Start(action) => action.name(),
+            Self::Update(action) => action.name(),
             Self::Stop(action) => action.name(),
             Self::Result(action) => action.name(),
         }
@@ -30,6 +29,7 @@ impl<T: Expression> SerializableAction for EvaluateAction<T> {
     fn serialize(&self) -> SerializedAction {
         match self {
             Self::Start(action) => action.serialize(),
+            Self::Update(action) => action.serialize(),
             Self::Stop(action) => action.serialize(),
             Self::Result(action) => action.serialize(),
         }
@@ -58,12 +58,34 @@ impl<'a, T: Expression> From<&'a EvaluateAction<T>> for Option<&'a EvaluateStart
     }
 }
 
-impl<T: Expression> From<EvaluateStopAction<T>> for EvaluateAction<T> {
-    fn from(value: EvaluateStopAction<T>) -> Self {
+impl<T: Expression> From<EvaluateUpdateAction<T>> for EvaluateAction<T> {
+    fn from(value: EvaluateUpdateAction<T>) -> Self {
+        Self::Update(value)
+    }
+}
+impl<T: Expression> From<EvaluateAction<T>> for Option<EvaluateUpdateAction<T>> {
+    fn from(value: EvaluateAction<T>) -> Self {
+        match value {
+            EvaluateAction::Update(value) => Some(value),
+            _ => None,
+        }
+    }
+}
+impl<'a, T: Expression> From<&'a EvaluateAction<T>> for Option<&'a EvaluateUpdateAction<T>> {
+    fn from(value: &'a EvaluateAction<T>) -> Self {
+        match value {
+            EvaluateAction::Update(value) => Some(value),
+            _ => None,
+        }
+    }
+}
+
+impl<T: Expression> From<EvaluateStopAction> for EvaluateAction<T> {
+    fn from(value: EvaluateStopAction) -> Self {
         Self::Stop(value)
     }
 }
-impl<T: Expression> From<EvaluateAction<T>> for Option<EvaluateStopAction<T>> {
+impl<T: Expression> From<EvaluateAction<T>> for Option<EvaluateStopAction> {
     fn from(value: EvaluateAction<T>) -> Self {
         match value {
             EvaluateAction::Stop(value) => Some(value),
@@ -71,7 +93,7 @@ impl<T: Expression> From<EvaluateAction<T>> for Option<EvaluateStopAction<T>> {
         }
     }
 }
-impl<'a, T: Expression> From<&'a EvaluateAction<T>> for Option<&'a EvaluateStopAction<T>> {
+impl<'a, T: Expression> From<&'a EvaluateAction<T>> for Option<&'a EvaluateStopAction> {
     fn from(value: &'a EvaluateAction<T>) -> Self {
         match value {
             EvaluateAction::Stop(value) => Some(value),
@@ -104,12 +126,10 @@ impl<'a, T: Expression> From<&'a EvaluateAction<T>> for Option<&'a EvaluateResul
 
 #[derive(Clone, Debug)]
 pub struct EvaluateStartAction<T: Expression> {
-    pub cache_key: StateToken,
+    pub cache_id: StateToken,
     pub query: T,
     pub evaluation_mode: QueryEvaluationMode,
     pub invalidation_strategy: QueryInvalidationStrategy,
-    pub state_index: Option<MessageOffset>,
-    pub state_updates: Vec<(StateToken, T)>,
 }
 impl<T: Expression> Action for EvaluateStartAction<T> {}
 impl<T: Expression> NamedAction for EvaluateStartAction<T> {
@@ -120,7 +140,7 @@ impl<T: Expression> NamedAction for EvaluateStartAction<T> {
 impl<T: Expression> SerializableAction for EvaluateStartAction<T> {
     fn serialize(&self) -> SerializedAction {
         SerializedAction::from_iter([
-            ("cache_id", JsonValue::from(self.cache_key)),
+            ("cache_id", JsonValue::from(self.cache_id)),
             ("query_id", JsonValue::from(self.query.id())),
             (
                 "standalone",
@@ -136,6 +156,26 @@ impl<T: Expression> SerializableAction for EvaluateStartAction<T> {
                     QueryInvalidationStrategy::Exact => false,
                 }),
             ),
+        ])
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct EvaluateUpdateAction<T: Expression> {
+    pub cache_id: StateToken,
+    pub state_index: Option<MessageOffset>,
+    pub state_updates: Vec<(StateToken, T)>,
+}
+impl<T: Expression> Action for EvaluateUpdateAction<T> {}
+impl<T: Expression> NamedAction for EvaluateUpdateAction<T> {
+    fn name(&self) -> &'static str {
+        "EvaluateUpdateAction"
+    }
+}
+impl<T: Expression> SerializableAction for EvaluateUpdateAction<T> {
+    fn serialize(&self) -> SerializedAction {
+        SerializedAction::from_iter([
+            ("cache_id", JsonValue::from(self.cache_id)),
             (
                 "state_index",
                 match self.state_index {
@@ -143,34 +183,33 @@ impl<T: Expression> SerializableAction for EvaluateStartAction<T> {
                     Some(value) => value.into(),
                 },
             ),
+            (
+                "num_updates",
+                JsonValue::Number(self.state_updates.len().into()),
+            ),
         ])
     }
 }
 
 #[derive(Clone, Debug)]
-pub struct EvaluateStopAction<T: Expression> {
-    pub cache_key: StateToken,
-    pub query: T,
+pub struct EvaluateStopAction {
+    pub cache_id: StateToken,
 }
-impl<T: Expression> Action for EvaluateStopAction<T> {}
-impl<T: Expression> NamedAction for EvaluateStopAction<T> {
+impl Action for EvaluateStopAction {}
+impl NamedAction for EvaluateStopAction {
     fn name(&self) -> &'static str {
         "EvaluateStopAction"
     }
 }
-impl<T: Expression> SerializableAction for EvaluateStopAction<T> {
+impl SerializableAction for EvaluateStopAction {
     fn serialize(&self) -> SerializedAction {
-        SerializedAction::from_iter([
-            ("cache_id", JsonValue::from(self.cache_key)),
-            ("query_id", JsonValue::from(self.query.id())),
-        ])
+        SerializedAction::from_iter([("cache_id", JsonValue::from(self.cache_id))])
     }
 }
 
 #[derive(Clone, Debug)]
 pub struct EvaluateResultAction<T: Expression> {
-    pub cache_key: StateToken,
-    pub query: T,
+    pub cache_id: StateToken,
     pub state_index: Option<MessageOffset>,
     pub result: EvaluationResult<T>,
 }
@@ -183,8 +222,7 @@ impl<T: Expression> NamedAction for EvaluateResultAction<T> {
 impl<T: Expression> SerializableAction for EvaluateResultAction<T> {
     fn serialize(&self) -> SerializedAction {
         SerializedAction::from_iter([
-            ("cache_id", JsonValue::from(self.cache_key)),
-            ("query_id", JsonValue::from(self.query.id())),
+            ("cache_id", JsonValue::from(self.cache_id)),
             (
                 "state_index",
                 match self.state_index {

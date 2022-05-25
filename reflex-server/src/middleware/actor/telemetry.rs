@@ -24,7 +24,7 @@ use reflex_json::JsonValue;
 use reflex_runtime::{
     action::{
         effect::{EffectEmitAction, EffectSubscribeAction, EffectUnsubscribeAction},
-        evaluate::EvaluateResultAction,
+        evaluate::{EvaluateResultAction, EvaluateStartAction, EvaluateStopAction},
     },
     actor::evaluate_handler::{create_evaluate_effect, parse_evaluate_effect_query},
     QueryEvaluationMode, QueryInvalidationStrategy, StateUpdate,
@@ -74,7 +74,9 @@ pub trait TelemetryMiddlewareAction<T: Expression>:
     + InboundAction<EffectSubscribeAction<T>>
     + InboundAction<EffectUnsubscribeAction<T>>
     + InboundAction<EffectEmitAction<T>>
+    + InboundAction<EvaluateStartAction<T>>
     + InboundAction<EvaluateResultAction<T>>
+    + InboundAction<EvaluateStopAction>
     + OutboundAction<TelemetryMiddlewareTransactionStartAction>
     + OutboundAction<TelemetryMiddlewareTransactionEndAction>
 {
@@ -88,7 +90,9 @@ impl<T: Expression, TAction> TelemetryMiddlewareAction<T> for TAction where
         + InboundAction<EffectSubscribeAction<T>>
         + InboundAction<EffectUnsubscribeAction<T>>
         + InboundAction<EffectEmitAction<T>>
+        + InboundAction<EvaluateStartAction<T>>
         + InboundAction<EvaluateResultAction<T>>
+        + InboundAction<EvaluateStopAction>
         + OutboundAction<TelemetryMiddlewareTransactionStartAction>
         + OutboundAction<TelemetryMiddlewareTransactionEndAction>
 {
@@ -133,12 +137,14 @@ where
 
 pub struct TelemetryMiddlewareState<T: Expression> {
     active_queries: HashMap<Uuid, TelemetryMiddlewareQueryState>,
+    active_workers: HashMap<StateToken, Signal<T>>,
     effect_mappings: HashMap<HashId, TelemetryMiddlewareEffectState<T>>,
 }
 impl<T: Expression> Default for TelemetryMiddlewareState<T> {
     fn default() -> Self {
         Self {
             active_queries: Default::default(),
+            active_workers: Default::default(),
             effect_mappings: Default::default(),
         }
     }
@@ -207,6 +213,10 @@ where
             self.handle_effect_subscribe(&mut state, action, metadata, context)
         } else if let Some(action) = action.match_type() {
             self.handle_effect_unsubscribe(&mut state, action, metadata, context)
+        } else if let Some(action) = action.match_type() {
+            self.handle_evaluate_start(&mut state, action, metadata, context)
+        } else if let Some(action) = action.match_type() {
+            self.handle_evaluate_stop(&mut state, action, metadata, context)
         } else if let Some(action) = action.match_type() {
             self.handle_evaluate_result(&mut state, action, metadata, context)
         } else if let Some(action) = action.match_type() {
@@ -477,6 +487,50 @@ where
         };
         Some(StateTransition::new(transaction_end_action))
     }
+    fn handle_evaluate_start<TAction>(
+        &self,
+        state: &mut TelemetryMiddlewareState<T>,
+        action: &EvaluateStartAction<T>,
+        _metadata: &MessageData,
+        _context: &mut impl HandlerContext,
+    ) -> Option<StateTransition<TAction>>
+    where
+        TAction: Action,
+    {
+        let EvaluateStartAction {
+            cache_id,
+            query,
+            evaluation_mode,
+            invalidation_strategy,
+        } = action;
+        match state.active_workers.entry(*cache_id) {
+            Entry::Occupied(_) => None,
+            Entry::Vacant(entry) => {
+                entry.insert(create_evaluate_effect(
+                    query.clone(),
+                    *evaluation_mode,
+                    *invalidation_strategy,
+                    &self.factory,
+                    &self.allocator,
+                ));
+                None
+            }
+        }
+    }
+    fn handle_evaluate_stop<TAction>(
+        &self,
+        state: &mut TelemetryMiddlewareState<T>,
+        action: &EvaluateStopAction,
+        _metadata: &MessageData,
+        _context: &mut impl HandlerContext,
+    ) -> Option<StateTransition<TAction>>
+    where
+        TAction: Action,
+    {
+        let EvaluateStopAction { cache_id } = action;
+        state.active_workers.remove(cache_id);
+        None
+    }
     fn handle_evaluate_result<TAction>(
         &self,
         state: &mut TelemetryMiddlewareState<T>,
@@ -487,14 +541,10 @@ where
     where
         TAction: Action,
     {
-        let EvaluateResultAction { query, result, .. } = action;
-        let evaluate_effect = create_evaluate_effect(
-            query.clone(),
-            QueryEvaluationMode::Query,
-            QueryInvalidationStrategy::default(),
-            &self.factory,
-            &self.allocator,
-        );
+        let EvaluateResultAction {
+            cache_id, result, ..
+        } = action;
+        let evaluate_effect = state.active_workers.get(cache_id)?;
         let (query_transaction_id, previous_result) = state
             .effect_mappings
             .get_mut(&evaluate_effect.id())
