@@ -60,7 +60,9 @@ pub use reduce::*;
 pub use remainder::*;
 pub use replace::*;
 pub use resolve::*;
+pub use resolve_args::*;
 pub use resolve_deep::*;
+pub use resolve_shallow::*;
 pub use round::*;
 pub use sequence::*;
 pub use slice::*;
@@ -117,10 +119,9 @@ mod reduce;
 mod remainder;
 mod replace;
 mod resolve;
+mod resolve_args;
 mod resolve_deep;
-pub use resolve_deep::*;
 mod resolve_shallow;
-pub use resolve_shallow::*;
 mod round;
 mod sequence;
 mod slice;
@@ -189,6 +190,7 @@ pub enum Stdlib {
     Reduce,
     Remainder,
     Replace,
+    ResolveArgs,
     ResolveDeep,
     ResolveHashMap,
     ResolveHashSet,
@@ -270,6 +272,7 @@ impl TryFrom<Uuid> for Stdlib {
             Reduce::UUID => Ok(Self::Reduce),
             Remainder::UUID => Ok(Self::Remainder),
             Replace::UUID => Ok(Self::Replace),
+            ResolveArgs::UUID => Ok(Self::ResolveArgs),
             ResolveDeep::UUID => Ok(Self::ResolveDeep),
             ResolveHashMap::UUID => Ok(Self::ResolveHashMap),
             ResolveHashSet::UUID => Ok(Self::ResolveHashSet),
@@ -348,6 +351,7 @@ impl Uid for Stdlib {
             Self::Reduce => Uid::uid(&Reduce {}),
             Self::Remainder => Uid::uid(&Remainder {}),
             Self::Replace => Uid::uid(&Replace {}),
+            Self::ResolveArgs => Uid::uid(&ResolveArgs {}),
             Self::ResolveDeep => Uid::uid(&ResolveDeep {}),
             Self::ResolveHashMap => Uid::uid(&ResolveHashMap {}),
             Self::ResolveHashSet => Uid::uid(&ResolveHashSet {}),
@@ -428,6 +432,7 @@ impl Stdlib {
             Self::Reduce => Reduce::arity(),
             Self::Remainder => Remainder::arity(),
             Self::Replace => Replace::arity(),
+            Self::ResolveArgs => ResolveArgs::arity(),
             Self::ResolveDeep => ResolveDeep::arity(),
             Self::ResolveHashMap => ResolveHashMap::arity(),
             Self::ResolveHashSet => ResolveHashSet::arity(),
@@ -540,6 +545,9 @@ impl Stdlib {
                 Applicable::<T>::apply(&Remainder {}, args, factory, allocator, cache)
             }
             Self::Replace => Applicable::<T>::apply(&Replace {}, args, factory, allocator, cache),
+            Self::ResolveArgs => {
+                Applicable::<T>::apply(&ResolveArgs {}, args, factory, allocator, cache)
+            }
             Self::ResolveDeep => {
                 Applicable::<T>::apply(&ResolveDeep {}, args, factory, allocator, cache)
             }
@@ -640,6 +648,7 @@ impl Stdlib {
             Self::Reduce => Applicable::<T>::should_parallelize(&Reduce {}, args),
             Self::Remainder => Applicable::<T>::should_parallelize(&Remainder {}, args),
             Self::Replace => Applicable::<T>::should_parallelize(&Replace {}, args),
+            Self::ResolveArgs => Applicable::<T>::should_parallelize(&ResolveArgs {}, args),
             Self::ResolveDeep => Applicable::<T>::should_parallelize(&ResolveDeep {}, args),
             Self::ResolveHashMap => Applicable::<T>::should_parallelize(&ResolveHashMap {}, args),
             Self::ResolveHashSet => Applicable::<T>::should_parallelize(&ResolveHashSet {}, args),

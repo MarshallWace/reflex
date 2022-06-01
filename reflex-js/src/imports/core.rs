@@ -222,6 +222,10 @@ where
                 factory.create_builtin_term(Stdlib::Replace),
             ),
             (
+                String::from("resolveArgs"),
+                factory.create_builtin_term(Stdlib::ResolveArgs),
+            ),
+            (
                 String::from("resolveDeep"),
                 factory.create_builtin_term(Stdlib::ResolveDeep),
             ),
