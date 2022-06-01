@@ -140,6 +140,7 @@ where
     factory: TFactory,
     allocator: TAllocator,
     reconnect_timeout: TReconnect,
+    max_operations_per_connection: Option<usize>,
     config: TConfig,
     metric_names: GrpcHandlerMetricNames,
     _expression: PhantomData<T>,
@@ -161,6 +162,7 @@ where
         factory: TFactory,
         allocator: TAllocator,
         reconnect_timeout: TReconnect,
+        max_operations_per_connection: Option<usize>,
         config: TConfig,
         metric_names: GrpcHandlerMetricNames,
     ) -> Self {
@@ -172,6 +174,7 @@ where
             factory,
             allocator,
             reconnect_timeout,
+            max_operations_per_connection,
             config,
             metric_names: metric_names.init(),
             _expression: Default::default(),
@@ -188,7 +191,7 @@ where
 {
     active_requests: HashMap<StateToken, GrpcRequestState>,
     active_connections: HashMap<GrpcConnectionId, GrpcConnectionState<T, TService, TClient>>,
-    active_connection_mappings: HashMap<(GrpcServiceId, GrpcServiceUrl), GrpcConnectionId>,
+    active_connection_mappings: HashMap<(GrpcServiceId, GrpcServiceUrl), Vec<GrpcConnectionId>>,
 }
 impl<T, TService, TClient> Default for GrpcHandlerState<T, TService, TClient>
 where
@@ -794,8 +797,38 @@ where
             .active_connection_mappings
             .entry((protocol.clone(), url.clone()))
         {
-            Entry::Occupied(entry) => *entry.get(),
-            Entry::Vacant(entry) => *entry.insert(GrpcConnectionId(Uuid::new_v4())),
+            Entry::Occupied(mut entry) => {
+                let connection_ids = entry.get_mut();
+                let existing_connection_id = connection_ids
+                    .iter()
+                    .find(|connection_id| {
+                        if let Some(max_operations) = self.max_operations_per_connection {
+                            state
+                                .active_connections
+                                .get(connection_id)
+                                .map(|connection_state| {
+                                    connection_state.operations.len() < max_operations
+                                })
+                                .unwrap_or(false)
+                        } else {
+                            true
+                        }
+                    })
+                    .copied();
+                match existing_connection_id {
+                    Some(connection_id) => connection_id,
+                    None => {
+                        let connection_id = GrpcConnectionId(Uuid::new_v4());
+                        connection_ids.push(connection_id);
+                        connection_id
+                    }
+                }
+            }
+            Entry::Vacant(entry) => {
+                let connection_id = GrpcConnectionId(Uuid::new_v4());
+                entry.insert(vec![connection_id]);
+                connection_id
+            }
         };
         let metric_labels = [
             ("url", String::from(url.as_str())),
@@ -964,7 +997,24 @@ where
                         1.0,
                         &metric_labels
                     );
-                    state.active_connection_mappings.remove(&(protocol, url));
+                    if let Entry::Occupied(mut entry) =
+                        state.active_connection_mappings.entry((protocol, url))
+                    {
+                        let num_remaining_entries = {
+                            let connection_ids = entry.get_mut();
+                            if let Some(index) =
+                                connection_ids.iter().position(|existing_connection_id| {
+                                    *existing_connection_id == connection_id
+                                })
+                            {
+                                connection_ids.remove(index);
+                            }
+                            connection_ids.len()
+                        };
+                        if num_remaining_entries == 0 {
+                            entry.remove();
+                        }
+                    }
                     let connection_pid = connection.dispose();
                     connection_pid.map(StateOperation::Kill)
                 })
