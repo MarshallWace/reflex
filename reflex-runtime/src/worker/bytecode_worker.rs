@@ -292,7 +292,7 @@ where
             state_index,
             result: result.clone(),
         };
-        let internal_gc_action = if is_blocked_result(&result, &self.factory) {
+        let internal_gc_action = if is_unresolved_result(&result, &self.factory) {
             None
         } else {
             Some(StateOperation::Send(
@@ -304,9 +304,9 @@ where
             .caller_pid()
             .map(|parent_pid| StateOperation::Send(parent_pid, result_action.into()));
         WorkerTransition::new(
-            emit_result_operation
+            internal_gc_action
                 .into_iter()
-                .chain(internal_gc_action)
+                .chain(emit_result_operation)
                 .map(|operation| (metadata.offset, operation)),
         )
     }
@@ -338,23 +338,25 @@ where
             self.metric_names.query_worker_gc_duration,
             elapsed_time.as_secs_f64()
         );
-        // TODO: Garbage-collect state values
         WorkerTransition::new(None)
     }
 }
 
-fn is_blocked_result<T: Expression>(
+fn is_unresolved_result<T: Expression>(
     result: &EvaluationResult<T>,
     factory: &impl ExpressionFactory<T>,
 ) -> bool {
     factory
         .match_signal_term(result.result())
-        .map(|term| term.signals().iter().any(is_custom_signal))
+        .map(|term| term.signals().iter().any(is_unresolved_effect))
         .unwrap_or(false)
 }
 
-fn is_custom_signal<T: Expression>(signal: &Signal<T>) -> bool {
-    matches!(signal.signal_type(), SignalType::Custom(_))
+fn is_unresolved_effect<T: Expression>(effect: &Signal<T>) -> bool {
+    match effect.signal_type() {
+        SignalType::Error => false,
+        SignalType::Pending | SignalType::Custom(_) => true,
+    }
 }
 
 fn sort_worker_message_queue<T, TAction>(

@@ -132,6 +132,7 @@ where
         metadata: &MessageData,
         context: &mut impl HandlerContext,
     ) -> ActorTransition<Self::State, TAction> {
+        // FIXME: remove QueryManager in favour of EvaluateHandler
         let mut state = state;
         let actions = if let Some(action) = action.match_type() {
             self.handle_query_subscribe(&mut state, action, metadata, context)

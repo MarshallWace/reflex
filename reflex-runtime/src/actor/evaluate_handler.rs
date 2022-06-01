@@ -837,7 +837,7 @@ where
             reevaluate_action
         };
         let effect_emit_action: Option<StateOperation<TAction>> =
-            if is_pending_result(result.result(), &self.factory) {
+            if is_unresolved_result(&result, &self.factory) {
                 None
             } else {
                 Some(StateOperation::Send(
@@ -1092,20 +1092,18 @@ fn get_custom_signal_type<T: Expression>(signal: &Signal<T>) -> Option<&String> 
     }
 }
 
-fn is_pending_result<T: Expression>(value: &T, factory: &impl ExpressionFactory<T>) -> bool {
+fn is_unresolved_result<T: Expression>(
+    result: &EvaluationResult<T>,
+    factory: &impl ExpressionFactory<T>,
+) -> bool {
     factory
-        .match_signal_term(value)
-        .map(|signal| {
-            signal
-                .signals()
-                .iter()
-                .any(|signal| is_pending_signal(signal))
-        })
+        .match_signal_term(result.result())
+        .map(|term| term.signals().iter().any(is_unresolved_effect))
         .unwrap_or(false)
 }
 
-fn is_pending_signal<T: Expression>(value: &Signal<T>) -> bool {
-    match value.signal_type() {
+fn is_unresolved_effect<T: Expression>(effect: &Signal<T>) -> bool {
+    match effect.signal_type() {
         SignalType::Error => false,
         SignalType::Pending | SignalType::Custom(_) => true,
     }
