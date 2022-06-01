@@ -20,6 +20,9 @@ impl ResolveTuple {
         optional: [],
         variadic: None,
     };
+    pub fn arity() -> Arity {
+        Arity::from(&Self::ARITY)
+    }
 }
 impl Uid for ResolveTuple {
     fn uid(&self) -> Uuid {
@@ -31,7 +34,7 @@ where
     T::Builtin: From<Stdlib>,
 {
     fn arity(&self) -> Option<Arity> {
-        Some(Arity::from(&Self::ARITY))
+        Some(Self::arity())
     }
     fn should_parallelize(&self, _args: &[T]) -> bool {
         false
@@ -67,6 +70,9 @@ impl ResolveStruct {
         optional: [],
         variadic: None,
     };
+    pub fn arity() -> Arity {
+        Arity::from(&Self::ARITY)
+    }
 }
 impl Uid for ResolveStruct {
     fn uid(&self) -> Uuid {
@@ -78,7 +84,7 @@ where
     T::Builtin: From<Stdlib>,
 {
     fn arity(&self) -> Option<Arity> {
-        Some(Arity::from(&Self::ARITY))
+        Some(Self::arity())
     }
     fn should_parallelize(&self, _args: &[T]) -> bool {
         false
@@ -120,6 +126,9 @@ impl ResolveVector {
         optional: [],
         variadic: None,
     };
+    pub fn arity() -> Arity {
+        Arity::from(&Self::ARITY)
+    }
 }
 impl Uid for ResolveVector {
     fn uid(&self) -> Uuid {
@@ -131,7 +140,7 @@ where
     T::Builtin: From<Stdlib>,
 {
     fn arity(&self) -> Option<Arity> {
-        Some(Arity::from(&Self::ARITY))
+        Some(Self::arity())
     }
     fn should_parallelize(&self, _args: &[T]) -> bool {
         false
@@ -167,6 +176,9 @@ impl ResolveHashSet {
         optional: [],
         variadic: None,
     };
+    pub fn arity() -> Arity {
+        Arity::from(&Self::ARITY)
+    }
 }
 impl Uid for ResolveHashSet {
     fn uid(&self) -> Uuid {
@@ -178,7 +190,7 @@ where
     T::Builtin: From<Stdlib>,
 {
     fn arity(&self) -> Option<Arity> {
-        Some(Arity::from(&Self::ARITY))
+        Some(Self::arity())
     }
     fn should_parallelize(&self, _args: &[T]) -> bool {
         false
@@ -214,6 +226,9 @@ impl ResolveHashMap {
         optional: [],
         variadic: None,
     };
+    pub fn arity() -> Arity {
+        Arity::from(&Self::ARITY)
+    }
 }
 impl Uid for ResolveHashMap {
     fn uid(&self) -> Uuid {
@@ -225,7 +240,7 @@ where
     T::Builtin: From<Stdlib>,
 {
     fn arity(&self) -> Option<Arity> {
-        Some(Arity::from(&Self::ARITY))
+        Some(Self::arity())
     }
     fn should_parallelize(&self, _args: &[T]) -> bool {
         false

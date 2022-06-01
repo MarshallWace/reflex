@@ -54,14 +54,14 @@ impl Uid for Stdlib {
     }
 }
 impl Stdlib {
-    pub fn arity<T: Expression + Applicable<T>>(&self) -> Option<Arity>
+    pub fn arity<T: Expression>(&self) -> Arity
     where
         T::Builtin: From<Self> + From<BuiltinStdlib>,
     {
         match self {
-            Self::CollectQueryListItems => Applicable::<T>::arity(&CollectQueryListItems {}),
-            Self::DynamicQueryBranch => Applicable::<T>::arity(&DynamicQueryBranch {}),
-            Self::FlattenDeep => Applicable::<T>::arity(&FlattenDeep {}),
+            Self::CollectQueryListItems => CollectQueryListItems::arity(),
+            Self::DynamicQueryBranch => DynamicQueryBranch::arity(),
+            Self::FlattenDeep => FlattenDeep::arity(),
         }
     }
     pub fn should_parallelize<T: Expression + Applicable<T>>(&self, args: &[T]) -> bool

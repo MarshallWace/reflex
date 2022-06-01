@@ -94,7 +94,7 @@ impl TryFrom<Uuid> for ServerBuiltins {
     }
 }
 impl Builtin for ServerBuiltins {
-    fn arity<T: Expression<Builtin = Self> + Applicable<T>>(&self) -> Option<Arity> {
+    fn arity<T: Expression<Builtin = Self>>(&self) -> Arity {
         match self {
             ServerBuiltins::Stdlib(term) => term.arity::<T>(),
             ServerBuiltins::Json(term) => term.arity::<T>(),

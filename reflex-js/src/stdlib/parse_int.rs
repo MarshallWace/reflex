@@ -17,6 +17,9 @@ impl ParseInt {
         optional: [],
         variadic: Some(ArgType::Eager),
     };
+    pub fn arity() -> Arity {
+        Arity::from(&Self::ARITY)
+    }
 }
 impl Uid for ParseInt {
     fn uid(&self) -> Uuid {
@@ -25,7 +28,7 @@ impl Uid for ParseInt {
 }
 impl<T: Expression> Applicable<T> for ParseInt {
     fn arity(&self) -> Option<Arity> {
-        Some(Arity::from(&Self::ARITY))
+        Some(Self::arity())
     }
     fn should_parallelize(&self, _args: &[T]) -> bool {
         false

@@ -27,6 +27,9 @@ impl<T: Expression> BuiltinTerm<T> {
     pub fn new(target: T::Builtin) -> Self {
         Self { target }
     }
+    pub fn arity(&self) -> Arity {
+        self.target.arity::<T>()
+    }
 }
 impl<T: Expression> Uid for BuiltinTerm<T> {
     fn uid(&self) -> Uuid {
@@ -61,7 +64,7 @@ impl<T: Expression> GraphNode for BuiltinTerm<T> {
 }
 impl<T: Expression + Applicable<T>> Applicable<T> for BuiltinTerm<T> {
     fn arity(&self) -> Option<Arity> {
-        self.target.arity::<T>()
+        Some(self.target.arity::<T>())
     }
     fn apply(
         &self,

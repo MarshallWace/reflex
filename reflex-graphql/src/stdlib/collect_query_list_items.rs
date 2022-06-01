@@ -15,6 +15,9 @@ impl CollectQueryListItems {
         optional: [],
         variadic: Some(ArgType::Strict),
     };
+    pub fn arity() -> Arity {
+        Arity::from(&Self::ARITY)
+    }
 }
 impl Uid for CollectQueryListItems {
     fn uid(&self) -> Uuid {
@@ -23,7 +26,7 @@ impl Uid for CollectQueryListItems {
 }
 impl<T: Expression> Applicable<T> for CollectQueryListItems {
     fn arity(&self) -> Option<Arity> {
-        Some(Arity::from(&Self::ARITY))
+        Some(Self::arity())
     }
     fn should_parallelize(&self, args: &[T]) -> bool {
         args.len() >= 64

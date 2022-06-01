@@ -871,7 +871,7 @@ mod tests {
         }
     }
     impl Builtin for GraphQlTestBuiltins {
-        fn arity<T: Expression<Builtin = Self> + Applicable<T>>(&self) -> Option<Arity> {
+        fn arity<T: Expression<Builtin = Self>>(&self) -> Arity {
             match self {
                 GraphQlTestBuiltins::Stdlib(term) => term.arity::<T>(),
                 GraphQlTestBuiltins::GraphQl(term) => term.arity::<T>(),

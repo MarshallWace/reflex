@@ -21,6 +21,9 @@ impl Collect {
         optional: [],
         variadic: None,
     };
+    pub fn arity() -> Arity {
+        Arity::from(&Self::ARITY)
+    }
 }
 impl Uid for Collect {
     fn uid(&self) -> Uuid {
@@ -32,7 +35,7 @@ where
     T::Builtin: From<Stdlib>,
 {
     fn arity(&self) -> Option<Arity> {
-        Some(Arity::from(&Self::ARITY))
+        Some(Self::arity())
     }
     fn should_parallelize(&self, _args: &[T]) -> bool {
         false
@@ -89,6 +92,9 @@ impl CollectTuple {
         optional: [],
         variadic: Some(ArgType::Strict),
     };
+    pub fn arity() -> Arity {
+        Arity::from(&Self::ARITY)
+    }
 }
 impl Uid for CollectTuple {
     fn uid(&self) -> Uuid {
@@ -97,7 +103,7 @@ impl Uid for CollectTuple {
 }
 impl<T: Expression> Applicable<T> for CollectTuple {
     fn arity(&self) -> Option<Arity> {
-        Some(Arity::from(&Self::ARITY))
+        Some(Self::arity())
     }
     fn should_parallelize(&self, _args: &[T]) -> bool {
         false
@@ -121,6 +127,9 @@ impl CollectStruct {
         optional: [],
         variadic: Some(ArgType::Strict),
     };
+    pub fn arity() -> Arity {
+        Arity::from(&Self::ARITY)
+    }
 }
 impl Uid for CollectStruct {
     fn uid(&self) -> Uuid {
@@ -129,7 +138,7 @@ impl Uid for CollectStruct {
 }
 impl<T: Expression> Applicable<T> for CollectStruct {
     fn arity(&self) -> Option<Arity> {
-        Some(Arity::from(&Self::ARITY))
+        Some(Self::arity())
     }
     fn should_parallelize(&self, _args: &[T]) -> bool {
         false
@@ -165,6 +174,9 @@ impl CollectVector {
         optional: [],
         variadic: Some(ArgType::Strict),
     };
+    pub fn arity() -> Arity {
+        Arity::from(&Self::ARITY)
+    }
 }
 impl Uid for CollectVector {
     fn uid(&self) -> Uuid {
@@ -173,7 +185,7 @@ impl Uid for CollectVector {
 }
 impl<T: Expression> Applicable<T> for CollectVector {
     fn arity(&self) -> Option<Arity> {
-        Some(Arity::from(&Self::ARITY))
+        Some(Self::arity())
     }
     fn should_parallelize(&self, _args: &[T]) -> bool {
         false
@@ -197,6 +209,9 @@ impl CollectHashSet {
         optional: [],
         variadic: Some(ArgType::Strict),
     };
+    pub fn arity() -> Arity {
+        Arity::from(&Self::ARITY)
+    }
 }
 impl Uid for CollectHashSet {
     fn uid(&self) -> Uuid {
@@ -205,7 +220,7 @@ impl Uid for CollectHashSet {
 }
 impl<T: Expression> Applicable<T> for CollectHashSet {
     fn arity(&self) -> Option<Arity> {
-        Some(Arity::from(&Self::ARITY))
+        Some(Self::arity())
     }
     fn should_parallelize(&self, _args: &[T]) -> bool {
         false
@@ -234,6 +249,9 @@ impl CollectHashMap {
         optional: [],
         variadic: Some(ArgType::Strict),
     };
+    pub fn arity() -> Arity {
+        Arity::from(&Self::ARITY)
+    }
 }
 impl Uid for CollectHashMap {
     fn uid(&self) -> Uuid {
@@ -245,7 +263,7 @@ where
     T::Builtin: From<Stdlib>,
 {
     fn arity(&self) -> Option<Arity> {
-        Some(Arity::from(&Self::ARITY))
+        Some(Self::arity())
     }
     fn should_parallelize(&self, _args: &[T]) -> bool {
         false

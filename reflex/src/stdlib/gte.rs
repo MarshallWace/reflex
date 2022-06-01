@@ -18,6 +18,9 @@ impl Gte {
         optional: [],
         variadic: None,
     };
+    pub fn arity() -> Arity {
+        Arity::from(&Self::ARITY)
+    }
 }
 impl Uid for Gte {
     fn uid(&self) -> Uuid {
@@ -26,7 +29,7 @@ impl Uid for Gte {
 }
 impl<T: Expression> Applicable<T> for Gte {
     fn arity(&self) -> Option<Arity> {
-        Some(Arity::from(&Self::ARITY))
+        Some(Self::arity())
     }
     fn should_parallelize(&self, _args: &[T]) -> bool {
         false

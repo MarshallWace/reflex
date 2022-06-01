@@ -43,12 +43,12 @@ impl Uid for Stdlib {
     }
 }
 impl Stdlib {
-    pub fn arity<T: Expression + Applicable<T>>(&self) -> Option<Arity>
+    pub fn arity<T: Expression>(&self) -> Arity
     where
         T::Builtin: From<Self> + From<BuiltinStdlib>,
     {
         match self {
-            Self::GraphQlResolver => Applicable::<T>::arity(&GraphQlResolver {}),
+            Self::GraphQlResolver => GraphQlResolver::arity(),
         }
     }
     pub fn should_parallelize<T: Expression + Applicable<T>>(&self, args: &[T]) -> bool

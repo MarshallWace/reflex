@@ -259,6 +259,7 @@ fn create_query<
     allocator: &TAllocator,
 ) -> (Signal<T>, EffectSubscribeAction<T>) {
     let evaluate_effect = create_evaluate_effect(
+        String::from("<anonymous>"),
         query,
         QueryEvaluationMode::Standalone,
         QueryInvalidationStrategy::Exact,

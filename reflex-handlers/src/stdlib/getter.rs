@@ -17,6 +17,9 @@ impl Getter {
         optional: [],
         variadic: None,
     };
+    pub fn arity() -> Arity {
+        Arity::from(&Self::ARITY)
+    }
 }
 impl Uid for Getter {
     fn uid(&self) -> Uuid {
@@ -25,7 +28,7 @@ impl Uid for Getter {
 }
 impl<T: Expression> Applicable<T> for Getter {
     fn arity(&self) -> Option<Arity> {
-        Some(Arity::from(&Self::ARITY))
+        Some(Self::arity())
     }
     fn should_parallelize(&self, _args: &[T]) -> bool {
         false

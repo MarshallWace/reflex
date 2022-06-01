@@ -61,16 +61,16 @@ impl Uid for Stdlib {
     }
 }
 impl Stdlib {
-    pub fn arity<T: Expression>(&self) -> Option<Arity>
+    pub fn arity<T: Expression>(&self) -> Arity
     where
         T::Builtin: From<Self> + From<reflex::stdlib::Stdlib>,
     {
         match self {
-            Self::Getter => Applicable::<T>::arity(&Getter {}),
-            Self::Scan => Applicable::<T>::arity(&Scan {}),
-            Self::Setter => Applicable::<T>::arity(&Setter {}),
-            Self::ToRequest => Applicable::<T>::arity(&ToRequest {}),
-            Self::Variable => Applicable::<T>::arity(&Variable {}),
+            Self::Getter => Getter::arity(),
+            Self::Scan => Scan::arity(),
+            Self::Setter => Setter::arity(),
+            Self::ToRequest => ToRequest::arity(),
+            Self::Variable => Variable::arity(),
         }
     }
     pub fn apply<T: Expression>(

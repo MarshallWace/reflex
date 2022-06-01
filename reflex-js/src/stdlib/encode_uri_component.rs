@@ -18,6 +18,9 @@ impl EncodeUriComponent {
         optional: [],
         variadic: None,
     };
+    pub fn arity() -> Arity {
+        Arity::from(&Self::ARITY)
+    }
 }
 impl Uid for EncodeUriComponent {
     fn uid(&self) -> Uuid {
@@ -26,7 +29,7 @@ impl Uid for EncodeUriComponent {
 }
 impl<T: Expression> Applicable<T> for EncodeUriComponent {
     fn arity(&self) -> Option<Arity> {
-        Some(Arity::from(&Self::ARITY))
+        Some(Self::arity())
     }
     fn should_parallelize(&self, _args: &[T]) -> bool {
         false

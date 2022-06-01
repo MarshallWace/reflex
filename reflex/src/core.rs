@@ -49,7 +49,7 @@ pub trait Builtin:
     + TryFrom<Uuid, Error = ()>
     + std::fmt::Display
 {
-    fn arity<T: Expression<Builtin = Self> + Applicable<T>>(&self) -> Option<Arity>;
+    fn arity<T: Expression<Builtin = Self>>(&self) -> Arity;
     fn apply<T: Expression<Builtin = Self> + Applicable<T>>(
         &self,
         args: impl ExactSizeIterator<Item = T>,

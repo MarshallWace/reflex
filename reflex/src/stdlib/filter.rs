@@ -22,6 +22,9 @@ impl Filter {
         optional: [],
         variadic: None,
     };
+    pub fn arity() -> Arity {
+        Arity::from(&Self::ARITY)
+    }
 }
 impl Uid for Filter {
     fn uid(&self) -> Uuid {
@@ -33,7 +36,7 @@ where
     T::Builtin: From<Stdlib>,
 {
     fn arity(&self) -> Option<Arity> {
-        Some(Arity::from(&Self::ARITY))
+        Some(Self::arity())
     }
     fn should_parallelize(&self, _args: &[T]) -> bool {
         false
@@ -125,6 +128,9 @@ impl CollectFilterResults {
         optional: [],
         variadic: None,
     };
+    pub fn arity() -> Arity {
+        Arity::from(&Self::ARITY)
+    }
 }
 impl Uid for CollectFilterResults {
     fn uid(&self) -> Uuid {
@@ -133,7 +139,7 @@ impl Uid for CollectFilterResults {
 }
 impl<T: Expression> Applicable<T> for CollectFilterResults {
     fn arity(&self) -> Option<Arity> {
-        Some(Arity::from(&Self::ARITY))
+        Some(Self::arity())
     }
     fn should_parallelize(&self, _args: &[T]) -> bool {
         false

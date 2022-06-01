@@ -22,6 +22,9 @@ impl Log {
         optional: [],
         variadic: Some(ArgType::Eager),
     };
+    pub fn arity() -> Arity {
+        Arity::from(&Self::ARITY)
+    }
 }
 impl Uid for Log {
     fn uid(&self) -> Uuid {
@@ -33,7 +36,7 @@ where
     T::Builtin: From<Stdlib> + From<JsStdlib>,
 {
     fn arity(&self) -> Option<Arity> {
-        Some(Arity::from(&Self::ARITY))
+        Some(Self::arity())
     }
     fn should_parallelize(&self, _args: &[T]) -> bool {
         false
@@ -66,6 +69,9 @@ impl LogArgs {
         optional: [],
         variadic: Some(ArgType::Eager),
     };
+    pub fn arity() -> Arity {
+        Arity::from(&Self::ARITY)
+    }
 }
 impl Uid for LogArgs {
     fn uid(&self) -> Uuid {
@@ -74,7 +80,7 @@ impl Uid for LogArgs {
 }
 impl<T: Expression> Applicable<T> for LogArgs {
     fn arity(&self) -> Option<Arity> {
-        Some(Arity::from(&Self::ARITY))
+        Some(Self::arity())
     }
     fn should_parallelize(&self, _args: &[T]) -> bool {
         false

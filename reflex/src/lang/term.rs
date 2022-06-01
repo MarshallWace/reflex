@@ -447,9 +447,9 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Evaluate<T>>
 impl<T: Expression + Rewritable<T> + Applicable<T>> Applicable<T> for Term<T> {
     fn arity(&self) -> Option<Arity> {
         match self {
-            Self::Lambda(term) => term.arity(),
-            Self::PartialApplication(term) => term.arity(),
-            Self::Builtin(term) => term.arity(),
+            Self::Lambda(term) => Applicable::<T>::arity(term),
+            Self::PartialApplication(term) => Applicable::<T>::arity(term),
+            Self::Builtin(term) => Applicable::<T>::arity(term),
             Self::CompiledFunction(term) => Applicable::<T>::arity(term),
             Self::Constructor(term) => Applicable::<T>::arity(term),
             _ => None,

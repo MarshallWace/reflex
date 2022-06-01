@@ -18,6 +18,9 @@ impl Divide {
         optional: [],
         variadic: None,
     };
+    pub fn arity() -> Arity {
+        Arity::from(&Self::ARITY)
+    }
 }
 impl Uid for Divide {
     fn uid(&self) -> Uuid {
@@ -26,7 +29,7 @@ impl Uid for Divide {
 }
 impl<T: Expression> Applicable<T> for Divide {
     fn arity(&self) -> Option<Arity> {
-        Some(Arity::from(&Self::ARITY))
+        Some(Self::arity())
     }
     fn should_parallelize(&self, _args: &[T]) -> bool {
         false

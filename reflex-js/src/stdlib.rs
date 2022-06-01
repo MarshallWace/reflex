@@ -122,28 +122,28 @@ impl TryFrom<Uuid> for Stdlib {
     }
 }
 impl Stdlib {
-    pub fn arity<T: Expression>(&self) -> Option<Arity>
+    pub fn arity<T: Expression>(&self) -> Arity
     where
         T::Builtin: From<Self> + From<BuiltinStdlib>,
     {
         match self {
-            Self::Construct => Applicable::<T>::arity(&Construct {}),
-            Self::DateConstructor => Applicable::<T>::arity(&DateConstructor {}),
-            Self::Dispatch => Applicable::<T>::arity(&Dispatch {}),
-            Self::EncodeUriComponent => Applicable::<T>::arity(&EncodeUriComponent {}),
-            Self::FormatErrorMessage => Applicable::<T>::arity(&FormatErrorMessage {}),
-            Self::FromEntries => Applicable::<T>::arity(&FromEntries {}),
-            Self::Hash => Applicable::<T>::arity(&Hash {}),
-            Self::IsFinite => Applicable::<T>::arity(&IsFinite {}),
-            Self::Log => Applicable::<T>::arity(&Log {}),
-            Self::LogArgs => Applicable::<T>::arity(&LogArgs {}),
-            Self::MapConstructor => Applicable::<T>::arity(&MapConstructor {}),
-            Self::ParseFloat => Applicable::<T>::arity(&ParseFloat {}),
-            Self::ParseInt => Applicable::<T>::arity(&ParseInt {}),
-            Self::SetConstructor => Applicable::<T>::arity(&SetConstructor {}),
-            Self::StructTypeFactory => Applicable::<T>::arity(&StructTypeFactory {}),
-            Self::Throw => Applicable::<T>::arity(&Throw {}),
-            Self::ToString => Applicable::<T>::arity(&ToString {}),
+            Self::Construct => Construct::arity(),
+            Self::DateConstructor => DateConstructor::arity(),
+            Self::Dispatch => Dispatch::arity(),
+            Self::EncodeUriComponent => EncodeUriComponent::arity(),
+            Self::FormatErrorMessage => FormatErrorMessage::arity(),
+            Self::FromEntries => FromEntries::arity(),
+            Self::Hash => Hash::arity(),
+            Self::IsFinite => IsFinite::arity(),
+            Self::Log => Log::arity(),
+            Self::LogArgs => LogArgs::arity(),
+            Self::MapConstructor => MapConstructor::arity(),
+            Self::ParseFloat => ParseFloat::arity(),
+            Self::ParseInt => ParseInt::arity(),
+            Self::SetConstructor => SetConstructor::arity(),
+            Self::StructTypeFactory => StructTypeFactory::arity(),
+            Self::Throw => Throw::arity(),
+            Self::ToString => ToString::arity(),
         }
     }
     pub fn should_parallelize<T: Expression>(&self, args: &[T]) -> bool

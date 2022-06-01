@@ -18,6 +18,9 @@ impl Round {
         optional: [],
         variadic: None,
     };
+    pub fn arity() -> Arity {
+        Arity::from(&Self::ARITY)
+    }
 }
 impl Uid for Round {
     fn uid(&self) -> Uuid {
@@ -26,7 +29,7 @@ impl Uid for Round {
 }
 impl<T: Expression> Applicable<T> for Round {
     fn arity(&self) -> Option<Arity> {
-        Some(Arity::from(&Self::ARITY))
+        Some(Self::arity())
     }
     fn should_parallelize(&self, _args: &[T]) -> bool {
         false

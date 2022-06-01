@@ -47,13 +47,13 @@ impl Uid for Stdlib {
     }
 }
 impl Stdlib {
-    pub fn arity<T: Expression>(&self) -> Option<Arity>
+    pub fn arity<T: Expression>(&self) -> Arity
     where
         T::Builtin: From<Self>,
     {
         match self {
-            Self::JsonDeserialize => Applicable::<T>::arity(&JsonDeserialize {}),
-            Self::JsonSerialize => Applicable::<T>::arity(&JsonSerialize {}),
+            Self::JsonDeserialize => JsonDeserialize::arity(),
+            Self::JsonSerialize => JsonSerialize::arity(),
         }
     }
     pub fn apply<T: Expression>(
@@ -86,7 +86,7 @@ impl Stdlib {
     }
 }
 impl Builtin for Stdlib {
-    fn arity<T: Expression<Builtin = Self>>(&self) -> Option<Arity> {
+    fn arity<T: Expression<Builtin = Self>>(&self) -> Arity {
         self.arity::<T>()
     }
     fn should_parallelize<T: Expression<Builtin = Self>>(&self, args: &[T]) -> bool {

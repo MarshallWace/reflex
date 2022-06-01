@@ -15,6 +15,9 @@ impl StructTypeFactory {
         optional: [],
         variadic: None,
     };
+    pub fn arity() -> Arity {
+        Arity::from(&Self::ARITY)
+    }
 }
 impl Uid for StructTypeFactory {
     fn uid(&self) -> Uuid {
@@ -23,7 +26,7 @@ impl Uid for StructTypeFactory {
 }
 impl<T: Expression> Applicable<T> for StructTypeFactory {
     fn arity(&self) -> Option<Arity> {
-        Some(Arity::from(&Self::ARITY))
+        Some(Self::arity())
     }
     fn should_parallelize(&self, _args: &[T]) -> bool {
         false

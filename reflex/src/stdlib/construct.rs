@@ -18,6 +18,9 @@ impl ConstructTuple {
         optional: [],
         variadic: Some(ArgType::Lazy),
     };
+    pub fn arity() -> Arity {
+        Arity::from(&Self::ARITY)
+    }
 }
 impl Uid for ConstructTuple {
     fn uid(&self) -> Uuid {
@@ -26,7 +29,7 @@ impl Uid for ConstructTuple {
 }
 impl<T: Expression> Applicable<T> for ConstructTuple {
     fn arity(&self) -> Option<Arity> {
-        Some(Arity::from(&Self::ARITY))
+        Some(Self::arity())
     }
     fn should_parallelize(&self, _args: &[T]) -> bool {
         false
@@ -50,6 +53,9 @@ impl ConstructStruct {
         optional: [],
         variadic: None,
     };
+    pub fn arity() -> Arity {
+        Arity::from(&Self::ARITY)
+    }
 }
 impl Uid for ConstructStruct {
     fn uid(&self) -> Uuid {
@@ -58,7 +64,7 @@ impl Uid for ConstructStruct {
 }
 impl<T: Expression> Applicable<T> for ConstructStruct {
     fn arity(&self) -> Option<Arity> {
-        Some(Arity::from(&Self::ARITY))
+        Some(Self::arity())
     }
     fn should_parallelize(&self, _args: &[T]) -> bool {
         false
@@ -119,6 +125,9 @@ impl ConstructHashMap {
         optional: [],
         variadic: None,
     };
+    pub fn arity() -> Arity {
+        Arity::from(&Self::ARITY)
+    }
 }
 impl Uid for ConstructHashMap {
     fn uid(&self) -> Uuid {
@@ -127,7 +136,7 @@ impl Uid for ConstructHashMap {
 }
 impl<T: Expression> Applicable<T> for ConstructHashMap {
     fn arity(&self) -> Option<Arity> {
-        Some(Arity::from(&Self::ARITY))
+        Some(Self::arity())
     }
     fn should_parallelize(&self, _args: &[T]) -> bool {
         false
@@ -188,6 +197,9 @@ impl ConstructHashSet {
         optional: [],
         variadic: Some(ArgType::Lazy),
     };
+    pub fn arity() -> Arity {
+        Arity::from(&Self::ARITY)
+    }
 }
 impl Uid for ConstructHashSet {
     fn uid(&self) -> Uuid {
@@ -196,7 +208,7 @@ impl Uid for ConstructHashSet {
 }
 impl<T: Expression> Applicable<T> for ConstructHashSet {
     fn arity(&self) -> Option<Arity> {
-        Some(Arity::from(&Self::ARITY))
+        Some(Self::arity())
     }
     fn should_parallelize(&self, _args: &[T]) -> bool {
         false
@@ -225,6 +237,9 @@ impl ConstructVector {
         optional: [],
         variadic: Some(ArgType::Lazy),
     };
+    pub fn arity() -> Arity {
+        Arity::from(&Self::ARITY)
+    }
 }
 impl Uid for ConstructVector {
     fn uid(&self) -> Uuid {
@@ -233,7 +248,7 @@ impl Uid for ConstructVector {
 }
 impl<T: Expression> Applicable<T> for ConstructVector {
     fn arity(&self) -> Option<Arity> {
-        Some(Arity::from(&Self::ARITY))
+        Some(Self::arity())
     }
     fn should_parallelize(&self, _args: &[T]) -> bool {
         false
