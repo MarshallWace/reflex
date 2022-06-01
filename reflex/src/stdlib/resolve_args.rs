@@ -54,6 +54,14 @@ where
                 .unwrap_or(false);
             if num_args == 0 || is_atomic_lambda {
                 Ok(target)
+            } else if num_args == 1 {
+                Ok(factory.create_lambda_term(
+                    1,
+                    factory.create_application_term(
+                        factory.create_builtin_term(Stdlib::Sequence),
+                        allocator.create_pair(factory.create_static_variable_term(0), target),
+                    ),
+                ))
             } else {
                 Ok(factory.create_lambda_term(
                     num_args,
