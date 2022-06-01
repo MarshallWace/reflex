@@ -367,29 +367,21 @@ pub trait GrpcClient: Send + Clone {
     ) -> Result<GrpcResponse<T>, String>;
 }
 
-pub struct GrpcResponse<T: AsyncExpression>(Pin<Box<dyn Stream<Item = T> + Send + 'static>>);
+pub struct GrpcResponse<T: AsyncExpression>(
+    Pin<Box<dyn Stream<Item = Result<T, String>> + Send + 'static>>,
+);
 impl<T: AsyncExpression> GrpcResponse<T> {
-    pub fn new(stream: Pin<Box<dyn Stream<Item = T> + Send + 'static>>) -> Self {
+    pub fn new(stream: Pin<Box<dyn Stream<Item = Result<T, String>> + Send + 'static>>) -> Self {
         Self(stream)
     }
     pub fn unary<V>(
         result: impl Future<Output = Result<tonic::Response<V>, tonic::Status>> + Send + 'static,
         parse: impl Fn(V) -> Result<T, String> + Send + 'static,
-        factory: &impl AsyncExpressionFactory<T>,
-        allocator: &impl AsyncHeapAllocator<T>,
     ) -> Self {
         Self::new(Box::pin(result.into_stream().map({
-            let factory = factory.clone();
-            let allocator = allocator.clone();
             move |result| match result {
-                Ok(result) => parse(result.into_inner()).unwrap_or_else(|message| {
-                    create_error_message_expression(message, &factory, &allocator)
-                }),
-                Err(error) => create_error_message_expression(
-                    format_grpc_error_message(error),
-                    &factory,
-                    &allocator,
-                ),
+                Ok(result) => parse(result.into_inner()),
+                Err(error) => Err(format_grpc_error_message(error)),
             }
         })))
     }
@@ -398,8 +390,6 @@ impl<T: AsyncExpression> GrpcResponse<T> {
             + Send
             + 'static,
         parse: impl Fn(V) -> Result<T, String> + Send + 'static,
-        factory: &impl AsyncExpressionFactory<T>,
-        allocator: &impl AsyncHeapAllocator<T>,
     ) -> Self {
         Self::new(Box::pin({
             {
@@ -420,18 +410,9 @@ impl<T: AsyncExpression> GrpcResponse<T> {
             }
             .into_stream()
             .flatten()
-            .map({
-                let factory = factory.clone();
-                let allocator = allocator.clone();
-                move |value| {
-                    value.unwrap_or_else(|error| {
-                        create_error_message_expression(error, &factory, &allocator)
-                    })
-                }
-            })
         }))
     }
-    pub fn into_stream(self) -> impl Stream<Item = T> + 'static {
+    pub fn into_stream(self) -> impl Stream<Item = Result<T, String>> + 'static {
         self.0
     }
 }
@@ -540,20 +521,35 @@ where
             .iter()
             .map(|effect| {
                 let state_token = effect.id();
-                match parse_grpc_effect_args(effect, &self.factory).and_then(|args| {
-                    self.subscribe_grpc_operation(
-                        state,
-                        effect,
-                        args.protocol,
-                        args.url,
-                        GrpcRequest {
+                match parse_grpc_effect_args(effect, &self.factory)
+                    .map_err(|message| {
+                        create_error_message_expression(message, &self.factory, &self.allocator)
+                    })
+                    .and_then(|args| {
+                        let url = args.url;
+                        let request = GrpcRequest {
                             method: args.method,
                             message: args.message,
-                        },
-                        args.accumulate,
-                        context,
-                    )
-                }) {
+                        };
+                        self.subscribe_grpc_operation(
+                            state,
+                            effect,
+                            args.protocol,
+                            url.clone(),
+                            request.clone(),
+                            args.accumulate,
+                            context,
+                        )
+                        .map_err(|message| {
+                            create_grpc_error_message_expression(
+                                &url,
+                                &request,
+                                &message,
+                                &self.factory,
+                                &self.allocator,
+                            )
+                        })
+                    }) {
                     Ok((connect_action, subscribe_action)) => (
                         (
                             state_token,
@@ -564,17 +560,7 @@ where
                         ),
                         (connect_action, subscribe_action),
                     ),
-                    Err(err) => (
-                        (
-                            state_token,
-                            StateUpdate::Value(create_error_message_expression(
-                                err,
-                                &self.factory,
-                                &self.allocator,
-                            )),
-                        ),
-                        (None, None),
-                    ),
+                    Err(err) => ((state_token, StateUpdate::Value(err)), (None, None)),
                 }
             })
             .unzip();
@@ -667,6 +653,7 @@ where
                 |operation| {
                     let effect_id = operation.effect_id;
                     match listen_grpc_operation(
+                        &connection_state.url,
                         client.clone(),
                         operation,
                         &self.factory,
@@ -904,6 +891,7 @@ where
                 }
                 GrpcConnection::Connected(client) => Some(
                     match listen_grpc_operation(
+                        &connection_state.url,
                         client.clone(),
                         operation,
                         &self.factory,
@@ -988,6 +976,7 @@ where
 }
 
 fn listen_grpc_operation<T, TFactory, TAllocator, TClient, TAction>(
+    url: &GrpcServiceUrl,
     client: TClient,
     operation: PendingGrpcOperation<T>,
     factory: &TFactory,
@@ -1006,30 +995,37 @@ where
         request,
         accumulate,
     } = operation;
-    client
-        .clone()
-        .execute(request, factory, allocator)
-        .map({
+    match client.clone().execute(request.clone(), factory, allocator) {
+        Ok(operation) => {
             let current_pid = context.pid();
             let task_pid = context.generate_pid();
-            let factory = factory.clone();
-            let allocator = allocator.clone();
-            move |operation| {
-                (
-                    StateOperation::Task(
-                        task_pid,
-                        OperationStream::new({
-                            let results = operation.into_stream();
-                            // FIXME: Deprecate gRPC handler accumulate option in favour of scan handler
-                            let results = if let Some(accumulator) = accumulate {
-                                results
-                                    .scan(factory.create_value_term(ValueTerm::Null), {
-                                        let factory = factory.clone();
-                                        let allocator = allocator.clone();
-                                        // TODO: Garbage-collect cache used for gRPC allocator iteratee
-                                        let mut cache = Mutex::new(SubstitutionCache::new());
-                                        move |state, value| {
-                                            let result = {
+            Ok((
+                StateOperation::Task(
+                    task_pid,
+                    OperationStream::new({
+                        let results = operation.into_stream().map({
+                            let factory = factory.clone();
+                            let allocator = allocator.clone();
+                            let url = url.clone();
+                            move |result| match result {
+                                Ok(result) => result,
+                                Err(message) => create_grpc_error_message_expression(
+                                    &url, &request, &message, &factory, &allocator,
+                                ),
+                            }
+                        });
+                        // FIXME: Deprecate gRPC handler accumulate option in favour of scan handler
+                        let results = if let Some(accumulator) = accumulate {
+                            results
+                                .scan(factory.create_value_term(ValueTerm::Null), {
+                                    let factory = factory.clone();
+                                    let allocator = allocator.clone();
+                                    // TODO: Garbage-collect cache used for gRPC allocator iteratee
+                                    let mut cache = Mutex::new(SubstitutionCache::new());
+                                    move |state, value| {
+                                        let result = match factory.match_signal_term(&value) {
+                                            Some(_effect) => value,
+                                            None => {
                                                 let result = factory.create_application_term(
                                                     accumulator.clone(),
                                                     allocator.create_pair(state.clone(), value),
@@ -1043,35 +1039,38 @@ where
                                                     .unwrap_or(result);
                                                 *state = result.clone();
                                                 result
-                                            };
-                                            future::ready(Some(result))
-                                        }
-                                    })
-                                    .left_stream()
-                            } else {
-                                results.right_stream()
-                            };
-                            results.map({
-                                move |result| {
-                                    StateOperation::Send(
-                                        current_pid,
-                                        EffectEmitAction {
-                                            updates: vec![(effect_id, StateUpdate::Value(result))],
-                                        }
-                                        .into(),
-                                    )
-                                }
-                            })
-                        }),
-                    ),
-                    task_pid,
-                )
-            }
-        })
-        .map_err(|message| {
-            let value = create_error_message_expression(message, factory, allocator);
-            (effect_id, StateUpdate::Value(value))
-        })
+                                            }
+                                        };
+                                        future::ready(Some(result))
+                                    }
+                                })
+                                .left_stream()
+                        } else {
+                            results.right_stream()
+                        };
+                        results.map({
+                            move |result| {
+                                StateOperation::Send(
+                                    current_pid,
+                                    EffectEmitAction {
+                                        updates: vec![(effect_id, StateUpdate::Value(result))],
+                                    }
+                                    .into(),
+                                )
+                            }
+                        })
+                    }),
+                ),
+                task_pid,
+            ))
+        }
+        Err(message) => Err((
+            effect_id,
+            StateUpdate::Value(create_grpc_error_message_expression(
+                &url, &request, &message, factory, allocator,
+            )),
+        )),
+    }
 }
 
 fn create_grpc_connect_task<TService, TClient, TConfig, TAction>(
@@ -1247,6 +1246,26 @@ fn create_pending_expression<T: Expression>(
     factory.create_signal_term(allocator.create_signal_list(once(
         allocator.create_signal(SignalType::Pending, allocator.create_empty_list()),
     )))
+}
+
+fn create_grpc_error_message_expression<T: AsyncExpression>(
+    url: &GrpcServiceUrl,
+    request: &GrpcRequest<T>,
+    message: &str,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> T {
+    create_error_message_expression(
+        format!(
+            "{}: {}({}): {}",
+            url,
+            request.method,
+            reflex_json::stringify(&request.message).unwrap_or_else(|_| String::from("...")),
+            message
+        ),
+        factory,
+        allocator,
+    )
 }
 
 fn create_error_message_expression<T: Expression>(
