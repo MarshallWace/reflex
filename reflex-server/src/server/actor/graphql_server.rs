@@ -77,38 +77,44 @@ impl Default for GraphQlServerMetricNames {
     }
 }
 
-pub(crate) struct GraphQlServer<T, TFactory, TAllocator, TMetricLabels>
+pub(crate) struct GraphQlServer<T, TFactory, TAllocator, TQueryLabel, TMetricLabels>
 where
     T: Expression,
     T::Builtin: From<Stdlib> + From<GraphQlStdlib>,
     TFactory: ExpressionFactory<T>,
     TAllocator: HeapAllocator<T>,
-    TMetricLabels: Fn(Option<&str>, &GraphQlOperation) -> Vec<(String, String)>,
+    TQueryLabel: Fn(&GraphQlOperation) -> String,
+    TMetricLabels: Fn(&GraphQlOperation) -> Vec<(String, String)>,
 {
     factory: TFactory,
     allocator: TAllocator,
     metric_names: GraphQlServerMetricNames,
+    get_graphql_query_label: TQueryLabel,
     get_operation_metric_labels: TMetricLabels,
     _expression: PhantomData<T>,
 }
-impl<T, TFactory, TAllocator, TMetricLabels> GraphQlServer<T, TFactory, TAllocator, TMetricLabels>
+impl<T, TFactory, TAllocator, TQueryLabel, TMetricLabels>
+    GraphQlServer<T, TFactory, TAllocator, TQueryLabel, TMetricLabels>
 where
     T: Expression,
     T::Builtin: From<Stdlib> + From<GraphQlStdlib>,
     TFactory: ExpressionFactory<T>,
     TAllocator: HeapAllocator<T>,
-    TMetricLabels: Fn(Option<&str>, &GraphQlOperation) -> Vec<(String, String)>,
+    TQueryLabel: Fn(&GraphQlOperation) -> String,
+    TMetricLabels: Fn(&GraphQlOperation) -> Vec<(String, String)>,
 {
     pub(crate) fn new(
         factory: TFactory,
         allocator: TAllocator,
         metric_names: GraphQlServerMetricNames,
+        get_graphql_query_label: TQueryLabel,
         get_operation_metric_labels: TMetricLabels,
     ) -> Self {
         Self {
             factory,
             allocator,
             metric_names: metric_names.init(),
+            get_graphql_query_label,
             get_operation_metric_labels,
             _expression: Default::default(),
         }
@@ -128,12 +134,12 @@ impl<T: Expression> Default for GraphQlServerState<T> {
 struct GraphQlOperationState<T: Expression> {
     operation: GraphQlOperation,
     query: T,
+    label: String,
     result: Option<EvaluationResult<T>>,
     subscriptions: Vec<GraphQlSubscriptionState>,
 }
 struct GraphQlSubscriptionState {
     subscription_id: Uuid,
-    operation_name: Option<String>,
     start_time: Option<Instant>,
     metric_labels: Vec<(String, String)>,
 }
@@ -169,14 +175,15 @@ impl<T: Expression, TAction> GraphQlServerAction<T> for TAction where
 {
 }
 
-impl<T, TFactory, TAllocator, TAction, TMetricLabels> Actor<TAction>
-    for GraphQlServer<T, TFactory, TAllocator, TMetricLabels>
+impl<T, TFactory, TAllocator, TAction, TQueryLabel, TMetricLabels> Actor<TAction>
+    for GraphQlServer<T, TFactory, TAllocator, TQueryLabel, TMetricLabels>
 where
     T: Expression,
     T::Builtin: From<Stdlib> + From<GraphQlStdlib>,
     TFactory: ExpressionFactory<T>,
     TAllocator: HeapAllocator<T>,
-    TMetricLabels: Fn(Option<&str>, &GraphQlOperation) -> Vec<(String, String)>,
+    TQueryLabel: Fn(&GraphQlOperation) -> String,
+    TMetricLabels: Fn(&GraphQlOperation) -> Vec<(String, String)>,
     TAction: GraphQlServerAction<T>,
 {
     type State = GraphQlServerState<T>;
@@ -208,13 +215,15 @@ where
         ActorTransition::new(state, actions)
     }
 }
-impl<T, TFactory, TAllocator, TMetricLabels> GraphQlServer<T, TFactory, TAllocator, TMetricLabels>
+impl<T, TFactory, TAllocator, TQueryLabel, TMetricLabels>
+    GraphQlServer<T, TFactory, TAllocator, TQueryLabel, TMetricLabels>
 where
     T: Expression,
     T::Builtin: From<Stdlib> + From<GraphQlStdlib>,
     TFactory: ExpressionFactory<T>,
     TAllocator: HeapAllocator<T>,
-    TMetricLabels: Fn(Option<&str>, &GraphQlOperation) -> Vec<(String, String)>,
+    TQueryLabel: Fn(&GraphQlOperation) -> String,
+    TMetricLabels: Fn(&GraphQlOperation) -> Vec<(String, String)>,
 {
     fn handle_graphql_subscribe<TAction>(
         &self,
@@ -236,13 +245,7 @@ where
             _expression: _,
         } = action;
         let subscription_id = *subscription_id;
-        let operation_name = operation.operation_name().map(String::from);
-        let metric_labels = (self.get_operation_metric_labels)(
-            operation_name
-                .as_ref()
-                .map(|operation_name| operation_name.as_str()),
-            operation,
-        );
+        let metric_labels = (self.get_operation_metric_labels)(operation);
         match reflex_graphql::parse_graphql_operation(operation, &self.factory, &self.allocator) {
             Err(err) => Some(StateTransition::new([
                 StateOperation::Send(
@@ -291,7 +294,6 @@ where
                 {
                     existing_entry.subscriptions.push(GraphQlSubscriptionState {
                         subscription_id,
-                        operation_name,
                         start_time: None,
                         metric_labels,
                     });
@@ -304,21 +306,14 @@ where
                         .into(),
                     ))))
                 } else {
-                    let sanitized_operation = GraphQlOperation::new(
-                        operation.query().clone(),
-                        None,
-                        operation
-                            .variables()
-                            .map(|(key, value)| (String::from(key), value.clone())),
-                        None,
-                    );
+                    let label = (self.get_graphql_query_label)(operation);
                     state.operations.push(GraphQlOperationState {
-                        operation: sanitized_operation,
+                        label: label.clone(),
+                        operation: operation.clone(),
                         query: query.clone(),
                         result: None,
                         subscriptions: vec![GraphQlSubscriptionState {
                             subscription_id,
-                            operation_name,
                             start_time: Some(Instant::now()),
                             metric_labels,
                         }],
@@ -332,7 +327,10 @@ where
                             }
                             .into(),
                         ),
-                        StateOperation::Send(context.pid(), QuerySubscribeAction { query }.into()),
+                        StateOperation::Send(
+                            context.pid(),
+                            QuerySubscribeAction { query, label }.into(),
+                        ),
                     ]))
                 }
             }
@@ -380,6 +378,7 @@ where
             context.pid(),
             QueryUnsubscribeAction {
                 query: removed_operation_state.query,
+                label: removed_operation_state.label,
             }
             .into(),
         ))))
@@ -436,9 +435,12 @@ where
                         subscription_index,
                         GraphQlOperation::new(
                             entry.operation.query().clone(),
-                            None,
+                            entry.operation.operation_name().map(String::from),
                             updated_variables,
-                            None,
+                            entry
+                                .operation
+                                .extensions()
+                                .map(|(key, value)| (String::from(key), value.clone())),
                         ),
                     ))
                 }
@@ -478,16 +480,10 @@ where
                         .remove(subscription_index);
                     let GraphQlSubscriptionState {
                         subscription_id,
-                        operation_name,
                         metric_labels: previous_metric_labels,
                         start_time: _,
                     } = existing_subscription;
-                    let metric_labels = (self.get_operation_metric_labels)(
-                        operation_name
-                            .as_ref()
-                            .map(|operation_name| operation_name.as_str()),
-                        &updated_operation,
-                    );
+                    let metric_labels = (self.get_operation_metric_labels)(&updated_operation);
                     decrement_gauge!(
                         self.metric_names.graphql_active_operation_count,
                         1.0,
@@ -508,7 +504,6 @@ where
                     {
                         existing_entry.subscriptions.push(GraphQlSubscriptionState {
                             subscription_id,
-                            operation_name,
                             start_time: None,
                             metric_labels,
                         });
@@ -521,13 +516,14 @@ where
                             .into(),
                         ))))
                     } else {
+                        let label = (self.get_graphql_query_label)(&updated_operation);
                         state.operations.push(GraphQlOperationState {
+                            label: label.clone(),
                             operation: updated_operation,
                             query: query.clone(),
                             result: None,
                             subscriptions: vec![GraphQlSubscriptionState {
                                 subscription_id,
-                                operation_name,
                                 start_time: Some(Instant::now()),
                                 metric_labels,
                             }],
@@ -543,7 +539,7 @@ where
                             ),
                             StateOperation::Send(
                                 context.pid(),
-                                QuerySubscribeAction { query }.into(),
+                                QuerySubscribeAction { query, label }.into(),
                             ),
                         ]))
                     }
@@ -628,7 +624,6 @@ where
                 .map(|subscription| {
                     let GraphQlSubscriptionState {
                         subscription_id: _,
-                        operation_name: _,
                         start_time,
                         metric_labels,
                     } = subscription;

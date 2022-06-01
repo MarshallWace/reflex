@@ -155,12 +155,13 @@ where
             + OutboundAction<EvaluateResultAction<T>>,
     {
         let EvaluateStartAction {
-            cache_id: cache_key,
+            cache_id,
+            label: _,
             query,
             evaluation_mode,
             invalidation_strategy,
         } = action;
-        match state.workers.entry(*cache_key) {
+        match state.workers.entry(*cache_id) {
             Entry::Occupied(_) => None,
             Entry::Vacant(entry) => {
                 let worker_pid = context.generate_pid();
@@ -169,7 +170,7 @@ where
                     StateOperation::spawn(
                         worker_pid,
                         BytecodeWorkerFactory {
-                            cache_id: *cache_key,
+                            cache_id: *cache_id,
                             query: query.clone(),
                             evaluation_mode: *evaluation_mode,
                             invalidation_strategy: *invalidation_strategy,

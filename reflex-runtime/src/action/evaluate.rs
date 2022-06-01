@@ -127,6 +127,7 @@ impl<'a, T: Expression> From<&'a EvaluateAction<T>> for Option<&'a EvaluateResul
 #[derive(Clone, Debug)]
 pub struct EvaluateStartAction<T: Expression> {
     pub cache_id: StateToken,
+    pub label: String,
     pub query: T,
     pub evaluation_mode: QueryEvaluationMode,
     pub invalidation_strategy: QueryInvalidationStrategy,
@@ -141,6 +142,7 @@ impl<T: Expression> SerializableAction for EvaluateStartAction<T> {
     fn serialize(&self) -> SerializedAction {
         SerializedAction::from_iter([
             ("cache_id", JsonValue::from(self.cache_id)),
+            ("label", JsonValue::from(self.label.clone())),
             ("query_id", JsonValue::from(self.query.id())),
             (
                 "standalone",

@@ -98,36 +98,41 @@ impl<T: Expression, TAction> TelemetryMiddlewareAction<T> for TAction where
 {
 }
 
-pub struct TelemetryMiddleware<T, TFactory, TAllocator, TOperationLabels>
+pub struct TelemetryMiddleware<T, TFactory, TAllocator, TQueryLabel, TTransactionLabels>
 where
     T: Expression,
     TFactory: ExpressionFactory<T>,
     TAllocator: HeapAllocator<T>,
-    TOperationLabels: Fn(&GraphQlOperation) -> (String, Vec<(String, String)>),
+    TQueryLabel: Fn(&GraphQlOperation) -> String,
+    TTransactionLabels: Fn(&GraphQlOperation) -> (String, Vec<(String, String)>),
 {
     factory: TFactory,
     allocator: TAllocator,
-    get_operation_transaction_labels: TOperationLabels,
+    get_graphql_query_label: TQueryLabel,
+    get_operation_transaction_labels: TTransactionLabels,
     metric_names: TelemetryMiddlewareMetricNames,
     _expression: PhantomData<T>,
 }
-impl<T, TFactory, TAllocator, TOperationLabels>
-    TelemetryMiddleware<T, TFactory, TAllocator, TOperationLabels>
+impl<T, TFactory, TAllocator, TQueryLabel, TTransactionLabels>
+    TelemetryMiddleware<T, TFactory, TAllocator, TQueryLabel, TTransactionLabels>
 where
     T: Expression,
     TFactory: ExpressionFactory<T>,
     TAllocator: HeapAllocator<T>,
-    TOperationLabels: Fn(&GraphQlOperation) -> (String, Vec<(String, String)>),
+    TQueryLabel: Fn(&GraphQlOperation) -> String,
+    TTransactionLabels: Fn(&GraphQlOperation) -> (String, Vec<(String, String)>),
 {
     pub fn new(
         factory: TFactory,
         allocator: TAllocator,
-        get_operation_transaction_labels: TOperationLabels,
+        get_graphql_query_label: TQueryLabel,
+        get_operation_transaction_labels: TTransactionLabels,
         metric_names: TelemetryMiddlewareMetricNames,
     ) -> Self {
         Self {
             factory,
             allocator,
+            get_graphql_query_label,
             get_operation_transaction_labels,
             metric_names: metric_names.init(),
             _expression: Default::default(),
@@ -168,6 +173,7 @@ impl<T: Expression> TelemetryMiddlewareEffectState<T> {
     }
 }
 struct TelemetryMiddlewareQueryState {
+    label: String,
     transaction_id: Traceparent,
     effect_id: Option<HashId>,
 }
@@ -180,13 +186,14 @@ impl TelemetryMiddlewareQueryState {
 // TODO: support async update transactions
 const EMIT_ASYNC_ASYNC_TRANSACTIONS: bool = false;
 
-impl<T, TFactory, TAllocator, TOperationLabels, TAction> Actor<TAction>
-    for TelemetryMiddleware<T, TFactory, TAllocator, TOperationLabels>
+impl<T, TFactory, TAllocator, TQueryLabel, TTransactionLabels, TAction> Actor<TAction>
+    for TelemetryMiddleware<T, TFactory, TAllocator, TQueryLabel, TTransactionLabels>
 where
     T: Expression,
     TFactory: ExpressionFactory<T>,
     TAllocator: HeapAllocator<T>,
-    TOperationLabels: Fn(&GraphQlOperation) -> (String, Vec<(String, String)>),
+    TQueryLabel: Fn(&GraphQlOperation) -> String,
+    TTransactionLabels: Fn(&GraphQlOperation) -> (String, Vec<(String, String)>),
     TAction: TelemetryMiddlewareAction<T>,
 {
     type State = TelemetryMiddlewareState<T>;
@@ -228,13 +235,14 @@ where
         ActorTransition::new(state, actions)
     }
 }
-impl<T, TFactory, TAllocator, TOperationLabels>
-    TelemetryMiddleware<T, TFactory, TAllocator, TOperationLabels>
+impl<T, TFactory, TAllocator, TQueryLabel, TTransactionLabels>
+    TelemetryMiddleware<T, TFactory, TAllocator, TQueryLabel, TTransactionLabels>
 where
     T: Expression,
     TFactory: ExpressionFactory<T>,
     TAllocator: HeapAllocator<T>,
-    TOperationLabels: Fn(&GraphQlOperation) -> (String, Vec<(String, String)>),
+    TQueryLabel: Fn(&GraphQlOperation) -> String,
+    TTransactionLabels: Fn(&GraphQlOperation) -> (String, Vec<(String, String)>),
 {
     fn handle_graphql_subscribe<TAction>(
         &self,
@@ -263,6 +271,7 @@ where
             (self.get_operation_transaction_labels)(operation);
         entry.insert(TelemetryMiddlewareQueryState {
             transaction_id,
+            label: (self.get_graphql_query_label)(operation),
             effect_id: None,
         });
         let transaction_start_action = StateOperation::Send(
@@ -293,14 +302,15 @@ where
             subscription_id,
             query,
         } = action;
+        let query_state = state.active_queries.get_mut(subscription_id)?;
         let evaluate_effect = create_evaluate_effect(
+            query_state.label.clone(),
             query.clone(),
             QueryEvaluationMode::Query,
             QueryInvalidationStrategy::default(),
             &self.factory,
             &self.allocator,
         );
-        let query_state = state.active_queries.get_mut(subscription_id)?;
         let effect_id = evaluate_effect.id();
         let previous_effect_id = query_state.effect_id.replace(effect_id);
         let is_unchanged = previous_effect_id
@@ -500,6 +510,7 @@ where
         let EvaluateStartAction {
             cache_id,
             query,
+            label,
             evaluation_mode,
             invalidation_strategy,
         } = action;
@@ -507,6 +518,7 @@ where
             Entry::Occupied(_) => None,
             Entry::Vacant(entry) => {
                 entry.insert(create_evaluate_effect(
+                    label.clone(),
                     query.clone(),
                     *evaluation_mode,
                     *invalidation_strategy,

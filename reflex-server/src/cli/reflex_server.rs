@@ -48,6 +48,7 @@ use crate::{
         http_graphql_server::HttpGraphQlServerQueryTransform,
         websocket_graphql_server::WebSocketGraphQlServerQueryTransform,
     },
+    utils::operation::format_graphql_operation_label,
     GraphQlWebServer, GraphQlWebServerAction, GraphQlWebServerMetricNames,
 };
 
@@ -130,6 +131,7 @@ impl OpenTelemetryConfig {
         TAction: TelemetryMiddlewareAction<T> + OpenTelemetryMiddlewareAction + Send,
     >(
         self,
+        get_graphql_query_label: impl Fn(&GraphQlOperation) -> String,
         get_operation_transaction_labels: impl Fn(&GraphQlOperation) -> (String, Vec<(String, String)>),
         factory: &impl AsyncExpressionFactory<T>,
         allocator: &impl AsyncHeapAllocator<T>,
@@ -163,6 +165,7 @@ impl OpenTelemetryConfig {
             TelemetryMiddleware::new(
                 factory.clone(),
                 allocator.clone(),
+                get_graphql_query_label,
                 get_operation_transaction_labels,
                 metric_names,
             ),
@@ -217,13 +220,14 @@ pub fn cli<T, TFactory, TAllocator, TAction, TPre, TPost>(
     transform_http: impl HttpGraphQlServerQueryTransform + Send + 'static,
     transform_ws: impl WebSocketGraphQlServerQueryTransform + Send + 'static,
     metric_names: GraphQlWebServerMetricNames,
+    get_graphql_query_label: impl Fn(&GraphQlOperation) -> String + Send + 'static,
     get_http_query_metric_labels: impl Fn(&GraphQlOperation, &HeaderMap) -> Vec<(String, String)>
         + Send
         + 'static,
     get_websocket_connection_metric_labels: impl Fn(Option<&JsonValue>, &HeaderMap) -> Vec<(String, String)>
         + Send
         + 'static,
-    get_websocket_operation_metric_labels: impl Fn(Option<&str>, &GraphQlOperation) -> Vec<(String, String)>
+    get_websocket_operation_metric_labels: impl Fn(&GraphQlOperation) -> Vec<(String, String)>
         + Send
         + 'static,
 ) -> Result<impl Future<Output = Result<(), hyper::Error>>>
@@ -254,6 +258,7 @@ where
         transform_http,
         transform_ws,
         metric_names,
+        get_graphql_query_label,
         get_http_query_metric_labels,
         get_websocket_connection_metric_labels,
         get_websocket_operation_metric_labels,
@@ -272,6 +277,10 @@ where
         .with_context(|| "Failed to bind server address")?
         .serve(service);
     Ok(server)
+}
+
+pub fn get_graphql_query_label(operation: &GraphQlOperation) -> String {
+    format_graphql_operation_label(operation)
 }
 
 pub fn get_operation_transaction_labels(

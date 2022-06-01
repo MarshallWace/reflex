@@ -2,9 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use reflex::core::{EvaluationResult, Expression};
-use reflex_dispatcher::{
-    Action, NamedAction, SerializableAction, SerializedAction,
-};
+use reflex_dispatcher::{Action, NamedAction, SerializableAction, SerializedAction};
 use reflex_json::JsonValue;
 
 #[derive(Clone, Debug)]
@@ -102,6 +100,7 @@ impl<'a, T: Expression> From<&'a QueryAction<T>> for Option<&'a QueryEmitAction<
 #[derive(Clone, Debug)]
 pub struct QuerySubscribeAction<T: Expression> {
     pub query: T,
+    pub label: String,
 }
 impl<T: Expression> Action for QuerySubscribeAction<T> {}
 impl<T: Expression> NamedAction for QuerySubscribeAction<T> {
@@ -111,13 +110,17 @@ impl<T: Expression> NamedAction for QuerySubscribeAction<T> {
 }
 impl<T: Expression> SerializableAction for QuerySubscribeAction<T> {
     fn serialize(&self) -> SerializedAction {
-        SerializedAction::from_iter([("query_id", JsonValue::from(self.query.id()))])
+        SerializedAction::from_iter([
+            ("query_id", JsonValue::from(self.query.id())),
+            ("label", JsonValue::from(self.label.clone())),
+        ])
     }
 }
 
 #[derive(Clone, Debug)]
 pub struct QueryUnsubscribeAction<T: Expression> {
     pub query: T,
+    pub label: String,
 }
 impl<T: Expression> Action for QueryUnsubscribeAction<T> {}
 impl<T: Expression> NamedAction for QueryUnsubscribeAction<T> {
@@ -127,7 +130,10 @@ impl<T: Expression> NamedAction for QueryUnsubscribeAction<T> {
 }
 impl<T: Expression> SerializableAction for QueryUnsubscribeAction<T> {
     fn serialize(&self) -> SerializedAction {
-        SerializedAction::from_iter([("query_id", JsonValue::from(self.query.id()))])
+        SerializedAction::from_iter([
+            ("query_id", JsonValue::from(self.query.id())),
+            ("label", JsonValue::from(self.label.clone())),
+        ])
     }
 }
 

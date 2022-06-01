@@ -15,7 +15,7 @@ use metrics::{
 use reflex::{
     core::{
         DependencyList, DynamicState, EvaluationResult, Expression, ExpressionFactory,
-        HeapAllocator, Signal, SignalType, StateCache, StateToken,
+        HeapAllocator, Signal, SignalType, StateCache, StateToken, StringValue,
     },
     lang::ValueTerm,
 };
@@ -115,6 +115,7 @@ impl Default for EvaluateHandlerMetricNames {
 }
 
 pub fn create_evaluate_effect<T: Expression>(
+    label: String,
     query: T,
     evaluation_mode: QueryEvaluationMode,
     invalidation_strategy: QueryInvalidationStrategy,
@@ -123,32 +124,40 @@ pub fn create_evaluate_effect<T: Expression>(
 ) -> Signal<T> {
     allocator.create_signal(
         SignalType::Custom(String::from(EFFECT_TYPE_EVALUATE)),
-        allocator.create_triple(
+        allocator.create_list([
+            factory.create_value_term(ValueTerm::String(label.into())),
             query,
             evaluation_mode.serialize(factory),
             invalidation_strategy.serialize(factory),
-        ),
+        ]),
     )
 }
 
-pub fn parse_evaluate_effect_query<'a, T: Expression>(
-    effect: &'a Signal<T>,
+pub fn parse_evaluate_effect_query<T: Expression>(
+    effect: &Signal<T>,
     factory: &impl ExpressionFactory<T>,
-) -> Option<(&'a T, QueryEvaluationMode, QueryInvalidationStrategy)> {
-    if effect.args().len() != 3 {
+) -> Option<(String, T, QueryEvaluationMode, QueryInvalidationStrategy)> {
+    if effect.args().len() != 4 {
         return None;
     }
     let mut args = effect.args().iter();
+    let label = args.next().unwrap();
     let query = args.next().unwrap();
     let evaluation_mode = args.next().unwrap();
     let invalidation_strategy = args.next().unwrap();
     match (
+        factory
+            .match_value_term(label)
+            .and_then(|value| value.match_string()),
         QueryEvaluationMode::deserialize(evaluation_mode, factory),
         QueryInvalidationStrategy::deserialize(invalidation_strategy, factory),
     ) {
-        (Some(evaluation_mode), Some(invalidation_strategy)) => {
-            Some((query, evaluation_mode, invalidation_strategy))
-        }
+        (Some(label), Some(evaluation_mode), Some(invalidation_strategy)) => Some((
+            String::from(label.as_str()),
+            query.clone(),
+            evaluation_mode,
+            invalidation_strategy,
+        )),
         _ => None,
     }
 }
@@ -592,7 +601,7 @@ where
         let current_pid = context.pid();
         let (evaluate_start_actions, existing_results): (Vec<_>, Vec<_>) =
             partition_results(queries.filter_map(
-                |(effect, (query, evaluation_mode, invalidation_strategy))| {
+                |(effect, (label, query, evaluation_mode, invalidation_strategy))| {
                     let cache_key = effect.id();
                     match state.workers.entry(cache_key) {
                         // For any queries that are already subscribed, re-emit the latest cached value if one exists
@@ -627,7 +636,8 @@ where
                                 current_pid,
                                 EvaluateStartAction {
                                     cache_id: cache_key,
-                                    query: query.clone(),
+                                    query,
+                                    label,
                                     evaluation_mode,
                                     invalidation_strategy,
                                 }

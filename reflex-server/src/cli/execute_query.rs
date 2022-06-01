@@ -22,6 +22,7 @@ use crate::{
     logger::json::JsonActionLogger,
     middleware::{LoggerMiddleware, ServerMiddleware},
     server::{HttpGraphQlServerQueryTransform, NoopWebSocketGraphQlServerQueryTransform},
+    utils::operation::format_graphql_operation_label,
     GraphQlWebServer, GraphQlWebServerAction, GraphQlWebServerMetricNames,
 };
 
@@ -138,6 +139,7 @@ where
         query_transform,
         NoopWebSocketGraphQlServerQueryTransform,
         metric_names,
+        get_graphql_query_label,
         get_http_query_metric_labels,
         get_websocket_connection_metric_labels,
         get_websocket_operation_metric_labels,
@@ -164,6 +166,10 @@ where
     }
 }
 
+fn get_graphql_query_label(operation: &GraphQlOperation) -> String {
+    format_graphql_operation_label(operation)
+}
+
 fn get_http_query_metric_labels(
     _operation: &GraphQlOperation,
     _headers: &HeaderMap,
@@ -178,10 +184,7 @@ fn get_websocket_connection_metric_labels(
     Vec::new()
 }
 
-fn get_websocket_operation_metric_labels(
-    _operation_name: Option<&str>,
-    _operation: &GraphQlOperation,
-) -> Vec<(String, String)> {
+fn get_websocket_operation_metric_labels(_operation: &GraphQlOperation) -> Vec<(String, String)> {
     Vec::new()
 }
 

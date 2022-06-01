@@ -163,8 +163,9 @@ where
         TAction:
             Action + OutboundAction<EffectSubscribeAction<T>> + OutboundAction<QueryEmitAction<T>>,
     {
-        let QuerySubscribeAction { query } = action;
+        let QuerySubscribeAction { query, label } = action;
         let query_effect = create_evaluate_effect(
+            label.clone(),
             query.clone(),
             QueryEvaluationMode::Query,
             QueryInvalidationStrategy::default(),
@@ -219,8 +220,9 @@ where
     where
         TAction: Action + OutboundAction<EffectUnsubscribeAction<T>>,
     {
-        let QueryUnsubscribeAction { query } = action;
+        let QueryUnsubscribeAction { query, label } = action;
         let query_effect = create_evaluate_effect(
+            label.clone(),
             query.clone(),
             QueryEvaluationMode::Query,
             QueryInvalidationStrategy::default(),

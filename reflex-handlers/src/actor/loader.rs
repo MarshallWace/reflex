@@ -184,8 +184,13 @@ impl<T: Expression> LoaderHandlerState<T> {
             })
             .unzip();
         let keys = allocator.create_list(keys);
-        let combined_effect =
-            create_load_batch_effect(loader.clone(), keys.clone(), factory, allocator);
+        let combined_effect = create_load_batch_effect(
+            name.clone(),
+            loader.clone(),
+            keys.clone(),
+            factory,
+            allocator,
+        );
         let loader_batch = LoaderBatch {
             effect: combined_effect.clone(),
             subscriptions: keys
@@ -275,12 +280,14 @@ impl<T: Expression> LoaderHandlerState<T> {
 }
 
 fn create_load_batch_effect<T: Expression>(
+    label: String,
     loader: T,
     keys: ExpressionList<T>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
 ) -> Signal<T> {
     create_evaluate_effect(
+        label,
         factory.create_application_term(
             loader,
             allocator.create_unit_list(factory.create_vector_term(keys)),

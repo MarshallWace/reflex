@@ -12,7 +12,9 @@ use std::{
 };
 
 use reflex::{
-    core::{Expression, ExpressionFactory, HeapAllocator, Signal, SignalType, StateToken},
+    core::{
+        Expression, ExpressionFactory, HeapAllocator, Signal, SignalType, StateToken, StringValue,
+    },
     hash::HashId,
     lang::ValueTerm,
 };
@@ -109,6 +111,7 @@ impl<T: Expression> ScanHandlerState<T> {
             self.effect_state.entry(scan_effect.id())
         {
             let ScanEffectArgs {
+                name,
                 target,
                 seed,
                 iteratee,
@@ -118,6 +121,7 @@ impl<T: Expression> ScanHandlerState<T> {
             let state_value_token =
                 generate_hash(HASH_NAMESPACE_SCAN_STATE, [&target, &seed, &iteratee]);
             let source_effect = create_evaluate_effect(
+                format!("{} [input]", name),
                 target,
                 QueryEvaluationMode::Standalone,
                 QueryInvalidationStrategy::Exact,
@@ -126,6 +130,7 @@ impl<T: Expression> ScanHandlerState<T> {
             );
             let pending_value = create_pending_expression(factory, allocator);
             let result_effect = create_evaluate_effect(
+                name,
                 factory.create_application_term(
                     iteratee,
                     allocator.create_pair(
@@ -263,7 +268,7 @@ where
             .iter()
             .filter_map(|effect| {
                 let state_token = effect.id();
-                match parse_scan_effect_args(effect) {
+                match parse_scan_effect_args(effect, &self.factory) {
                     Ok(args) => {
                         if let Some(action) =
                             state.subscribe(effect, args, &self.factory, &self.allocator)
@@ -427,27 +432,46 @@ where
 }
 
 struct ScanEffectArgs<T: Expression> {
+    name: String,
     target: T,
     seed: T,
     iteratee: T,
 }
 
-fn parse_scan_effect_args<T: Expression>(effect: &Signal<T>) -> Result<ScanEffectArgs<T>, String> {
+fn parse_scan_effect_args<T: Expression>(
+    effect: &Signal<T>,
+    factory: &impl ExpressionFactory<T>,
+) -> Result<ScanEffectArgs<T>, String> {
     let mut args = effect.args().into_iter();
-    if args.len() != 3 {
+    if args.len() != 4 {
         return Err(format!(
-            "Invalid scan signal: Expected 3 arguments, received {}",
+            "Invalid scan signal: Expected 4 arguments, received {}",
             args.len()
         ));
     }
+    let name = args.next().unwrap();
     let target = args.next().unwrap();
     let seed = args.next().unwrap();
     let iteratee = args.next().unwrap();
-    Ok(ScanEffectArgs {
-        target: target.clone(),
-        seed: seed.clone(),
-        iteratee: iteratee.clone(),
-    })
+    if let Some(name) = factory
+        .match_value_term(name)
+        .and_then(|value| value.match_string())
+    {
+        Ok(ScanEffectArgs {
+            name: String::from(name.as_str()),
+            target: target.clone(),
+            seed: seed.clone(),
+            iteratee: iteratee.clone(),
+        })
+    } else {
+        Err(format!(
+            "Invalid scan signal arguments: Expected (String, <any>, <any>, <function:2>), received ({}, {}, {}, {})",
+            name,
+            target,
+            seed,
+            iteratee,
+        ))
+    }
 }
 
 fn generate_hash<'a, T: std::hash::Hash + 'a>(

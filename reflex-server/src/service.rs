@@ -113,13 +113,14 @@ impl<TAction: Action + Send + 'static> GraphQlWebServer<TAction> {
         transform_http: impl HttpGraphQlServerQueryTransform + Send + 'static,
         transform_ws: impl WebSocketGraphQlServerQueryTransform + Send + 'static,
         metric_names: GraphQlWebServerMetricNames,
+        get_graphql_query_label: impl Fn(&GraphQlOperation) -> String + Send + 'static,
         get_http_query_metric_labels: impl Fn(&GraphQlOperation, &HeaderMap) -> Vec<(String, String)>
             + Send
             + 'static,
         get_websocket_connection_metric_labels: impl Fn(Option<&JsonValue>, &HeaderMap) -> Vec<(String, String)>
             + Send
             + 'static,
-        get_operation_metric_labels: impl Fn(Option<&str>, &GraphQlOperation) -> Vec<(String, String)>
+        get_operation_metric_labels: impl Fn(&GraphQlOperation) -> Vec<(String, String)>
             + Send
             + 'static,
     ) -> Result<Self, String>
@@ -139,6 +140,7 @@ impl<TAction: Action + Send + 'static> GraphQlWebServer<TAction> {
             transform_http,
             transform_ws,
             metric_names.server,
+            get_graphql_query_label,
             get_http_query_metric_labels,
             get_websocket_connection_metric_labels,
             get_operation_metric_labels,

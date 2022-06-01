@@ -35,7 +35,8 @@ use reflex_server::{
     action::ServerCliAction,
     builtins::ServerBuiltins,
     cli::reflex_server::{
-        cli, get_operation_transaction_labels, OpenTelemetryConfig, ReflexServerCliOptions,
+        cli, get_graphql_query_label, get_operation_transaction_labels, OpenTelemetryConfig,
+        ReflexServerCliOptions,
     },
     imports::server_imports,
     logger::{formatted::FormattedLogger, json::JsonActionLogger, ActionLogger, EitherLogger},
@@ -156,6 +157,7 @@ pub async fn main() -> Result<()> {
             EitherActor::Right(compose_actors(
                 middleware,
                 config.into_middleware(
+                    get_graphql_query_label,
                     get_operation_transaction_labels,
                     &factory,
                     &allocator,
@@ -223,6 +225,7 @@ pub async fn main() -> Result<()> {
         NoopGraphQlQueryTransform,
         NoopGraphQlQueryTransform,
         GraphQlWebServerMetricNames::default(),
+        get_graphql_query_label,
         get_http_query_metric_labels,
         get_websocket_connection_metric_labels,
         get_websocket_operation_metric_labels,
@@ -248,13 +251,10 @@ fn get_websocket_connection_metric_labels(
     Vec::new()
 }
 
-fn get_websocket_operation_metric_labels(
-    operation_name: Option<&str>,
-    _operation: &GraphQlOperation,
-) -> Vec<(String, String)> {
+fn get_websocket_operation_metric_labels(operation: &GraphQlOperation) -> Vec<(String, String)> {
     vec![(
         String::from("operation_name"),
-        String::from(operation_name.unwrap_or("<null>")),
+        String::from(operation.operation_name().unwrap_or("<null>")),
     )]
 }
 
