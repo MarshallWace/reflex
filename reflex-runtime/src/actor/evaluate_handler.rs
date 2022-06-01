@@ -939,19 +939,26 @@ where
         state
             .state_cache
             .apply_batch(state_index, updates, self.metric_names);
-        let invalidated_workers =
-            state
-                .workers
-                .values_mut()
-                .filter(|worker| match &worker.status {
-                    WorkerStatus::Idle {
-                        latest_result: (_, result),
-                    } => result
+        let invalidated_workers = state
+            .workers
+            .values_mut()
+            .filter_map(|worker| match &mut worker.status {
+                WorkerStatus::Idle {
+                    latest_result: (_, result),
+                } => {
+                    let has_invalidated_dependencies = result
                         .dependencies()
                         .iter()
-                        .any(|state_token| updated_state_tokens.contains(&state_token)),
-                    _ => false,
-                });
+                        .any(|state_token| updated_state_tokens.contains(&state_token));
+                    if has_invalidated_dependencies {
+                        Some(worker)
+                    } else {
+                        worker.state_index = Some(state_index);
+                        None
+                    }
+                }
+                _ => None,
+            });
         let worker_update_actions = invalidated_workers
             .filter_map(|worker| {
                 update_worker_state(
