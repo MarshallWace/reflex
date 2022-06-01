@@ -7,7 +7,7 @@ use std::iter::once;
 use crate::{
     core::{
         uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
-        FunctionArity, GraphNode, HeapAllocator, Uid, Uuid,
+        FunctionArity, HeapAllocator, Uid, Uuid,
     },
     stdlib::Stdlib,
 };
@@ -48,7 +48,8 @@ where
     ) -> Result<T, String> {
         let target = args.next().unwrap();
         if let Some(value) = factory.match_tuple_term(&target) {
-            if value.is_static() {
+            let has_dynamic_values = value.fields().iter().any(|item| !item.is_static());
+            if !has_dynamic_values {
                 Ok(target)
             } else {
                 Ok(factory.create_application_term(
@@ -98,7 +99,8 @@ where
     ) -> Result<T, String> {
         let target = args.next().unwrap();
         if let Some(value) = factory.match_struct_term(&target) {
-            if value.is_static() {
+            let has_dynamic_values = value.fields().iter().any(|item| !item.is_static());
+            if !has_dynamic_values {
                 Ok(target)
             } else {
                 Ok(factory.create_application_term(
@@ -154,7 +156,8 @@ where
     ) -> Result<T, String> {
         let target = args.next().unwrap();
         if let Some(value) = factory.match_vector_term(&target) {
-            if value.is_static() {
+            let has_dynamic_values = value.items().iter().any(|item| !item.is_static());
+            if !has_dynamic_values {
                 Ok(target)
             } else {
                 Ok(factory.create_application_term(
@@ -204,7 +207,8 @@ where
     ) -> Result<T, String> {
         let target = args.next().unwrap();
         if let Some(value) = factory.match_hashset_term(&target) {
-            if value.is_static() {
+            let has_dynamic_values = value.values().iter().any(|item| !item.is_static());
+            if !has_dynamic_values {
                 Ok(target)
             } else {
                 Ok(factory.create_application_term(
@@ -254,7 +258,8 @@ where
     ) -> Result<T, String> {
         let target = args.next().unwrap();
         if let Some(value) = factory.match_hashmap_term(&target) {
-            if value.keys().is_static() {
+            let has_dynamic_keys = value.keys().iter().any(|item| !item.is_static());
+            if !has_dynamic_keys {
                 Ok(target)
             } else {
                 Ok(factory.create_application_term(

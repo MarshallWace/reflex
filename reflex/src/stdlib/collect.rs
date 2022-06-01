@@ -7,7 +7,7 @@ use std::iter::once;
 use crate::{
     core::{
         uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
-        FunctionArity, GraphNode, HeapAllocator, SignalType, Uid, Uuid,
+        FunctionArity, HeapAllocator, SignalType, Uid, Uuid,
     },
     lang::{deduplicate_hashmap_entries, deduplicate_hashset_entries, ValueTerm},
     stdlib::Stdlib,
@@ -49,7 +49,8 @@ where
     ) -> Result<T, String> {
         let target = args.next().unwrap();
         if let Some(collection) = factory.match_vector_term(&target) {
-            Ok(if collection.is_static() {
+            let has_dynamic_values = collection.items().iter().any(|item| !item.is_static());
+            Ok(if !has_dynamic_values {
                 target.clone()
             } else {
                 factory.create_application_term(
@@ -58,7 +59,8 @@ where
                 )
             })
         } else if let Some(collection) = factory.match_hashset_term(&target) {
-            Ok(if collection.is_static() {
+            let has_dynamic_values = collection.values().iter().any(|item| !item.is_static());
+            Ok(if !has_dynamic_values {
                 target.clone()
             } else {
                 factory.create_application_term(
@@ -67,7 +69,8 @@ where
                 )
             })
         } else if let Some(collection) = factory.match_hashmap_term(&target) {
-            Ok(if collection.is_static() {
+            let has_dynamic_keys = collection.keys().iter().any(|item| !item.is_static());
+            Ok(if !has_dynamic_keys {
                 target.clone()
             } else {
                 factory.create_application_term(

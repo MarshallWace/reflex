@@ -51,7 +51,7 @@ where
             Ok(factory.create_hashset_term(allocator.create_empty_list()))
         } else if let Some(values) = factory.match_vector_term(&values) {
             let values = values.items().iter().cloned().collect::<Vec<_>>();
-            let has_dynamic_values = values.iter().any(|value| !value.is_static());
+            let has_dynamic_values = values.iter().any(|item| !item.is_static());
             if has_dynamic_values {
                 Ok(factory.create_application_term(
                     factory.create_builtin_term(Stdlib::CollectHashSet),

@@ -42,7 +42,7 @@ impl<T: Expression> Applicable<T> for Throw {
     ) -> Result<T, String> {
         let mut args = args.into_iter();
         let error = args.next().unwrap();
-        if !error.is_static() {
+        if !error.is_atomic() {
             return Err(String::from(
                 "Thrown exceptions cannot contain dynamic values",
             ));

@@ -96,10 +96,10 @@ impl<T: Expression + Applicable<T>> GraphNode for PartialApplicationTerm<T> {
             })
     }
     fn is_static(&self) -> bool {
-        self.target.is_static()
+        true
     }
     fn is_atomic(&self) -> bool {
-        false
+        self.target.is_atomic() && self.args.is_atomic()
     }
     fn is_complex(&self) -> bool {
         true

@@ -68,7 +68,7 @@ impl GraphNode for CompiledFunctionTerm {
         true
     }
     fn is_atomic(&self) -> bool {
-        false
+        true
     }
     fn is_complex(&self) -> bool {
         false

@@ -67,7 +67,7 @@ impl<T: Expression> GraphNode for HashSetTerm<T> {
         true
     }
     fn is_atomic(&self) -> bool {
-        self.values.is_empty()
+        self.values.is_atomic()
     }
     fn is_complex(&self) -> bool {
         true

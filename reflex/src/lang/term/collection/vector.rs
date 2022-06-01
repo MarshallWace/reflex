@@ -51,7 +51,7 @@ impl<T: Expression> GraphNode for VectorTerm<T> {
         }
     }
     fn is_static(&self) -> bool {
-        self.items.is_static()
+        true
     }
     fn is_atomic(&self) -> bool {
         self.items.is_atomic()

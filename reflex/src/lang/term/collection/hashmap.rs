@@ -154,7 +154,7 @@ impl<T: Expression> GraphNode for HashMapTerm<T> {
         true
     }
     fn is_atomic(&self) -> bool {
-        self.keys.is_empty()
+        self.keys.is_atomic() && self.values().is_atomic()
     }
     fn is_complex(&self) -> bool {
         true

@@ -46,7 +46,7 @@ impl<T: Expression> GraphNode for RecursiveTerm<T> {
         false
     }
     fn is_atomic(&self) -> bool {
-        false
+        self.factory.is_atomic()
     }
     fn is_complex(&self) -> bool {
         true
