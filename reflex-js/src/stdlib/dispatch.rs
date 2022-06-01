@@ -104,7 +104,7 @@ where
                 .map(|target| factory.match_hashmap_term(target))
                 .is_some()
         {
-            get_builtin_hashmap_field(method, factory)
+            get_builtin_hashmap_field(method, factory, allocator)
         } else {
             None
         }
@@ -177,6 +177,7 @@ where
 fn get_builtin_hashmap_field<T: Expression>(
     method: &str,
     factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
 ) -> Option<T>
 where
     T::Builtin: From<Stdlib>,
@@ -186,7 +187,25 @@ where
         "get" => Some(factory.create_builtin_term(Stdlib::Get)),
         "has" => Some(factory.create_builtin_term(Stdlib::Contains)),
         "keys" => Some(factory.create_builtin_term(Stdlib::Keys)),
-        "set" => Some(factory.create_builtin_term(Stdlib::Insert)),
+        "set" => Some({
+            // Ensure value is resolved before inserting into underlying hashmap
+            factory.create_lambda_term(
+                3,
+                factory.create_application_term(
+                    factory.create_builtin_term(Stdlib::Sequence),
+                    allocator.create_pair(
+                        factory.create_static_variable_term(0),
+                        factory.create_partial_application_term(
+                            factory.create_builtin_term(Stdlib::Insert),
+                            allocator.create_pair(
+                                factory.create_static_variable_term(2),
+                                factory.create_static_variable_term(1),
+                            ),
+                        ),
+                    ),
+                ),
+            )
+        }),
         "values" => Some(factory.create_builtin_term(Stdlib::Values)),
         _ => None,
     }

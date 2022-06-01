@@ -70,16 +70,28 @@ where
                 Err(error) => Err(error),
                 Ok(entries) => {
                     let (keys, values): (Vec<_>, Vec<_>) = entries.into_iter().unzip();
-                    let has_dynamic_keys = keys.iter().any(|key| !key.is_static());
-                    if has_dynamic_keys {
+                    let has_dynamic_keys = keys.iter().any(|item| !item.is_static());
+                    let has_dynamic_values = values.iter().any(|item| !item.is_static());
+                    if has_dynamic_keys || has_dynamic_values {
                         Ok(factory.create_application_term(
                             factory.create_builtin_term(Stdlib::ConstructHashMap),
                             allocator.create_pair(
-                                factory.create_application_term(
-                                    factory.create_builtin_term(Stdlib::CollectVector),
-                                    allocator.create_list(keys),
-                                ),
-                                factory.create_vector_term(allocator.create_list(values)),
+                                if has_dynamic_keys {
+                                    factory.create_application_term(
+                                        factory.create_builtin_term(Stdlib::CollectVector),
+                                        allocator.create_list(keys),
+                                    )
+                                } else {
+                                    factory.create_vector_term(allocator.create_list(keys))
+                                },
+                                if has_dynamic_values {
+                                    factory.create_application_term(
+                                        factory.create_builtin_term(Stdlib::CollectVector),
+                                        allocator.create_list(values),
+                                    )
+                                } else {
+                                    factory.create_vector_term(allocator.create_list(values))
+                                },
                             ),
                         ))
                     } else {
