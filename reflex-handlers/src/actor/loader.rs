@@ -535,20 +535,33 @@ where
                 .into_parts();
                 batch.latest_result.replace(value.clone());
                 let mut results = if let Some(value) = self.factory.match_vector_term(&value) {
-                    Ok(batch
-                        .subscriptions
-                        .iter()
-                        .enumerate()
-                        .filter_map(|(index, subscription)| {
-                            value
-                                .items()
-                                .get(index)
-                                .cloned()
-                                .map(|value| (subscription.key.clone(), value))
-                        })
-                        .collect::<HashMap<_, _>>())
+                    if value.items().len() != batch.subscriptions.len() {
+                        Err(create_error_expression(
+                            format!(
+                                "Invalid {} loader result: Expected {} values, received {}",
+                                loader_state.name,
+                                batch.subscriptions.len(),
+                                value.items().len()
+                            ),
+                            &self.factory,
+                            &self.allocator,
+                        ))
+                    } else {
+                        Ok(batch
+                            .subscriptions
+                            .iter()
+                            .enumerate()
+                            .filter_map(|(index, subscription)| {
+                                value
+                                    .items()
+                                    .get(index)
+                                    .cloned()
+                                    .map(|value| (subscription.key.clone(), value))
+                            })
+                            .collect::<HashMap<_, _>>())
+                    }
                 } else if let Some(value) = self.factory.match_hashmap_term(&value) {
-                    Ok(batch
+                    let results = batch
                         .subscriptions
                         .iter()
                         .filter_map(|subscription| {
@@ -557,7 +570,28 @@ where
                                 .cloned()
                                 .map(|value| (subscription.key.clone(), value))
                         })
-                        .collect::<HashMap<_, _>>())
+                        .collect::<HashMap<_, _>>();
+                    if results.len() < batch.subscriptions.len() {
+                        Err(create_error_expression(
+                            format!(
+                                "Invalid {} loader result: missing values for {}",
+                                loader_state.name,
+                                batch
+                                    .subscriptions
+                                    .iter()
+                                    .filter_map(|subscription| match value.get(&subscription.key) {
+                                        Some(_) => None,
+                                        None => Some(format!("{}", subscription.key)),
+                                    })
+                                    .collect::<Vec<_>>()
+                                    .join(", ")
+                            ),
+                            &self.factory,
+                            &self.allocator,
+                        ))
+                    } else {
+                        Ok(results)
+                    }
                 } else if let Some(term) = self.factory.match_signal_term(&value) {
                     Err(if has_error_message_effects(term, &self.factory) {
                         prefix_error_message_effects(
