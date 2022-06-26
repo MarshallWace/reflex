@@ -44,16 +44,16 @@ impl<T: Expression> Applicable<T> for Append {
         _cache: &mut impl EvaluationCache<T>,
     ) -> Result<T, String> {
         let target = args.next().unwrap();
-        if let Some(collection) = factory.match_vector_term(&target) {
+        if let Some(collection) = factory.match_list_term(&target) {
             let args = args.collect::<Vec<_>>();
             let additional_collections = match_typed_expression_list(
                 args.iter(),
-                |term| factory.match_vector_term(term),
-                |arg| format!("Expected Vector, received {}", arg),
+                |term| factory.match_list_term(term),
+                |arg| format!("Expected List, received {}", arg),
             )?;
             let combined_collections = once(collection).chain(additional_collections);
             let combined_items = combined_collections.flat_map(|arg| arg.items().iter().cloned());
-            Ok(factory.create_vector_term(allocator.create_unsized_list(combined_items)))
+            Ok(factory.create_list_term(allocator.create_unsized_list(combined_items)))
         } else if let Some(collection) = factory.match_hashset_term(&target) {
             let args = args.collect::<Vec<_>>();
             let additional_collections = match_typed_expression_list(
@@ -71,7 +71,7 @@ impl<T: Expression> Applicable<T> for Append {
             Ok(factory.create_hashset_term(allocator.create_list(deduplicated_values)))
         } else {
             Err(format!(
-                "Expected (Vector, ...) or (HashSet, ...), received ({})",
+                "Expected (List, ...) or (HashSet, ...), received ({})",
                 once(target)
                     .chain(args)
                     .map(|arg| format!("{}", arg))

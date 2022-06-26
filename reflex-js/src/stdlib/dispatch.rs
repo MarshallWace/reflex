@@ -92,10 +92,10 @@ where
     .or_else(|| {
         if target.is_none()
             || target
-                .map(|target| factory.match_vector_term(target))
+                .map(|target| factory.match_list_term(target))
                 .is_some()
         {
-            get_builtin_vector_field(method, factory, allocator)
+            get_builtin_list_field(method, factory, allocator)
         } else {
             None
         }
@@ -138,7 +138,7 @@ where
     }
 }
 
-fn get_builtin_vector_field<T: Expression>(
+fn get_builtin_list_field<T: Expression>(
     method: &str,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,

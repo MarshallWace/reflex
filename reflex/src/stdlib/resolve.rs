@@ -120,8 +120,8 @@ where
     }
 }
 
-pub struct ResolveVector {}
-impl ResolveVector {
+pub struct ResolveList {}
+impl ResolveList {
     pub(crate) const UUID: Uuid = uuid!("6d324a63-2138-41ad-8775-ad4931043700");
     const ARITY: FunctionArity<1, 0> = FunctionArity {
         required: [ArgType::Strict],
@@ -132,12 +132,12 @@ impl ResolveVector {
         Arity::from(&Self::ARITY)
     }
 }
-impl Uid for ResolveVector {
+impl Uid for ResolveList {
     fn uid(&self) -> Uuid {
         Self::UUID
     }
 }
-impl<T: Expression> Applicable<T> for ResolveVector
+impl<T: Expression> Applicable<T> for ResolveList
 where
     T::Builtin: From<Stdlib>,
 {
@@ -155,18 +155,18 @@ where
         _cache: &mut impl EvaluationCache<T>,
     ) -> Result<T, String> {
         let target = args.next().unwrap();
-        if let Some(value) = factory.match_vector_term(&target) {
+        if let Some(value) = factory.match_list_term(&target) {
             let has_dynamic_values = value.items().iter().any(|item| !item.is_static());
             if !has_dynamic_values {
                 Ok(target)
             } else {
                 Ok(factory.create_application_term(
-                    factory.create_builtin_term(Stdlib::CollectVector),
+                    factory.create_builtin_term(Stdlib::CollectList),
                     allocator.create_list(value.items().iter().cloned()),
                 ))
             }
         } else {
-            Err(format!("Expected Vector, received {}", target))
+            Err(format!("Expected List, received {}", target))
         }
     }
 }
@@ -266,10 +266,10 @@ where
                     factory.create_builtin_term(Stdlib::ConstructHashMap),
                     allocator.create_pair(
                         factory.create_application_term(
-                            factory.create_builtin_term(Stdlib::CollectVector),
+                            factory.create_builtin_term(Stdlib::CollectList),
                             allocator.clone_list(value.keys()),
                         ),
-                        factory.create_vector_term(allocator.clone_list(value.values())),
+                        factory.create_list_term(allocator.clone_list(value.values())),
                     ),
                 ))
             }

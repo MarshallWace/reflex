@@ -69,8 +69,8 @@ where
                 factory.create_builtin_term(Stdlib::CollectTuple),
             ),
             (
-                String::from("collectVector"),
-                factory.create_builtin_term(Stdlib::CollectVector),
+                String::from("collectList"),
+                factory.create_builtin_term(Stdlib::CollectList),
             ),
             (
                 String::from("concat"),
@@ -97,8 +97,8 @@ where
                 factory.create_builtin_term(Stdlib::ConstructTuple),
             ),
             (
-                String::from("constructVector"),
-                factory.create_builtin_term(Stdlib::ConstructVector),
+                String::from("constructList"),
+                factory.create_builtin_term(Stdlib::ConstructList),
             ),
             (
                 String::from("contains"),
@@ -250,8 +250,8 @@ where
                 factory.create_builtin_term(Stdlib::ResolveTuple),
             ),
             (
-                String::from("resolveVector"),
-                factory.create_builtin_term(Stdlib::ResolveVector),
+                String::from("resolveList"),
+                factory.create_builtin_term(Stdlib::ResolveList),
             ),
             (
                 String::from("round"),

@@ -70,9 +70,7 @@ fn parse_aggregate_error<'a, T: Expression + 'a>(
             factory.match_string_term(error_type).and_then(|name| {
                 if name.value.as_str() == "AggregateError" {
                     target.get("errors").and_then(|errors| {
-                        factory
-                            .match_vector_term(errors)
-                            .map(|errors| errors.items())
+                        factory.match_list_term(errors).map(|errors| errors.items())
                     })
                 } else {
                     None

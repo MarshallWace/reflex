@@ -816,17 +816,17 @@ fn evaluate_instruction<'a, T: Expression + Rewritable<T> + Reducible<T> + Appli
             stack.push(factory.create_constructor_term(prototype.clone()));
             Ok((ExecutionResult::Advance, DependencyList::empty()))
         }
-        Instruction::ConstructVector { size } => {
-            trace!(instruction = "Instruction::ConstructVector");
+        Instruction::ConstructList { size } => {
+            trace!(instruction = "Instruction::ConstructList");
             let size = *size;
             if stack.len() < size {
                 Err(format!(
-                    "Unable to create {}-item vector: insufficient arguments on stack",
+                    "Unable to create {}-item list: insufficient arguments on stack",
                     size,
                 ))
             } else {
                 let items = allocator.create_list(stack.pop_multiple(size));
-                stack.push(factory.create_vector_term(items));
+                stack.push(factory.create_list_term(items));
                 Ok((ExecutionResult::Advance, DependencyList::empty()))
             }
         }
@@ -2114,17 +2114,17 @@ mod tests {
         let expression = factory.create_application_term(
             factory.create_builtin_term(Stdlib::Append),
             allocator.create_triple(
-                factory.create_vector_term(allocator.create_list(vec![
+                factory.create_list_term(allocator.create_list(vec![
                     factory.create_int_term(1),
                     factory.create_int_term(2),
                     factory.create_int_term(3),
                 ])),
-                factory.create_vector_term(allocator.create_list(vec![
+                factory.create_list_term(allocator.create_list(vec![
                     factory.create_int_term(4),
                     factory.create_int_term(5),
                     factory.create_int_term(6),
                 ])),
-                factory.create_vector_term(allocator.create_list(vec![
+                factory.create_list_term(allocator.create_list(vec![
                     factory.create_int_term(7),
                     factory.create_int_term(8),
                     factory.create_int_term(9),
@@ -2153,7 +2153,7 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                factory.create_vector_term(allocator.create_list(vec![
+                factory.create_list_term(allocator.create_list(vec![
                     factory.create_int_term(1),
                     factory.create_int_term(2),
                     factory.create_int_term(3),
@@ -2177,7 +2177,7 @@ mod tests {
                 factory.create_application_term(
                     factory.create_lambda_term(
                         0,
-                        factory.create_vector_term(allocator.create_list(vec![
+                        factory.create_list_term(allocator.create_list(vec![
                             factory.create_int_term(1),
                             factory.create_int_term(2),
                             factory.create_int_term(3),
@@ -2188,7 +2188,7 @@ mod tests {
                 factory.create_application_term(
                     factory.create_lambda_term(
                         0,
-                        factory.create_vector_term(allocator.create_list(vec![
+                        factory.create_list_term(allocator.create_list(vec![
                             factory.create_int_term(4),
                             factory.create_int_term(5),
                             factory.create_int_term(6),
@@ -2199,7 +2199,7 @@ mod tests {
                 factory.create_application_term(
                     factory.create_lambda_term(
                         0,
-                        factory.create_vector_term(allocator.create_list(vec![
+                        factory.create_list_term(allocator.create_list(vec![
                             factory.create_int_term(7),
                             factory.create_int_term(8),
                             factory.create_int_term(9),
@@ -2231,7 +2231,7 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                factory.create_vector_term(allocator.create_list(vec![
+                factory.create_list_term(allocator.create_list(vec![
                     factory.create_int_term(1),
                     factory.create_int_term(2),
                     factory.create_int_term(3),

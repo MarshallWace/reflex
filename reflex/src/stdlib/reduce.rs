@@ -41,7 +41,7 @@ impl<T: Expression> Applicable<T> for Reduce {
         let target = args.next().unwrap();
         let iteratee = args.next().unwrap();
         let seed = args.next().unwrap();
-        if let Some(target) = factory.match_vector_term(&target) {
+        if let Some(target) = factory.match_list_term(&target) {
             Ok(target.items().iter().fold(seed, |result, item| {
                 factory.create_application_term(
                     iteratee.clone(),

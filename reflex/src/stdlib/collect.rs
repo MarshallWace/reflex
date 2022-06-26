@@ -48,13 +48,13 @@ where
         _cache: &mut impl EvaluationCache<T>,
     ) -> Result<T, String> {
         let target = args.next().unwrap();
-        if let Some(collection) = factory.match_vector_term(&target) {
+        if let Some(collection) = factory.match_list_term(&target) {
             let has_dynamic_values = collection.items().iter().any(|item| !item.is_static());
             Ok(if !has_dynamic_values {
                 target.clone()
             } else {
                 factory.create_application_term(
-                    factory.create_builtin_term(Stdlib::CollectVector),
+                    factory.create_builtin_term(Stdlib::CollectList),
                     allocator.clone_list(collection.items()),
                 )
             })
@@ -80,7 +80,7 @@ where
             })
         } else {
             Err(format!(
-                "Expected Vector or HashSet or HashMap, received {}",
+                "Expected List or HashSet or HashMap, received {}",
                 target,
             ))
         }
@@ -169,8 +169,8 @@ impl<T: Expression> Applicable<T> for CollectRecord {
     }
 }
 
-pub struct CollectVector {}
-impl CollectVector {
+pub struct CollectList {}
+impl CollectList {
     pub(crate) const UUID: Uuid = uuid!("c99b0901-f996-4887-9403-c2f123b779b0");
     const ARITY: FunctionArity<0, 0> = FunctionArity {
         required: [],
@@ -181,12 +181,12 @@ impl CollectVector {
         Arity::from(&Self::ARITY)
     }
 }
-impl Uid for CollectVector {
+impl Uid for CollectList {
     fn uid(&self) -> Uuid {
         Self::UUID
     }
 }
-impl<T: Expression> Applicable<T> for CollectVector {
+impl<T: Expression> Applicable<T> for CollectList {
     fn arity(&self) -> Option<Arity> {
         Some(Self::arity())
     }
@@ -200,7 +200,7 @@ impl<T: Expression> Applicable<T> for CollectVector {
         allocator: &impl HeapAllocator<T>,
         _cache: &mut impl EvaluationCache<T>,
     ) -> Result<T, String> {
-        Ok(factory.create_vector_term(allocator.create_list(args)))
+        Ok(factory.create_list_term(allocator.create_list(args)))
     }
 }
 
@@ -287,7 +287,7 @@ where
                         }
                         _ => Err(format!("Invalid HashMap entry: {}", entry)),
                     }
-                } else if let Some(entry) = factory.match_vector_term(&arg) {
+                } else if let Some(entry) = factory.match_list_term(&arg) {
                     match (entry.items().get(0), entry.items().get(1)) {
                         (Some(key), Some(value)) => Ok(Some((key.clone(), value.clone()))),
                         _ => Err(format!("Invalid HashMap entry: {}", entry)),

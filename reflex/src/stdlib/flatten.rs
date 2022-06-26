@@ -38,10 +38,10 @@ impl<T: Expression> Applicable<T> for Flatten {
         _cache: &mut impl EvaluationCache<T>,
     ) -> Result<T, String> {
         let target = args.next().unwrap();
-        let result = if let Some(target) = factory.match_vector_term(&target) {
+        let result = if let Some(target) = factory.match_list_term(&target) {
             let items = target.items().iter().flat_map(|item| {
                 let (list_items, standalone_item) =
-                    if let Some(inner) = factory.match_vector_term(item) {
+                    if let Some(inner) = factory.match_list_term(item) {
                         (Some(inner.items().iter().cloned()), None)
                     } else {
                         (None, Some(item.clone()))
@@ -49,19 +49,19 @@ impl<T: Expression> Applicable<T> for Flatten {
                 list_items.into_iter().flatten().chain(standalone_item)
             });
             let num_items = target.items().iter().fold(0, |num_items, item| {
-                if let Some(inner) = factory.match_vector_term(item) {
+                if let Some(inner) = factory.match_list_term(item) {
                     num_items + inner.items().len()
                 } else {
                     num_items + 1
                 }
             });
-            Some(factory.create_vector_term(allocator.create_sized_list(num_items, items)))
+            Some(factory.create_list_term(allocator.create_sized_list(num_items, items)))
         } else {
             None
         };
         match result {
             Some(result) => Ok(result),
-            None => Err(format!("Expected Vector, received {}", target)),
+            None => Err(format!("Expected List, received {}", target)),
         }
     }
 }

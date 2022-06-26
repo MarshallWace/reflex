@@ -42,12 +42,12 @@ impl<T: Expression> Applicable<T> for Values {
             return Err(format!("Expected 1 argument, received {}", args.len()));
         }
         let target = args.next().unwrap();
-        let result = if let Some(_) = factory.match_vector_term(&target) {
+        let result = if let Some(_) = factory.match_list_term(&target) {
             Some(target.clone())
         } else if let Some(target) = factory.match_hashmap_term(&target) {
-            Some(factory.create_vector_term(allocator.create_list(target.values().iter().cloned())))
+            Some(factory.create_list_term(allocator.create_list(target.values().iter().cloned())))
         } else if let Some(target) = factory.match_hashset_term(&target) {
-            Some(factory.create_vector_term(allocator.create_list(target.values().iter().cloned())))
+            Some(factory.create_list_term(allocator.create_list(target.values().iter().cloned())))
         } else {
             None
         };

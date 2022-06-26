@@ -74,7 +74,7 @@ fn hydrate_array<T: Expression>(
         .into_iter()
         .map(|item| hydrate(item, factory, allocator))
         .collect::<Result<Vec<_>, _>>()?;
-    Ok(factory.create_vector_term(allocator.create_list(items)))
+    Ok(factory.create_list_term(allocator.create_list(items)))
 }
 
 fn hydrate_object<T: Expression>(
@@ -186,11 +186,11 @@ mod tests {
         let factory = SharedTermFactory::<Stdlib>::default();
         let allocator = DefaultAllocator::default();
         assert_eq!(
-            stringify(&factory.create_vector_term(allocator.create_empty_list())),
+            stringify(&factory.create_list_term(allocator.create_empty_list())),
             Ok(String::from("[]"))
         );
         assert_eq!(
-            stringify(&factory.create_vector_term(allocator.create_list(vec![
+            stringify(&factory.create_list_term(allocator.create_list(vec![
                 factory.create_int_term(3),
                 factory.create_int_term(4),
                 factory.create_int_term(5),

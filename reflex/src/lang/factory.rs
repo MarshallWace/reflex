@@ -164,12 +164,12 @@ impl<TBuiltin: Builtin> ExpressionFactory<CachedSharedTerm<TBuiltin>>
         trace!(factory_create = "constructor");
         self.create_expression(Term::Constructor(ConstructorTerm::new(prototype)))
     }
-    fn create_vector_term(
+    fn create_list_term(
         &self,
         items: ExpressionList<CachedSharedTerm<TBuiltin>>,
     ) -> CachedSharedTerm<TBuiltin> {
-        trace!(factory_create = "vector");
-        self.create_expression(Term::Vector(VectorTerm::new(items)))
+        trace!(factory_create = "list");
+        self.create_expression(Term::List(ListTerm::new(items)))
     }
     fn create_hashmap_term(
         &self,
@@ -355,12 +355,12 @@ impl<TBuiltin: Builtin> ExpressionFactory<CachedSharedTerm<TBuiltin>>
             _ => None,
         }
     }
-    fn match_vector_term<'a>(
+    fn match_list_term<'a>(
         &self,
         expression: &'a CachedSharedTerm<TBuiltin>,
-    ) -> Option<&'a VectorTerm<CachedSharedTerm<TBuiltin>>> {
+    ) -> Option<&'a ListTerm<CachedSharedTerm<TBuiltin>>> {
         match expression.inner_term() {
-            Term::Vector(term) => Some(term),
+            Term::List(term) => Some(term),
             _ => None,
         }
     }

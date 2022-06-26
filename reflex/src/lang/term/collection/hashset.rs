@@ -105,7 +105,7 @@ impl<T: Expression + Rewritable<T>> Rewritable<T> for HashSetTerm<T> {
             transform_expression_list(&self.values, allocator, |value| {
                 value.substitute_dynamic(deep, state, factory, allocator, cache)
             })
-            .map(|values| factory.create_vector_term(values))
+            .map(|values| factory.create_list_term(values))
         } else {
             None
         }
@@ -118,7 +118,7 @@ impl<T: Expression + Rewritable<T>> Rewritable<T> for HashSetTerm<T> {
         transform_expression_list(&self.values, allocator, |value| {
             value.hoist_free_variables(factory, allocator)
         })
-        .map(|values| factory.create_vector_term(values))
+        .map(|values| factory.create_list_term(values))
     }
     fn normalize(
         &self,
@@ -129,7 +129,7 @@ impl<T: Expression + Rewritable<T>> Rewritable<T> for HashSetTerm<T> {
         transform_expression_list(&self.values, allocator, |value| {
             value.normalize(factory, allocator, cache)
         })
-        .map(|values| factory.create_vector_term(values))
+        .map(|values| factory.create_list_term(values))
     }
 }
 impl<T: Expression + Compile<T>> Compile<T> for HashSetTerm<T> {

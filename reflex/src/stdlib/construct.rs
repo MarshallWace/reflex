@@ -78,7 +78,7 @@ impl<T: Expression> Applicable<T> for ConstructRecord {
     ) -> Result<T, String> {
         let keys = args.next().unwrap();
         let values = args.next().unwrap();
-        let (num_keys, keys) = match factory.match_vector_term(&keys) {
+        let (num_keys, keys) = match factory.match_list_term(&keys) {
             Some(keys) => {
                 let num_keys = keys.items().len();
                 match_typed_expression_list(
@@ -94,7 +94,7 @@ impl<T: Expression> Applicable<T> for ConstructRecord {
             }
             None => Err(format!("Invalid property keys: {}", keys)),
         }?;
-        match factory.match_vector_term(&values) {
+        match factory.match_list_term(&values) {
             Some(values) => {
                 if values.items().len() != num_keys {
                     Err(format!(
@@ -147,7 +147,7 @@ impl<T: Expression> Applicable<T> for ConstructHashMap {
     ) -> Result<T, String> {
         let keys = args.next().unwrap();
         let values = args.next().unwrap();
-        let keys = match factory.match_vector_term(&keys) {
+        let keys = match factory.match_list_term(&keys) {
             Some(keys) => {
                 if let Some(dynamic_key) = keys.items().iter().find(|key| !key.is_static()) {
                     Err(format!("Invalid HashMap key: {}", dynamic_key))
@@ -157,7 +157,7 @@ impl<T: Expression> Applicable<T> for ConstructHashMap {
             }
             None => Err(format!("Invalid HashMap keys: {}", keys)),
         }?;
-        match factory.match_vector_term(&values) {
+        match factory.match_list_term(&values) {
             Some(values) => {
                 if values.items().len() != keys.items().len() {
                     Err(format!(
@@ -226,8 +226,8 @@ impl<T: Expression> Applicable<T> for ConstructHashSet {
     }
 }
 
-pub struct ConstructVector {}
-impl ConstructVector {
+pub struct ConstructList {}
+impl ConstructList {
     pub(crate) const UUID: Uuid = uuid!("ecdf265f-d628-415b-80d5-5977e10a1141");
     const ARITY: FunctionArity<0, 0> = FunctionArity {
         required: [],
@@ -238,12 +238,12 @@ impl ConstructVector {
         Arity::from(&Self::ARITY)
     }
 }
-impl Uid for ConstructVector {
+impl Uid for ConstructList {
     fn uid(&self) -> Uuid {
         Self::UUID
     }
 }
-impl<T: Expression> Applicable<T> for ConstructVector {
+impl<T: Expression> Applicable<T> for ConstructList {
     fn arity(&self) -> Option<Arity> {
         Some(Self::arity())
     }
@@ -257,6 +257,6 @@ impl<T: Expression> Applicable<T> for ConstructVector {
         allocator: &impl HeapAllocator<T>,
         _cache: &mut impl EvaluationCache<T>,
     ) -> Result<T, String> {
-        Ok(factory.create_vector_term(allocator.create_list(args)))
+        Ok(factory.create_list_term(allocator.create_list(args)))
     }
 }

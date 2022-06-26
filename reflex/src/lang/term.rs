@@ -46,11 +46,11 @@ pub use variable::*;
 mod collection {
     pub mod hashmap;
     pub mod hashset;
-    pub mod vector;
+    pub mod list;
 }
 pub use collection::hashmap::*;
 pub use collection::hashset::*;
-pub use collection::vector::*;
+pub use collection::list::*;
 
 use crate::core::{CompoundNode, Evaluate, EvaluationResult};
 use crate::{
@@ -88,7 +88,7 @@ pub enum Term<T: Expression> {
     Tuple(TupleTerm<T>),
     Record(RecordTerm<T>),
     Constructor(ConstructorTerm),
-    Vector(VectorTerm<T>),
+    List(ListTerm<T>),
     HashMap(HashMapTerm<T>),
     HashSet(HashSetTerm<T>),
     Signal(SignalTerm<T>),
@@ -121,7 +121,7 @@ impl<T: Expression + Applicable<T>> GraphNode for Term<T> {
             Self::Tuple(term) => term.capture_depth(),
             Self::Record(term) => term.capture_depth(),
             Self::Constructor(term) => term.capture_depth(),
-            Self::Vector(term) => term.capture_depth(),
+            Self::List(term) => term.capture_depth(),
             Self::HashMap(term) => term.capture_depth(),
             Self::HashSet(term) => term.capture_depth(),
             Self::Signal(term) => term.capture_depth(),
@@ -147,7 +147,7 @@ impl<T: Expression + Applicable<T>> GraphNode for Term<T> {
             Self::Tuple(term) => term.free_variables(),
             Self::Record(term) => term.free_variables(),
             Self::Constructor(term) => term.free_variables(),
-            Self::Vector(term) => term.free_variables(),
+            Self::List(term) => term.free_variables(),
             Self::HashMap(term) => term.free_variables(),
             Self::HashSet(term) => term.free_variables(),
             Self::Signal(term) => term.free_variables(),
@@ -173,7 +173,7 @@ impl<T: Expression + Applicable<T>> GraphNode for Term<T> {
             Self::Tuple(term) => term.count_variable_usages(offset),
             Self::Record(term) => term.count_variable_usages(offset),
             Self::Constructor(term) => term.count_variable_usages(offset),
-            Self::Vector(term) => term.count_variable_usages(offset),
+            Self::List(term) => term.count_variable_usages(offset),
             Self::HashMap(term) => term.count_variable_usages(offset),
             Self::HashSet(term) => term.count_variable_usages(offset),
             Self::Signal(term) => term.count_variable_usages(offset),
@@ -199,7 +199,7 @@ impl<T: Expression + Applicable<T>> GraphNode for Term<T> {
             Self::Tuple(term) => term.dynamic_dependencies(deep),
             Self::Record(term) => term.dynamic_dependencies(deep),
             Self::Constructor(term) => term.dynamic_dependencies(deep),
-            Self::Vector(term) => term.dynamic_dependencies(deep),
+            Self::List(term) => term.dynamic_dependencies(deep),
             Self::HashMap(term) => term.dynamic_dependencies(deep),
             Self::HashSet(term) => term.dynamic_dependencies(deep),
             Self::Signal(term) => term.dynamic_dependencies(deep),
@@ -225,7 +225,7 @@ impl<T: Expression + Applicable<T>> GraphNode for Term<T> {
             Self::Tuple(term) => term.has_dynamic_dependencies(deep),
             Self::Record(term) => term.has_dynamic_dependencies(deep),
             Self::Constructor(term) => term.has_dynamic_dependencies(deep),
-            Self::Vector(term) => term.has_dynamic_dependencies(deep),
+            Self::List(term) => term.has_dynamic_dependencies(deep),
             Self::HashMap(term) => term.has_dynamic_dependencies(deep),
             Self::HashSet(term) => term.has_dynamic_dependencies(deep),
             Self::Signal(term) => term.has_dynamic_dependencies(deep),
@@ -251,7 +251,7 @@ impl<T: Expression + Applicable<T>> GraphNode for Term<T> {
             Self::Tuple(term) => term.is_static(),
             Self::Record(term) => term.is_static(),
             Self::Constructor(term) => term.is_static(),
-            Self::Vector(term) => term.is_static(),
+            Self::List(term) => term.is_static(),
             Self::HashMap(term) => term.is_static(),
             Self::HashSet(term) => term.is_static(),
             Self::Signal(term) => term.is_static(),
@@ -277,7 +277,7 @@ impl<T: Expression + Applicable<T>> GraphNode for Term<T> {
             Self::Tuple(term) => term.is_atomic(),
             Self::Record(term) => term.is_atomic(),
             Self::Constructor(term) => term.is_atomic(),
-            Self::Vector(term) => term.is_atomic(),
+            Self::List(term) => term.is_atomic(),
             Self::HashMap(term) => term.is_atomic(),
             Self::HashSet(term) => term.is_atomic(),
             Self::Signal(term) => term.is_atomic(),
@@ -303,7 +303,7 @@ impl<T: Expression + Applicable<T>> GraphNode for Term<T> {
             Self::Tuple(term) => term.is_complex(),
             Self::Record(term) => term.is_complex(),
             Self::Constructor(term) => term.is_complex(),
-            Self::Vector(term) => term.is_complex(),
+            Self::List(term) => term.is_complex(),
             Self::HashMap(term) => term.is_complex(),
             Self::HashSet(term) => term.is_complex(),
             Self::Signal(term) => term.is_complex(),
@@ -319,7 +319,7 @@ pub enum TermChildren<'a, T: Expression> {
     Recursive(RecursiveTermChildren<'a, T>),
     Tuple(TupleTermChildren<'a, T>),
     Record(RecordTermChildren<'a, T>),
-    Vector(VectorTermChildren<'a, T>),
+    List(ListTermChildren<'a, T>),
     HashMap(HashMapTermChildren<'a, T>),
     HashSet(HashSetTermChildren<'a, T>),
     Empty,
@@ -336,7 +336,7 @@ impl<'a, T: Expression> Iterator for TermChildren<'a, T> {
             Self::Recursive(iter) => iter.next(),
             Self::Tuple(iter) => iter.next(),
             Self::Record(iter) => iter.next(),
-            Self::Vector(iter) => iter.next(),
+            Self::List(iter) => iter.next(),
             Self::HashMap(iter) => iter.next(),
             Self::HashSet(iter) => iter.next(),
             Self::Empty => None,
@@ -355,7 +355,7 @@ impl<'a, T: Expression + 'a> CompoundNode<'a, T> for Term<T> {
             Self::Recursive(term) => TermChildren::Recursive(term.children()),
             Self::Tuple(term) => TermChildren::Tuple(term.children()),
             Self::Record(term) => TermChildren::Record(term.children()),
-            Self::Vector(term) => TermChildren::Vector(term.children()),
+            Self::List(term) => TermChildren::List(term.children()),
             Self::HashMap(term) => TermChildren::HashMap(term.children()),
             Self::HashSet(term) => TermChildren::HashSet(term.children()),
             _ => TermChildren::Empty,
@@ -392,7 +392,7 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Evaluate<T>>
             }
             Self::Tuple(term) => term.substitute_static(substitutions, factory, allocator, cache),
             Self::Record(term) => term.substitute_static(substitutions, factory, allocator, cache),
-            Self::Vector(term) => term.substitute_static(substitutions, factory, allocator, cache),
+            Self::List(term) => term.substitute_static(substitutions, factory, allocator, cache),
             Self::HashMap(term) => term.substitute_static(substitutions, factory, allocator, cache),
             Self::HashSet(term) => term.substitute_static(substitutions, factory, allocator, cache),
             _ => None,
@@ -426,7 +426,7 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Evaluate<T>>
             }
             Self::Tuple(term) => term.substitute_dynamic(deep, state, factory, allocator, cache),
             Self::Record(term) => term.substitute_dynamic(deep, state, factory, allocator, cache),
-            Self::Vector(term) => term.substitute_dynamic(deep, state, factory, allocator, cache),
+            Self::List(term) => term.substitute_dynamic(deep, state, factory, allocator, cache),
             Self::HashMap(term) => term.substitute_dynamic(deep, state, factory, allocator, cache),
             Self::HashSet(term) => term.substitute_dynamic(deep, state, factory, allocator, cache),
             _ => None,
@@ -448,7 +448,7 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Evaluate<T>>
             Self::Recursive(term) => term.normalize(factory, allocator, cache),
             Self::Tuple(term) => term.normalize(factory, allocator, cache),
             Self::Record(term) => term.normalize(factory, allocator, cache),
-            Self::Vector(term) => term.normalize(factory, allocator, cache),
+            Self::List(term) => term.normalize(factory, allocator, cache),
             Self::HashMap(term) => term.normalize(factory, allocator, cache),
             Self::HashSet(term) => term.normalize(factory, allocator, cache),
             _ => None,
@@ -469,7 +469,7 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Evaluate<T>>
             Self::Recursive(term) => term.hoist_free_variables(factory, allocator),
             Self::Tuple(term) => term.hoist_free_variables(factory, allocator),
             Self::Record(term) => term.hoist_free_variables(factory, allocator),
-            Self::Vector(term) => term.hoist_free_variables(factory, allocator),
+            Self::List(term) => term.hoist_free_variables(factory, allocator),
             Self::HashMap(term) => term.hoist_free_variables(factory, allocator),
             Self::HashSet(term) => term.hoist_free_variables(factory, allocator),
             _ => None,
@@ -612,7 +612,7 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>> 
             Self::Constructor(term) => {
                 term.compile(eager, stack_offset, factory, allocator, compiler)
             }
-            Self::Vector(term) => term.compile(eager, stack_offset, factory, allocator, compiler),
+            Self::List(term) => term.compile(eager, stack_offset, factory, allocator, compiler),
             Self::HashMap(term) => term.compile(eager, stack_offset, factory, allocator, compiler),
             Self::HashSet(term) => term.compile(eager, stack_offset, factory, allocator, compiler),
             Self::Signal(term) => term.compile(eager, stack_offset, factory, allocator, compiler),
@@ -640,7 +640,7 @@ impl<T: Expression> std::fmt::Display for Term<T> {
             Self::Tuple(term) => std::fmt::Display::fmt(term, f),
             Self::Record(term) => std::fmt::Display::fmt(term, f),
             Self::Constructor(term) => std::fmt::Display::fmt(term, f),
-            Self::Vector(term) => std::fmt::Display::fmt(term, f),
+            Self::List(term) => std::fmt::Display::fmt(term, f),
             Self::HashMap(term) => std::fmt::Display::fmt(term, f),
             Self::HashSet(term) => std::fmt::Display::fmt(term, f),
             Self::Signal(term) => std::fmt::Display::fmt(term, f),
@@ -668,7 +668,7 @@ impl<T: Expression> SerializeJson for Term<T> {
             Self::Tuple(term) => term.to_json(),
             Self::Record(term) => term.to_json(),
             Self::Constructor(term) => term.to_json(),
-            Self::Vector(term) => term.to_json(),
+            Self::List(term) => term.to_json(),
             Self::HashMap(term) => term.to_json(),
             Self::HashSet(term) => term.to_json(),
             Self::Signal(term) => term.to_json(),

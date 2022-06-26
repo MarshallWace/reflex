@@ -783,7 +783,7 @@ fn parse_value<T: Expression>(
                 .iter()
                 .map(|item| parse_value(item, variables, fragments, factory, allocator))
                 .collect::<Result<Vec<_>, _>>()?;
-            Ok(factory.create_vector_term(allocator.create_list(values)))
+            Ok(factory.create_list_term(allocator.create_list(values)))
         }
         Value::Object(value) => {
             let entries = value
@@ -1058,7 +1058,7 @@ mod tests {
                             (String::from("foo"), factory.create_nil_term()),
                             (
                                 String::from("items"),
-                                factory.create_vector_term(allocator.create_list(vec![
+                                factory.create_list_term(allocator.create_list(vec![
                                     factory.create_int_term(3),
                                     factory.create_int_term(4),
                                     factory.create_int_term(5),
@@ -1095,7 +1095,7 @@ mod tests {
                 create_record(
                     vec![(
                         String::from("items"),
-                        factory.create_vector_term(allocator.create_list(vec![
+                        factory.create_list_term(allocator.create_list(vec![
                             factory.create_int_term(3),
                             factory.create_int_term(4),
                             factory.create_int_term(5)
@@ -1122,53 +1122,53 @@ mod tests {
                             (String::from("foo"), factory.create_nil_term()),
                             (
                                 String::from("items"),
-                                factory.create_vector_term(allocator.create_list(vec![
-                                    factory.create_vector_term(allocator.create_list(vec![
-                                        factory.create_vector_term(allocator.create_list(vec![
+                                factory.create_list_term(allocator.create_list(vec![
+                                    factory.create_list_term(allocator.create_list(vec![
+                                        factory.create_list_term(allocator.create_list(vec![
                                             factory.create_float_term(1.1),
                                             factory.create_float_term(1.2),
                                             factory.create_float_term(1.3),
                                         ])),
-                                        factory.create_vector_term(allocator.create_list(vec![
+                                        factory.create_list_term(allocator.create_list(vec![
                                             factory.create_float_term(1.4),
                                             factory.create_float_term(1.5),
                                             factory.create_float_term(1.6),
                                         ])),
-                                        factory.create_vector_term(allocator.create_list(vec![
+                                        factory.create_list_term(allocator.create_list(vec![
                                             factory.create_float_term(1.7),
                                             factory.create_float_term(1.8),
                                             factory.create_float_term(1.9),
                                         ])),
                                     ])),
-                                    factory.create_vector_term(allocator.create_list(vec![
-                                        factory.create_vector_term(allocator.create_list(vec![
+                                    factory.create_list_term(allocator.create_list(vec![
+                                        factory.create_list_term(allocator.create_list(vec![
                                             factory.create_float_term(2.1),
                                             factory.create_float_term(2.2),
                                             factory.create_float_term(2.3),
                                         ])),
-                                        factory.create_vector_term(allocator.create_list(vec![
+                                        factory.create_list_term(allocator.create_list(vec![
                                             factory.create_float_term(2.4),
                                             factory.create_float_term(2.5),
                                             factory.create_float_term(2.6),
                                         ])),
-                                        factory.create_vector_term(allocator.create_list(vec![
+                                        factory.create_list_term(allocator.create_list(vec![
                                             factory.create_float_term(2.7),
                                             factory.create_float_term(2.8),
                                             factory.create_float_term(2.9),
                                         ])),
                                     ])),
-                                    factory.create_vector_term(allocator.create_list(vec![
-                                        factory.create_vector_term(allocator.create_list(vec![
+                                    factory.create_list_term(allocator.create_list(vec![
+                                        factory.create_list_term(allocator.create_list(vec![
                                             factory.create_float_term(3.1),
                                             factory.create_float_term(3.2),
                                             factory.create_float_term(3.3),
                                         ])),
-                                        factory.create_vector_term(allocator.create_list(vec![
+                                        factory.create_list_term(allocator.create_list(vec![
                                             factory.create_float_term(3.4),
                                             factory.create_float_term(3.5),
                                             factory.create_float_term(3.6),
                                         ])),
-                                        factory.create_vector_term(allocator.create_list(vec![
+                                        factory.create_list_term(allocator.create_list(vec![
                                             factory.create_float_term(3.7),
                                             factory.create_float_term(3.8),
                                             factory.create_float_term(3.9),
@@ -1207,53 +1207,53 @@ mod tests {
                 create_record(
                     vec![(
                         String::from("items"),
-                        factory.create_vector_term(allocator.create_list(vec![
-                            factory.create_vector_term(allocator.create_list(vec![
-                                factory.create_vector_term(allocator.create_list(vec![
+                        factory.create_list_term(allocator.create_list(vec![
+                            factory.create_list_term(allocator.create_list(vec![
+                                factory.create_list_term(allocator.create_list(vec![
                                     factory.create_float_term(1.1),
                                     factory.create_float_term(1.2),
                                     factory.create_float_term(1.3),
                                 ])),
-                                factory.create_vector_term(allocator.create_list(vec![
+                                factory.create_list_term(allocator.create_list(vec![
                                     factory.create_float_term(1.4),
                                     factory.create_float_term(1.5),
                                     factory.create_float_term(1.6),
                                 ])),
-                                factory.create_vector_term(allocator.create_list(vec![
+                                factory.create_list_term(allocator.create_list(vec![
                                     factory.create_float_term(1.7),
                                     factory.create_float_term(1.8),
                                     factory.create_float_term(1.9),
                                 ])),
                             ])),
-                            factory.create_vector_term(allocator.create_list(vec![
-                                factory.create_vector_term(allocator.create_list(vec![
+                            factory.create_list_term(allocator.create_list(vec![
+                                factory.create_list_term(allocator.create_list(vec![
                                     factory.create_float_term(2.1),
                                     factory.create_float_term(2.2),
                                     factory.create_float_term(2.3),
                                 ])),
-                                factory.create_vector_term(allocator.create_list(vec![
+                                factory.create_list_term(allocator.create_list(vec![
                                     factory.create_float_term(2.4),
                                     factory.create_float_term(2.5),
                                     factory.create_float_term(2.6),
                                 ])),
-                                factory.create_vector_term(allocator.create_list(vec![
+                                factory.create_list_term(allocator.create_list(vec![
                                     factory.create_float_term(2.7),
                                     factory.create_float_term(2.8),
                                     factory.create_float_term(2.9),
                                 ])),
                             ])),
-                            factory.create_vector_term(allocator.create_list(vec![
-                                factory.create_vector_term(allocator.create_list(vec![
+                            factory.create_list_term(allocator.create_list(vec![
+                                factory.create_list_term(allocator.create_list(vec![
                                     factory.create_float_term(3.1),
                                     factory.create_float_term(3.2),
                                     factory.create_float_term(3.3),
                                 ])),
-                                factory.create_vector_term(allocator.create_list(vec![
+                                factory.create_list_term(allocator.create_list(vec![
                                     factory.create_float_term(3.4),
                                     factory.create_float_term(3.5),
                                     factory.create_float_term(3.6),
                                 ])),
-                                factory.create_vector_term(allocator.create_list(vec![
+                                factory.create_list_term(allocator.create_list(vec![
                                     factory.create_float_term(3.7),
                                     factory.create_float_term(3.8),
                                     factory.create_float_term(3.9),

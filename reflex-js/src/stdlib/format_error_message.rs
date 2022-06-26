@@ -46,7 +46,7 @@ impl<T: Expression> Applicable<T> for FormatErrorMessage {
         let operand = args.next().unwrap();
         let message = parse_error_message(&operand, factory)
             .or_else(|| {
-                if let Some(value) = factory.match_vector_term(&operand) {
+                if let Some(value) = factory.match_list_term(&operand) {
                     let max_displayed_errors = 10;
                     let num_errors = value.items().len();
                     let messages = value

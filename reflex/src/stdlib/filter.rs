@@ -50,11 +50,11 @@ where
     ) -> Result<T, String> {
         let target = args.next().unwrap();
         let predicate = args.next().unwrap();
-        let result = if let Some(target) = factory.match_vector_term(&target) {
+        let result = if let Some(target) = factory.match_list_term(&target) {
             Some(collect_filter_results(
                 target.items().iter().cloned(),
                 &predicate,
-                Stdlib::CollectVector,
+                Stdlib::CollectList,
                 factory,
                 allocator,
             ))
@@ -110,9 +110,9 @@ where
     factory.create_application_term(
         factory.create_builtin_term(Stdlib::CollectFilterResults),
         allocator.create_triple(
-            factory.create_vector_term(allocator.create_list(items)),
+            factory.create_list_term(allocator.create_list(items)),
             factory.create_application_term(
-                factory.create_builtin_term(Stdlib::CollectVector),
+                factory.create_builtin_term(Stdlib::CollectList),
                 allocator.create_list(results),
             ),
             factory.create_builtin_term(collect),
@@ -155,8 +155,8 @@ impl<T: Expression> Applicable<T> for CollectFilterResults {
         let results = args.next().unwrap();
         let combine = args.next().unwrap();
         match (
-            factory.match_vector_term(&items),
-            factory.match_vector_term(&results),
+            factory.match_list_term(&items),
+            factory.match_list_term(&results),
         ) {
             (Some(items), Some(results)) => {
                 Ok(factory.create_application_term(

@@ -165,7 +165,7 @@ fn create_evaluate_effect_result<T: Expression>(
     factory.create_tuple_term(
         allocator.create_pair(
             result.result().clone(),
-            factory.create_vector_term(
+            factory.create_list_term(
                 allocator.create_list(
                     result
                         .dependencies()
@@ -184,7 +184,7 @@ pub fn parse_evaluate_effect_result<T: Expression>(
     let tuple = factory.match_tuple_term(value)?;
     let value = tuple.get(0)?;
     let dependencies = factory
-        .match_vector_term(tuple.get(1)?)?
+        .match_list_term(tuple.get(1)?)?
         .items()
         .iter()
         .filter_map(|dependency| factory.match_symbol_term(dependency).map(|term| term.id));

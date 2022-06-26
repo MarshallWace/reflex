@@ -15,10 +15,10 @@ use crate::{
 };
 
 #[derive(Hash, Eq, PartialEq, Clone, Debug, Serialize, Deserialize)]
-pub struct VectorTerm<T: Expression> {
+pub struct ListTerm<T: Expression> {
     items: ExpressionList<T>,
 }
-impl<T: Expression> VectorTerm<T> {
+impl<T: Expression> ListTerm<T> {
     pub fn new(items: ExpressionList<T>) -> Self {
         Self { items }
     }
@@ -26,7 +26,7 @@ impl<T: Expression> VectorTerm<T> {
         &self.items
     }
 }
-impl<T: Expression> GraphNode for VectorTerm<T> {
+impl<T: Expression> GraphNode for ListTerm<T> {
     fn capture_depth(&self) -> StackOffset {
         self.items.capture_depth()
     }
@@ -60,14 +60,14 @@ impl<T: Expression> GraphNode for VectorTerm<T> {
         true
     }
 }
-pub type VectorTermChildren<'a, T> = ExpressionListSlice<'a, T>;
-impl<'a, T: Expression + 'a> CompoundNode<'a, T> for VectorTerm<T> {
-    type Children = VectorTermChildren<'a, T>;
+pub type ListTermChildren<'a, T> = ExpressionListSlice<'a, T>;
+impl<'a, T: Expression + 'a> CompoundNode<'a, T> for ListTerm<T> {
+    type Children = ListTermChildren<'a, T>;
     fn children(&'a self) -> Self::Children {
         self.items.iter()
     }
 }
-impl<T: Expression + Rewritable<T>> Rewritable<T> for VectorTerm<T> {
+impl<T: Expression + Rewritable<T>> Rewritable<T> for ListTerm<T> {
     fn substitute_static(
         &self,
         substitutions: &Substitutions<T>,
@@ -78,7 +78,7 @@ impl<T: Expression + Rewritable<T>> Rewritable<T> for VectorTerm<T> {
         transform_expression_list(&self.items, allocator, |item| {
             item.substitute_static(substitutions, factory, allocator, cache)
         })
-        .map(|items| factory.create_vector_term(items))
+        .map(|items| factory.create_list_term(items))
     }
     fn substitute_dynamic(
         &self,
@@ -92,7 +92,7 @@ impl<T: Expression + Rewritable<T>> Rewritable<T> for VectorTerm<T> {
             transform_expression_list(&self.items, allocator, |item| {
                 item.substitute_dynamic(deep, state, factory, allocator, cache)
             })
-            .map(|items| factory.create_vector_term(items))
+            .map(|items| factory.create_list_term(items))
         } else {
             None
         }
@@ -105,7 +105,7 @@ impl<T: Expression + Rewritable<T>> Rewritable<T> for VectorTerm<T> {
         transform_expression_list(&self.items, allocator, |item| {
             item.hoist_free_variables(factory, allocator)
         })
-        .map(|items| factory.create_vector_term(items))
+        .map(|items| factory.create_list_term(items))
     }
     fn normalize(
         &self,
@@ -116,10 +116,10 @@ impl<T: Expression + Rewritable<T>> Rewritable<T> for VectorTerm<T> {
         transform_expression_list(&self.items, allocator, |item| {
             item.normalize(factory, allocator, cache)
         })
-        .map(|items| factory.create_vector_term(items))
+        .map(|items| factory.create_list_term(items))
     }
 }
-impl<T: Expression + Compile<T>> Compile<T> for VectorTerm<T> {
+impl<T: Expression + Compile<T>> Compile<T> for ListTerm<T> {
     fn compile(
         &self,
         _eager: VarArgs,
@@ -137,14 +137,14 @@ impl<T: Expression + Compile<T>> Compile<T> for VectorTerm<T> {
             compiler,
         )
         .map(|mut program| {
-            program.push(Instruction::ConstructVector {
+            program.push(Instruction::ConstructList {
                 size: self.items.len(),
             });
             program
         })
     }
 }
-impl<T: Expression> std::fmt::Display for VectorTerm<T> {
+impl<T: Expression> std::fmt::Display for ListTerm<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let max_displayed_items = 100;
         let items = &self.items;
@@ -174,7 +174,7 @@ impl<T: Expression> std::fmt::Display for VectorTerm<T> {
     }
 }
 
-impl<T: Expression> SerializeJson for VectorTerm<T> {
+impl<T: Expression> SerializeJson for ListTerm<T> {
     fn to_json(&self) -> Result<serde_json::Value, String> {
         self.items()
             .iter()

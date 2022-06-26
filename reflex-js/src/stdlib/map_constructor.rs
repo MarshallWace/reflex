@@ -50,7 +50,7 @@ where
         if is_nil_term(&entries, factory) {
             Ok(factory
                 .create_hashmap_term(allocator.create_empty_list(), allocator.create_empty_list()))
-        } else if let Some(entries) = factory.match_vector_term(&entries) {
+        } else if let Some(entries) = factory.match_list_term(&entries) {
             let entries = entries
                 .items()
                 .iter()
@@ -78,19 +78,19 @@ where
                             allocator.create_pair(
                                 if has_dynamic_keys {
                                     factory.create_application_term(
-                                        factory.create_builtin_term(Stdlib::CollectVector),
+                                        factory.create_builtin_term(Stdlib::CollectList),
                                         allocator.create_list(keys),
                                     )
                                 } else {
-                                    factory.create_vector_term(allocator.create_list(keys))
+                                    factory.create_list_term(allocator.create_list(keys))
                                 },
                                 if has_dynamic_values {
                                     factory.create_application_term(
-                                        factory.create_builtin_term(Stdlib::CollectVector),
+                                        factory.create_builtin_term(Stdlib::CollectList),
                                         allocator.create_list(values),
                                     )
                                 } else {
-                                    factory.create_vector_term(allocator.create_list(values))
+                                    factory.create_list_term(allocator.create_list(values))
                                 },
                             ),
                         ))
@@ -126,7 +126,7 @@ where
 {
     if let Some(target) = factory.match_tuple_term(target) {
         target.get(index).cloned()
-    } else if let Some(target) = factory.match_vector_term(target) {
+    } else if let Some(target) = factory.match_list_term(target) {
         target.items().get(index).cloned()
     } else if target.is_static() {
         None
@@ -269,7 +269,7 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                factory.create_vector_term(allocator.create_empty_list()),
+                factory.create_list_term(allocator.create_empty_list()),
                 DependencyList::empty(),
             )
         );
@@ -284,7 +284,7 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                factory.create_vector_term(allocator.create_list(vec![
+                factory.create_list_term(allocator.create_list(vec![
                     factory.create_tuple_term(allocator.create_pair(
                         factory.create_string_term(allocator.create_static_string("one")),
                         factory.create_float_term(1.0),
@@ -312,7 +312,7 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                factory.create_vector_term(allocator.create_list(vec![
+                factory.create_list_term(allocator.create_list(vec![
                     factory.create_tuple_term(allocator.create_pair(
                         factory.create_string_term(allocator.create_static_string("one")),
                         factory.create_float_term(1.0),
@@ -343,7 +343,7 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                factory.create_vector_term(allocator.create_empty_list()),
+                factory.create_list_term(allocator.create_empty_list()),
                 DependencyList::empty(),
             )
         );
@@ -358,7 +358,7 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                factory.create_vector_term(allocator.create_list(vec![
+                factory.create_list_term(allocator.create_list(vec![
                     factory.create_string_term(allocator.create_static_string("one")),
                     factory.create_string_term(allocator.create_static_string("two")),
                     factory.create_string_term(allocator.create_static_string("three")),
@@ -377,7 +377,7 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                factory.create_vector_term(allocator.create_list(vec![
+                factory.create_list_term(allocator.create_list(vec![
                     factory.create_string_term(allocator.create_static_string("one")),
                     factory.create_string_term(allocator.create_static_string("two")),
                     factory.create_string_term(allocator.create_static_string("three")),
@@ -399,7 +399,7 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                factory.create_vector_term(allocator.create_empty_list()),
+                factory.create_list_term(allocator.create_empty_list()),
                 DependencyList::empty(),
             )
         );
@@ -414,7 +414,7 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                factory.create_vector_term(allocator.create_list(vec![
+                factory.create_list_term(allocator.create_list(vec![
                     factory.create_float_term(1.0),
                     factory.create_float_term(2.0),
                     factory.create_float_term(3.0),
@@ -433,7 +433,7 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                factory.create_vector_term(allocator.create_list(vec![
+                factory.create_list_term(allocator.create_list(vec![
                     factory.create_float_term(1.0),
                     factory.create_float_term(4.0),
                     factory.create_float_term(3.0),

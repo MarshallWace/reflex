@@ -49,7 +49,7 @@ where
         let values = args.next().unwrap();
         if is_nil_term(&values, factory) {
             Ok(factory.create_hashset_term(allocator.create_empty_list()))
-        } else if let Some(values) = factory.match_vector_term(&values) {
+        } else if let Some(values) = factory.match_list_term(&values) {
             let values = values.items().iter().cloned().collect::<Vec<_>>();
             let has_dynamic_values = values.iter().any(|item| !item.is_static());
             if has_dynamic_values {
@@ -167,7 +167,7 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                factory.create_vector_term(allocator.create_empty_list()),
+                factory.create_list_term(allocator.create_empty_list()),
                 DependencyList::empty(),
             )
         );
@@ -182,7 +182,7 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                factory.create_vector_term(allocator.create_list(vec![
+                factory.create_list_term(allocator.create_list(vec![
                     factory.create_string_term(allocator.create_static_string("one")),
                     factory.create_string_term(allocator.create_static_string("two")),
                     factory.create_string_term(allocator.create_static_string("three")),
@@ -201,7 +201,7 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                factory.create_vector_term(allocator.create_list(vec![
+                factory.create_list_term(allocator.create_list(vec![
                     factory.create_string_term(allocator.create_static_string("one")),
                     factory.create_string_term(allocator.create_static_string("two")),
                     factory.create_string_term(allocator.create_static_string("three")),
@@ -223,7 +223,7 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                factory.create_vector_term(allocator.create_empty_list()),
+                factory.create_list_term(allocator.create_empty_list()),
                 DependencyList::empty(),
             )
         );
@@ -238,7 +238,7 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                factory.create_vector_term(allocator.create_list(vec![
+                factory.create_list_term(allocator.create_list(vec![
                     factory.create_tuple_term(allocator.create_pair(
                         factory.create_string_term(allocator.create_static_string("one")),
                         factory.create_string_term(allocator.create_static_string("one")),
@@ -266,7 +266,7 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                factory.create_vector_term(allocator.create_list(vec![
+                factory.create_list_term(allocator.create_list(vec![
                     factory.create_tuple_term(allocator.create_pair(
                         factory.create_string_term(allocator.create_static_string("one")),
                         factory.create_string_term(allocator.create_static_string("one")),

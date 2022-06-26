@@ -72,7 +72,7 @@ impl<T: Expression> Applicable<T> for Get {
                     key, target
                 )),
             }
-        } else if let Some(target) = factory.match_vector_term(&target) {
+        } else if let Some(target) = factory.match_list_term(&target) {
             let index = match factory.match_int_term(&key) {
                 Some(term) if term.value >= 0 => Some(term.value as usize),
                 _ => match factory.match_float_term(&key) {

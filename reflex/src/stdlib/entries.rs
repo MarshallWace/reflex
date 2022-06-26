@@ -41,7 +41,7 @@ impl<T: Expression> Applicable<T> for Entries {
         let target = args.next().unwrap();
         let result = if let Some(target) = factory.match_record_term(&target) {
             Some(
-                factory.create_vector_term(
+                factory.create_list_term(
                     allocator.create_list(
                         target
                             .prototype()
@@ -61,8 +61,8 @@ impl<T: Expression> Applicable<T> for Entries {
                     ),
                 ),
             )
-        } else if let Some(target) = factory.match_vector_term(&target) {
-            Some(factory.create_vector_term(allocator.create_list(
+        } else if let Some(target) = factory.match_list_term(&target) {
+            Some(factory.create_list_term(allocator.create_list(
                 target.items().iter().enumerate().map(|(index, item)| {
                     factory.create_tuple_term(
                         allocator.create_pair(factory.create_int_term(index as i32), item.clone()),
@@ -71,12 +71,11 @@ impl<T: Expression> Applicable<T> for Entries {
             )))
         } else if let Some(target) = factory.match_hashmap_term(&target) {
             Some(
-                factory
-                    .create_vector_term(allocator.create_list(target.entries(factory, allocator))),
+                factory.create_list_term(allocator.create_list(target.entries(factory, allocator))),
             )
         } else if let Some(target) = factory.match_hashset_term(&target) {
             Some(
-                factory.create_vector_term(allocator.create_list(target.values().iter().map(
+                factory.create_list_term(allocator.create_list(target.values().iter().map(
                     |value| {
                         factory
                             .create_tuple_term(allocator.create_pair(value.clone(), value.clone()))

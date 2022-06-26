@@ -136,7 +136,7 @@ pub fn create_list<V, T: Expression>(
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
 ) -> T {
-    factory.create_vector_term(allocator.create_list(items.into_iter().map(item_factory)))
+    factory.create_list_term(allocator.create_list(items.into_iter().map(item_factory)))
 }
 
 pub fn create_oneof<'a, V, T: Expression>(
@@ -348,7 +348,7 @@ pub fn parse_repeated<V, T: Expression>(
     value: &T,
     factory: &impl ExpressionFactory<T>,
 ) -> Result<Vec<V>, String> {
-    match factory.match_vector_term(value) {
+    match factory.match_list_term(value) {
         Some(value) => value
             .items()
             .iter()

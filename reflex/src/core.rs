@@ -1006,7 +1006,7 @@ pub trait ExpressionFactory<T: Expression> {
     fn create_tuple_term(&self, fields: ExpressionList<T>) -> T;
     fn create_record_term(&self, prototype: StructPrototype, fields: ExpressionList<T>) -> T;
     fn create_constructor_term(&self, prototype: StructPrototype) -> T;
-    fn create_vector_term(&self, items: ExpressionList<T>) -> T;
+    fn create_list_term(&self, items: ExpressionList<T>) -> T;
     fn create_hashmap_term(&self, keys: ExpressionList<T>, values: ExpressionList<T>) -> T;
     fn create_hashset_term(&self, values: ExpressionList<T>) -> T;
     fn create_signal_term(&self, signals: SignalList<T>) -> T;
@@ -1035,7 +1035,7 @@ pub trait ExpressionFactory<T: Expression> {
     fn match_tuple_term<'a>(&self, expression: &'a T) -> Option<&'a TupleTerm<T>>;
     fn match_record_term<'a>(&self, expression: &'a T) -> Option<&'a RecordTerm<T>>;
     fn match_constructor_term<'a>(&self, expression: &'a T) -> Option<&'a ConstructorTerm>;
-    fn match_vector_term<'a>(&self, expression: &'a T) -> Option<&'a VectorTerm<T>>;
+    fn match_list_term<'a>(&self, expression: &'a T) -> Option<&'a ListTerm<T>>;
     fn match_hashmap_term<'a>(&self, expression: &'a T) -> Option<&'a HashMapTerm<T>>;
     fn match_hashset_term<'a>(&self, expression: &'a T) -> Option<&'a HashSetTerm<T>>;
     fn match_signal_term<'a>(&self, expression: &'a T) -> Option<&'a SignalTerm<T>>;

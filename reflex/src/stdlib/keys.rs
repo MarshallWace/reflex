@@ -39,31 +39,30 @@ impl<T: Expression> Applicable<T> for Keys {
         _cache: &mut impl EvaluationCache<T>,
     ) -> Result<T, String> {
         let target = args.next().unwrap();
-        let result = if let Some(target) = factory.match_record_term(&target) {
-            Some(factory.create_vector_term(
-                allocator.create_list(
+        let result =
+            if let Some(target) = factory.match_record_term(&target) {
+                Some(factory.create_list_term(allocator.create_list(
                     target.prototype().keys().iter().map(|key| {
                         factory.create_string_term(allocator.create_string(key.as_str()))
                     }),
-                ),
-            ))
-        } else if let Some(target) = factory.match_vector_term(&target) {
-            Some(
-                factory.create_vector_term(
-                    allocator.create_list(
-                        target
-                            .items()
-                            .iter()
-                            .enumerate()
-                            .map(|(index, _)| factory.create_int_term(index as i32)),
+                )))
+            } else if let Some(target) = factory.match_list_term(&target) {
+                Some(
+                    factory.create_list_term(
+                        allocator.create_list(
+                            target
+                                .items()
+                                .iter()
+                                .enumerate()
+                                .map(|(index, _)| factory.create_int_term(index as i32)),
+                        ),
                     ),
-                ),
-            )
-        } else if let Some(target) = factory.match_hashmap_term(&target) {
-            Some(factory.create_vector_term(allocator.create_list(target.keys().iter().cloned())))
-        } else {
-            None
-        };
+                )
+            } else if let Some(target) = factory.match_hashmap_term(&target) {
+                Some(factory.create_list_term(allocator.create_list(target.keys().iter().cloned())))
+            } else {
+                None
+            };
         match result {
             Some(result) => Ok(result),
             None => Err(format!("Unable to enumerate keys for {}", target)),

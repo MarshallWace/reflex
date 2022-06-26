@@ -38,7 +38,7 @@ impl<T: Expression> Applicable<T> for Length {
         _cache: &mut impl EvaluationCache<T>,
     ) -> Result<T, String> {
         let target = args.next().unwrap();
-        let result = if let Some(target) = factory.match_vector_term(&target) {
+        let result = if let Some(target) = factory.match_list_term(&target) {
             Some(factory.create_int_term(target.items().len() as i32))
         } else if let Some(target) = factory.match_hashmap_term(&target) {
             Some(factory.create_int_term(target.keys().len() as i32))

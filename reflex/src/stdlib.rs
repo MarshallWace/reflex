@@ -147,14 +147,14 @@ pub enum Stdlib {
     CollectHashSet,
     CollectRecord,
     CollectTuple,
-    CollectVector,
+    CollectList,
     Concat,
     Cons,
     ConstructHashMap,
     ConstructHashSet,
     ConstructRecord,
     ConstructTuple,
-    ConstructVector,
+    ConstructList,
     Contains,
     Divide,
     Effect,
@@ -197,7 +197,7 @@ pub enum Stdlib {
     ResolveShallow,
     ResolveRecord,
     ResolveTuple,
-    ResolveVector,
+    ResolveList,
     Round,
     Sequence,
     Slice,
@@ -229,14 +229,14 @@ impl TryFrom<Uuid> for Stdlib {
             CollectHashSet::UUID => Ok(Self::CollectHashSet),
             CollectRecord::UUID => Ok(Self::CollectRecord),
             CollectTuple::UUID => Ok(Self::CollectTuple),
-            CollectVector::UUID => Ok(Self::CollectVector),
+            CollectList::UUID => Ok(Self::CollectList),
             Concat::UUID => Ok(Self::Concat),
             Cons::UUID => Ok(Self::Cons),
             ConstructHashMap::UUID => Ok(Self::ConstructHashMap),
             ConstructHashSet::UUID => Ok(Self::ConstructHashSet),
             ConstructRecord::UUID => Ok(Self::ConstructRecord),
             ConstructTuple::UUID => Ok(Self::ConstructTuple),
-            ConstructVector::UUID => Ok(Self::ConstructVector),
+            ConstructList::UUID => Ok(Self::ConstructList),
             Contains::UUID => Ok(Self::Contains),
             Divide::UUID => Ok(Self::Divide),
             Effect::UUID => Ok(Self::Effect),
@@ -279,7 +279,7 @@ impl TryFrom<Uuid> for Stdlib {
             ResolveShallow::UUID => Ok(Self::ResolveShallow),
             ResolveRecord::UUID => Ok(Self::ResolveRecord),
             ResolveTuple::UUID => Ok(Self::ResolveTuple),
-            ResolveVector::UUID => Ok(Self::ResolveVector),
+            ResolveList::UUID => Ok(Self::ResolveList),
             Round::UUID => Ok(Self::Round),
             Sequence::UUID => Ok(Self::Sequence),
             Slice::UUID => Ok(Self::Slice),
@@ -308,14 +308,14 @@ impl Uid for Stdlib {
             Self::CollectHashSet => Uid::uid(&CollectHashSet {}),
             Self::CollectRecord => Uid::uid(&CollectRecord {}),
             Self::CollectTuple => Uid::uid(&CollectTuple {}),
-            Self::CollectVector => Uid::uid(&CollectVector {}),
+            Self::CollectList => Uid::uid(&CollectList {}),
             Self::Concat => Uid::uid(&Concat {}),
             Self::Cons => Uid::uid(&Cons {}),
             Self::ConstructHashMap => Uid::uid(&ConstructHashMap {}),
             Self::ConstructHashSet => Uid::uid(&ConstructHashSet {}),
             Self::ConstructRecord => Uid::uid(&ConstructRecord {}),
             Self::ConstructTuple => Uid::uid(&ConstructTuple {}),
-            Self::ConstructVector => Uid::uid(&ConstructVector {}),
+            Self::ConstructList => Uid::uid(&ConstructList {}),
             Self::Contains => Uid::uid(&Contains {}),
             Self::Divide => Uid::uid(&Divide {}),
             Self::Effect => Uid::uid(&Effect {}),
@@ -358,7 +358,7 @@ impl Uid for Stdlib {
             Self::ResolveShallow => Uid::uid(&ResolveShallow {}),
             Self::ResolveRecord => Uid::uid(&ResolveRecord {}),
             Self::ResolveTuple => Uid::uid(&ResolveTuple {}),
-            Self::ResolveVector => Uid::uid(&ResolveVector {}),
+            Self::ResolveList => Uid::uid(&ResolveList {}),
             Self::Round => Uid::uid(&Round {}),
             Self::Sequence => Uid::uid(&Sequence {}),
             Self::Slice => Uid::uid(&Slice {}),
@@ -389,14 +389,14 @@ impl Stdlib {
             Self::CollectHashSet => CollectHashSet::arity(),
             Self::CollectRecord => CollectRecord::arity(),
             Self::CollectTuple => CollectTuple::arity(),
-            Self::CollectVector => CollectVector::arity(),
+            Self::CollectList => CollectList::arity(),
             Self::Concat => Concat::arity(),
             Self::Cons => Cons::arity(),
             Self::ConstructHashMap => ConstructHashMap::arity(),
             Self::ConstructHashSet => ConstructHashSet::arity(),
             Self::ConstructRecord => ConstructRecord::arity(),
             Self::ConstructTuple => ConstructTuple::arity(),
-            Self::ConstructVector => ConstructVector::arity(),
+            Self::ConstructList => ConstructList::arity(),
             Self::Contains => Contains::arity(),
             Self::Divide => Divide::arity(),
             Self::Effect => Effect::arity(),
@@ -439,7 +439,7 @@ impl Stdlib {
             Self::ResolveShallow => ResolveShallow::arity(),
             Self::ResolveRecord => ResolveRecord::arity(),
             Self::ResolveTuple => ResolveTuple::arity(),
-            Self::ResolveVector => ResolveVector::arity(),
+            Self::ResolveList => ResolveList::arity(),
             Self::Round => Round::arity(),
             Self::Sequence => Sequence::arity(),
             Self::Slice => Slice::arity(),
@@ -484,8 +484,8 @@ impl Stdlib {
             Self::CollectTuple => {
                 Applicable::<T>::apply(&CollectTuple {}, args, factory, allocator, cache)
             }
-            Self::CollectVector => {
-                Applicable::<T>::apply(&CollectVector {}, args, factory, allocator, cache)
+            Self::CollectList => {
+                Applicable::<T>::apply(&CollectList {}, args, factory, allocator, cache)
             }
             Self::Concat => Applicable::<T>::apply(&Concat {}, args, factory, allocator, cache),
             Self::Cons => Applicable::<T>::apply(&Cons {}, args, factory, allocator, cache),
@@ -501,8 +501,8 @@ impl Stdlib {
             Self::ConstructTuple => {
                 Applicable::<T>::apply(&ConstructTuple {}, args, factory, allocator, cache)
             }
-            Self::ConstructVector => {
-                Applicable::<T>::apply(&ConstructVector {}, args, factory, allocator, cache)
+            Self::ConstructList => {
+                Applicable::<T>::apply(&ConstructList {}, args, factory, allocator, cache)
             }
             Self::Contains => Applicable::<T>::apply(&Contains {}, args, factory, allocator, cache),
             Self::Divide => Applicable::<T>::apply(&Divide {}, args, factory, allocator, cache),
@@ -566,8 +566,8 @@ impl Stdlib {
             Self::ResolveTuple => {
                 Applicable::<T>::apply(&ResolveTuple {}, args, factory, allocator, cache)
             }
-            Self::ResolveVector => {
-                Applicable::<T>::apply(&ResolveVector {}, args, factory, allocator, cache)
+            Self::ResolveList => {
+                Applicable::<T>::apply(&ResolveList {}, args, factory, allocator, cache)
             }
             Self::Round => Applicable::<T>::apply(&Round {}, args, factory, allocator, cache),
             Self::Sequence => Applicable::<T>::apply(&Sequence {}, args, factory, allocator, cache),
@@ -601,7 +601,7 @@ impl Stdlib {
             Self::CollectHashSet => Applicable::<T>::should_parallelize(&CollectHashSet {}, args),
             Self::CollectRecord => Applicable::<T>::should_parallelize(&CollectRecord {}, args),
             Self::CollectTuple => Applicable::<T>::should_parallelize(&CollectTuple {}, args),
-            Self::CollectVector => Applicable::<T>::should_parallelize(&CollectVector {}, args),
+            Self::CollectList => Applicable::<T>::should_parallelize(&CollectList {}, args),
             Self::Concat => Applicable::<T>::should_parallelize(&Concat {}, args),
             Self::Cons => Applicable::<T>::should_parallelize(&Cons {}, args),
             Self::ConstructHashMap => {
@@ -612,7 +612,7 @@ impl Stdlib {
             }
             Self::ConstructRecord => Applicable::<T>::should_parallelize(&ConstructRecord {}, args),
             Self::ConstructTuple => Applicable::<T>::should_parallelize(&ConstructTuple {}, args),
-            Self::ConstructVector => Applicable::<T>::should_parallelize(&ConstructVector {}, args),
+            Self::ConstructList => Applicable::<T>::should_parallelize(&ConstructList {}, args),
             Self::Contains => Applicable::<T>::should_parallelize(&Contains {}, args),
             Self::Divide => Applicable::<T>::should_parallelize(&Divide {}, args),
             Self::Effect => Applicable::<T>::should_parallelize(&Effect {}, args),
@@ -655,7 +655,7 @@ impl Stdlib {
             Self::ResolveShallow => Applicable::<T>::should_parallelize(&ResolveShallow {}, args),
             Self::ResolveRecord => Applicable::<T>::should_parallelize(&ResolveRecord {}, args),
             Self::ResolveTuple => Applicable::<T>::should_parallelize(&ResolveTuple {}, args),
-            Self::ResolveVector => Applicable::<T>::should_parallelize(&ResolveVector {}, args),
+            Self::ResolveList => Applicable::<T>::should_parallelize(&ResolveList {}, args),
             Self::Round => Applicable::<T>::should_parallelize(&Round {}, args),
             Self::Sequence => Applicable::<T>::should_parallelize(&Sequence {}, args),
             Self::Slice => Applicable::<T>::should_parallelize(&Slice {}, args),

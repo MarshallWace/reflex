@@ -162,7 +162,7 @@ pub enum Instruction {
     ConstructTuple {
         size: usize,
     },
-    ConstructVector {
+    ConstructList {
         size: usize,
     },
     ConstructHashMap {
@@ -288,7 +288,7 @@ impl std::hash::Hash for Instruction {
                 state.write_u8(23);
                 size.hash(state);
             }
-            Self::ConstructVector { size } => {
+            Self::ConstructList { size } => {
                 state.write_u8(25);
                 size.hash(state);
             }

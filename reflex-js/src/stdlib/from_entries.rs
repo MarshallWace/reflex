@@ -48,7 +48,7 @@ where
         let target = args.next().unwrap();
         if let Some(_) = factory.match_record_term(&target) {
             Ok(target)
-        } else if let Some(entries) = factory.match_vector_term(&target) {
+        } else if let Some(entries) = factory.match_list_term(&target) {
             let entries = entries
                 .items()
                 .iter()
@@ -83,10 +83,10 @@ where
                             factory.create_builtin_term(Stdlib::ConstructRecord),
                             allocator.create_pair(
                                 factory.create_application_term(
-                                    factory.create_builtin_term(Stdlib::CollectVector),
+                                    factory.create_builtin_term(Stdlib::CollectList),
                                     allocator.create_list(keys),
                                 ),
-                                factory.create_vector_term(allocator.create_list(values)),
+                                factory.create_list_term(allocator.create_list(values)),
                             ),
                         )),
                     }
@@ -112,7 +112,7 @@ where
 {
     if let Some(target) = factory.match_tuple_term(target) {
         target.get(index).cloned()
-    } else if let Some(target) = factory.match_vector_term(target) {
+    } else if let Some(target) = factory.match_list_term(target) {
         target.items().get(index).cloned()
     } else if target.is_static() {
         None

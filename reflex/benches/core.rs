@@ -248,7 +248,7 @@ fn list_transforms(b: &mut Bencher) {
     let state = StateCache::default();
     let factory = SharedTermFactory::<Stdlib>::default();
     let allocator = DefaultAllocator::default();
-    let collection = factory.create_vector_term(allocator.create_list((0..1000).map(|index| {
+    let collection = factory.create_list_term(allocator.create_list((0..1000).map(|index| {
         factory.create_application_term(
             factory.create_builtin_term(Stdlib::Add),
             allocator.create_list(vec![

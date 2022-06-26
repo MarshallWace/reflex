@@ -56,8 +56,8 @@ impl<T: Expression> Applicable<T> for Slice {
                 _ => None,
             }
         };
-        match (factory.match_vector_term(&target), bounds) {
-            (Some(target), Some((start_index, end_index))) => Ok(factory.create_vector_term(
+        match (factory.match_list_term(&target), bounds) {
+            (Some(target), Some((start_index, end_index))) => Ok(factory.create_list_term(
                 allocator.create_list(
                     target
                         .items()
@@ -68,7 +68,7 @@ impl<T: Expression> Applicable<T> for Slice {
                 ),
             )),
             _ => Err(format!(
-                "Expected (<vector>, Int, Int), received ({}, {}, {})",
+                "Expected (List, Int, Int), received ({}, {}, {})",
                 target, start_index, end_index,
             )),
         }

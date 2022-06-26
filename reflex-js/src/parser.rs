@@ -1167,9 +1167,7 @@ where
 
     let item_sets = elements.into_iter().map(|properties| match properties {
         ArrayLiteralFields::Spread(value) => value,
-        ArrayLiteralFields::Items(items) => {
-            factory.create_vector_term(allocator.create_list(items))
-        }
+        ArrayLiteralFields::Items(items) => factory.create_list_term(allocator.create_list(items)),
     });
     Ok(if item_sets.len() >= 2 {
         factory.create_application_term(
@@ -1179,7 +1177,7 @@ where
     } else {
         match item_sets.into_iter().next() {
             Some(value) => value,
-            None => factory.create_vector_term(allocator.create_empty_list()),
+            None => factory.create_list_term(allocator.create_empty_list()),
         }
     })
 }
@@ -2541,7 +2539,7 @@ mod tests {
         )
         .unwrap();
         let query = factory.create_application_term(
-            factory.create_builtin_term(Stdlib::CollectVector),
+            factory.create_builtin_term(Stdlib::CollectList),
             allocator.create_list(vec![
                 factory.create_application_term(
                     factory.create_builtin_term(Stdlib::Get),
@@ -2590,7 +2588,7 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                factory.create_vector_term(allocator.create_list(allocator.create_list(vec![
+                factory.create_list_term(allocator.create_list(allocator.create_list(vec![
                     factory.create_float_term(6.0),
                     factory.create_float_term(2.0),
                     factory.create_float_term(7.0),
@@ -2608,7 +2606,7 @@ mod tests {
         )
         .unwrap();
         let query = factory.create_application_term(
-            factory.create_builtin_term(Stdlib::CollectVector),
+            factory.create_builtin_term(Stdlib::CollectList),
             allocator.create_list(vec![
                 factory.create_application_term(
                     factory.create_builtin_term(Stdlib::Get),
@@ -2643,7 +2641,7 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                factory.create_vector_term(allocator.create_list(vec![
+                factory.create_list_term(allocator.create_list(vec![
                     factory.create_float_term(1.0),
                     factory.create_float_term(2.0),
                     factory.create_float_term(3.0),
@@ -2660,11 +2658,11 @@ mod tests {
         let env = Env::new();
         assert_eq!(
             parse("[]", &env, &factory, &allocator),
-            Ok(factory.create_vector_term(allocator.create_empty_list())),
+            Ok(factory.create_list_term(allocator.create_empty_list())),
         );
         assert_eq!(
             parse("[3, 4, 5]", &env, &factory, &allocator),
-            Ok(factory.create_vector_term(allocator.create_list(vec![
+            Ok(factory.create_list_term(allocator.create_list(vec![
                 factory.create_float_term(3.0),
                 factory.create_float_term(4.0),
                 factory.create_float_term(5.0),
@@ -2707,7 +2705,7 @@ mod tests {
             Ok(factory.create_application_term(
                 factory.create_builtin_term(Stdlib::Push),
                 allocator.create_pair(
-                    factory.create_vector_term(allocator.create_list(vec![
+                    factory.create_list_term(allocator.create_list(vec![
                         factory.create_float_term(3.0),
                         factory.create_float_term(4.0),
                         factory.create_float_term(5.0),
@@ -2721,7 +2719,7 @@ mod tests {
             Ok(factory.create_application_term(
                 factory.create_builtin_term(Stdlib::PushFront),
                 allocator.create_pair(
-                    factory.create_vector_term(allocator.create_list(vec![
+                    factory.create_list_term(allocator.create_list(vec![
                         factory.create_float_term(4.0),
                         factory.create_float_term(5.0),
                         factory.create_float_term(6.0),
@@ -2751,7 +2749,7 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                factory.create_vector_term(allocator.create_list(vec![
+                factory.create_list_term(allocator.create_list(vec![
                     factory.create_float_term(1.0),
                     factory.create_float_term(2.0),
                     factory.create_float_term(3.0),
@@ -2784,7 +2782,7 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                factory.create_vector_term(allocator.create_list(vec![
+                factory.create_list_term(allocator.create_list(vec![
                     factory.create_float_term(1.0),
                     factory.create_float_term(2.0),
                     factory.create_float_term(3.0),
@@ -2809,7 +2807,7 @@ mod tests {
             Ok(factory.create_application_term(
                 factory.create_builtin_term(JsStdlib::Dispatch),
                 allocator.create_list(vec![
-                    factory.create_vector_term(allocator.create_list(vec![
+                    factory.create_list_term(allocator.create_list(vec![
                         factory.create_float_term(3.0),
                         factory.create_float_term(4.0),
                         factory.create_float_term(5.0),
@@ -2819,7 +2817,7 @@ mod tests {
                         factory.create_application_term(
                             factory.create_builtin_term(Stdlib::Get),
                             allocator.create_pair(
-                                factory.create_vector_term(allocator.create_list(vec![
+                                factory.create_list_term(allocator.create_list(vec![
                                     factory.create_float_term(3.0),
                                     factory.create_float_term(4.0),
                                     factory.create_float_term(5.0),
@@ -3402,7 +3400,7 @@ mod tests {
                 factory.create_application_term(
                     factory.create_builtin_term(Stdlib::Get),
                     allocator.create_pair(
-                        factory.create_vector_term(allocator.create_list(vec![
+                        factory.create_list_term(allocator.create_list(vec![
                             factory.create_float_term(3.0),
                             factory.create_float_term(4.0),
                             factory.create_float_term(5.0),
@@ -3421,7 +3419,7 @@ mod tests {
                 &allocator
             ),
             Ok(factory.create_let_term(
-                factory.create_vector_term(allocator.create_list(vec![
+                factory.create_list_term(allocator.create_list(vec![
                     factory.create_float_term(3.0),
                     factory.create_float_term(4.0),
                     factory.create_float_term(5.0),
@@ -3458,7 +3456,7 @@ mod tests {
                 factory.create_application_term(
                     factory.create_builtin_term(Stdlib::Get),
                     allocator.create_pair(
-                        factory.create_vector_term(allocator.create_list(vec![
+                        factory.create_list_term(allocator.create_list(vec![
                             factory.create_float_term(3.0),
                             factory.create_float_term(4.0),
                             factory.create_float_term(5.0),
@@ -3477,7 +3475,7 @@ mod tests {
                 &allocator
             ),
             Ok(factory.create_let_term(
-                factory.create_vector_term(allocator.create_list(vec![
+                factory.create_list_term(allocator.create_list(vec![
                     factory.create_float_term(3.0),
                     factory.create_float_term(4.0),
                     factory.create_float_term(5.0),
@@ -3516,7 +3514,7 @@ mod tests {
                     factory.create_application_term(
                         factory.create_builtin_term(Stdlib::Get),
                         allocator.create_pair(
-                            factory.create_vector_term(allocator.create_list(vec![
+                            factory.create_list_term(allocator.create_list(vec![
                                 factory.create_float_term(3.0),
                                 factory.create_float_term(4.0),
                                 factory.create_float_term(5.0),
@@ -3538,7 +3536,7 @@ mod tests {
             Ok(factory.create_let_term(
                 factory.create_boolean_term(true),
                 factory.create_let_term(
-                    factory.create_vector_term(allocator.create_list(vec![
+                    factory.create_list_term(allocator.create_list(vec![
                         factory.create_float_term(3.0),
                         factory.create_float_term(4.0),
                         factory.create_float_term(5.0),
@@ -4908,7 +4906,7 @@ mod tests {
                             ),
                         )
                     ),
-                    factory.create_vector_term(allocator.create_pair(
+                    factory.create_list_term(allocator.create_pair(
                         factory.create_float_term(3.0),
                         factory.create_float_term(4.0),
                     )),
@@ -4941,7 +4939,7 @@ mod tests {
                             factory.create_float_term(2.0),
                         ),
                     ),
-                    factory.create_vector_term(allocator.create_pair(
+                    factory.create_list_term(allocator.create_pair(
                         factory.create_float_term(3.0),
                         factory.create_float_term(4.0),
                     )),

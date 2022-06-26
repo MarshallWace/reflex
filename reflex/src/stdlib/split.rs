@@ -44,7 +44,7 @@ impl<T: Expression> Applicable<T> for Split {
             factory.match_string_term(&target),
             factory.match_string_term(&separator),
         ) {
-            (Some(target), Some(separator)) => Ok(factory.create_vector_term(
+            (Some(target), Some(separator)) => Ok(factory.create_list_term(
                 allocator.create_unsized_list(
                     target
                         .value

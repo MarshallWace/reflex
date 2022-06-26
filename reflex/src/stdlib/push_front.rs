@@ -42,8 +42,8 @@ impl<T: Expression> Applicable<T> for PushFront {
     ) -> Result<T, String> {
         let target = args.next().unwrap();
         let value = args.next().unwrap();
-        if let Some(collection) = factory.match_vector_term(&target) {
-            Ok(factory.create_vector_term(allocator.create_sized_list(
+        if let Some(collection) = factory.match_list_term(&target) {
+            Ok(factory.create_list_term(allocator.create_sized_list(
                 collection.items().len() + 1,
                 once(value).chain(collection.items().iter().cloned()),
             )))
@@ -58,7 +58,7 @@ impl<T: Expression> Applicable<T> for PushFront {
             })
         } else {
             Err(format!(
-                "Invalid push operation: Expected (Vector, <any>) or (HashSet, <any>), received ({}, {})",
+                "Invalid push operation: Expected (List, <any>) or (HashSet, <any>), received ({}, {})",
                 target, value
             ))
         }

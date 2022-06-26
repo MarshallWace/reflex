@@ -49,9 +49,9 @@ where
         let target = args.next().unwrap();
         if let Some(_) = factory.match_nil_term(&target) {
             Ok(target)
-        } else if let Some(list) = factory.match_vector_term(&target) {
+        } else if let Some(list) = factory.match_list_term(&target) {
             Ok(factory.create_application_term(
-                factory.create_builtin_term(Stdlib::CollectVector),
+                factory.create_builtin_term(Stdlib::CollectList),
                 allocator.create_list(list.items().iter().map(|item| {
                     factory.create_application_term(
                         factory.create_builtin_term(GraphQlStdlib::FlattenDeep),

@@ -42,9 +42,9 @@ impl<T: Expression> Applicable<T> for Map {
     ) -> Result<T, String> {
         let target = args.next().unwrap();
         let iteratee = args.next().unwrap();
-        let result = if let Some(target) = factory.match_vector_term(&target) {
+        let result = if let Some(target) = factory.match_list_term(&target) {
             Some(
-                factory.create_vector_term(allocator.create_list(target.items().iter().map(
+                factory.create_list_term(allocator.create_list(target.items().iter().map(
                     |item| {
                         factory.create_application_term(
                             iteratee.clone(),
@@ -69,7 +69,7 @@ impl<T: Expression> Applicable<T> for Map {
         match result {
             Some(result) => Ok(result),
             None => Err(format!(
-                "Expected (Vector, <function:1>) or (HashMap, <function:1>), received ({}, {})",
+                "Expected (List, <function:1>) or (HashMap, <function:1>), received ({}, {})",
                 target, iteratee,
             )),
         }

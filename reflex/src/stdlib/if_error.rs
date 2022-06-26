@@ -65,7 +65,7 @@ impl<T: Expression> Applicable<T> for IfError {
             } else {
                 Ok(factory.create_application_term(
                     handler,
-                    allocator.create_unit_list(factory.create_vector_term(allocator.create_list(
+                    allocator.create_unit_list(factory.create_list_term(allocator.create_list(
                         error_signals.into_iter().map(|signal| {
                             signal
                                 .args()

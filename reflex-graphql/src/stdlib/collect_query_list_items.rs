@@ -38,6 +38,6 @@ impl<T: Expression> Applicable<T> for CollectQueryListItems {
         allocator: &impl HeapAllocator<T>,
         _cache: &mut impl EvaluationCache<T>,
     ) -> Result<T, String> {
-        Ok(factory.create_vector_term(allocator.create_list(args)))
+        Ok(factory.create_list_term(allocator.create_list(args)))
     }
 }

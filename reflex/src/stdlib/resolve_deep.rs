@@ -92,12 +92,12 @@ where
                     ),
                 ))
             }
-        } else if let Some(value) = factory.match_vector_term(&target) {
+        } else if let Some(value) = factory.match_list_term(&target) {
             if value.is_atomic() {
                 Ok(target)
             } else {
                 Ok(factory.create_application_term(
-                    factory.create_builtin_term(Stdlib::CollectVector),
+                    factory.create_builtin_term(Stdlib::CollectList),
                     allocator.create_list(value.items().iter().map(|item| {
                         if item.is_atomic() {
                             item.clone()
@@ -136,10 +136,10 @@ where
                     factory.create_builtin_term(Stdlib::ConstructHashMap),
                     allocator.create_pair(
                         if value.keys().is_atomic() {
-                            factory.create_vector_term(allocator.clone_list(value.keys()))
+                            factory.create_list_term(allocator.clone_list(value.keys()))
                         } else {
                             factory.create_application_term(
-                                factory.create_builtin_term(Stdlib::CollectVector),
+                                factory.create_builtin_term(Stdlib::CollectList),
                                 allocator.create_list(value.keys().iter().map(|item| {
                                     if item.is_atomic() {
                                         item.clone()
@@ -153,10 +153,10 @@ where
                             )
                         },
                         if value.values().is_atomic() {
-                            factory.create_vector_term(allocator.clone_list(value.values()))
+                            factory.create_list_term(allocator.clone_list(value.values()))
                         } else {
                             factory.create_application_term(
-                                factory.create_builtin_term(Stdlib::CollectVector),
+                                factory.create_builtin_term(Stdlib::CollectList),
                                 allocator.create_list(value.values().iter().map(|item| {
                                     if item.is_atomic() {
                                         item.clone()

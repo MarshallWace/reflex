@@ -57,7 +57,7 @@ where
             .chain(once((
                 String::from("errors"),
                 factory.create_application_term(
-                    factory.create_builtin_term(Stdlib::ResolveVector),
+                    factory.create_builtin_term(Stdlib::ResolveList),
                     allocator.create_unit_list(factory.create_static_variable_term(0)),
                 ),
             ))),

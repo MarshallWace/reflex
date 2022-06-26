@@ -290,7 +290,7 @@ fn create_load_batch_effect<T: Expression>(
         label,
         factory.create_application_term(
             loader,
-            allocator.create_unit_list(factory.create_vector_term(keys)),
+            allocator.create_unit_list(factory.create_list_term(keys)),
         ),
         QueryEvaluationMode::Standalone,
         QueryInvalidationStrategy::Exact,
@@ -538,7 +538,7 @@ where
                 }?
                 .into_parts();
                 batch.latest_result.replace(value.clone());
-                let mut results = if let Some(value) = self.factory.match_vector_term(&value) {
+                let mut results = if let Some(value) = self.factory.match_list_term(&value) {
                     if value.items().len() != batch.subscriptions.len() {
                         Err(create_error_expression(
                             format!(
@@ -610,7 +610,7 @@ where
                 } else {
                     Err(create_error_expression(
                         format!(
-                            "Invalid {} loader result: Expected Vector or HashMap, received {}",
+                            "Invalid {} loader result: Expected List or HashMap, received {}",
                             loader_state.name, value
                         ),
                         &self.factory,
