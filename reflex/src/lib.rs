@@ -25,7 +25,7 @@ pub mod lang {
     pub mod term;
     pub(crate) use term::*;
     pub use term::{
-        as_integer, create_struct, deduplicate_hashmap_entries, deduplicate_hashset_entries,
+        as_integer, create_record, deduplicate_hashmap_entries, deduplicate_hashset_entries,
         is_integer,
     };
 }

@@ -7,7 +7,7 @@ use std::{borrow::Cow, collections::HashMap, iter::once};
 use either::Either;
 use reflex::{
     core::{Expression, ExpressionFactory, ExpressionList, HeapAllocator, SignalType},
-    lang::{create_struct, term::SignalTerm},
+    lang::{create_record, term::SignalTerm},
     stdlib::Stdlib,
 };
 use reflex_json::{json_object, sanitize, JsonMap, JsonValue};
@@ -589,7 +589,7 @@ where
             factory.create_lambda_term(
                 1,
                 factory.create_application_term(
-                    factory.create_builtin_term(Stdlib::CollectStruct),
+                    factory.create_builtin_term(Stdlib::CollectRecord),
                     allocator.create_sized_list(
                         values.len() + 1,
                         once(
@@ -747,7 +747,7 @@ fn parse_field_arguments<T: Expression>(
             },
         )
         .collect::<Result<Vec<_>, _>>()?;
-    let arg = create_struct(arg_fields, factory, allocator);
+    let arg = create_record(arg_fields, factory, allocator);
     Ok(allocator.create_unit_list(arg))
 }
 
@@ -795,7 +795,7 @@ fn parse_value<T: Expression>(
                     }
                 })
                 .collect::<Result<Vec<_>, _>>()?;
-            Ok(create_struct(entries, factory, allocator))
+            Ok(create_record(entries, factory, allocator))
         }
     }
 }
@@ -828,7 +828,7 @@ mod tests {
             EvaluationResult, Expression, ExpressionFactory, HeapAllocator, Reducible, Rewritable,
             StateCache, Uid,
         },
-        lang::{create_struct, SharedTermFactory},
+        lang::{create_record, SharedTermFactory},
         stdlib::Stdlib,
     };
     use std::convert::{TryFrom, TryInto};
@@ -908,11 +908,11 @@ mod tests {
     fn leaf_queries() {
         let factory = SharedTermFactory::<GraphQlTestBuiltins>::default();
         let allocator = DefaultAllocator::default();
-        let root = create_struct(
+        let root = create_record(
             vec![
                 (
                     String::from("query"),
-                    create_struct(
+                    create_record(
                         vec![
                             (String::from("first"), factory.create_int_term(3)),
                             (String::from("second"), factory.create_int_term(4)),
@@ -945,7 +945,7 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                create_struct(
+                create_record(
                     vec![
                         (String::from("second"), factory.create_int_term(4)),
                         (String::from("third"), factory.create_int_term(5)),
@@ -962,14 +962,14 @@ mod tests {
     fn computed_leaf_queries() {
         let factory = SharedTermFactory::<GraphQlTestBuiltins>::default();
         let allocator = DefaultAllocator::default();
-        let root = create_struct(
+        let root = create_record(
             vec![
                 (
                     String::from("query"),
                     factory.create_application_term(
                         factory.create_lambda_term(
                             1,
-                            create_struct(
+                            create_record(
                                 vec![
                                     (
                                         String::from("first"),
@@ -1032,7 +1032,7 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                create_struct(
+                create_record(
                     vec![
                         (String::from("second"), factory.create_int_term(4 + 10)),
                         (String::from("third"), factory.create_int_term(5 + 10)),
@@ -1049,11 +1049,11 @@ mod tests {
     fn list_leaf_queries() {
         let factory = SharedTermFactory::<GraphQlTestBuiltins>::default();
         let allocator = DefaultAllocator::default();
-        let root = create_struct(
+        let root = create_record(
             vec![
                 (
                     String::from("query"),
-                    create_struct(
+                    create_record(
                         vec![
                             (String::from("foo"), factory.create_nil_term()),
                             (
@@ -1092,7 +1092,7 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                create_struct(
+                create_record(
                     vec![(
                         String::from("items"),
                         factory.create_vector_term(allocator.create_list(vec![
@@ -1113,11 +1113,11 @@ mod tests {
     fn deeply_nested_list_leaf_queries() {
         let factory = SharedTermFactory::<GraphQlTestBuiltins>::default();
         let allocator = DefaultAllocator::default();
-        let root = create_struct(
+        let root = create_record(
             vec![
                 (
                     String::from("query"),
-                    create_struct(
+                    create_record(
                         vec![
                             (String::from("foo"), factory.create_nil_term()),
                             (
@@ -1204,7 +1204,7 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                create_struct(
+                create_record(
                     vec![(
                         String::from("items"),
                         factory.create_vector_term(allocator.create_list(vec![

@@ -6,19 +6,19 @@ use std::iter::empty;
 use reflex::{
     core::{Expression, ExpressionFactory, HeapAllocator},
     env::ENV_STATE_TOKEN,
-    lang::create_struct,
+    lang::create_record,
 };
 
 pub fn global_process<T: Expression>(
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
 ) -> T {
-    create_struct(
+    create_record(
         vec![(
             String::from("env"),
             factory.create_dynamic_variable_term(
                 ENV_STATE_TOKEN,
-                create_struct(empty(), factory, allocator),
+                create_record(empty(), factory, allocator),
             ),
         )],
         factory,

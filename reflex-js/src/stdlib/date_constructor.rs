@@ -7,7 +7,7 @@ use reflex::{
         uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
         FunctionArity, HeapAllocator, StringValue, Uid, Uuid,
     },
-    lang::create_struct,
+    lang::create_record,
     stdlib::Stdlib,
 };
 
@@ -57,7 +57,7 @@ where
             None
         };
         if let Some(timestamp) = timestamp {
-            Ok(create_struct(
+            Ok(create_record(
                 [(
                     String::from("getTime"),
                     factory.create_lambda_term(0, factory.create_float_term(timestamp as f64)),

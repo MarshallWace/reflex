@@ -46,7 +46,7 @@ where
     ) -> Result<T, String> {
         let mut args = args.into_iter();
         let target = args.next().unwrap();
-        if let Some(_) = factory.match_struct_term(&target) {
+        if let Some(_) = factory.match_record_term(&target) {
             Ok(target)
         } else if let Some(entries) = factory.match_vector_term(&target) {
             let entries = entries
@@ -76,11 +76,11 @@ where
                             );
                             Ok(
                                 factory
-                                    .create_struct_term(prototype, allocator.create_list(values)),
+                                    .create_record_term(prototype, allocator.create_list(values)),
                             )
                         }
                         Ok(None) => Ok(factory.create_application_term(
-                            factory.create_builtin_term(Stdlib::ConstructStruct),
+                            factory.create_builtin_term(Stdlib::ConstructRecord),
                             allocator.create_pair(
                                 factory.create_application_term(
                                     factory.create_builtin_term(Stdlib::CollectVector),

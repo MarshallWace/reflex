@@ -10,7 +10,7 @@ use std::{
 use reflex::{
     cache::NoopCache,
     core::{Expression, ExpressionFactory, HeapAllocator, Rewritable, StringValue, Substitutions},
-    lang::{as_integer, create_struct},
+    lang::{as_integer, create_record},
     stdlib::Stdlib,
 };
 use swc_common::{source_map::Pos, sync::Lrc, FileName, SourceMap, Span, Spanned};
@@ -1070,7 +1070,7 @@ where
                 }
                 None => {
                     if !current_set.is_empty() {
-                        field_sets.push(create_struct(current_set, factory, allocator));
+                        field_sets.push(create_record(current_set, factory, allocator));
                     }
                     (field_sets, Vec::new())
                 }
@@ -1085,7 +1085,7 @@ where
         )
     } else {
         field_sets.into_iter().next().unwrap_or_else(|| {
-            factory.create_struct_term(
+            factory.create_record_term(
                 allocator.create_struct_prototype(empty()),
                 allocator.create_empty_list(),
             )
@@ -1995,7 +1995,7 @@ mod tests {
         },
         env::inject_env_vars,
         interpreter::{execute, DefaultInterpreterCache, InterpreterOptions},
-        lang::{create_struct, SharedTermFactory},
+        lang::{create_record, SharedTermFactory},
         stdlib::Stdlib,
     };
 
@@ -2008,7 +2008,7 @@ mod tests {
             messages.into_iter().map(|message| {
                 allocator.create_signal(
                     SignalType::Error,
-                    allocator.create_unit_list(create_struct(
+                    allocator.create_unit_list(create_record(
                         once((
                             String::from("name"),
                             factory.create_string_term(allocator.create_static_string("Error")),
@@ -2030,7 +2030,7 @@ mod tests {
             .into_iter()
             .map(|signal| {
                 let message = factory
-                    .match_struct_term(signal.args().into_iter().next().unwrap())
+                    .match_record_term(signal.args().into_iter().next().unwrap())
                     .unwrap()
                     .get("message")
                     .unwrap();
@@ -2366,14 +2366,14 @@ mod tests {
         let env = Env::new();
         assert_eq!(
             parse("({})", &env, &factory, &allocator),
-            Ok(factory.create_struct_term(
+            Ok(factory.create_record_term(
                 allocator.create_struct_prototype(empty()),
                 allocator.create_empty_list(),
             )),
         );
         assert_eq!(
             parse("({ foo: 3, bar: 4, baz: 5 })", &env, &factory, &allocator),
-            Ok(factory.create_struct_term(
+            Ok(factory.create_record_term(
                 allocator.create_struct_prototype(vec![
                     allocator.create_static_string("foo"),
                     allocator.create_static_string("bar"),
@@ -2393,7 +2393,7 @@ mod tests {
                 &factory,
                 &allocator
             ),
-            Ok(factory.create_struct_term(
+            Ok(factory.create_record_term(
                 allocator.create_struct_prototype(vec![
                     allocator.create_static_string("foo"),
                     allocator.create_static_string("bar"),
@@ -2413,7 +2413,7 @@ mod tests {
                 &factory,
                 &allocator
             ),
-            Ok(factory.create_struct_term(
+            Ok(factory.create_record_term(
                 allocator.create_struct_prototype(vec![
                     allocator.create_static_string("foo"),
                     allocator.create_static_string("bar"),
@@ -2433,7 +2433,7 @@ mod tests {
                 &factory,
                 &allocator
             ),
-            Ok(factory.create_struct_term(
+            Ok(factory.create_record_term(
                 allocator.create_struct_prototype(vec![
                     allocator.create_static_string("3"),
                     allocator.create_static_string("4"),
@@ -2453,7 +2453,7 @@ mod tests {
                 &factory,
                 &allocator
             ),
-            Ok(factory.create_struct_term(
+            Ok(factory.create_record_term(
                 allocator.create_struct_prototype(vec![
                     allocator.create_static_string("3"),
                     allocator.create_static_string("4"),
@@ -2473,7 +2473,7 @@ mod tests {
                 &factory,
                 &allocator
             ),
-            Ok(factory.create_struct_term(
+            Ok(factory.create_record_term(
                 allocator.create_struct_prototype(vec![
                     allocator.create_static_string("3"),
                     allocator.create_static_string("4"),
@@ -2493,7 +2493,7 @@ mod tests {
                 &factory,
                 &allocator
             ),
-            Ok(factory.create_struct_term(
+            Ok(factory.create_record_term(
                 allocator.create_struct_prototype(vec![
                     allocator.create_static_string("3"),
                     allocator.create_static_string("4"),
@@ -2513,7 +2513,7 @@ mod tests {
                 &factory,
                 &allocator
             ),
-            Ok(factory.create_struct_term(
+            Ok(factory.create_record_term(
                 allocator.create_struct_prototype(vec![
                     allocator.create_static_string("1.1"),
                     allocator.create_static_string("1.2"),
@@ -2961,7 +2961,7 @@ mod tests {
                 factory.create_application_term(
                     factory.create_builtin_term(Stdlib::Get),
                     allocator.create_pair(
-                        factory.create_struct_term(
+                        factory.create_record_term(
                             allocator.create_struct_prototype(vec![
                                 allocator.create_static_string("foo"),
                                 allocator.create_static_string("bar"),
@@ -2987,7 +2987,7 @@ mod tests {
                 &allocator,
             ),
             Ok(factory.create_let_term(
-                factory.create_struct_term(
+                factory.create_record_term(
                     allocator.create_struct_prototype(vec![
                         allocator.create_static_string("foo"),
                         allocator.create_static_string("bar"),
@@ -3028,7 +3028,7 @@ mod tests {
                 &allocator,
             ),
             Ok(factory.create_let_term(
-                factory.create_struct_term(
+                factory.create_record_term(
                     allocator.create_struct_prototype(vec![
                         allocator.create_static_string("foo"),
                         allocator.create_static_string("bar"),
@@ -3069,7 +3069,7 @@ mod tests {
                 &allocator,
             ),
             Ok(factory.create_let_term(
-                factory.create_struct_term(
+                factory.create_record_term(
                     allocator.create_struct_prototype(vec![
                         allocator.create_static_string("foo"),
                         allocator.create_static_string("bar"),
@@ -3110,7 +3110,7 @@ mod tests {
                 &allocator,
             ),
             Ok(factory.create_let_term(
-                factory.create_struct_term(
+                factory.create_record_term(
                     allocator.create_struct_prototype(vec![
                         allocator.create_static_string("foo"),
                         allocator.create_static_string("bar"),
@@ -3151,7 +3151,7 @@ mod tests {
                 &allocator
             ),
             Ok(factory.create_let_term(
-                factory.create_struct_term(
+                factory.create_record_term(
                     allocator.create_struct_prototype(vec![
                         allocator.create_static_string("first"),
                         allocator.create_static_string("second"),
@@ -3199,7 +3199,7 @@ mod tests {
                 &allocator
             ),
             Ok(factory.create_let_term(
-                factory.create_struct_term(
+                factory.create_record_term(
                     allocator.create_struct_prototype(vec![
                         allocator.create_static_string("first"),
                         allocator.create_static_string("second"),
@@ -3250,13 +3250,13 @@ mod tests {
                 &allocator,
             ),
             Ok(factory.create_let_term(
-                factory.create_struct_term(
+                factory.create_record_term(
                     allocator.create_struct_prototype(vec![
                         allocator.create_static_string("one"),
                         allocator.create_static_string("two"),
                     ]),
                     allocator.create_list(vec![
-                        factory.create_struct_term(
+                        factory.create_record_term(
                             allocator.create_struct_prototype(vec![
                                 allocator.create_static_string("a"),
                                 allocator.create_static_string("b"),
@@ -3266,7 +3266,7 @@ mod tests {
                                 factory.create_float_term(2.0),
                             ]),
                         ),
-                        factory.create_struct_term(
+                        factory.create_record_term(
                             allocator.create_struct_prototype(vec![
                                 allocator.create_static_string("c"),
                                 allocator.create_static_string("d"),
@@ -3373,7 +3373,7 @@ mod tests {
                         ),
                     ),
                 ),
-                allocator.create_unit_list(factory.create_struct_term(
+                allocator.create_unit_list(factory.create_record_term(
                     allocator.create_struct_prototype(vec![
                         allocator.create_static_string("foo"),
                         allocator.create_static_string("bar"),
@@ -4445,7 +4445,7 @@ mod tests {
                             .map(|message| {
                                 allocator.create_signal(
                                     SignalType::Error,
-                                    allocator.create_unit_list(create_struct(
+                                    allocator.create_unit_list(create_record(
                                         once((
                                             String::from("name"),
                                             factory.create_string_term(

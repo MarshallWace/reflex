@@ -39,7 +39,7 @@ impl<T: Expression> Applicable<T> for Entries {
         _cache: &mut impl EvaluationCache<T>,
     ) -> Result<T, String> {
         let target = args.next().unwrap();
-        let result = if let Some(target) = factory.match_struct_term(&target) {
+        let result = if let Some(target) = factory.match_record_term(&target) {
             Some(
                 factory.create_vector_term(
                     allocator.create_list(
@@ -47,7 +47,7 @@ impl<T: Expression> Applicable<T> for Entries {
                             .prototype()
                             .keys()
                             .iter()
-                            .zip(target.fields().iter())
+                            .zip(target.values().iter())
                             .map(|(key, value)| {
                                 factory.create_tuple_term(
                                     allocator.create_pair(

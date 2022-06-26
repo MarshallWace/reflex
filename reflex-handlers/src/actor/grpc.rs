@@ -21,7 +21,7 @@ use reflex::{
         Expression, ExpressionFactory, HeapAllocator, Reducible, Rewritable, Signal, SignalType,
         StateToken, StringValue,
     },
-    lang::create_struct,
+    lang::create_record,
     stdlib::Stdlib,
 };
 use reflex_dispatcher::{
@@ -343,7 +343,7 @@ fn create_default_module_export<T: Expression>(
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
 ) -> T {
-    create_struct(once((String::from("default"), value)), factory, allocator)
+    create_record(once((String::from("default"), value)), factory, allocator)
 }
 
 pub trait GrpcService<TClient: GrpcClient>: Send + Clone {

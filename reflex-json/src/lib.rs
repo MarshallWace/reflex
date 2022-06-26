@@ -87,7 +87,7 @@ fn hydrate_object<T: Expression>(
         .map(|(key, value)| hydrate(value, factory, allocator).map(|value| (key, value)))
         .collect::<Result<Vec<_>, _>>()?;
     let (keys, values): (Vec<_>, Vec<_>) = entries.into_iter().unzip();
-    Ok(factory.create_struct_term(
+    Ok(factory.create_record_term(
         allocator.create_struct_prototype(keys),
         allocator.create_list(values),
     ))
@@ -100,7 +100,7 @@ mod tests {
     use reflex::{
         allocator::DefaultAllocator,
         core::{ExpressionFactory, HeapAllocator},
-        lang::{create_struct, SharedTermFactory},
+        lang::{create_record, SharedTermFactory},
         stdlib::Stdlib,
     };
 
@@ -204,11 +204,11 @@ mod tests {
         let factory = SharedTermFactory::<Stdlib>::default();
         let allocator = DefaultAllocator::default();
         assert_eq!(
-            stringify(&create_struct(empty(), &factory, &allocator)),
+            stringify(&create_record(empty(), &factory, &allocator)),
             Ok(String::from("{}"))
         );
         assert_eq!(
-            stringify(&create_struct(
+            stringify(&create_record(
                 vec![
                     (String::from("first"), factory.create_int_term(3),),
                     (String::from("second"), factory.create_int_term(4),),
@@ -220,7 +220,7 @@ mod tests {
             Ok(String::from("{\"first\":3,\"second\":4,\"third\":5}")),
         );
         assert_eq!(
-            stringify(&create_struct(
+            stringify(&create_record(
                 vec![(String::from("\"\'\n\r"), factory.create_int_term(3),)],
                 &factory,
                 &allocator,

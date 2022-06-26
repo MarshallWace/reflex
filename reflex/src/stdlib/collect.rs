@@ -122,8 +122,8 @@ impl<T: Expression> Applicable<T> for CollectTuple {
     }
 }
 
-pub struct CollectStruct {}
-impl CollectStruct {
+pub struct CollectRecord {}
+impl CollectRecord {
     pub(crate) const UUID: Uuid = uuid!("03e8d5bb-917d-414b-8041-d07ec403c1a9");
     const ARITY: FunctionArity<1, 0> = FunctionArity {
         required: [ArgType::Strict],
@@ -134,12 +134,12 @@ impl CollectStruct {
         Arity::from(&Self::ARITY)
     }
 }
-impl Uid for CollectStruct {
+impl Uid for CollectRecord {
     fn uid(&self) -> Uuid {
         Self::UUID
     }
 }
-impl<T: Expression> Applicable<T> for CollectStruct {
+impl<T: Expression> Applicable<T> for CollectRecord {
     fn arity(&self) -> Option<Arity> {
         Some(Self::arity())
     }
@@ -156,7 +156,7 @@ impl<T: Expression> Applicable<T> for CollectStruct {
         let prototype = args.next().unwrap();
         match factory.match_constructor_term(&prototype) {
             Some(constructor) if constructor.prototype().keys().len() == args.len() => Ok(factory
-                .create_struct_term(
+                .create_record_term(
                     allocator.clone_struct_prototype(constructor.prototype()),
                     allocator.create_list(args),
                 )),

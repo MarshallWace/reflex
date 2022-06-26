@@ -40,7 +40,7 @@ impl<T: Expression> Applicable<T> for StructTypeFactory {
     ) -> Result<T, String> {
         let mut args = args.into_iter();
         let shape = args.next().unwrap();
-        if let Some(shape) = factory.match_struct_term(&shape) {
+        if let Some(shape) = factory.match_record_term(&shape) {
             Ok(
                 factory
                     .create_constructor_term(allocator.clone_struct_prototype(shape.prototype())),

@@ -61,7 +61,7 @@ impl<T: Expression> Applicable<T> for ConstructorTerm {
         allocator: &impl HeapAllocator<T>,
         _cache: &mut impl EvaluationCache<T>,
     ) -> Result<T, String> {
-        Ok(factory.create_struct_term(
+        Ok(factory.create_record_term(
             allocator.clone_struct_prototype(&self.prototype),
             allocator.create_list(args),
         ))

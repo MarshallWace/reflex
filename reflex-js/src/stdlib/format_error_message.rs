@@ -89,7 +89,7 @@ fn parse_error_message<T: Expression>(
 ) -> Option<String> {
     if let Some(value) = format_value(target, factory) {
         Some(value)
-    } else if let Some(value) = factory.match_struct_term(&target) {
+    } else if let Some(value) = factory.match_record_term(&target) {
         value.get("message").and_then(|value| {
             factory
                 .match_string_term(value)

@@ -3,7 +3,7 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use reflex::{
     core::{Expression, ExpressionFactory, HeapAllocator},
-    lang::create_struct,
+    lang::create_record,
     stdlib::Stdlib,
 };
 
@@ -20,7 +20,7 @@ where
 {
     factory.create_lambda_term(
         1,
-        create_struct(
+        create_record(
             methods.into_iter().map(|method_name| {
                 (
                     String::from(method_name),

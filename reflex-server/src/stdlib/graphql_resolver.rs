@@ -39,7 +39,7 @@ impl<T: Expression + Applicable<T>> Applicable<T> for GraphQlResolver {
     ) -> Result<T, String> {
         let mut args = args.into_iter();
         let root = args.next().unwrap();
-        if let Some(_) = factory.match_struct_term(&root).filter(|value| {
+        if let Some(_) = factory.match_record_term(&root).filter(|value| {
             value.get("query").is_some()
                 && value.get("mutation").is_some()
                 && value.get("subscription").is_some()

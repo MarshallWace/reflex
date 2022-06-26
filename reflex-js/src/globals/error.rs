@@ -6,7 +6,7 @@ use std::iter::once;
 use crate::stdlib::Stdlib as JsStdlib;
 use reflex::{
     core::{Expression, ExpressionFactory, HeapAllocator},
-    lang::create_struct,
+    lang::create_record,
     stdlib::Stdlib,
 };
 
@@ -17,7 +17,7 @@ pub fn global_error<T: Expression>(
     // TODO: Add optional JS Error data argument
     factory.create_lambda_term(
         1,
-        create_struct(
+        create_record(
             once((
                 String::from("name"),
                 factory.create_string_term(allocator.create_static_string("Error")),
@@ -42,7 +42,7 @@ where
     // TODO: Add optional JS AggregateError override message
     factory.create_lambda_term(
         1,
-        create_struct(
+        create_record(
             once((
                 String::from("name"),
                 factory.create_string_term(allocator.create_static_string("AggregateError")),

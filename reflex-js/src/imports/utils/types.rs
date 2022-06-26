@@ -4,7 +4,7 @@
 use crate::stdlib::Stdlib as JsStdlib;
 use reflex::{
     core::{Expression, ExpressionFactory, HeapAllocator},
-    lang::create_struct,
+    lang::create_record,
 };
 
 pub(crate) fn import_types<T: Expression>(
@@ -15,7 +15,7 @@ where
     T::Builtin: From<JsStdlib>,
 {
     let null = factory.create_nil_term();
-    create_struct(
+    create_record(
         vec![
             (String::from("Boolean"), null.clone()),
             (String::from("Int"), null.clone()),
@@ -129,7 +129,7 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                factory.create_struct_term(
+                factory.create_record_term(
                     allocator.create_struct_prototype(vec![
                         allocator.create_static_string("foo"),
                         allocator.create_static_string("bar"),
@@ -171,7 +171,7 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                factory.create_struct_term(
+                factory.create_record_term(
                     allocator.create_struct_prototype(vec![
                         allocator.create_static_string("foo"),
                         allocator.create_static_string("bar"),
@@ -213,7 +213,7 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                factory.create_struct_term(
+                factory.create_record_term(
                     allocator.create_struct_prototype(vec![
                         allocator.create_static_string("foo"),
                         allocator.create_static_string("bar"),

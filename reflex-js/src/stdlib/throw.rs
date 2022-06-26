@@ -65,7 +65,7 @@ fn parse_aggregate_error<'a, T: Expression + 'a>(
     target: &'a T,
     factory: &impl ExpressionFactory<T>,
 ) -> Option<&'a ExpressionList<T>> {
-    factory.match_struct_term(target).and_then(|target| {
+    factory.match_record_term(target).and_then(|target| {
         target.get("name").and_then(|error_type| {
             factory.match_string_term(error_type).and_then(|name| {
                 if name.value.as_str() == "AggregateError" {

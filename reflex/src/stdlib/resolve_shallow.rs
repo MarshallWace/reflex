@@ -54,13 +54,13 @@ where
                     allocator.clone_list(value.fields()),
                 ))
             }
-        } else if let Some(value) = factory.match_struct_term(&target) {
+        } else if let Some(value) = factory.match_record_term(&target) {
             if value.is_atomic() {
                 Ok(target)
             } else {
                 Ok(factory.create_application_term(
-                    factory.create_builtin_term(Stdlib::CollectStruct),
-                    allocator.clone_list(value.fields()),
+                    factory.create_builtin_term(Stdlib::CollectRecord),
+                    allocator.clone_list(value.values()),
                 ))
             }
         } else if let Some(value) = factory.match_vector_term(&target) {

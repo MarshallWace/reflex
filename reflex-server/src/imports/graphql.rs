@@ -4,7 +4,7 @@
 use crate::stdlib::Stdlib as ServerStdlib;
 use reflex::{
     core::{Expression, ExpressionFactory, HeapAllocator},
-    lang::create_struct,
+    lang::create_record,
 };
 
 pub fn import_graphql<T: Expression>(
@@ -14,7 +14,7 @@ pub fn import_graphql<T: Expression>(
 where
     T::Builtin: From<ServerStdlib>,
 {
-    create_struct(
+    create_record(
         vec![(
             String::from("Resolver"),
             factory.create_builtin_term(ServerStdlib::GraphQlResolver),

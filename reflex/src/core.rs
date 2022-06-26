@@ -943,7 +943,7 @@ impl StructPrototype {
         factory: &impl ExpressionFactory<T>,
         allocator: &impl HeapAllocator<T>,
     ) -> Option<T> {
-        if let Some(input_values) = factory.match_struct_term(values) {
+        if let Some(input_values) = factory.match_record_term(values) {
             let prototype = input_values.prototype();
             if hash_object(prototype) == hash_object(self) {
                 Some(values.clone())
@@ -954,7 +954,7 @@ impl StructPrototype {
                     .map(|key| input_values.get(key).cloned())
                     .collect::<Option<Vec<_>>>();
                 match values {
-                    Some(field_values) => Some(factory.create_struct_term(
+                    Some(field_values) => Some(factory.create_record_term(
                         allocator.clone_struct_prototype(self),
                         allocator.create_list(field_values),
                     )),
@@ -1004,7 +1004,7 @@ pub trait ExpressionFactory<T: Expression> {
         optional_args: StackOffset,
     ) -> T;
     fn create_tuple_term(&self, fields: ExpressionList<T>) -> T;
-    fn create_struct_term(&self, prototype: StructPrototype, fields: ExpressionList<T>) -> T;
+    fn create_record_term(&self, prototype: StructPrototype, fields: ExpressionList<T>) -> T;
     fn create_constructor_term(&self, prototype: StructPrototype) -> T;
     fn create_vector_term(&self, items: ExpressionList<T>) -> T;
     fn create_hashmap_term(&self, keys: ExpressionList<T>, values: ExpressionList<T>) -> T;
@@ -1033,7 +1033,7 @@ pub trait ExpressionFactory<T: Expression> {
     fn match_builtin_term<'a>(&self, expression: &'a T) -> Option<&'a BuiltinTerm<T>>;
     fn match_compiled_function_term<'a>(&self, target: &'a T) -> Option<&'a CompiledFunctionTerm>;
     fn match_tuple_term<'a>(&self, expression: &'a T) -> Option<&'a TupleTerm<T>>;
-    fn match_struct_term<'a>(&self, expression: &'a T) -> Option<&'a StructTerm<T>>;
+    fn match_record_term<'a>(&self, expression: &'a T) -> Option<&'a RecordTerm<T>>;
     fn match_constructor_term<'a>(&self, expression: &'a T) -> Option<&'a ConstructorTerm>;
     fn match_vector_term<'a>(&self, expression: &'a T) -> Option<&'a VectorTerm<T>>;
     fn match_hashmap_term<'a>(&self, expression: &'a T) -> Option<&'a HashMapTerm<T>>;

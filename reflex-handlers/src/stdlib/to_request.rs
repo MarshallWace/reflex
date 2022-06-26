@@ -43,12 +43,12 @@ impl<T: Expression> Applicable<T> for ToRequest {
             Some(_) => {
                 let url = target.clone();
                 let method = factory.create_string_term(allocator.create_static_string("GET"));
-                let headers = factory.create_struct_term(
+                let headers = factory.create_record_term(
                     allocator.create_struct_prototype(Vec::new()),
                     allocator.create_empty_list(),
                 );
                 let body = factory.create_nil_term();
-                Some(factory.create_struct_term(
+                Some(factory.create_record_term(
                     request_prototype(allocator),
                     allocator.create_list(vec![url, method, headers, body]),
                 ))

@@ -6,7 +6,7 @@ use std::{borrow::Cow, time::Duration};
 use crc::{Crc, CRC_32_ISCSI};
 use reflex::{
     core::{Expression, ExpressionFactory, HeapAllocator, StringValue},
-    lang::{create_struct, is_integer, term::StructTerm},
+    lang::{create_record, is_integer, term::RecordTerm},
 };
 
 #[derive(PartialEq, Eq, Clone, Hash)]
@@ -92,7 +92,7 @@ pub fn create_object<'a, T: Expression>(
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
 ) -> T {
-    create_struct(
+    create_record(
         items
             .into_iter()
             .map(|(key, value)| (String::from(key), value)),
@@ -146,7 +146,7 @@ pub fn create_oneof<'a, V, T: Expression>(
     allocator: &impl HeapAllocator<T>,
 ) -> T {
     let (enum_case, value) = variant_factory(value);
-    create_struct(
+    create_record(
         vec![
             (String::from("case"), create_integer(enum_case, factory)),
             (String::from("value"), value),
@@ -157,7 +157,7 @@ pub fn create_oneof<'a, V, T: Expression>(
 }
 
 pub fn get_serialized_object_field<'a, T: Expression>(
-    value: &'a StructTerm<T>,
+    value: &'a RecordTerm<T>,
     key: &str,
     factory: &impl ExpressionFactory<T>,
 ) -> Result<&'a T, String> {
@@ -166,7 +166,7 @@ pub fn get_serialized_object_field<'a, T: Expression>(
 }
 
 pub fn get_optional_serialized_object_field<'a, T: Expression>(
-    value: &'a StructTerm<T>,
+    value: &'a RecordTerm<T>,
     key: &str,
     factory: &impl ExpressionFactory<T>,
 ) -> Option<&'a T> {
@@ -290,7 +290,7 @@ pub fn parse_duration<T: Expression>(
     value: &T,
     factory: &impl ExpressionFactory<T>,
 ) -> Result<Duration, String> {
-    match factory.match_struct_term(value).and_then(|value| {
+    match factory.match_record_term(value).and_then(|value| {
         value.get("seconds").and_then(|seconds| {
             parse_integer(seconds, factory).ok().and_then(|seconds| {
                 value.get("nanos").and_then(|nanos| {
@@ -323,11 +323,11 @@ pub fn parse_optional_duration<T: Expression>(
 }
 
 pub fn parse_object<V, T: Expression>(
-    parse: impl Fn(&StructTerm<T>) -> Result<V, String>,
+    parse: impl Fn(&RecordTerm<T>) -> Result<V, String>,
     value: &T,
     factory: &impl ExpressionFactory<T>,
 ) -> Result<V, String> {
-    match factory.match_struct_term(value) {
+    match factory.match_record_term(value) {
         Some(value) => parse(value),
         _ => Err(format!("Expected object value, received {}", value)),
     }

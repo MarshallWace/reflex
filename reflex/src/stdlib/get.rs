@@ -59,7 +59,7 @@ impl<T: Expression> Applicable<T> for Get {
                 Some(value) => Ok(value.clone()),
                 None => Err(format!("Invalid field offset: {} on tuple {}", key, target)),
             }
-        } else if let Some(target) = factory.match_struct_term(&target) {
+        } else if let Some(target) = factory.match_record_term(&target) {
             let field_name = match factory.match_string_term(&key) {
                 Some(key) => Some(&key.value),
                 _ => None,

@@ -68,18 +68,18 @@ where
                     })),
                 ))
             }
-        } else if let Some(value) = factory.match_struct_term(&target) {
+        } else if let Some(value) = factory.match_record_term(&target) {
             if value.is_atomic() {
                 Ok(target)
             } else {
                 Ok(factory.create_application_term(
-                    factory.create_builtin_term(Stdlib::CollectStruct),
+                    factory.create_builtin_term(Stdlib::CollectRecord),
                     allocator.create_sized_list(
-                        value.fields().len() + 1,
+                        value.values().len() + 1,
                         once(factory.create_constructor_term(
                             allocator.clone_struct_prototype(value.prototype()),
                         ))
-                        .chain(value.fields().iter().map(|field| {
+                        .chain(value.values().iter().map(|field| {
                             if field.is_atomic() {
                                 field.clone()
                             } else {

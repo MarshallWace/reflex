@@ -63,8 +63,8 @@ where
     }
 }
 
-pub struct ResolveStruct {}
-impl ResolveStruct {
+pub struct ResolveRecord {}
+impl ResolveRecord {
     pub(crate) const UUID: Uuid = uuid!("0e580200-7a85-415b-ba8e-ac854dc51ec7");
     const ARITY: FunctionArity<1, 0> = FunctionArity {
         required: [ArgType::Strict],
@@ -75,12 +75,12 @@ impl ResolveStruct {
         Arity::from(&Self::ARITY)
     }
 }
-impl Uid for ResolveStruct {
+impl Uid for ResolveRecord {
     fn uid(&self) -> Uuid {
         Self::UUID
     }
 }
-impl<T: Expression> Applicable<T> for ResolveStruct
+impl<T: Expression> Applicable<T> for ResolveRecord
 where
     T::Builtin: From<Stdlib>,
 {
@@ -98,19 +98,19 @@ where
         _cache: &mut impl EvaluationCache<T>,
     ) -> Result<T, String> {
         let target = args.next().unwrap();
-        if let Some(value) = factory.match_struct_term(&target) {
-            let has_dynamic_values = value.fields().iter().any(|item| !item.is_static());
+        if let Some(value) = factory.match_record_term(&target) {
+            let has_dynamic_values = value.values().iter().any(|item| !item.is_static());
             if !has_dynamic_values {
                 Ok(target)
             } else {
                 Ok(factory.create_application_term(
-                    factory.create_builtin_term(Stdlib::CollectStruct),
+                    factory.create_builtin_term(Stdlib::CollectRecord),
                     allocator.create_sized_list(
-                        value.fields().len() + 1,
+                        value.values().len() + 1,
                         once(factory.create_constructor_term(
                             allocator.clone_struct_prototype(value.prototype()),
                         ))
-                        .chain(value.fields().iter().cloned()),
+                        .chain(value.values().iter().cloned()),
                     ),
                 ))
             }

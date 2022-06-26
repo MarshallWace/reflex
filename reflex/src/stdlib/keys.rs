@@ -39,7 +39,7 @@ impl<T: Expression> Applicable<T> for Keys {
         _cache: &mut impl EvaluationCache<T>,
     ) -> Result<T, String> {
         let target = args.next().unwrap();
-        let result = if let Some(target) = factory.match_struct_term(&target) {
+        let result = if let Some(target) = factory.match_record_term(&target) {
             Some(factory.create_vector_term(
                 allocator.create_list(
                     target.prototype().keys().iter().map(|key| {

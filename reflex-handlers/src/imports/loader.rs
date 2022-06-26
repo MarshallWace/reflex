@@ -5,7 +5,7 @@ use std::iter::once;
 
 use reflex::{
     core::{Expression, ExpressionFactory, HeapAllocator},
-    lang::create_struct,
+    lang::create_record,
     stdlib::Stdlib,
 };
 
@@ -18,12 +18,12 @@ pub fn import_loader<T: Expression>(
 where
     T::Builtin: From<Stdlib>,
 {
-    create_struct(
+    create_record(
         once((
             String::from("default"),
             factory.create_lambda_term(
                 2,
-                create_struct(
+                create_record(
                     [
                         (
                             String::from("load"),

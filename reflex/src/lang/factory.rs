@@ -152,13 +152,13 @@ impl<TBuiltin: Builtin> ExpressionFactory<CachedSharedTerm<TBuiltin>>
         trace!(factory_create = "tuple");
         self.create_expression(Term::Tuple(TupleTerm::new(fields)))
     }
-    fn create_struct_term(
+    fn create_record_term(
         &self,
         prototype: StructPrototype,
         fields: ExpressionList<CachedSharedTerm<TBuiltin>>,
     ) -> CachedSharedTerm<TBuiltin> {
         trace!(factory_create = "struct");
-        self.create_expression(Term::Struct(StructTerm::new(prototype, fields)))
+        self.create_expression(Term::Record(RecordTerm::new(prototype, fields)))
     }
     fn create_constructor_term(&self, prototype: StructPrototype) -> CachedSharedTerm<TBuiltin> {
         trace!(factory_create = "constructor");
@@ -337,12 +337,12 @@ impl<TBuiltin: Builtin> ExpressionFactory<CachedSharedTerm<TBuiltin>>
             _ => None,
         }
     }
-    fn match_struct_term<'a>(
+    fn match_record_term<'a>(
         &self,
         expression: &'a CachedSharedTerm<TBuiltin>,
-    ) -> Option<&'a StructTerm<CachedSharedTerm<TBuiltin>>> {
+    ) -> Option<&'a RecordTerm<CachedSharedTerm<TBuiltin>>> {
         match expression.inner_term() {
-            Term::Struct(term) => Some(term),
+            Term::Record(term) => Some(term),
             _ => None,
         }
     }

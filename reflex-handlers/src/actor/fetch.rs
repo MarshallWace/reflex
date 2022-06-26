@@ -467,7 +467,7 @@ fn parse_key_values_arg<T: Expression>(
     value: &T,
     factory: &impl ExpressionFactory<T>,
 ) -> Option<Vec<(String, String)>> {
-    if let Some(value) = factory.match_struct_term(value) {
+    if let Some(value) = factory.match_record_term(value) {
         value
             .entries()
             .into_iter()

@@ -145,14 +145,14 @@ pub enum Stdlib {
     CollectFilterResults,
     CollectHashMap,
     CollectHashSet,
-    CollectStruct,
+    CollectRecord,
     CollectTuple,
     CollectVector,
     Concat,
     Cons,
     ConstructHashMap,
     ConstructHashSet,
-    ConstructStruct,
+    ConstructRecord,
     ConstructTuple,
     ConstructVector,
     Contains,
@@ -195,7 +195,7 @@ pub enum Stdlib {
     ResolveHashMap,
     ResolveHashSet,
     ResolveShallow,
-    ResolveStruct,
+    ResolveRecord,
     ResolveTuple,
     ResolveVector,
     Round,
@@ -227,14 +227,14 @@ impl TryFrom<Uuid> for Stdlib {
             CollectFilterResults::UUID => Ok(Self::CollectFilterResults),
             CollectHashMap::UUID => Ok(Self::CollectHashMap),
             CollectHashSet::UUID => Ok(Self::CollectHashSet),
-            CollectStruct::UUID => Ok(Self::CollectStruct),
+            CollectRecord::UUID => Ok(Self::CollectRecord),
             CollectTuple::UUID => Ok(Self::CollectTuple),
             CollectVector::UUID => Ok(Self::CollectVector),
             Concat::UUID => Ok(Self::Concat),
             Cons::UUID => Ok(Self::Cons),
             ConstructHashMap::UUID => Ok(Self::ConstructHashMap),
             ConstructHashSet::UUID => Ok(Self::ConstructHashSet),
-            ConstructStruct::UUID => Ok(Self::ConstructStruct),
+            ConstructRecord::UUID => Ok(Self::ConstructRecord),
             ConstructTuple::UUID => Ok(Self::ConstructTuple),
             ConstructVector::UUID => Ok(Self::ConstructVector),
             Contains::UUID => Ok(Self::Contains),
@@ -277,7 +277,7 @@ impl TryFrom<Uuid> for Stdlib {
             ResolveHashMap::UUID => Ok(Self::ResolveHashMap),
             ResolveHashSet::UUID => Ok(Self::ResolveHashSet),
             ResolveShallow::UUID => Ok(Self::ResolveShallow),
-            ResolveStruct::UUID => Ok(Self::ResolveStruct),
+            ResolveRecord::UUID => Ok(Self::ResolveRecord),
             ResolveTuple::UUID => Ok(Self::ResolveTuple),
             ResolveVector::UUID => Ok(Self::ResolveVector),
             Round::UUID => Ok(Self::Round),
@@ -306,14 +306,14 @@ impl Uid for Stdlib {
             Self::CollectFilterResults => Uid::uid(&CollectFilterResults {}),
             Self::CollectHashMap => Uid::uid(&CollectHashMap {}),
             Self::CollectHashSet => Uid::uid(&CollectHashSet {}),
-            Self::CollectStruct => Uid::uid(&CollectStruct {}),
+            Self::CollectRecord => Uid::uid(&CollectRecord {}),
             Self::CollectTuple => Uid::uid(&CollectTuple {}),
             Self::CollectVector => Uid::uid(&CollectVector {}),
             Self::Concat => Uid::uid(&Concat {}),
             Self::Cons => Uid::uid(&Cons {}),
             Self::ConstructHashMap => Uid::uid(&ConstructHashMap {}),
             Self::ConstructHashSet => Uid::uid(&ConstructHashSet {}),
-            Self::ConstructStruct => Uid::uid(&ConstructStruct {}),
+            Self::ConstructRecord => Uid::uid(&ConstructRecord {}),
             Self::ConstructTuple => Uid::uid(&ConstructTuple {}),
             Self::ConstructVector => Uid::uid(&ConstructVector {}),
             Self::Contains => Uid::uid(&Contains {}),
@@ -356,7 +356,7 @@ impl Uid for Stdlib {
             Self::ResolveHashMap => Uid::uid(&ResolveHashMap {}),
             Self::ResolveHashSet => Uid::uid(&ResolveHashSet {}),
             Self::ResolveShallow => Uid::uid(&ResolveShallow {}),
-            Self::ResolveStruct => Uid::uid(&ResolveStruct {}),
+            Self::ResolveRecord => Uid::uid(&ResolveRecord {}),
             Self::ResolveTuple => Uid::uid(&ResolveTuple {}),
             Self::ResolveVector => Uid::uid(&ResolveVector {}),
             Self::Round => Uid::uid(&Round {}),
@@ -387,14 +387,14 @@ impl Stdlib {
             Self::CollectFilterResults => CollectFilterResults::arity(),
             Self::CollectHashMap => CollectHashMap::arity(),
             Self::CollectHashSet => CollectHashSet::arity(),
-            Self::CollectStruct => CollectStruct::arity(),
+            Self::CollectRecord => CollectRecord::arity(),
             Self::CollectTuple => CollectTuple::arity(),
             Self::CollectVector => CollectVector::arity(),
             Self::Concat => Concat::arity(),
             Self::Cons => Cons::arity(),
             Self::ConstructHashMap => ConstructHashMap::arity(),
             Self::ConstructHashSet => ConstructHashSet::arity(),
-            Self::ConstructStruct => ConstructStruct::arity(),
+            Self::ConstructRecord => ConstructRecord::arity(),
             Self::ConstructTuple => ConstructTuple::arity(),
             Self::ConstructVector => ConstructVector::arity(),
             Self::Contains => Contains::arity(),
@@ -437,7 +437,7 @@ impl Stdlib {
             Self::ResolveHashMap => ResolveHashMap::arity(),
             Self::ResolveHashSet => ResolveHashSet::arity(),
             Self::ResolveShallow => ResolveShallow::arity(),
-            Self::ResolveStruct => ResolveStruct::arity(),
+            Self::ResolveRecord => ResolveRecord::arity(),
             Self::ResolveTuple => ResolveTuple::arity(),
             Self::ResolveVector => ResolveVector::arity(),
             Self::Round => Round::arity(),
@@ -478,8 +478,8 @@ impl Stdlib {
             Self::CollectHashSet => {
                 Applicable::<T>::apply(&CollectHashSet {}, args, factory, allocator, cache)
             }
-            Self::CollectStruct => {
-                Applicable::<T>::apply(&CollectStruct {}, args, factory, allocator, cache)
+            Self::CollectRecord => {
+                Applicable::<T>::apply(&CollectRecord {}, args, factory, allocator, cache)
             }
             Self::CollectTuple => {
                 Applicable::<T>::apply(&CollectTuple {}, args, factory, allocator, cache)
@@ -495,8 +495,8 @@ impl Stdlib {
             Self::ConstructHashSet => {
                 Applicable::<T>::apply(&ConstructHashSet {}, args, factory, allocator, cache)
             }
-            Self::ConstructStruct => {
-                Applicable::<T>::apply(&ConstructStruct {}, args, factory, allocator, cache)
+            Self::ConstructRecord => {
+                Applicable::<T>::apply(&ConstructRecord {}, args, factory, allocator, cache)
             }
             Self::ConstructTuple => {
                 Applicable::<T>::apply(&ConstructTuple {}, args, factory, allocator, cache)
@@ -560,8 +560,8 @@ impl Stdlib {
             Self::ResolveShallow => {
                 Applicable::<T>::apply(&ResolveShallow {}, args, factory, allocator, cache)
             }
-            Self::ResolveStruct => {
-                Applicable::<T>::apply(&ResolveStruct {}, args, factory, allocator, cache)
+            Self::ResolveRecord => {
+                Applicable::<T>::apply(&ResolveRecord {}, args, factory, allocator, cache)
             }
             Self::ResolveTuple => {
                 Applicable::<T>::apply(&ResolveTuple {}, args, factory, allocator, cache)
@@ -599,7 +599,7 @@ impl Stdlib {
             }
             Self::CollectHashMap => Applicable::<T>::should_parallelize(&CollectHashMap {}, args),
             Self::CollectHashSet => Applicable::<T>::should_parallelize(&CollectHashSet {}, args),
-            Self::CollectStruct => Applicable::<T>::should_parallelize(&CollectStruct {}, args),
+            Self::CollectRecord => Applicable::<T>::should_parallelize(&CollectRecord {}, args),
             Self::CollectTuple => Applicable::<T>::should_parallelize(&CollectTuple {}, args),
             Self::CollectVector => Applicable::<T>::should_parallelize(&CollectVector {}, args),
             Self::Concat => Applicable::<T>::should_parallelize(&Concat {}, args),
@@ -610,7 +610,7 @@ impl Stdlib {
             Self::ConstructHashSet => {
                 Applicable::<T>::should_parallelize(&ConstructHashSet {}, args)
             }
-            Self::ConstructStruct => Applicable::<T>::should_parallelize(&ConstructStruct {}, args),
+            Self::ConstructRecord => Applicable::<T>::should_parallelize(&ConstructRecord {}, args),
             Self::ConstructTuple => Applicable::<T>::should_parallelize(&ConstructTuple {}, args),
             Self::ConstructVector => Applicable::<T>::should_parallelize(&ConstructVector {}, args),
             Self::Contains => Applicable::<T>::should_parallelize(&Contains {}, args),
@@ -653,7 +653,7 @@ impl Stdlib {
             Self::ResolveHashMap => Applicable::<T>::should_parallelize(&ResolveHashMap {}, args),
             Self::ResolveHashSet => Applicable::<T>::should_parallelize(&ResolveHashSet {}, args),
             Self::ResolveShallow => Applicable::<T>::should_parallelize(&ResolveShallow {}, args),
-            Self::ResolveStruct => Applicable::<T>::should_parallelize(&ResolveStruct {}, args),
+            Self::ResolveRecord => Applicable::<T>::should_parallelize(&ResolveRecord {}, args),
             Self::ResolveTuple => Applicable::<T>::should_parallelize(&ResolveTuple {}, args),
             Self::ResolveVector => Applicable::<T>::should_parallelize(&ResolveVector {}, args),
             Self::Round => Applicable::<T>::should_parallelize(&Round {}, args),

@@ -4,7 +4,7 @@
 use crate::stdlib::Stdlib as JsStdlib;
 use reflex::{
     core::{Expression, ExpressionFactory, HeapAllocator},
-    lang::create_struct,
+    lang::create_record,
 };
 
 pub fn global_object<T: Expression>(
@@ -14,7 +14,7 @@ pub fn global_object<T: Expression>(
 where
     T::Builtin: From<JsStdlib>,
 {
-    create_struct(
+    create_record(
         vec![(
             String::from("fromEntries"),
             factory.create_builtin_term(JsStdlib::FromEntries),

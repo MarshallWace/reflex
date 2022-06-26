@@ -3,7 +3,7 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use reflex::{
     core::{Expression, ExpressionFactory, HeapAllocator},
-    lang::create_struct,
+    lang::create_record,
     stdlib::Stdlib,
 };
 
@@ -16,7 +16,7 @@ pub fn import_time<T: Expression>(
 where
     T::Builtin: From<Stdlib>,
 {
-    create_struct(
+    create_record(
         vec![
             (
                 String::from("timeout"),

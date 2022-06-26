@@ -3,7 +3,7 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use reflex::{
     core::{Expression, ExpressionFactory, HeapAllocator},
-    lang::create_struct,
+    lang::create_record,
     stdlib::Stdlib,
 };
 use reflex_json::stdlib::Stdlib as JsonStdlib;
@@ -15,7 +15,7 @@ pub fn global_json<T: Expression>(
 where
     T::Builtin: From<Stdlib> + From<JsonStdlib>,
 {
-    create_struct(
+    create_record(
         vec![
             (
                 String::from("parse"),

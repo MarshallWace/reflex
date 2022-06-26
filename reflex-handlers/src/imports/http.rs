@@ -3,7 +3,7 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use reflex::{
     core::{Expression, ExpressionFactory, HeapAllocator},
-    lang::create_struct,
+    lang::create_record,
     stdlib::Stdlib,
 };
 use reflex_json::stdlib::Stdlib as JsonStdlib;
@@ -20,7 +20,7 @@ pub fn import_http<T: Expression>(
 where
     T::Builtin: From<Stdlib> + From<JsonStdlib> + From<HandlersStdlib>,
 {
-    create_struct(
+    create_record(
         vec![
             (String::from("fetch"), import_http_fetch(factory, allocator)),
             (
@@ -96,7 +96,7 @@ where
                         ),
                     ]),
                 ),
-                factory.create_struct_term(
+                factory.create_record_term(
                     allocator.create_struct_prototype(vec![
                         String::from("status"),
                         String::from("ok"),

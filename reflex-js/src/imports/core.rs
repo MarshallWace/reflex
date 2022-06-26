@@ -3,7 +3,7 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use reflex::{
     core::{Expression, ExpressionFactory, HeapAllocator},
-    lang::create_struct,
+    lang::create_record,
     stdlib::Stdlib,
 };
 
@@ -14,7 +14,7 @@ pub fn import_core<T: Expression>(
 where
     T::Builtin: From<Stdlib>,
 {
-    create_struct(
+    create_record(
         [
             (
                 String::from("abs"),
@@ -61,8 +61,8 @@ where
                 factory.create_builtin_term(Stdlib::CollectHashSet),
             ),
             (
-                String::from("collectStruct"),
-                factory.create_builtin_term(Stdlib::CollectStruct),
+                String::from("collectRecord"),
+                factory.create_builtin_term(Stdlib::CollectRecord),
             ),
             (
                 String::from("collectTuple"),
@@ -89,8 +89,8 @@ where
                 factory.create_builtin_term(Stdlib::ConstructHashSet),
             ),
             (
-                String::from("constructStruct"),
-                factory.create_builtin_term(Stdlib::ConstructStruct),
+                String::from("constructRecord"),
+                factory.create_builtin_term(Stdlib::ConstructRecord),
             ),
             (
                 String::from("constructTuple"),
@@ -242,8 +242,8 @@ where
                 factory.create_builtin_term(Stdlib::ResolveShallow),
             ),
             (
-                String::from("resolveStruct"),
-                factory.create_builtin_term(Stdlib::ResolveStruct),
+                String::from("resolveRecord"),
+                factory.create_builtin_term(Stdlib::ResolveRecord),
             ),
             (
                 String::from("resolveTuple"),

@@ -45,8 +45,8 @@ impl<T: Expression> Applicable<T> for ConstructTuple {
     }
 }
 
-pub struct ConstructStruct {}
-impl ConstructStruct {
+pub struct ConstructRecord {}
+impl ConstructRecord {
     pub(crate) const UUID: Uuid = uuid!("f3a1b7ad-fe7d-444b-adf3-6945332e03b7");
     const ARITY: FunctionArity<2, 0> = FunctionArity {
         required: [ArgType::Strict, ArgType::Strict],
@@ -57,12 +57,12 @@ impl ConstructStruct {
         Arity::from(&Self::ARITY)
     }
 }
-impl Uid for ConstructStruct {
+impl Uid for ConstructRecord {
     fn uid(&self) -> Uuid {
         Self::UUID
     }
 }
-impl<T: Expression> Applicable<T> for ConstructStruct {
+impl<T: Expression> Applicable<T> for ConstructRecord {
     fn arity(&self) -> Option<Arity> {
         Some(Self::arity())
     }
@@ -103,7 +103,7 @@ impl<T: Expression> Applicable<T> for ConstructStruct {
                         values.items().len(),
                     ))
                 } else {
-                    Ok(factory.create_struct_term(
+                    Ok(factory.create_record_term(
                         allocator.create_struct_prototype(keys),
                         allocator.clone_list(values.items()),
                     ))

@@ -157,7 +157,7 @@ fn create_default_module_export<T: Expression>(
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
 ) -> T {
-    factory.create_struct_term(
+    factory.create_record_term(
         allocator.create_struct_prototype(vec![String::from("default")]),
         allocator.create_unit_list(value),
     )

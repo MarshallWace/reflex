@@ -1385,7 +1385,7 @@ fn parse_object_arg<T: Expression>(
     value: &T,
     factory: &impl ExpressionFactory<T>,
 ) -> Result<Option<impl IntoIterator<Item = (String, JsonValue)>>, String> {
-    match factory.match_struct_term(value) {
+    match factory.match_record_term(value) {
         Some(value) => {
             let properties = value
                 .entries()

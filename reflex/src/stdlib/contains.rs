@@ -40,7 +40,7 @@ impl<T: Expression> Applicable<T> for Contains {
     ) -> Result<T, String> {
         let target = args.next().unwrap();
         let key = args.next().unwrap();
-        let result = if let Some(target) = factory.match_struct_term(&target) {
+        let result = if let Some(target) = factory.match_record_term(&target) {
             let field_name = match factory.match_string_term(&key) {
                 Some(term) => Some(&term.value),
                 _ => None,

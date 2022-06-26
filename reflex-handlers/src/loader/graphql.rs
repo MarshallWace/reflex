@@ -9,7 +9,7 @@ use std::{
 
 use reflex::{
     core::{Expression, ExpressionFactory, HeapAllocator},
-    lang::create_struct,
+    lang::create_record,
     stdlib::Stdlib,
 };
 use reflex_graphql::graphql_parser::{self, schema::Document};
@@ -102,7 +102,7 @@ where
 {
     factory.create_lambda_term(
         1,
-        create_struct(
+        create_record(
             vec![(
                 String::from("execute"),
                 factory.create_lambda_term(
@@ -136,7 +136,7 @@ where
                                     allocator,
                                 )]),
                             ),
-                            create_struct(empty(), factory, allocator),
+                            create_record(empty(), factory, allocator),
                             get_optional_struct_field(
                                 factory.create_static_variable_term(0),
                                 String::from("token"),
@@ -159,7 +159,7 @@ fn create_default_export<T: Expression>(
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
 ) -> T {
-    create_struct(once((String::from("default"), value)), factory, allocator)
+    create_record(once((String::from("default"), value)), factory, allocator)
 }
 
 fn get_struct_field<T: Expression>(

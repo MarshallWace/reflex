@@ -42,8 +42,8 @@ impl<T: Expression> Applicable<T> for Merge {
     ) -> Result<T, String> {
         let target = args.next().unwrap();
         let base = factory
-            .match_struct_term(&target)
-            .map(|target| (target.prototype(), target.fields()));
+            .match_record_term(&target)
+            .map(|target| (target.prototype(), target.values()));
         match base {
             None => Err(format!(
                 "Expected (<struct>, ...), received ({}{})",
@@ -69,7 +69,7 @@ impl<T: Expression> Applicable<T> for Merge {
                         let (keys, values): (Vec<_>, Vec<_>) = args
                             .fold(Ok(base_entries), |result, arg| {
                                 let mut combined_properties = result?;
-                                let properties = match factory.match_struct_term(&arg) {
+                                let properties = match factory.match_record_term(&arg) {
                                     Some(value) => {
                                         combined_properties.extend(
                                             value
@@ -77,7 +77,7 @@ impl<T: Expression> Applicable<T> for Merge {
                                                 .keys()
                                                 .iter()
                                                 .cloned()
-                                                .zip(value.fields().iter().cloned()),
+                                                .zip(value.values().iter().cloned()),
                                         );
                                         Some(combined_properties)
                                     }
@@ -146,7 +146,7 @@ impl<T: Expression> Applicable<T> for Merge {
                         (prototype, values)
                     }
                 };
-                Ok(factory.create_struct_term(prototype, values))
+                Ok(factory.create_record_term(prototype, values))
             }
         }
     }

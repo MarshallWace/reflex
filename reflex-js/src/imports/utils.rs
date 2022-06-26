@@ -5,7 +5,7 @@ use std::iter::once;
 
 use reflex::{
     core::{Expression, ExpressionFactory, HeapAllocator, SignalType},
-    lang::create_struct,
+    lang::create_record,
 };
 use types::import_types;
 
@@ -20,7 +20,7 @@ pub fn import_utils<T: Expression>(
 where
     T::Builtin: From<JsStdlib>,
 {
-    create_struct(
+    create_record(
         vec![
             (
                 String::from("graph"),

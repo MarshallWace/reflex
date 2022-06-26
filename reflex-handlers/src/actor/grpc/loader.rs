@@ -5,7 +5,7 @@ use std::{collections::HashMap, iter::once, path::Path};
 
 use reflex::{
     core::{Expression, ExpressionFactory, HeapAllocator},
-    lang::create_struct,
+    lang::create_record,
     stdlib::Stdlib,
 };
 
@@ -68,5 +68,5 @@ fn create_default_module_export<T: Expression>(
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
 ) -> T {
-    create_struct(once((String::from("default"), value)), factory, allocator)
+    create_record(once((String::from("default"), value)), factory, allocator)
 }
