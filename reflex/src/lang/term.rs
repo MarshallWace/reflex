@@ -12,6 +12,8 @@ mod boolean;
 pub use boolean::*;
 mod builtin;
 pub use builtin::*;
+mod constructor;
+pub use constructor::*;
 mod compiled;
 pub use compiled::*;
 mod float;
