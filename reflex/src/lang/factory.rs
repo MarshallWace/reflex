@@ -43,9 +43,32 @@ impl<TBuiltin: Builtin> SharedTermFactory<TBuiltin> {
 impl<TBuiltin: Builtin> ExpressionFactory<CachedSharedTerm<TBuiltin>>
     for SharedTermFactory<TBuiltin>
 {
-    fn create_value_term(&self, value: ValueTerm<String>) -> CachedSharedTerm<TBuiltin> {
-        trace!(factory_create = "value_term");
-        self.create_expression(Term::Value(value))
+    fn create_nil_term(&self) -> CachedSharedTerm<TBuiltin> {
+        trace!(factory_create = "nil_term");
+        self.create_expression(Term::Nil(NilTerm))
+    }
+    fn create_boolean_term(&self, value: bool) -> CachedSharedTerm<TBuiltin> {
+        trace!(factory_create = "boolean_term");
+        self.create_expression(Term::Boolean(BooleanTerm { value }))
+    }
+    fn create_int_term(&self, value: IntValue) -> CachedSharedTerm<TBuiltin> {
+        trace!(factory_create = "int_term");
+        self.create_expression(Term::Int(IntTerm { value }))
+    }
+    fn create_float_term(&self, value: FloatValue) -> CachedSharedTerm<TBuiltin> {
+        trace!(factory_create = "float_term");
+        self.create_expression(Term::Float(FloatTerm { value }))
+    }
+    fn create_string_term(
+        &self,
+        value: <CachedSharedTerm<TBuiltin> as Expression>::String,
+    ) -> CachedSharedTerm<TBuiltin> {
+        trace!(factory_create = "string_term");
+        self.create_expression(Term::String(StringTerm { value }))
+    }
+    fn create_symbol_term(&self, id: SymbolId) -> CachedSharedTerm<TBuiltin> {
+        trace!(factory_create = "symbol_term");
+        self.create_expression(Term::Symbol(SymbolTerm { id }))
     }
     fn create_static_variable_term(&self, offset: StackOffset) -> CachedSharedTerm<TBuiltin> {
         trace!(factory_create = "static_variable");
@@ -170,12 +193,57 @@ impl<TBuiltin: Builtin> ExpressionFactory<CachedSharedTerm<TBuiltin>>
         trace!(factory_create = "signal");
         self.create_expression(Term::Signal(SignalTerm::new(signals)))
     }
-    fn match_value_term<'a>(
+    fn match_nil_term<'a>(
         &self,
         expression: &'a CachedSharedTerm<TBuiltin>,
-    ) -> Option<&'a ValueTerm<String>> {
+    ) -> Option<&'a NilTerm> {
         match expression.inner_term() {
-            Term::Value(term) => Some(term),
+            Term::Nil(term) => Some(term),
+            _ => None,
+        }
+    }
+    fn match_boolean_term<'a>(
+        &self,
+        expression: &'a CachedSharedTerm<TBuiltin>,
+    ) -> Option<&'a BooleanTerm> {
+        match expression.inner_term() {
+            Term::Boolean(term) => Some(term),
+            _ => None,
+        }
+    }
+    fn match_int_term<'a>(
+        &self,
+        expression: &'a CachedSharedTerm<TBuiltin>,
+    ) -> Option<&'a IntTerm> {
+        match expression.inner_term() {
+            Term::Int(term) => Some(term),
+            _ => None,
+        }
+    }
+    fn match_float_term<'a>(
+        &self,
+        expression: &'a CachedSharedTerm<TBuiltin>,
+    ) -> Option<&'a FloatTerm> {
+        match expression.inner_term() {
+            Term::Float(term) => Some(term),
+            _ => None,
+        }
+    }
+    fn match_string_term<'a>(
+        &self,
+        expression: &'a CachedSharedTerm<TBuiltin>,
+    ) -> Option<&'a StringTerm<<CachedSharedTerm<TBuiltin> as Expression>::String>> {
+        match expression.inner_term() {
+            Term::String(term) => Some(term),
+            _ => None,
+        }
+    }
+    fn match_symbol_term<'a>(
+        &self,
+        expression: &'a CachedSharedTerm<TBuiltin>,
+    ) -> Option<&'a SymbolTerm> {
+        match expression.inner_term() {
+            Term::Symbol(term) => Some(term),
             _ => None,
         }
     }

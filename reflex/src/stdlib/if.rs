@@ -2,12 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
-use crate::{
-    core::{
-        uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
-        FunctionArity, HeapAllocator, Uid, Uuid,
-    },
-    lang::ValueTerm,
+use crate::core::{
+    uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
+    FunctionArity, HeapAllocator, Uid, Uuid,
 };
 
 pub struct If {}
@@ -53,9 +50,11 @@ impl<T: Expression> Applicable<T> for If {
 }
 
 pub fn is_truthy<T: Expression>(value: &T, factory: &impl ExpressionFactory<T>) -> bool {
-    match factory.match_value_term(value) {
-        Some(ValueTerm::Boolean(value)) => *value,
-        Some(ValueTerm::Null) => false,
-        _ => true,
+    match factory.match_boolean_term(value) {
+        Some(term) => term.value,
+        _ => match factory.match_nil_term(value) {
+            Some(_) => false,
+            _ => true,
+        },
     }
 }

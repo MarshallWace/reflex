@@ -4,10 +4,7 @@
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use std::iter::FromIterator;
 
-use reflex::{
-    core::{Expression, ExpressionFactory, HeapAllocator},
-    lang::ValueTerm,
-};
+use reflex::core::{Expression, ExpressionFactory, HeapAllocator};
 use serde_json::{Map, Value};
 
 pub mod stdlib;
@@ -50,15 +47,13 @@ pub fn hydrate<T: Expression>(
     allocator: &impl HeapAllocator<T>,
 ) -> Result<T, String> {
     match value {
-        Value::Null => Ok(factory.create_value_term(ValueTerm::Null)),
-        Value::Bool(value) => Ok(factory.create_value_term(ValueTerm::Boolean(value))),
-        Value::String(value) => {
-            Ok(factory.create_value_term(ValueTerm::String(allocator.create_string(value))))
-        }
+        Value::Null => Ok(factory.create_nil_term()),
+        Value::Bool(value) => Ok(factory.create_boolean_term(value)),
+        Value::String(value) => Ok(factory.create_string_term(allocator.create_string(value))),
         Value::Number(value) => match value.as_i64() {
-            Some(value) => Ok(factory.create_value_term(ValueTerm::Int(value as i32))),
+            Some(value) => Ok(factory.create_int_term(value as i32)),
             None => match value.as_f64() {
-                Some(value) => Ok(factory.create_value_term(ValueTerm::Float(value))),
+                Some(value) => Ok(factory.create_float_term(value)),
                 None => Err(format!(
                     "JSON deserialization encountered invalid number: {}",
                     value
@@ -105,7 +100,7 @@ mod tests {
     use reflex::{
         allocator::DefaultAllocator,
         core::{ExpressionFactory, HeapAllocator},
-        lang::{create_struct, SharedTermFactory, ValueTerm},
+        lang::{create_struct, SharedTermFactory},
         stdlib::Stdlib,
     };
 
@@ -115,73 +110,73 @@ mod tests {
     fn stringify_primitives() {
         let factory = SharedTermFactory::<Stdlib>::default();
         assert_eq!(
-            stringify(&factory.create_value_term(ValueTerm::Symbol(3))),
+            stringify(&factory.create_symbol_term(3)),
             Err(String::from(
                 "JSON serialization failed: Unable to serialize term: <symbol:3>"
             )),
         );
         assert_eq!(
-            stringify(&factory.create_value_term(ValueTerm::Null)),
+            stringify(&factory.create_nil_term()),
             Ok(String::from("null")),
         );
         assert_eq!(
-            stringify(&factory.create_value_term(ValueTerm::Boolean(false))),
+            stringify(&factory.create_boolean_term(false)),
             Ok(String::from("false")),
         );
         assert_eq!(
-            stringify(&factory.create_value_term(ValueTerm::Boolean(true))),
+            stringify(&factory.create_boolean_term(true)),
             Ok(String::from("true")),
         );
         assert_eq!(
-            stringify(&factory.create_value_term(ValueTerm::Int(3))),
+            stringify(&factory.create_int_term(3)),
             Ok(String::from("3")),
         );
         assert_eq!(
-            stringify(&factory.create_value_term(ValueTerm::Int(0))),
+            stringify(&factory.create_int_term(0)),
             Ok(String::from("0")),
         );
         assert_eq!(
-            stringify(&factory.create_value_term(ValueTerm::Int(-0))),
+            stringify(&factory.create_int_term(-0)),
             Ok(String::from("0")),
         );
         assert_eq!(
-            stringify(&factory.create_value_term(ValueTerm::Int(-3))),
+            stringify(&factory.create_int_term(-3)),
             Ok(String::from("-3")),
         );
         assert_eq!(
-            stringify(&factory.create_value_term(ValueTerm::Float(3.142))),
+            stringify(&factory.create_float_term(3.142)),
             Ok(String::from("3.142")),
         );
         assert_eq!(
-            stringify(&factory.create_value_term(ValueTerm::Float(3.0))),
+            stringify(&factory.create_float_term(3.0)),
             Ok(String::from("3.0")),
         );
         assert_eq!(
-            stringify(&factory.create_value_term(ValueTerm::Float(0.0))),
+            stringify(&factory.create_float_term(0.0)),
             Ok(String::from("0.0")),
         );
         assert_eq!(
-            stringify(&factory.create_value_term(ValueTerm::Float(-0.0))),
+            stringify(&factory.create_float_term(-0.0)),
             Ok(String::from("-0.0")),
         );
         assert_eq!(
-            stringify(&factory.create_value_term(ValueTerm::Float(-3.0))),
+            stringify(&factory.create_float_term(-3.0)),
             Ok(String::from("-3.0")),
         );
         assert_eq!(
-            stringify(&factory.create_value_term(ValueTerm::Float(-3.142))),
+            stringify(&factory.create_float_term(-3.142)),
             Ok(String::from("-3.142")),
         );
         assert_eq!(
-            stringify(&factory.create_value_term(ValueTerm::String(String::from("")))),
+            stringify(&factory.create_string_term(String::from(""))),
             Ok(String::from("\"\"")),
         );
         assert_eq!(
-            stringify(&factory.create_value_term(ValueTerm::String(String::from("foo")))),
+            stringify(&factory.create_string_term(String::from("foo"))),
             Ok(String::from("\"foo\"")),
         );
         assert_eq!(
-            stringify(&factory.create_value_term(ValueTerm::String(String::from("\"\'\n\r")))),
+            stringify(&factory.create_string_term(String::from("\"\'\n\r"))),
             Ok(String::from("\"\\\"\'\\n\\r\"")),
         );
     }
@@ -196,9 +191,9 @@ mod tests {
         );
         assert_eq!(
             stringify(&factory.create_vector_term(allocator.create_list(vec![
-                factory.create_value_term(ValueTerm::Int(3)),
-                factory.create_value_term(ValueTerm::Int(4)),
-                factory.create_value_term(ValueTerm::Int(5)),
+                factory.create_int_term(3),
+                factory.create_int_term(4),
+                factory.create_int_term(5),
             ]))),
             Ok(String::from("[3,4,5]")),
         );
@@ -215,18 +210,9 @@ mod tests {
         assert_eq!(
             stringify(&create_struct(
                 vec![
-                    (
-                        String::from("first"),
-                        factory.create_value_term(ValueTerm::Int(3)),
-                    ),
-                    (
-                        String::from("second"),
-                        factory.create_value_term(ValueTerm::Int(4)),
-                    ),
-                    (
-                        String::from("third"),
-                        factory.create_value_term(ValueTerm::Int(5)),
-                    )
+                    (String::from("first"), factory.create_int_term(3),),
+                    (String::from("second"), factory.create_int_term(4),),
+                    (String::from("third"), factory.create_int_term(5),)
                 ],
                 &factory,
                 &allocator
@@ -235,10 +221,7 @@ mod tests {
         );
         assert_eq!(
             stringify(&create_struct(
-                vec![(
-                    String::from("\"\'\n\r"),
-                    factory.create_value_term(ValueTerm::Int(3)),
-                )],
+                vec![(String::from("\"\'\n\r"), factory.create_int_term(3),)],
                 &factory,
                 &allocator,
             )),
@@ -252,43 +235,43 @@ mod tests {
         let allocator = DefaultAllocator::default();
         assert_eq!(
             parse("3", &factory, &allocator),
-            Ok(factory.create_value_term(ValueTerm::Int(3))),
+            Ok(factory.create_int_term(3)),
         );
         assert_eq!(
             parse("0", &factory, &allocator),
-            Ok(factory.create_value_term(ValueTerm::Int(0))),
+            Ok(factory.create_int_term(0)),
         );
         assert_eq!(
             parse("-0", &factory, &allocator),
-            Ok(factory.create_value_term(ValueTerm::Float(-0.0))),
+            Ok(factory.create_float_term(-0.0)),
         );
         assert_eq!(
             parse("-3", &factory, &allocator),
-            Ok(factory.create_value_term(ValueTerm::Int(-3))),
+            Ok(factory.create_int_term(-3)),
         );
         assert_eq!(
             parse("3.142", &factory, &allocator),
-            Ok(factory.create_value_term(ValueTerm::Float(3.142))),
+            Ok(factory.create_float_term(3.142)),
         );
         assert_eq!(
             parse("3.0", &factory, &allocator),
-            Ok(factory.create_value_term(ValueTerm::Float(3.0))),
+            Ok(factory.create_float_term(3.0)),
         );
         assert_eq!(
             parse("0.0", &factory, &allocator),
-            Ok(factory.create_value_term(ValueTerm::Float(0.0))),
+            Ok(factory.create_float_term(0.0)),
         );
         assert_eq!(
             parse("-0.0", &factory, &allocator),
-            Ok(factory.create_value_term(ValueTerm::Float(-0.0))),
+            Ok(factory.create_float_term(-0.0)),
         );
         assert_eq!(
             parse("-3.0", &factory, &allocator),
-            Ok(factory.create_value_term(ValueTerm::Float(-3.0))),
+            Ok(factory.create_float_term(-3.0)),
         );
         assert_eq!(
             parse("-3.142", &factory, &allocator),
-            Ok(factory.create_value_term(ValueTerm::Float(-3.142))),
+            Ok(factory.create_float_term(-3.142)),
         );
     }
 }

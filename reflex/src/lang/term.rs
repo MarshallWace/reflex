@@ -8,26 +8,36 @@ use serde::{Deserialize, Serialize};
 
 mod application;
 pub use application::*;
+mod boolean;
+pub use boolean::*;
 mod builtin;
 pub use builtin::*;
 mod compiled;
 pub use compiled::*;
+mod float;
+pub use float::*;
+mod int;
+pub use int::*;
 mod lambda;
 pub use lambda::*;
 mod r#let;
 pub use r#let::*;
+mod nil;
+pub use nil::*;
 mod partial;
 pub use partial::*;
 mod recursive;
 pub use recursive::*;
 mod signal;
 pub use signal::*;
+mod string;
+pub use string::*;
+mod symbol;
+pub use symbol::*;
 mod r#struct;
 pub use r#struct::*;
 mod tuple;
 pub use tuple::*;
-mod value;
-pub use value::*;
 mod variable;
 pub use variable::*;
 
@@ -58,7 +68,12 @@ pub enum Term<T: Expression> {
         serialize = "<T as Expression>::String: Serialize",
         deserialize = "<T as Expression>::String: Deserialize<'de>"
     ))]
-    Value(ValueTerm<T::String>),
+    Nil(NilTerm),
+    Boolean(BooleanTerm),
+    Int(IntTerm),
+    Float(FloatTerm),
+    String(StringTerm<T::String>),
+    Symbol(SymbolTerm),
     StaticVariable(StaticVariableTerm),
     DynamicVariable(DynamicVariableTerm<T>),
     Let(LetTerm<T>),
@@ -86,7 +101,12 @@ impl<T: Expression + Applicable<T>> Expression for Term<T> {
 impl<T: Expression + Applicable<T>> GraphNode for Term<T> {
     fn capture_depth(&self) -> StackOffset {
         match self {
-            Self::Value(term) => term.capture_depth(),
+            Self::Nil(term) => term.capture_depth(),
+            Self::Boolean(term) => term.capture_depth(),
+            Self::Int(term) => term.capture_depth(),
+            Self::Float(term) => term.capture_depth(),
+            Self::String(term) => term.capture_depth(),
+            Self::Symbol(term) => term.capture_depth(),
             Self::StaticVariable(term) => term.capture_depth(),
             Self::DynamicVariable(term) => term.capture_depth(),
             Self::Let(term) => term.capture_depth(),
@@ -107,7 +127,12 @@ impl<T: Expression + Applicable<T>> GraphNode for Term<T> {
     }
     fn free_variables(&self) -> HashSet<StackOffset> {
         match self {
-            Self::Value(term) => term.free_variables(),
+            Self::Nil(term) => term.free_variables(),
+            Self::Boolean(term) => term.free_variables(),
+            Self::Int(term) => term.free_variables(),
+            Self::Float(term) => term.free_variables(),
+            Self::String(term) => term.free_variables(),
+            Self::Symbol(term) => term.free_variables(),
             Self::StaticVariable(term) => term.free_variables(),
             Self::DynamicVariable(term) => term.free_variables(),
             Self::Let(term) => term.free_variables(),
@@ -128,7 +153,12 @@ impl<T: Expression + Applicable<T>> GraphNode for Term<T> {
     }
     fn count_variable_usages(&self, offset: StackOffset) -> usize {
         match self {
-            Self::Value(term) => term.count_variable_usages(offset),
+            Self::Nil(term) => term.count_variable_usages(offset),
+            Self::Boolean(term) => term.count_variable_usages(offset),
+            Self::Int(term) => term.count_variable_usages(offset),
+            Self::Float(term) => term.count_variable_usages(offset),
+            Self::String(term) => term.count_variable_usages(offset),
+            Self::Symbol(term) => term.count_variable_usages(offset),
             Self::StaticVariable(term) => term.count_variable_usages(offset),
             Self::DynamicVariable(term) => term.count_variable_usages(offset),
             Self::Let(term) => term.count_variable_usages(offset),
@@ -149,7 +179,12 @@ impl<T: Expression + Applicable<T>> GraphNode for Term<T> {
     }
     fn dynamic_dependencies(&self, deep: bool) -> DependencyList {
         match self {
-            Self::Value(term) => term.dynamic_dependencies(deep),
+            Self::Nil(term) => term.dynamic_dependencies(deep),
+            Self::Boolean(term) => term.dynamic_dependencies(deep),
+            Self::Int(term) => term.dynamic_dependencies(deep),
+            Self::Float(term) => term.dynamic_dependencies(deep),
+            Self::String(term) => term.dynamic_dependencies(deep),
+            Self::Symbol(term) => term.dynamic_dependencies(deep),
             Self::StaticVariable(term) => term.dynamic_dependencies(deep),
             Self::DynamicVariable(term) => term.dynamic_dependencies(deep),
             Self::Let(term) => term.dynamic_dependencies(deep),
@@ -170,7 +205,12 @@ impl<T: Expression + Applicable<T>> GraphNode for Term<T> {
     }
     fn has_dynamic_dependencies(&self, deep: bool) -> bool {
         match self {
-            Self::Value(term) => term.has_dynamic_dependencies(deep),
+            Self::Nil(term) => term.has_dynamic_dependencies(deep),
+            Self::Boolean(term) => term.has_dynamic_dependencies(deep),
+            Self::Int(term) => term.has_dynamic_dependencies(deep),
+            Self::Float(term) => term.has_dynamic_dependencies(deep),
+            Self::String(term) => term.has_dynamic_dependencies(deep),
+            Self::Symbol(term) => term.has_dynamic_dependencies(deep),
             Self::StaticVariable(term) => term.has_dynamic_dependencies(deep),
             Self::DynamicVariable(term) => term.has_dynamic_dependencies(deep),
             Self::Let(term) => term.has_dynamic_dependencies(deep),
@@ -191,7 +231,12 @@ impl<T: Expression + Applicable<T>> GraphNode for Term<T> {
     }
     fn is_static(&self) -> bool {
         match self {
-            Self::Value(term) => term.is_static(),
+            Self::Nil(term) => term.is_static(),
+            Self::Boolean(term) => term.is_static(),
+            Self::Int(term) => term.is_static(),
+            Self::Float(term) => term.is_static(),
+            Self::String(term) => term.is_static(),
+            Self::Symbol(term) => term.is_static(),
             Self::StaticVariable(term) => term.is_static(),
             Self::DynamicVariable(term) => term.is_static(),
             Self::Let(term) => term.is_static(),
@@ -212,7 +257,12 @@ impl<T: Expression + Applicable<T>> GraphNode for Term<T> {
     }
     fn is_atomic(&self) -> bool {
         match self {
-            Self::Value(term) => term.is_atomic(),
+            Self::Nil(term) => term.is_atomic(),
+            Self::Boolean(term) => term.is_atomic(),
+            Self::Int(term) => term.is_atomic(),
+            Self::Float(term) => term.is_atomic(),
+            Self::String(term) => term.is_atomic(),
+            Self::Symbol(term) => term.is_atomic(),
             Self::StaticVariable(term) => term.is_atomic(),
             Self::DynamicVariable(term) => term.is_atomic(),
             Self::Let(term) => term.is_atomic(),
@@ -233,7 +283,12 @@ impl<T: Expression + Applicable<T>> GraphNode for Term<T> {
     }
     fn is_complex(&self) -> bool {
         match self {
-            Self::Value(term) => term.is_complex(),
+            Self::Nil(term) => term.is_complex(),
+            Self::Boolean(term) => term.is_complex(),
+            Self::Int(term) => term.is_complex(),
+            Self::Float(term) => term.is_complex(),
+            Self::String(term) => term.is_complex(),
+            Self::Symbol(term) => term.is_complex(),
             Self::StaticVariable(term) => term.is_complex(),
             Self::DynamicVariable(term) => term.is_complex(),
             Self::Let(term) => term.is_complex(),
@@ -523,7 +578,12 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>> 
         compiler: &mut Compiler,
     ) -> Result<Program, String> {
         match self {
-            Self::Value(term) => term.compile(eager, stack_offset, factory, allocator, compiler),
+            Self::Nil(term) => term.compile(eager, stack_offset, factory, allocator, compiler),
+            Self::Boolean(term) => term.compile(eager, stack_offset, factory, allocator, compiler),
+            Self::Int(term) => term.compile(eager, stack_offset, factory, allocator, compiler),
+            Self::Float(term) => term.compile(eager, stack_offset, factory, allocator, compiler),
+            Self::String(term) => term.compile(eager, stack_offset, factory, allocator, compiler),
+            Self::Symbol(term) => term.compile(eager, stack_offset, factory, allocator, compiler),
             Self::StaticVariable(term) => {
                 term.compile(eager, stack_offset, factory, allocator, compiler)
             }
@@ -560,7 +620,12 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>> 
 impl<T: Expression> std::fmt::Display for Term<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Value(term) => std::fmt::Display::fmt(term, f),
+            Self::Nil(term) => std::fmt::Display::fmt(term, f),
+            Self::Boolean(term) => std::fmt::Display::fmt(term, f),
+            Self::Int(term) => std::fmt::Display::fmt(term, f),
+            Self::Float(term) => std::fmt::Display::fmt(term, f),
+            Self::String(term) => std::fmt::Display::fmt(term, f),
+            Self::Symbol(term) => std::fmt::Display::fmt(term, f),
             Self::StaticVariable(term) => std::fmt::Display::fmt(term, f),
             Self::DynamicVariable(term) => std::fmt::Display::fmt(term, f),
             Self::Let(term) => std::fmt::Display::fmt(term, f),
@@ -583,23 +648,28 @@ impl<T: Expression> std::fmt::Display for Term<T> {
 impl<T: Expression> SerializeJson for Term<T> {
     fn to_json(&self) -> Result<serde_json::Value, String> {
         match self {
-            Term::Value(term) => term.to_json(),
-            Term::StaticVariable(term) => term.to_json(),
-            Term::DynamicVariable(term) => term.to_json(),
-            Term::Let(term) => term.to_json(),
-            Term::Lambda(term) => term.to_json(),
-            Term::Application(term) => term.to_json(),
-            Term::PartialApplication(term) => term.to_json(),
-            Term::Recursive(term) => term.to_json(),
-            Term::CompiledFunction(term) => term.to_json(),
-            Term::Builtin(term) => term.to_json(),
-            Term::Tuple(term) => term.to_json(),
-            Term::Struct(term) => term.to_json(),
-            Term::Constructor(term) => term.to_json(),
-            Term::Vector(term) => term.to_json(),
-            Term::HashMap(term) => term.to_json(),
-            Term::HashSet(term) => term.to_json(),
-            Term::Signal(term) => term.to_json(),
+            Self::Nil(term) => term.to_json(),
+            Self::Boolean(term) => term.to_json(),
+            Self::Int(term) => term.to_json(),
+            Self::Float(term) => term.to_json(),
+            Self::String(term) => term.to_json(),
+            Self::Symbol(term) => term.to_json(),
+            Self::StaticVariable(term) => term.to_json(),
+            Self::DynamicVariable(term) => term.to_json(),
+            Self::Let(term) => term.to_json(),
+            Self::Lambda(term) => term.to_json(),
+            Self::Application(term) => term.to_json(),
+            Self::PartialApplication(term) => term.to_json(),
+            Self::Recursive(term) => term.to_json(),
+            Self::CompiledFunction(term) => term.to_json(),
+            Self::Builtin(term) => term.to_json(),
+            Self::Tuple(term) => term.to_json(),
+            Self::Struct(term) => term.to_json(),
+            Self::Constructor(term) => term.to_json(),
+            Self::Vector(term) => term.to_json(),
+            Self::HashMap(term) => term.to_json(),
+            Self::HashSet(term) => term.to_json(),
+            Self::Signal(term) => term.to_json(),
         }
     }
 }
@@ -609,7 +679,7 @@ mod test {
     use super::*;
     use crate::allocator::DefaultAllocator;
     use crate::core::SignalType;
-    use crate::lang::{CachedSharedTerm, SharedTermFactory, ValueTerm};
+    use crate::lang::{CachedSharedTerm, SharedTermFactory};
     use crate::parser::sexpr::parse;
     use crate::stdlib::Stdlib;
 
@@ -618,7 +688,7 @@ mod test {
         let factory = SharedTermFactory::<Stdlib>::default();
         let allocator = DefaultAllocator::default();
 
-        let input = factory.create_value_term(ValueTerm::Int(5));
+        let input = factory.create_int_term(5);
         let serialized = serde_json::to_string(&input).unwrap();
         let deserialized: CachedSharedTerm<Stdlib> = serde_json::from_str(&serialized).unwrap();
         assert_eq!(input, deserialized);
@@ -626,7 +696,7 @@ mod test {
         let input =
             factory.create_signal_term(allocator.create_signal_list([allocator.create_signal(
                 SignalType::Custom(String::from("foo")),
-                allocator.create_unit_list(factory.create_value_term(ValueTerm::Int(3))),
+                allocator.create_unit_list(factory.create_int_term(3)),
             )]));
         let serialized = serde_json::to_string(&input).unwrap();
         let deserialized: CachedSharedTerm<Stdlib> = serde_json::from_str(&serialized).unwrap();

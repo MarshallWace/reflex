@@ -16,7 +16,6 @@ use reflex::{
         Expression, ExpressionFactory, HeapAllocator, Signal, SignalType, StateToken, StringValue,
     },
     hash::HashId,
-    lang::ValueTerm,
 };
 use reflex_dispatcher::{
     Action, Actor, ActorTransition, HandlerContext, InboundAction, MessageData, OutboundAction,
@@ -461,12 +460,9 @@ fn parse_scan_effect_args<T: Expression>(
     let target = args.next().unwrap();
     let seed = args.next().unwrap();
     let iteratee = args.next().unwrap();
-    if let Some(name) = factory
-        .match_value_term(name)
-        .and_then(|value| value.match_string())
-    {
+    if let Some(name) = factory.match_string_term(name) {
         Ok(ScanEffectArgs {
-            name: String::from(name.as_str()),
+            name: String::from(name.value.as_str()),
             target: target.clone(),
             seed: seed.clone(),
             iteratee: iteratee.clone(),
@@ -510,6 +506,6 @@ fn create_error_expression<T: Expression>(
 ) -> T {
     factory.create_signal_term(allocator.create_signal_list(once(allocator.create_signal(
         SignalType::Error,
-        allocator.create_unit_list(factory.create_value_term(ValueTerm::String(message.into()))),
+        allocator.create_unit_list(factory.create_string_term(message.into())),
     ))))
 }

@@ -26,7 +26,7 @@ pub mod lang {
     pub(crate) use term::*;
     pub use term::{
         as_integer, create_struct, deduplicate_hashmap_entries, deduplicate_hashset_entries,
-        is_integer, ValueTerm,
+        is_integer,
     };
 }
 pub mod stdlib;

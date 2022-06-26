@@ -4,12 +4,9 @@
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use uuid::Uuid;
 
-use crate::{
-    core::{
-        uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
-        FunctionArity, HeapAllocator, Uid,
-    },
-    lang::ValueTerm,
+use crate::core::{
+    uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
+    FunctionArity, HeapAllocator, Uid,
 };
 
 pub struct Abs {}
@@ -44,14 +41,12 @@ impl<T: Expression> Applicable<T> for Abs {
         _cache: &mut impl EvaluationCache<T>,
     ) -> Result<T, String> {
         let operand = args.next().unwrap();
-        let result = match factory.match_value_term(&operand) {
-            Some(ValueTerm::Int(operand)) => {
-                Some(factory.create_value_term(ValueTerm::Int(operand.abs())))
-            }
-            Some(ValueTerm::Float(operand)) => {
-                Some(factory.create_value_term(ValueTerm::Float(operand.abs())))
-            }
-            _ => None,
+        let result = if let Some(operand) = factory.match_int_term(&operand) {
+            Some(factory.create_int_term(operand.value.abs()))
+        } else if let Some(operand) = factory.match_float_term(&operand) {
+            Some(factory.create_float_term(operand.value.abs()))
+        } else {
+            None
         };
         match result {
             Some(result) => Ok(result),

@@ -6,7 +6,7 @@ use std::{borrow::Cow, time::Duration};
 use crc::{Crc, CRC_32_ISCSI};
 use reflex::{
     core::{Expression, ExpressionFactory, HeapAllocator, StringValue},
-    lang::{create_struct, is_integer, term::StructTerm, ValueTerm},
+    lang::{create_struct, is_integer, term::StructTerm},
 };
 
 #[derive(PartialEq, Eq, Clone, Hash)]
@@ -35,11 +35,11 @@ pub const fn get_grpc_schema_checksum(input: &[u8]) -> GrpcServiceId {
 }
 
 pub fn create_null<T: Expression>(factory: &impl ExpressionFactory<T>) -> T {
-    factory.create_value_term(ValueTerm::Null)
+    factory.create_nil_term()
 }
 
 pub fn create_integer<T: Expression>(value: i32, factory: &impl ExpressionFactory<T>) -> T {
-    factory.create_value_term(ValueTerm::Int(value))
+    factory.create_int_term(value)
 }
 
 pub fn create_optional_integer<T: Expression>(
@@ -57,11 +57,11 @@ pub fn create_optional_integer<T: Expression>(
 }
 
 pub fn create_boolean<T: Expression>(value: bool, factory: &impl ExpressionFactory<T>) -> T {
-    factory.create_value_term(ValueTerm::Boolean(value))
+    factory.create_boolean_term(value)
 }
 
 pub fn create_float<T: Expression>(value: f64, factory: &impl ExpressionFactory<T>) -> T {
-    factory.create_value_term(ValueTerm::Float(value))
+    factory.create_float_term(value)
 }
 
 pub fn create_string<T: Expression>(
@@ -69,7 +69,7 @@ pub fn create_string<T: Expression>(
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
 ) -> T {
-    factory.create_value_term(ValueTerm::String(allocator.create_string(value)))
+    factory.create_string_term(allocator.create_string(value))
 }
 
 pub fn create_byte_string<T: Expression>(
@@ -108,13 +108,10 @@ pub fn create_duration<T: Expression>(
 ) -> T {
     create_object(
         [
-            (
-                "seconds",
-                factory.create_value_term(ValueTerm::Int(value.as_secs() as i32)),
-            ),
+            ("seconds", factory.create_int_term(value.as_secs() as i32)),
             (
                 "nanos",
-                factory.create_value_term(ValueTerm::Int(value.subsec_nanos() as i32)),
+                factory.create_int_term(value.subsec_nanos() as i32),
             ),
         ],
         factory,
@@ -174,7 +171,7 @@ pub fn get_optional_serialized_object_field<'a, T: Expression>(
     factory: &impl ExpressionFactory<T>,
 ) -> Option<&'a T> {
     value.get(key).and_then(|value| {
-        if let Some(ValueTerm::Null) = factory.match_value_term(value) {
+        if let Some(_) = factory.match_nil_term(value) {
             None
         } else {
             Some(value)
@@ -186,8 +183,8 @@ pub fn parse_boolean<T: Expression>(
     value: &T,
     factory: &impl ExpressionFactory<T>,
 ) -> Result<bool, String> {
-    match factory.match_value_term(value) {
-        Some(ValueTerm::Boolean(value)) => Ok(*value),
+    match factory.match_boolean_term(value) {
+        Some(term) => Ok(term.value),
         _ => Err(format!("Expected Boolean, received {}", value)),
     }
 }
@@ -203,10 +200,12 @@ pub fn parse_integer<T: Expression>(
     value: &T,
     factory: &impl ExpressionFactory<T>,
 ) -> Result<i32, String> {
-    match factory.match_value_term(value) {
-        Some(ValueTerm::Int(value)) => Ok(*value),
-        Some(ValueTerm::Float(value)) if is_integer(*value) => Ok(*value as i32),
-        _ => Err(format!("Expected Int, received {}", value)),
+    match factory.match_int_term(value) {
+        Some(term) => Ok(term.value),
+        _ => match factory.match_float_term(value) {
+            Some(term) if is_integer(term.value) => Ok(term.value as i32),
+            _ => Err(format!("Expected Int, received {}", value)),
+        },
     }
 }
 
@@ -221,10 +220,12 @@ pub fn parse_float<T: Expression>(
     value: &T,
     factory: &impl ExpressionFactory<T>,
 ) -> Result<f64, String> {
-    match factory.match_value_term(value) {
-        Some(ValueTerm::Int(value)) => Ok(*value as f64),
-        Some(ValueTerm::Float(value)) => Ok(*value),
-        _ => Err(format!("Expected Float, received {}", value)),
+    match factory.match_float_term(value) {
+        Some(term) => Ok(term.value),
+        _ => match factory.match_int_term(value) {
+            Some(term) => Ok(term.value as f64),
+            _ => Err(format!("Expected Float, received {}", value)),
+        },
     }
 }
 
@@ -239,8 +240,8 @@ pub fn parse_string<T: Expression>(
     value: &T,
     factory: &impl ExpressionFactory<T>,
 ) -> Result<String, String> {
-    match factory.match_value_term(value) {
-        Some(ValueTerm::String(value)) => Ok(String::from(value.as_str())),
+    match factory.match_string_term(value) {
+        Some(term) => Ok(String::from(term.value.as_str())),
         _ => Err(format!("Expected String, received {}", value)),
     }
 }
@@ -257,8 +258,8 @@ pub fn parse_enum<V: Into<i32> + Default, T: Expression>(
     value: &T,
     factory: &impl ExpressionFactory<T>,
 ) -> Result<V, String> {
-    match factory.match_value_term(value) {
-        Some(ValueTerm::String(value)) => parse(value.as_str()),
+    match factory.match_string_term(value) {
+        Some(term) => parse(term.value.as_str()),
         _ => Err(format!("Expected enum value, received {}", value)),
     }
 }

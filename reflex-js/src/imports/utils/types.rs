@@ -4,7 +4,7 @@
 use crate::stdlib::Stdlib as JsStdlib;
 use reflex::{
     core::{Expression, ExpressionFactory, HeapAllocator},
-    lang::{create_struct, ValueTerm},
+    lang::create_struct,
 };
 
 pub(crate) fn import_types<T: Expression>(
@@ -14,7 +14,7 @@ pub(crate) fn import_types<T: Expression>(
 where
     T::Builtin: From<JsStdlib>,
 {
-    let null = factory.create_value_term(ValueTerm::Null);
+    let null = factory.create_nil_term();
     create_struct(
         vec![
             (String::from("Boolean"), null.clone()),
@@ -57,7 +57,7 @@ mod tests {
             evaluate, DependencyList, EvaluationResult, ExpressionFactory, HeapAllocator,
             StateCache,
         },
-        lang::{SharedTermFactory, ValueTerm},
+        lang::SharedTermFactory,
         stdlib::Stdlib,
     };
 
@@ -136,9 +136,9 @@ mod tests {
                         allocator.create_static_string("baz"),
                     ]),
                     allocator.create_list(vec![
-                        factory.create_value_term(ValueTerm::Float(3.0)),
-                        factory.create_value_term(ValueTerm::Float(4.0)),
-                        factory.create_value_term(ValueTerm::Float(5.0)),
+                        factory.create_float_term(3.0),
+                        factory.create_float_term(4.0),
+                        factory.create_float_term(5.0),
                     ])
                 ),
                 DependencyList::empty(),
@@ -178,9 +178,9 @@ mod tests {
                         allocator.create_static_string("baz"),
                     ]),
                     allocator.create_list(vec![
-                        factory.create_value_term(ValueTerm::Float(3.0)),
-                        factory.create_value_term(ValueTerm::Float(4.0)),
-                        factory.create_value_term(ValueTerm::Float(5.0)),
+                        factory.create_float_term(3.0),
+                        factory.create_float_term(4.0),
+                        factory.create_float_term(5.0),
                     ])
                 ),
                 DependencyList::empty(),
@@ -223,22 +223,22 @@ mod tests {
                         factory.create_application_term(
                             factory.create_builtin_term(Stdlib::Add),
                             allocator.create_pair(
-                                factory.create_value_term(ValueTerm::Float(3.0)),
-                                factory.create_value_term(ValueTerm::Float(1.0)),
+                                factory.create_float_term(3.0),
+                                factory.create_float_term(1.0),
                             ),
                         ),
                         factory.create_application_term(
                             factory.create_builtin_term(Stdlib::Add),
                             allocator.create_pair(
-                                factory.create_value_term(ValueTerm::Float(4.0)),
-                                factory.create_value_term(ValueTerm::Float(1.0)),
+                                factory.create_float_term(4.0),
+                                factory.create_float_term(1.0),
                             ),
                         ),
                         factory.create_application_term(
                             factory.create_builtin_term(Stdlib::Add),
                             allocator.create_pair(
-                                factory.create_value_term(ValueTerm::Float(5.0)),
-                                factory.create_value_term(ValueTerm::Float(1.0)),
+                                factory.create_float_term(5.0),
+                                factory.create_float_term(1.0),
                             ),
                         ),
                     ])
@@ -272,10 +272,7 @@ mod tests {
         );
         assert_eq!(
             result,
-            EvaluationResult::new(
-                factory.create_value_term(ValueTerm::Float(4.0)),
-                DependencyList::empty(),
-            ),
+            EvaluationResult::new(factory.create_float_term(4.0), DependencyList::empty(),),
         );
     }
 }

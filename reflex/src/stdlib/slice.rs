@@ -7,7 +7,7 @@ use crate::{
         uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
         FunctionArity, HeapAllocator, Uid, Uuid,
     },
-    lang::{as_integer, ValueTerm},
+    lang::as_integer,
 };
 
 pub struct Slice {}
@@ -76,12 +76,14 @@ impl<T: Expression> Applicable<T> for Slice {
 }
 
 fn parse_integer_argument<T: Expression>(
-    value: &T,
+    term: &T,
     factory: &impl ExpressionFactory<T>,
 ) -> Option<i32> {
-    match factory.match_value_term(value) {
-        Some(ValueTerm::Int(value)) => Some(*value),
-        Some(ValueTerm::Float(value)) => as_integer(*value),
-        _ => None,
+    match factory.match_int_term(term) {
+        Some(term) => Some(term.value),
+        _ => match factory.match_float_term(term) {
+            Some(term) => as_integer(term.value),
+            _ => None,
+        },
     }
 }

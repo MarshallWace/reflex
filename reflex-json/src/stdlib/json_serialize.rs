@@ -1,13 +1,9 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
-use reflex::{
-    core::{
-        uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
-        FunctionArity, HeapAllocator, Uid, Uuid,
-    },
-    lang::ValueTerm,
+use reflex::core::{
+    uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
+    FunctionArity, HeapAllocator, Uid, Uuid,
 };
 
 pub struct JsonSerialize {}
@@ -44,9 +40,7 @@ impl<T: Expression> Applicable<T> for JsonSerialize {
         let mut args = args.into_iter();
         let source = args.next().unwrap();
         match crate::stringify(&source) {
-            Ok(result) => {
-                Ok(factory.create_value_term(ValueTerm::String(allocator.create_string(result))))
-            }
+            Ok(result) => Ok(factory.create_string_term(allocator.create_string(result))),
             Err(error) => Err(format!("JSON serialization failed: {}", error)),
         }
     }

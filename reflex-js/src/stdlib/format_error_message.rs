@@ -2,12 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
-use reflex::{
-    core::{
-        uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
-        FunctionArity, HeapAllocator, StringValue, Uid, Uuid,
-    },
-    lang::ValueTerm,
+use reflex::core::{
+    uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
+    FunctionArity, HeapAllocator, StringValue, Uid, Uuid,
 };
 
 use super::format_value;
@@ -82,7 +79,7 @@ impl<T: Expression> Applicable<T> for FormatErrorMessage {
                 }
             })
             .unwrap_or_else(|| String::from(UNKNOWN_ERROR_MESSAGE));
-        Ok(factory.create_value_term(ValueTerm::String(allocator.create_string(message))))
+        Ok(factory.create_string_term(allocator.create_string(message)))
     }
 }
 
@@ -90,15 +87,13 @@ fn parse_error_message<T: Expression>(
     target: &T,
     factory: &impl ExpressionFactory<T>,
 ) -> Option<String> {
-    if let Some(value) = factory.match_value_term(&target) {
-        Some(format_value(value))
+    if let Some(value) = format_value(target, factory) {
+        Some(value)
     } else if let Some(value) = factory.match_struct_term(&target) {
         value.get("message").and_then(|value| {
-            factory.match_value_term(value).and_then(|value| {
-                value
-                    .match_string()
-                    .map(|value| String::from(value.as_str()))
-            })
+            factory
+                .match_string_term(value)
+                .map(|message| String::from(message.value.as_str()))
         })
     } else {
         None

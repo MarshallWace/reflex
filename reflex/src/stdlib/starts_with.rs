@@ -2,12 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
-use crate::{
-    core::{
-        uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
-        FunctionArity, HeapAllocator, StringValue, Uid, Uuid,
-    },
-    lang::ValueTerm,
+use crate::core::{
+    uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
+    FunctionArity, HeapAllocator, StringValue, Uid, Uuid,
 };
 
 pub struct StartsWith {}
@@ -44,11 +41,12 @@ impl<T: Expression> Applicable<T> for StartsWith {
         let left = args.next().unwrap();
         let right = args.next().unwrap();
         match (
-            factory.match_value_term(&left),
-            factory.match_value_term(&right),
+            factory.match_string_term(&left),
+            factory.match_string_term(&right),
         ) {
-            (Some(ValueTerm::String(left)), Some(ValueTerm::String(right))) => Ok(factory
-                .create_value_term(ValueTerm::Boolean(left.as_str().ends_with(right.as_str())))),
+            (Some(left), Some(right)) => Ok(
+                factory.create_boolean_term(left.value.as_str().ends_with(right.value.as_str()))
+            ),
             _ => Err(format!(
                 "Expected (String, String), received ({}, {})",
                 left, right,

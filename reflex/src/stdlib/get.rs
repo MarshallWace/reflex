@@ -7,7 +7,7 @@ use crate::{
         uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
         FunctionArity, HeapAllocator, StringValue, StructFieldOffset, Uid, Uuid,
     },
-    lang::{as_integer, ValueTerm},
+    lang::as_integer,
 };
 
 pub struct Get {}
@@ -44,13 +44,15 @@ impl<T: Expression> Applicable<T> for Get {
         let target = args.next().unwrap();
         let key = args.next().unwrap();
         if let Some(target) = factory.match_tuple_term(&target) {
-            let field_offset = match factory.match_value_term(&key) {
-                Some(ValueTerm::Int(value)) if *value >= 0 => Some(*value as StructFieldOffset),
-                Some(ValueTerm::Float(value)) => match as_integer(*value) {
-                    Some(value) if value >= 0 => Some(value as StructFieldOffset),
+            let field_offset = match factory.match_int_term(&key) {
+                Some(term) if term.value >= 0 => Some(term.value as StructFieldOffset),
+                _ => match factory.match_float_term(&key) {
+                    Some(term) => match as_integer(term.value) {
+                        Some(value) if value >= 0 => Some(value as StructFieldOffset),
+                        _ => None,
+                    },
                     _ => None,
                 },
-                _ => None,
             };
             let value = field_offset.and_then(|field_offset| target.get(field_offset));
             match value {
@@ -58,8 +60,8 @@ impl<T: Expression> Applicable<T> for Get {
                 None => Err(format!("Invalid field offset: {} on tuple {}", key, target)),
             }
         } else if let Some(target) = factory.match_struct_term(&target) {
-            let field_name = match factory.match_value_term(&key) {
-                Some(ValueTerm::String(key)) => Some(key),
+            let field_name = match factory.match_string_term(&key) {
+                Some(key) => Some(&key.value),
                 _ => None,
             };
             let value = field_name.and_then(|key| target.get(key.as_str()));
@@ -71,13 +73,15 @@ impl<T: Expression> Applicable<T> for Get {
                 )),
             }
         } else if let Some(target) = factory.match_vector_term(&target) {
-            let index = match factory.match_value_term(&key) {
-                Some(ValueTerm::Int(value)) if *value >= 0 => Some(*value as usize),
-                Some(ValueTerm::Float(value)) => match as_integer(*value) {
-                    Some(value) if value >= 0 => Some(value as usize),
+            let index = match factory.match_int_term(&key) {
+                Some(term) if term.value >= 0 => Some(term.value as usize),
+                _ => match factory.match_float_term(&key) {
+                    Some(term) => match as_integer(term.value) {
+                        Some(value) if value >= 0 => Some(value as usize),
+                        _ => None,
+                    },
                     _ => None,
                 },
-                _ => None,
             };
             match index {
                 None => Err(format!(
@@ -86,13 +90,13 @@ impl<T: Expression> Applicable<T> for Get {
                 )),
                 Some(index) => match target.items().get(index) {
                     Some(value) => Ok(value.clone()),
-                    None => Ok(factory.create_value_term(ValueTerm::Null)),
+                    None => Ok(factory.create_nil_term()),
                 },
             }
         } else if let Some(target) = factory.match_hashmap_term(&target) {
             match target.get(&key) {
                 Some(value) => Ok(value.clone()),
-                None => Ok(factory.create_value_term(ValueTerm::Null)),
+                None => Ok(factory.create_nil_term()),
             }
         } else {
             Err(format!("Unable to access field {} on {}", key, target,))

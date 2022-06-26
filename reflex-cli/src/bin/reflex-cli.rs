@@ -47,7 +47,7 @@ use reflex::{
     core::{Expression, ExpressionFactory, Signal, StateCache},
     env::inject_env_vars,
     interpreter::{execute, DefaultInterpreterCache, InterpreterOptions},
-    lang::{term::SignalTerm, CachedSharedTerm, SharedTermFactory, ValueTerm},
+    lang::{term::SignalTerm, CachedSharedTerm, SharedTermFactory},
 };
 
 use reflex_cli::{builtins::CliBuiltins, create_parser, repl, Syntax, SyntaxParser};
@@ -235,7 +235,7 @@ pub async fn main() -> Result<()> {
                 while let Some(value) = results_stream.next().await {
                     let output = match factory.match_signal_term(&value) {
                         None => format!("{}", value),
-                        Some(signal) => format_signal_errors(signal)
+                        Some(signal) => format_signal_errors(signal, &factory)
                             .into_iter()
                             .map(|error| format!(" - {}", error))
                             .collect::<Vec<_>>()
@@ -341,15 +341,16 @@ where
     }
 }
 
-fn format_signal_errors<T: Expression>(
-    signal: &SignalTerm<T>,
-) -> impl IntoIterator<Item = String> + '_ {
+fn format_signal_errors<'a, T: Expression>(
+    signal: &'a SignalTerm<T>,
+    factory: &'a impl ExpressionFactory<T>,
+) -> impl IntoIterator<Item = String> + 'a {
     signal
         .signals()
         .iter()
         .map(|signal| match signal.args().iter().next() {
             Some(payload) => format!("{}", payload),
-            None => format!("{}", ValueTerm::<T::String>::Null),
+            None => format!("{}", factory.create_nil_term()),
         })
 }
 

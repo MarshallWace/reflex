@@ -7,7 +7,7 @@ use std::{borrow::Cow, collections::HashMap, iter::once};
 use either::Either;
 use reflex::{
     core::{Expression, ExpressionFactory, ExpressionList, HeapAllocator, SignalType},
-    lang::{create_struct, term::SignalTerm, ValueTerm},
+    lang::{create_struct, term::SignalTerm},
     stdlib::Stdlib,
 };
 use reflex_json::{json_object, sanitize, JsonMap, JsonValue};
@@ -515,9 +515,7 @@ where
                 factory.create_builtin_term(Stdlib::Get),
                 allocator.create_pair(
                     factory.create_static_variable_term(0),
-                    factory.create_value_term(ValueTerm::String(
-                        allocator.create_static_string(operation_type),
-                    )),
+                    factory.create_string_term(allocator.create_static_string(operation_type)),
                 ),
             )),
         ),
@@ -567,7 +565,7 @@ fn validate_variable<T: Expression>(
         }
         // TODO: Validate query variable types
         // TODO: Differentiate between missing optional variables and null values
-        _ => Ok(value.unwrap_or_else(|| factory.create_value_term(ValueTerm::Null))),
+        _ => Ok(value.unwrap_or_else(|| factory.create_nil_term())),
     }
 }
 
@@ -721,9 +719,7 @@ where
                     factory.create_builtin_term(Stdlib::Get),
                     allocator.create_pair(
                         factory.create_static_variable_term(0),
-                        factory.create_value_term(ValueTerm::String(
-                            allocator.create_string(field.name.to_string()),
-                        )),
+                        factory.create_string_term(allocator.create_string(field.name.to_string())),
                     ),
                 );
                 match field_args {
@@ -767,22 +763,21 @@ fn parse_value<T: Expression>(
             Some(value) => Ok(value.clone()),
             None => Err(format!("Undeclared query variable: {}", name.to_string())),
         },
-        Value::Int(value) => Ok(factory.create_value_term(ValueTerm::Int(
+        Value::Int(value) => Ok(factory.create_int_term(
             value
                 .as_i64()
                 .ok_or_else(|| format!("Invalid integer argument: {:?}", value))?
                 as i32,
-        ))),
-        Value::Float(value) => Ok(factory.create_value_term(ValueTerm::Float(*value))),
+        )),
+        Value::Float(value) => Ok(factory.create_float_term(*value)),
         Value::String(value) => {
-            Ok(factory
-                .create_value_term(ValueTerm::String(allocator.create_string(value.as_str()))))
+            Ok(factory.create_string_term(allocator.create_string(value.as_str())))
         }
-        Value::Boolean(value) => Ok(factory.create_value_term(ValueTerm::Boolean(*value))),
-        Value::Null => Ok(factory.create_value_term(ValueTerm::Null)),
-        Value::Enum(value) => Ok(factory.create_value_term(ValueTerm::String(
-            allocator.create_string(value.to_string()),
-        ))),
+        Value::Boolean(value) => Ok(factory.create_boolean_term(*value)),
+        Value::Null => Ok(factory.create_nil_term()),
+        Value::Enum(value) => {
+            Ok(factory.create_string_term(allocator.create_string(value.to_string())))
+        }
         Value::List(value) => {
             let values = value
                 .iter()
@@ -833,7 +828,7 @@ mod tests {
             EvaluationResult, Expression, ExpressionFactory, HeapAllocator, Reducible, Rewritable,
             StateCache, Uid,
         },
-        lang::{create_struct, SharedTermFactory, ValueTerm},
+        lang::{create_struct, SharedTermFactory},
         stdlib::Stdlib,
     };
     use std::convert::{TryFrom, TryInto};
@@ -919,31 +914,16 @@ mod tests {
                     String::from("query"),
                     create_struct(
                         vec![
-                            (
-                                String::from("first"),
-                                factory.create_value_term(ValueTerm::Int(3)),
-                            ),
-                            (
-                                String::from("second"),
-                                factory.create_value_term(ValueTerm::Int(4)),
-                            ),
-                            (
-                                String::from("third"),
-                                factory.create_value_term(ValueTerm::Int(5)),
-                            ),
+                            (String::from("first"), factory.create_int_term(3)),
+                            (String::from("second"), factory.create_int_term(4)),
+                            (String::from("third"), factory.create_int_term(5)),
                         ],
                         &factory,
                         &allocator,
                     ),
                 ),
-                (
-                    String::from("mutation"),
-                    factory.create_value_term(ValueTerm::Null),
-                ),
-                (
-                    String::from("subscription"),
-                    factory.create_value_term(ValueTerm::Null),
-                ),
+                (String::from("mutation"), factory.create_nil_term()),
+                (String::from("subscription"), factory.create_nil_term()),
             ],
             &factory,
             &allocator,
@@ -967,14 +947,8 @@ mod tests {
             EvaluationResult::new(
                 create_struct(
                     vec![
-                        (
-                            String::from("second"),
-                            factory.create_value_term(ValueTerm::Int(4))
-                        ),
-                        (
-                            String::from("third"),
-                            factory.create_value_term(ValueTerm::Int(5))
-                        ),
+                        (String::from("second"), factory.create_int_term(4)),
+                        (String::from("third"), factory.create_int_term(5)),
                     ],
                     &factory,
                     &allocator
@@ -1002,7 +976,7 @@ mod tests {
                                         factory.create_application_term(
                                             factory.create_builtin_term(Stdlib::Add),
                                             allocator.create_pair(
-                                                factory.create_value_term(ValueTerm::Int(3)),
+                                                factory.create_int_term(3),
                                                 factory.create_static_variable_term(0),
                                             ),
                                         ),
@@ -1012,7 +986,7 @@ mod tests {
                                         factory.create_application_term(
                                             factory.create_builtin_term(Stdlib::Add),
                                             allocator.create_pair(
-                                                factory.create_value_term(ValueTerm::Int(4)),
+                                                factory.create_int_term(4),
                                                 factory.create_static_variable_term(0),
                                             ),
                                         ),
@@ -1022,7 +996,7 @@ mod tests {
                                         factory.create_application_term(
                                             factory.create_builtin_term(Stdlib::Add),
                                             allocator.create_pair(
-                                                factory.create_value_term(ValueTerm::Int(5)),
+                                                factory.create_int_term(5),
                                                 factory.create_static_variable_term(0),
                                             ),
                                         ),
@@ -1032,17 +1006,11 @@ mod tests {
                                 &allocator,
                             ),
                         ),
-                        allocator.create_unit_list(factory.create_value_term(ValueTerm::Int(10))),
+                        allocator.create_unit_list(factory.create_int_term(10)),
                     ),
                 ),
-                (
-                    String::from("mutation"),
-                    factory.create_value_term(ValueTerm::Null),
-                ),
-                (
-                    String::from("subscription"),
-                    factory.create_value_term(ValueTerm::Null),
-                ),
+                (String::from("mutation"), factory.create_nil_term()),
+                (String::from("subscription"), factory.create_nil_term()),
             ],
             &factory,
             &allocator,
@@ -1066,14 +1034,8 @@ mod tests {
             EvaluationResult::new(
                 create_struct(
                     vec![
-                        (
-                            String::from("second"),
-                            factory.create_value_term(ValueTerm::Int(4 + 10))
-                        ),
-                        (
-                            String::from("third"),
-                            factory.create_value_term(ValueTerm::Int(5 + 10))
-                        ),
+                        (String::from("second"), factory.create_int_term(4 + 10)),
+                        (String::from("third"), factory.create_int_term(5 + 10)),
                     ],
                     &factory,
                     &allocator
@@ -1093,35 +1055,23 @@ mod tests {
                     String::from("query"),
                     create_struct(
                         vec![
-                            (
-                                String::from("foo"),
-                                factory.create_value_term(ValueTerm::Null),
-                            ),
+                            (String::from("foo"), factory.create_nil_term()),
                             (
                                 String::from("items"),
                                 factory.create_vector_term(allocator.create_list(vec![
-                                    factory.create_value_term(ValueTerm::Int(3)),
-                                    factory.create_value_term(ValueTerm::Int(4)),
-                                    factory.create_value_term(ValueTerm::Int(5)),
+                                    factory.create_int_term(3),
+                                    factory.create_int_term(4),
+                                    factory.create_int_term(5),
                                 ])),
                             ),
-                            (
-                                String::from("bar"),
-                                factory.create_value_term(ValueTerm::Null),
-                            ),
+                            (String::from("bar"), factory.create_nil_term()),
                         ],
                         &factory,
                         &allocator,
                     ),
                 ),
-                (
-                    String::from("mutation"),
-                    factory.create_value_term(ValueTerm::Null),
-                ),
-                (
-                    String::from("subscription"),
-                    factory.create_value_term(ValueTerm::Null),
-                ),
+                (String::from("mutation"), factory.create_nil_term()),
+                (String::from("subscription"), factory.create_nil_term()),
             ],
             &factory,
             &allocator,
@@ -1146,9 +1096,9 @@ mod tests {
                     vec![(
                         String::from("items"),
                         factory.create_vector_term(allocator.create_list(vec![
-                            factory.create_value_term(ValueTerm::Int(3)),
-                            factory.create_value_term(ValueTerm::Int(4)),
-                            factory.create_value_term(ValueTerm::Int(5))
+                            factory.create_int_term(3),
+                            factory.create_int_term(4),
+                            factory.create_int_term(5)
                         ]))
                     ),],
                     &factory,
@@ -1169,83 +1119,71 @@ mod tests {
                     String::from("query"),
                     create_struct(
                         vec![
-                            (
-                                String::from("foo"),
-                                factory.create_value_term(ValueTerm::Null),
-                            ),
+                            (String::from("foo"), factory.create_nil_term()),
                             (
                                 String::from("items"),
                                 factory.create_vector_term(allocator.create_list(vec![
                                     factory.create_vector_term(allocator.create_list(vec![
                                         factory.create_vector_term(allocator.create_list(vec![
-                                            factory.create_value_term(ValueTerm::Float(1.1)),
-                                            factory.create_value_term(ValueTerm::Float(1.2)),
-                                            factory.create_value_term(ValueTerm::Float(1.3)),
+                                            factory.create_float_term(1.1),
+                                            factory.create_float_term(1.2),
+                                            factory.create_float_term(1.3),
                                         ])),
                                         factory.create_vector_term(allocator.create_list(vec![
-                                            factory.create_value_term(ValueTerm::Float(1.4)),
-                                            factory.create_value_term(ValueTerm::Float(1.5)),
-                                            factory.create_value_term(ValueTerm::Float(1.6)),
+                                            factory.create_float_term(1.4),
+                                            factory.create_float_term(1.5),
+                                            factory.create_float_term(1.6),
                                         ])),
                                         factory.create_vector_term(allocator.create_list(vec![
-                                            factory.create_value_term(ValueTerm::Float(1.7)),
-                                            factory.create_value_term(ValueTerm::Float(1.8)),
-                                            factory.create_value_term(ValueTerm::Float(1.9)),
-                                        ])),
-                                    ])),
-                                    factory.create_vector_term(allocator.create_list(vec![
-                                        factory.create_vector_term(allocator.create_list(vec![
-                                            factory.create_value_term(ValueTerm::Float(2.1)),
-                                            factory.create_value_term(ValueTerm::Float(2.2)),
-                                            factory.create_value_term(ValueTerm::Float(2.3)),
-                                        ])),
-                                        factory.create_vector_term(allocator.create_list(vec![
-                                            factory.create_value_term(ValueTerm::Float(2.4)),
-                                            factory.create_value_term(ValueTerm::Float(2.5)),
-                                            factory.create_value_term(ValueTerm::Float(2.6)),
-                                        ])),
-                                        factory.create_vector_term(allocator.create_list(vec![
-                                            factory.create_value_term(ValueTerm::Float(2.7)),
-                                            factory.create_value_term(ValueTerm::Float(2.8)),
-                                            factory.create_value_term(ValueTerm::Float(2.9)),
+                                            factory.create_float_term(1.7),
+                                            factory.create_float_term(1.8),
+                                            factory.create_float_term(1.9),
                                         ])),
                                     ])),
                                     factory.create_vector_term(allocator.create_list(vec![
                                         factory.create_vector_term(allocator.create_list(vec![
-                                            factory.create_value_term(ValueTerm::Float(3.1)),
-                                            factory.create_value_term(ValueTerm::Float(3.2)),
-                                            factory.create_value_term(ValueTerm::Float(3.3)),
+                                            factory.create_float_term(2.1),
+                                            factory.create_float_term(2.2),
+                                            factory.create_float_term(2.3),
                                         ])),
                                         factory.create_vector_term(allocator.create_list(vec![
-                                            factory.create_value_term(ValueTerm::Float(3.4)),
-                                            factory.create_value_term(ValueTerm::Float(3.5)),
-                                            factory.create_value_term(ValueTerm::Float(3.6)),
+                                            factory.create_float_term(2.4),
+                                            factory.create_float_term(2.5),
+                                            factory.create_float_term(2.6),
                                         ])),
                                         factory.create_vector_term(allocator.create_list(vec![
-                                            factory.create_value_term(ValueTerm::Float(3.7)),
-                                            factory.create_value_term(ValueTerm::Float(3.8)),
-                                            factory.create_value_term(ValueTerm::Float(3.9)),
+                                            factory.create_float_term(2.7),
+                                            factory.create_float_term(2.8),
+                                            factory.create_float_term(2.9),
+                                        ])),
+                                    ])),
+                                    factory.create_vector_term(allocator.create_list(vec![
+                                        factory.create_vector_term(allocator.create_list(vec![
+                                            factory.create_float_term(3.1),
+                                            factory.create_float_term(3.2),
+                                            factory.create_float_term(3.3),
+                                        ])),
+                                        factory.create_vector_term(allocator.create_list(vec![
+                                            factory.create_float_term(3.4),
+                                            factory.create_float_term(3.5),
+                                            factory.create_float_term(3.6),
+                                        ])),
+                                        factory.create_vector_term(allocator.create_list(vec![
+                                            factory.create_float_term(3.7),
+                                            factory.create_float_term(3.8),
+                                            factory.create_float_term(3.9),
                                         ])),
                                     ])),
                                 ])),
                             ),
-                            (
-                                String::from("bar"),
-                                factory.create_value_term(ValueTerm::Null),
-                            ),
+                            (String::from("bar"), factory.create_nil_term()),
                         ],
                         &factory,
                         &allocator,
                     ),
                 ),
-                (
-                    String::from("mutation"),
-                    factory.create_value_term(ValueTerm::Null),
-                ),
-                (
-                    String::from("subscription"),
-                    factory.create_value_term(ValueTerm::Null),
-                ),
+                (String::from("mutation"), factory.create_nil_term()),
+                (String::from("subscription"), factory.create_nil_term()),
             ],
             &factory,
             &allocator,
@@ -1272,53 +1210,53 @@ mod tests {
                         factory.create_vector_term(allocator.create_list(vec![
                             factory.create_vector_term(allocator.create_list(vec![
                                 factory.create_vector_term(allocator.create_list(vec![
-                                    factory.create_value_term(ValueTerm::Float(1.1)),
-                                    factory.create_value_term(ValueTerm::Float(1.2)),
-                                    factory.create_value_term(ValueTerm::Float(1.3)),
+                                    factory.create_float_term(1.1),
+                                    factory.create_float_term(1.2),
+                                    factory.create_float_term(1.3),
                                 ])),
                                 factory.create_vector_term(allocator.create_list(vec![
-                                    factory.create_value_term(ValueTerm::Float(1.4)),
-                                    factory.create_value_term(ValueTerm::Float(1.5)),
-                                    factory.create_value_term(ValueTerm::Float(1.6)),
+                                    factory.create_float_term(1.4),
+                                    factory.create_float_term(1.5),
+                                    factory.create_float_term(1.6),
                                 ])),
                                 factory.create_vector_term(allocator.create_list(vec![
-                                    factory.create_value_term(ValueTerm::Float(1.7)),
-                                    factory.create_value_term(ValueTerm::Float(1.8)),
-                                    factory.create_value_term(ValueTerm::Float(1.9)),
-                                ])),
-                            ])),
-                            factory.create_vector_term(allocator.create_list(vec![
-                                factory.create_vector_term(allocator.create_list(vec![
-                                    factory.create_value_term(ValueTerm::Float(2.1)),
-                                    factory.create_value_term(ValueTerm::Float(2.2)),
-                                    factory.create_value_term(ValueTerm::Float(2.3)),
-                                ])),
-                                factory.create_vector_term(allocator.create_list(vec![
-                                    factory.create_value_term(ValueTerm::Float(2.4)),
-                                    factory.create_value_term(ValueTerm::Float(2.5)),
-                                    factory.create_value_term(ValueTerm::Float(2.6)),
-                                ])),
-                                factory.create_vector_term(allocator.create_list(vec![
-                                    factory.create_value_term(ValueTerm::Float(2.7)),
-                                    factory.create_value_term(ValueTerm::Float(2.8)),
-                                    factory.create_value_term(ValueTerm::Float(2.9)),
+                                    factory.create_float_term(1.7),
+                                    factory.create_float_term(1.8),
+                                    factory.create_float_term(1.9),
                                 ])),
                             ])),
                             factory.create_vector_term(allocator.create_list(vec![
                                 factory.create_vector_term(allocator.create_list(vec![
-                                    factory.create_value_term(ValueTerm::Float(3.1)),
-                                    factory.create_value_term(ValueTerm::Float(3.2)),
-                                    factory.create_value_term(ValueTerm::Float(3.3)),
+                                    factory.create_float_term(2.1),
+                                    factory.create_float_term(2.2),
+                                    factory.create_float_term(2.3),
                                 ])),
                                 factory.create_vector_term(allocator.create_list(vec![
-                                    factory.create_value_term(ValueTerm::Float(3.4)),
-                                    factory.create_value_term(ValueTerm::Float(3.5)),
-                                    factory.create_value_term(ValueTerm::Float(3.6)),
+                                    factory.create_float_term(2.4),
+                                    factory.create_float_term(2.5),
+                                    factory.create_float_term(2.6),
                                 ])),
                                 factory.create_vector_term(allocator.create_list(vec![
-                                    factory.create_value_term(ValueTerm::Float(3.7)),
-                                    factory.create_value_term(ValueTerm::Float(3.8)),
-                                    factory.create_value_term(ValueTerm::Float(3.9)),
+                                    factory.create_float_term(2.7),
+                                    factory.create_float_term(2.8),
+                                    factory.create_float_term(2.9),
+                                ])),
+                            ])),
+                            factory.create_vector_term(allocator.create_list(vec![
+                                factory.create_vector_term(allocator.create_list(vec![
+                                    factory.create_float_term(3.1),
+                                    factory.create_float_term(3.2),
+                                    factory.create_float_term(3.3),
+                                ])),
+                                factory.create_vector_term(allocator.create_list(vec![
+                                    factory.create_float_term(3.4),
+                                    factory.create_float_term(3.5),
+                                    factory.create_float_term(3.6),
+                                ])),
+                                factory.create_vector_term(allocator.create_list(vec![
+                                    factory.create_float_term(3.7),
+                                    factory.create_float_term(3.8),
+                                    factory.create_float_term(3.9),
                                 ])),
                             ])),
                         ])),

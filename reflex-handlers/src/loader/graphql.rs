@@ -9,7 +9,7 @@ use std::{
 
 use reflex::{
     core::{Expression, ExpressionFactory, HeapAllocator},
-    lang::{create_struct, ValueTerm},
+    lang::create_struct,
     stdlib::Stdlib,
 };
 use reflex_graphql::graphql_parser::{self, schema::Document};
@@ -110,9 +110,9 @@ where
                     factory.create_application_term(
                         factory.create_builtin_term(Stdlib::Effect),
                         allocator.create_list(vec![
-                            factory.create_value_term(ValueTerm::String(
+                            factory.create_string_term(
                                 allocator.create_static_string(EFFECT_TYPE_GRAPHQL),
-                            )),
+                            ),
                             factory.create_static_variable_term(1),
                             get_struct_field(
                                 factory.create_static_variable_term(0),
@@ -123,7 +123,7 @@ where
                             get_optional_struct_field(
                                 factory.create_static_variable_term(0),
                                 String::from("operationName"),
-                                factory.create_value_term(ValueTerm::Null),
+                                factory.create_nil_term(),
                                 factory,
                                 allocator,
                             ),
@@ -140,7 +140,7 @@ where
                             get_optional_struct_field(
                                 factory.create_static_variable_term(0),
                                 String::from("token"),
-                                factory.create_value_term(ValueTerm::Null),
+                                factory.create_nil_term(),
                                 factory,
                                 allocator,
                             ),
@@ -175,7 +175,7 @@ where
         factory.create_builtin_term(Stdlib::Get),
         allocator.create_pair(
             target,
-            factory.create_value_term(ValueTerm::String(allocator.create_string(field))),
+            factory.create_string_term(allocator.create_string(field)),
         ),
     )
 }
@@ -197,16 +197,14 @@ where
                 factory.create_builtin_term(Stdlib::Contains),
                 allocator.create_pair(
                     target.clone(),
-                    factory.create_value_term(ValueTerm::String(
-                        allocator.create_string(field.clone()),
-                    )),
+                    factory.create_string_term(allocator.create_string(field.clone())),
                 ),
             ),
             factory.create_application_term(
                 factory.create_builtin_term(Stdlib::Get),
                 allocator.create_pair(
                     target,
-                    factory.create_value_term(ValueTerm::String(allocator.create_string(field))),
+                    factory.create_string_term(allocator.create_string(field)),
                 ),
             ),
             fallback,

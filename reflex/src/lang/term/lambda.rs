@@ -293,7 +293,7 @@ mod tests {
             evaluate, DependencyList, EvaluationResult, ExpressionFactory, HeapAllocator,
             Rewritable, StateCache,
         },
-        lang::{SharedTermFactory, ValueTerm},
+        lang::SharedTermFactory,
         parser::sexpr::parse,
         stdlib::Stdlib,
     };
@@ -342,9 +342,9 @@ mod tests {
             factory.create_application_term(
                 result.unwrap(),
                 allocator.create_list(vec![
-                    factory.create_value_term(ValueTerm::Int(1)),
-                    factory.create_value_term(ValueTerm::Int(2)),
-                    factory.create_value_term(ValueTerm::Int(3)),
+                    factory.create_int_term(1),
+                    factory.create_int_term(2),
+                    factory.create_int_term(3),
                 ]),
             ),
             allocator.create_empty_list(),
@@ -357,10 +357,7 @@ mod tests {
                 &allocator,
                 &mut SubstitutionCache::new()
             ),
-            EvaluationResult::new(
-                factory.create_value_term(ValueTerm::Int(1 + 2 + 3)),
-                DependencyList::empty()
-            )
+            EvaluationResult::new(factory.create_int_term(1 + 2 + 3), DependencyList::empty())
         );
 
         let input = "
@@ -408,12 +405,12 @@ mod tests {
             factory.create_application_term(
                 result.unwrap(),
                 allocator.create_list(vec![
-                    factory.create_value_term(ValueTerm::Int(1)),
-                    factory.create_value_term(ValueTerm::Int(2)),
-                    factory.create_value_term(ValueTerm::Int(3)),
+                    factory.create_int_term(1),
+                    factory.create_int_term(2),
+                    factory.create_int_term(3),
                 ]),
             ),
-            allocator.create_list(vec![factory.create_value_term(ValueTerm::Int(4))]),
+            allocator.create_list(vec![factory.create_int_term(4)]),
         );
         assert_eq!(
             evaluate(
@@ -424,7 +421,7 @@ mod tests {
                 &mut SubstitutionCache::new()
             ),
             EvaluationResult::new(
-                factory.create_value_term(ValueTerm::Int(1 + 2 + 3 + 4)),
+                factory.create_int_term(1 + 2 + 3 + 4),
                 DependencyList::empty()
             )
         );
@@ -499,17 +496,14 @@ mod tests {
                 factory.create_application_term(
                     result.unwrap(),
                     allocator.create_list(vec![
-                        factory.create_value_term(ValueTerm::Int(1)),
-                        factory.create_value_term(ValueTerm::Int(2)),
-                        factory.create_value_term(ValueTerm::Int(3)),
+                        factory.create_int_term(1),
+                        factory.create_int_term(2),
+                        factory.create_int_term(3),
                     ]),
                 ),
-                allocator.create_list(vec![factory.create_value_term(ValueTerm::Int(4))]),
+                allocator.create_list(vec![factory.create_int_term(4)]),
             ),
-            allocator.create_list(vec![
-                factory.create_value_term(ValueTerm::Int(5)),
-                factory.create_value_term(ValueTerm::Int(6)),
-            ]),
+            allocator.create_list(vec![factory.create_int_term(5), factory.create_int_term(6)]),
         );
         assert_eq!(
             evaluate(
@@ -520,7 +514,7 @@ mod tests {
                 &mut SubstitutionCache::new()
             ),
             EvaluationResult::new(
-                factory.create_value_term(ValueTerm::Int(1 + 2 + 3 + 4 + 5 + 6)),
+                factory.create_int_term(1 + 2 + 3 + 4 + 5 + 6),
                 DependencyList::empty()
             )
         );

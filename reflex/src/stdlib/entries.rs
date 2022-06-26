@@ -2,12 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
-use crate::{
-    core::{
-        uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
-        FunctionArity, HeapAllocator, Uid, Uuid,
-    },
-    lang::ValueTerm,
+use crate::core::{
+    uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
+    FunctionArity, HeapAllocator, Uid, Uuid,
 };
 
 pub struct Entries {}
@@ -52,12 +49,14 @@ impl<T: Expression> Applicable<T> for Entries {
                             .iter()
                             .zip(target.fields().iter())
                             .map(|(key, value)| {
-                                factory.create_tuple_term(allocator.create_pair(
-                                    factory.create_value_term(ValueTerm::String(
-                                        allocator.create_string(key.as_str()),
-                                    )),
-                                    value.clone(),
-                                ))
+                                factory.create_tuple_term(
+                                    allocator.create_pair(
+                                        factory.create_string_term(
+                                            allocator.create_string(key.as_str()),
+                                        ),
+                                        value.clone(),
+                                    ),
+                                )
                             }),
                     ),
                 ),
@@ -65,10 +64,9 @@ impl<T: Expression> Applicable<T> for Entries {
         } else if let Some(target) = factory.match_vector_term(&target) {
             Some(factory.create_vector_term(allocator.create_list(
                 target.items().iter().enumerate().map(|(index, item)| {
-                    factory.create_tuple_term(allocator.create_pair(
-                        factory.create_value_term(ValueTerm::Int(index as i32)),
-                        item.clone(),
-                    ))
+                    factory.create_tuple_term(
+                        allocator.create_pair(factory.create_int_term(index as i32), item.clone()),
+                    )
                 }),
             )))
         } else if let Some(target) = factory.match_hashmap_term(&target) {

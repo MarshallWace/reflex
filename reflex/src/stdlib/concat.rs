@@ -2,12 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
-use crate::{
-    core::{
-        match_typed_expression_list, uuid, Applicable, ArgType, Arity, EvaluationCache, Expression,
-        ExpressionFactory, FunctionArity, HeapAllocator, StringValue, Uid, Uuid,
-    },
-    lang::ValueTerm,
+use crate::core::{
+    match_typed_expression_list, uuid, Applicable, ArgType, Arity, EvaluationCache, Expression,
+    ExpressionFactory, FunctionArity, HeapAllocator, StringValue, Uid, Uuid,
 };
 
 pub struct Concat {}
@@ -45,8 +42,8 @@ impl<T: Expression> Applicable<T> for Concat {
         let value = match_typed_expression_list(
             args.iter(),
             |arg| {
-                if let Some(ValueTerm::String(value)) = factory.match_value_term(arg) {
-                    Some(value.as_str())
+                if let Some(term) = factory.match_string_term(arg) {
+                    Some(term.value.as_str())
                 } else {
                     None
                 }
@@ -55,6 +52,6 @@ impl<T: Expression> Applicable<T> for Concat {
         )?
         .into_iter()
         .collect::<String>();
-        Ok(factory.create_value_term(ValueTerm::String(allocator.create_string(value))))
+        Ok(factory.create_string_term(allocator.create_string(value)))
     }
 }

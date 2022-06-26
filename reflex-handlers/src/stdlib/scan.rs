@@ -51,10 +51,7 @@ impl<T: Expression> Applicable<T> for Scan {
         let target = args.next().unwrap();
         let seed = args.next().unwrap();
         let iteratee = args.next().unwrap();
-        match factory
-            .match_value_term(&name)
-            .and_then(|value| value.match_string())
-        {
+        match factory.match_string_term(&name) {
             None => Err(format!(
                 "Invalid scan name: Expected String, received {}",
                 name

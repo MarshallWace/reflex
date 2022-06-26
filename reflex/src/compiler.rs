@@ -96,7 +96,7 @@ pub enum Instruction {
     PushDynamic {
         state_token: StateToken,
     },
-    PushNull,
+    PushNil,
     PushBoolean {
         value: bool,
     },
@@ -110,10 +110,7 @@ pub enum Instruction {
         value: String,
     },
     PushSymbol {
-        value: SymbolId,
-    },
-    PushHash {
-        value: HashId,
+        id: SymbolId,
     },
     PushFunction {
         target: InstructionPointer,
@@ -189,7 +186,7 @@ impl std::hash::Hash for Instruction {
                 state.write_u8(1);
                 state_token.hash(state);
             }
-            Self::PushNull => {
+            Self::PushNil => {
                 state.write_u8(2);
             }
             Self::PushBoolean { value } => {
@@ -208,49 +205,45 @@ impl std::hash::Hash for Instruction {
                 state.write_u8(6);
                 value.hash(state);
             }
-            Self::PushSymbol { value } => {
+            Self::PushSymbol { id: value } => {
                 state.write_u8(7);
                 value.hash(state);
             }
-            Self::PushHash { value } => {
-                state.write_u8(8);
-                value.hash(state);
-            }
             Self::PushFunction { target, hash } => {
-                state.write_u8(9);
+                state.write_u8(8);
                 target.hash(state);
                 hash.hash(state)
             }
             Self::PushBuiltin { target } => {
-                state.write_u8(10);
+                state.write_u8(9);
                 target.hash(state);
             }
             Self::PushConstructor { prototype } => {
-                state.write_u8(11);
+                state.write_u8(10);
                 prototype.hash(state);
             }
             Self::PushSignal {
                 signal_type,
                 num_args,
             } => {
-                state.write_u8(12);
+                state.write_u8(11);
                 signal_type.hash(state);
                 num_args.hash(state);
             }
             Self::Pop { count } => {
-                state.write_u8(13);
+                state.write_u8(12);
                 count.hash(state);
             }
             Self::Squash { depth } => {
-                state.write_u8(14);
+                state.write_u8(13);
                 depth.hash(state);
             }
             Self::Move { offset } => {
-                state.write_u8(15);
+                state.write_u8(14);
                 offset.hash(state);
             }
             Self::Jump { target } => {
-                state.write_u8(16);
+                state.write_u8(15);
                 target.hash(state);
             }
             Self::Call {
@@ -258,13 +251,13 @@ impl std::hash::Hash for Instruction {
                 target_hash,
                 num_args,
             } => {
-                state.write_u8(17);
+                state.write_u8(16);
                 target_address.hash(state);
                 target_hash.hash(state);
                 num_args.hash(state);
             }
             Self::Apply { num_args } => {
-                state.write_u8(18);
+                state.write_u8(17);
                 num_args.hash(state);
             }
             Self::Function {
@@ -272,39 +265,39 @@ impl std::hash::Hash for Instruction {
                 required_args,
                 optional_args,
             } => {
-                state.write_u8(19);
+                state.write_u8(18);
                 hash.hash(state);
                 required_args.hash(state);
                 optional_args.hash(state);
             }
             Self::Return => {
-                state.write_u8(20);
+                state.write_u8(19);
             }
             Self::Evaluate => {
-                state.write_u8(21);
+                state.write_u8(20);
             }
             Self::ConstructApplication { num_args } => {
-                state.write_u8(22);
+                state.write_u8(21);
                 num_args.hash(state);
             }
             Self::ConstructPartialApplication { num_args } => {
-                state.write_u8(23);
+                state.write_u8(22);
                 num_args.hash(state);
             }
             Self::ConstructTuple { size } => {
-                state.write_u8(24);
+                state.write_u8(23);
                 size.hash(state);
             }
             Self::ConstructVector { size } => {
-                state.write_u8(26);
+                state.write_u8(25);
                 size.hash(state);
             }
             Self::ConstructHashMap { size } => {
-                state.write_u8(27);
+                state.write_u8(26);
                 size.hash(state);
             }
             Self::ConstructHashSet { size } => {
-                state.write_u8(28);
+                state.write_u8(27);
                 size.hash(state);
             }
             Self::CombineSignals { count } => {

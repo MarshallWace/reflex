@@ -2,12 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
-use crate::{
-    core::{
-        uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
-        FunctionArity, HeapAllocator, Uid, Uuid,
-    },
-    lang::ValueTerm,
+use crate::core::{
+    uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
+    FunctionArity, HeapAllocator, Uid, Uuid,
 };
 
 pub struct Eq {}
@@ -43,6 +40,6 @@ impl<T: Expression> Applicable<T> for Eq {
     ) -> Result<T, String> {
         let left = args.next().unwrap();
         let right = args.next().unwrap();
-        Ok(factory.create_value_term(ValueTerm::Boolean(left.id() == right.id())))
+        Ok(factory.create_boolean_term(left.id() == right.id()))
     }
 }

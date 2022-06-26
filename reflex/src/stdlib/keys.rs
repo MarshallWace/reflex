@@ -2,12 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
-use crate::{
-    core::{
-        uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
-        FunctionArity, HeapAllocator, Uid, Uuid,
-    },
-    lang::ValueTerm,
+use crate::core::{
+    uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
+    FunctionArity, HeapAllocator, Uid, Uuid,
 };
 
 pub struct Keys {}
@@ -43,19 +40,22 @@ impl<T: Expression> Applicable<T> for Keys {
     ) -> Result<T, String> {
         let target = args.next().unwrap();
         let result = if let Some(target) = factory.match_struct_term(&target) {
-            Some(factory.create_vector_term(allocator.create_list(
-                target.prototype().keys().iter().map(|key| {
-                    factory
-                        .create_value_term(ValueTerm::String(allocator.create_string(key.as_str())))
-                }),
-            )))
+            Some(factory.create_vector_term(
+                allocator.create_list(
+                    target.prototype().keys().iter().map(|key| {
+                        factory.create_string_term(allocator.create_string(key.as_str()))
+                    }),
+                ),
+            ))
         } else if let Some(target) = factory.match_vector_term(&target) {
             Some(
                 factory.create_vector_term(
                     allocator.create_list(
-                        target.items().iter().enumerate().map(|(index, _)| {
-                            factory.create_value_term(ValueTerm::Int(index as i32))
-                        }),
+                        target
+                            .items()
+                            .iter()
+                            .enumerate()
+                            .map(|(index, _)| factory.create_int_term(index as i32)),
                     ),
                 ),
             )

@@ -17,7 +17,7 @@ use crate::{
         ScopeOffset, SerializeJson, SignalType, StackOffset, StateCache, Substitutions, VarArgs,
     },
     hash::HashId,
-    lang::{SignalTerm, ValueTerm},
+    lang::SignalTerm,
 };
 
 use super::LambdaTerm;
@@ -379,7 +379,7 @@ fn apply_function<T: Expression + Applicable<T>>(
         .apply(args.into_iter(), factory, allocator, cache)
         .unwrap_or_else(|error| {
             create_error_signal_term(
-                factory.create_value_term(ValueTerm::String(allocator.create_string(error))),
+                factory.create_string_term(allocator.create_string(error)),
                 factory,
                 allocator,
             )
@@ -639,7 +639,7 @@ fn evaluate_function_args<T: Expression + Reducible<T> + Evaluate<T>, TState: Dy
     match validate_function_application_arity(target, arity, args.len()) {
         Err(message) => (
             FunctionArgs::ShortCircuit(create_error_signal_term(
-                factory.create_value_term(ValueTerm::String(allocator.create_string(message))),
+                factory.create_string_term(allocator.create_string(message)),
                 factory,
                 allocator,
             )),
@@ -699,8 +699,7 @@ fn evaluate_function_args<T: Expression + Reducible<T> + Evaluate<T>, TState: Dy
                     num_positional_args.saturating_sub(num_provided_args);
                 if num_unspecified_optional_args > 0 {
                     resolved_args.extend(
-                        (0..num_unspecified_optional_args)
-                            .map(|_| factory.create_value_term(ValueTerm::Null)),
+                        (0..num_unspecified_optional_args).map(|_| factory.create_nil_term()),
                     )
                 }
                 (FunctionArgs::Resolved(resolved_args), dependencies)
@@ -885,7 +884,7 @@ mod tests {
         allocator::DefaultAllocator,
         cache::SubstitutionCache,
         core::{ExpressionFactory, HeapAllocator, Rewritable},
-        lang::{CachedSharedTerm, SharedTermFactory, ValueTerm},
+        lang::{CachedSharedTerm, SharedTermFactory},
         stdlib::Stdlib,
     };
 
@@ -894,11 +893,11 @@ mod tests {
         let factory = SharedTermFactory::<Stdlib>::default();
         let allocator = DefaultAllocator::<CachedSharedTerm<Stdlib>>::default();
         let expression = factory.create_application_term(
-            factory.create_lambda_term(0, factory.create_value_term(ValueTerm::Int(3))),
+            factory.create_lambda_term(0, factory.create_int_term(3)),
             allocator.create_empty_list(),
         );
         let result = expression.normalize(&factory, &allocator, &mut SubstitutionCache::new());
-        assert_eq!(result, Some(factory.create_value_term(ValueTerm::Int(3))));
+        assert_eq!(result, Some(factory.create_int_term(3)));
     }
 
     #[test]
@@ -923,16 +922,13 @@ mod tests {
                 ),
             ),
             allocator.create_triple(
-                factory.create_value_term(ValueTerm::Int(3)),
-                factory.create_value_term(ValueTerm::Int(4)),
-                factory.create_value_term(ValueTerm::Int(5)),
+                factory.create_int_term(3),
+                factory.create_int_term(4),
+                factory.create_int_term(5),
             ),
         );
         let result = expression.normalize(&factory, &allocator, &mut SubstitutionCache::new());
-        assert_eq!(
-            result,
-            Some(factory.create_value_term(ValueTerm::Int(3 - (4 + 5))))
-        );
+        assert_eq!(result, Some(factory.create_int_term(3 - (4 + 5))));
     }
 
     #[test]
@@ -958,8 +954,8 @@ mod tests {
             ),
             allocator.create_triple(
                 factory.create_static_variable_term(123),
-                factory.create_value_term(ValueTerm::Int(4)),
-                factory.create_value_term(ValueTerm::Int(5)),
+                factory.create_int_term(4),
+                factory.create_int_term(5),
             ),
         );
         let result = expression.normalize(&factory, &allocator, &mut SubstitutionCache::new());
@@ -969,7 +965,7 @@ mod tests {
                 factory.create_builtin_term(Stdlib::Subtract),
                 allocator.create_pair(
                     factory.create_static_variable_term(123),
-                    factory.create_value_term(ValueTerm::Int(4 + 5)),
+                    factory.create_int_term(4 + 5),
                 ),
             ))
         );
@@ -1003,11 +999,10 @@ mod tests {
                 ),
             ),
             allocator.create_triple(
-                factory.create_tuple_term(allocator.create_pair(
-                    factory.create_value_term(ValueTerm::Int(3)),
-                    factory.create_value_term(ValueTerm::Int(4)),
-                )),
-                factory.create_value_term(ValueTerm::Int(0)),
+                factory.create_tuple_term(
+                    allocator.create_pair(factory.create_int_term(3), factory.create_int_term(4)),
+                ),
+                factory.create_int_term(0),
                 factory.create_static_variable_term(0),
             ),
         );
@@ -1024,7 +1019,7 @@ mod tests {
                                 factory.create_builtin_term(Stdlib::Get),
                                 allocator.create_pair(
                                     factory.create_static_variable_term(0),
-                                    factory.create_value_term(ValueTerm::Int(0)),
+                                    factory.create_int_term(0),
                                 ),
                             ),
                             factory.create_application_term(
@@ -1037,10 +1032,9 @@ mod tests {
                         ),
                     ),
                 ),
-                allocator.create_unit_list(factory.create_tuple_term(allocator.create_pair(
-                    factory.create_value_term(ValueTerm::Int(3)),
-                    factory.create_value_term(ValueTerm::Int(4)),
-                )),),
+                allocator.create_unit_list(factory.create_tuple_term(
+                    allocator.create_pair(factory.create_int_term(3), factory.create_int_term(4),)
+                ),),
             ))
         );
     }
@@ -1049,25 +1043,23 @@ mod tests {
     fn normalize_builtin_application_args() {
         let factory = SharedTermFactory::<Stdlib>::default();
         let allocator = DefaultAllocator::<CachedSharedTerm<Stdlib>>::default();
-        let expression = factory.create_application_term(
-            factory.create_builtin_term(Stdlib::Get),
-            allocator.create_pair(
-                factory.create_tuple_term(allocator.create_unit_list(
-                    factory.create_application_term(
-                        factory.create_builtin_term(Stdlib::Add),
-                        allocator.create_pair(
-                            factory.create_value_term(ValueTerm::Int(3)),
-                            factory.create_value_term(ValueTerm::Int(4)),
+        let expression =
+            factory.create_application_term(
+                factory.create_builtin_term(Stdlib::Get),
+                allocator.create_pair(
+                    factory.create_tuple_term(allocator.create_unit_list(
+                        factory.create_application_term(
+                            factory.create_builtin_term(Stdlib::Add),
+                            allocator.create_pair(
+                                factory.create_int_term(3),
+                                factory.create_int_term(4),
+                            ),
                         ),
-                    ),
-                )),
-                factory.create_value_term(ValueTerm::Int(0)),
-            ),
-        );
+                    )),
+                    factory.create_int_term(0),
+                ),
+            );
         let result = expression.normalize(&factory, &allocator, &mut SubstitutionCache::new());
-        assert_eq!(
-            result,
-            Some(factory.create_value_term(ValueTerm::Int(3 + 4))),
-        );
+        assert_eq!(result, Some(factory.create_int_term(3 + 4)),);
     }
 }

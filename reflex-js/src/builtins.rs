@@ -112,14 +112,14 @@ mod test {
     use crate::{create_js_env, parse};
     use reflex::allocator::DefaultAllocator;
     use reflex::core::ExpressionFactory;
-    use reflex::lang::{CachedSharedTerm, SharedTermFactory, ValueTerm};
+    use reflex::lang::{CachedSharedTerm, SharedTermFactory};
 
     #[test]
     fn round_trip_serde() {
         let factory = SharedTermFactory::<JsBuiltins>::default();
         let allocator = DefaultAllocator::default();
 
-        let value = factory.create_value_term(ValueTerm::Int(5));
+        let value = factory.create_int_term(5);
         let serialized = serde_json::to_string(&value).unwrap();
         let deser: CachedSharedTerm<JsBuiltins> = serde_json::from_str(&serialized).unwrap();
         assert_eq!(value, deser);

@@ -6,7 +6,6 @@ use std::{iter::once, marker::PhantomData};
 use reflex::{
     core::{Expression, ExpressionFactory, HeapAllocator, Signal, SignalType},
     hash::HashId,
-    lang::ValueTerm,
 };
 use reflex_dispatcher::{
     Action, Actor, ActorTransition, HandlerContext, InboundAction, MessageData, OutboundAction,
@@ -167,8 +166,8 @@ fn parse_assign_effect_args<T: Expression>(
 }
 
 fn parse_hash_arg<T: Expression>(value: &T, factory: &impl ExpressionFactory<T>) -> Option<HashId> {
-    match factory.match_value_term(value) {
-        Some(ValueTerm::Hash(value)) => Some(*value),
+    match factory.match_symbol_term(value) {
+        Some(term) => Some(term.id),
         _ => None,
     }
 }
@@ -180,6 +179,6 @@ fn create_error_expression<T: Expression>(
 ) -> T {
     factory.create_signal_term(allocator.create_signal_list(once(allocator.create_signal(
         SignalType::Error,
-        allocator.create_unit_list(factory.create_value_term(ValueTerm::String(message.into()))),
+        allocator.create_unit_list(factory.create_string_term(message.into())),
     ))))
 }

@@ -2,12 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
-use crate::{
-    core::{
-        uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
-        FunctionArity, HeapAllocator, StringValue, Uid, Uuid,
-    },
-    lang::ValueTerm,
+use crate::core::{
+    uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
+    FunctionArity, HeapAllocator, StringValue, Uid, Uuid,
 };
 
 pub struct Replace {}
@@ -45,21 +42,17 @@ impl<T: Expression> Applicable<T> for Replace {
         let pattern = args.next().unwrap();
         let replacement = args.next().unwrap();
         match (
-            factory.match_value_term(&target),
-            factory.match_value_term(&pattern),
-            factory.match_value_term(&replacement),
+            factory.match_string_term(&target),
+            factory.match_string_term(&pattern),
+            factory.match_string_term(&replacement),
         ) {
-            (
-                Some(ValueTerm::String(target)),
-                Some(ValueTerm::String(pattern)),
-                Some(ValueTerm::String(replacement)),
-            ) => Ok(factory.create_value_term(ValueTerm::String(
-                allocator.create_string(target.as_str().replacen(
-                    pattern.as_str(),
-                    replacement.as_str(),
+            (Some(target), Some(pattern), Some(replacement)) => Ok(factory.create_string_term(
+                allocator.create_string(target.value.as_str().replacen(
+                    pattern.value.as_str(),
+                    replacement.value.as_str(),
                     1,
                 )),
-            ))),
+            )),
             _ => Err(format!(
                 "Expected (String, String, String), received ({}, {}, {})",
                 target, pattern, replacement,

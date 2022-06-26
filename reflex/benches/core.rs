@@ -17,7 +17,7 @@ use reflex::{
     },
     core::{evaluate, ExpressionFactory, HeapAllocator, StateCache, Uid},
     interpreter::{execute, DefaultInterpreterCache, InterpreterOptions},
-    lang::{SharedTermFactory, ValueTerm},
+    lang::SharedTermFactory,
     parser::sexpr::parse,
     stdlib::Stdlib,
 };
@@ -201,7 +201,7 @@ fn deeply_nested_function_application(b: &mut Bencher) {
     let state = StateCache::default();
     let factory = SharedTermFactory::<Stdlib>::default();
     let allocator = DefaultAllocator::default();
-    let expression = (1..=100).fold(factory.create_value_term(ValueTerm::Int(0)), |acc, i| {
+    let expression = (1..=100).fold(factory.create_int_term(0), |acc, i| {
         factory.create_application_term(
             factory.create_lambda_term(
                 1,
@@ -210,7 +210,7 @@ fn deeply_nested_function_application(b: &mut Bencher) {
                     allocator.create_list(vec![factory.create_static_variable_term(0), acc]),
                 ),
             ),
-            allocator.create_list(once(factory.create_value_term(ValueTerm::Int(i)))),
+            allocator.create_list(once(factory.create_int_term(i))),
         )
     });
     b.iter(|| {
@@ -252,8 +252,8 @@ fn list_transforms(b: &mut Bencher) {
         factory.create_application_term(
             factory.create_builtin_term(Stdlib::Add),
             allocator.create_list(vec![
-                factory.create_value_term(ValueTerm::Int(index)),
-                factory.create_value_term(ValueTerm::Int(1)),
+                factory.create_int_term(index),
+                factory.create_int_term(1),
             ]),
         )
     })));

@@ -2,12 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
-use crate::{
-    core::{
-        uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
-        FunctionArity, HeapAllocator, Uid, Uuid,
-    },
-    lang::ValueTerm,
+use crate::core::{
+    uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
+    FunctionArity, HeapAllocator, Uid, Uuid,
 };
 
 pub struct Equal {}
@@ -43,22 +40,31 @@ impl<T: Expression> Applicable<T> for Equal {
     ) -> Result<T, String> {
         let left = args.next().unwrap();
         let right = args.next().unwrap();
-        match (
-            factory.match_value_term(&left),
-            factory.match_value_term(&right),
+        let result = if let (Some(left), Some(right)) = (
+            factory.match_int_term(&left),
+            factory.match_int_term(&right),
         ) {
-            (Some(ValueTerm::Int(left)), Some(ValueTerm::Int(right))) => {
-                Ok(factory.create_value_term(ValueTerm::Boolean(left == right)))
-            }
-            (Some(ValueTerm::Float(left)), Some(ValueTerm::Float(right))) => {
-                Ok(factory.create_value_term(ValueTerm::Boolean(left == right)))
-            }
-            (Some(ValueTerm::Int(left)), Some(ValueTerm::Float(right))) => {
-                Ok(factory.create_value_term(ValueTerm::Boolean((*left as f64) == *right)))
-            }
-            (Some(ValueTerm::Float(left)), Some(ValueTerm::Int(right))) => {
-                Ok(factory.create_value_term(ValueTerm::Boolean(*left == (*right as f64))))
-            }
+            Some(factory.create_boolean_term(left.value == right.value))
+        } else if let (Some(left), Some(right)) = (
+            factory.match_float_term(&left),
+            factory.match_float_term(&right),
+        ) {
+            Some(factory.create_boolean_term(left.value == right.value))
+        } else if let (Some(left), Some(right)) = (
+            factory.match_int_term(&left),
+            factory.match_float_term(&right),
+        ) {
+            Some(factory.create_boolean_term((left.value as f64) == right.value))
+        } else if let (Some(left), Some(right)) = (
+            factory.match_float_term(&left),
+            factory.match_int_term(&right),
+        ) {
+            Some(factory.create_boolean_term(left.value == (right.value as f64)))
+        } else {
+            None
+        };
+        match result {
+            Some(result) => Ok(result),
             _ => Err(format!(
                 "Expected (Int, Int) or (Float, Float), received ({}, {})",
                 left, right,

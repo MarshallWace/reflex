@@ -12,12 +12,9 @@ use metrics::{
     counter, decrement_gauge, describe_counter, describe_gauge, describe_histogram, gauge,
     histogram, increment_gauge, Unit,
 };
-use reflex::{
-    core::{
-        DependencyList, DynamicState, EvaluationResult, Expression, ExpressionFactory,
-        HeapAllocator, Signal, SignalType, StateCache, StateToken, StringValue,
-    },
-    lang::ValueTerm,
+use reflex::core::{
+    DependencyList, DynamicState, EvaluationResult, Expression, ExpressionFactory, HeapAllocator,
+    Signal, SignalType, StateCache, StateToken, StringValue,
 };
 use reflex_dispatcher::{
     Action, Actor, ActorTransition, HandlerContext, InboundAction, MessageData, MessageOffset,
@@ -125,7 +122,7 @@ pub fn create_evaluate_effect<T: Expression>(
     allocator.create_signal(
         SignalType::Custom(String::from(EFFECT_TYPE_EVALUATE)),
         allocator.create_list([
-            factory.create_value_term(ValueTerm::String(label.into())),
+            factory.create_string_term(label.into()),
             query,
             evaluation_mode.serialize(factory),
             invalidation_strategy.serialize(factory),
@@ -146,14 +143,12 @@ pub fn parse_evaluate_effect_query<T: Expression>(
     let evaluation_mode = args.next().unwrap();
     let invalidation_strategy = args.next().unwrap();
     match (
-        factory
-            .match_value_term(label)
-            .and_then(|value| value.match_string()),
+        factory.match_string_term(label),
         QueryEvaluationMode::deserialize(evaluation_mode, factory),
         QueryInvalidationStrategy::deserialize(invalidation_strategy, factory),
     ) {
         (Some(label), Some(evaluation_mode), Some(invalidation_strategy)) => Some((
-            String::from(label.as_str()),
+            String::from(label.value.as_str()),
             query.clone(),
             evaluation_mode,
             invalidation_strategy,
@@ -175,7 +170,7 @@ fn create_evaluate_effect_result<T: Expression>(
                     result
                         .dependencies()
                         .iter()
-                        .map(|state_token| factory.create_value_term(ValueTerm::Hash(state_token))),
+                        .map(|state_token| factory.create_symbol_term(state_token)),
                 ),
             ),
         ),
@@ -192,11 +187,7 @@ pub fn parse_evaluate_effect_result<T: Expression>(
         .match_vector_term(tuple.get(1)?)?
         .items()
         .iter()
-        .filter_map(|dependency| {
-            factory
-                .match_value_term(dependency)
-                .and_then(|dependency| dependency.match_hash())
-        });
+        .filter_map(|dependency| factory.match_symbol_term(dependency).map(|term| term.id));
     Some(EvaluationResult::new(
         value.clone(),
         DependencyList::from_iter(dependencies),

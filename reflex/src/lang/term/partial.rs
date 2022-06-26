@@ -276,7 +276,7 @@ mod tests {
         allocator::DefaultAllocator,
         cache::SubstitutionCache,
         core::{ExpressionFactory, HeapAllocator, Rewritable},
-        lang::{CachedSharedTerm, SharedTermFactory, ValueTerm},
+        lang::{CachedSharedTerm, SharedTermFactory},
         stdlib::Stdlib,
     };
 
@@ -286,13 +286,13 @@ mod tests {
         let allocator = DefaultAllocator::<CachedSharedTerm<Stdlib>>::default();
 
         let expression = factory.create_partial_application_term(
-            factory.create_lambda_term(0, factory.create_value_term(ValueTerm::Int(3))),
+            factory.create_lambda_term(0, factory.create_int_term(3)),
             allocator.create_empty_list(),
         );
         let result = expression.normalize(&factory, &allocator, &mut SubstitutionCache::new());
         assert_eq!(
             result,
-            Some(factory.create_lambda_term(0, factory.create_value_term(ValueTerm::Int(3))))
+            Some(factory.create_lambda_term(0, factory.create_int_term(3)))
         );
 
         let expression = factory.create_partial_application_term(
@@ -315,31 +315,31 @@ mod tests {
         let expression = factory.create_application_term(
             factory.create_partial_application_term(
                 factory.create_lambda_term(1, factory.create_static_variable_term(0)),
-                allocator.create_unit_list(factory.create_value_term(ValueTerm::Int(3))),
+                allocator.create_unit_list(factory.create_int_term(3)),
             ),
             allocator.create_empty_list(),
         );
         let result = expression.normalize(&factory, &allocator, &mut SubstitutionCache::new());
-        assert_eq!(result, Some(factory.create_value_term(ValueTerm::Int(3))));
+        assert_eq!(result, Some(factory.create_int_term(3)));
 
         let expression = factory.create_application_term(
             factory.create_partial_application_term(
-                factory.create_lambda_term(0, factory.create_value_term(ValueTerm::Int(3))),
+                factory.create_lambda_term(0, factory.create_int_term(3)),
                 allocator.create_empty_list(),
             ),
             allocator.create_empty_list(),
         );
         let result = expression.normalize(&factory, &allocator, &mut SubstitutionCache::new());
-        assert_eq!(result, Some(factory.create_value_term(ValueTerm::Int(3))));
+        assert_eq!(result, Some(factory.create_int_term(3)));
 
         let expression = factory.create_application_term(
             factory.create_partial_application_term(
                 factory.create_lambda_term(1, factory.create_static_variable_term(0)),
                 allocator.create_empty_list(),
             ),
-            allocator.create_unit_list(factory.create_value_term(ValueTerm::Int(3))),
+            allocator.create_unit_list(factory.create_int_term(3)),
         );
         let result = expression.normalize(&factory, &allocator, &mut SubstitutionCache::new());
-        assert_eq!(result, Some(factory.create_value_term(ValueTerm::Int(3))));
+        assert_eq!(result, Some(factory.create_int_term(3)));
     }
 }

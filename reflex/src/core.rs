@@ -982,7 +982,12 @@ pub type StructFieldOffset = usize;
 pub type StackOffset = usize;
 
 pub trait ExpressionFactory<T: Expression> {
-    fn create_value_term(&self, value: ValueTerm<T::String>) -> T;
+    fn create_nil_term(&self) -> T;
+    fn create_boolean_term(&self, value: bool) -> T;
+    fn create_int_term(&self, value: IntValue) -> T;
+    fn create_float_term(&self, value: FloatValue) -> T;
+    fn create_string_term(&self, value: T::String) -> T;
+    fn create_symbol_term(&self, value: SymbolId) -> T;
     fn create_static_variable_term(&self, offset: StackOffset) -> T;
     fn create_dynamic_variable_term(&self, state_token: StateToken, fallback: T) -> T;
     fn create_let_term(&self, initializer: T, body: T) -> T;
@@ -1006,7 +1011,12 @@ pub trait ExpressionFactory<T: Expression> {
     fn create_hashset_term(&self, values: ExpressionList<T>) -> T;
     fn create_signal_term(&self, signals: SignalList<T>) -> T;
 
-    fn match_value_term<'a>(&self, expression: &'a T) -> Option<&'a ValueTerm<T::String>>;
+    fn match_nil_term<'a>(&self, expression: &'a T) -> Option<&'a NilTerm>;
+    fn match_boolean_term<'a>(&self, expression: &'a T) -> Option<&'a BooleanTerm>;
+    fn match_int_term<'a>(&self, expression: &'a T) -> Option<&'a IntTerm>;
+    fn match_float_term<'a>(&self, expression: &'a T) -> Option<&'a FloatTerm>;
+    fn match_string_term<'a>(&self, expression: &'a T) -> Option<&'a StringTerm<T::String>>;
+    fn match_symbol_term<'a>(&self, expression: &'a T) -> Option<&'a SymbolTerm>;
     fn match_static_variable_term<'a>(&self, expression: &'a T) -> Option<&'a StaticVariableTerm>;
     fn match_dynamic_variable_term<'a>(
         &self,
@@ -1554,7 +1564,7 @@ mod tests {
             evaluate, ArgType, DependencyList, EvaluationResult, Expression, ExpressionFactory,
             FunctionArity, GraphNode, HeapAllocator, Rewritable, Signal, SignalType, StateCache,
         },
-        lang::{SharedTermFactory, ValueTerm},
+        lang::SharedTermFactory,
         parser::sexpr::parse,
         stdlib::Stdlib,
     };
@@ -1576,9 +1586,8 @@ mod tests {
     ) -> Signal<T> {
         allocator.create_signal(
             SignalType::Error,
-            allocator.create_unit_list(
-                factory.create_value_term(ValueTerm::String(allocator.create_string(message))),
-            ),
+            allocator
+                .create_unit_list(factory.create_string_term(allocator.create_string(message))),
         )
     }
 
@@ -1592,10 +1601,7 @@ mod tests {
         let result = evaluate(&expression, &state, &factory, &allocator, &mut cache);
         assert_eq!(
             result,
-            EvaluationResult::new(
-                factory.create_value_term(ValueTerm::Int(3)),
-                DependencyList::empty(),
-            )
+            EvaluationResult::new(factory.create_int_term(3), DependencyList::empty(),)
         );
     }
 
@@ -1630,20 +1636,14 @@ mod tests {
         let result = evaluate(&expression, &state, &factory, &allocator, &mut cache);
         assert_eq!(
             result,
-            EvaluationResult::new(
-                factory.create_value_term(ValueTerm::Int(3)),
-                DependencyList::empty(),
-            ),
+            EvaluationResult::new(factory.create_int_term(3), DependencyList::empty(),),
         );
         let expression =
             parse("((lambda (foo bar) (+ foo bar)) 3 4)", &factory, &allocator).unwrap();
         let result = evaluate(&expression, &state, &factory, &allocator, &mut cache);
         assert_eq!(
             result,
-            EvaluationResult::new(
-                factory.create_value_term(ValueTerm::Int(3 + 4)),
-                DependencyList::empty(),
-            ),
+            EvaluationResult::new(factory.create_int_term(3 + 4), DependencyList::empty(),),
         );
         let expression =
             parse("((lambda (foo bar) (((lambda (foo bar) (lambda (foo bar) (+ foo bar))) foo bar) foo bar)) 3 4)", &factory, &allocator)
@@ -1651,10 +1651,7 @@ mod tests {
         let result = evaluate(&expression, &state, &factory, &allocator, &mut cache);
         assert_eq!(
             result,
-            EvaluationResult::new(
-                factory.create_value_term(ValueTerm::Int(3 + 4)),
-                DependencyList::empty(),
-            ),
+            EvaluationResult::new(factory.create_int_term(3 + 4), DependencyList::empty(),),
         );
     }
 
@@ -1742,10 +1739,7 @@ mod tests {
         let result = evaluate(&expression, &state, &factory, &allocator, &mut cache);
         assert_eq!(
             result,
-            EvaluationResult::new(
-                factory.create_value_term(ValueTerm::Int(3)),
-                DependencyList::empty(),
-            ),
+            EvaluationResult::new(factory.create_int_term(3), DependencyList::empty(),),
         );
     }
 
@@ -1759,10 +1753,7 @@ mod tests {
         let result = evaluate(&expression, &state, &factory, &allocator, &mut cache);
         assert_eq!(
             result,
-            EvaluationResult::new(
-                factory.create_value_term(ValueTerm::Int(3 + 4 + 5)),
-                DependencyList::empty(),
-            ),
+            EvaluationResult::new(factory.create_int_term(3 + 4 + 5), DependencyList::empty(),),
         );
     }
 
@@ -1872,29 +1863,20 @@ mod tests {
         let result = evaluate(&expression, &state, &factory, &allocator, &mut cache);
         assert_eq!(
             result,
-            EvaluationResult::new(
-                factory.create_value_term(ValueTerm::Int(3)),
-                DependencyList::empty(),
-            ),
+            EvaluationResult::new(factory.create_int_term(3), DependencyList::empty(),),
         );
         let expression = parse("(let ((foo 3)) foo)", &factory, &allocator).unwrap();
         let result = evaluate(&expression, &state, &factory, &allocator, &mut cache);
         assert_eq!(
             result,
-            EvaluationResult::new(
-                factory.create_value_term(ValueTerm::Int(3)),
-                DependencyList::empty(),
-            ),
+            EvaluationResult::new(factory.create_int_term(3), DependencyList::empty(),),
         );
         let expression =
             parse("(let ((foo 3) (bar 4)) (+ foo bar))", &factory, &allocator).unwrap();
         let result = evaluate(&expression, &state, &factory, &allocator, &mut cache);
         assert_eq!(
             result,
-            EvaluationResult::new(
-                factory.create_value_term(ValueTerm::Int(3 + 4)),
-                DependencyList::empty(),
-            ),
+            EvaluationResult::new(factory.create_int_term(3 + 4), DependencyList::empty(),),
         );
         let expression = parse(
             "(let ((first 3)) (let ((second 4)) first))",
@@ -1905,19 +1887,13 @@ mod tests {
         let result = evaluate(&expression, &state, &factory, &allocator, &mut cache);
         assert_eq!(
             result,
-            EvaluationResult::new(
-                factory.create_value_term(ValueTerm::Int(3)),
-                DependencyList::empty(),
-            ),
+            EvaluationResult::new(factory.create_int_term(3), DependencyList::empty(),),
         );
         let expression = parse("(let ((first 3)) (let ((second 4)) (let ((third first) (fourth second)) (+ third fourth))))", &factory, &allocator).unwrap();
         let result = evaluate(&expression, &state, &factory, &allocator, &mut cache);
         assert_eq!(
             result,
-            EvaluationResult::new(
-                factory.create_value_term(ValueTerm::Int(3 + 4)),
-                DependencyList::empty(),
-            ),
+            EvaluationResult::new(factory.create_int_term(3 + 4), DependencyList::empty(),),
         );
     }
 
@@ -1931,19 +1907,13 @@ mod tests {
         let result = evaluate(&expression, &state, &factory, &allocator, &mut cache);
         assert_eq!(
             result,
-            EvaluationResult::new(
-                factory.create_value_term(ValueTerm::Int(3)),
-                DependencyList::empty(),
-            ),
+            EvaluationResult::new(factory.create_int_term(3), DependencyList::empty(),),
         );
         let expression = parse("(letrec ((foo 3)) foo)", &factory, &allocator).unwrap();
         let result = evaluate(&expression, &state, &factory, &allocator, &mut cache);
         assert_eq!(
             result,
-            EvaluationResult::new(
-                factory.create_value_term(ValueTerm::Int(3)),
-                DependencyList::empty(),
-            ),
+            EvaluationResult::new(factory.create_int_term(3), DependencyList::empty(),),
         );
         let expression = parse(
             "(letrec ((foo 3) (bar 4)) (+ foo bar))",
@@ -1954,10 +1924,7 @@ mod tests {
         let result = evaluate(&expression, &state, &factory, &allocator, &mut cache);
         assert_eq!(
             result,
-            EvaluationResult::new(
-                factory.create_value_term(ValueTerm::Int(3 + 4)),
-                DependencyList::empty(),
-            ),
+            EvaluationResult::new(factory.create_int_term(3 + 4), DependencyList::empty(),),
         );
         let expression = parse(
             "(letrec ((first 3)) (let ((second 4)) first))",
@@ -1968,19 +1935,13 @@ mod tests {
         let result = evaluate(&expression, &state, &factory, &allocator, &mut cache);
         assert_eq!(
             result,
-            EvaluationResult::new(
-                factory.create_value_term(ValueTerm::Int(3)),
-                DependencyList::empty(),
-            ),
+            EvaluationResult::new(factory.create_int_term(3), DependencyList::empty(),),
         );
         let expression = parse("(letrec ((first 3)) (let ((second 4)) (let ((third first) (fourth second)) (+ third fourth))))", &factory, &allocator).unwrap();
         let result = evaluate(&expression, &state, &factory, &allocator, &mut cache);
         assert_eq!(
             result,
-            EvaluationResult::new(
-                factory.create_value_term(ValueTerm::Int(3 + 4)),
-                DependencyList::empty(),
-            ),
+            EvaluationResult::new(factory.create_int_term(3 + 4), DependencyList::empty(),),
         );
 
         let expression = parse(
@@ -1992,10 +1953,7 @@ mod tests {
         let result = evaluate(&expression, &state, &factory, &allocator, &mut cache);
         assert_eq!(
             result,
-            EvaluationResult::new(
-                factory.create_value_term(ValueTerm::Int(3 + 3)),
-                DependencyList::empty(),
-            ),
+            EvaluationResult::new(factory.create_int_term(3 + 3), DependencyList::empty(),),
         );
         let expression = parse(
             "(letrec ((foo bar) (bar 3)) (+ foo bar))",
@@ -2006,10 +1964,7 @@ mod tests {
         let result = evaluate(&expression, &state, &factory, &allocator, &mut cache);
         assert_eq!(
             result,
-            EvaluationResult::new(
-                factory.create_value_term(ValueTerm::Int(3 + 3)),
-                DependencyList::empty(),
-            ),
+            EvaluationResult::new(factory.create_int_term(3 + 3), DependencyList::empty(),),
         );
         let expression = parse(
             "(letrec ((foo 3) (bar (+ foo 1))) bar)",
@@ -2020,10 +1975,7 @@ mod tests {
         let result = evaluate(&expression, &state, &factory, &allocator, &mut cache);
         assert_eq!(
             result,
-            EvaluationResult::new(
-                factory.create_value_term(ValueTerm::Int(3 + 1)),
-                DependencyList::empty(),
-            ),
+            EvaluationResult::new(factory.create_int_term(3 + 1), DependencyList::empty(),),
         );
         let expression = parse(
             "(letrec ((foo (+ bar 1)) (bar 3)) foo)",
@@ -2034,10 +1986,7 @@ mod tests {
         let result = evaluate(&expression, &state, &factory, &allocator, &mut cache);
         assert_eq!(
             result,
-            EvaluationResult::new(
-                factory.create_value_term(ValueTerm::Int(3 + 1)),
-                DependencyList::empty(),
-            ),
+            EvaluationResult::new(factory.create_int_term(3 + 1), DependencyList::empty(),),
         );
         let expression = parse(
             "(letrec ((fac (lambda (n) (if (= n 1) n (* n (fac (- n 1))))))) (fac 5))",
@@ -2049,7 +1998,7 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                factory.create_value_term(ValueTerm::Int(5 * 4 * 3 * 2 * 1)),
+                factory.create_int_term(5 * 4 * 3 * 2 * 1),
                 DependencyList::empty(),
             ),
         );
@@ -2057,19 +2006,13 @@ mod tests {
         let result = evaluate(&expression, &state, &factory, &allocator, &mut cache);
         assert_eq!(
             result,
-            EvaluationResult::new(
-                factory.create_value_term(ValueTerm::Boolean(false)),
-                DependencyList::empty(),
-            ),
+            EvaluationResult::new(factory.create_boolean_term(false), DependencyList::empty(),),
         );
         let expression = parse("(letrec ((is-even? (lambda (x) (if (= x 0) #t (is-odd? (- x 1))))) (is-odd? (lambda (x) (if (= x 0) #f (is-even? (- x 1)))))) (is-odd? 3))", &factory, &allocator).unwrap();
         let result = evaluate(&expression, &state, &factory, &allocator, &mut cache);
         assert_eq!(
             result,
-            EvaluationResult::new(
-                factory.create_value_term(ValueTerm::Boolean(true)),
-                DependencyList::empty(),
-            ),
+            EvaluationResult::new(factory.create_boolean_term(true), DependencyList::empty(),),
         );
         let expression = parse(
             "(letrec ((foo (cons 3 foo))) (car (cdr (cdr (cdr foo)))))",
@@ -2080,10 +2023,7 @@ mod tests {
         let result = evaluate(&expression, &state, &factory, &allocator, &mut cache);
         assert_eq!(
             result,
-            EvaluationResult::new(
-                factory.create_value_term(ValueTerm::Int(3)),
-                DependencyList::empty(),
-            ),
+            EvaluationResult::new(factory.create_int_term(3), DependencyList::empty(),),
         );
         let expression = parse(
             "(letrec ((foo (cons 1 bar)) (bar (cons 2 foo))) (car (cdr (cdr (cdr foo)))))",
@@ -2094,10 +2034,7 @@ mod tests {
         let result = evaluate(&expression, &state, &factory, &allocator, &mut cache);
         assert_eq!(
             result,
-            EvaluationResult::new(
-                factory.create_value_term(ValueTerm::Int(2)),
-                DependencyList::empty(),
-            ),
+            EvaluationResult::new(factory.create_int_term(2), DependencyList::empty(),),
         );
     }
 
@@ -2113,7 +2050,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             expression.normalize(&factory, &allocator, &mut SubstitutionCache::new()),
-            Some(factory.create_value_term(ValueTerm::Boolean(true)))
+            Some(factory.create_boolean_term(true))
         );
 
         let expression = parse(
@@ -2129,7 +2066,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             expression.normalize(&factory, &allocator, &mut SubstitutionCache::new()),
-            Some(factory.create_value_term(ValueTerm::Int(6)))
+            Some(factory.create_int_term(6))
         );
     }
 

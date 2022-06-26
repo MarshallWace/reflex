@@ -2,12 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
-use crate::{
-    core::{
-        uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
-        FunctionArity, HeapAllocator, Uid, Uuid,
-    },
-    lang::ValueTerm,
+use crate::core::{
+    uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
+    FunctionArity, HeapAllocator, Uid, Uuid,
 };
 
 pub struct Floor {}
@@ -42,12 +39,12 @@ impl<T: Expression> Applicable<T> for Floor {
         _cache: &mut impl EvaluationCache<T>,
     ) -> Result<T, String> {
         let operand = args.next().unwrap();
-        match factory.match_value_term(&operand) {
-            Some(ValueTerm::Int(_)) => Ok(operand),
-            Some(ValueTerm::Float(operand)) => {
-                Ok(factory.create_value_term(ValueTerm::Float(operand.floor())))
-            }
-            _ => Err(format!("Expected Int or Float, received {}", operand)),
+        match factory.match_int_term(&operand) {
+            Some(_) => Ok(operand),
+            _ => match factory.match_float_term(&operand) {
+                Some(term) => Ok(factory.create_float_term(term.value.floor())),
+                _ => Err(format!("Expected Int or Float, received {}", operand)),
+            },
         }
     }
 }

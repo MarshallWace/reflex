@@ -85,11 +85,8 @@ impl<T: Expression> Applicable<T> for ConstructStruct {
                     keys.items().iter(),
                     |key| {
                         factory
-                            .match_value_term(key)
-                            .and_then(|key| match key.match_string() {
-                                Some(key) => Some(String::from(key.as_str())),
-                                None => None,
-                            })
+                            .match_string_term(key)
+                            .map(|key| String::from(key.value.as_str()))
                     },
                     |key| format!("Invalid property key: {}", key),
                 )

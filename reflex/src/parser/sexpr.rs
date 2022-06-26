@@ -14,7 +14,7 @@ use crate::{
         EvaluationCache, Expression, ExpressionFactory, ExpressionList, HeapAllocator, Reducible,
         Rewritable, StructFieldOffset, Substitutions,
     },
-    lang::{SymbolId, ValueTerm},
+    lang::SymbolId,
     stdlib::Stdlib,
 };
 
@@ -91,7 +91,7 @@ impl<'src> SymbolCache<'src> {
             .get(identifier)
             .map(|value| *value)
             .unwrap_or_else(|| {
-                let id = SymbolId::from(self.cache.len());
+                let id = self.cache.len() as u64;
                 self.cache.insert(identifier, id);
                 id
             })
@@ -182,7 +182,7 @@ fn parse_boolean_literal<'src, T: Expression + Rewritable<T> + Reducible<T>>(
 where
     T::Builtin: From<Stdlib>,
 {
-    factory.create_value_term(ValueTerm::Boolean(value))
+    factory.create_boolean_term(value)
 }
 
 fn parse_integer_literal<'src, T: Expression + Rewritable<T> + Reducible<T>>(
@@ -193,7 +193,7 @@ fn parse_integer_literal<'src, T: Expression + Rewritable<T> + Reducible<T>>(
 where
     T::Builtin: From<Stdlib>,
 {
-    factory.create_value_term(ValueTerm::Int(value))
+    factory.create_int_term(value)
 }
 
 fn parse_float_literal<'src, T: Expression + Rewritable<T> + Reducible<T>>(
@@ -204,7 +204,7 @@ fn parse_float_literal<'src, T: Expression + Rewritable<T> + Reducible<T>>(
 where
     T::Builtin: From<Stdlib>,
 {
-    factory.create_value_term(ValueTerm::Float(value))
+    factory.create_float_term(value)
 }
 
 fn parse_string_literal<'src, T: Expression + Rewritable<T> + Reducible<T>>(
@@ -216,7 +216,7 @@ fn parse_string_literal<'src, T: Expression + Rewritable<T> + Reducible<T>>(
 where
     T::Builtin: From<Stdlib>,
 {
-    factory.create_value_term(ValueTerm::String(allocator.create_string(value)))
+    factory.create_string_term(allocator.create_string(value))
 }
 
 fn parse_symbol_literal<'src, T: Expression + Rewritable<T> + Reducible<T>>(
@@ -228,7 +228,7 @@ fn parse_symbol_literal<'src, T: Expression + Rewritable<T> + Reducible<T>>(
 where
     T::Builtin: From<Stdlib>,
 {
-    factory.create_value_term(ValueTerm::Symbol(symbol_cache.get(symbol)))
+    factory.create_symbol_term(symbol_cache.get(symbol))
 }
 
 fn parse_variable<'src, T: Expression + Rewritable<T> + Reducible<T>>(
@@ -489,7 +489,7 @@ where
         let args = args.into_iter();
         allocator.create_sized_list(
             1 + args.len(),
-            once(factory.create_value_term(ValueTerm::Int(discriminant as i32))).chain(args),
+            once(factory.create_int_term(discriminant as i32)).chain(args),
         )
     })
 }
@@ -711,7 +711,7 @@ where
                                         factory.create_builtin_term(Stdlib::Get),
                                         allocator.create_pair(
                                             factory.create_static_variable_term(0),
-                                            factory.create_value_term(ValueTerm::Int(index as i32)),
+                                            factory.create_int_term(index as i32),
                                         ),
                                     ),
                                 )
@@ -741,7 +741,7 @@ where
                                     factory.create_builtin_term(Stdlib::Get),
                                     allocator.create_pair(
                                         bindings.clone(),
-                                        factory.create_value_term(ValueTerm::Int(index as i32)),
+                                        factory.create_int_term(index as i32),
                                     ),
                                 )
                             })),
@@ -838,7 +838,7 @@ mod tests {
     use crate::{
         allocator::DefaultAllocator,
         core::{ExpressionFactory, HeapAllocator},
-        lang::{SharedTermFactory, ValueTerm},
+        lang::SharedTermFactory,
         stdlib::Stdlib,
     };
 
@@ -1271,14 +1271,14 @@ mod tests {
         let allocator = DefaultAllocator::default();
         assert_eq!(
             parse("(letrec () 3)", &factory, &allocator),
-            Ok(factory.create_value_term(ValueTerm::Int(3))),
+            Ok(factory.create_int_term(3)),
         );
         assert_eq!(
             parse("(letrec ((foo 3)) foo)", &factory, &allocator),
             Ok(factory.create_application_term(
                 factory.create_lambda_term(1, factory.create_static_variable_term(0)),
                 allocator.create_unit_list(factory.create_recursive_term(
-                    factory.create_lambda_term(1, factory.create_value_term(ValueTerm::Int(3)))
+                    factory.create_lambda_term(1, factory.create_int_term(3))
                 )),
             )),
         );
@@ -1293,11 +1293,11 @@ mod tests {
                             factory.create_recursive_term(factory.create_lambda_term(
                                 1,
                                 factory.create_tuple_term(allocator.create_pair(
-                                    factory.create_value_term(ValueTerm::Int(3)),
-                                    factory.create_value_term(ValueTerm::Int(4)),
+                                    factory.create_int_term(3),
+                                    factory.create_int_term(4),
                                 ),),
                             )),
-                            factory.create_value_term(ValueTerm::Int(0)),
+                            factory.create_int_term(0),
                         ),
                     ),
                     factory.create_application_term(
@@ -1306,11 +1306,11 @@ mod tests {
                             factory.create_recursive_term(factory.create_lambda_term(
                                 1,
                                 factory.create_tuple_term(allocator.create_pair(
-                                    factory.create_value_term(ValueTerm::Int(3)),
-                                    factory.create_value_term(ValueTerm::Int(4)),
+                                    factory.create_int_term(3),
+                                    factory.create_int_term(4),
                                 ),),
                             )),
-                            factory.create_value_term(ValueTerm::Int(1)),
+                            factory.create_int_term(1),
                         ),
                     ),
                 ),
@@ -1327,11 +1327,11 @@ mod tests {
                             factory.create_recursive_term(factory.create_lambda_term(
                                 1,
                                 factory.create_tuple_term(allocator.create_pair(
-                                    factory.create_value_term(ValueTerm::Int(3)),
-                                    factory.create_value_term(ValueTerm::Int(4)),
+                                    factory.create_int_term(3),
+                                    factory.create_int_term(4),
                                 ),),
                             )),
-                            factory.create_value_term(ValueTerm::Int(0)),
+                            factory.create_int_term(0),
                         ),
                     ),
                     factory.create_application_term(
@@ -1340,11 +1340,11 @@ mod tests {
                             factory.create_recursive_term(factory.create_lambda_term(
                                 1,
                                 factory.create_tuple_term(allocator.create_pair(
-                                    factory.create_value_term(ValueTerm::Int(3)),
-                                    factory.create_value_term(ValueTerm::Int(4)),
+                                    factory.create_int_term(3),
+                                    factory.create_int_term(4),
                                 ),),
                             )),
-                            factory.create_value_term(ValueTerm::Int(1)),
+                            factory.create_int_term(1),
                         ),
                     ),
                 ),
@@ -1361,7 +1361,7 @@ mod tests {
                 factory.create_application_term(
                     factory.create_lambda_term(1, factory.create_static_variable_term(1)),
                     allocator.create_unit_list(factory.create_recursive_term(
-                        factory.create_lambda_term(1, factory.create_value_term(ValueTerm::Int(3))),
+                        factory.create_lambda_term(1, factory.create_int_term(3)),
                     )),
                 ),
             )),
@@ -1383,11 +1383,11 @@ mod tests {
                                 factory.create_recursive_term(factory.create_lambda_term(
                                     1,
                                     factory.create_tuple_term(allocator.create_pair(
-                                        factory.create_value_term(ValueTerm::Int(3)),
-                                        factory.create_value_term(ValueTerm::Int(4)),
+                                        factory.create_int_term(3),
+                                        factory.create_int_term(4),
                                     )),
                                 ),),
-                                factory.create_value_term(ValueTerm::Int(0)),
+                                factory.create_int_term(0),
                             ),
                         ),
                         factory.create_application_term(
@@ -1396,11 +1396,11 @@ mod tests {
                                 factory.create_recursive_term(factory.create_lambda_term(
                                     1,
                                     factory.create_tuple_term(allocator.create_pair(
-                                        factory.create_value_term(ValueTerm::Int(3)),
-                                        factory.create_value_term(ValueTerm::Int(4)),
+                                        factory.create_int_term(3),
+                                        factory.create_int_term(4),
                                     )),
                                 ),),
-                                factory.create_value_term(ValueTerm::Int(1)),
+                                factory.create_int_term(1),
                             ),
                         ),
                     ),
@@ -1418,17 +1418,17 @@ mod tests {
                             factory.create_recursive_term(factory.create_lambda_term(
                                 1,
                                 factory.create_tuple_term(allocator.create_pair(
-                                    factory.create_value_term(ValueTerm::Int(3)),
+                                    factory.create_int_term(3),
                                     factory.create_application_term(
                                         factory.create_builtin_term(Stdlib::Get),
                                         allocator.create_pair(
                                             factory.create_static_variable_term(0),
-                                            factory.create_value_term(ValueTerm::Int(0)),
+                                            factory.create_int_term(0),
                                         ),
                                     ),
                                 )),
                             ),),
-                            factory.create_value_term(ValueTerm::Int(0)),
+                            factory.create_int_term(0),
                         ),
                     ),
                     factory.create_application_term(
@@ -1437,17 +1437,17 @@ mod tests {
                             factory.create_recursive_term(factory.create_lambda_term(
                                 1,
                                 factory.create_tuple_term(allocator.create_pair(
-                                    factory.create_value_term(ValueTerm::Int(3)),
+                                    factory.create_int_term(3),
                                     factory.create_application_term(
                                         factory.create_builtin_term(Stdlib::Get),
                                         allocator.create_pair(
                                             factory.create_static_variable_term(0),
-                                            factory.create_value_term(ValueTerm::Int(0)),
+                                            factory.create_int_term(0),
                                         ),
                                     ),
                                 )),
                             ),),
-                            factory.create_value_term(ValueTerm::Int(1)),
+                            factory.create_int_term(1),
                         ),
                     ),
                 ),
@@ -1464,17 +1464,17 @@ mod tests {
                             factory.create_recursive_term(factory.create_lambda_term(
                                 1,
                                 factory.create_tuple_term(allocator.create_pair(
-                                    factory.create_value_term(ValueTerm::Int(3)),
+                                    factory.create_int_term(3),
                                     factory.create_application_term(
                                         factory.create_builtin_term(Stdlib::Get),
                                         allocator.create_pair(
                                             factory.create_static_variable_term(0),
-                                            factory.create_value_term(ValueTerm::Int(0)),
+                                            factory.create_int_term(0),
                                         ),
                                     ),
                                 )),
                             ),),
-                            factory.create_value_term(ValueTerm::Int(0)),
+                            factory.create_int_term(0),
                         ),
                     ),
                     factory.create_application_term(
@@ -1483,17 +1483,17 @@ mod tests {
                             factory.create_recursive_term(factory.create_lambda_term(
                                 1,
                                 factory.create_tuple_term(allocator.create_pair(
-                                    factory.create_value_term(ValueTerm::Int(3)),
+                                    factory.create_int_term(3),
                                     factory.create_application_term(
                                         factory.create_builtin_term(Stdlib::Get),
                                         allocator.create_pair(
                                             factory.create_static_variable_term(0),
-                                            factory.create_value_term(ValueTerm::Int(0)),
+                                            factory.create_int_term(0),
                                         ),
                                     ),
                                 )),
                             ),),
-                            factory.create_value_term(ValueTerm::Int(1)),
+                            factory.create_int_term(1),
                         ),
                     ),
                 ),
@@ -1523,17 +1523,17 @@ mod tests {
                             factory.create_recursive_term(factory.create_lambda_term(
                                 1,
                                 factory.create_tuple_term(allocator.create_pair(
-                                    factory.create_value_term(ValueTerm::Int(3)),
+                                    factory.create_int_term(3),
                                     factory.create_application_term(
                                         factory.create_builtin_term(Stdlib::Get),
                                         allocator.create_pair(
                                             factory.create_static_variable_term(0),
-                                            factory.create_value_term(ValueTerm::Int(0)),
+                                            factory.create_int_term(0),
                                         ),
                                     ),
                                 )),
                             )),
-                            factory.create_value_term(ValueTerm::Int(0)),
+                            factory.create_int_term(0),
                         ),
                     ),
                     factory.create_application_term(
@@ -1542,17 +1542,17 @@ mod tests {
                             factory.create_recursive_term(factory.create_lambda_term(
                                 1,
                                 factory.create_tuple_term(allocator.create_pair(
-                                    factory.create_value_term(ValueTerm::Int(3)),
+                                    factory.create_int_term(3),
                                     factory.create_application_term(
                                         factory.create_builtin_term(Stdlib::Get),
                                         allocator.create_pair(
                                             factory.create_static_variable_term(0),
-                                            factory.create_value_term(ValueTerm::Int(0)),
+                                            factory.create_int_term(0),
                                         ),
                                     ),
                                 )),
                             )),
-                            factory.create_value_term(ValueTerm::Int(1)),
+                            factory.create_int_term(1),
                         ),
                     ),
                 ),
@@ -1573,13 +1573,13 @@ mod tests {
                                         factory.create_builtin_term(Stdlib::Get),
                                         allocator.create_pair(
                                             factory.create_static_variable_term(0),
-                                            factory.create_value_term(ValueTerm::Int(1)),
+                                            factory.create_int_term(1),
                                         )
                                     ),
-                                    factory.create_value_term(ValueTerm::Int(3)),
+                                    factory.create_int_term(3),
                                 ))
                             )),
-                            factory.create_value_term(ValueTerm::Int(0)),
+                            factory.create_int_term(0),
                         ),
                     ),
                     factory.create_application_term(
@@ -1592,13 +1592,13 @@ mod tests {
                                         factory.create_builtin_term(Stdlib::Get),
                                         allocator.create_pair(
                                             factory.create_static_variable_term(0),
-                                            factory.create_value_term(ValueTerm::Int(1)),
+                                            factory.create_int_term(1),
                                         )
                                     ),
-                                    factory.create_value_term(ValueTerm::Int(3)),
+                                    factory.create_int_term(3),
                                 ))
                             )),
-                            factory.create_value_term(ValueTerm::Int(1)),
+                            factory.create_int_term(1),
                         ),
                     ),
                 ),
@@ -1619,13 +1619,13 @@ mod tests {
                                         factory.create_builtin_term(Stdlib::Get),
                                         allocator.create_pair(
                                             factory.create_static_variable_term(0),
-                                            factory.create_value_term(ValueTerm::Int(1)),
+                                            factory.create_int_term(1),
                                         )
                                     ),
-                                    factory.create_value_term(ValueTerm::Int(3)),
+                                    factory.create_int_term(3),
                                 ))
                             )),
-                            factory.create_value_term(ValueTerm::Int(0)),
+                            factory.create_int_term(0),
                         ),
                     ),
                     factory.create_application_term(
@@ -1638,13 +1638,13 @@ mod tests {
                                         factory.create_builtin_term(Stdlib::Get),
                                         allocator.create_pair(
                                             factory.create_static_variable_term(0),
-                                            factory.create_value_term(ValueTerm::Int(1)),
+                                            factory.create_int_term(1),
                                         )
                                     ),
-                                    factory.create_value_term(ValueTerm::Int(3)),
+                                    factory.create_int_term(3),
                                 ))
                             )),
-                            factory.create_value_term(ValueTerm::Int(1)),
+                            factory.create_int_term(1),
                         ),
                     ),
                 ),
@@ -1656,8 +1656,8 @@ mod tests {
             factory.create_lambda_term(3, factory.create_application_term(
                 factory.create_static_variable_term(2),
                 allocator.create_pair(
-                    factory.create_value_term(ValueTerm::Int(5)),
-                    factory.create_value_term(ValueTerm::Int(6)),
+                    factory.create_int_term(5),
+                    factory.create_int_term(6),
                 )
             )),
             allocator.create_triple(
@@ -1677,7 +1677,7 @@ mod tests {
                                                         factory.create_builtin_term(Stdlib::Get),
                                                         allocator.create_pair(
                                                             factory.create_static_variable_term(2),
-                                                            factory.create_value_term(ValueTerm::Int(1)),
+                                                            factory.create_int_term(1),
                                                         ),
                                                     ),
                                                     factory.create_static_variable_term(1),
@@ -1690,7 +1690,7 @@ mod tests {
                                                         factory.create_builtin_term(Stdlib::Get),
                                                         allocator.create_pair(
                                                             factory.create_static_variable_term(2),
-                                                            factory.create_value_term(ValueTerm::Int(2)),
+                                                            factory.create_int_term(2),
                                                         ),
                                                     ),
                                                     factory.create_static_variable_term(0),
@@ -1698,12 +1698,12 @@ mod tests {
                                             ),
                                         ),
                                     )),
-                                    factory.create_value_term(ValueTerm::Int(3)),
-                                    factory.create_value_term(ValueTerm::Int(4)),
+                                    factory.create_int_term(3),
+                                    factory.create_int_term(4),
                                 ),
                             )),
                         ),
-                        factory.create_value_term(ValueTerm::Int(0)),
+                        factory.create_int_term(0),
                     ),
                 ),
                 factory.create_application_term(
@@ -1722,7 +1722,7 @@ mod tests {
                                                         factory.create_builtin_term(Stdlib::Get),
                                                         allocator.create_pair(
                                                             factory.create_static_variable_term(2),
-                                                            factory.create_value_term(ValueTerm::Int(1)),
+                                                            factory.create_int_term(1),
                                                         ),
                                                     ),
                                                     factory.create_static_variable_term(1),
@@ -1735,7 +1735,7 @@ mod tests {
                                                         factory.create_builtin_term(Stdlib::Get),
                                                         allocator.create_pair(
                                                             factory.create_static_variable_term(2),
-                                                            factory.create_value_term(ValueTerm::Int(2)),
+                                                            factory.create_int_term(2),
                                                         ),
                                                     ),
                                                     factory.create_static_variable_term(0),
@@ -1743,12 +1743,12 @@ mod tests {
                                             ),
                                         ),
                                     )),
-                                    factory.create_value_term(ValueTerm::Int(3)),
-                                    factory.create_value_term(ValueTerm::Int(4)),
+                                    factory.create_int_term(3),
+                                    factory.create_int_term(4),
                                 ),
                             )),
                         ),
-                        factory.create_value_term(ValueTerm::Int(1)),
+                        factory.create_int_term(1),
                     ),
                 ),
                 factory.create_application_term(
@@ -1767,7 +1767,7 @@ mod tests {
                                                         factory.create_builtin_term(Stdlib::Get),
                                                         allocator.create_pair(
                                                             factory.create_static_variable_term(2),
-                                                            factory.create_value_term(ValueTerm::Int(1)),
+                                                            factory.create_int_term(1),
                                                         ),
                                                     ),
                                                     factory.create_static_variable_term(1),
@@ -1780,7 +1780,7 @@ mod tests {
                                                         factory.create_builtin_term(Stdlib::Get),
                                                         allocator.create_pair(
                                                             factory.create_static_variable_term(2),
-                                                            factory.create_value_term(ValueTerm::Int(2)),
+                                                            factory.create_int_term(2),
                                                         ),
                                                     ),
                                                     factory.create_static_variable_term(0),
@@ -1788,12 +1788,12 @@ mod tests {
                                             ),
                                         ),
                                     )),
-                                    factory.create_value_term(ValueTerm::Int(3)),
-                                    factory.create_value_term(ValueTerm::Int(4)),
+                                    factory.create_int_term(3),
+                                    factory.create_int_term(4),
                                 ),
                             )),
                         ),
-                        factory.create_value_term(ValueTerm::Int(2)),
+                        factory.create_int_term(2),
                     ),
                 ),
             ),
@@ -1810,7 +1810,7 @@ mod tests {
                     1,
                     factory.create_application_term(
                         factory.create_static_variable_term(0),
-                        allocator.create_unit_list(factory.create_value_term(ValueTerm::Int(5))),
+                        allocator.create_unit_list(factory.create_int_term(5)),
                     )
                 ),
                 allocator.create_unit_list(
@@ -1826,7 +1826,7 @@ mod tests {
                                             factory.create_builtin_term(Stdlib::Equal),
                                             allocator.create_pair(
                                                 factory.create_static_variable_term(0),
-                                                factory.create_value_term(ValueTerm::Int(1)),
+                                                factory.create_int_term(1),
                                             ),
                                         ),
                                         factory.create_static_variable_term(0),
@@ -1844,9 +1844,7 @@ mod tests {
                                                             allocator.create_pair(
                                                                 factory
                                                                     .create_static_variable_term(0),
-                                                                factory.create_value_term(
-                                                                    ValueTerm::Int(1)
-                                                                ),
+                                                                factory.create_int_term(1),
                                                             ),
                                                         ),
                                                     ),

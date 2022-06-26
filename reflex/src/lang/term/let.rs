@@ -288,11 +288,11 @@ mod tests {
         let mut cache = DefaultInterpreterCache::default();
 
         let expression = factory.create_let_term(
-            factory.create_value_term(ValueTerm::Int(3)),
+            factory.create_int_term(3),
             factory.create_application_term(
                 factory.create_builtin_term(Stdlib::Abs),
                 allocator.create_unit_list(factory.create_let_term(
-                    factory.create_value_term(ValueTerm::Null),
+                    factory.create_nil_term(),
                     factory.create_static_variable_term(1),
                 )),
             ),
@@ -318,20 +318,17 @@ mod tests {
         .unwrap();
         assert_eq!(
             result,
-            EvaluationResult::new(
-                factory.create_value_term(ValueTerm::Int(3)),
-                DependencyList::empty(),
-            ),
+            EvaluationResult::new(factory.create_int_term(3), DependencyList::empty(),),
         );
 
         let expression = factory.create_let_term(
-            factory.create_value_term(ValueTerm::Int(3)),
+            factory.create_int_term(3),
             factory.create_application_term(
                 factory.create_builtin_term(Stdlib::Add),
                 allocator.create_pair(
-                    factory.create_value_term(ValueTerm::Int(4)),
+                    factory.create_int_term(4),
                     factory.create_let_term(
-                        factory.create_value_term(ValueTerm::Null),
+                        factory.create_nil_term(),
                         factory.create_static_variable_term(1),
                     ),
                 ),
@@ -358,25 +355,22 @@ mod tests {
         .unwrap();
         assert_eq!(
             result,
-            EvaluationResult::new(
-                factory.create_value_term(ValueTerm::Int(3 + 4)),
-                DependencyList::empty(),
-            ),
+            EvaluationResult::new(factory.create_int_term(3 + 4), DependencyList::empty(),),
         );
 
         let expression = factory.create_let_term(
-            factory.create_value_term(ValueTerm::Int(3)),
+            factory.create_int_term(3),
             factory.create_application_term(
                 factory.create_builtin_term(Stdlib::If),
                 allocator.create_triple(
-                    factory.create_value_term(ValueTerm::Boolean(false)),
-                    factory.create_value_term(ValueTerm::Null),
+                    factory.create_boolean_term(false),
+                    factory.create_nil_term(),
                     factory.create_application_term(
                         factory.create_builtin_term(Stdlib::Add),
                         allocator.create_pair(
-                            factory.create_value_term(ValueTerm::Int(4)),
+                            factory.create_int_term(4),
                             factory.create_let_term(
-                                factory.create_value_term(ValueTerm::Null),
+                                factory.create_nil_term(),
                                 factory.create_static_variable_term(1),
                             ),
                         ),
@@ -405,10 +399,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             result,
-            EvaluationResult::new(
-                factory.create_value_term(ValueTerm::Int(3 + 4)),
-                DependencyList::empty(),
-            ),
+            EvaluationResult::new(factory.create_int_term(3 + 4), DependencyList::empty(),),
         );
 
         let expression = factory.create_application_term(
@@ -425,7 +416,7 @@ mod tests {
                     ),
                 ),
             ),
-            allocator.create_unit_list(factory.create_value_term(ValueTerm::Int(3))),
+            allocator.create_unit_list(factory.create_int_term(3)),
         );
         let program = Compiler::new(CompilerOptions::unoptimized(), None)
             .compile(&expression, CompilerMode::Function, &factory, &allocator)
@@ -448,10 +439,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             result,
-            EvaluationResult::new(
-                factory.create_value_term(ValueTerm::Int(3)),
-                DependencyList::empty(),
-            ),
+            EvaluationResult::new(factory.create_int_term(3), DependencyList::empty(),),
         );
     }
 }

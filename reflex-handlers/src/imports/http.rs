@@ -3,7 +3,7 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use reflex::{
     core::{Expression, ExpressionFactory, HeapAllocator},
-    lang::{create_struct, ValueTerm},
+    lang::create_struct,
     stdlib::Stdlib,
 };
 use reflex_json::stdlib::Stdlib as JsonStdlib;
@@ -58,25 +58,21 @@ where
                 factory.create_application_term(
                     factory.create_builtin_term(Stdlib::Effect),
                     allocator.create_list(vec![
-                        factory.create_value_term(ValueTerm::String(
-                            allocator.create_static_string(EFFECT_TYPE_FETCH),
-                        )),
+                        factory
+                            .create_string_term(allocator.create_static_string(EFFECT_TYPE_FETCH)),
                         factory.create_application_term(
                             factory.create_builtin_term(Stdlib::Get),
                             allocator.create_pair(
                                 factory.create_static_variable_term(0),
-                                factory.create_value_term(ValueTerm::String(
-                                    allocator.create_static_string("url"),
-                                )),
+                                factory.create_string_term(allocator.create_static_string("url")),
                             ),
                         ),
                         factory.create_application_term(
                             factory.create_builtin_term(Stdlib::Get),
                             allocator.create_pair(
                                 factory.create_static_variable_term(0),
-                                factory.create_value_term(ValueTerm::String(
-                                    allocator.create_static_string("method"),
-                                )),
+                                factory
+                                    .create_string_term(allocator.create_static_string("method")),
                             ),
                         ),
                         factory.create_application_term(
@@ -85,9 +81,9 @@ where
                                 factory.create_builtin_term(Stdlib::Get),
                                 allocator.create_pair(
                                     factory.create_static_variable_term(0),
-                                    factory.create_value_term(ValueTerm::String(
+                                    factory.create_string_term(
                                         allocator.create_static_string("headers"),
-                                    )),
+                                    ),
                                 ),
                             )),
                         ),
@@ -95,9 +91,7 @@ where
                             factory.create_builtin_term(Stdlib::Get),
                             allocator.create_pair(
                                 factory.create_static_variable_term(0),
-                                factory.create_value_term(ValueTerm::String(
-                                    allocator.create_static_string("body"),
-                                )),
+                                factory.create_string_term(allocator.create_static_string("body")),
                             ),
                         ),
                     ]),
@@ -114,7 +108,7 @@ where
                             factory.create_builtin_term(Stdlib::Get),
                             allocator.create_pair(
                                 factory.create_static_variable_term(0),
-                                factory.create_value_term(ValueTerm::Int(0)),
+                                factory.create_int_term(0),
                             ),
                         ),
                         factory.create_application_term(
@@ -124,10 +118,10 @@ where
                                     factory.create_builtin_term(Stdlib::Get),
                                     allocator.create_pair(
                                         factory.create_static_variable_term(0),
-                                        factory.create_value_term(ValueTerm::Int(0)),
+                                        factory.create_int_term(0),
                                     ),
                                 ),
-                                factory.create_value_term(ValueTerm::Int(400)),
+                                factory.create_int_term(400),
                             ),
                         ),
                         factory.create_lambda_term(
@@ -136,7 +130,7 @@ where
                                 factory.create_builtin_term(Stdlib::Get),
                                 allocator.create_pair(
                                     factory.create_static_variable_term(0),
-                                    factory.create_value_term(ValueTerm::Int(1)),
+                                    factory.create_int_term(1),
                                 ),
                             ),
                         ),
@@ -148,7 +142,7 @@ where
                                     factory.create_builtin_term(Stdlib::Get),
                                     allocator.create_pair(
                                         factory.create_static_variable_term(0),
-                                        factory.create_value_term(ValueTerm::Int(1)),
+                                        factory.create_int_term(1),
                                     ),
                                 )),
                             ),

@@ -1,12 +1,9 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use reflex::{
-    core::{
-        uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
-        FunctionArity, HeapAllocator, Uid, Uuid,
-    },
-    lang::ValueTerm,
+use reflex::core::{
+    uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
+    FunctionArity, HeapAllocator, Uid, Uuid,
 };
 
 pub struct Getter {}
@@ -43,8 +40,8 @@ impl<T: Expression> Applicable<T> for Getter {
         let mut args = args.into_iter();
         let state_token = args.next().unwrap();
         let initial_value = args.next().unwrap();
-        if let Some(ValueTerm::Hash(state_token)) = factory.match_value_term(&state_token) {
-            Ok(factory.create_dynamic_variable_term(*state_token, initial_value))
+        if let Some(term) = factory.match_symbol_term(&state_token) {
+            Ok(factory.create_dynamic_variable_term(term.id, initial_value))
         } else {
             Err(format!(
                 "Invalid variable identifier: Expected Hash, received {}",

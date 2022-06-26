@@ -16,11 +16,8 @@ use hyper::Body;
 use metrics::{
     decrement_gauge, describe_counter, describe_gauge, increment_counter, increment_gauge, Unit,
 };
-use reflex::{
-    core::{
-        Expression, ExpressionFactory, HeapAllocator, Signal, SignalType, StateToken, StringValue,
-    },
-    lang::ValueTerm,
+use reflex::core::{
+    Expression, ExpressionFactory, HeapAllocator, Signal, SignalType, StateToken, StringValue,
 };
 use reflex_dispatcher::{
     Action, Actor, ActorTransition, HandlerContext, InboundAction, MessageData, OperationStream,
@@ -372,8 +369,8 @@ fn parse_fetch_result<T: Expression>(
     match result {
         Ok((status, body)) => match String::from_utf8(body.into_iter().collect()) {
             Ok(body) => factory.create_tuple_term(allocator.create_pair(
-                factory.create_value_term(ValueTerm::Int(status.as_u16().into())),
-                factory.create_value_term(ValueTerm::String(allocator.create_string(body))),
+                factory.create_int_term(status.as_u16().into()),
+                factory.create_string_term(allocator.create_string(body)),
             )),
             Err(err) => create_fetch_error_expression(err, factory, allocator),
         },
@@ -447,8 +444,8 @@ fn parse_string_arg<T: Expression>(
     value: &T,
     factory: &impl ExpressionFactory<T>,
 ) -> Option<String> {
-    match factory.match_value_term(value) {
-        Some(ValueTerm::String(value)) => Some(String::from(value.as_str())),
+    match factory.match_string_term(value) {
+        Some(term) => Some(String::from(term.value.as_str())),
         _ => None,
     }
 }
@@ -457,10 +454,12 @@ fn parse_optional_string_arg<T: Expression>(
     value: &T,
     factory: &impl ExpressionFactory<T>,
 ) -> Option<Option<String>> {
-    match factory.match_value_term(value) {
-        Some(ValueTerm::String(value)) => Some(Some(String::from(value.as_str()))),
-        Some(ValueTerm::Null) => Some(None),
-        _ => None,
+    match factory.match_string_term(value) {
+        Some(term) => Some(Some(String::from(term.value.as_str()))),
+        _ => match factory.match_nil_term(value) {
+            Some(_) => Some(None),
+            _ => None,
+        },
     }
 }
 
@@ -472,10 +471,11 @@ fn parse_key_values_arg<T: Expression>(
         value
             .entries()
             .into_iter()
-            .map(|(key, value)| match factory.match_value_term(value) {
-                Some(ValueTerm::String(value)) => {
-                    Some((String::from(key.as_str()), String::from(value.as_str())))
-                }
+            .map(|(key, value)| match factory.match_string_term(value) {
+                Some(term) => Some((
+                    String::from(key.as_str()),
+                    String::from(term.value.as_str()),
+                )),
                 _ => None,
             })
             .collect::<Option<Vec<_>>>()
@@ -500,6 +500,6 @@ fn create_error_expression<T: Expression>(
 ) -> T {
     factory.create_signal_term(allocator.create_signal_list(once(allocator.create_signal(
         SignalType::Error,
-        allocator.create_unit_list(factory.create_value_term(ValueTerm::String(message.into()))),
+        allocator.create_unit_list(factory.create_string_term(message.into())),
     ))))
 }

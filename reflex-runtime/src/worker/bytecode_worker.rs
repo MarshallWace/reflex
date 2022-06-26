@@ -15,7 +15,6 @@ use reflex::{
     },
     hash::{hash_object, HashId},
     interpreter::{execute, DefaultInterpreterCache, InterpreterOptions, MutableInterpreterCache},
-    lang::ValueTerm,
 };
 use reflex_dispatcher::{
     find_earliest_typed_message, find_latest_typed_message, Action, HandlerContext, InboundAction,
@@ -543,8 +542,8 @@ fn create_query_entry_point_function(
     let (graph_factory_address, graph_factory_hash) = graph_factory;
     let (query_factory_address, query_factory_hash) = query_factory;
     create_main_function([
-        Instruction::PushHash {
-            value: hash_object(operation_id),
+        Instruction::PushSymbol {
+            id: hash_object(operation_id),
         },
         Instruction::Call {
             target_address: graph_factory_address,
@@ -597,6 +596,6 @@ fn create_error_expression<T: Expression>(
 ) -> T {
     factory.create_signal_term(allocator.create_signal_list(once(allocator.create_signal(
         SignalType::Error,
-        allocator.create_unit_list(factory.create_value_term(ValueTerm::String(message.into()))),
+        allocator.create_unit_list(factory.create_string_term(message.into())),
     ))))
 }

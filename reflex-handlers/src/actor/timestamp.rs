@@ -9,10 +9,7 @@ use std::{
 };
 
 use futures::StreamExt;
-use reflex::{
-    core::{Expression, ExpressionFactory, HeapAllocator, Signal, SignalType, StateToken},
-    lang::ValueTerm,
-};
+use reflex::core::{Expression, ExpressionFactory, HeapAllocator, Signal, SignalType, StateToken};
 use reflex_dispatcher::{
     Action, Actor, ActorTransition, HandlerContext, InboundAction, MessageData, OperationStream,
     OutboundAction, ProcessId, StateOperation, StateTransition,
@@ -126,48 +123,47 @@ where
             return None;
         }
         let current_pid = context.pid();
-        let (initial_values, tasks): (Vec<_>, Vec<_>) =
-            effects
-                .iter()
-                .filter_map(|effect| {
-                    let state_token = effect.id();
-                    match parse_timestamp_effect_args(effect, &self.factory) {
-                        Ok(duration) => {
-                            if let Entry::Vacant(entry) = state.tasks.entry(state_token) {
-                                let (task_pid, task) = create_timestamp_task(
-                                    state_token,
-                                    duration,
-                                    &self.factory,
-                                    context,
-                                );
-                                entry.insert(task_pid);
-                                Some((
-                                    (
-                                        state_token,
-                                        StateUpdate::Value(self.factory.create_value_term(
-                                            ValueTerm::Float(get_current_time()),
-                                        )),
-                                    ),
-                                    Some(StateOperation::Task(task_pid, task)),
-                                ))
-                            } else {
-                                None
-                            }
-                        }
-                        Err(err) => Some((
-                            (
+        let (initial_values, tasks): (Vec<_>, Vec<_>) = effects
+            .iter()
+            .filter_map(|effect| {
+                let state_token = effect.id();
+                match parse_timestamp_effect_args(effect, &self.factory) {
+                    Ok(duration) => {
+                        if let Entry::Vacant(entry) = state.tasks.entry(state_token) {
+                            let (task_pid, task) = create_timestamp_task(
                                 state_token,
-                                StateUpdate::Value(create_error_expression(
-                                    err,
-                                    &self.factory,
-                                    &self.allocator,
-                                )),
-                            ),
-                            None,
-                        )),
+                                duration,
+                                &self.factory,
+                                context,
+                            );
+                            entry.insert(task_pid);
+                            Some((
+                                (
+                                    state_token,
+                                    StateUpdate::Value(
+                                        self.factory.create_float_term(get_current_time()),
+                                    ),
+                                ),
+                                Some(StateOperation::Task(task_pid, task)),
+                            ))
+                        } else {
+                            None
+                        }
                     }
-                })
-                .unzip();
+                    Err(err) => Some((
+                        (
+                            state_token,
+                            StateUpdate::Value(create_error_expression(
+                                err,
+                                &self.factory,
+                                &self.allocator,
+                            )),
+                        ),
+                        None,
+                    )),
+                }
+            })
+            .unzip();
         let initial_values_action = if initial_values.is_empty() {
             None
         } else {
@@ -236,9 +232,7 @@ where
                 EffectEmitAction {
                     updates: vec![(
                         state_token,
-                        StateUpdate::Value(
-                            factory.create_value_term(ValueTerm::Float(get_current_time())),
-                        ),
+                        StateUpdate::Value(factory.create_float_term(get_current_time())),
                     )],
                 }
                 .into(),
@@ -283,10 +277,12 @@ fn parse_timestamp_effect_args<T: Expression>(
 }
 
 fn parse_number_arg<T: Expression>(value: &T, factory: &impl ExpressionFactory<T>) -> Option<f64> {
-    match factory.match_value_term(value) {
-        Some(ValueTerm::Int(value)) => Some(*value as f64),
-        Some(ValueTerm::Float(value)) => Some(*value),
-        _ => None,
+    match factory.match_int_term(value) {
+        Some(term) => Some(term.value as f64),
+        _ => match factory.match_float_term(value) {
+            Some(term) => Some(term.value),
+            _ => None,
+        },
     }
 }
 
@@ -297,6 +293,6 @@ fn create_error_expression<T: Expression>(
 ) -> T {
     factory.create_signal_term(allocator.create_signal_list(once(allocator.create_signal(
         SignalType::Error,
-        allocator.create_unit_list(factory.create_value_term(ValueTerm::String(message.into()))),
+        allocator.create_unit_list(factory.create_string_term(message.into())),
     ))))
 }

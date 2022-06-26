@@ -3,7 +3,7 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use reflex::{
     core::{Expression, ExpressionFactory, HeapAllocator},
-    lang::{create_struct, ValueTerm},
+    lang::create_struct,
     stdlib::Stdlib,
 };
 
@@ -29,22 +29,22 @@ where
                         factory.create_application_term(
                             factory.create_builtin_term(Stdlib::Effect),
                             allocator.create_list(vec![
-                                factory.create_value_term(ValueTerm::String(
+                                factory.create_string_term(
                                     allocator.create_string(String::from(EFFECT_TYPE_GRPC)),
-                                )),
-                                factory.create_value_term(ValueTerm::Int(protocol_id.as_i32())),
+                                ),
+                                factory.create_int_term(protocol_id.as_i32()),
                                 factory.create_application_term(
                                     factory.create_builtin_term(Stdlib::Get),
                                     allocator.create_pair(
                                         factory.create_static_variable_term(2),
-                                        factory.create_value_term(ValueTerm::String(
+                                        factory.create_string_term(
                                             allocator.create_string(String::from("url")),
-                                        )),
+                                        ),
                                     ),
                                 ),
-                                factory.create_value_term(ValueTerm::String(
+                                factory.create_string_term(
                                     allocator.create_string(String::from(method_name)),
-                                )),
+                                ),
                                 factory.create_application_term(
                                     factory.create_builtin_term(Stdlib::ResolveDeep),
                                     allocator
@@ -57,32 +57,32 @@ where
                                             factory.create_builtin_term(Stdlib::Contains),
                                             allocator.create_pair(
                                                 factory.create_static_variable_term(0),
-                                                factory.create_value_term(ValueTerm::String(
+                                                factory.create_string_term(
                                                     allocator
                                                         .create_string(String::from("accumulate")),
-                                                )),
+                                                ),
                                             ),
                                         ),
                                         factory.create_application_term(
                                             factory.create_builtin_term(Stdlib::Get),
                                             allocator.create_pair(
                                                 factory.create_static_variable_term(0),
-                                                factory.create_value_term(ValueTerm::String(
+                                                factory.create_string_term(
                                                     allocator
                                                         .create_string(String::from("accumulate")),
-                                                )),
+                                                ),
                                             ),
                                         ),
-                                        factory.create_value_term(ValueTerm::Null),
+                                        factory.create_nil_term(),
                                     ),
                                 ),
                                 factory.create_application_term(
                                     factory.create_builtin_term(Stdlib::Get),
                                     allocator.create_pair(
                                         factory.create_static_variable_term(0),
-                                        factory.create_value_term(ValueTerm::String(
+                                        factory.create_string_term(
                                             allocator.create_string(String::from("token")),
-                                        )),
+                                        ),
                                     ),
                                 ),
                             ]),

@@ -2,12 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
-use crate::{
-    core::{
-        uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
-        FunctionArity, HeapAllocator, SignalType, Uid, Uuid,
-    },
-    lang::ValueTerm,
+use crate::core::{
+    uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
+    FunctionArity, HeapAllocator, SignalType, Uid, Uuid,
 };
 
 pub struct IfError {}
@@ -75,7 +72,7 @@ impl<T: Expression> Applicable<T> for IfError {
                                 .iter()
                                 .next()
                                 .cloned()
-                                .unwrap_or_else(|| factory.create_value_term(ValueTerm::Null))
+                                .unwrap_or_else(|| factory.create_nil_term())
                         }),
                     ))),
                 ))

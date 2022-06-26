@@ -9,7 +9,6 @@ use reflex::{
         uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
         FunctionArity, HeapAllocator, StringValue, Uid, Uuid,
     },
-    lang::ValueTerm,
     stdlib::Stdlib,
 };
 
@@ -51,10 +50,13 @@ where
         let target = args.next().unwrap();
         let method_name = args.next().unwrap();
         let fallback = args.next().unwrap();
-        let builtin_method = match factory.match_value_term(&method_name) {
-            Some(ValueTerm::String(method_name)) => {
-                get_builtin_field(Some(&target), method_name.as_str(), factory, allocator)
-            }
+        let builtin_method = match factory.match_string_term(&method_name) {
+            Some(method_name) => get_builtin_field(
+                Some(&target),
+                method_name.value.as_str(),
+                factory,
+                allocator,
+            ),
             _ => None,
         };
         match builtin_method {
@@ -79,7 +81,7 @@ where
     None.or_else(|| {
         if target.is_none()
             || target
-                .map(|target| match_string_value_term(target, factory))
+                .and_then(|target| factory.match_string_term(target))
                 .is_some()
         {
             get_builtin_string_field(method, factory)
@@ -225,13 +227,4 @@ where
         "values" => Some(factory.create_builtin_term(Stdlib::Values)),
         _ => None,
     }
-}
-
-fn match_string_value_term<'a, T: Expression>(
-    target: &'a T,
-    factory: &impl ExpressionFactory<T>,
-) -> Option<&'a T::String> {
-    factory
-        .match_value_term(target)
-        .and_then(|target| target.match_string())
 }

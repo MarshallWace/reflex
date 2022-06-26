@@ -8,7 +8,6 @@ use reflex::{
         uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
         FunctionArity, HeapAllocator, Uid, Uuid,
     },
-    lang::ValueTerm,
     stdlib::Stdlib,
 };
 
@@ -48,7 +47,7 @@ where
     ) -> Result<T, String> {
         let mut args = args.into_iter();
         let target = args.next().unwrap();
-        if let Some(ValueTerm::Null) = factory.match_value_term(&target) {
+        if let Some(_) = factory.match_nil_term(&target) {
             Ok(target)
         } else if let Some(list) = factory.match_vector_term(&target) {
             Ok(factory.create_application_term(

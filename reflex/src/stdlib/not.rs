@@ -2,12 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
-use crate::{
-    core::{
-        uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
-        FunctionArity, HeapAllocator, Uid, Uuid,
-    },
-    lang::ValueTerm,
+use crate::core::{
+    uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
+    FunctionArity, HeapAllocator, Uid, Uuid,
 };
 
 use super::is_truthy;
@@ -44,6 +41,6 @@ impl<T: Expression> Applicable<T> for Not {
         _cache: &mut impl EvaluationCache<T>,
     ) -> Result<T, String> {
         let operand = args.next().unwrap();
-        Ok(factory.create_value_term(ValueTerm::Boolean(!is_truthy(&operand, factory))))
+        Ok(factory.create_boolean_term(!is_truthy(&operand, factory)))
     }
 }

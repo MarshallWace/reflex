@@ -7,7 +7,7 @@ use crate::{
         uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
         FunctionArity, HeapAllocator, Uid, Uuid,
     },
-    lang::{is_integer, ValueTerm},
+    lang::is_integer,
 };
 
 pub struct Pow {}
@@ -43,54 +43,52 @@ impl<T: Expression> Applicable<T> for Pow {
     ) -> Result<T, String> {
         let left = args.next().unwrap();
         let right = args.next().unwrap();
-        let result = match (
-            factory.match_value_term(&left),
-            factory.match_value_term(&right),
+        let result = if let (Some(left), Some(right)) = (
+            factory.match_int_term(&left),
+            factory.match_int_term(&right),
         ) {
-            (Some(left), Some(right)) => match (left, right) {
-                (ValueTerm::Int(left), ValueTerm::Int(right)) => {
-                    let left = *left;
-                    let right = *right;
-                    Some(Ok(factory.create_value_term(if right < 0 {
-                        ValueTerm::Float((left as f64).powi(right))
-                    } else {
-                        ValueTerm::Int(left.pow(right as u32))
-                    })))
-                }
-                (ValueTerm::Float(left), ValueTerm::Float(right)) => {
-                    let left = *left;
-                    let right = *right;
-                    if left < 0.0 && !is_integer(right) {
-                        Some(Err(format!(
-                            "Invalid exponentiation operands: ({}, {})",
-                            left, right
-                        )))
-                    } else {
-                        Some(Ok(
-                            factory.create_value_term(ValueTerm::Float(left.powf(right)))
-                        ))
-                    }
-                }
-                (ValueTerm::Int(left), ValueTerm::Float(right)) => {
-                    let left = *left;
-                    let right = *right;
-                    if left < 0 && !is_integer(right) {
-                        Some(Err(format!(
-                            "Invalid exponentiation operands: ({}, {})",
-                            left, right
-                        )))
-                    } else {
-                        Some(Ok(factory.create_value_term(ValueTerm::Float(
-                            (left as f64).powf(right),
-                        ))))
-                    }
-                }
-                (ValueTerm::Float(left), ValueTerm::Int(right)) => Some(Ok(
-                    factory.create_value_term(ValueTerm::Float(left.powi(*right)))
-                )),
-                _ => None,
-            },
-            _ => None,
+            let left = left.value;
+            let right = right.value;
+            Some(Ok(if right < 0 {
+                factory.create_float_term((left as f64).powi(right))
+            } else {
+                factory.create_int_term(left.pow(right as u32))
+            }))
+        } else if let (Some(left), Some(right)) = (
+            factory.match_float_term(&left),
+            factory.match_float_term(&right),
+        ) {
+            let left = left.value;
+            let right = right.value;
+            if left < 0.0 && !is_integer(right) {
+                Some(Err(format!(
+                    "Invalid exponentiation operands: ({}, {})",
+                    left, right
+                )))
+            } else {
+                Some(Ok(factory.create_float_term(left.powf(right))))
+            }
+        } else if let (Some(left), Some(right)) = (
+            factory.match_int_term(&left),
+            factory.match_float_term(&right),
+        ) {
+            let left = left.value;
+            let right = right.value;
+            if left < 0 && !is_integer(right) {
+                Some(Err(format!(
+                    "Invalid exponentiation operands: ({}, {})",
+                    left, right
+                )))
+            } else {
+                Some(Ok(factory.create_float_term((left as f64).powf(right))))
+            }
+        } else if let (Some(left), Some(right)) = (
+            factory.match_float_term(&left),
+            factory.match_int_term(&right),
+        ) {
+            Some(Ok(factory.create_float_term(left.value.powi(right.value))))
+        } else {
+            None
         };
         match result {
             Some(result) => result,

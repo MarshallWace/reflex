@@ -2,12 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
-use crate::{
-    core::{
-        uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
-        FunctionArity, HeapAllocator, StringValue, Uid, Uuid,
-    },
-    lang::ValueTerm,
+use crate::core::{
+    uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
+    FunctionArity, HeapAllocator, StringValue, Uid, Uuid,
 };
 
 pub struct Split {}
@@ -44,15 +41,18 @@ impl<T: Expression> Applicable<T> for Split {
         let target = args.next().unwrap();
         let separator = args.next().unwrap();
         match (
-            factory.match_value_term(&target),
-            factory.match_value_term(&separator),
+            factory.match_string_term(&target),
+            factory.match_string_term(&separator),
         ) {
-            (Some(ValueTerm::String(target)), Some(ValueTerm::String(separator))) => Ok(factory
-                .create_vector_term(allocator.create_unsized_list(
-                    target.as_str().split(separator.as_str()).map(|value| {
-                        factory.create_value_term(ValueTerm::String(allocator.create_string(value)))
-                    }),
-                ))),
+            (Some(target), Some(separator)) => Ok(factory.create_vector_term(
+                allocator.create_unsized_list(
+                    target
+                        .value
+                        .as_str()
+                        .split(separator.value.as_str())
+                        .map(|value| factory.create_string_term(allocator.create_string(value))),
+                ),
+            )),
             _ => Err(format!(
                 "Expected (String, String), received ({}, {})",
                 target, separator,

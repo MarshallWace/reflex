@@ -3,7 +3,6 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use reflex::{
     core::{Expression, ExpressionFactory, HeapAllocator},
-    lang::ValueTerm,
     stdlib::Stdlib,
 };
 
@@ -20,8 +19,8 @@ where
             factory.create_builtin_term(Stdlib::If),
             allocator.create_triple(
                 factory.create_static_variable_term(0),
-                factory.create_value_term(ValueTerm::Boolean(true)),
-                factory.create_value_term(ValueTerm::Boolean(false)),
+                factory.create_boolean_term(true),
+                factory.create_boolean_term(false),
             ),
         ),
     )

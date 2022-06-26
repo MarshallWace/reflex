@@ -10,7 +10,7 @@ use std::{
 use reflex::{
     cache::NoopCache,
     core::{Expression, ExpressionFactory, HeapAllocator, Rewritable, StringValue, Substitutions},
-    lang::{as_integer, create_struct, ValueTerm},
+    lang::{as_integer, create_struct},
     stdlib::Stdlib,
 };
 use swc_common::{source_map::Pos, sync::Lrc, FileName, SourceMap, Span, Spanned};
@@ -572,8 +572,8 @@ where
                     _ => Err(err_unimplemented(node)),
                 }?;
                 let field_name = parse_prop_name(&node.key, scope, env, factory, allocator)?;
-                let field_accessor = factory
-                    .create_value_term(ValueTerm::String(allocator.create_string(field_name)));
+                let field_accessor =
+                    factory.create_string_term(allocator.create_string(field_name));
                 Ok((identifier, field_accessor))
             }
             ObjectPatProp::Assign(node) => {
@@ -581,9 +581,8 @@ where
                     Err(err_unimplemented(node))
                 } else {
                     let identifier = parse_identifier(&node.key);
-                    let field_accessor = factory.create_value_term(ValueTerm::String(
-                        allocator.create_string(String::from(identifier)),
-                    ));
+                    let field_accessor = factory
+                        .create_string_term(allocator.create_string(String::from(identifier)));
                     Ok((identifier, field_accessor))
                 }
             }
@@ -721,17 +720,22 @@ where
         PropName::BigInt(key) => Err(err_unimplemented(key)),
         PropName::Computed(key) => {
             let dynamic_key = parse_expression(&key.expr, scope, env, factory, allocator)?;
-            match factory.match_value_term(&dynamic_key) {
-                Some(ValueTerm::String(value)) => Ok(String::from(value.as_str())),
-                Some(ValueTerm::Null) => Ok(format!("{}", dynamic_key)),
-                Some(ValueTerm::Boolean(_)) => Ok(format!("{}", dynamic_key)),
-                Some(ValueTerm::Int(_)) => Ok(format!("{}", dynamic_key)),
-                Some(ValueTerm::Float(value)) => Ok(if let Some(value) = as_integer(*value) {
+            if let Some(term) = factory.match_string_term(&dynamic_key) {
+                Ok(String::from(term.value.as_str()))
+            } else if let Some(_) = factory.match_nil_term(&dynamic_key) {
+                Ok(format!("{}", dynamic_key))
+            } else if let Some(_) = factory.match_boolean_term(&dynamic_key) {
+                Ok(format!("{}", dynamic_key))
+            } else if let Some(_) = factory.match_int_term(&dynamic_key) {
+                Ok(format!("{}", dynamic_key))
+            } else if let Some(term) = factory.match_float_term(&dynamic_key) {
+                Ok(if let Some(value) = as_integer(term.value) {
                     format!("{}", value)
                 } else {
                     format!("{}", dynamic_key)
-                }),
-                _ => Err(err_unimplemented(dynamic_key)),
+                })
+            } else {
+                Err(err_unimplemented(dynamic_key))
             }
         }
     }
@@ -874,21 +878,21 @@ fn parse_null_literal<T: Expression + Rewritable<T>>(
     _node: &Null,
     factory: &impl ExpressionFactory<T>,
 ) -> ParserResult<T> {
-    Ok(factory.create_value_term(ValueTerm::Null))
+    Ok(factory.create_nil_term())
 }
 
 fn parse_boolean_literal<T: Expression + Rewritable<T>>(
     node: &Bool,
     factory: &impl ExpressionFactory<T>,
 ) -> ParserResult<T> {
-    Ok(factory.create_value_term(ValueTerm::Boolean(node.value)))
+    Ok(factory.create_boolean_term(node.value))
 }
 
 fn parse_number_literal<T: Expression + Rewritable<T>>(
     node: &Number,
     factory: &impl ExpressionFactory<T>,
 ) -> ParserResult<T> {
-    Ok(factory.create_value_term(ValueTerm::Float(node.value)))
+    Ok(factory.create_float_term(node.value))
 }
 
 fn parse_string_literal<T: Expression + Rewritable<T>>(
@@ -897,7 +901,7 @@ fn parse_string_literal<T: Expression + Rewritable<T>>(
     allocator: &impl HeapAllocator<T>,
 ) -> ParserResult<T> {
     let value = parse_string(node);
-    Ok(factory.create_value_term(ValueTerm::String(allocator.create_string(value))))
+    Ok(factory.create_string_term(allocator.create_string(value)))
 }
 
 fn parse_string(node: &Str) -> String {
@@ -939,7 +943,7 @@ where
             if value.is_empty() {
                 None
             } else {
-                Some(factory.create_value_term(ValueTerm::String(allocator.create_string(value))))
+                Some(factory.create_string_term(allocator.create_string(value)))
             }
         })
         .zip(
@@ -962,7 +966,7 @@ where
         })
         .collect::<ParserResult<Vec<_>>>()?;
     Ok(match args.len() {
-        0 => factory.create_value_term(ValueTerm::String(allocator.create_static_string(""))),
+        0 => factory.create_string_term(allocator.create_static_string("")),
         1 => args.into_iter().next().unwrap(),
         _ => factory.create_application_term(
             factory.create_builtin_term(Stdlib::Concat),
@@ -1246,13 +1250,15 @@ where
     T::Builtin: From<Stdlib> + From<JsStdlib>,
 {
     let operand = parse_expression(&node.arg, scope, env, factory, allocator)?;
-    Ok(match factory.match_value_term(&operand) {
-        Some(ValueTerm::Int(value)) => factory.create_value_term(ValueTerm::Int(-*value)),
-        Some(ValueTerm::Float(value)) => factory.create_value_term(ValueTerm::Float(-*value)),
-        _ => factory.create_application_term(
+    Ok(if let Some(term) = factory.match_int_term(&operand) {
+        factory.create_int_term(-term.value)
+    } else if let Some(term) = factory.match_float_term(&operand) {
+        factory.create_float_term(-term.value)
+    } else {
+        factory.create_application_term(
             factory.create_builtin_term(Stdlib::Subtract),
-            allocator.create_pair(factory.create_value_term(ValueTerm::Float(0.0)), operand),
-        ),
+            allocator.create_pair(factory.create_float_term(0.0), operand),
+        )
     })
 }
 
@@ -1267,13 +1273,15 @@ where
     T::Builtin: From<Stdlib> + From<JsStdlib>,
 {
     let operand = parse_expression(&node.arg, scope, env, factory, allocator)?;
-    Ok(match factory.match_value_term(&operand) {
-        Some(ValueTerm::Int(_)) => operand,
-        Some(ValueTerm::Float(_)) => operand,
-        _ => factory.create_application_term(
+    Ok(if let Some(_) = factory.match_int_term(&operand) {
+        operand
+    } else if let Some(_) = factory.match_float_term(&operand) {
+        operand
+    } else {
+        factory.create_application_term(
             factory.create_builtin_term(Stdlib::Add),
-            allocator.create_pair(factory.create_value_term(ValueTerm::Float(0.0)), operand),
-        ),
+            allocator.create_pair(factory.create_float_term(0.0), operand),
+        )
     })
 }
 
@@ -1752,7 +1760,7 @@ fn get_static_field<T: Expression + Rewritable<T>>(
 where
     T::Builtin: From<Stdlib>,
 {
-    let field = factory.create_value_term(ValueTerm::String(allocator.create_string(field)));
+    let field = factory.create_string_term(allocator.create_string(field));
     get_dynamic_field(target, field, factory, allocator)
 }
 
@@ -1782,7 +1790,7 @@ where
 {
     get_dynamic_field(
         target,
-        factory.create_value_term(ValueTerm::Int(index as i32)),
+        factory.create_int_term(index as i32),
         factory,
         allocator,
     )
@@ -1852,8 +1860,7 @@ where
     let is_potential_builtin_method =
         get_builtin_field(None, method_name, factory, allocator).is_some();
     if is_potential_builtin_method {
-        let method =
-            factory.create_value_term(ValueTerm::String(allocator.create_string(method_name)));
+        let method = factory.create_string_term(allocator.create_string(method_name));
         let num_args = args.len();
         let method_args = parse_expressions(
             args.iter().map(|arg| &*arg.expr),
@@ -1988,7 +1995,7 @@ mod tests {
         },
         env::inject_env_vars,
         interpreter::{execute, DefaultInterpreterCache, InterpreterOptions},
-        lang::{create_struct, SharedTermFactory, ValueTerm},
+        lang::{create_struct, SharedTermFactory},
         stdlib::Stdlib,
     };
 
@@ -2004,15 +2011,11 @@ mod tests {
                     allocator.create_unit_list(create_struct(
                         once((
                             String::from("name"),
-                            factory.create_value_term(ValueTerm::String(
-                                allocator.create_static_string("Error"),
-                            )),
+                            factory.create_string_term(allocator.create_static_string("Error")),
                         ))
                         .chain(once((
                             String::from("message"),
-                            factory.create_value_term(ValueTerm::String(
-                                allocator.create_string(message),
-                            )),
+                            factory.create_string_term(allocator.create_string(message)),
                         ))),
                         factory,
                         allocator,
@@ -2031,14 +2034,7 @@ mod tests {
                     .unwrap()
                     .get("message")
                     .unwrap();
-                String::from(
-                    factory
-                        .match_value_term(message)
-                        .unwrap()
-                        .match_string()
-                        .unwrap()
-                        .as_str(),
-                )
+                String::from(factory.match_string_term(message).unwrap().value.as_str())
             })
             .collect()
     }
@@ -2067,7 +2063,7 @@ mod tests {
         let env = Env::new();
         assert_eq!(
             parse("null", &env, &factory, &allocator),
-            Ok(factory.create_value_term(ValueTerm::Null)),
+            Ok(factory.create_nil_term()),
         );
     }
 
@@ -2078,11 +2074,11 @@ mod tests {
         let env = Env::new();
         assert_eq!(
             parse("true", &env, &factory, &allocator),
-            Ok(factory.create_value_term(ValueTerm::Boolean(true))),
+            Ok(factory.create_boolean_term(true)),
         );
         assert_eq!(
             parse("false", &env, &factory, &allocator),
-            Ok(factory.create_value_term(ValueTerm::Boolean(false))),
+            Ok(factory.create_boolean_term(false)),
         );
     }
 
@@ -2093,31 +2089,31 @@ mod tests {
         let env = Env::new();
         assert_eq!(
             parse("''", &env, &factory, &allocator),
-            Ok(factory.create_value_term(ValueTerm::String(allocator.create_static_string("")))),
+            Ok(factory.create_string_term(allocator.create_static_string(""))),
         );
         assert_eq!(
             parse("\"\"", &env, &factory, &allocator),
-            Ok(factory.create_value_term(ValueTerm::String(allocator.create_static_string("")))),
+            Ok(factory.create_string_term(allocator.create_static_string(""))),
         );
         assert_eq!(
             parse("'foo'", &env, &factory, &allocator),
-            Ok(factory.create_value_term(ValueTerm::String(allocator.create_static_string("foo")))),
+            Ok(factory.create_string_term(allocator.create_static_string("foo"))),
         );
         assert_eq!(
             parse("\"foo\"", &env, &factory, &allocator),
-            Ok(factory.create_value_term(ValueTerm::String(allocator.create_static_string("foo")))),
+            Ok(factory.create_string_term(allocator.create_static_string("foo"))),
         );
         assert_eq!(
             parse("'\"'", &env, &factory, &allocator),
-            Ok(factory.create_value_term(ValueTerm::String(allocator.create_static_string("\"")))),
+            Ok(factory.create_string_term(allocator.create_static_string("\""))),
         );
         assert_eq!(
             parse("'\\\"'", &env, &factory, &allocator),
-            Ok(factory.create_value_term(ValueTerm::String(allocator.create_static_string("\"")))),
+            Ok(factory.create_string_term(allocator.create_static_string("\""))),
         );
         assert_eq!(
             parse("\"\\\"\"", &env, &factory, &allocator),
-            Ok(factory.create_value_term(ValueTerm::String(allocator.create_static_string("\"")))),
+            Ok(factory.create_string_term(allocator.create_static_string("\""))),
         );
     }
 
@@ -2128,55 +2124,55 @@ mod tests {
         let env = Env::new();
         assert_eq!(
             parse("0", &env, &factory, &allocator),
-            Ok(factory.create_value_term(ValueTerm::Float(0.0))),
+            Ok(factory.create_float_term(0.0)),
         );
         assert_eq!(
             parse("3", &env, &factory, &allocator),
-            Ok(factory.create_value_term(ValueTerm::Float(3.0))),
+            Ok(factory.create_float_term(3.0)),
         );
         assert_eq!(
             parse("0.0", &env, &factory, &allocator),
-            Ok(factory.create_value_term(ValueTerm::Float(0.0))),
+            Ok(factory.create_float_term(0.0)),
         );
         assert_eq!(
             parse("3.142", &env, &factory, &allocator),
-            Ok(factory.create_value_term(ValueTerm::Float(3.142))),
+            Ok(factory.create_float_term(3.142)),
         );
         assert_eq!(
             parse("0.000", &env, &factory, &allocator),
-            Ok(factory.create_value_term(ValueTerm::Float(0.0))),
+            Ok(factory.create_float_term(0.0)),
         );
         assert_eq!(
             parse("-0", &env, &factory, &allocator),
-            Ok(factory.create_value_term(ValueTerm::Float(-0.0))),
+            Ok(factory.create_float_term(-0.0)),
         );
         assert_eq!(
             parse("-3", &env, &factory, &allocator),
-            Ok(factory.create_value_term(ValueTerm::Float(-3.0))),
+            Ok(factory.create_float_term(-3.0)),
         );
         assert_eq!(
             parse("-0.0", &env, &factory, &allocator),
-            Ok(factory.create_value_term(ValueTerm::Float(-0.0))),
+            Ok(factory.create_float_term(-0.0)),
         );
         assert_eq!(
             parse("-3.142", &env, &factory, &allocator),
-            Ok(factory.create_value_term(ValueTerm::Float(-3.142))),
+            Ok(factory.create_float_term(-3.142)),
         );
         assert_eq!(
             parse("+0", &env, &factory, &allocator),
-            Ok(factory.create_value_term(ValueTerm::Float(0.0))),
+            Ok(factory.create_float_term(0.0)),
         );
         assert_eq!(
             parse("+3", &env, &factory, &allocator),
-            Ok(factory.create_value_term(ValueTerm::Float(3.0))),
+            Ok(factory.create_float_term(3.0)),
         );
         assert_eq!(
             parse("+0.0", &env, &factory, &allocator),
-            Ok(factory.create_value_term(ValueTerm::Float(0.0))),
+            Ok(factory.create_float_term(0.0)),
         );
         assert_eq!(
             parse("+3.142", &env, &factory, &allocator),
-            Ok(factory.create_value_term(ValueTerm::Float(3.142))),
+            Ok(factory.create_float_term(3.142)),
         );
     }
 
@@ -2187,36 +2183,30 @@ mod tests {
         let env = Env::new();
         assert_eq!(
             parse("``", &env, &factory, &allocator),
-            Ok(factory.create_value_term(ValueTerm::String(allocator.create_static_string("")))),
+            Ok(factory.create_string_term(allocator.create_static_string(""))),
         );
         assert_eq!(
             parse("`foo`", &env, &factory, &allocator),
-            Ok(factory.create_value_term(ValueTerm::String(allocator.create_static_string("foo")))),
+            Ok(factory.create_string_term(allocator.create_static_string("foo"))),
         );
         assert_eq!(
             parse("`\"`", &env, &factory, &allocator),
-            Ok(factory.create_value_term(ValueTerm::String(allocator.create_static_string("\"")))),
+            Ok(factory.create_string_term(allocator.create_static_string("\""))),
         );
         assert_eq!(
             parse("`\\\"`", &env, &factory, &allocator),
-            Ok(factory.create_value_term(ValueTerm::String(
-                allocator.create_string(String::from("\""))
-            ))),
+            Ok(factory.create_string_term(allocator.create_string(String::from("\"")))),
         );
         assert_eq!(
             parse("`\\\\\"`", &env, &factory, &allocator),
-            Ok(factory.create_value_term(ValueTerm::String(
-                allocator.create_string(String::from("\\\""))
-            ))),
+            Ok(factory.create_string_term(allocator.create_string(String::from("\\\"")))),
         );
         assert_eq!(
             parse("`${'foo'}`", &env, &factory, &allocator),
             Ok(factory.create_application_term(
                 factory.create_builtin_term(JsStdlib::ToString),
                 allocator.create_list(allocator.create_unit_list(
-                    factory.create_value_term(ValueTerm::String(
-                        allocator.create_static_string("foo")
-                    ))
+                    factory.create_string_term(allocator.create_static_string("foo"))
                 )),
             )),
         );
@@ -2225,14 +2215,12 @@ mod tests {
             Ok(factory.create_application_term(
                 factory.create_builtin_term(Stdlib::Concat),
                 allocator.create_list(vec![
-                    factory.create_value_term(ValueTerm::String(
-                        allocator.create_static_string("foo")
-                    )),
+                    factory.create_string_term(allocator.create_static_string("foo")),
                     factory.create_application_term(
                         factory.create_builtin_term(JsStdlib::ToString),
-                        allocator.create_unit_list(factory.create_value_term(ValueTerm::String(
-                            allocator.create_static_string("bar")
-                        ))),
+                        allocator.create_unit_list(
+                            factory.create_string_term(allocator.create_static_string("bar"))
+                        ),
                     ),
                 ]),
             )),
@@ -2244,13 +2232,11 @@ mod tests {
                 allocator.create_list(vec![
                     factory.create_application_term(
                         factory.create_builtin_term(JsStdlib::ToString),
-                        allocator.create_unit_list(factory.create_value_term(ValueTerm::String(
-                            allocator.create_static_string("foo")
-                        ))),
+                        allocator.create_unit_list(
+                            factory.create_string_term(allocator.create_static_string("foo"))
+                        ),
                     ),
-                    factory.create_value_term(ValueTerm::String(
-                        allocator.create_static_string("bar")
-                    )),
+                    factory.create_string_term(allocator.create_static_string("bar")),
                 ]),
             )),
         );
@@ -2261,15 +2247,15 @@ mod tests {
                 allocator.create_list(vec![
                     factory.create_application_term(
                         factory.create_builtin_term(JsStdlib::ToString),
-                        allocator.create_unit_list(factory.create_value_term(ValueTerm::String(
-                            allocator.create_static_string("foo")
-                        ))),
+                        allocator.create_unit_list(
+                            factory.create_string_term(allocator.create_static_string("foo"))
+                        ),
                     ),
                     factory.create_application_term(
                         factory.create_builtin_term(JsStdlib::ToString),
-                        allocator.create_unit_list(factory.create_value_term(ValueTerm::String(
-                            allocator.create_static_string("bar")
-                        ))),
+                        allocator.create_unit_list(
+                            factory.create_string_term(allocator.create_static_string("bar"))
+                        ),
                     ),
                 ]),
             )),
@@ -2279,18 +2265,14 @@ mod tests {
             Ok(factory.create_application_term(
                 factory.create_builtin_term(Stdlib::Concat),
                 allocator.create_list(vec![
-                    factory.create_value_term(ValueTerm::String(
-                        allocator.create_static_string("foo")
-                    )),
+                    factory.create_string_term(allocator.create_static_string("foo")),
                     factory.create_application_term(
                         factory.create_builtin_term(JsStdlib::ToString),
-                        allocator.create_unit_list(factory.create_value_term(ValueTerm::String(
-                            allocator.create_static_string("bar")
-                        ))),
+                        allocator.create_unit_list(
+                            factory.create_string_term(allocator.create_static_string("bar"))
+                        ),
                     ),
-                    factory.create_value_term(ValueTerm::String(
-                        allocator.create_static_string("baz")
-                    )),
+                    factory.create_string_term(allocator.create_static_string("baz")),
                 ]),
             )),
         );
@@ -2301,18 +2283,16 @@ mod tests {
                 allocator.create_list(vec![
                     factory.create_application_term(
                         factory.create_builtin_term(JsStdlib::ToString),
-                        allocator.create_unit_list(factory.create_value_term(ValueTerm::String(
-                            allocator.create_static_string("foo")
-                        ))),
+                        allocator.create_unit_list(
+                            factory.create_string_term(allocator.create_static_string("foo"))
+                        ),
                     ),
-                    factory.create_value_term(ValueTerm::String(
-                        allocator.create_static_string("bar")
-                    )),
+                    factory.create_string_term(allocator.create_static_string("bar")),
                     factory.create_application_term(
                         factory.create_builtin_term(JsStdlib::ToString),
-                        allocator.create_unit_list(factory.create_value_term(ValueTerm::String(
-                            allocator.create_static_string("baz")
-                        ))),
+                        allocator.create_unit_list(
+                            factory.create_string_term(allocator.create_static_string("baz"))
+                        ),
                     ),
                 ]),
             )),
@@ -2324,21 +2304,21 @@ mod tests {
                 allocator.create_list(vec![
                     factory.create_application_term(
                         factory.create_builtin_term(JsStdlib::ToString),
-                        allocator.create_unit_list(factory.create_value_term(ValueTerm::String(
-                            allocator.create_static_string("foo")
-                        ))),
+                        allocator.create_unit_list(
+                            factory.create_string_term(allocator.create_static_string("foo"))
+                        ),
                     ),
                     factory.create_application_term(
                         factory.create_builtin_term(JsStdlib::ToString),
-                        allocator.create_unit_list(factory.create_value_term(ValueTerm::String(
-                            allocator.create_static_string("bar")
-                        ))),
+                        allocator.create_unit_list(
+                            factory.create_string_term(allocator.create_static_string("bar"))
+                        ),
                     ),
                     factory.create_application_term(
                         factory.create_builtin_term(JsStdlib::ToString),
-                        allocator.create_unit_list(factory.create_value_term(ValueTerm::String(
-                            allocator.create_static_string("baz")
-                        ))),
+                        allocator.create_unit_list(
+                            factory.create_string_term(allocator.create_static_string("baz"))
+                        ),
                     ),
                 ]),
             )),
@@ -2353,32 +2333,26 @@ mod tests {
             Ok(factory.create_application_term(
                 factory.create_builtin_term(Stdlib::Concat),
                 allocator.create_list(vec![
-                    factory.create_value_term(ValueTerm::String(
-                        allocator.create_static_string("foo")
-                    )),
+                    factory.create_string_term(allocator.create_static_string("foo")),
                     factory.create_application_term(
                         factory.create_builtin_term(JsStdlib::ToString),
-                        allocator.create_unit_list(factory.create_value_term(ValueTerm::String(
-                            allocator.create_static_string("one")
-                        ))),
+                        allocator.create_unit_list(
+                            factory.create_string_term(allocator.create_static_string("one"))
+                        ),
                     ),
-                    factory.create_value_term(ValueTerm::String(
-                        allocator.create_static_string("bar")
-                    )),
+                    factory.create_string_term(allocator.create_static_string("bar")),
                     factory.create_application_term(
                         factory.create_builtin_term(JsStdlib::ToString),
-                        allocator.create_unit_list(factory.create_value_term(ValueTerm::String(
-                            allocator.create_static_string("two")
-                        ))),
+                        allocator.create_unit_list(
+                            factory.create_string_term(allocator.create_static_string("two"))
+                        ),
                     ),
-                    factory.create_value_term(ValueTerm::String(
-                        allocator.create_static_string("baz")
-                    )),
+                    factory.create_string_term(allocator.create_static_string("baz")),
                     factory.create_application_term(
                         factory.create_builtin_term(JsStdlib::ToString),
-                        allocator.create_unit_list(factory.create_value_term(ValueTerm::String(
-                            allocator.create_static_string("three")
-                        ))),
+                        allocator.create_unit_list(
+                            factory.create_string_term(allocator.create_static_string("three"))
+                        ),
                     ),
                 ]),
             ))
@@ -2406,9 +2380,9 @@ mod tests {
                     allocator.create_static_string("baz"),
                 ]),
                 allocator.create_list(vec![
-                    factory.create_value_term(ValueTerm::Float(3.0)),
-                    factory.create_value_term(ValueTerm::Float(4.0)),
-                    factory.create_value_term(ValueTerm::Float(5.0)),
+                    factory.create_float_term(3.0),
+                    factory.create_float_term(4.0),
+                    factory.create_float_term(5.0),
                 ]),
             )),
         );
@@ -2426,9 +2400,9 @@ mod tests {
                     allocator.create_static_string("baz"),
                 ]),
                 allocator.create_list(vec![
-                    factory.create_value_term(ValueTerm::Float(3.0)),
-                    factory.create_value_term(ValueTerm::Float(4.0)),
-                    factory.create_value_term(ValueTerm::Float(5.0)),
+                    factory.create_float_term(3.0),
+                    factory.create_float_term(4.0),
+                    factory.create_float_term(5.0),
                 ]),
             )),
         );
@@ -2446,9 +2420,9 @@ mod tests {
                     allocator.create_static_string("baz"),
                 ]),
                 allocator.create_list(vec![
-                    factory.create_value_term(ValueTerm::Float(3.0)),
-                    factory.create_value_term(ValueTerm::Float(4.0)),
-                    factory.create_value_term(ValueTerm::Float(5.0)),
+                    factory.create_float_term(3.0),
+                    factory.create_float_term(4.0),
+                    factory.create_float_term(5.0),
                 ]),
             )),
         );
@@ -2466,15 +2440,9 @@ mod tests {
                     allocator.create_static_string("5"),
                 ]),
                 allocator.create_list(vec![
-                    factory.create_value_term(ValueTerm::String(
-                        allocator.create_static_string("foo")
-                    )),
-                    factory.create_value_term(ValueTerm::String(
-                        allocator.create_static_string("bar")
-                    )),
-                    factory.create_value_term(ValueTerm::String(
-                        allocator.create_static_string("baz")
-                    )),
+                    factory.create_string_term(allocator.create_static_string("foo")),
+                    factory.create_string_term(allocator.create_static_string("bar")),
+                    factory.create_string_term(allocator.create_static_string("baz")),
                 ]),
             )),
         );
@@ -2492,15 +2460,9 @@ mod tests {
                     allocator.create_static_string("5"),
                 ]),
                 allocator.create_list(vec![
-                    factory.create_value_term(ValueTerm::String(
-                        allocator.create_static_string("foo")
-                    )),
-                    factory.create_value_term(ValueTerm::String(
-                        allocator.create_static_string("bar")
-                    )),
-                    factory.create_value_term(ValueTerm::String(
-                        allocator.create_static_string("baz")
-                    )),
+                    factory.create_string_term(allocator.create_static_string("foo")),
+                    factory.create_string_term(allocator.create_static_string("bar")),
+                    factory.create_string_term(allocator.create_static_string("baz")),
                 ]),
             )),
         );
@@ -2518,15 +2480,9 @@ mod tests {
                     allocator.create_static_string("5"),
                 ]),
                 allocator.create_list(vec![
-                    factory.create_value_term(ValueTerm::String(
-                        allocator.create_static_string("foo")
-                    )),
-                    factory.create_value_term(ValueTerm::String(
-                        allocator.create_static_string("bar")
-                    )),
-                    factory.create_value_term(ValueTerm::String(
-                        allocator.create_static_string("baz")
-                    )),
+                    factory.create_string_term(allocator.create_static_string("foo")),
+                    factory.create_string_term(allocator.create_static_string("bar")),
+                    factory.create_string_term(allocator.create_static_string("baz")),
                 ]),
             )),
         );
@@ -2544,15 +2500,9 @@ mod tests {
                     allocator.create_static_string("5"),
                 ]),
                 allocator.create_list(vec![
-                    factory.create_value_term(ValueTerm::String(
-                        allocator.create_static_string("foo")
-                    )),
-                    factory.create_value_term(ValueTerm::String(
-                        allocator.create_static_string("bar")
-                    )),
-                    factory.create_value_term(ValueTerm::String(
-                        allocator.create_static_string("baz")
-                    )),
+                    factory.create_string_term(allocator.create_static_string("foo")),
+                    factory.create_string_term(allocator.create_static_string("bar")),
+                    factory.create_string_term(allocator.create_static_string("baz")),
                 ]),
             )),
         );
@@ -2570,15 +2520,9 @@ mod tests {
                     allocator.create_static_string("1.3"),
                 ]),
                 allocator.create_list(vec![
-                    factory.create_value_term(ValueTerm::String(
-                        allocator.create_static_string("foo")
-                    )),
-                    factory.create_value_term(ValueTerm::String(
-                        allocator.create_static_string("bar")
-                    )),
-                    factory.create_value_term(ValueTerm::String(
-                        allocator.create_static_string("baz")
-                    )),
+                    factory.create_string_term(allocator.create_static_string("foo")),
+                    factory.create_string_term(allocator.create_static_string("bar")),
+                    factory.create_string_term(allocator.create_static_string("baz")),
                 ]),
             )),
         );
@@ -2603,45 +2547,35 @@ mod tests {
                     factory.create_builtin_term(Stdlib::Get),
                     allocator.create_pair(
                         expression.clone(),
-                        factory.create_value_term(ValueTerm::String(
-                            allocator.create_static_string("first"),
-                        )),
+                        factory.create_string_term(allocator.create_static_string("first")),
                     ),
                 ),
                 factory.create_application_term(
                     factory.create_builtin_term(Stdlib::Get),
                     allocator.create_pair(
                         expression.clone(),
-                        factory.create_value_term(ValueTerm::String(
-                            allocator.create_static_string("second"),
-                        )),
+                        factory.create_string_term(allocator.create_static_string("second")),
                     ),
                 ),
                 factory.create_application_term(
                     factory.create_builtin_term(Stdlib::Get),
                     allocator.create_pair(
                         expression.clone(),
-                        factory.create_value_term(ValueTerm::String(
-                            allocator.create_static_string("third"),
-                        )),
+                        factory.create_string_term(allocator.create_static_string("third")),
                     ),
                 ),
                 factory.create_application_term(
                     factory.create_builtin_term(Stdlib::Get),
                     allocator.create_pair(
                         expression.clone(),
-                        factory.create_value_term(ValueTerm::String(
-                            allocator.create_static_string("fourth"),
-                        )),
+                        factory.create_string_term(allocator.create_static_string("fourth")),
                     ),
                 ),
                 factory.create_application_term(
                     factory.create_builtin_term(Stdlib::Get),
                     allocator.create_pair(
                         expression.clone(),
-                        factory.create_value_term(ValueTerm::String(
-                            allocator.create_static_string("fifth"),
-                        )),
+                        factory.create_string_term(allocator.create_static_string("fifth")),
                     ),
                 ),
             ]),
@@ -2657,11 +2591,11 @@ mod tests {
             result,
             EvaluationResult::new(
                 factory.create_vector_term(allocator.create_list(allocator.create_list(vec![
-                    factory.create_value_term(ValueTerm::Float(6.0)),
-                    factory.create_value_term(ValueTerm::Float(2.0)),
-                    factory.create_value_term(ValueTerm::Float(7.0)),
-                    factory.create_value_term(ValueTerm::Float(4.0)),
-                    factory.create_value_term(ValueTerm::Float(5.0)),
+                    factory.create_float_term(6.0),
+                    factory.create_float_term(2.0),
+                    factory.create_float_term(7.0),
+                    factory.create_float_term(4.0),
+                    factory.create_float_term(5.0),
                 ]))),
                 DependencyList::empty(),
             ),
@@ -2680,27 +2614,21 @@ mod tests {
                     factory.create_builtin_term(Stdlib::Get),
                     allocator.create_pair(
                         expression.clone(),
-                        factory.create_value_term(ValueTerm::String(
-                            allocator.create_static_string("first"),
-                        )),
+                        factory.create_string_term(allocator.create_static_string("first")),
                     ),
                 ),
                 factory.create_application_term(
                     factory.create_builtin_term(Stdlib::Get),
                     allocator.create_pair(
                         expression.clone(),
-                        factory.create_value_term(ValueTerm::String(
-                            allocator.create_static_string("second"),
-                        )),
+                        factory.create_string_term(allocator.create_static_string("second")),
                     ),
                 ),
                 factory.create_application_term(
                     factory.create_builtin_term(Stdlib::Get),
                     allocator.create_pair(
                         expression.clone(),
-                        factory.create_value_term(ValueTerm::String(
-                            allocator.create_static_string("third"),
-                        )),
+                        factory.create_string_term(allocator.create_static_string("third")),
                     ),
                 ),
             ]),
@@ -2716,9 +2644,9 @@ mod tests {
             result,
             EvaluationResult::new(
                 factory.create_vector_term(allocator.create_list(vec![
-                    factory.create_value_term(ValueTerm::Float(1.0)),
-                    factory.create_value_term(ValueTerm::Float(2.0)),
-                    factory.create_value_term(ValueTerm::Float(3.0)),
+                    factory.create_float_term(1.0),
+                    factory.create_float_term(2.0),
+                    factory.create_float_term(3.0),
                 ])),
                 DependencyList::empty(),
             ),
@@ -2737,9 +2665,9 @@ mod tests {
         assert_eq!(
             parse("[3, 4, 5]", &env, &factory, &allocator),
             Ok(factory.create_vector_term(allocator.create_list(vec![
-                factory.create_value_term(ValueTerm::Float(3.0)),
-                factory.create_value_term(ValueTerm::Float(4.0)),
-                factory.create_value_term(ValueTerm::Float(5.0)),
+                factory.create_float_term(3.0),
+                factory.create_float_term(4.0),
+                factory.create_float_term(5.0),
             ]))),
         );
     }
@@ -2765,10 +2693,7 @@ mod tests {
         );
         assert_eq!(
             result,
-            EvaluationResult::new(
-                factory.create_value_term(ValueTerm::Float(4.0)),
-                DependencyList::empty(),
-            )
+            EvaluationResult::new(factory.create_float_term(4.0), DependencyList::empty())
         );
     }
 
@@ -2783,11 +2708,11 @@ mod tests {
                 factory.create_builtin_term(Stdlib::Push),
                 allocator.create_pair(
                     factory.create_vector_term(allocator.create_list(vec![
-                        factory.create_value_term(ValueTerm::Float(3.0)),
-                        factory.create_value_term(ValueTerm::Float(4.0)),
-                        factory.create_value_term(ValueTerm::Float(5.0)),
+                        factory.create_float_term(3.0),
+                        factory.create_float_term(4.0),
+                        factory.create_float_term(5.0),
                     ])),
-                    factory.create_value_term(ValueTerm::Float(6.0)),
+                    factory.create_float_term(6.0),
                 ),
             ))
         );
@@ -2797,11 +2722,11 @@ mod tests {
                 factory.create_builtin_term(Stdlib::PushFront),
                 allocator.create_pair(
                     factory.create_vector_term(allocator.create_list(vec![
-                        factory.create_value_term(ValueTerm::Float(4.0)),
-                        factory.create_value_term(ValueTerm::Float(5.0)),
-                        factory.create_value_term(ValueTerm::Float(6.0)),
+                        factory.create_float_term(4.0),
+                        factory.create_float_term(5.0),
+                        factory.create_float_term(6.0),
                     ])),
-                    factory.create_value_term(ValueTerm::Float(3.0)),
+                    factory.create_float_term(3.0),
                 ),
             ))
         );
@@ -2827,13 +2752,13 @@ mod tests {
             result,
             EvaluationResult::new(
                 factory.create_vector_term(allocator.create_list(vec![
-                    factory.create_value_term(ValueTerm::Float(1.0)),
-                    factory.create_value_term(ValueTerm::Float(2.0)),
-                    factory.create_value_term(ValueTerm::Float(3.0)),
-                    factory.create_value_term(ValueTerm::Float(4.0)),
-                    factory.create_value_term(ValueTerm::Float(5.0)),
-                    factory.create_value_term(ValueTerm::Float(6.0)),
-                    factory.create_value_term(ValueTerm::Float(7.0)),
+                    factory.create_float_term(1.0),
+                    factory.create_float_term(2.0),
+                    factory.create_float_term(3.0),
+                    factory.create_float_term(4.0),
+                    factory.create_float_term(5.0),
+                    factory.create_float_term(6.0),
+                    factory.create_float_term(7.0),
                 ])),
                 DependencyList::empty(),
             ),
@@ -2860,9 +2785,9 @@ mod tests {
             result,
             EvaluationResult::new(
                 factory.create_vector_term(allocator.create_list(vec![
-                    factory.create_value_term(ValueTerm::Float(1.0)),
-                    factory.create_value_term(ValueTerm::Float(2.0)),
-                    factory.create_value_term(ValueTerm::Float(3.0)),
+                    factory.create_float_term(1.0),
+                    factory.create_float_term(2.0),
+                    factory.create_float_term(3.0),
                 ])),
                 DependencyList::empty(),
             ),
@@ -2885,25 +2810,21 @@ mod tests {
                 factory.create_builtin_term(JsStdlib::Dispatch),
                 allocator.create_list(vec![
                     factory.create_vector_term(allocator.create_list(vec![
-                        factory.create_value_term(ValueTerm::Float(3.0)),
-                        factory.create_value_term(ValueTerm::Float(4.0)),
-                        factory.create_value_term(ValueTerm::Float(5.0)),
+                        factory.create_float_term(3.0),
+                        factory.create_float_term(4.0),
+                        factory.create_float_term(5.0),
                     ])),
-                    factory.create_value_term(ValueTerm::String(
-                        allocator.create_static_string("map")
-                    )),
+                    factory.create_string_term(allocator.create_static_string("map")),
                     factory.create_application_term(
                         factory.create_application_term(
                             factory.create_builtin_term(Stdlib::Get),
                             allocator.create_pair(
                                 factory.create_vector_term(allocator.create_list(vec![
-                                    factory.create_value_term(ValueTerm::Float(3.0)),
-                                    factory.create_value_term(ValueTerm::Float(4.0)),
-                                    factory.create_value_term(ValueTerm::Float(5.0)),
+                                    factory.create_float_term(3.0),
+                                    factory.create_float_term(4.0),
+                                    factory.create_float_term(5.0),
                                 ])),
-                                factory.create_value_term(ValueTerm::String(
-                                    allocator.create_static_string("map")
-                                )),
+                                factory.create_string_term(allocator.create_static_string("map")),
                             ),
                         ),
                         allocator.create_unit_list(factory.create_lambda_term(
@@ -2912,10 +2833,10 @@ mod tests {
                                 factory.create_builtin_term(Stdlib::Multiply),
                                 allocator.create_pair(
                                     factory.create_static_variable_term(0),
-                                    factory.create_value_term(ValueTerm::Float(2.0)),
+                                    factory.create_float_term(2.0),
                                 ),
                             ),
-                        ),),
+                        )),
                     ),
                     factory.create_lambda_term(
                         1,
@@ -2923,7 +2844,7 @@ mod tests {
                             factory.create_builtin_term(Stdlib::Multiply),
                             allocator.create_pair(
                                 factory.create_static_variable_term(0),
-                                factory.create_value_term(ValueTerm::Float(2.0)),
+                                factory.create_float_term(2.0),
                             ),
                         ),
                     ),
@@ -2939,11 +2860,11 @@ mod tests {
         let env = Env::new();
         assert_eq!(
             parse("(3)", &env, &factory, &allocator),
-            Ok(factory.create_value_term(ValueTerm::Float(3.0))),
+            Ok(factory.create_float_term(3.0)),
         );
         assert_eq!(
             parse("(((3)))", &env, &factory, &allocator),
-            Ok(factory.create_value_term(ValueTerm::Float(3.0))),
+            Ok(factory.create_float_term(3.0)),
         );
     }
 
@@ -2963,7 +2884,7 @@ mod tests {
                 &factory,
                 &allocator
             ),
-            Ok(factory.create_value_term(ValueTerm::Float(3.0))),
+            Ok(factory.create_float_term(3.0)),
         );
     }
 
@@ -2975,7 +2896,7 @@ mod tests {
         assert_eq!(
             parse("const foo = 3; foo;", &env, &factory, &allocator),
             Ok(factory.create_let_term(
-                factory.create_value_term(ValueTerm::Float(3.0)),
+                factory.create_float_term(3.0),
                 factory.create_static_variable_term(0),
             )),
         );
@@ -2987,9 +2908,9 @@ mod tests {
                 &allocator
             ),
             Ok(factory.create_let_term(
-                factory.create_value_term(ValueTerm::Float(3.0)),
+                factory.create_float_term(3.0),
                 factory.create_let_term(
-                    factory.create_value_term(ValueTerm::Float(4.0)),
+                    factory.create_float_term(4.0),
                     factory.create_static_variable_term(1),
                 ),
             )),
@@ -3002,9 +2923,9 @@ mod tests {
                 &allocator
             ),
             Ok(factory.create_let_term(
-                factory.create_value_term(ValueTerm::Float(3.0)),
+                factory.create_float_term(3.0),
                 factory.create_let_term(
-                    factory.create_value_term(ValueTerm::Float(4.0)),
+                    factory.create_float_term(4.0),
                     factory.create_static_variable_term(0),
                 ),
             )),
@@ -3018,7 +2939,7 @@ mod tests {
         let env = Env::new();
         assert_eq!(
             parse("const {} = {}; true;", &env, &factory, &allocator),
-            Ok(factory.create_value_term(ValueTerm::Boolean(true))),
+            Ok(factory.create_boolean_term(true)),
         );
         assert_eq!(
             parse(
@@ -3027,7 +2948,7 @@ mod tests {
                 &factory,
                 &allocator
             ),
-            Ok(factory.create_value_term(ValueTerm::Boolean(true))),
+            Ok(factory.create_boolean_term(true)),
         );
         assert_eq!(
             parse(
@@ -3047,17 +2968,15 @@ mod tests {
                                 allocator.create_static_string("baz"),
                             ]),
                             allocator.create_list(vec![
-                                factory.create_value_term(ValueTerm::Float(3.0)),
-                                factory.create_value_term(ValueTerm::Float(4.0)),
-                                factory.create_value_term(ValueTerm::Float(5.0)),
+                                factory.create_float_term(3.0),
+                                factory.create_float_term(4.0),
+                                factory.create_float_term(5.0),
                             ]),
                         ),
-                        factory.create_value_term(ValueTerm::String(
-                            allocator.create_static_string("foo")
-                        )),
+                        factory.create_string_term(allocator.create_static_string("foo")),
                     ),
                 ),
-                factory.create_value_term(ValueTerm::Boolean(true))
+                factory.create_boolean_term(true)
             )),
         );
         assert_eq!(
@@ -3075,9 +2994,9 @@ mod tests {
                         allocator.create_static_string("baz"),
                     ]),
                     allocator.create_list(vec![
-                        factory.create_value_term(ValueTerm::Float(3.0)),
-                        factory.create_value_term(ValueTerm::Float(4.0)),
-                        factory.create_value_term(ValueTerm::Float(5.0)),
+                        factory.create_float_term(3.0),
+                        factory.create_float_term(4.0),
+                        factory.create_float_term(5.0),
                     ]),
                 ),
                 factory.create_let_term(
@@ -3085,9 +3004,7 @@ mod tests {
                         factory.create_builtin_term(Stdlib::Get),
                         allocator.create_pair(
                             factory.create_static_variable_term(0),
-                            factory.create_value_term(ValueTerm::String(
-                                allocator.create_static_string("bar")
-                            )),
+                            factory.create_string_term(allocator.create_static_string("bar")),
                         ),
                     ),
                     factory.create_let_term(
@@ -3095,9 +3012,7 @@ mod tests {
                             factory.create_builtin_term(Stdlib::Get),
                             allocator.create_pair(
                                 factory.create_static_variable_term(1),
-                                factory.create_value_term(ValueTerm::String(
-                                    allocator.create_static_string("foo")
-                                )),
+                                factory.create_string_term(allocator.create_static_string("foo")),
                             ),
                         ),
                         factory.create_static_variable_term(0),
@@ -3120,9 +3035,9 @@ mod tests {
                         allocator.create_static_string("baz"),
                     ]),
                     allocator.create_list(vec![
-                        factory.create_value_term(ValueTerm::Float(3.0)),
-                        factory.create_value_term(ValueTerm::Float(4.0)),
-                        factory.create_value_term(ValueTerm::Float(5.0)),
+                        factory.create_float_term(3.0),
+                        factory.create_float_term(4.0),
+                        factory.create_float_term(5.0),
                     ]),
                 ),
                 factory.create_let_term(
@@ -3130,9 +3045,7 @@ mod tests {
                         factory.create_builtin_term(Stdlib::Get),
                         allocator.create_pair(
                             factory.create_static_variable_term(0),
-                            factory.create_value_term(ValueTerm::String(
-                                allocator.create_static_string("bar")
-                            )),
+                            factory.create_string_term(allocator.create_static_string("bar")),
                         ),
                     ),
                     factory.create_let_term(
@@ -3140,9 +3053,7 @@ mod tests {
                             factory.create_builtin_term(Stdlib::Get),
                             allocator.create_pair(
                                 factory.create_static_variable_term(1),
-                                factory.create_value_term(ValueTerm::String(
-                                    allocator.create_static_string("foo")
-                                )),
+                                factory.create_string_term(allocator.create_static_string("foo")),
                             ),
                         ),
                         factory.create_static_variable_term(1),
@@ -3165,9 +3076,9 @@ mod tests {
                         allocator.create_static_string("baz"),
                     ]),
                     allocator.create_list(vec![
-                        factory.create_value_term(ValueTerm::Float(3.0)),
-                        factory.create_value_term(ValueTerm::Float(4.0)),
-                        factory.create_value_term(ValueTerm::Float(5.0)),
+                        factory.create_float_term(3.0),
+                        factory.create_float_term(4.0),
+                        factory.create_float_term(5.0),
                     ]),
                 ),
                 factory.create_let_term(
@@ -3175,9 +3086,7 @@ mod tests {
                         factory.create_builtin_term(Stdlib::Get),
                         allocator.create_pair(
                             factory.create_static_variable_term(0),
-                            factory.create_value_term(ValueTerm::String(
-                                allocator.create_static_string("bar")
-                            )),
+                            factory.create_string_term(allocator.create_static_string("bar")),
                         ),
                     ),
                     factory.create_let_term(
@@ -3185,9 +3094,7 @@ mod tests {
                             factory.create_builtin_term(Stdlib::Get),
                             allocator.create_pair(
                                 factory.create_static_variable_term(1),
-                                factory.create_value_term(ValueTerm::String(
-                                    allocator.create_static_string("foo")
-                                )),
+                                factory.create_string_term(allocator.create_static_string("foo")),
                             ),
                         ),
                         factory.create_static_variable_term(1),
@@ -3210,9 +3117,9 @@ mod tests {
                         allocator.create_static_string("baz"),
                     ]),
                     allocator.create_list(vec![
-                        factory.create_value_term(ValueTerm::Float(3.0)),
-                        factory.create_value_term(ValueTerm::Float(4.0)),
-                        factory.create_value_term(ValueTerm::Float(5.0)),
+                        factory.create_float_term(3.0),
+                        factory.create_float_term(4.0),
+                        factory.create_float_term(5.0),
                     ]),
                 ),
                 factory.create_let_term(
@@ -3220,9 +3127,7 @@ mod tests {
                         factory.create_builtin_term(Stdlib::Get),
                         allocator.create_pair(
                             factory.create_static_variable_term(0),
-                            factory.create_value_term(ValueTerm::String(
-                                allocator.create_static_string("bar")
-                            )),
+                            factory.create_string_term(allocator.create_static_string("bar")),
                         ),
                     ),
                     factory.create_let_term(
@@ -3230,9 +3135,7 @@ mod tests {
                             factory.create_builtin_term(Stdlib::Get),
                             allocator.create_pair(
                                 factory.create_static_variable_term(1),
-                                factory.create_value_term(ValueTerm::String(
-                                    allocator.create_static_string("foo")
-                                )),
+                                factory.create_string_term(allocator.create_static_string("foo")),
                             ),
                         ),
                         factory.create_static_variable_term(1),
@@ -3255,9 +3158,9 @@ mod tests {
                         allocator.create_static_string("third"),
                     ]),
                     allocator.create_list(vec![
-                        factory.create_value_term(ValueTerm::Float(3.0)),
-                        factory.create_value_term(ValueTerm::Float(4.0)),
-                        factory.create_value_term(ValueTerm::Float(5.0)),
+                        factory.create_float_term(3.0),
+                        factory.create_float_term(4.0),
+                        factory.create_float_term(5.0),
                     ]),
                 ),
                 factory.create_let_term(
@@ -3267,9 +3170,9 @@ mod tests {
                             factory.create_builtin_term(Stdlib::Get),
                             allocator.create_pair(
                                 factory.create_static_variable_term(0),
-                                factory.create_value_term(ValueTerm::String(
+                                factory.create_string_term(
                                     allocator.create_static_string("first"),
-                                )),
+                                ),
                             ),
                         ),
                         factory.create_let_term(
@@ -3277,9 +3180,9 @@ mod tests {
                                 factory.create_builtin_term(Stdlib::Get),
                                 allocator.create_pair(
                                     factory.create_static_variable_term(1),
-                                    factory.create_value_term(ValueTerm::String(
+                                    factory.create_string_term(
                                         allocator.create_static_string("second"),
-                                    )),
+                                    ),
                                 ),
                             ),
                             factory.create_static_variable_term(1),
@@ -3303,13 +3206,13 @@ mod tests {
                         allocator.create_static_string("third"),
                     ]),
                     allocator.create_list(vec![
-                        factory.create_value_term(ValueTerm::Float(3.0)),
-                        factory.create_value_term(ValueTerm::Float(4.0)),
-                        factory.create_value_term(ValueTerm::Float(5.0)),
+                        factory.create_float_term(3.0),
+                        factory.create_float_term(4.0),
+                        factory.create_float_term(5.0),
                     ]),
                 ),
                 factory.create_let_term(
-                    factory.create_value_term(ValueTerm::Boolean(true)),
+                    factory.create_boolean_term(true),
                     factory.create_let_term(
                         factory.create_static_variable_term(1),
                         factory.create_let_term(
@@ -3317,9 +3220,9 @@ mod tests {
                                 factory.create_builtin_term(Stdlib::Get),
                                 allocator.create_pair(
                                     factory.create_static_variable_term(0),
-                                    factory.create_value_term(ValueTerm::String(
+                                    factory.create_string_term(
                                         allocator.create_static_string("first"),
-                                    )),
+                                    ),
                                 ),
                             ),
                             factory.create_let_term(
@@ -3327,9 +3230,9 @@ mod tests {
                                     factory.create_builtin_term(Stdlib::Get),
                                     allocator.create_pair(
                                         factory.create_static_variable_term(1),
-                                        factory.create_value_term(ValueTerm::String(
+                                        factory.create_string_term(
                                             allocator.create_static_string("second"),
-                                        )),
+                                        ),
                                     ),
                                 ),
                                 factory.create_static_variable_term(1),
@@ -3359,8 +3262,8 @@ mod tests {
                                 allocator.create_static_string("b"),
                             ]),
                             allocator.create_list(vec![
-                                factory.create_value_term(ValueTerm::Float(1.0)),
-                                factory.create_value_term(ValueTerm::Float(2.0)),
+                                factory.create_float_term(1.0),
+                                factory.create_float_term(2.0),
                             ]),
                         ),
                         factory.create_struct_term(
@@ -3369,8 +3272,8 @@ mod tests {
                                 allocator.create_static_string("d"),
                             ]),
                             allocator.create_list(vec![
-                                factory.create_value_term(ValueTerm::Float(3.0)),
-                                factory.create_value_term(ValueTerm::Float(4.0)),
+                                factory.create_float_term(3.0),
+                                factory.create_float_term(4.0),
                             ]),
                         ),
                     ]),
@@ -3380,9 +3283,9 @@ mod tests {
                         factory.create_builtin_term(Stdlib::Get),
                         allocator.create_pair(
                             factory.create_static_variable_term(0),
-                            factory.create_value_term(ValueTerm::String(allocator.create_string(
+                            factory.create_string_term(allocator.create_string(
                                 "one"
-                            ))),
+                            )),
                         ),
                     ),
                     factory.create_let_term(
@@ -3390,9 +3293,9 @@ mod tests {
                             factory.create_builtin_term(Stdlib::Get),
                             allocator.create_pair(
                                 factory.create_static_variable_term(1),
-                                factory.create_value_term(ValueTerm::String(allocator.create_string(
+                                factory.create_string_term(allocator.create_string(
                                     "two"
-                                ))),
+                                )),
                             ),
                         ),
                         factory.create_let_term(
@@ -3402,7 +3305,7 @@ mod tests {
                                     factory.create_builtin_term(Stdlib::Get),
                                     allocator.create_pair(
                                         factory.create_static_variable_term(0),
-                                        factory.create_value_term(ValueTerm::String(allocator.create_static_string("a"))),
+                                        factory.create_string_term(allocator.create_static_string("a")),
                                     ),
                                 ),
                                 factory.create_let_term(
@@ -3410,7 +3313,7 @@ mod tests {
                                         factory.create_builtin_term(Stdlib::Get),
                                         allocator.create_pair(
                                             factory.create_static_variable_term(1),
-                                            factory.create_value_term(ValueTerm::String(allocator.create_static_string("b"))),
+                                            factory.create_string_term(allocator.create_static_string("b")),
                                         ),
                                     ),
                                     factory.create_let_term(
@@ -3420,7 +3323,7 @@ mod tests {
                                                 factory.create_builtin_term(Stdlib::Get),
                                                 allocator.create_pair(
                                                     factory.create_static_variable_term(0),
-                                                    factory.create_value_term(ValueTerm::String(allocator.create_static_string("c"))),
+                                                    factory.create_string_term(allocator.create_static_string("c")),
                                                 ),
                                             ),
                                             factory.create_let_term(
@@ -3428,7 +3331,7 @@ mod tests {
                                                     factory.create_builtin_term(Stdlib::Get),
                                                     allocator.create_pair(
                                                         factory.create_static_variable_term(1),
-                                                        factory.create_value_term(ValueTerm::String(allocator.create_static_string("d"))),
+                                                        factory.create_string_term(allocator.create_static_string("d")),
                                                     ),
                                                 ),
                                                 factory.create_static_variable_term(4),
@@ -3454,7 +3357,7 @@ mod tests {
                                 factory.create_builtin_term(Stdlib::Get),
                                 allocator.create_pair(
                                     factory.create_static_variable_term(0),
-                                    factory.create_value_term(ValueTerm::String(allocator.create_static_string("foo"))),
+                                    factory.create_string_term(allocator.create_static_string("foo")),
                                 ),
                             ),
                             factory.create_let_term(
@@ -3462,7 +3365,7 @@ mod tests {
                                     factory.create_builtin_term(Stdlib::Get),
                                     allocator.create_pair(
                                         factory.create_static_variable_term(1),
-                                        factory.create_value_term(ValueTerm::String(allocator.create_static_string("bar"))),
+                                        factory.create_string_term(allocator.create_static_string("bar")),
                                     ),
                                 ),
                                 factory.create_static_variable_term(0),
@@ -3476,8 +3379,8 @@ mod tests {
                         allocator.create_static_string("bar"),
                     ]),
                     allocator.create_list(vec![
-                        factory.create_value_term(ValueTerm::Boolean(false)),
-                        factory.create_value_term(ValueTerm::Boolean(true)),
+                        factory.create_boolean_term(false),
+                        factory.create_boolean_term(true),
                     ]),
                 )),
             )),
@@ -3491,7 +3394,7 @@ mod tests {
         let env = Env::new();
         assert_eq!(
             parse("const [] = [3, 4, 5]; true;", &env, &factory, &allocator),
-            Ok(factory.create_value_term(ValueTerm::Boolean(true))),
+            Ok(factory.create_boolean_term(true)),
         );
         assert_eq!(
             parse("const [foo] = [3, 4, 5]; foo;", &env, &factory, &allocator),
@@ -3500,11 +3403,11 @@ mod tests {
                     factory.create_builtin_term(Stdlib::Get),
                     allocator.create_pair(
                         factory.create_vector_term(allocator.create_list(vec![
-                            factory.create_value_term(ValueTerm::Float(3.0)),
-                            factory.create_value_term(ValueTerm::Float(4.0)),
-                            factory.create_value_term(ValueTerm::Float(5.0)),
+                            factory.create_float_term(3.0),
+                            factory.create_float_term(4.0),
+                            factory.create_float_term(5.0),
                         ])),
-                        factory.create_value_term(ValueTerm::Int(0)),
+                        factory.create_int_term(0),
                     ),
                 ),
                 factory.create_static_variable_term(0),
@@ -3519,16 +3422,16 @@ mod tests {
             ),
             Ok(factory.create_let_term(
                 factory.create_vector_term(allocator.create_list(vec![
-                    factory.create_value_term(ValueTerm::Float(3.0)),
-                    factory.create_value_term(ValueTerm::Float(4.0)),
-                    factory.create_value_term(ValueTerm::Float(5.0)),
+                    factory.create_float_term(3.0),
+                    factory.create_float_term(4.0),
+                    factory.create_float_term(5.0),
                 ])),
                 factory.create_let_term(
                     factory.create_application_term(
                         factory.create_builtin_term(Stdlib::Get),
                         allocator.create_pair(
                             factory.create_static_variable_term(0),
-                            factory.create_value_term(ValueTerm::Int(0)),
+                            factory.create_int_term(0),
                         ),
                     ),
                     factory.create_let_term(
@@ -3536,7 +3439,7 @@ mod tests {
                             factory.create_builtin_term(Stdlib::Get),
                             allocator.create_pair(
                                 factory.create_static_variable_term(1),
-                                factory.create_value_term(ValueTerm::Int(1)),
+                                factory.create_int_term(1),
                             ),
                         ),
                         factory.create_static_variable_term(1),
@@ -3556,11 +3459,11 @@ mod tests {
                     factory.create_builtin_term(Stdlib::Get),
                     allocator.create_pair(
                         factory.create_vector_term(allocator.create_list(vec![
-                            factory.create_value_term(ValueTerm::Float(3.0)),
-                            factory.create_value_term(ValueTerm::Float(4.0)),
-                            factory.create_value_term(ValueTerm::Float(5.0)),
+                            factory.create_float_term(3.0),
+                            factory.create_float_term(4.0),
+                            factory.create_float_term(5.0),
                         ])),
-                        factory.create_value_term(ValueTerm::Int(2)),
+                        factory.create_int_term(2),
                     ),
                 ),
                 factory.create_static_variable_term(0),
@@ -3575,16 +3478,16 @@ mod tests {
             ),
             Ok(factory.create_let_term(
                 factory.create_vector_term(allocator.create_list(vec![
-                    factory.create_value_term(ValueTerm::Float(3.0)),
-                    factory.create_value_term(ValueTerm::Float(4.0)),
-                    factory.create_value_term(ValueTerm::Float(5.0)),
+                    factory.create_float_term(3.0),
+                    factory.create_float_term(4.0),
+                    factory.create_float_term(5.0),
                 ])),
                 factory.create_let_term(
                     factory.create_application_term(
                         factory.create_builtin_term(Stdlib::Get),
                         allocator.create_pair(
                             factory.create_static_variable_term(0),
-                            factory.create_value_term(ValueTerm::Int(1)),
+                            factory.create_int_term(1),
                         ),
                     ),
                     factory.create_let_term(
@@ -3592,7 +3495,7 @@ mod tests {
                             factory.create_builtin_term(Stdlib::Get),
                             allocator.create_pair(
                                 factory.create_static_variable_term(1),
-                                factory.create_value_term(ValueTerm::Int(2)),
+                                factory.create_int_term(2),
                             ),
                         ),
                         factory.create_static_variable_term(1),
@@ -3608,17 +3511,17 @@ mod tests {
                 &allocator
             ),
             Ok(factory.create_let_term(
-                factory.create_value_term(ValueTerm::Boolean(true)),
+                factory.create_boolean_term(true),
                 factory.create_let_term(
                     factory.create_application_term(
                         factory.create_builtin_term(Stdlib::Get),
                         allocator.create_pair(
                             factory.create_vector_term(allocator.create_list(vec![
-                                factory.create_value_term(ValueTerm::Float(3.0)),
-                                factory.create_value_term(ValueTerm::Float(4.0)),
-                                factory.create_value_term(ValueTerm::Float(5.0)),
+                                factory.create_float_term(3.0),
+                                factory.create_float_term(4.0),
+                                factory.create_float_term(5.0),
                             ])),
-                            factory.create_value_term(ValueTerm::Int(0)),
+                            factory.create_int_term(0),
                         ),
                     ),
                     factory.create_static_variable_term(1),
@@ -3633,19 +3536,19 @@ mod tests {
                 &allocator
             ),
             Ok(factory.create_let_term(
-                factory.create_value_term(ValueTerm::Boolean(true)),
+                factory.create_boolean_term(true),
                 factory.create_let_term(
                     factory.create_vector_term(allocator.create_list(vec![
-                        factory.create_value_term(ValueTerm::Float(3.0)),
-                        factory.create_value_term(ValueTerm::Float(4.0)),
-                        factory.create_value_term(ValueTerm::Float(5.0)),
+                        factory.create_float_term(3.0),
+                        factory.create_float_term(4.0),
+                        factory.create_float_term(5.0),
                     ])),
                     factory.create_let_term(
                         factory.create_application_term(
                             factory.create_builtin_term(Stdlib::Get),
                             allocator.create_pair(
                                 factory.create_static_variable_term(0),
-                                factory.create_value_term(ValueTerm::Int(0)),
+                                factory.create_int_term(0),
                             ),
                         ),
                         factory.create_let_term(
@@ -3653,7 +3556,7 @@ mod tests {
                                 factory.create_builtin_term(Stdlib::Get),
                                 allocator.create_pair(
                                     factory.create_static_variable_term(1),
-                                    factory.create_value_term(ValueTerm::Int(1)),
+                                    factory.create_int_term(1),
                                 ),
                             ),
                             factory.create_static_variable_term(3),
@@ -3692,7 +3595,7 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                factory.create_value_term(ValueTerm::Float(3.0 * 2.0)),
+                factory.create_float_term(3.0 * 2.0),
                 DependencyList::empty(),
             ),
         );
@@ -3719,7 +3622,7 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                factory.create_value_term(ValueTerm::Float(3.0 * 2.0)),
+                factory.create_float_term(3.0 * 2.0),
                 DependencyList::empty(),
             ),
         );
@@ -3751,10 +3654,7 @@ mod tests {
         );
         assert_eq!(
             result,
-            EvaluationResult::new(
-                factory.create_value_term(ValueTerm::Float(3.0)),
-                DependencyList::empty(),
-            ),
+            EvaluationResult::new(factory.create_float_term(3.0), DependencyList::empty()),
         );
         let expression = parse(
             "
@@ -3777,10 +3677,7 @@ mod tests {
         );
         assert_eq!(
             result,
-            EvaluationResult::new(
-                factory.create_value_term(ValueTerm::Float(3.0)),
-                DependencyList::empty(),
-            ),
+            EvaluationResult::new(factory.create_float_term(3.0), DependencyList::empty()),
         );
     }
 
@@ -3793,21 +3690,21 @@ mod tests {
             parse("!true", &env, &factory, &allocator),
             Ok(factory.create_application_term(
                 factory.create_builtin_term(Stdlib::Not),
-                allocator.create_unit_list(factory.create_value_term(ValueTerm::Boolean(true))),
+                allocator.create_unit_list(factory.create_boolean_term(true)),
             )),
         );
         assert_eq!(
             parse("!false", &env, &factory, &allocator),
             Ok(factory.create_application_term(
                 factory.create_builtin_term(Stdlib::Not),
-                allocator.create_unit_list(factory.create_value_term(ValueTerm::Boolean(false))),
+                allocator.create_unit_list(factory.create_boolean_term(false)),
             )),
         );
         assert_eq!(
             parse("!3", &env, &factory, &allocator),
             Ok(factory.create_application_term(
                 factory.create_builtin_term(Stdlib::Not),
-                allocator.create_unit_list(factory.create_value_term(ValueTerm::Float(3.0))),
+                allocator.create_unit_list(factory.create_float_term(3.0)),
             )),
         );
     }
@@ -3822,8 +3719,8 @@ mod tests {
             Ok(factory.create_application_term(
                 factory.create_builtin_term(Stdlib::Add),
                 allocator.create_pair(
-                    factory.create_value_term(ValueTerm::Float(3.0)),
-                    factory.create_value_term(ValueTerm::Float(4.0)),
+                    factory.create_float_term(3.0),
+                    factory.create_float_term(4.0),
                 ),
             )),
         );
@@ -3832,8 +3729,8 @@ mod tests {
             Ok(factory.create_application_term(
                 factory.create_builtin_term(Stdlib::Subtract),
                 allocator.create_pair(
-                    factory.create_value_term(ValueTerm::Float(3.0)),
-                    factory.create_value_term(ValueTerm::Float(4.0)),
+                    factory.create_float_term(3.0),
+                    factory.create_float_term(4.0),
                 ),
             )),
         );
@@ -3842,8 +3739,8 @@ mod tests {
             Ok(factory.create_application_term(
                 factory.create_builtin_term(Stdlib::Multiply),
                 allocator.create_pair(
-                    factory.create_value_term(ValueTerm::Float(3.0)),
-                    factory.create_value_term(ValueTerm::Float(4.0)),
+                    factory.create_float_term(3.0),
+                    factory.create_float_term(4.0),
                 ),
             )),
         );
@@ -3852,8 +3749,8 @@ mod tests {
             Ok(factory.create_application_term(
                 factory.create_builtin_term(Stdlib::Divide),
                 allocator.create_pair(
-                    factory.create_value_term(ValueTerm::Float(3.0)),
-                    factory.create_value_term(ValueTerm::Float(4.0)),
+                    factory.create_float_term(3.0),
+                    factory.create_float_term(4.0),
                 ),
             )),
         );
@@ -3862,8 +3759,8 @@ mod tests {
             Ok(factory.create_application_term(
                 factory.create_builtin_term(Stdlib::Remainder),
                 allocator.create_pair(
-                    factory.create_value_term(ValueTerm::Float(3.0)),
-                    factory.create_value_term(ValueTerm::Float(4.0)),
+                    factory.create_float_term(3.0),
+                    factory.create_float_term(4.0),
                 ),
             )),
         );
@@ -3872,8 +3769,8 @@ mod tests {
             Ok(factory.create_application_term(
                 factory.create_builtin_term(Stdlib::Pow),
                 allocator.create_pair(
-                    factory.create_value_term(ValueTerm::Float(3.0)),
-                    factory.create_value_term(ValueTerm::Float(4.0)),
+                    factory.create_float_term(3.0),
+                    factory.create_float_term(4.0),
                 ),
             )),
         );
@@ -3882,8 +3779,8 @@ mod tests {
             Ok(factory.create_application_term(
                 factory.create_builtin_term(Stdlib::Lt),
                 allocator.create_pair(
-                    factory.create_value_term(ValueTerm::Float(3.0)),
-                    factory.create_value_term(ValueTerm::Float(4.0)),
+                    factory.create_float_term(3.0),
+                    factory.create_float_term(4.0),
                 ),
             )),
         );
@@ -3892,8 +3789,8 @@ mod tests {
             Ok(factory.create_application_term(
                 factory.create_builtin_term(Stdlib::Lte),
                 allocator.create_pair(
-                    factory.create_value_term(ValueTerm::Float(3.0)),
-                    factory.create_value_term(ValueTerm::Float(4.0)),
+                    factory.create_float_term(3.0),
+                    factory.create_float_term(4.0),
                 ),
             )),
         );
@@ -3902,8 +3799,8 @@ mod tests {
             Ok(factory.create_application_term(
                 factory.create_builtin_term(Stdlib::Gt),
                 allocator.create_pair(
-                    factory.create_value_term(ValueTerm::Float(3.0)),
-                    factory.create_value_term(ValueTerm::Float(4.0)),
+                    factory.create_float_term(3.0),
+                    factory.create_float_term(4.0),
                 ),
             )),
         );
@@ -3912,8 +3809,8 @@ mod tests {
             Ok(factory.create_application_term(
                 factory.create_builtin_term(Stdlib::Gte),
                 allocator.create_pair(
-                    factory.create_value_term(ValueTerm::Float(3.0)),
-                    factory.create_value_term(ValueTerm::Float(4.0)),
+                    factory.create_float_term(3.0),
+                    factory.create_float_term(4.0),
                 ),
             )),
         );
@@ -3929,8 +3826,8 @@ mod tests {
             Ok(factory.create_application_term(
                 factory.create_builtin_term(Stdlib::Eq),
                 allocator.create_pair(
-                    factory.create_value_term(ValueTerm::Boolean(true)),
-                    factory.create_value_term(ValueTerm::Boolean(false)),
+                    factory.create_boolean_term(true),
+                    factory.create_boolean_term(false),
                 ),
             )),
         );
@@ -3941,8 +3838,8 @@ mod tests {
                 allocator.create_unit_list(factory.create_application_term(
                     factory.create_builtin_term(Stdlib::Eq),
                     allocator.create_pair(
-                        factory.create_value_term(ValueTerm::Boolean(true)),
-                        factory.create_value_term(ValueTerm::Boolean(false)),
+                        factory.create_boolean_term(true),
+                        factory.create_boolean_term(false),
                     ),
                 )),
             )),
@@ -3959,8 +3856,8 @@ mod tests {
             Ok(factory.create_application_term(
                 factory.create_builtin_term(Stdlib::And),
                 allocator.create_pair(
-                    factory.create_value_term(ValueTerm::Boolean(true)),
-                    factory.create_value_term(ValueTerm::Boolean(false)),
+                    factory.create_boolean_term(true),
+                    factory.create_boolean_term(false),
                 ),
             )),
         );
@@ -3969,8 +3866,8 @@ mod tests {
             Ok(factory.create_application_term(
                 factory.create_builtin_term(Stdlib::Or),
                 allocator.create_pair(
-                    factory.create_value_term(ValueTerm::Boolean(true)),
-                    factory.create_value_term(ValueTerm::Boolean(false)),
+                    factory.create_boolean_term(true),
+                    factory.create_boolean_term(false),
                 ),
             )),
         );
@@ -3986,9 +3883,9 @@ mod tests {
             Ok(factory.create_application_term(
                 factory.create_builtin_term(Stdlib::If),
                 allocator.create_triple(
-                    factory.create_value_term(ValueTerm::Boolean(true)),
-                    factory.create_value_term(ValueTerm::Float(3.0)),
-                    factory.create_value_term(ValueTerm::Float(4.0)),
+                    factory.create_boolean_term(true),
+                    factory.create_float_term(3.0),
+                    factory.create_float_term(4.0),
                 ),
             )),
         );
@@ -4012,9 +3909,9 @@ mod tests {
                     factory.create_application_term(
                         factory.create_builtin_term(Stdlib::If),
                         allocator.create_triple(
-                            factory.create_value_term(ValueTerm::Boolean(true)),
-                            factory.create_value_term(ValueTerm::Float(3.0)),
-                            factory.create_value_term(ValueTerm::Float(4.0)),
+                            factory.create_boolean_term(true),
+                            factory.create_float_term(3.0),
+                            factory.create_float_term(4.0),
                         )
                     )
                 ),
@@ -4029,12 +3926,12 @@ mod tests {
                     factory.create_application_term(
                         factory.create_builtin_term(Stdlib::If),
                         allocator.create_triple(
-                            factory.create_value_term(ValueTerm::Boolean(true)),
+                            factory.create_boolean_term(true),
                             factory.create_application_term(
                                 factory.create_builtin_term(JsStdlib::Throw),
                                 allocator.create_unit_list(
                                     create_error_instance(
-                                        factory.create_value_term(ValueTerm::String(allocator.create_static_string("foo"))),
+                                        factory.create_string_term(allocator.create_static_string("foo")),
                                         &factory,
                                         &allocator,
                                     )
@@ -4044,7 +3941,7 @@ mod tests {
                                 factory.create_builtin_term(JsStdlib::Throw),
                                 allocator.create_unit_list(
                                     create_error_instance(
-                                        factory.create_value_term(ValueTerm::String(allocator.create_static_string("bar"))),
+                                        factory.create_string_term(allocator.create_static_string("bar")),
                                         &factory,
                                         &allocator,
                                     )
@@ -4064,11 +3961,11 @@ mod tests {
                     factory.create_application_term(
                         factory.create_builtin_term(Stdlib::If),
                         allocator.create_triple(
-                            factory.create_value_term(ValueTerm::Boolean(true)),
+                            factory.create_boolean_term(true),
                             factory.create_let_term(
-                                factory.create_value_term(ValueTerm::Float(3.0)),
+                                factory.create_float_term(3.0),
                                 factory.create_let_term(
-                                    factory.create_value_term(ValueTerm::Float(4.0)),
+                                    factory.create_float_term(4.0),
                                     factory.create_application_term(
                                         factory.create_builtin_term(Stdlib::Add),
                                         allocator.create_pair(
@@ -4079,9 +3976,9 @@ mod tests {
                                 ),
                             ),
                             factory.create_let_term(
-                                factory.create_value_term(ValueTerm::Float(4.0)),
+                                factory.create_float_term(4.0),
                                 factory.create_let_term(
-                                    factory.create_value_term(ValueTerm::Float(3.0)),
+                                    factory.create_float_term(3.0),
                                     factory.create_application_term(
                                         factory.create_builtin_term(Stdlib::Add),
                                         allocator.create_pair(
@@ -4105,11 +4002,11 @@ mod tests {
                     factory.create_application_term(
                         factory.create_builtin_term(Stdlib::If),
                         allocator.create_triple(
-                            factory.create_value_term(ValueTerm::Boolean(true)),
+                            factory.create_boolean_term(true),
                             factory.create_let_term(
-                                factory.create_value_term(ValueTerm::Float(3.0)),
+                                factory.create_float_term(3.0),
                                 factory.create_let_term(
-                                    factory.create_value_term(ValueTerm::Float(4.0)),
+                                    factory.create_float_term(4.0),
                                     factory.create_application_term(
                                         factory.create_builtin_term(Stdlib::Add),
                                         allocator.create_pair(
@@ -4120,9 +4017,9 @@ mod tests {
                                 ),
                             ),
                             factory.create_let_term(
-                                factory.create_value_term(ValueTerm::Float(4.0)),
+                                factory.create_float_term(4.0),
                                 factory.create_let_term(
-                                    factory.create_value_term(ValueTerm::Float(3.0)),
+                                    factory.create_float_term(3.0),
                                     factory.create_application_term(
                                         factory.create_builtin_term(Stdlib::Add),
                                         allocator.create_pair(
@@ -4146,21 +4043,21 @@ mod tests {
                     factory.create_application_term(
                         factory.create_builtin_term(Stdlib::If),
                         allocator.create_triple(
-                            factory.create_value_term(ValueTerm::Boolean(true)),
+                            factory.create_boolean_term(true),
                             factory.create_application_term(
                                 factory.create_builtin_term(JsStdlib::Throw),
                                 allocator.create_unit_list(
                                     create_error_instance(
-                                        factory.create_value_term(ValueTerm::String(allocator.create_static_string("foo"))),
+                                        factory.create_string_term(allocator.create_static_string("foo")),
                                         &factory,
                                         &allocator,
                                     )
                                 ),
                             ),
                             factory.create_let_term(
-                                factory.create_value_term(ValueTerm::Float(3.0)),
+                                factory.create_float_term(3.0),
                                 factory.create_let_term(
-                                    factory.create_value_term(ValueTerm::Float(4.0)),
+                                    factory.create_float_term(4.0),
                                     factory.create_application_term(
                                         factory.create_builtin_term(Stdlib::Add),
                                         allocator.create_pair(
@@ -4188,9 +4085,7 @@ mod tests {
             Ok(factory.create_application_term(
                 factory.create_builtin_term(JsStdlib::Throw),
                 allocator.create_unit_list(create_error_instance(
-                    factory.create_value_term(ValueTerm::String(
-                        allocator.create_static_string("foo")
-                    )),
+                    factory.create_string_term(allocator.create_static_string("foo")),
                     &factory,
                     &allocator
                 )),
@@ -4204,14 +4099,13 @@ mod tests {
                     factory.create_application_term(
                         factory.create_builtin_term(Stdlib::Concat),
                         allocator.create_pair(
-                            factory.create_value_term(ValueTerm::String(
-                                allocator.create_static_string("foo")
-                            )),
+                            factory.create_string_term(allocator.create_static_string("foo")),
                             factory.create_application_term(
                                 factory.create_builtin_term(JsStdlib::ToString),
-                                allocator.create_unit_list(factory.create_value_term(
-                                    ValueTerm::String(allocator.create_static_string("bar"))
-                                )),
+                                allocator.create_unit_list(
+                                    factory
+                                        .create_string_term(allocator.create_static_string("bar"))
+                                ),
                             ),
                         ),
                     ),
@@ -4249,10 +4143,7 @@ mod tests {
         );
         assert_eq!(
             result,
-            EvaluationResult::new(
-                factory.create_value_term(ValueTerm::Float(3.0)),
-                DependencyList::empty(),
-            ),
+            EvaluationResult::new(factory.create_float_term(3.0), DependencyList::empty()),
         );
         let expression = parse(
             "(() => {
@@ -4276,10 +4167,7 @@ mod tests {
         );
         assert_eq!(
             result,
-            EvaluationResult::new(
-                factory.create_value_term(ValueTerm::Float(3.0)),
-                DependencyList::empty(),
-            ),
+            EvaluationResult::new(factory.create_float_term(3.0), DependencyList::empty()),
         );
         let expression = parse(
             "(() => {
@@ -4303,10 +4191,7 @@ mod tests {
         );
         assert_eq!(
             result,
-            EvaluationResult::new(
-                factory.create_value_term(ValueTerm::Float(3.0)),
-                DependencyList::empty(),
-            ),
+            EvaluationResult::new(factory.create_float_term(3.0), DependencyList::empty()),
         );
         let expression = parse(
             "((x) => {
@@ -4330,10 +4215,7 @@ mod tests {
         );
         assert_eq!(
             result,
-            EvaluationResult::new(
-                factory.create_value_term(ValueTerm::Float(3.0)),
-                DependencyList::empty(),
-            ),
+            EvaluationResult::new(factory.create_float_term(3.0), DependencyList::empty()),
         );
         let expression = parse(
             "(() => {
@@ -4357,10 +4239,7 @@ mod tests {
         );
         assert_eq!(
             result,
-            EvaluationResult::new(
-                factory.create_value_term(ValueTerm::Float(3.0)),
-                DependencyList::empty(),
-            ),
+            EvaluationResult::new(factory.create_float_term(3.0), DependencyList::empty()),
         );
         let expression = parse(
             "(() => {
@@ -4385,8 +4264,7 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                factory
-                    .create_value_term(ValueTerm::String(allocator.create_static_string("foo"),)),
+                factory.create_string_term(allocator.create_static_string("foo")),
                 DependencyList::empty(),
             ),
         );
@@ -4413,8 +4291,7 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                factory
-                    .create_value_term(ValueTerm::String(allocator.create_static_string("foo"),)),
+                factory.create_string_term(allocator.create_static_string("foo")),
                 DependencyList::empty(),
             ),
         );
@@ -4443,7 +4320,7 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                factory.create_value_term(ValueTerm::String(
+                factory.create_string_term(
                     allocator.create_string(
                         get_combined_errors(
                             vec![String::from("foo"), String::from("bar")],
@@ -4452,7 +4329,7 @@ mod tests {
                         )
                         .join("\n")
                     )
-                )),
+                ),
                 DependencyList::empty(),
             ),
         );
@@ -4481,7 +4358,7 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                factory.create_value_term(ValueTerm::String(
+                factory.create_string_term(
                     allocator.create_string(
                         get_combined_errors(
                             vec![String::from("foo"), String::from("bar")],
@@ -4492,7 +4369,7 @@ mod tests {
                         .cloned()
                         .unwrap()
                     )
-                )),
+                ),
                 DependencyList::empty(),
             ),
         );
@@ -4521,7 +4398,7 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                factory.create_value_term(ValueTerm::String(
+                factory.create_string_term(
                     allocator.create_string(
                         get_combined_errors(
                             vec![String::from("foo"), String::from("bar")],
@@ -4532,7 +4409,7 @@ mod tests {
                         .cloned()
                         .unwrap()
                     )
-                )),
+                ),
                 DependencyList::empty(),
             ),
         );
@@ -4571,15 +4448,15 @@ mod tests {
                                     allocator.create_unit_list(create_struct(
                                         once((
                                             String::from("name"),
-                                            factory.create_value_term(ValueTerm::String(
+                                            factory.create_string_term(
                                                 allocator.create_static_string("Error"),
-                                            )),
+                                            ),
                                         ))
                                         .chain(once((
                                             String::from("message"),
-                                            factory.create_value_term(ValueTerm::String(
+                                            factory.create_string_term(
                                                 allocator.create_string(message),
-                                            )),
+                                            ),
                                         ))),
                                         &factory,
                                         &allocator,
@@ -4600,11 +4477,11 @@ mod tests {
         let env = Env::new();
         assert_eq!(
             parse("() => 3", &env, &factory, &allocator),
-            Ok(factory.create_lambda_term(0, factory.create_value_term(ValueTerm::Float(3.0)))),
+            Ok(factory.create_lambda_term(0, factory.create_float_term(3.0))),
         );
         assert_eq!(
             parse("(foo) => 3", &env, &factory, &allocator),
-            Ok(factory.create_lambda_term(1, factory.create_value_term(ValueTerm::Float(3.0)))),
+            Ok(factory.create_lambda_term(1, factory.create_float_term(3.0))),
         );
         assert_eq!(
             parse("(foo) => foo", &env, &factory, &allocator),
@@ -4669,7 +4546,7 @@ mod tests {
         let env = Env::new();
         assert_eq!(
             parse("({}) => 3", &env, &factory, &allocator),
-            Ok(factory.create_lambda_term(1, factory.create_value_term(ValueTerm::Float(3.0)))),
+            Ok(factory.create_lambda_term(1, factory.create_float_term(3.0))),
         );
         assert_eq!(
             parse("({ foo }) => foo", &env, &factory, &allocator),
@@ -4680,9 +4557,7 @@ mod tests {
                         factory.create_builtin_term(Stdlib::Get),
                         allocator.create_pair(
                             factory.create_static_variable_term(0),
-                            factory.create_value_term(ValueTerm::String(
-                                allocator.create_static_string("foo")
-                            )),
+                            factory.create_string_term(allocator.create_static_string("foo")),
                         ),
                     ),
                     factory.create_static_variable_term(0),
@@ -4700,9 +4575,7 @@ mod tests {
                             factory.create_builtin_term(Stdlib::Get),
                             allocator.create_pair(
                                 factory.create_static_variable_term(0),
-                                factory.create_value_term(ValueTerm::String(
-                                    allocator.create_static_string("foo")
-                                )),
+                                factory.create_string_term(allocator.create_static_string("foo")),
                             ),
                         ),
                         factory.create_let_term(
@@ -4710,9 +4583,8 @@ mod tests {
                                 factory.create_builtin_term(Stdlib::Get),
                                 allocator.create_pair(
                                     factory.create_static_variable_term(1),
-                                    factory.create_value_term(ValueTerm::String(
-                                        allocator.create_static_string("bar")
-                                    )),
+                                    factory
+                                        .create_string_term(allocator.create_static_string("bar")),
                                 ),
                             ),
                             factory.create_application_term(
@@ -4743,9 +4615,7 @@ mod tests {
                             factory.create_builtin_term(Stdlib::Get),
                             allocator.create_pair(
                                 factory.create_static_variable_term(0),
-                                factory.create_value_term(ValueTerm::String(
-                                    allocator.create_static_string("foo")
-                                )),
+                                factory.create_string_term(allocator.create_static_string("foo")),
                             ),
                         ),
                         factory.create_let_term(
@@ -4753,9 +4623,8 @@ mod tests {
                                 factory.create_builtin_term(Stdlib::Get),
                                 allocator.create_pair(
                                     factory.create_static_variable_term(1),
-                                    factory.create_value_term(ValueTerm::String(
-                                        allocator.create_static_string("bar")
-                                    )),
+                                    factory
+                                        .create_string_term(allocator.create_static_string("bar")),
                                 ),
                             ),
                             factory.create_application_term(
@@ -4791,7 +4660,7 @@ mod tests {
         let env = Env::new();
         assert_eq!(
             parse("([]) => 3", &env, &factory, &allocator),
-            Ok(factory.create_lambda_term(1, factory.create_value_term(ValueTerm::Float(3.0)))),
+            Ok(factory.create_lambda_term(1, factory.create_float_term(3.0))),
         );
         assert_eq!(
             parse("([foo]) => foo", &env, &factory, &allocator),
@@ -4802,7 +4671,7 @@ mod tests {
                         factory.create_builtin_term(Stdlib::Get),
                         allocator.create_pair(
                             factory.create_static_variable_term(0),
-                            factory.create_value_term(ValueTerm::Int(0)),
+                            factory.create_int_term(0),
                         ),
                     ),
                     factory.create_static_variable_term(0),
@@ -4820,7 +4689,7 @@ mod tests {
                             factory.create_builtin_term(Stdlib::Get),
                             allocator.create_pair(
                                 factory.create_static_variable_term(0),
-                                factory.create_value_term(ValueTerm::Int(0)),
+                                factory.create_int_term(0),
                             ),
                         ),
                         factory.create_let_term(
@@ -4828,7 +4697,7 @@ mod tests {
                                 factory.create_builtin_term(Stdlib::Get),
                                 allocator.create_pair(
                                     factory.create_static_variable_term(1),
-                                    factory.create_value_term(ValueTerm::Int(1)),
+                                    factory.create_int_term(1),
                                 ),
                             ),
                             factory.create_application_term(
@@ -4852,7 +4721,7 @@ mod tests {
                         factory.create_builtin_term(Stdlib::Get),
                         allocator.create_pair(
                             factory.create_static_variable_term(0),
-                            factory.create_value_term(ValueTerm::Int(2)),
+                            factory.create_int_term(2),
                         ),
                     ),
                     factory.create_static_variable_term(0),
@@ -4870,7 +4739,7 @@ mod tests {
                             factory.create_builtin_term(Stdlib::Get),
                             allocator.create_pair(
                                 factory.create_static_variable_term(0),
-                                factory.create_value_term(ValueTerm::Int(1)),
+                                factory.create_int_term(1),
                             ),
                         ),
                         factory.create_let_term(
@@ -4878,7 +4747,7 @@ mod tests {
                                 factory.create_builtin_term(Stdlib::Get),
                                 allocator.create_pair(
                                     factory.create_static_variable_term(1),
-                                    factory.create_value_term(ValueTerm::Int(2)),
+                                    factory.create_int_term(2),
                                 ),
                             ),
                             factory.create_static_variable_term(1),
@@ -4903,7 +4772,7 @@ mod tests {
                             factory.create_builtin_term(Stdlib::Get),
                             allocator.create_pair(
                                 factory.create_static_variable_term(0),
-                                factory.create_value_term(ValueTerm::Int(0)),
+                                factory.create_int_term(0),
                             ),
                         ),
                         factory.create_let_term(
@@ -4911,7 +4780,7 @@ mod tests {
                                 factory.create_builtin_term(Stdlib::Get),
                                 allocator.create_pair(
                                     factory.create_static_variable_term(1),
-                                    factory.create_value_term(ValueTerm::Int(1)),
+                                    factory.create_int_term(1),
                                 ),
                             ),
                             factory.create_application_term(
@@ -4948,7 +4817,7 @@ mod tests {
         assert_eq!(
             parse("(() => 3)()", &env, &factory, &allocator),
             Ok(factory.create_application_term(
-                factory.create_lambda_term(0, factory.create_value_term(ValueTerm::Float(3.0))),
+                factory.create_lambda_term(0, factory.create_float_term(3.0)),
                 allocator.create_empty_list(),
             )),
         );
@@ -4956,7 +4825,7 @@ mod tests {
             parse("((foo) => foo)(3)", &env, &factory, &allocator),
             Ok(factory.create_application_term(
                 factory.create_lambda_term(1, factory.create_static_variable_term(0)),
-                allocator.create_unit_list(factory.create_value_term(ValueTerm::Float(3.0)),),
+                allocator.create_unit_list(factory.create_float_term(3.0)),
             )),
         );
         assert_eq!(
@@ -4978,9 +4847,9 @@ mod tests {
                     ),
                 ),
                 allocator.create_list(vec![
-                    factory.create_value_term(ValueTerm::Float(3.0)),
-                    factory.create_value_term(ValueTerm::Float(4.0)),
-                    factory.create_value_term(ValueTerm::Float(5.0)),
+                    factory.create_float_term(3.0),
+                    factory.create_float_term(4.0),
+                    factory.create_float_term(5.0),
                 ]),
             )),
         );
@@ -5010,12 +4879,11 @@ mod tests {
                                 ),
                             ),
                         ),
-                        allocator
-                            .create_unit_list(factory.create_value_term(ValueTerm::Float(3.0))),
+                        allocator.create_unit_list(factory.create_float_term(3.0)),
                     ),
-                    allocator.create_unit_list(factory.create_value_term(ValueTerm::Float(4.0))),
+                    allocator.create_unit_list(factory.create_float_term(4.0)),
                 ),
-                allocator.create_unit_list(factory.create_value_term(ValueTerm::Float(5.0))),
+                allocator.create_unit_list(factory.create_float_term(5.0)),
             )),
         );
     }
@@ -5041,8 +4909,8 @@ mod tests {
                         )
                     ),
                     factory.create_vector_term(allocator.create_pair(
-                        factory.create_value_term(ValueTerm::Float(3.0)),
-                        factory.create_value_term(ValueTerm::Float(4.0)),
+                        factory.create_float_term(3.0),
+                        factory.create_float_term(4.0),
                     )),
                 ),
             )),
@@ -5069,13 +4937,13 @@ mod tests {
                             )
                         ),
                         allocator.create_pair(
-                            factory.create_value_term(ValueTerm::Float(1.0)),
-                            factory.create_value_term(ValueTerm::Float(2.0)),
+                            factory.create_float_term(1.0),
+                            factory.create_float_term(2.0),
                         ),
                     ),
                     factory.create_vector_term(allocator.create_pair(
-                        factory.create_value_term(ValueTerm::Float(3.0)),
-                        factory.create_value_term(ValueTerm::Float(4.0)),
+                        factory.create_float_term(3.0),
+                        factory.create_float_term(4.0),
                     )),
                 ),
             )),
@@ -5110,10 +4978,7 @@ mod tests {
         );
         assert_eq!(
             result,
-            EvaluationResult::new(
-                factory.create_value_term(ValueTerm::Float(3.0)),
-                DependencyList::empty(),
-            ),
+            EvaluationResult::new(factory.create_float_term(3.0), DependencyList::empty()),
         );
         let expression = parse_module(
             "
@@ -5140,10 +5005,7 @@ mod tests {
         );
         assert_eq!(
             result,
-            EvaluationResult::new(
-                factory.create_value_term(ValueTerm::Float(3.0)),
-                DependencyList::empty(),
-            ),
+            EvaluationResult::new(factory.create_float_term(3.0), DependencyList::empty()),
         );
     }
 
@@ -5153,8 +5015,7 @@ mod tests {
         let allocator = DefaultAllocator::default();
         let env = Env::new();
         let path = Path::new("./foo.js");
-        let loader =
-            static_module_loader(vec![("foo", factory.create_value_term(ValueTerm::Null))]);
+        let loader = static_module_loader(vec![("foo", factory.create_nil_term())]);
         let expression = parse_module(
             "
             import Foo from 'foo';
@@ -5178,10 +5039,7 @@ mod tests {
         );
         assert_eq!(
             result,
-            EvaluationResult::new(
-                factory.create_value_term(ValueTerm::Float(3.0)),
-                DependencyList::empty(),
-            )
+            EvaluationResult::new(factory.create_float_term(3.0), DependencyList::empty())
         );
     }
 
@@ -5204,9 +5062,7 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                factory.create_value_term(ValueTerm::String(
-                    allocator.create_string(String::from("foo"))
-                )),
+                factory.create_string_term(allocator.create_string(String::from("foo"))),
                 DependencyList::empty(),
             ),
         );
@@ -5228,9 +5084,7 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                factory.create_value_term(ValueTerm::String(
-                    allocator.create_static_string("Hello, John Doe!")
-                )),
+                factory.create_string_term(allocator.create_static_string("Hello, John Doe!")),
                 DependencyList::empty(),
             ),
         );
@@ -5269,9 +5123,7 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                factory.create_value_term(ValueTerm::String(
-                    allocator.create_static_string("Hello, John Doe!")
-                )),
+                factory.create_string_term(allocator.create_static_string("Hello, John Doe!")),
                 DependencyList::empty(),
             ),
         );

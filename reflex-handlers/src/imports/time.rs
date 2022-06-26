@@ -3,7 +3,7 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use reflex::{
     core::{Expression, ExpressionFactory, HeapAllocator},
-    lang::{create_struct, ValueTerm},
+    lang::create_struct,
     stdlib::Stdlib,
 };
 
@@ -25,9 +25,9 @@ where
                     factory.create_application_term(
                         factory.create_builtin_term(Stdlib::Effect),
                         allocator.create_triple(
-                            factory.create_value_term(ValueTerm::String(
+                            factory.create_string_term(
                                 allocator.create_string(String::from(EFFECT_TYPE_TIMEOUT)),
-                            )),
+                            ),
                             factory.create_static_variable_term(1),
                             factory.create_static_variable_term(0),
                         ),
@@ -41,16 +41,16 @@ where
                     factory.create_application_term(
                         factory.create_builtin_term(Stdlib::Effect),
                         allocator.create_pair(
-                            factory.create_value_term(ValueTerm::String(
+                            factory.create_string_term(
                                 allocator.create_static_string(EFFECT_TYPE_TIMESTAMP),
-                            )),
+                            ),
                             factory.create_application_term(
                                 factory.create_builtin_term(Stdlib::Get),
                                 allocator.create_pair(
                                     factory.create_static_variable_term(0),
-                                    factory.create_value_term(ValueTerm::String(
+                                    factory.create_string_term(
                                         allocator.create_static_string("interval"),
-                                    )),
+                                    ),
                                 ),
                             ),
                         ),

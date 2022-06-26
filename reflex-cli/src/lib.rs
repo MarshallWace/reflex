@@ -11,7 +11,7 @@ use reflex::{
         Applicable, Expression, ExpressionFactory, HeapAllocator, Reducible, Rewritable, Signal,
         SignalType, StringValue,
     },
-    lang::{term::SignalTerm, ValueTerm},
+    lang::term::SignalTerm,
     stdlib::Stdlib,
 };
 use reflex_handlers::stdlib::Stdlib as HandlersStdlib;
@@ -164,8 +164,8 @@ fn format_signal<T: Expression>(signal: &Signal<T>, factory: &impl ExpressionFac
         SignalType::Error => {
             let (message, args) = {
                 let args = signal.args();
-                match args.get(0).map(|arg| match factory.match_value_term(arg) {
-                    Some(ValueTerm::String(message)) => Some(String::from(message.as_str())),
+                match args.get(0).map(|arg| match factory.match_string_term(arg) {
+                    Some(message) => Some(String::from(message.value.as_str())),
                     _ => None,
                 }) {
                     Some(message) => (message, Some(&args[1..])),

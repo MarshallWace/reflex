@@ -67,18 +67,16 @@ fn parse_aggregate_error<'a, T: Expression + 'a>(
 ) -> Option<&'a ExpressionList<T>> {
     factory.match_struct_term(target).and_then(|target| {
         target.get("name").and_then(|error_type| {
-            factory.match_value_term(error_type).and_then(|error_type| {
-                error_type.match_string().and_then(|name| {
-                    if name.as_str() == "AggregateError" {
-                        target.get("errors").and_then(|errors| {
-                            factory
-                                .match_vector_term(errors)
-                                .map(|errors| errors.items())
-                        })
-                    } else {
-                        None
-                    }
-                })
+            factory.match_string_term(error_type).and_then(|name| {
+                if name.value.as_str() == "AggregateError" {
+                    target.get("errors").and_then(|errors| {
+                        factory
+                            .match_vector_term(errors)
+                            .map(|errors| errors.items())
+                    })
+                } else {
+                    None
+                }
             })
         })
     })

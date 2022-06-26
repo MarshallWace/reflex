@@ -6,7 +6,6 @@ use reflex::{
         uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
         FunctionArity, HeapAllocator, StateToken, Uid, Uuid,
     },
-    lang::ValueTerm,
     stdlib::Stdlib,
 };
 
@@ -48,8 +47,8 @@ where
     ) -> Result<T, String> {
         let mut args = args.into_iter();
         let state_token = args.next().unwrap();
-        if let Some(ValueTerm::Hash(state_token)) = factory.match_value_term(&state_token) {
-            Ok(create_setter_function(*state_token, factory, allocator))
+        if let Some(term) = factory.match_symbol_term(&state_token) {
+            Ok(create_setter_function(term.id, factory, allocator))
         } else {
             Err(format!(
                 "Invalid variable identifier: Expected Hash, received {}",
@@ -72,10 +71,9 @@ where
         factory.create_application_term(
             factory.create_builtin_term(Stdlib::Effect),
             allocator.create_triple(
-                factory.create_value_term(ValueTerm::String(
-                    allocator.create_string(String::from(EFFECT_TYPE_ASSIGN)),
-                )),
-                factory.create_value_term(ValueTerm::Hash(state_token)),
+                factory
+                    .create_string_term(allocator.create_string(String::from(EFFECT_TYPE_ASSIGN))),
+                factory.create_symbol_term(state_token),
                 factory.create_static_variable_term(0),
             ),
         ),

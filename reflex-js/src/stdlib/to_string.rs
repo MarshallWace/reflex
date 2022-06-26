@@ -2,12 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
-use reflex::{
-    core::{
-        uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
-        FunctionArity, HeapAllocator, StringValue, Uid, Uuid,
-    },
-    lang::ValueTerm,
+use reflex::core::{
+    uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
+    FunctionArity, HeapAllocator, StringValue, Uid, Uuid,
 };
 
 pub struct ToString {}
@@ -43,24 +40,33 @@ impl<T: Expression> Applicable<T> for ToString {
     ) -> Result<T, String> {
         let mut args = args.into_iter();
         let operand = args.next().unwrap();
-        match factory.match_value_term(&operand) {
-            Some(ValueTerm::String(_)) => Ok(operand),
-            Some(value) => Ok(factory.create_value_term(ValueTerm::String(
-                allocator.create_string(format_value(value)),
-            ))),
-            _ => Err(format!("Expected printable value, received {}", operand)),
+        if let Some(_) = factory.match_string_term(&operand) {
+            Ok(operand)
+        } else if let Some(value) = format_value(&operand, factory) {
+            Ok(factory.create_string_term(allocator.create_string(value)))
+        } else {
+            Err(format!("Expected printable value, received {}", operand))
         }
     }
 }
 
-pub fn format_value<TString: StringValue>(value: &ValueTerm<TString>) -> String {
-    match value {
-        ValueTerm::Null => String::from("null"),
-        ValueTerm::Boolean(value) => format!("{}", value),
-        ValueTerm::Int(value) => format!("{}", value),
-        ValueTerm::Float(value) => format!("{}", value),
-        ValueTerm::String(value) => String::from(value.as_str()),
-        ValueTerm::Symbol(_) => format!("{}", value),
-        ValueTerm::Hash(value) => format!("{:016x}", value),
+pub fn format_value<T: Expression>(
+    value: &T,
+    factory: &impl ExpressionFactory<T>,
+) -> Option<String> {
+    if let Some(_) = factory.match_nil_term(value) {
+        Some(String::from("null"))
+    } else if let Some(term) = factory.match_boolean_term(value) {
+        Some(format!("{}", term.value))
+    } else if let Some(term) = factory.match_int_term(value) {
+        Some(format!("{}", term.value))
+    } else if let Some(term) = factory.match_float_term(value) {
+        Some(format!("{}", term.value))
+    } else if let Some(term) = factory.match_string_term(value) {
+        Some(String::from(term.value.as_str()))
+    } else if let Some(term) = factory.match_symbol_term(value) {
+        Some(format!("{}", term.id))
+    } else {
+        None
     }
 }

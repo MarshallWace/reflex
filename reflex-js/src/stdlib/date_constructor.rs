@@ -7,7 +7,7 @@ use reflex::{
         uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
         FunctionArity, HeapAllocator, StringValue, Uid, Uuid,
     },
-    lang::{create_struct, ValueTerm},
+    lang::create_struct,
     stdlib::Stdlib,
 };
 
@@ -47,13 +47,12 @@ where
     ) -> Result<T, String> {
         let mut args = args.into_iter();
         let value = args.next().unwrap();
-        let timestamp = if let Some(value) = factory.match_value_term(&value) {
-            match value {
-                ValueTerm::Int(value) => Some(*value as i64),
-                ValueTerm::Float(value) => Some(value.trunc() as i64),
-                ValueTerm::String(value) => parse_string_timestamp(value.as_str()),
-                _ => None,
-            }
+        let timestamp = if let Some(term) = factory.match_int_term(&value) {
+            Some(term.value as i64)
+        } else if let Some(term) = factory.match_float_term(&value) {
+            Some(term.value.trunc() as i64)
+        } else if let Some(term) = factory.match_string_term(&value) {
+            parse_string_timestamp(term.value.as_str())
         } else {
             None
         };
@@ -61,10 +60,7 @@ where
             Ok(create_struct(
                 [(
                     String::from("getTime"),
-                    factory.create_lambda_term(
-                        0,
-                        factory.create_value_term(ValueTerm::Float(timestamp as f64)),
-                    ),
+                    factory.create_lambda_term(0, factory.create_float_term(timestamp as f64)),
                 )],
                 factory,
                 allocator,

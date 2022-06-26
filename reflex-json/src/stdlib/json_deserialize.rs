@@ -1,13 +1,9 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
-use reflex::{
-    core::{
-        uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
-        FunctionArity, HeapAllocator, StringValue, Uid, Uuid,
-    },
-    lang::ValueTerm,
+use reflex::core::{
+    uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
+    FunctionArity, HeapAllocator, StringValue, Uid, Uuid,
 };
 
 pub struct JsonDeserialize {}
@@ -43,8 +39,8 @@ impl<T: Expression> Applicable<T> for JsonDeserialize {
     ) -> Result<T, String> {
         let mut args = args.into_iter();
         let source = args.next().unwrap();
-        match factory.match_value_term(&source) {
-            Some(ValueTerm::String(source)) => crate::parse(source.as_str(), factory, allocator)
+        match factory.match_string_term(&source) {
+            Some(source) => crate::parse(source.value.as_str(), factory, allocator)
                 .map_err(|error| format!("JSON deserialization failed: {}", error)),
             _ => Err(format!(
                 "JSON deserialization failed: expected string argument, received {}",

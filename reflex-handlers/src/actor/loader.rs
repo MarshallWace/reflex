@@ -13,7 +13,7 @@ use reflex::{
         Applicable, Arity, Expression, ExpressionFactory, ExpressionList, HeapAllocator, Signal,
         SignalType, StateToken, StringValue,
     },
-    lang::{term::SignalTerm, ValueTerm},
+    lang::term::SignalTerm,
 };
 use reflex_dispatcher::{
     Action, Actor, ActorTransition, HandlerContext, InboundAction, MessageData, OutboundAction,
@@ -673,9 +673,9 @@ fn prefix_error_message_effects<T: Expression>(
                     signal.signal_type().clone(),
                     allocator.create_list(signal.args().iter().enumerate().map(|(index, arg)| {
                         if index == 0 {
-                            factory.create_value_term(ValueTerm::String(
+                            factory.create_string_term(
                                 format!("{}{}", prefix, message.as_str()).into(),
-                            ))
+                            )
                         } else {
                             arg.clone()
                         }
@@ -695,11 +695,11 @@ fn as_error_message_effect<'a, T: Expression>(
     if !matches!(effect.signal_type(), SignalType::Error) {
         return None;
     }
-    effect.args().iter().next().and_then(|arg| {
-        factory
-            .match_value_term(arg)
-            .and_then(|value| value.match_string())
-    })
+    effect
+        .args()
+        .iter()
+        .next()
+        .and_then(|arg| factory.match_string_term(arg).map(|term| &term.value))
 }
 
 struct LoaderEffectArgs<T: Expression> {
@@ -723,8 +723,8 @@ fn parse_loader_effect_args<T: Expression + Applicable<T>>(
     let loader = args.next().unwrap();
     let key = args.next().unwrap();
     let name = factory
-        .match_value_term(name)
-        .and_then(|value| value.match_string().map(|value| value.as_str()))
+        .match_string_term(name)
+        .map(|term| term.value.as_str())
         .ok_or(name);
     match (name, loader.arity()) {
         (Ok(name), Some(arity)) if is_valid_loader_signature(&arity) => Ok(LoaderEffectArgs {
@@ -763,6 +763,6 @@ fn create_error_expression<T: Expression>(
 ) -> T {
     factory.create_signal_term(allocator.create_signal_list(once(allocator.create_signal(
         SignalType::Error,
-        allocator.create_unit_list(factory.create_value_term(ValueTerm::String(message.into()))),
+        allocator.create_unit_list(factory.create_string_term(message.into())),
     ))))
 }

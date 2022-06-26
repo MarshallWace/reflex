@@ -9,10 +9,7 @@ use std::{
 };
 
 use futures::{stream, FutureExt, StreamExt};
-use reflex::{
-    core::{Expression, ExpressionFactory, HeapAllocator, Signal, SignalType, StateToken},
-    lang::ValueTerm,
-};
+use reflex::core::{Expression, ExpressionFactory, HeapAllocator, Signal, SignalType, StateToken};
 use reflex_dispatcher::{
     Action, Actor, ActorTransition, HandlerContext, InboundAction, MessageData, OperationStream,
     OutboundAction, ProcessId, StateOperation, StateTransition,
@@ -134,7 +131,7 @@ where
                         None => Some((
                             (
                                 state_token,
-                                StateUpdate::Value(self.factory.create_value_term(ValueTerm::Null)),
+                                StateUpdate::Value(self.factory.create_nil_term()),
                             ),
                             None,
                         )),
@@ -241,10 +238,7 @@ where
                 StateOperation::Send(
                     main_pid,
                     EffectEmitAction {
-                        updates: vec![(
-                            state_token,
-                            StateUpdate::Value(factory.create_value_term(ValueTerm::Null)),
-                        )],
+                        updates: vec![(state_token, StateUpdate::Value(factory.create_nil_term()))],
                     }
                     .into(),
                 )
@@ -283,10 +277,12 @@ fn parse_timeout_effect_args<T: Expression>(
 }
 
 fn parse_number_arg<T: Expression>(value: &T, factory: &impl ExpressionFactory<T>) -> Option<f64> {
-    match factory.match_value_term(value) {
-        Some(ValueTerm::Int(value)) => Some(*value as f64),
-        Some(ValueTerm::Float(value)) => Some(*value),
-        _ => None,
+    match factory.match_int_term(value) {
+        Some(term) => Some(term.value as f64),
+        _ => match factory.match_float_term(value) {
+            Some(term) => Some(term.value),
+            _ => None,
+        },
     }
 }
 
@@ -306,6 +302,6 @@ fn create_error_expression<T: Expression>(
 ) -> T {
     factory.create_signal_term(allocator.create_signal_list(once(allocator.create_signal(
         SignalType::Error,
-        allocator.create_unit_list(factory.create_value_term(ValueTerm::String(message.into()))),
+        allocator.create_unit_list(factory.create_string_term(message.into())),
     ))))
 }

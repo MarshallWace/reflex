@@ -2,12 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
-use crate::{
-    core::{
-        uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
-        FunctionArity, HeapAllocator, Uid, Uuid,
-    },
-    lang::ValueTerm,
+use crate::core::{
+    uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
+    FunctionArity, HeapAllocator, Uid, Uuid,
 };
 
 pub struct Cons {}
@@ -46,7 +43,7 @@ impl<T: Expression> Applicable<T> for Cons {
         }
         let head = args.next().unwrap();
         let tail = args.next().unwrap();
-        let enum_variant = factory.create_value_term(ValueTerm::Int(1));
+        let enum_variant = factory.create_int_term(1);
         Ok(factory.create_tuple_term(allocator.create_triple(enum_variant, head, tail)))
     }
 }
@@ -56,8 +53,8 @@ pub(crate) fn match_cons_cell<'a, T: Expression>(
     factory: &'a impl ExpressionFactory<T>,
 ) -> Option<(&'a T, &'a T)> {
     match_triple(target, factory).and_then(|(enum_discriminant, head, tail)| {
-        match factory.match_value_term(enum_discriminant) {
-            Some(ValueTerm::Int(value)) if *value == 1 => Some((head, tail)),
+        match factory.match_int_term(enum_discriminant) {
+            Some(term) if term.value == 1 => Some((head, tail)),
             _ => None,
         }
     })

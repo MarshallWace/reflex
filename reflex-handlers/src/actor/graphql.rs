@@ -18,11 +18,8 @@ use hyper::Body;
 use metrics::{
     decrement_gauge, describe_counter, describe_gauge, increment_counter, increment_gauge, Unit,
 };
-use reflex::{
-    core::{
-        Expression, ExpressionFactory, HeapAllocator, Signal, SignalType, StateToken, StringValue,
-    },
-    lang::ValueTerm,
+use reflex::core::{
+    Expression, ExpressionFactory, HeapAllocator, Signal, SignalType, StateToken, StringValue,
 };
 use reflex_dispatcher::{
     Action, Actor, ActorTransition, HandlerContext, InboundAction, MessageData, OperationStream,
@@ -1365,8 +1362,8 @@ fn parse_string_arg<T: Expression>(
     value: &T,
     factory: &impl ExpressionFactory<T>,
 ) -> Option<String> {
-    match factory.match_value_term(value) {
-        Some(ValueTerm::String(value)) => Some(String::from(value.as_str())),
+    match factory.match_string_term(value) {
+        Some(term) => Some(String::from(term.value.as_str())),
         _ => None,
     }
 }
@@ -1375,10 +1372,12 @@ fn parse_optional_string_arg<T: Expression>(
     value: &T,
     factory: &impl ExpressionFactory<T>,
 ) -> Option<Option<String>> {
-    match factory.match_value_term(value) {
-        Some(ValueTerm::String(value)) => Some(Some(String::from(value.as_str()))),
-        Some(ValueTerm::Null) => Some(None),
-        _ => None,
+    match factory.match_string_term(value) {
+        Some(term) => Some(Some(String::from(term.value.as_str()))),
+        _ => match factory.match_nil_term(value) {
+            Some(_) => Some(None),
+            _ => None,
+        },
     }
 }
 
@@ -1416,7 +1415,7 @@ fn create_error_message_expression<T: Expression>(
     allocator: &impl HeapAllocator<T>,
 ) -> T {
     create_error_expression(
-        factory.create_value_term(ValueTerm::String(message.into())),
+        factory.create_string_term(message.into()),
         factory,
         allocator,
     )

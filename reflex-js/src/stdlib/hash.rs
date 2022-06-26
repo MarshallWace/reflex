@@ -3,12 +3,9 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use std::{collections::hash_map::DefaultHasher, hash::Hasher};
 
-use reflex::{
-    core::{
-        uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
-        FunctionArity, HeapAllocator, Uid, Uuid,
-    },
-    lang::ValueTerm,
+use reflex::core::{
+    uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
+    FunctionArity, HeapAllocator, Uid, Uuid,
 };
 
 pub struct Hash {}
@@ -48,6 +45,6 @@ impl<T: Expression> Applicable<T> for Hash {
             arg.hash(&mut hasher);
         }
         let hash = hasher.finish();
-        Ok(factory.create_value_term(ValueTerm::Hash(hash)))
+        Ok(factory.create_symbol_term(hash))
     }
 }

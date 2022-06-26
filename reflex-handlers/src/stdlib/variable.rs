@@ -11,7 +11,6 @@ use reflex::{
         uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
         FunctionArity, HeapAllocator, StateToken, Uid, Uuid,
     },
-    lang::ValueTerm,
     stdlib::Stdlib,
 };
 
@@ -56,8 +55,8 @@ where
         let mut args = args.into_iter();
         let state_token = args.next().unwrap();
         let initial_value = args.next().unwrap();
-        if let Some(ValueTerm::Hash(state_token)) = factory.match_value_term(&state_token) {
-            let state_token = prefix_state_token(STATE_NAMESPACE_VARIABLE, *state_token);
+        if let Some(term) = factory.match_symbol_term(&state_token) {
+            let state_token = prefix_state_token(STATE_NAMESPACE_VARIABLE, term.id);
             let getter = factory.create_dynamic_variable_term(state_token, initial_value);
             let setter = create_setter_function(state_token, factory, allocator);
             Ok(factory.create_tuple_term(allocator.create_pair(getter, setter)))

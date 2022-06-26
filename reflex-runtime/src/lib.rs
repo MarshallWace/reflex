@@ -6,10 +6,7 @@ use std::iter::once;
 
 use reflex::{
     core::{Expression, ExpressionFactory, HeapAllocator, SignalType, StringValue},
-    lang::{
-        term::{FloatValue, IntValue},
-        ValueTerm,
-    },
+    lang::term::{FloatValue, IntValue},
 };
 use serde::{Deserialize, Serialize};
 
@@ -91,11 +88,9 @@ fn apply_atomic_integer_operation<T: Expression>(
     factory: &impl ExpressionFactory<T>,
 ) -> T {
     match existing_value {
-        None => factory.create_value_term(ValueTerm::Int(delta)),
-        Some(NumericValue::Int(value)) => factory.create_value_term(ValueTerm::Int(value + delta)),
-        Some(NumericValue::Float(value)) => {
-            factory.create_value_term(ValueTerm::Float(value + (delta as f64)))
-        }
+        None => factory.create_int_term(delta),
+        Some(NumericValue::Int(value)) => factory.create_int_term(value + delta),
+        Some(NumericValue::Float(value)) => factory.create_float_term(value + (delta as f64)),
     }
 }
 
@@ -107,14 +102,10 @@ fn parse_numeric_value<'a, T: Expression>(
     value: &'a T,
     factory: &'a impl ExpressionFactory<T>,
 ) -> Result<NumericValue, Option<T>> {
-    if let Some(value) = factory.match_value_term(value) {
-        if let Some(value) = value.match_int() {
-            Ok(NumericValue::Int(value))
-        } else if let Some(value) = value.match_float() {
-            Ok(NumericValue::Float(value))
-        } else {
-            Err(None)
-        }
+    if let Some(term) = factory.match_int_term(value) {
+        Ok(NumericValue::Int(term.value))
+    } else if let Some(term) = factory.match_float_term(value) {
+        Ok(NumericValue::Float(term.value))
     } else if let Some(_) = factory.match_signal_term(value) {
         Err(Some(value.clone()))
     } else {
@@ -153,19 +144,18 @@ pub enum QueryEvaluationMode {
 }
 impl QueryEvaluationMode {
     pub(crate) fn serialize<T: Expression>(&self, factory: &impl ExpressionFactory<T>) -> T {
-        factory.create_value_term(ValueTerm::Boolean(match self {
+        factory.create_boolean_term(match self {
             Self::Query => false,
             Self::Standalone => true,
-        }))
+        })
     }
     pub(crate) fn deserialize<T: Expression>(
         value: &T,
         factory: &impl ExpressionFactory<T>,
     ) -> Option<Self> {
         factory
-            .match_value_term(value)
-            .and_then(|value| value.match_boolean())
-            .map(|value| match value {
+            .match_boolean_term(value)
+            .map(|term| match term.value {
                 false => Self::Query,
                 true => Self::Standalone,
             })
@@ -186,19 +176,18 @@ impl Default for QueryInvalidationStrategy {
 }
 impl QueryInvalidationStrategy {
     pub(crate) fn serialize<T: Expression>(&self, factory: &impl ExpressionFactory<T>) -> T {
-        factory.create_value_term(ValueTerm::Boolean(match self {
+        factory.create_boolean_term(match self {
             Self::CombineUpdateBatches => false,
             Self::Exact => true,
-        }))
+        })
     }
     pub(crate) fn deserialize<T: Expression>(
         value: &T,
         factory: &impl ExpressionFactory<T>,
     ) -> Option<Self> {
         factory
-            .match_value_term(value)
-            .and_then(|value| value.match_boolean())
-            .map(|value| match value {
+            .match_boolean_term(value)
+            .map(|term| match term.value {
                 false => Self::CombineUpdateBatches,
                 true => Self::Exact,
             })
@@ -212,6 +201,6 @@ fn create_error_expression<T: Expression>(
 ) -> T {
     factory.create_signal_term(allocator.create_signal_list(once(allocator.create_signal(
         SignalType::Error,
-        allocator.create_unit_list(factory.create_value_term(ValueTerm::String(message.into()))),
+        allocator.create_unit_list(factory.create_string_term(message.into())),
     ))))
 }

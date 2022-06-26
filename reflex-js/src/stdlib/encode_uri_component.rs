@@ -2,12 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
-use reflex::{
-    core::{
-        uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
-        FunctionArity, HeapAllocator, StringValue, Uid, Uuid,
-    },
-    lang::ValueTerm,
+use reflex::core::{
+    uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
+    FunctionArity, HeapAllocator, StringValue, Uid, Uuid,
 };
 
 pub struct EncodeUriComponent {}
@@ -43,10 +40,10 @@ impl<T: Expression> Applicable<T> for EncodeUriComponent {
     ) -> Result<T, String> {
         let mut args = args.into_iter();
         let input = args.next().unwrap();
-        match factory.match_value_term(&input) {
-            Some(ValueTerm::String(value)) => {
-                let value = urlencoding::encode(value.as_str());
-                Ok(factory.create_value_term(ValueTerm::String(allocator.create_string(value))))
+        match factory.match_string_term(&input) {
+            Some(term) => {
+                let value = urlencoding::encode(term.value.as_str());
+                Ok(factory.create_string_term(allocator.create_string(value)))
             }
             _ => Err(format!("Expected String, received {}", input)),
         }

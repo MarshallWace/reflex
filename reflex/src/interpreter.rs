@@ -28,7 +28,7 @@ use crate::{
     hash::HashId,
     lang::{
         get_combined_short_circuit_signal, get_num_short_circuit_signals, get_short_circuit_signal,
-        validate_function_application_arity, CompiledFunctionTerm, ValueTerm,
+        validate_function_application_arity, CompiledFunctionTerm,
     },
 };
 
@@ -394,7 +394,7 @@ fn evaluate_program_loop<'a, T: Expression + Rewritable<T> + Reducible<T> + Appl
                                     num_positional_args.saturating_sub(num_args);
                                 stack.push_multiple(
                                     (0..num_unspecified_optional_args)
-                                        .map(|_| factory.create_value_term(ValueTerm::Null)),
+                                        .map(|_| factory.create_nil_term()),
                                 );
                                 call_stack.enter_function(
                                     hash,
@@ -502,42 +502,34 @@ fn evaluate_instruction<'a, T: Expression + Rewritable<T> + Reducible<T> + Appli
                 }
             }
         }
-        Instruction::PushNull => {
-            trace!(instruction = "Instruction::PushNull");
-            stack.push(factory.create_value_term(ValueTerm::Null));
+        Instruction::PushNil => {
+            trace!(instruction = "Instruction::PushNil");
+            stack.push(factory.create_nil_term());
             Ok((ExecutionResult::Advance, DependencyList::empty()))
         }
         Instruction::PushBoolean { value } => {
             trace!(instruction = "Instruction::PushBoolean");
-            stack.push(factory.create_value_term(ValueTerm::Boolean(*value)));
+            stack.push(factory.create_boolean_term(*value));
             Ok((ExecutionResult::Advance, DependencyList::empty()))
         }
         Instruction::PushInt { value } => {
             trace!(instruction = "Instruction::PushInt");
-            stack.push(factory.create_value_term(ValueTerm::Int(*value)));
+            stack.push(factory.create_int_term(*value));
             Ok((ExecutionResult::Advance, DependencyList::empty()))
         }
         Instruction::PushFloat { value } => {
             trace!(instruction = "Instruction::PushFloat");
-            stack.push(factory.create_value_term(ValueTerm::Float(*value)));
+            stack.push(factory.create_float_term(*value));
             Ok((ExecutionResult::Advance, DependencyList::empty()))
         }
         Instruction::PushString { value } => {
             trace!(instruction = "Instruction::PushString");
-            stack.push(
-                factory
-                    .create_value_term(ValueTerm::String(allocator.create_string(value.as_str()))),
-            );
+            stack.push(factory.create_string_term(allocator.create_string(value.as_str())));
             Ok((ExecutionResult::Advance, DependencyList::empty()))
         }
-        Instruction::PushSymbol { value } => {
+        Instruction::PushSymbol { id: value } => {
             trace!(instruction = "Instruction::PushSymbol");
-            stack.push(factory.create_value_term(ValueTerm::Symbol(*value)));
-            Ok((ExecutionResult::Advance, DependencyList::empty()))
-        }
-        Instruction::PushHash { value } => {
-            trace!(instruction = "Instruction::PushHash");
-            stack.push(factory.create_value_term(ValueTerm::Hash(*value)));
+            stack.push(factory.create_symbol_term(*value));
             Ok((ExecutionResult::Advance, DependencyList::empty()))
         }
         Instruction::PushFunction { target, .. } => {
@@ -1052,9 +1044,8 @@ fn apply_function<T: Expression + Applicable<T>>(
     let num_unspecified_optional_args = num_positional_args.saturating_sub(num_args);
     let args = WithExactSizeIterator::new(
         num_args + num_unspecified_optional_args,
-        args.take(num_args).chain(
-            (0..num_unspecified_optional_args).map(|_| factory.create_value_term(ValueTerm::Null)),
-        ),
+        args.take(num_args)
+            .chain((0..num_unspecified_optional_args).map(|_| factory.create_nil_term())),
     );
     // TODO: distinguish between type errors vs runtime errors, and wrap runtime errors as signals
     target.apply(args, factory, allocator, &mut NoopCache::default())
@@ -1597,20 +1588,20 @@ mod tests {
                         compiled_function.required_args(),
                         compiled_function.optional_args(),
                     ),
-                    allocator.create_unit_list(factory.create_value_term(ValueTerm::Int(5))),
+                    allocator.create_unit_list(factory.create_int_term(5)),
                 ),
-                allocator.create_unit_list(factory.create_value_term(ValueTerm::Int(4))),
+                allocator.create_unit_list(factory.create_int_term(4)),
             ),
-            allocator.create_unit_list(factory.create_value_term(ValueTerm::Int(3))),
+            allocator.create_unit_list(factory.create_int_term(3)),
         );
         assert_eq!(
             match_compiled_application_target(&expression, &factory),
             Some((
                 &compiled_function,
                 vec![
-                    factory.create_value_term(ValueTerm::Int(3)),
-                    factory.create_value_term(ValueTerm::Int(4)),
-                    factory.create_value_term(ValueTerm::Int(5))
+                    factory.create_int_term(3),
+                    factory.create_int_term(4),
+                    factory.create_int_term(5)
                 ],
             ))
         )
@@ -1626,7 +1617,7 @@ mod tests {
         let expression = factory.create_application_term(
             target,
             allocator.create_pair(
-                factory.create_value_term(ValueTerm::Int(3)),
+                factory.create_int_term(3),
                 factory.create_dynamic_variable_term(
                     state_token,
                     factory.create_signal_term(allocator.create_signal_list(once(
@@ -1665,7 +1656,7 @@ mod tests {
             ),
         );
 
-        state.set(state_token, factory.create_value_term(ValueTerm::Int(4)));
+        state.set(state_token, factory.create_int_term(4));
         let state_id = 1;
         let (result, _) = execute(
             cache_key,
@@ -1682,7 +1673,7 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                factory.create_value_term(ValueTerm::Int(3 + 4)),
+                factory.create_int_term(3 + 4),
                 DependencyList::of(state_token),
             ),
         );
@@ -1720,10 +1711,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             result,
-            EvaluationResult::new(
-                factory.create_value_term(ValueTerm::Int(3 + 4)),
-                DependencyList::empty(),
-            ),
+            EvaluationResult::new(factory.create_int_term(3 + 4), DependencyList::empty(),),
         );
     }
 
@@ -1759,10 +1747,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             result,
-            EvaluationResult::new(
-                factory.create_value_term(ValueTerm::Int(3 + 4)),
-                DependencyList::empty(),
-            ),
+            EvaluationResult::new(factory.create_int_term(3 + 4), DependencyList::empty(),),
         );
     }
 
@@ -1799,10 +1784,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             result,
-            EvaluationResult::new(
-                factory.create_value_term(ValueTerm::Int(3)),
-                DependencyList::empty(),
-            ),
+            EvaluationResult::new(factory.create_int_term(3), DependencyList::empty(),),
         );
     }
 
@@ -1855,10 +1837,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             result,
-            EvaluationResult::new(
-                factory.create_value_term(ValueTerm::Int(3 + 4 + 5)),
-                DependencyList::empty(),
-            ),
+            EvaluationResult::new(factory.create_int_term(3 + 4 + 5), DependencyList::empty(),),
         );
     }
 
@@ -1869,10 +1848,7 @@ mod tests {
         let mut cache = DefaultInterpreterCache::default();
         let expression = factory.create_application_term(
             factory.create_builtin_term(Stdlib::Add),
-            allocator.create_pair(
-                factory.create_value_term(ValueTerm::Int(3)),
-                factory.create_value_term(ValueTerm::Int(4)),
-            ),
+            allocator.create_pair(factory.create_int_term(3), factory.create_int_term(4)),
         );
         let program = Compiler::new(CompilerOptions::unoptimized(), None)
             .compile(&expression, CompilerMode::Function, &factory, &allocator)
@@ -1895,10 +1871,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             result,
-            EvaluationResult::new(
-                factory.create_value_term(ValueTerm::Int(3 + 4)),
-                DependencyList::empty(),
-            ),
+            EvaluationResult::new(factory.create_int_term(3 + 4), DependencyList::empty(),),
         );
 
         let factory = SharedTermFactory::<Stdlib>::default();
@@ -1907,9 +1880,9 @@ mod tests {
         let expression = factory.create_application_term(
             factory.create_builtin_term(Stdlib::If),
             allocator.create_triple(
-                factory.create_value_term(ValueTerm::Boolean(true)),
-                factory.create_value_term(ValueTerm::Int(3)),
-                factory.create_value_term(ValueTerm::Int(4)),
+                factory.create_boolean_term(true),
+                factory.create_int_term(3),
+                factory.create_int_term(4),
             ),
         );
         let program = Compiler::new(CompilerOptions::unoptimized(), None)
@@ -1931,10 +1904,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             result,
-            EvaluationResult::new(
-                factory.create_value_term(ValueTerm::Int(3)),
-                DependencyList::empty(),
-            ),
+            EvaluationResult::new(factory.create_int_term(3), DependencyList::empty(),),
         );
 
         let factory = SharedTermFactory::<Stdlib>::default();
@@ -1943,9 +1913,9 @@ mod tests {
         let expression = factory.create_application_term(
             factory.create_builtin_term(Stdlib::If),
             allocator.create_triple(
-                factory.create_value_term(ValueTerm::Boolean(false)),
-                factory.create_value_term(ValueTerm::Int(3)),
-                factory.create_value_term(ValueTerm::Int(4)),
+                factory.create_boolean_term(false),
+                factory.create_int_term(3),
+                factory.create_int_term(4),
             ),
         );
         let program = Compiler::new(CompilerOptions::unoptimized(), None)
@@ -1969,10 +1939,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             result,
-            EvaluationResult::new(
-                factory.create_value_term(ValueTerm::Int(4)),
-                DependencyList::empty(),
-            ),
+            EvaluationResult::new(factory.create_int_term(4), DependencyList::empty(),),
         );
 
         let factory = SharedTermFactory::<Stdlib>::default();
@@ -1984,12 +1951,12 @@ mod tests {
                 factory.create_application_term(
                     factory.create_builtin_term(Stdlib::And),
                     allocator.create_pair(
-                        factory.create_value_term(ValueTerm::Boolean(true)),
-                        factory.create_value_term(ValueTerm::Boolean(true)),
+                        factory.create_boolean_term(true),
+                        factory.create_boolean_term(true),
                     ),
                 ),
-                factory.create_value_term(ValueTerm::Int(3)),
-                factory.create_value_term(ValueTerm::Int(4)),
+                factory.create_int_term(3),
+                factory.create_int_term(4),
             ),
         );
         let program = Compiler::new(CompilerOptions::unoptimized(), None)
@@ -2013,10 +1980,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             result,
-            EvaluationResult::new(
-                factory.create_value_term(ValueTerm::Int(3)),
-                DependencyList::empty(),
-            ),
+            EvaluationResult::new(factory.create_int_term(3), DependencyList::empty(),),
         );
 
         let factory = SharedTermFactory::<Stdlib>::default();
@@ -2028,12 +1992,12 @@ mod tests {
                 factory.create_application_term(
                     factory.create_builtin_term(Stdlib::And),
                     allocator.create_pair(
-                        factory.create_value_term(ValueTerm::Boolean(true)),
-                        factory.create_value_term(ValueTerm::Boolean(false)),
+                        factory.create_boolean_term(true),
+                        factory.create_boolean_term(false),
                     ),
                 ),
-                factory.create_value_term(ValueTerm::Int(3)),
-                factory.create_value_term(ValueTerm::Int(4)),
+                factory.create_int_term(3),
+                factory.create_int_term(4),
             ),
         );
         let program = Compiler::new(CompilerOptions::unoptimized(), None)
@@ -2057,10 +2021,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             result,
-            EvaluationResult::new(
-                factory.create_value_term(ValueTerm::Int(4)),
-                DependencyList::empty(),
-            ),
+            EvaluationResult::new(factory.create_int_term(4), DependencyList::empty(),),
         );
     }
 
@@ -2074,12 +2035,9 @@ mod tests {
             allocator.create_pair(
                 factory.create_application_term(
                     factory.create_builtin_term(Stdlib::Add),
-                    allocator.create_pair(
-                        factory.create_value_term(ValueTerm::Int(3)),
-                        factory.create_value_term(ValueTerm::Int(4)),
-                    ),
+                    allocator.create_pair(factory.create_int_term(3), factory.create_int_term(4)),
                 ),
-                factory.create_value_term(ValueTerm::Int(5)),
+                factory.create_int_term(5),
             ),
         );
         let program = Compiler::new(CompilerOptions::unoptimized(), None)
@@ -2103,10 +2061,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             result,
-            EvaluationResult::new(
-                factory.create_value_term(ValueTerm::Int(3 + 4 + 5)),
-                DependencyList::empty(),
-            ),
+            EvaluationResult::new(factory.create_int_term(3 + 4 + 5), DependencyList::empty(),),
         );
 
         let factory = SharedTermFactory::<Stdlib>::default();
@@ -2118,12 +2073,12 @@ mod tests {
                 factory.create_application_term(
                     factory.create_builtin_term(Stdlib::And),
                     allocator.create_pair(
-                        factory.create_value_term(ValueTerm::Boolean(true)),
-                        factory.create_value_term(ValueTerm::Boolean(false)),
+                        factory.create_boolean_term(true),
+                        factory.create_boolean_term(false),
                     ),
                 ),
-                factory.create_value_term(ValueTerm::Int(3)),
-                factory.create_value_term(ValueTerm::Int(4)),
+                factory.create_int_term(3),
+                factory.create_int_term(4),
             ),
         );
         let program = Compiler::new(CompilerOptions::unoptimized(), None)
@@ -2147,10 +2102,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             result,
-            EvaluationResult::new(
-                factory.create_value_term(ValueTerm::Int(4)),
-                DependencyList::empty(),
-            ),
+            EvaluationResult::new(factory.create_int_term(4), DependencyList::empty(),),
         );
     }
 
@@ -2163,19 +2115,19 @@ mod tests {
             factory.create_builtin_term(Stdlib::Append),
             allocator.create_triple(
                 factory.create_vector_term(allocator.create_list(vec![
-                    factory.create_value_term(ValueTerm::Int(1)),
-                    factory.create_value_term(ValueTerm::Int(2)),
-                    factory.create_value_term(ValueTerm::Int(3)),
+                    factory.create_int_term(1),
+                    factory.create_int_term(2),
+                    factory.create_int_term(3),
                 ])),
                 factory.create_vector_term(allocator.create_list(vec![
-                    factory.create_value_term(ValueTerm::Int(4)),
-                    factory.create_value_term(ValueTerm::Int(5)),
-                    factory.create_value_term(ValueTerm::Int(6)),
+                    factory.create_int_term(4),
+                    factory.create_int_term(5),
+                    factory.create_int_term(6),
                 ])),
                 factory.create_vector_term(allocator.create_list(vec![
-                    factory.create_value_term(ValueTerm::Int(7)),
-                    factory.create_value_term(ValueTerm::Int(8)),
-                    factory.create_value_term(ValueTerm::Int(9)),
+                    factory.create_int_term(7),
+                    factory.create_int_term(8),
+                    factory.create_int_term(9),
                 ])),
             ),
         );
@@ -2202,15 +2154,15 @@ mod tests {
             result,
             EvaluationResult::new(
                 factory.create_vector_term(allocator.create_list(vec![
-                    factory.create_value_term(ValueTerm::Int(1)),
-                    factory.create_value_term(ValueTerm::Int(2)),
-                    factory.create_value_term(ValueTerm::Int(3)),
-                    factory.create_value_term(ValueTerm::Int(4)),
-                    factory.create_value_term(ValueTerm::Int(5)),
-                    factory.create_value_term(ValueTerm::Int(6)),
-                    factory.create_value_term(ValueTerm::Int(7)),
-                    factory.create_value_term(ValueTerm::Int(8)),
-                    factory.create_value_term(ValueTerm::Int(9)),
+                    factory.create_int_term(1),
+                    factory.create_int_term(2),
+                    factory.create_int_term(3),
+                    factory.create_int_term(4),
+                    factory.create_int_term(5),
+                    factory.create_int_term(6),
+                    factory.create_int_term(7),
+                    factory.create_int_term(8),
+                    factory.create_int_term(9),
                 ])),
                 DependencyList::empty(),
             ),
@@ -2226,9 +2178,9 @@ mod tests {
                     factory.create_lambda_term(
                         0,
                         factory.create_vector_term(allocator.create_list(vec![
-                            factory.create_value_term(ValueTerm::Int(1)),
-                            factory.create_value_term(ValueTerm::Int(2)),
-                            factory.create_value_term(ValueTerm::Int(3)),
+                            factory.create_int_term(1),
+                            factory.create_int_term(2),
+                            factory.create_int_term(3),
                         ])),
                     ),
                     allocator.create_empty_list(),
@@ -2237,9 +2189,9 @@ mod tests {
                     factory.create_lambda_term(
                         0,
                         factory.create_vector_term(allocator.create_list(vec![
-                            factory.create_value_term(ValueTerm::Int(4)),
-                            factory.create_value_term(ValueTerm::Int(5)),
-                            factory.create_value_term(ValueTerm::Int(6)),
+                            factory.create_int_term(4),
+                            factory.create_int_term(5),
+                            factory.create_int_term(6),
                         ])),
                     ),
                     allocator.create_empty_list(),
@@ -2248,9 +2200,9 @@ mod tests {
                     factory.create_lambda_term(
                         0,
                         factory.create_vector_term(allocator.create_list(vec![
-                            factory.create_value_term(ValueTerm::Int(7)),
-                            factory.create_value_term(ValueTerm::Int(8)),
-                            factory.create_value_term(ValueTerm::Int(9)),
+                            factory.create_int_term(7),
+                            factory.create_int_term(8),
+                            factory.create_int_term(9),
                         ])),
                     ),
                     allocator.create_empty_list(),
@@ -2280,15 +2232,15 @@ mod tests {
             result,
             EvaluationResult::new(
                 factory.create_vector_term(allocator.create_list(vec![
-                    factory.create_value_term(ValueTerm::Int(1)),
-                    factory.create_value_term(ValueTerm::Int(2)),
-                    factory.create_value_term(ValueTerm::Int(3)),
-                    factory.create_value_term(ValueTerm::Int(4)),
-                    factory.create_value_term(ValueTerm::Int(5)),
-                    factory.create_value_term(ValueTerm::Int(6)),
-                    factory.create_value_term(ValueTerm::Int(7)),
-                    factory.create_value_term(ValueTerm::Int(8)),
-                    factory.create_value_term(ValueTerm::Int(9)),
+                    factory.create_int_term(1),
+                    factory.create_int_term(2),
+                    factory.create_int_term(3),
+                    factory.create_int_term(4),
+                    factory.create_int_term(5),
+                    factory.create_int_term(6),
+                    factory.create_int_term(7),
+                    factory.create_int_term(8),
+                    factory.create_int_term(9),
                 ])),
                 DependencyList::empty(),
             ),

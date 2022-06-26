@@ -2,12 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
-use crate::{
-    core::{
-        uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
-        FunctionArity, HeapAllocator, StringValue, Uid, Uuid,
-    },
-    lang::ValueTerm,
+use crate::core::{
+    uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
+    FunctionArity, HeapAllocator, StringValue, Uid, Uuid,
 };
 
 pub struct Contains {}
@@ -44,8 +41,8 @@ impl<T: Expression> Applicable<T> for Contains {
         let target = args.next().unwrap();
         let key = args.next().unwrap();
         let result = if let Some(target) = factory.match_struct_term(&target) {
-            let field_name = match factory.match_value_term(&key) {
-                Some(ValueTerm::String(value)) => Some(value),
+            let field_name = match factory.match_string_term(&key) {
+                Some(term) => Some(&term.value),
                 _ => None,
             };
             Ok(field_name
@@ -61,6 +58,6 @@ impl<T: Expression> Applicable<T> for Contains {
                 target, key
             ))
         };
-        result.map(|result| factory.create_value_term(ValueTerm::Boolean(result)))
+        result.map(|result| factory.create_boolean_term(result))
     }
 }

@@ -9,7 +9,7 @@ use crate::{
         uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
         FunctionArity, HeapAllocator, SignalType, Uid, Uuid,
     },
-    lang::{deduplicate_hashmap_entries, deduplicate_hashset_entries, ValueTerm},
+    lang::{deduplicate_hashmap_entries, deduplicate_hashset_entries},
     stdlib::Stdlib,
 };
 
@@ -300,21 +300,16 @@ where
                     Ok(None) => (
                         factory.create_application_term(
                             factory.create_builtin_term(Stdlib::Get),
-                            allocator.create_pair(
-                                arg.clone(),
-                                factory.create_value_term(ValueTerm::Int(0)),
-                            ),
+                            allocator.create_pair(arg.clone(), factory.create_int_term(0)),
                         ),
                         factory.create_application_term(
                             factory.create_builtin_term(Stdlib::Get),
-                            allocator
-                                .create_pair(arg, factory.create_value_term(ValueTerm::Int(1))),
+                            allocator.create_pair(arg, factory.create_int_term(1)),
                         ),
                     ),
                     Err(err) => {
                         let signal = create_error_signal_term(
-                            factory
-                                .create_value_term(ValueTerm::String(allocator.create_string(err))),
+                            factory.create_string_term(allocator.create_string(err)),
                             factory,
                             allocator,
                         );

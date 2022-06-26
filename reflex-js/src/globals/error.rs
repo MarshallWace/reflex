@@ -6,7 +6,7 @@ use std::iter::once;
 use crate::stdlib::Stdlib as JsStdlib;
 use reflex::{
     core::{Expression, ExpressionFactory, HeapAllocator},
-    lang::{create_struct, ValueTerm},
+    lang::create_struct,
     stdlib::Stdlib,
 };
 
@@ -20,8 +20,7 @@ pub fn global_error<T: Expression>(
         create_struct(
             once((
                 String::from("name"),
-                factory
-                    .create_value_term(ValueTerm::String(allocator.create_static_string("Error"))),
+                factory.create_string_term(allocator.create_static_string("Error")),
             ))
             .chain(once((
                 String::from("message"),
@@ -46,9 +45,7 @@ where
         create_struct(
             once((
                 String::from("name"),
-                factory.create_value_term(ValueTerm::String(
-                    allocator.create_static_string("AggregateError"),
-                )),
+                factory.create_string_term(allocator.create_static_string("AggregateError")),
             ))
             .chain(once((
                 String::from("message"),

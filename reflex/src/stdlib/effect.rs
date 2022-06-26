@@ -4,12 +4,9 @@
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use std::iter::once;
 
-use crate::{
-    core::{
-        uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
-        FunctionArity, HeapAllocator, SignalType, StringValue, Uid, Uuid,
-    },
-    lang::ValueTerm,
+use crate::core::{
+    uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
+    FunctionArity, HeapAllocator, SignalType, StringValue, Uid, Uuid,
 };
 
 pub struct Effect {}
@@ -44,9 +41,9 @@ impl<T: Expression> Applicable<T> for Effect {
         _cache: &mut impl EvaluationCache<T>,
     ) -> Result<T, String> {
         let signal_type = args.next().unwrap();
-        if let Some(ValueTerm::String(signal_type)) = factory.match_value_term(&signal_type) {
+        if let Some(signal_type) = factory.match_string_term(&signal_type) {
             let signal = allocator.create_signal(
-                SignalType::Custom(String::from(signal_type.as_str())),
+                SignalType::Custom(String::from(signal_type.value.as_str())),
                 allocator.create_list(args),
             );
             Ok(factory.create_dynamic_variable_term(

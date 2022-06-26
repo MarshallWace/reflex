@@ -2,12 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
-use crate::{
-    core::{
-        uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
-        FunctionArity, HeapAllocator, StructFieldOffset, Uid, Uuid,
-    },
-    lang::ValueTerm,
+use crate::core::{
+    uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
+    FunctionArity, HeapAllocator, StructFieldOffset, Uid, Uuid,
 };
 
 pub struct Match {}
@@ -80,14 +77,14 @@ pub(crate) fn match_enum<'a, T: Expression>(
 )> {
     match factory.match_tuple_term(target) {
         Some(target) => {
-            target.get(0).and_then(
-                |discriminant| match factory.match_value_term(discriminant) {
-                    Some(ValueTerm::Int(value)) if *value >= 0 => {
-                        Some((*value as usize, target.fields().iter().skip(1)))
+            target
+                .get(0)
+                .and_then(|discriminant| match factory.match_int_term(discriminant) {
+                    Some(term) if term.value >= 0 => {
+                        Some((term.value as usize, target.fields().iter().skip(1)))
                     }
                     _ => None,
-                },
-            )
+                })
         }
         _ => None,
     }

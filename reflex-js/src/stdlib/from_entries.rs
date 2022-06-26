@@ -7,7 +7,6 @@ use reflex::{
         uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
         FunctionArity, HeapAllocator, StringValue, Uid, Uuid,
     },
-    lang::ValueTerm,
     stdlib::Stdlib,
 };
 
@@ -120,10 +119,7 @@ where
     } else {
         Some(factory.create_application_term(
             factory.create_builtin_term(Stdlib::Get),
-            allocator.create_pair(
-                target.clone(),
-                factory.create_value_term(ValueTerm::Int(index as i32)),
-            ),
+            allocator.create_pair(target.clone(), factory.create_int_term(index as i32)),
         ))
     }
 }
@@ -134,8 +130,8 @@ fn get_static_prototype_keys<'a, T: Expression + 'a>(
 ) -> Result<Option<Vec<&'a T::String>>, String> {
     items
         .into_iter()
-        .map(|item| match factory.match_value_term(item) {
-            Some(ValueTerm::String(value)) => Ok(Some(value)),
+        .map(|item| match factory.match_string_term(item) {
+            Some(term) => Ok(Some(&term.value)),
             _ => {
                 if !item.is_static() {
                     Ok(None)

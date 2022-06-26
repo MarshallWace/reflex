@@ -21,7 +21,7 @@ use reflex::{
         Expression, ExpressionFactory, HeapAllocator, Reducible, Rewritable, Signal, SignalType,
         StateToken, StringValue,
     },
-    lang::{create_struct, ValueTerm},
+    lang::create_struct,
     stdlib::Stdlib,
 };
 use reflex_dispatcher::{
@@ -1067,7 +1067,7 @@ where
                         // FIXME: Deprecate gRPC handler accumulate option in favour of scan handler
                         let results = if let Some(accumulator) = accumulate {
                             results
-                                .scan(factory.create_value_term(ValueTerm::Null), {
+                                .scan(factory.create_nil_term(), {
                                     let factory = factory.clone();
                                     let allocator = allocator.clone();
                                     // TODO: Garbage-collect cache used for gRPC allocator iteratee
@@ -1261,8 +1261,8 @@ fn parse_grpc_effect_args<T: AsyncExpression>(
 }
 
 fn parse_integer_arg<T: Expression>(value: &T, factory: &impl ExpressionFactory<T>) -> Option<i32> {
-    match factory.match_value_term(value) {
-        Some(ValueTerm::Int(value)) => Some(*value),
+    match factory.match_int_term(value) {
+        Some(term) => Some(term.value),
         _ => None,
     }
 }
@@ -1271,8 +1271,8 @@ fn parse_string_arg<T: Expression>(
     value: &T,
     factory: &impl ExpressionFactory<T>,
 ) -> Option<String> {
-    match factory.match_value_term(value) {
-        Some(ValueTerm::String(value)) => Some(String::from(value.as_str())),
+    match factory.match_string_term(value) {
+        Some(term) => Some(String::from(term.value.as_str())),
         _ => None,
     }
 }
@@ -1281,12 +1281,10 @@ fn match_null_expression<'a, T: Expression>(
     value: &'a T,
     factory: &'a impl ExpressionFactory<T>,
 ) -> Option<&'a T> {
-    Some(value).filter(|value| {
-        factory
-            .match_value_term(value)
-            .map(|value| value.match_null().is_some())
-            .unwrap_or(false)
-    })
+    match factory.match_nil_term(value) {
+        Some(_) => Some(value),
+        _ => None,
+    }
 }
 
 fn create_pending_expression<T: Expression>(
@@ -1324,7 +1322,7 @@ fn create_error_message_expression<T: Expression>(
     allocator: &impl HeapAllocator<T>,
 ) -> T {
     create_error_expression(
-        factory.create_value_term(ValueTerm::String(message.into())),
+        factory.create_string_term(message.into()),
         factory,
         allocator,
     )

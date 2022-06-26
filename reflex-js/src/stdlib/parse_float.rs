@@ -1,12 +1,9 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use reflex::{
-    core::{
-        uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
-        FunctionArity, HeapAllocator, Uid, Uuid,
-    },
-    lang::ValueTerm,
+use reflex::core::{
+    uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
+    FunctionArity, HeapAllocator, Uid, Uuid,
 };
 
 pub struct ParseFloat {}
@@ -42,15 +39,15 @@ impl<T: Expression> Applicable<T> for ParseFloat {
     ) -> Result<T, String> {
         let mut args = args.into_iter();
         let value = args.next().unwrap();
-        match factory.match_value_term(&value) {
-            Some(ValueTerm::Float(_)) => Ok(value),
-            Some(ValueTerm::Int(value)) => {
-                Ok(factory.create_value_term(ValueTerm::Float(*value as f64)))
-            }
-            _ => Err(format!(
-                "Invalid float conversion: Expected Int or Float, received {}",
-                value,
-            )),
+        match factory.match_float_term(&value) {
+            Some(_) => Ok(value),
+            _ => match factory.match_int_term(&value) {
+                Some(term) => Ok(factory.create_float_term(term.value as f64)),
+                _ => Err(format!(
+                    "Invalid float conversion: Expected Int or Float, received {}",
+                    value,
+                )),
+            },
         }
     }
 }

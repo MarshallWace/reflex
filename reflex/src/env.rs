@@ -6,7 +6,7 @@ use crate::{
     core::{
         Expression, ExpressionFactory, HeapAllocator, Reducible, Rewritable, StateCache, StateToken,
     },
-    lang::{create_struct, ValueTerm},
+    lang::create_struct,
 };
 
 pub const ENV_STATE_TOKEN: StateToken = 0;
@@ -21,7 +21,7 @@ pub fn inject_env_vars<T: Expression + Rewritable<T> + Reducible<T>>(
         vars.into_iter().map(|(key, value)| {
             (
                 key,
-                factory.create_value_term(ValueTerm::String(allocator.create_string(value))),
+                factory.create_string_term(allocator.create_string(value)),
             )
         }),
         factory,

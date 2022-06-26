@@ -2,12 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
-use crate::{
-    core::{
-        uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
-        FunctionArity, HeapAllocator, Uid, Uuid,
-    },
-    lang::ValueTerm,
+use crate::core::{
+    uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
+    FunctionArity, HeapAllocator, Uid, Uuid,
 };
 
 pub struct Divide {}
@@ -43,45 +40,63 @@ impl<T: Expression> Applicable<T> for Divide {
     ) -> Result<T, String> {
         let left = args.next().unwrap();
         let right = args.next().unwrap();
-        let result = match (
-            factory.match_value_term(&left),
-            factory.match_value_term(&right),
+        let result = if let (Some(left), Some(right)) = (
+            factory.match_int_term(&left),
+            factory.match_int_term(&right),
         ) {
-            (Some(left), Some(right)) => match (left, right) {
-                (ValueTerm::Int(left), ValueTerm::Int(right)) => {
-                    if *right == 0 {
-                        Some(Err(format!("Division by zero: {} / {}", left, right)))
-                    } else {
-                        Some(Ok(ValueTerm::Int(left / right)))
-                    }
-                }
-                (ValueTerm::Float(left), ValueTerm::Float(right)) => {
-                    if *right == 0.0 {
-                        Some(Err(format!("Division by zero: {} / {}", left, right)))
-                    } else {
-                        Some(Ok(ValueTerm::Float(left / right)))
-                    }
-                }
-                (ValueTerm::Int(left), ValueTerm::Float(right)) => {
-                    if *right == 0.0 {
-                        Some(Err(format!("Division by zero: {} / {}", left, right)))
-                    } else {
-                        Some(Ok(ValueTerm::Float((*left as f64) / right)))
-                    }
-                }
-                (ValueTerm::Float(left), ValueTerm::Int(right)) => {
-                    if *right == 0 {
-                        Some(Err(format!("Division by zero: {} / {}", left, right)))
-                    } else {
-                        Some(Ok(ValueTerm::Float(left / (*right as f64))))
-                    }
-                }
-                _ => None,
-            },
-            _ => None,
+            if right.value == 0 {
+                Some(Err(format!(
+                    "Division by zero: {} / {}",
+                    left.value, right.value
+                )))
+            } else {
+                Some(Ok(factory.create_int_term(left.value / right.value)))
+            }
+        } else if let (Some(left), Some(right)) = (
+            factory.match_float_term(&left),
+            factory.match_float_term(&right),
+        ) {
+            if right.value == 0.0 {
+                Some(Err(format!(
+                    "Division by zero: {} / {}",
+                    left.value, right.value
+                )))
+            } else {
+                Some(Ok(factory.create_float_term(left.value / right.value)))
+            }
+        } else if let (Some(left), Some(right)) = (
+            factory.match_int_term(&left),
+            factory.match_float_term(&right),
+        ) {
+            if right.value == 0.0 {
+                Some(Err(format!(
+                    "Division by zero: {} / {}",
+                    left.value, right.value
+                )))
+            } else {
+                Some(Ok(
+                    factory.create_float_term((left.value as f64) / right.value)
+                ))
+            }
+        } else if let (Some(left), Some(right)) = (
+            factory.match_float_term(&left),
+            factory.match_int_term(&right),
+        ) {
+            if right.value == 0 {
+                Some(Err(format!(
+                    "Division by zero: {} / {}",
+                    left.value, right.value
+                )))
+            } else {
+                Some(Ok(
+                    factory.create_float_term(left.value / (right.value as f64))
+                ))
+            }
+        } else {
+            None
         };
         match result {
-            Some(result) => result.map(|value| factory.create_value_term(value)),
+            Some(result) => result,
             None => Err(format!(
                 "Expected (Int, Int) or (Float, Float), received ({}, {})",
                 left, right

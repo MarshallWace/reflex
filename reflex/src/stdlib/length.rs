@@ -1,12 +1,9 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use crate::{
-    core::{
-        uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
-        FunctionArity, HeapAllocator, Uid, Uuid,
-    },
-    lang::ValueTerm,
+use crate::core::{
+    uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
+    FunctionArity, HeapAllocator, Uid, Uuid,
 };
 
 pub struct Length {}
@@ -42,11 +39,11 @@ impl<T: Expression> Applicable<T> for Length {
     ) -> Result<T, String> {
         let target = args.next().unwrap();
         let result = if let Some(target) = factory.match_vector_term(&target) {
-            Some(factory.create_value_term(ValueTerm::Int(target.items().len() as i32)))
+            Some(factory.create_int_term(target.items().len() as i32))
         } else if let Some(target) = factory.match_hashmap_term(&target) {
-            Some(factory.create_value_term(ValueTerm::Int(target.keys().len() as i32)))
+            Some(factory.create_int_term(target.keys().len() as i32))
         } else if let Some(target) = factory.match_hashset_term(&target) {
-            Some(factory.create_value_term(ValueTerm::Int(target.values().len() as i32)))
+            Some(factory.create_int_term(target.values().len() as i32))
         } else {
             None
         };
