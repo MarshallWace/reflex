@@ -368,7 +368,7 @@ fn parse_fetch_result<T: Expression>(
 ) -> T {
     match result {
         Ok((status, body)) => match String::from_utf8(body.into_iter().collect()) {
-            Ok(body) => factory.create_tuple_term(allocator.create_pair(
+            Ok(body) => factory.create_list_term(allocator.create_pair(
                 factory.create_int_term(status.as_u16().into()),
                 factory.create_string_term(allocator.create_string(body)),
             )),

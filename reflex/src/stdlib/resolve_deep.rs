@@ -50,25 +50,7 @@ where
             return Err(format!("Expected 1 argument, received {}", args.len()));
         }
         let target = args.next().unwrap();
-        if let Some(value) = factory.match_tuple_term(&target) {
-            if value.is_atomic() {
-                Ok(target)
-            } else {
-                Ok(factory.create_application_term(
-                    factory.create_builtin_term(Stdlib::CollectTuple),
-                    allocator.create_list(value.fields().iter().map(|field| {
-                        if field.is_atomic() {
-                            field.clone()
-                        } else {
-                            factory.create_application_term(
-                                factory.create_builtin_term(Stdlib::ResolveDeep),
-                                allocator.create_list(once(field.clone())),
-                            )
-                        }
-                    })),
-                ))
-            }
-        } else if let Some(value) = factory.match_record_term(&target) {
+        if let Some(value) = factory.match_record_term(&target) {
             if value.is_atomic() {
                 Ok(target)
             } else {

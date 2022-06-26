@@ -49,7 +49,7 @@ impl<T: Expression> Applicable<T> for Entries {
                             .iter()
                             .zip(target.values().iter())
                             .map(|(key, value)| {
-                                factory.create_tuple_term(
+                                factory.create_list_term(
                                     allocator.create_pair(
                                         factory.create_string_term(
                                             allocator.create_string(key.as_str()),
@@ -64,7 +64,7 @@ impl<T: Expression> Applicable<T> for Entries {
         } else if let Some(target) = factory.match_list_term(&target) {
             Some(factory.create_list_term(allocator.create_list(
                 target.items().iter().enumerate().map(|(index, item)| {
-                    factory.create_tuple_term(
+                    factory.create_list_term(
                         allocator.create_pair(factory.create_int_term(index as i32), item.clone()),
                     )
                 }),
@@ -78,7 +78,7 @@ impl<T: Expression> Applicable<T> for Entries {
                 factory.create_list_term(allocator.create_list(target.values().iter().map(
                     |value| {
                         factory
-                            .create_tuple_term(allocator.create_pair(value.clone(), value.clone()))
+                            .create_list_term(allocator.create_pair(value.clone(), value.clone()))
                     },
                 ))),
             )

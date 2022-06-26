@@ -40,9 +40,7 @@ impl<T: Expression> Applicable<T> for Apply {
     ) -> Result<T, String> {
         let target = args.next().unwrap();
         let args = args.next().unwrap();
-        let arg_values = if let Some(args) = factory.match_tuple_term(&args) {
-            Some(args.fields())
-        } else if let Some(args) = factory.match_list_term(&args) {
+        let arg_values = if let Some(args) = factory.match_list_term(&args) {
             Some(args.items())
         } else {
             None
@@ -52,7 +50,7 @@ impl<T: Expression> Applicable<T> for Apply {
                 Ok(factory.create_application_term(target, allocator.clone_list(arg_values)))
             }
             None => Err(format!(
-                "Expected (<function>, <tuple>) or (<function>, List), received ({}, {})",
+                "Expected (<function>, List), received ({}, {})",
                 target, args
             )),
         }

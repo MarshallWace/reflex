@@ -797,20 +797,6 @@ fn evaluate_instruction<'a, T: Expression + Rewritable<T> + Reducible<T> + Appli
                 Ok((ExecutionResult::Advance, DependencyList::empty()))
             }
         }
-        Instruction::ConstructTuple { size } => {
-            trace!(instruction = "Instruction::ConstructTuple");
-            let size = *size;
-            if stack.len() < size {
-                Err(format!(
-                    "Unable to create {}-item tuple: insufficient arguments on stack",
-                    size,
-                ))
-            } else {
-                let fields = allocator.create_list(stack.pop_multiple(size));
-                stack.push(factory.create_tuple_term(fields));
-                Ok((ExecutionResult::Advance, DependencyList::empty()))
-            }
-        }
         Instruction::PushConstructor { prototype } => {
             trace!(instruction = "Instruction::PushConstructor");
             stack.push(factory.create_constructor_term(prototype.clone()));

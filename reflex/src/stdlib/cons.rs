@@ -44,7 +44,7 @@ impl<T: Expression> Applicable<T> for Cons {
         let head = args.next().unwrap();
         let tail = args.next().unwrap();
         let enum_variant = factory.create_int_term(1);
-        Ok(factory.create_tuple_term(allocator.create_triple(enum_variant, head, tail)))
+        Ok(factory.create_list_term(allocator.create_triple(enum_variant, head, tail)))
     }
 }
 
@@ -64,12 +64,12 @@ fn match_triple<'a, T: Expression>(
     target: &'a T,
     factory: &'a impl ExpressionFactory<T>,
 ) -> Option<(&'a T, &'a T, &'a T)> {
-    match factory.match_tuple_term(target) {
-        Some(target) if target.size() == 3 => {
-            let mut fields = target.fields().iter();
-            let first = fields.next().unwrap();
-            let second = fields.next().unwrap();
-            let third = fields.next().unwrap();
+    match factory.match_list_term(target) {
+        Some(term) if term.items().len() == 3 => {
+            let mut values = term.items().iter();
+            let first = values.next().unwrap();
+            let second = values.next().unwrap();
+            let third = values.next().unwrap();
             Some((first, second, third))
         }
         _ => None,

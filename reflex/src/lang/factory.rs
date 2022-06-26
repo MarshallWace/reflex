@@ -145,13 +145,6 @@ impl<TBuiltin: Builtin> ExpressionFactory<CachedSharedTerm<TBuiltin>>
             optional_args,
         )))
     }
-    fn create_tuple_term(
-        &self,
-        fields: ExpressionList<CachedSharedTerm<TBuiltin>>,
-    ) -> CachedSharedTerm<TBuiltin> {
-        trace!(factory_create = "tuple");
-        self.create_expression(Term::Tuple(TupleTerm::new(fields)))
-    }
     fn create_record_term(
         &self,
         prototype: StructPrototype,
@@ -325,15 +318,6 @@ impl<TBuiltin: Builtin> ExpressionFactory<CachedSharedTerm<TBuiltin>>
     ) -> Option<&'a CompiledFunctionTerm> {
         match expression.inner_term() {
             Term::CompiledFunction(term) => Some(term),
-            _ => None,
-        }
-    }
-    fn match_tuple_term<'a>(
-        &self,
-        expression: &'a CachedSharedTerm<TBuiltin>,
-    ) -> Option<&'a TupleTerm<CachedSharedTerm<TBuiltin>>> {
-        match expression.inner_term() {
-            Term::Tuple(term) => Some(term),
             _ => None,
         }
     }

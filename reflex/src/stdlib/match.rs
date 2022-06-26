@@ -42,10 +42,10 @@ impl<T: Expression> Applicable<T> for Match {
         let matcher = args.next().unwrap();
         let result = match (
             match_enum(&target, factory),
-            factory.match_tuple_term(&matcher),
+            factory.match_list_term(&matcher),
         ) {
             (Some((discriminant, enum_args)), Some(matcher)) => Some({
-                match matcher.fields().get(discriminant) {
+                match matcher.items().get(discriminant) {
                     Some(handler) => Ok(factory.create_application_term(
                         handler.clone(),
                         allocator.create_list(enum_args.into_iter().cloned()),
@@ -75,17 +75,15 @@ pub(crate) fn match_enum<'a, T: Expression>(
     StructFieldOffset,
     impl IntoIterator<Item = &'a T, IntoIter = impl ExactSizeIterator<Item = &'a T>>,
 )> {
-    match factory.match_tuple_term(target) {
-        Some(target) => {
-            target
-                .get(0)
-                .and_then(|discriminant| match factory.match_int_term(discriminant) {
-                    Some(term) if term.value >= 0 => {
-                        Some((term.value as usize, target.fields().iter().skip(1)))
-                    }
-                    _ => None,
-                })
-        }
+    match factory.match_list_term(target) {
+        Some(target) => target.items().get(0).and_then(|discriminant| {
+            match factory.match_int_term(discriminant) {
+                Some(term) if term.value >= 0 => {
+                    Some((term.value as usize, target.items().iter().skip(1)))
+                }
+                _ => None,
+            }
+        }),
         _ => None,
     }
 }

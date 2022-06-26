@@ -5,7 +5,7 @@
 use crate::{
     core::{
         uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
-        FunctionArity, HeapAllocator, StringValue, StructFieldOffset, Uid, Uuid,
+        FunctionArity, HeapAllocator, StringValue, Uid, Uuid,
     },
     lang::as_integer,
 };
@@ -43,23 +43,7 @@ impl<T: Expression> Applicable<T> for Get {
     ) -> Result<T, String> {
         let target = args.next().unwrap();
         let key = args.next().unwrap();
-        if let Some(target) = factory.match_tuple_term(&target) {
-            let field_offset = match factory.match_int_term(&key) {
-                Some(term) if term.value >= 0 => Some(term.value as StructFieldOffset),
-                _ => match factory.match_float_term(&key) {
-                    Some(term) => match as_integer(term.value) {
-                        Some(value) if value >= 0 => Some(value as StructFieldOffset),
-                        _ => None,
-                    },
-                    _ => None,
-                },
-            };
-            let value = field_offset.and_then(|field_offset| target.get(field_offset));
-            match value {
-                Some(value) => Ok(value.clone()),
-                None => Err(format!("Invalid field offset: {} on tuple {}", key, target)),
-            }
-        } else if let Some(target) = factory.match_record_term(&target) {
+        if let Some(target) = factory.match_record_term(&target) {
             let field_name = match factory.match_string_term(&key) {
                 Some(key) => Some(&key.value),
                 _ => None,

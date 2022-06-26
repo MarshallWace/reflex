@@ -45,16 +45,7 @@ where
         _cache: &mut impl EvaluationCache<T>,
     ) -> Result<T, String> {
         let target = args.next().unwrap();
-        if let Some(value) = factory.match_tuple_term(&target) {
-            if value.is_atomic() {
-                Ok(target)
-            } else {
-                Ok(factory.create_application_term(
-                    factory.create_builtin_term(Stdlib::CollectTuple),
-                    allocator.clone_list(value.fields()),
-                ))
-            }
-        } else if let Some(value) = factory.match_record_term(&target) {
+        if let Some(value) = factory.match_record_term(&target) {
             if value.is_atomic() {
                 Ok(target)
             } else {

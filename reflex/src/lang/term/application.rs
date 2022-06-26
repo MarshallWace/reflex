@@ -999,7 +999,7 @@ mod tests {
                 ),
             ),
             allocator.create_triple(
-                factory.create_tuple_term(
+                factory.create_list_term(
                     allocator.create_pair(factory.create_int_term(3), factory.create_int_term(4)),
                 ),
                 factory.create_int_term(0),
@@ -1032,7 +1032,7 @@ mod tests {
                         ),
                     ),
                 ),
-                allocator.create_unit_list(factory.create_tuple_term(
+                allocator.create_unit_list(factory.create_list_term(
                     allocator.create_pair(factory.create_int_term(3), factory.create_int_term(4),)
                 ),),
             ))
@@ -1047,7 +1047,7 @@ mod tests {
             factory.create_application_term(
                 factory.create_builtin_term(Stdlib::Get),
                 allocator.create_pair(
-                    factory.create_tuple_term(allocator.create_unit_list(
+                    factory.create_list_term(allocator.create_unit_list(
                         factory.create_application_term(
                             factory.create_builtin_term(Stdlib::Add),
                             allocator.create_pair(

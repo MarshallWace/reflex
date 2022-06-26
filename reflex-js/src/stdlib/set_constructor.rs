@@ -239,15 +239,15 @@ mod tests {
             result,
             EvaluationResult::new(
                 factory.create_list_term(allocator.create_list(vec![
-                    factory.create_tuple_term(allocator.create_pair(
+                    factory.create_list_term(allocator.create_pair(
                         factory.create_string_term(allocator.create_static_string("one")),
                         factory.create_string_term(allocator.create_static_string("one")),
                     )),
-                    factory.create_tuple_term(allocator.create_pair(
+                    factory.create_list_term(allocator.create_pair(
                         factory.create_string_term(allocator.create_static_string("two")),
                         factory.create_string_term(allocator.create_static_string("two")),
                     )),
-                    factory.create_tuple_term(allocator.create_pair(
+                    factory.create_list_term(allocator.create_pair(
                         factory.create_string_term(allocator.create_static_string("three")),
                         factory.create_string_term(allocator.create_static_string("three")),
                     )),
@@ -267,15 +267,15 @@ mod tests {
             result,
             EvaluationResult::new(
                 factory.create_list_term(allocator.create_list(vec![
-                    factory.create_tuple_term(allocator.create_pair(
+                    factory.create_list_term(allocator.create_pair(
                         factory.create_string_term(allocator.create_static_string("one")),
                         factory.create_string_term(allocator.create_static_string("one")),
                     )),
-                    factory.create_tuple_term(allocator.create_pair(
+                    factory.create_list_term(allocator.create_pair(
                         factory.create_string_term(allocator.create_static_string("two")),
                         factory.create_string_term(allocator.create_static_string("two")),
                     )),
-                    factory.create_tuple_term(allocator.create_pair(
+                    factory.create_list_term(allocator.create_pair(
                         factory.create_string_term(allocator.create_static_string("three")),
                         factory.create_string_term(allocator.create_static_string("three")),
                     )),

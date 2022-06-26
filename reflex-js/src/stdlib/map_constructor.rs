@@ -124,9 +124,7 @@ fn get_indexed_field<T: Expression>(
 where
     T::Builtin: From<Stdlib>,
 {
-    if let Some(target) = factory.match_tuple_term(target) {
-        target.get(index).cloned()
-    } else if let Some(target) = factory.match_list_term(target) {
+    if let Some(target) = factory.match_list_term(target) {
         target.items().get(index).cloned()
     } else if target.is_static() {
         None
@@ -285,15 +283,15 @@ mod tests {
             result,
             EvaluationResult::new(
                 factory.create_list_term(allocator.create_list(vec![
-                    factory.create_tuple_term(allocator.create_pair(
+                    factory.create_list_term(allocator.create_pair(
                         factory.create_string_term(allocator.create_static_string("one")),
                         factory.create_float_term(1.0),
                     )),
-                    factory.create_tuple_term(allocator.create_pair(
+                    factory.create_list_term(allocator.create_pair(
                         factory.create_string_term(allocator.create_static_string("two")),
                         factory.create_float_term(2.0),
                     )),
-                    factory.create_tuple_term(allocator.create_pair(
+                    factory.create_list_term(allocator.create_pair(
                         factory.create_string_term(allocator.create_static_string("three")),
                         factory.create_float_term(3.0),
                     )),
@@ -313,15 +311,15 @@ mod tests {
             result,
             EvaluationResult::new(
                 factory.create_list_term(allocator.create_list(vec![
-                    factory.create_tuple_term(allocator.create_pair(
+                    factory.create_list_term(allocator.create_pair(
                         factory.create_string_term(allocator.create_static_string("one")),
                         factory.create_float_term(1.0),
                     )),
-                    factory.create_tuple_term(allocator.create_pair(
+                    factory.create_list_term(allocator.create_pair(
                         factory.create_string_term(allocator.create_static_string("two")),
                         factory.create_float_term(4.0),
                     )),
-                    factory.create_tuple_term(allocator.create_pair(
+                    factory.create_list_term(allocator.create_pair(
                         factory.create_string_term(allocator.create_static_string("three")),
                         factory.create_float_term(3.0),
                     )),

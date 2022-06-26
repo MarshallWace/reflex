@@ -10,41 +10,6 @@ use crate::{
     lang::{deduplicate_hashmap_entries, deduplicate_hashset_entries},
 };
 
-pub struct ConstructTuple {}
-impl ConstructTuple {
-    pub(crate) const UUID: Uuid = uuid!("3b347355-5a6a-4756-8f51-1920f602df85");
-    const ARITY: FunctionArity<0, 0> = FunctionArity {
-        required: [],
-        optional: [],
-        variadic: Some(ArgType::Lazy),
-    };
-    pub fn arity() -> Arity {
-        Arity::from(&Self::ARITY)
-    }
-}
-impl Uid for ConstructTuple {
-    fn uid(&self) -> Uuid {
-        Self::UUID
-    }
-}
-impl<T: Expression> Applicable<T> for ConstructTuple {
-    fn arity(&self) -> Option<Arity> {
-        Some(Self::arity())
-    }
-    fn should_parallelize(&self, _args: &[T]) -> bool {
-        false
-    }
-    fn apply(
-        &self,
-        args: impl ExactSizeIterator<Item = T>,
-        factory: &impl ExpressionFactory<T>,
-        allocator: &impl HeapAllocator<T>,
-        _cache: &mut impl EvaluationCache<T>,
-    ) -> Result<T, String> {
-        Ok(factory.create_tuple_term(allocator.create_list(args)))
-    }
-}
-
 pub struct ConstructRecord {}
 impl ConstructRecord {
     pub(crate) const UUID: Uuid = uuid!("f3a1b7ad-fe7d-444b-adf3-6945332e03b7");

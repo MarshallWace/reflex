@@ -12,57 +12,6 @@ use crate::{
     stdlib::Stdlib,
 };
 
-pub struct ResolveTuple {}
-impl ResolveTuple {
-    pub(crate) const UUID: Uuid = uuid!("4422c938-62aa-4610-a388-ecaf7af487e5");
-    const ARITY: FunctionArity<1, 0> = FunctionArity {
-        required: [ArgType::Strict],
-        optional: [],
-        variadic: None,
-    };
-    pub fn arity() -> Arity {
-        Arity::from(&Self::ARITY)
-    }
-}
-impl Uid for ResolveTuple {
-    fn uid(&self) -> Uuid {
-        Self::UUID
-    }
-}
-impl<T: Expression> Applicable<T> for ResolveTuple
-where
-    T::Builtin: From<Stdlib>,
-{
-    fn arity(&self) -> Option<Arity> {
-        Some(Self::arity())
-    }
-    fn should_parallelize(&self, _args: &[T]) -> bool {
-        false
-    }
-    fn apply(
-        &self,
-        mut args: impl ExactSizeIterator<Item = T>,
-        factory: &impl ExpressionFactory<T>,
-        allocator: &impl HeapAllocator<T>,
-        _cache: &mut impl EvaluationCache<T>,
-    ) -> Result<T, String> {
-        let target = args.next().unwrap();
-        if let Some(value) = factory.match_tuple_term(&target) {
-            let has_dynamic_values = value.fields().iter().any(|item| !item.is_static());
-            if !has_dynamic_values {
-                Ok(target)
-            } else {
-                Ok(factory.create_application_term(
-                    factory.create_builtin_term(Stdlib::CollectTuple),
-                    allocator.create_list(value.fields().iter().cloned()),
-                ))
-            }
-        } else {
-            Err(format!("Expected <tuple>, received {}", target))
-        }
-    }
-}
-
 pub struct ResolveRecord {}
 impl ResolveRecord {
     pub(crate) const UUID: Uuid = uuid!("0e580200-7a85-415b-ba8e-ac854dc51ec7");

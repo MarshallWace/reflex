@@ -110,9 +110,7 @@ fn get_indexed_field<T: Expression>(
 where
     T::Builtin: From<Stdlib>,
 {
-    if let Some(target) = factory.match_tuple_term(target) {
-        target.get(index).cloned()
-    } else if let Some(target) = factory.match_list_term(target) {
+    if let Some(target) = factory.match_list_term(target) {
         target.items().get(index).cloned()
     } else if target.is_static() {
         None

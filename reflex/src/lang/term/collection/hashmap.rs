@@ -57,7 +57,7 @@ impl<T: Expression> HashMapTerm<T> {
             .iter()
             .zip(self.values().iter())
             .map(move |(key, value)| {
-                factory.create_tuple_term(allocator.create_pair(key.clone(), value.clone()))
+                factory.create_list_term(allocator.create_pair(key.clone(), value.clone()))
             })
     }
     pub fn get(&self, key: &T) -> Option<&T> {

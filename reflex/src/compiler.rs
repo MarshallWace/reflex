@@ -159,9 +159,6 @@ pub enum Instruction {
     ConstructPartialApplication {
         num_args: usize,
     },
-    ConstructTuple {
-        size: usize,
-    },
     ConstructList {
         size: usize,
     },
@@ -284,24 +281,20 @@ impl std::hash::Hash for Instruction {
                 state.write_u8(22);
                 num_args.hash(state);
             }
-            Self::ConstructTuple { size } => {
+            Self::ConstructList { size } => {
                 state.write_u8(23);
                 size.hash(state);
             }
-            Self::ConstructList { size } => {
-                state.write_u8(25);
-                size.hash(state);
-            }
             Self::ConstructHashMap { size } => {
-                state.write_u8(26);
+                state.write_u8(24);
                 size.hash(state);
             }
             Self::ConstructHashSet { size } => {
-                state.write_u8(27);
+                state.write_u8(25);
                 size.hash(state);
             }
             Self::CombineSignals { count } => {
-                state.write_u8(28);
+                state.write_u8(26);
                 count.hash(state);
             }
         }

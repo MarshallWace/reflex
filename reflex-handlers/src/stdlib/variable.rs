@@ -59,7 +59,7 @@ where
             let state_token = prefix_state_token(STATE_NAMESPACE_VARIABLE, term.id);
             let getter = factory.create_dynamic_variable_term(state_token, initial_value);
             let setter = create_setter_function(state_token, factory, allocator);
-            Ok(factory.create_tuple_term(allocator.create_pair(getter, setter)))
+            Ok(factory.create_list_term(allocator.create_pair(getter, setter)))
         } else {
             Err(format!(
                 "Invalid variable identifier: Expected Hash, received {}",

@@ -87,41 +87,6 @@ where
     }
 }
 
-pub struct CollectTuple {}
-impl CollectTuple {
-    pub(crate) const UUID: Uuid = uuid!("b1e26891-1dda-45f0-a54e-c3d047dc20ef");
-    const ARITY: FunctionArity<0, 0> = FunctionArity {
-        required: [],
-        optional: [],
-        variadic: Some(ArgType::Strict),
-    };
-    pub fn arity() -> Arity {
-        Arity::from(&Self::ARITY)
-    }
-}
-impl Uid for CollectTuple {
-    fn uid(&self) -> Uuid {
-        Self::UUID
-    }
-}
-impl<T: Expression> Applicable<T> for CollectTuple {
-    fn arity(&self) -> Option<Arity> {
-        Some(Self::arity())
-    }
-    fn should_parallelize(&self, _args: &[T]) -> bool {
-        false
-    }
-    fn apply(
-        &self,
-        args: impl ExactSizeIterator<Item = T>,
-        factory: &impl ExpressionFactory<T>,
-        allocator: &impl HeapAllocator<T>,
-        _cache: &mut impl EvaluationCache<T>,
-    ) -> Result<T, String> {
-        Ok(factory.create_tuple_term(allocator.create_list(args)))
-    }
-}
-
 pub struct CollectRecord {}
 impl CollectRecord {
     pub(crate) const UUID: Uuid = uuid!("03e8d5bb-917d-414b-8041-d07ec403c1a9");
@@ -280,14 +245,7 @@ where
     ) -> Result<T, String> {
         let (keys, values): (Vec<_>, Vec<_>) = {
             args.map(|arg| {
-                let static_entry = if let Some(entry) = factory.match_tuple_term(&arg) {
-                    match (entry.get(0), entry.get(1)) {
-                        (Some(key), Some(value)) if entry.size() == 0 => {
-                            Ok(Some((key.clone(), value.clone())))
-                        }
-                        _ => Err(format!("Invalid HashMap entry: {}", entry)),
-                    }
-                } else if let Some(entry) = factory.match_list_term(&arg) {
+                let static_entry = if let Some(entry) = factory.match_list_term(&arg) {
                     match (entry.items().get(0), entry.items().get(1)) {
                         (Some(key), Some(value)) => Ok(Some((key.clone(), value.clone()))),
                         _ => Err(format!("Invalid HashMap entry: {}", entry)),

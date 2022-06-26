@@ -1003,7 +1003,6 @@ pub trait ExpressionFactory<T: Expression> {
         required_args: StackOffset,
         optional_args: StackOffset,
     ) -> T;
-    fn create_tuple_term(&self, fields: ExpressionList<T>) -> T;
     fn create_record_term(&self, prototype: StructPrototype, fields: ExpressionList<T>) -> T;
     fn create_constructor_term(&self, prototype: StructPrototype) -> T;
     fn create_list_term(&self, items: ExpressionList<T>) -> T;
@@ -1032,7 +1031,6 @@ pub trait ExpressionFactory<T: Expression> {
     fn match_recursive_term<'a>(&self, expression: &'a T) -> Option<&'a RecursiveTerm<T>>;
     fn match_builtin_term<'a>(&self, expression: &'a T) -> Option<&'a BuiltinTerm<T>>;
     fn match_compiled_function_term<'a>(&self, target: &'a T) -> Option<&'a CompiledFunctionTerm>;
-    fn match_tuple_term<'a>(&self, expression: &'a T) -> Option<&'a TupleTerm<T>>;
     fn match_record_term<'a>(&self, expression: &'a T) -> Option<&'a RecordTerm<T>>;
     fn match_constructor_term<'a>(&self, expression: &'a T) -> Option<&'a ConstructorTerm>;
     fn match_list_term<'a>(&self, expression: &'a T) -> Option<&'a ListTerm<T>>;

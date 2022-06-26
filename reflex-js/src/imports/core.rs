@@ -65,10 +65,6 @@ where
                 factory.create_builtin_term(Stdlib::CollectRecord),
             ),
             (
-                String::from("collectTuple"),
-                factory.create_builtin_term(Stdlib::CollectTuple),
-            ),
-            (
                 String::from("collectList"),
                 factory.create_builtin_term(Stdlib::CollectList),
             ),
@@ -91,10 +87,6 @@ where
             (
                 String::from("constructRecord"),
                 factory.create_builtin_term(Stdlib::ConstructRecord),
-            ),
-            (
-                String::from("constructTuple"),
-                factory.create_builtin_term(Stdlib::ConstructTuple),
             ),
             (
                 String::from("constructList"),
@@ -244,10 +236,6 @@ where
             (
                 String::from("resolveRecord"),
                 factory.create_builtin_term(Stdlib::ResolveRecord),
-            ),
-            (
-                String::from("resolveTuple"),
-                factory.create_builtin_term(Stdlib::ResolveTuple),
             ),
             (
                 String::from("resolveList"),

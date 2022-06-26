@@ -485,7 +485,7 @@ fn create_enum<'src, T: Expression + Rewritable<T> + Reducible<T>>(
 where
     T::Builtin: From<Stdlib>,
 {
-    factory.create_tuple_term({
+    factory.create_list_term({
         let args = args.into_iter();
         allocator.create_sized_list(
             1 + args.len(),
@@ -721,7 +721,7 @@ where
                             Substitutions::named(&initializer_replacements, None);
                         let bindings = factory.create_recursive_term(factory.create_lambda_term(
                             1,
-                            factory.create_tuple_term(allocator.create_list(
+                            factory.create_list_term(allocator.create_list(
                                 initializers.iter().map(|initializer| {
                                     initializer
                                         .substitute_static(
@@ -1292,7 +1292,7 @@ mod tests {
                         allocator.create_pair(
                             factory.create_recursive_term(factory.create_lambda_term(
                                 1,
-                                factory.create_tuple_term(allocator.create_pair(
+                                factory.create_list_term(allocator.create_pair(
                                     factory.create_int_term(3),
                                     factory.create_int_term(4),
                                 ),),
@@ -1305,7 +1305,7 @@ mod tests {
                         allocator.create_pair(
                             factory.create_recursive_term(factory.create_lambda_term(
                                 1,
-                                factory.create_tuple_term(allocator.create_pair(
+                                factory.create_list_term(allocator.create_pair(
                                     factory.create_int_term(3),
                                     factory.create_int_term(4),
                                 ),),
@@ -1326,7 +1326,7 @@ mod tests {
                         allocator.create_pair(
                             factory.create_recursive_term(factory.create_lambda_term(
                                 1,
-                                factory.create_tuple_term(allocator.create_pair(
+                                factory.create_list_term(allocator.create_pair(
                                     factory.create_int_term(3),
                                     factory.create_int_term(4),
                                 ),),
@@ -1339,7 +1339,7 @@ mod tests {
                         allocator.create_pair(
                             factory.create_recursive_term(factory.create_lambda_term(
                                 1,
-                                factory.create_tuple_term(allocator.create_pair(
+                                factory.create_list_term(allocator.create_pair(
                                     factory.create_int_term(3),
                                     factory.create_int_term(4),
                                 ),),
@@ -1382,7 +1382,7 @@ mod tests {
                             allocator.create_pair(
                                 factory.create_recursive_term(factory.create_lambda_term(
                                     1,
-                                    factory.create_tuple_term(allocator.create_pair(
+                                    factory.create_list_term(allocator.create_pair(
                                         factory.create_int_term(3),
                                         factory.create_int_term(4),
                                     )),
@@ -1395,7 +1395,7 @@ mod tests {
                             allocator.create_pair(
                                 factory.create_recursive_term(factory.create_lambda_term(
                                     1,
-                                    factory.create_tuple_term(allocator.create_pair(
+                                    factory.create_list_term(allocator.create_pair(
                                         factory.create_int_term(3),
                                         factory.create_int_term(4),
                                     )),
@@ -1417,7 +1417,7 @@ mod tests {
                         allocator.create_pair(
                             factory.create_recursive_term(factory.create_lambda_term(
                                 1,
-                                factory.create_tuple_term(allocator.create_pair(
+                                factory.create_list_term(allocator.create_pair(
                                     factory.create_int_term(3),
                                     factory.create_application_term(
                                         factory.create_builtin_term(Stdlib::Get),
@@ -1436,7 +1436,7 @@ mod tests {
                         allocator.create_pair(
                             factory.create_recursive_term(factory.create_lambda_term(
                                 1,
-                                factory.create_tuple_term(allocator.create_pair(
+                                factory.create_list_term(allocator.create_pair(
                                     factory.create_int_term(3),
                                     factory.create_application_term(
                                         factory.create_builtin_term(Stdlib::Get),
@@ -1463,7 +1463,7 @@ mod tests {
                         allocator.create_pair(
                             factory.create_recursive_term(factory.create_lambda_term(
                                 1,
-                                factory.create_tuple_term(allocator.create_pair(
+                                factory.create_list_term(allocator.create_pair(
                                     factory.create_int_term(3),
                                     factory.create_application_term(
                                         factory.create_builtin_term(Stdlib::Get),
@@ -1482,7 +1482,7 @@ mod tests {
                         allocator.create_pair(
                             factory.create_recursive_term(factory.create_lambda_term(
                                 1,
-                                factory.create_tuple_term(allocator.create_pair(
+                                factory.create_list_term(allocator.create_pair(
                                     factory.create_int_term(3),
                                     factory.create_application_term(
                                         factory.create_builtin_term(Stdlib::Get),
@@ -1522,7 +1522,7 @@ mod tests {
                         allocator.create_pair(
                             factory.create_recursive_term(factory.create_lambda_term(
                                 1,
-                                factory.create_tuple_term(allocator.create_pair(
+                                factory.create_list_term(allocator.create_pair(
                                     factory.create_int_term(3),
                                     factory.create_application_term(
                                         factory.create_builtin_term(Stdlib::Get),
@@ -1541,7 +1541,7 @@ mod tests {
                         allocator.create_pair(
                             factory.create_recursive_term(factory.create_lambda_term(
                                 1,
-                                factory.create_tuple_term(allocator.create_pair(
+                                factory.create_list_term(allocator.create_pair(
                                     factory.create_int_term(3),
                                     factory.create_application_term(
                                         factory.create_builtin_term(Stdlib::Get),
@@ -1568,7 +1568,7 @@ mod tests {
                         allocator.create_pair(
                             factory.create_recursive_term(factory.create_lambda_term(
                                 1,
-                                factory.create_tuple_term(allocator.create_pair(
+                                factory.create_list_term(allocator.create_pair(
                                     factory.create_application_term(
                                         factory.create_builtin_term(Stdlib::Get),
                                         allocator.create_pair(
@@ -1587,7 +1587,7 @@ mod tests {
                         allocator.create_pair(
                             factory.create_recursive_term(factory.create_lambda_term(
                                 1,
-                                factory.create_tuple_term(allocator.create_pair(
+                                factory.create_list_term(allocator.create_pair(
                                     factory.create_application_term(
                                         factory.create_builtin_term(Stdlib::Get),
                                         allocator.create_pair(
@@ -1614,7 +1614,7 @@ mod tests {
                         allocator.create_pair(
                             factory.create_recursive_term(factory.create_lambda_term(
                                 1,
-                                factory.create_tuple_term(allocator.create_pair(
+                                factory.create_list_term(allocator.create_pair(
                                     factory.create_application_term(
                                         factory.create_builtin_term(Stdlib::Get),
                                         allocator.create_pair(
@@ -1633,7 +1633,7 @@ mod tests {
                         allocator.create_pair(
                             factory.create_recursive_term(factory.create_lambda_term(
                                 1,
-                                factory.create_tuple_term(allocator.create_pair(
+                                factory.create_list_term(allocator.create_pair(
                                     factory.create_application_term(
                                         factory.create_builtin_term(Stdlib::Get),
                                         allocator.create_pair(
@@ -1665,7 +1665,7 @@ mod tests {
                     factory.create_builtin_term(Stdlib::Get),
                     allocator.create_pair(
                         factory.create_recursive_term(
-                            factory.create_lambda_term(1, factory.create_tuple_term(
+                            factory.create_lambda_term(1, factory.create_list_term(
                                 allocator.create_triple(
                                     factory.create_lambda_term(2, factory.create_application_term(
                                         factory.create_builtin_term(Stdlib::Add),
@@ -1710,7 +1710,7 @@ mod tests {
                     factory.create_builtin_term(Stdlib::Get),
                     allocator.create_pair(
                         factory.create_recursive_term(
-                            factory.create_lambda_term(1, factory.create_tuple_term(
+                            factory.create_lambda_term(1, factory.create_list_term(
                                 allocator.create_triple(
                                     factory.create_lambda_term(2, factory.create_application_term(
                                         factory.create_builtin_term(Stdlib::Add),
@@ -1755,7 +1755,7 @@ mod tests {
                     factory.create_builtin_term(Stdlib::Get),
                     allocator.create_pair(
                         factory.create_recursive_term(
-                            factory.create_lambda_term(1, factory.create_tuple_term(
+                            factory.create_lambda_term(1, factory.create_list_term(
                                 allocator.create_triple(
                                     factory.create_lambda_term(2, factory.create_application_term(
                                         factory.create_builtin_term(Stdlib::Add),

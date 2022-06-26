@@ -70,7 +70,7 @@ where
                         allocator.create_pair(
                             target,
                             factory.create_application_term(
-                                factory.create_builtin_term(Stdlib::CollectTuple),
+                                factory.create_builtin_term(Stdlib::CollectList),
                                 allocator.create_sized_list(
                                     num_args,
                                     (0..num_args).map(|index| {
