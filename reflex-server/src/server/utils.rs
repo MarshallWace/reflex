@@ -5,11 +5,15 @@ use std::iter::once;
 
 use http::{
     header::{self, HeaderName},
-    HeaderValue, Request, Response, StatusCode,
+    HeaderMap, HeaderValue, Request, Response, StatusCode,
 };
 use reflex_json::JsonValue;
 
-pub(crate) fn clone_request_wrapper<T>(request: &Request<T>) -> Request<()> {
+pub fn clone_http_request<T: Clone>(request: &Request<T>) -> Request<T> {
+    clone_http_request_wrapper(request).map(|_| request.body().clone())
+}
+
+pub fn clone_http_request_wrapper<T>(request: &Request<T>) -> Request<()> {
     let mut result = Request::new(());
     *result.method_mut() = request.method().clone();
     *result.uri_mut() = request.uri().clone();
@@ -21,7 +25,11 @@ pub(crate) fn clone_request_wrapper<T>(request: &Request<T>) -> Request<()> {
     result
 }
 
-pub(crate) fn clone_response_wrapper<T>(response: &Response<T>) -> Response<()> {
+pub fn clone_http_response<T: Clone>(response: &Response<T>) -> Response<T> {
+    clone_http_response_wrapper(response).map(|_| response.body().clone())
+}
+
+pub fn clone_http_response_wrapper<T>(response: &Response<T>) -> Response<()> {
     let mut result = Response::new(());
     *result.status_mut() = response.status();
     *result.version_mut() = response.version();
@@ -32,7 +40,7 @@ pub(crate) fn clone_response_wrapper<T>(response: &Response<T>) -> Response<()> 
     result
 }
 
-pub(crate) fn create_json_http_response<T: From<String> + Default>(
+pub fn create_json_http_response<T: From<String> + Default>(
     status: StatusCode,
     headers: impl IntoIterator<Item = (HeaderName, HeaderValue)>,
     body: &JsonValue,
@@ -46,7 +54,71 @@ pub(crate) fn create_json_http_response<T: From<String> + Default>(
     )
 }
 
-fn create_content_type_header(value: &'static str) -> (HeaderName, HeaderValue) {
+pub fn create_html_http_response<T: From<String> + Default>(
+    status: StatusCode,
+    headers: impl IntoIterator<Item = (HeaderName, HeaderValue)>,
+    body: impl Into<String>,
+) -> Response<T> {
+    create_http_response(
+        status,
+        headers
+            .into_iter()
+            .chain(once(create_content_type_header("text/html"))),
+        Some(body.into()),
+    )
+}
+
+pub fn create_accepted_http_response<T: Default + From<String>>(
+    status_code: StatusCode,
+    headers: impl IntoIterator<Item = (HeaderName, HeaderValue)>,
+    body: Option<String>,
+    request_headers: &HeaderMap,
+) -> Response<T> {
+    let body = match body {
+        Some(body) => Some(body),
+        None if !status_code.is_success() => Some(format!("{}", status_code)),
+        _ => None,
+    };
+    if is_json_request(request_headers) {
+        create_json_http_response(
+            status_code,
+            headers,
+            &match body {
+                Some(body) => JsonValue::String(body),
+                None => JsonValue::Null,
+            },
+        )
+    } else {
+        create_http_response(
+            status_code,
+            once((
+                http::header::CONTENT_TYPE,
+                HeaderValue::from_static("text/plain"),
+            )),
+            body,
+        )
+    }
+}
+
+pub(crate) fn is_json_request(headers: &HeaderMap) -> bool {
+    headers
+        .get(http::header::ACCEPT)
+        .map(|header_value| {
+            find_subsequence_index(header_value.as_ref(), b"application/json").is_some()
+        })
+        .unwrap_or(false)
+}
+
+fn find_subsequence_index<T>(haystack: &[T], needle: &[T]) -> Option<usize>
+where
+    for<'a> &'a [T]: PartialEq,
+{
+    haystack
+        .windows(needle.len())
+        .position(|window| window == needle)
+}
+
+pub(crate) fn create_content_type_header(value: &'static str) -> (HeaderName, HeaderValue) {
     (header::CONTENT_TYPE, HeaderValue::from_static(value))
 }
 

@@ -4,16 +4,17 @@
 use reflex_dispatcher::{Action, NamedAction, SerializableAction, SerializedAction};
 use reflex_graphql::subscriptions::GraphQlSubscriptionServerMessage;
 use reflex_json::{JsonMap, JsonValue};
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-#[derive(Clone, Debug)]
-pub enum GraphQlHandlerAction {
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum GraphQlHandlerActions {
     ConnectSuccess(GraphQlHandlerWebSocketConnectSuccessAction),
     ConnectError(GraphQlHandlerWebSocketConnectErrorAction),
     ServerMessage(GraphQlHandlerWebSocketServerMessageAction),
 }
-impl Action for GraphQlHandlerAction {}
-impl NamedAction for GraphQlHandlerAction {
+impl Action for GraphQlHandlerActions {}
+impl NamedAction for GraphQlHandlerActions {
     fn name(&self) -> &'static str {
         match self {
             Self::ConnectSuccess(action) => action.name(),
@@ -22,85 +23,87 @@ impl NamedAction for GraphQlHandlerAction {
         }
     }
 }
-impl SerializableAction for GraphQlHandlerAction {
-    fn serialize(&self) -> SerializedAction {
+impl SerializableAction for GraphQlHandlerActions {
+    fn to_json(&self) -> SerializedAction {
         match self {
-            Self::ConnectSuccess(action) => action.serialize(),
-            Self::ConnectError(action) => action.serialize(),
-            Self::ServerMessage(action) => action.serialize(),
+            Self::ConnectSuccess(action) => action.to_json(),
+            Self::ConnectError(action) => action.to_json(),
+            Self::ServerMessage(action) => action.to_json(),
         }
     }
 }
 
-impl From<GraphQlHandlerWebSocketConnectSuccessAction> for GraphQlHandlerAction {
+impl From<GraphQlHandlerWebSocketConnectSuccessAction> for GraphQlHandlerActions {
     fn from(value: GraphQlHandlerWebSocketConnectSuccessAction) -> Self {
         Self::ConnectSuccess(value)
     }
 }
-impl From<GraphQlHandlerAction> for Option<GraphQlHandlerWebSocketConnectSuccessAction> {
-    fn from(value: GraphQlHandlerAction) -> Self {
+impl From<GraphQlHandlerActions> for Option<GraphQlHandlerWebSocketConnectSuccessAction> {
+    fn from(value: GraphQlHandlerActions) -> Self {
         match value {
-            GraphQlHandlerAction::ConnectSuccess(value) => Some(value),
+            GraphQlHandlerActions::ConnectSuccess(value) => Some(value),
             _ => None,
         }
     }
 }
-impl<'a> From<&'a GraphQlHandlerAction>
+impl<'a> From<&'a GraphQlHandlerActions>
     for Option<&'a GraphQlHandlerWebSocketConnectSuccessAction>
 {
-    fn from(value: &'a GraphQlHandlerAction) -> Self {
+    fn from(value: &'a GraphQlHandlerActions) -> Self {
         match value {
-            GraphQlHandlerAction::ConnectSuccess(value) => Some(value),
+            GraphQlHandlerActions::ConnectSuccess(value) => Some(value),
             _ => None,
         }
     }
 }
 
-impl From<GraphQlHandlerWebSocketConnectErrorAction> for GraphQlHandlerAction {
+impl From<GraphQlHandlerWebSocketConnectErrorAction> for GraphQlHandlerActions {
     fn from(value: GraphQlHandlerWebSocketConnectErrorAction) -> Self {
         Self::ConnectError(value)
     }
 }
-impl From<GraphQlHandlerAction> for Option<GraphQlHandlerWebSocketConnectErrorAction> {
-    fn from(value: GraphQlHandlerAction) -> Self {
+impl From<GraphQlHandlerActions> for Option<GraphQlHandlerWebSocketConnectErrorAction> {
+    fn from(value: GraphQlHandlerActions) -> Self {
         match value {
-            GraphQlHandlerAction::ConnectError(value) => Some(value),
+            GraphQlHandlerActions::ConnectError(value) => Some(value),
             _ => None,
         }
     }
 }
-impl<'a> From<&'a GraphQlHandlerAction> for Option<&'a GraphQlHandlerWebSocketConnectErrorAction> {
-    fn from(value: &'a GraphQlHandlerAction) -> Self {
+impl<'a> From<&'a GraphQlHandlerActions> for Option<&'a GraphQlHandlerWebSocketConnectErrorAction> {
+    fn from(value: &'a GraphQlHandlerActions) -> Self {
         match value {
-            GraphQlHandlerAction::ConnectError(value) => Some(value),
+            GraphQlHandlerActions::ConnectError(value) => Some(value),
             _ => None,
         }
     }
 }
 
-impl From<GraphQlHandlerWebSocketServerMessageAction> for GraphQlHandlerAction {
+impl From<GraphQlHandlerWebSocketServerMessageAction> for GraphQlHandlerActions {
     fn from(value: GraphQlHandlerWebSocketServerMessageAction) -> Self {
         Self::ServerMessage(value)
     }
 }
-impl From<GraphQlHandlerAction> for Option<GraphQlHandlerWebSocketServerMessageAction> {
-    fn from(value: GraphQlHandlerAction) -> Self {
+impl From<GraphQlHandlerActions> for Option<GraphQlHandlerWebSocketServerMessageAction> {
+    fn from(value: GraphQlHandlerActions) -> Self {
         match value {
-            GraphQlHandlerAction::ServerMessage(value) => Some(value),
+            GraphQlHandlerActions::ServerMessage(value) => Some(value),
             _ => None,
         }
     }
 }
-impl<'a> From<&'a GraphQlHandlerAction> for Option<&'a GraphQlHandlerWebSocketServerMessageAction> {
-    fn from(value: &'a GraphQlHandlerAction) -> Self {
+impl<'a> From<&'a GraphQlHandlerActions>
+    for Option<&'a GraphQlHandlerWebSocketServerMessageAction>
+{
+    fn from(value: &'a GraphQlHandlerActions) -> Self {
         match value {
-            GraphQlHandlerAction::ServerMessage(value) => Some(value),
+            GraphQlHandlerActions::ServerMessage(value) => Some(value),
             _ => None,
         }
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct GraphQlHandlerWebSocketConnectSuccessAction {
     pub connection_id: Uuid,
     pub url: String,
@@ -112,7 +115,7 @@ impl NamedAction for GraphQlHandlerWebSocketConnectSuccessAction {
     }
 }
 impl SerializableAction for GraphQlHandlerWebSocketConnectSuccessAction {
-    fn serialize(&self) -> SerializedAction {
+    fn to_json(&self) -> SerializedAction {
         SerializedAction::from_iter([
             (
                 "connection_id",
@@ -123,7 +126,7 @@ impl SerializableAction for GraphQlHandlerWebSocketConnectSuccessAction {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct GraphQlHandlerWebSocketConnectErrorAction {
     pub connection_id: Uuid,
     pub url: String,
@@ -136,7 +139,7 @@ impl NamedAction for GraphQlHandlerWebSocketConnectErrorAction {
     }
 }
 impl SerializableAction for GraphQlHandlerWebSocketConnectErrorAction {
-    fn serialize(&self) -> SerializedAction {
+    fn to_json(&self) -> SerializedAction {
         SerializedAction::from_iter([
             (
                 "connection_id",
@@ -148,7 +151,7 @@ impl SerializableAction for GraphQlHandlerWebSocketConnectErrorAction {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct GraphQlHandlerWebSocketServerMessageAction {
     pub connection_id: Uuid,
     pub message: GraphQlSubscriptionServerMessage,
@@ -160,7 +163,7 @@ impl NamedAction for GraphQlHandlerWebSocketServerMessageAction {
     }
 }
 impl SerializableAction for GraphQlHandlerWebSocketServerMessageAction {
-    fn serialize(&self) -> SerializedAction {
+    fn to_json(&self) -> SerializedAction {
         SerializedAction::from_iter([
             (
                 "connection_id",

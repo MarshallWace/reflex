@@ -153,17 +153,15 @@ mod test {
     use reflex::allocator::DefaultAllocator;
     use reflex::lang::{CachedSharedTerm, SharedTermFactory};
     use reflex::parser::sexpr::parse;
-    use rmp_serde::Serializer;
 
     #[test]
-    fn round_trip_serde() {
+    fn serialization() {
         let factory = SharedTermFactory::<ServerBuiltins>::default();
         let allocator = DefaultAllocator::default();
-
-        let value = parse("((lambda (foo) (* (+ 2 3) foo)) 2)", &factory, &allocator).unwrap();
-        let mut buf = Vec::new();
-        value.serialize(&mut Serializer::new(&mut buf)).unwrap();
-        let deser: CachedSharedTerm<ServerBuiltins> = rmp_serde::from_read_ref(&buf).unwrap();
-        assert_eq!(value, deser);
+        let input = parse("((lambda (foo) (* (+ 2 3) foo)) 2)", &factory, &allocator).unwrap();
+        let serialized = serde_json::to_string(&input).unwrap();
+        let deserialized: CachedSharedTerm<ServerBuiltins> =
+            serde_json::from_str(&serialized).unwrap();
+        assert_eq!(deserialized, input);
     }
 }

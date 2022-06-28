@@ -215,7 +215,7 @@ impl WebSocketConnection {
         context: &mut impl HandlerContext,
     ) -> Option<StateOperation<TAction>>
     where
-        TAction: Action + 'static,
+        TAction: Action + Send + 'static,
     {
         match self {
             Self::Pending(_, connection) => {
@@ -447,7 +447,7 @@ where
         context: &mut impl HandlerContext,
     ) -> Option<StateTransition<TAction>>
     where
-        TAction: Action + 'static,
+        TAction: Action + Send + 'static,
     {
         let EffectUnsubscribeAction {
             effect_type,
@@ -767,7 +767,7 @@ where
         context: &mut impl HandlerContext,
     ) -> Result<StateOperation<TAction>, T>
     where
-        TAction: Action + 'static + OutboundAction<EffectEmitAction<T>>,
+        TAction: Action + Send + 'static + OutboundAction<EffectEmitAction<T>>,
     {
         let GraphQlEffectArgs { url, operation } = operation;
         let operation_name = operation.operation_name.clone();
@@ -985,7 +985,7 @@ where
         Option<StateOperation<TAction>>,
     )>
     where
-        TAction: Action + 'static,
+        TAction: Action + Send + 'static,
     {
         let connection_id = state.websocket_requests.remove(&effect.id())?;
         let (unsubscribe_action, is_final_subscription) = {

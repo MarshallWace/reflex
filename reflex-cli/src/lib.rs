@@ -19,7 +19,6 @@ use reflex_js::stdlib::Stdlib as JsStdlib;
 use reflex_json::stdlib::Stdlib as JsonStdlib;
 
 use crate::syntax::{
-    bytecode::compile_bytecode_entry_point,
     js::compile_js_entry_point,
     js::{create_js_module_parser, create_js_script_parser},
     json::compile_json_entry_point,
@@ -34,7 +33,6 @@ pub mod cli {
 }
 pub mod repl;
 pub mod syntax {
-    pub mod bytecode;
     pub mod js;
     pub mod json;
     pub mod sexpr;
@@ -45,7 +43,6 @@ pub enum Syntax {
     JavaScript,
     Json,
     Lisp,
-    Bytecode,
 }
 impl FromStr for Syntax {
     type Err = anyhow::Error;
@@ -54,7 +51,6 @@ impl FromStr for Syntax {
             "javascript" | "js" => Ok(Self::JavaScript),
             "json" => Ok(Self::Json),
             "sexpr" | "lisp" => Ok(Self::Lisp),
-            "bytecode" => Ok(Self::Bytecode),
             _ => Err(anyhow!("Unknown syntax: {}", input)),
         }
     }
@@ -92,7 +88,6 @@ where
         }
         (Syntax::Json, _) => GenericSyntaxParser::new(create_json_parser(factory, allocator)),
         (Syntax::Lisp, _) => GenericSyntaxParser::new(create_sexpr_parser(factory, allocator)),
-        (Syntax::Bytecode, _) => todo!(),
     }
 }
 struct GenericSyntaxParser<T: Expression> {
@@ -136,7 +131,6 @@ where
         ),
         Syntax::Json => compile_json_entry_point(path, compiler_options, factory, allocator),
         Syntax::Lisp => compile_sexpr_entry_point(path, compiler_options, factory, allocator),
-        Syntax::Bytecode => compile_bytecode_entry_point(path),
     }
 }
 

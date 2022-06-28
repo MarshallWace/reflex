@@ -23,7 +23,6 @@ pub use to_request::*;
 pub use variable::*;
 
 #[derive(Hash, Eq, PartialEq, Clone, Copy, Debug, Serialize, Deserialize, EnumIter)]
-#[serde(tag = "type")]
 pub enum Stdlib {
     Getter,
     Scan,

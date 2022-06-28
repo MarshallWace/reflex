@@ -12,10 +12,9 @@ use anyhow::{anyhow, Context, Result};
 use clap::Parser;
 use futures::{stream, StreamExt};
 use reflex_dispatcher::{
-    compose_actors,
     scheduler::tokio::{TokioScheduler, TokioSchedulerMetricNames},
-    Action, Actor, ActorTransition, EitherActor, HandlerContext, Matcher, MessageData, NamedAction,
-    SerializableAction, SerializedAction,
+    Action, Actor, ActorTransition, ChainedActor, EitherActor, HandlerContext, Matcher,
+    MessageData, NamedAction, SchedulerMiddleware, SerializableAction, SerializedAction,
 };
 use reflex_handlers::{
     action::graphql::*,
@@ -25,7 +24,7 @@ use reflex_handlers::{
 };
 use reflex_json::{JsonMap, JsonValue};
 use reflex_runtime::{
-    action::{effect::*, evaluate::*, query::*, RuntimeAction},
+    action::{effect::*, evaluate::*, query::*, RuntimeActions},
     actor::{
         bytecode_interpreter::BytecodeInterpreter,
         evaluate_handler::{
@@ -93,9 +92,6 @@ pub async fn main() -> Result<()> {
     let allocator = DefaultAllocator::default();
     let input_path = args.entry_point;
     let syntax = args.syntax;
-    if syntax == Syntax::Bytecode {
-        return Err(anyhow!("CLI is not yet supported for bytecode"));
-    }
     let tls_cert = args
         .tls_cert
         .as_ref()
@@ -184,8 +180,8 @@ pub async fn main() -> Result<()> {
                         NoopReconnectTimeout,
                         DefaultHandlersMetricNames::default(),
                     );
-                let app = compose_actors(
-                    compose_actors(
+                let app = ChainedActor::new(
+                    ChainedActor::new(
                         RuntimeActor::new(
                             factory.clone(),
                             allocator.clone(),
@@ -203,14 +199,18 @@ pub async fn main() -> Result<()> {
                     handlers,
                 );
                 let app = if debug_actions {
-                    EitherActor::Left(compose_actors(app, DebugActor::stderr()))
+                    EitherActor::Left(ChainedActor::new(app, DebugActor::stderr()))
                 } else {
                     EitherActor::Right(app)
                 };
-                let scheduler = TokioScheduler::new(app, TokioSchedulerMetricNames::default());
+                let scheduler = TokioScheduler::new(
+                    app,
+                    SchedulerMiddleware::noop(),
+                    TokioSchedulerMetricNames::default(),
+                );
                 let mut results_stream = tokio::spawn(scheduler.subscribe({
                     let factory = factory.clone();
-                    move |action| {
+                    move |action: &CliAction<CachedSharedTerm<CliBuiltins>>| {
                         let EffectEmitAction { updates } = action.match_type()?;
                         let update = updates
                             .iter()
@@ -281,7 +281,7 @@ impl<T: std::io::Write> DebugActorLogger<T> {
         Self { output }
     }
     fn log(&mut self, action: &impl SerializableAction) {
-        let serialized_args = JsonValue::Object(JsonMap::from_iter(action.serialize()));
+        let serialized_args = JsonValue::Object(JsonMap::from_iter(action.to_json()));
         let _ = writeln!(
             self.output,
             "[{}] {}",
@@ -361,9 +361,10 @@ fn clear_escape_sequence() -> &'static str {
     "\x1b[2J\x1b[H"
 }
 
+#[derive(Clone, Debug)]
 enum CliAction<T: Expression> {
-    Runtime(RuntimeAction<T>),
-    GraphQlHandler(GraphQlHandlerAction),
+    Runtime(RuntimeActions<T>),
+    GraphQlHandler(GraphQlHandlerActions),
 }
 impl<T: Expression> Action for CliAction<T> {}
 impl<T: Expression> NamedAction for CliAction<T> {
@@ -375,20 +376,20 @@ impl<T: Expression> NamedAction for CliAction<T> {
     }
 }
 impl<T: Expression> SerializableAction for CliAction<T> {
-    fn serialize(&self) -> SerializedAction {
+    fn to_json(&self) -> SerializedAction {
         match self {
-            Self::Runtime(action) => action.serialize(),
-            Self::GraphQlHandler(action) => action.serialize(),
+            Self::Runtime(action) => action.to_json(),
+            Self::GraphQlHandler(action) => action.to_json(),
         }
     }
 }
 
-impl<T: Expression> From<RuntimeAction<T>> for CliAction<T> {
-    fn from(value: RuntimeAction<T>) -> Self {
+impl<T: Expression> From<RuntimeActions<T>> for CliAction<T> {
+    fn from(value: RuntimeActions<T>) -> Self {
         Self::Runtime(value)
     }
 }
-impl<T: Expression> From<CliAction<T>> for Option<RuntimeAction<T>> {
+impl<T: Expression> From<CliAction<T>> for Option<RuntimeActions<T>> {
     fn from(value: CliAction<T>) -> Self {
         match value {
             CliAction::Runtime(value) => Some(value),
@@ -396,7 +397,7 @@ impl<T: Expression> From<CliAction<T>> for Option<RuntimeAction<T>> {
         }
     }
 }
-impl<'a, T: Expression> From<&'a CliAction<T>> for Option<&'a RuntimeAction<T>> {
+impl<'a, T: Expression> From<&'a CliAction<T>> for Option<&'a RuntimeActions<T>> {
     fn from(value: &'a CliAction<T>) -> Self {
         match value {
             CliAction::Runtime(value) => Some(value),
@@ -405,12 +406,12 @@ impl<'a, T: Expression> From<&'a CliAction<T>> for Option<&'a RuntimeAction<T>> 
     }
 }
 
-impl<T: Expression> From<GraphQlHandlerAction> for CliAction<T> {
-    fn from(value: GraphQlHandlerAction) -> Self {
+impl<T: Expression> From<GraphQlHandlerActions> for CliAction<T> {
+    fn from(value: GraphQlHandlerActions) -> Self {
         Self::GraphQlHandler(value)
     }
 }
-impl<T: Expression> From<CliAction<T>> for Option<GraphQlHandlerAction> {
+impl<T: Expression> From<CliAction<T>> for Option<GraphQlHandlerActions> {
     fn from(value: CliAction<T>) -> Self {
         match value {
             CliAction::GraphQlHandler(value) => Some(value),
@@ -418,7 +419,7 @@ impl<T: Expression> From<CliAction<T>> for Option<GraphQlHandlerAction> {
         }
     }
 }
-impl<'a, T: Expression> From<&'a CliAction<T>> for Option<&'a GraphQlHandlerAction> {
+impl<'a, T: Expression> From<&'a CliAction<T>> for Option<&'a GraphQlHandlerActions> {
     fn from(value: &'a CliAction<T>) -> Self {
         match value {
             CliAction::GraphQlHandler(value) => Some(value),
@@ -427,265 +428,265 @@ impl<'a, T: Expression> From<&'a CliAction<T>> for Option<&'a GraphQlHandlerActi
     }
 }
 
-impl<T: Expression> From<EffectAction<T>> for CliAction<T> {
-    fn from(value: EffectAction<T>) -> Self {
-        RuntimeAction::from(value).into()
+impl<T: Expression> From<EffectActions<T>> for CliAction<T> {
+    fn from(value: EffectActions<T>) -> Self {
+        RuntimeActions::from(value).into()
     }
 }
-impl<T: Expression> From<CliAction<T>> for Option<EffectAction<T>> {
+impl<T: Expression> From<CliAction<T>> for Option<EffectActions<T>> {
     fn from(value: CliAction<T>) -> Self {
-        Option::<RuntimeAction<T>>::from(value).and_then(|value| value.into())
+        Option::<RuntimeActions<T>>::from(value).and_then(|value| value.into())
     }
 }
-impl<'a, T: Expression> From<&'a CliAction<T>> for Option<&'a EffectAction<T>> {
+impl<'a, T: Expression> From<&'a CliAction<T>> for Option<&'a EffectActions<T>> {
     fn from(value: &'a CliAction<T>) -> Self {
-        Option::<&'a RuntimeAction<T>>::from(value).and_then(|value| value.into())
+        Option::<&'a RuntimeActions<T>>::from(value).and_then(|value| value.into())
     }
 }
 
 impl<T: Expression> From<EffectSubscribeAction<T>> for CliAction<T> {
     fn from(value: EffectSubscribeAction<T>) -> Self {
-        EffectAction::from(value).into()
+        EffectActions::from(value).into()
     }
 }
 impl<T: Expression> From<CliAction<T>> for Option<EffectSubscribeAction<T>> {
     fn from(value: CliAction<T>) -> Self {
-        Option::<EffectAction<T>>::from(value).and_then(|value| value.into())
+        Option::<EffectActions<T>>::from(value).and_then(|value| value.into())
     }
 }
 impl<'a, T: Expression> From<&'a CliAction<T>> for Option<&'a EffectSubscribeAction<T>> {
     fn from(value: &'a CliAction<T>) -> Self {
-        Option::<&'a EffectAction<T>>::from(value).and_then(|value| value.into())
+        Option::<&'a EffectActions<T>>::from(value).and_then(|value| value.into())
     }
 }
 
 impl<T: Expression> From<EffectUnsubscribeAction<T>> for CliAction<T> {
     fn from(value: EffectUnsubscribeAction<T>) -> Self {
-        EffectAction::from(value).into()
+        EffectActions::from(value).into()
     }
 }
 impl<T: Expression> From<CliAction<T>> for Option<EffectUnsubscribeAction<T>> {
     fn from(value: CliAction<T>) -> Self {
-        Option::<EffectAction<T>>::from(value).and_then(|value| value.into())
+        Option::<EffectActions<T>>::from(value).and_then(|value| value.into())
     }
 }
 impl<'a, T: Expression> From<&'a CliAction<T>> for Option<&'a EffectUnsubscribeAction<T>> {
     fn from(value: &'a CliAction<T>) -> Self {
-        Option::<&'a EffectAction<T>>::from(value).and_then(|value| value.into())
+        Option::<&'a EffectActions<T>>::from(value).and_then(|value| value.into())
     }
 }
 
 impl<T: Expression> From<EffectEmitAction<T>> for CliAction<T> {
     fn from(value: EffectEmitAction<T>) -> Self {
-        EffectAction::from(value).into()
+        EffectActions::from(value).into()
     }
 }
 impl<T: Expression> From<CliAction<T>> for Option<EffectEmitAction<T>> {
     fn from(value: CliAction<T>) -> Self {
-        Option::<EffectAction<T>>::from(value).and_then(|value| value.into())
+        Option::<EffectActions<T>>::from(value).and_then(|value| value.into())
     }
 }
 impl<'a, T: Expression> From<&'a CliAction<T>> for Option<&'a EffectEmitAction<T>> {
     fn from(value: &'a CliAction<T>) -> Self {
-        Option::<&'a EffectAction<T>>::from(value).and_then(|value| value.into())
+        Option::<&'a EffectActions<T>>::from(value).and_then(|value| value.into())
     }
 }
 
-impl<T: Expression> From<EvaluateAction<T>> for CliAction<T> {
-    fn from(value: EvaluateAction<T>) -> Self {
-        RuntimeAction::from(value).into()
+impl<T: Expression> From<EvaluateActions<T>> for CliAction<T> {
+    fn from(value: EvaluateActions<T>) -> Self {
+        RuntimeActions::from(value).into()
     }
 }
-impl<T: Expression> From<CliAction<T>> for Option<EvaluateAction<T>> {
+impl<T: Expression> From<CliAction<T>> for Option<EvaluateActions<T>> {
     fn from(value: CliAction<T>) -> Self {
-        Option::<RuntimeAction<T>>::from(value).and_then(|value| value.into())
+        Option::<RuntimeActions<T>>::from(value).and_then(|value| value.into())
     }
 }
-impl<'a, T: Expression> From<&'a CliAction<T>> for Option<&'a EvaluateAction<T>> {
+impl<'a, T: Expression> From<&'a CliAction<T>> for Option<&'a EvaluateActions<T>> {
     fn from(value: &'a CliAction<T>) -> Self {
-        Option::<&'a RuntimeAction<T>>::from(value).and_then(|value| value.into())
+        Option::<&'a RuntimeActions<T>>::from(value).and_then(|value| value.into())
     }
 }
 
 impl<T: Expression> From<EvaluateStartAction<T>> for CliAction<T> {
     fn from(value: EvaluateStartAction<T>) -> Self {
-        EvaluateAction::from(value).into()
+        EvaluateActions::from(value).into()
     }
 }
 impl<T: Expression> From<CliAction<T>> for Option<EvaluateStartAction<T>> {
     fn from(value: CliAction<T>) -> Self {
-        Option::<EvaluateAction<T>>::from(value).and_then(|value| value.into())
+        Option::<EvaluateActions<T>>::from(value).and_then(|value| value.into())
     }
 }
 impl<'a, T: Expression> From<&'a CliAction<T>> for Option<&'a EvaluateStartAction<T>> {
     fn from(value: &'a CliAction<T>) -> Self {
-        Option::<&'a EvaluateAction<T>>::from(value).and_then(|value| value.into())
+        Option::<&'a EvaluateActions<T>>::from(value).and_then(|value| value.into())
     }
 }
 
 impl<T: Expression> From<EvaluateUpdateAction<T>> for CliAction<T> {
     fn from(value: EvaluateUpdateAction<T>) -> Self {
-        EvaluateAction::from(value).into()
+        EvaluateActions::from(value).into()
     }
 }
 impl<T: Expression> From<CliAction<T>> for Option<EvaluateUpdateAction<T>> {
     fn from(value: CliAction<T>) -> Self {
-        Option::<EvaluateAction<T>>::from(value).and_then(|value| value.into())
+        Option::<EvaluateActions<T>>::from(value).and_then(|value| value.into())
     }
 }
 impl<'a, T: Expression> From<&'a CliAction<T>> for Option<&'a EvaluateUpdateAction<T>> {
     fn from(value: &'a CliAction<T>) -> Self {
-        Option::<&'a EvaluateAction<T>>::from(value).and_then(|value| value.into())
+        Option::<&'a EvaluateActions<T>>::from(value).and_then(|value| value.into())
     }
 }
 
 impl<T: Expression> From<EvaluateStopAction> for CliAction<T> {
     fn from(value: EvaluateStopAction) -> Self {
-        EvaluateAction::from(value).into()
+        EvaluateActions::from(value).into()
     }
 }
 impl<T: Expression> From<CliAction<T>> for Option<EvaluateStopAction> {
     fn from(value: CliAction<T>) -> Self {
-        Option::<EvaluateAction<T>>::from(value).and_then(|value| value.into())
+        Option::<EvaluateActions<T>>::from(value).and_then(|value| value.into())
     }
 }
 impl<'a, T: Expression> From<&'a CliAction<T>> for Option<&'a EvaluateStopAction> {
     fn from(value: &'a CliAction<T>) -> Self {
-        Option::<&'a EvaluateAction<T>>::from(value).and_then(|value| value.into())
+        Option::<&'a EvaluateActions<T>>::from(value).and_then(|value| value.into())
     }
 }
 
 impl<T: Expression> From<EvaluateResultAction<T>> for CliAction<T> {
     fn from(value: EvaluateResultAction<T>) -> Self {
-        EvaluateAction::from(value).into()
+        EvaluateActions::from(value).into()
     }
 }
 impl<T: Expression> From<CliAction<T>> for Option<EvaluateResultAction<T>> {
     fn from(value: CliAction<T>) -> Self {
-        Option::<EvaluateAction<T>>::from(value).and_then(|value| value.into())
+        Option::<EvaluateActions<T>>::from(value).and_then(|value| value.into())
     }
 }
 impl<'a, T: Expression> From<&'a CliAction<T>> for Option<&'a EvaluateResultAction<T>> {
     fn from(value: &'a CliAction<T>) -> Self {
-        Option::<&'a EvaluateAction<T>>::from(value).and_then(|value| value.into())
+        Option::<&'a EvaluateActions<T>>::from(value).and_then(|value| value.into())
     }
 }
 
-impl<T: Expression> From<QueryAction<T>> for CliAction<T> {
-    fn from(value: QueryAction<T>) -> Self {
-        RuntimeAction::from(value).into()
+impl<T: Expression> From<QueryActions<T>> for CliAction<T> {
+    fn from(value: QueryActions<T>) -> Self {
+        RuntimeActions::from(value).into()
     }
 }
-impl<T: Expression> From<CliAction<T>> for Option<QueryAction<T>> {
+impl<T: Expression> From<CliAction<T>> for Option<QueryActions<T>> {
     fn from(value: CliAction<T>) -> Self {
-        Option::<RuntimeAction<T>>::from(value).and_then(|value| value.into())
+        Option::<RuntimeActions<T>>::from(value).and_then(|value| value.into())
     }
 }
-impl<'a, T: Expression> From<&'a CliAction<T>> for Option<&'a QueryAction<T>> {
+impl<'a, T: Expression> From<&'a CliAction<T>> for Option<&'a QueryActions<T>> {
     fn from(value: &'a CliAction<T>) -> Self {
-        Option::<&'a RuntimeAction<T>>::from(value).and_then(|value| value.into())
+        Option::<&'a RuntimeActions<T>>::from(value).and_then(|value| value.into())
     }
 }
 
 impl<T: Expression> From<QuerySubscribeAction<T>> for CliAction<T> {
     fn from(value: QuerySubscribeAction<T>) -> Self {
-        QueryAction::from(value).into()
+        QueryActions::from(value).into()
     }
 }
 impl<T: Expression> From<CliAction<T>> for Option<QuerySubscribeAction<T>> {
     fn from(value: CliAction<T>) -> Self {
-        Option::<QueryAction<T>>::from(value).and_then(|value| value.into())
+        Option::<QueryActions<T>>::from(value).and_then(|value| value.into())
     }
 }
 impl<'a, T: Expression> From<&'a CliAction<T>> for Option<&'a QuerySubscribeAction<T>> {
     fn from(value: &'a CliAction<T>) -> Self {
-        Option::<&'a QueryAction<T>>::from(value).and_then(|value| value.into())
+        Option::<&'a QueryActions<T>>::from(value).and_then(|value| value.into())
     }
 }
 
 impl<T: Expression> From<QueryUnsubscribeAction<T>> for CliAction<T> {
     fn from(value: QueryUnsubscribeAction<T>) -> Self {
-        QueryAction::from(value).into()
+        QueryActions::from(value).into()
     }
 }
 impl<T: Expression> From<CliAction<T>> for Option<QueryUnsubscribeAction<T>> {
     fn from(value: CliAction<T>) -> Self {
-        Option::<QueryAction<T>>::from(value).and_then(|value| value.into())
+        Option::<QueryActions<T>>::from(value).and_then(|value| value.into())
     }
 }
 impl<'a, T: Expression> From<&'a CliAction<T>> for Option<&'a QueryUnsubscribeAction<T>> {
     fn from(value: &'a CliAction<T>) -> Self {
-        Option::<&'a QueryAction<T>>::from(value).and_then(|value| value.into())
+        Option::<&'a QueryActions<T>>::from(value).and_then(|value| value.into())
     }
 }
 
 impl<T: Expression> From<QueryEmitAction<T>> for CliAction<T> {
     fn from(value: QueryEmitAction<T>) -> Self {
-        QueryAction::from(value).into()
+        QueryActions::from(value).into()
     }
 }
 impl<T: Expression> From<CliAction<T>> for Option<QueryEmitAction<T>> {
     fn from(value: CliAction<T>) -> Self {
-        Option::<QueryAction<T>>::from(value).and_then(|value| value.into())
+        Option::<QueryActions<T>>::from(value).and_then(|value| value.into())
     }
 }
 impl<'a, T: Expression> From<&'a CliAction<T>> for Option<&'a QueryEmitAction<T>> {
     fn from(value: &'a CliAction<T>) -> Self {
-        Option::<&'a QueryAction<T>>::from(value).and_then(|value| value.into())
+        Option::<&'a QueryActions<T>>::from(value).and_then(|value| value.into())
     }
 }
 
 impl<T: Expression> From<GraphQlHandlerWebSocketConnectSuccessAction> for CliAction<T> {
     fn from(value: GraphQlHandlerWebSocketConnectSuccessAction) -> Self {
-        GraphQlHandlerAction::from(value).into()
+        GraphQlHandlerActions::from(value).into()
     }
 }
 impl<T: Expression> From<CliAction<T>> for Option<GraphQlHandlerWebSocketConnectSuccessAction> {
     fn from(value: CliAction<T>) -> Self {
-        Option::<GraphQlHandlerAction>::from(value).and_then(|value| value.into())
+        Option::<GraphQlHandlerActions>::from(value).and_then(|value| value.into())
     }
 }
 impl<'a, T: Expression> From<&'a CliAction<T>>
     for Option<&'a GraphQlHandlerWebSocketConnectSuccessAction>
 {
     fn from(value: &'a CliAction<T>) -> Self {
-        Option::<&'a GraphQlHandlerAction>::from(value).and_then(|value| value.into())
+        Option::<&'a GraphQlHandlerActions>::from(value).and_then(|value| value.into())
     }
 }
 
 impl<T: Expression> From<GraphQlHandlerWebSocketConnectErrorAction> for CliAction<T> {
     fn from(value: GraphQlHandlerWebSocketConnectErrorAction) -> Self {
-        GraphQlHandlerAction::from(value).into()
+        GraphQlHandlerActions::from(value).into()
     }
 }
 impl<T: Expression> From<CliAction<T>> for Option<GraphQlHandlerWebSocketConnectErrorAction> {
     fn from(value: CliAction<T>) -> Self {
-        Option::<GraphQlHandlerAction>::from(value).and_then(|value| value.into())
+        Option::<GraphQlHandlerActions>::from(value).and_then(|value| value.into())
     }
 }
 impl<'a, T: Expression> From<&'a CliAction<T>>
     for Option<&'a GraphQlHandlerWebSocketConnectErrorAction>
 {
     fn from(value: &'a CliAction<T>) -> Self {
-        Option::<&'a GraphQlHandlerAction>::from(value).and_then(|value| value.into())
+        Option::<&'a GraphQlHandlerActions>::from(value).and_then(|value| value.into())
     }
 }
 
 impl<T: Expression> From<GraphQlHandlerWebSocketServerMessageAction> for CliAction<T> {
     fn from(value: GraphQlHandlerWebSocketServerMessageAction) -> Self {
-        GraphQlHandlerAction::from(value).into()
+        GraphQlHandlerActions::from(value).into()
     }
 }
 impl<T: Expression> From<CliAction<T>> for Option<GraphQlHandlerWebSocketServerMessageAction> {
     fn from(value: CliAction<T>) -> Self {
-        Option::<GraphQlHandlerAction>::from(value).and_then(|value| value.into())
+        Option::<GraphQlHandlerActions>::from(value).and_then(|value| value.into())
     }
 }
 impl<'a, T: Expression> From<&'a CliAction<T>>
     for Option<&'a GraphQlHandlerWebSocketServerMessageAction>
 {
     fn from(value: &'a CliAction<T>) -> Self {
-        Option::<&'a GraphQlHandlerAction>::from(value).and_then(|value| value.into())
+        Option::<&'a GraphQlHandlerActions>::from(value).and_then(|value| value.into())
     }
 }
 

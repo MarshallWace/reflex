@@ -199,7 +199,7 @@ pub fn parse_evaluate_effect_result<T: Expression>(
         });
     Some(EvaluationResult::new(
         value.clone(),
-        DependencyList::from(dependencies),
+        DependencyList::from_iter(dependencies),
     ))
 }
 
@@ -913,9 +913,11 @@ where
             let updates = updates.iter().filter_map(|(state_token, update)| {
                 let updated_value = match update {
                     StateUpdate::Value(value) => value.clone(),
-                    StateUpdate::Patch(updater) => {
-                        updater(state.state_cache.combined_state.get(state_token))
-                    }
+                    StateUpdate::Patch(operation) => operation.apply(
+                        state.state_cache.combined_state.get(state_token),
+                        &self.factory,
+                        &self.allocator,
+                    ),
                 };
                 let is_unchanged = existing_state
                     .get(state_token)

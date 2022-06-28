@@ -3,10 +3,11 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use reflex_dispatcher::{Action, NamedAction, SerializableAction, SerializedAction};
 use reflex_json::{JsonMap, JsonValue};
+use serde::{Deserialize, Serialize};
 
 use crate::utils::traceparent::Traceparent;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TelemetryTransaction {
     pub transaction_id: Traceparent,
     pub parent_ids: Vec<Traceparent>,
@@ -14,13 +15,13 @@ pub struct TelemetryTransaction {
     pub attributes: Vec<(String, String)>,
 }
 
-#[derive(Clone, Debug)]
-pub enum TelemetryMiddlewareAction {
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum TelemetryMiddlewareActions {
     TransactionStart(TelemetryMiddlewareTransactionStartAction),
     TransactionEnd(TelemetryMiddlewareTransactionEndAction),
 }
-impl Action for TelemetryMiddlewareAction {}
-impl NamedAction for TelemetryMiddlewareAction {
+impl Action for TelemetryMiddlewareActions {}
+impl NamedAction for TelemetryMiddlewareActions {
     fn name(&self) -> &'static str {
         match self {
             Self::TransactionStart(action) => action.name(),
@@ -28,64 +29,64 @@ impl NamedAction for TelemetryMiddlewareAction {
         }
     }
 }
-impl SerializableAction for TelemetryMiddlewareAction {
-    fn serialize(&self) -> SerializedAction {
+impl SerializableAction for TelemetryMiddlewareActions {
+    fn to_json(&self) -> SerializedAction {
         match self {
-            Self::TransactionStart(action) => action.serialize(),
-            Self::TransactionEnd(action) => action.serialize(),
+            Self::TransactionStart(action) => action.to_json(),
+            Self::TransactionEnd(action) => action.to_json(),
         }
     }
 }
 
-impl From<TelemetryMiddlewareTransactionStartAction> for TelemetryMiddlewareAction {
+impl From<TelemetryMiddlewareTransactionStartAction> for TelemetryMiddlewareActions {
     fn from(value: TelemetryMiddlewareTransactionStartAction) -> Self {
         Self::TransactionStart(value)
     }
 }
-impl From<TelemetryMiddlewareAction> for Option<TelemetryMiddlewareTransactionStartAction> {
-    fn from(value: TelemetryMiddlewareAction) -> Self {
+impl From<TelemetryMiddlewareActions> for Option<TelemetryMiddlewareTransactionStartAction> {
+    fn from(value: TelemetryMiddlewareActions) -> Self {
         match value {
-            TelemetryMiddlewareAction::TransactionStart(value) => Some(value),
+            TelemetryMiddlewareActions::TransactionStart(value) => Some(value),
             _ => None,
         }
     }
 }
-impl<'a> From<&'a TelemetryMiddlewareAction>
+impl<'a> From<&'a TelemetryMiddlewareActions>
     for Option<&'a TelemetryMiddlewareTransactionStartAction>
 {
-    fn from(value: &'a TelemetryMiddlewareAction) -> Self {
+    fn from(value: &'a TelemetryMiddlewareActions) -> Self {
         match value {
-            TelemetryMiddlewareAction::TransactionStart(value) => Some(value),
+            TelemetryMiddlewareActions::TransactionStart(value) => Some(value),
             _ => None,
         }
     }
 }
 
-impl From<TelemetryMiddlewareTransactionEndAction> for TelemetryMiddlewareAction {
+impl From<TelemetryMiddlewareTransactionEndAction> for TelemetryMiddlewareActions {
     fn from(value: TelemetryMiddlewareTransactionEndAction) -> Self {
         Self::TransactionEnd(value)
     }
 }
-impl From<TelemetryMiddlewareAction> for Option<TelemetryMiddlewareTransactionEndAction> {
-    fn from(value: TelemetryMiddlewareAction) -> Self {
+impl From<TelemetryMiddlewareActions> for Option<TelemetryMiddlewareTransactionEndAction> {
+    fn from(value: TelemetryMiddlewareActions) -> Self {
         match value {
-            TelemetryMiddlewareAction::TransactionEnd(value) => Some(value),
+            TelemetryMiddlewareActions::TransactionEnd(value) => Some(value),
             _ => None,
         }
     }
 }
-impl<'a> From<&'a TelemetryMiddlewareAction>
+impl<'a> From<&'a TelemetryMiddlewareActions>
     for Option<&'a TelemetryMiddlewareTransactionEndAction>
 {
-    fn from(value: &'a TelemetryMiddlewareAction) -> Self {
+    fn from(value: &'a TelemetryMiddlewareActions) -> Self {
         match value {
-            TelemetryMiddlewareAction::TransactionEnd(value) => Some(value),
+            TelemetryMiddlewareActions::TransactionEnd(value) => Some(value),
             _ => None,
         }
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TelemetryMiddlewareTransactionStartAction {
     pub transactions: Vec<TelemetryTransaction>,
 }
@@ -96,7 +97,7 @@ impl NamedAction for TelemetryMiddlewareTransactionStartAction {
     }
 }
 impl SerializableAction for TelemetryMiddlewareTransactionStartAction {
-    fn serialize(&self) -> SerializedAction {
+    fn to_json(&self) -> SerializedAction {
         SerializedAction::from_iter([(
             "transactions",
             JsonValue::Array(
@@ -135,7 +136,7 @@ impl SerializableAction for TelemetryMiddlewareTransactionStartAction {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TelemetryMiddlewareTransactionEndAction {
     pub transaction_ids: Vec<Traceparent>,
 }
@@ -146,7 +147,7 @@ impl NamedAction for TelemetryMiddlewareTransactionEndAction {
     }
 }
 impl SerializableAction for TelemetryMiddlewareTransactionEndAction {
-    fn serialize(&self) -> SerializedAction {
+    fn to_json(&self) -> SerializedAction {
         SerializedAction::from_iter([(
             "transaction_ids",
             JsonValue::Array(

@@ -7,9 +7,10 @@ use reflex::core::{Expression, Uuid};
 use reflex_dispatcher::{Action, NamedAction, SerializableAction, SerializedAction};
 use reflex_graphql::GraphQlOperation;
 use reflex_json::JsonValue;
+use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug)]
-pub enum GraphQlServerAction<T: Expression> {
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum GraphQlServerActions<T: Expression> {
     Subscribe(GraphQlServerSubscribeAction<T>),
     Unsubscribe(GraphQlServerUnsubscribeAction<T>),
     Modify(GraphQlServerModifyAction<T>),
@@ -17,8 +18,8 @@ pub enum GraphQlServerAction<T: Expression> {
     ParseError(GraphQlServerParseErrorAction<T>),
     Emit(GraphQlServerEmitAction<T>),
 }
-impl<T: Expression> Action for GraphQlServerAction<T> {}
-impl<T: Expression> NamedAction for GraphQlServerAction<T> {
+impl<T: Expression> Action for GraphQlServerActions<T> {}
+impl<T: Expression> NamedAction for GraphQlServerActions<T> {
     fn name(&self) -> &'static str {
         match self {
             Self::Subscribe(action) => action.name(),
@@ -30,164 +31,164 @@ impl<T: Expression> NamedAction for GraphQlServerAction<T> {
         }
     }
 }
-impl<T: Expression> SerializableAction for GraphQlServerAction<T> {
-    fn serialize(&self) -> SerializedAction {
+impl<T: Expression> SerializableAction for GraphQlServerActions<T> {
+    fn to_json(&self) -> SerializedAction {
         match self {
-            Self::Subscribe(action) => action.serialize(),
-            Self::Unsubscribe(action) => action.serialize(),
-            Self::Modify(action) => action.serialize(),
-            Self::ParseSuccess(action) => action.serialize(),
-            Self::ParseError(action) => action.serialize(),
-            Self::Emit(action) => action.serialize(),
+            Self::Subscribe(action) => action.to_json(),
+            Self::Unsubscribe(action) => action.to_json(),
+            Self::Modify(action) => action.to_json(),
+            Self::ParseSuccess(action) => action.to_json(),
+            Self::ParseError(action) => action.to_json(),
+            Self::Emit(action) => action.to_json(),
         }
     }
 }
 
-impl<T: Expression> From<GraphQlServerSubscribeAction<T>> for GraphQlServerAction<T> {
+impl<T: Expression> From<GraphQlServerSubscribeAction<T>> for GraphQlServerActions<T> {
     fn from(value: GraphQlServerSubscribeAction<T>) -> Self {
         Self::Subscribe(value)
     }
 }
-impl<T: Expression> From<GraphQlServerAction<T>> for Option<GraphQlServerSubscribeAction<T>> {
-    fn from(value: GraphQlServerAction<T>) -> Self {
+impl<T: Expression> From<GraphQlServerActions<T>> for Option<GraphQlServerSubscribeAction<T>> {
+    fn from(value: GraphQlServerActions<T>) -> Self {
         match value {
-            GraphQlServerAction::Subscribe(value) => Some(value),
+            GraphQlServerActions::Subscribe(value) => Some(value),
             _ => None,
         }
     }
 }
-impl<'a, T: Expression> From<&'a GraphQlServerAction<T>>
+impl<'a, T: Expression> From<&'a GraphQlServerActions<T>>
     for Option<&'a GraphQlServerSubscribeAction<T>>
 {
-    fn from(value: &'a GraphQlServerAction<T>) -> Self {
+    fn from(value: &'a GraphQlServerActions<T>) -> Self {
         match value {
-            GraphQlServerAction::Subscribe(value) => Some(value),
+            GraphQlServerActions::Subscribe(value) => Some(value),
             _ => None,
         }
     }
 }
 
-impl<T: Expression> From<GraphQlServerUnsubscribeAction<T>> for GraphQlServerAction<T> {
+impl<T: Expression> From<GraphQlServerUnsubscribeAction<T>> for GraphQlServerActions<T> {
     fn from(value: GraphQlServerUnsubscribeAction<T>) -> Self {
         Self::Unsubscribe(value)
     }
 }
-impl<T: Expression> From<GraphQlServerAction<T>> for Option<GraphQlServerUnsubscribeAction<T>> {
-    fn from(value: GraphQlServerAction<T>) -> Self {
+impl<T: Expression> From<GraphQlServerActions<T>> for Option<GraphQlServerUnsubscribeAction<T>> {
+    fn from(value: GraphQlServerActions<T>) -> Self {
         match value {
-            GraphQlServerAction::Unsubscribe(value) => Some(value),
+            GraphQlServerActions::Unsubscribe(value) => Some(value),
             _ => None,
         }
     }
 }
-impl<'a, T: Expression> From<&'a GraphQlServerAction<T>>
+impl<'a, T: Expression> From<&'a GraphQlServerActions<T>>
     for Option<&'a GraphQlServerUnsubscribeAction<T>>
 {
-    fn from(value: &'a GraphQlServerAction<T>) -> Self {
+    fn from(value: &'a GraphQlServerActions<T>) -> Self {
         match value {
-            GraphQlServerAction::Unsubscribe(value) => Some(value),
+            GraphQlServerActions::Unsubscribe(value) => Some(value),
             _ => None,
         }
     }
 }
 
-impl<T: Expression> From<GraphQlServerModifyAction<T>> for GraphQlServerAction<T> {
+impl<T: Expression> From<GraphQlServerModifyAction<T>> for GraphQlServerActions<T> {
     fn from(value: GraphQlServerModifyAction<T>) -> Self {
         Self::Modify(value)
     }
 }
-impl<T: Expression> From<GraphQlServerAction<T>> for Option<GraphQlServerModifyAction<T>> {
-    fn from(value: GraphQlServerAction<T>) -> Self {
+impl<T: Expression> From<GraphQlServerActions<T>> for Option<GraphQlServerModifyAction<T>> {
+    fn from(value: GraphQlServerActions<T>) -> Self {
         match value {
-            GraphQlServerAction::Modify(value) => Some(value),
+            GraphQlServerActions::Modify(value) => Some(value),
             _ => None,
         }
     }
 }
-impl<'a, T: Expression> From<&'a GraphQlServerAction<T>>
+impl<'a, T: Expression> From<&'a GraphQlServerActions<T>>
     for Option<&'a GraphQlServerModifyAction<T>>
 {
-    fn from(value: &'a GraphQlServerAction<T>) -> Self {
+    fn from(value: &'a GraphQlServerActions<T>) -> Self {
         match value {
-            GraphQlServerAction::Modify(value) => Some(value),
+            GraphQlServerActions::Modify(value) => Some(value),
             _ => None,
         }
     }
 }
 
-impl<T: Expression> From<GraphQlServerParseSuccessAction<T>> for GraphQlServerAction<T> {
+impl<T: Expression> From<GraphQlServerParseSuccessAction<T>> for GraphQlServerActions<T> {
     fn from(value: GraphQlServerParseSuccessAction<T>) -> Self {
         Self::ParseSuccess(value)
     }
 }
-impl<T: Expression> From<GraphQlServerAction<T>> for Option<GraphQlServerParseSuccessAction<T>> {
-    fn from(value: GraphQlServerAction<T>) -> Self {
+impl<T: Expression> From<GraphQlServerActions<T>> for Option<GraphQlServerParseSuccessAction<T>> {
+    fn from(value: GraphQlServerActions<T>) -> Self {
         match value {
-            GraphQlServerAction::ParseSuccess(value) => Some(value),
+            GraphQlServerActions::ParseSuccess(value) => Some(value),
             _ => None,
         }
     }
 }
-impl<'a, T: Expression> From<&'a GraphQlServerAction<T>>
+impl<'a, T: Expression> From<&'a GraphQlServerActions<T>>
     for Option<&'a GraphQlServerParseSuccessAction<T>>
 {
-    fn from(value: &'a GraphQlServerAction<T>) -> Self {
+    fn from(value: &'a GraphQlServerActions<T>) -> Self {
         match value {
-            GraphQlServerAction::ParseSuccess(value) => Some(value),
+            GraphQlServerActions::ParseSuccess(value) => Some(value),
             _ => None,
         }
     }
 }
 
-impl<T: Expression> From<GraphQlServerParseErrorAction<T>> for GraphQlServerAction<T> {
+impl<T: Expression> From<GraphQlServerParseErrorAction<T>> for GraphQlServerActions<T> {
     fn from(value: GraphQlServerParseErrorAction<T>) -> Self {
         Self::ParseError(value)
     }
 }
-impl<T: Expression> From<GraphQlServerAction<T>> for Option<GraphQlServerParseErrorAction<T>> {
-    fn from(value: GraphQlServerAction<T>) -> Self {
+impl<T: Expression> From<GraphQlServerActions<T>> for Option<GraphQlServerParseErrorAction<T>> {
+    fn from(value: GraphQlServerActions<T>) -> Self {
         match value {
-            GraphQlServerAction::ParseError(value) => Some(value),
+            GraphQlServerActions::ParseError(value) => Some(value),
             _ => None,
         }
     }
 }
-impl<'a, T: Expression> From<&'a GraphQlServerAction<T>>
+impl<'a, T: Expression> From<&'a GraphQlServerActions<T>>
     for Option<&'a GraphQlServerParseErrorAction<T>>
 {
-    fn from(value: &'a GraphQlServerAction<T>) -> Self {
+    fn from(value: &'a GraphQlServerActions<T>) -> Self {
         match value {
-            GraphQlServerAction::ParseError(value) => Some(value),
+            GraphQlServerActions::ParseError(value) => Some(value),
             _ => None,
         }
     }
 }
 
-impl<T: Expression> From<GraphQlServerEmitAction<T>> for GraphQlServerAction<T> {
+impl<T: Expression> From<GraphQlServerEmitAction<T>> for GraphQlServerActions<T> {
     fn from(value: GraphQlServerEmitAction<T>) -> Self {
         Self::Emit(value)
     }
 }
-impl<T: Expression> From<GraphQlServerAction<T>> for Option<GraphQlServerEmitAction<T>> {
-    fn from(value: GraphQlServerAction<T>) -> Self {
+impl<T: Expression> From<GraphQlServerActions<T>> for Option<GraphQlServerEmitAction<T>> {
+    fn from(value: GraphQlServerActions<T>) -> Self {
         match value {
-            GraphQlServerAction::Emit(value) => Some(value),
+            GraphQlServerActions::Emit(value) => Some(value),
             _ => None,
         }
     }
 }
-impl<'a, T: Expression> From<&'a GraphQlServerAction<T>>
+impl<'a, T: Expression> From<&'a GraphQlServerActions<T>>
     for Option<&'a GraphQlServerEmitAction<T>>
 {
-    fn from(value: &'a GraphQlServerAction<T>) -> Self {
+    fn from(value: &'a GraphQlServerActions<T>) -> Self {
         match value {
-            GraphQlServerAction::Emit(value) => Some(value),
+            GraphQlServerActions::Emit(value) => Some(value),
             _ => None,
         }
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct GraphQlServerSubscribeAction<T: Expression> {
     pub subscription_id: Uuid,
     pub operation: GraphQlOperation,
@@ -200,7 +201,7 @@ impl<T: Expression> NamedAction for GraphQlServerSubscribeAction<T> {
     }
 }
 impl<T: Expression> SerializableAction for GraphQlServerSubscribeAction<T> {
-    fn serialize(&self) -> SerializedAction {
+    fn to_json(&self) -> SerializedAction {
         SerializedAction::from_iter([
             (
                 "subscription_id",
@@ -237,7 +238,7 @@ impl<T: Expression> SerializableAction for GraphQlServerSubscribeAction<T> {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct GraphQlServerUnsubscribeAction<T: Expression> {
     pub subscription_id: Uuid,
     pub _expression: PhantomData<T>,
@@ -249,7 +250,7 @@ impl<T: Expression> NamedAction for GraphQlServerUnsubscribeAction<T> {
     }
 }
 impl<T: Expression> SerializableAction for GraphQlServerUnsubscribeAction<T> {
-    fn serialize(&self) -> SerializedAction {
+    fn to_json(&self) -> SerializedAction {
         SerializedAction::from_iter([(
             "subscription_id",
             JsonValue::from(format!("{}", self.subscription_id.as_hyphenated())),
@@ -257,7 +258,7 @@ impl<T: Expression> SerializableAction for GraphQlServerUnsubscribeAction<T> {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct GraphQlServerModifyAction<T: Expression> {
     pub subscription_id: Uuid,
     pub variables: HashMap<String, JsonValue>,
@@ -270,7 +271,7 @@ impl<T: Expression> NamedAction for GraphQlServerModifyAction<T> {
     }
 }
 impl<T: Expression> SerializableAction for GraphQlServerModifyAction<T> {
-    fn serialize(&self) -> SerializedAction {
+    fn to_json(&self) -> SerializedAction {
         SerializedAction::from_iter([
             (
                 "subscription_id",
@@ -288,7 +289,7 @@ impl<T: Expression> SerializableAction for GraphQlServerModifyAction<T> {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct GraphQlServerParseSuccessAction<T: Expression> {
     pub subscription_id: Uuid,
     pub query: T,
@@ -300,7 +301,7 @@ impl<T: Expression> NamedAction for GraphQlServerParseSuccessAction<T> {
     }
 }
 impl<T: Expression> SerializableAction for GraphQlServerParseSuccessAction<T> {
-    fn serialize(&self) -> SerializedAction {
+    fn to_json(&self) -> SerializedAction {
         SerializedAction::from_iter([
             (
                 "subscription_id",
@@ -311,7 +312,7 @@ impl<T: Expression> SerializableAction for GraphQlServerParseSuccessAction<T> {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct GraphQlServerParseErrorAction<T: Expression> {
     pub subscription_id: Uuid,
     pub message: String,
@@ -325,7 +326,7 @@ impl<T: Expression> NamedAction for GraphQlServerParseErrorAction<T> {
     }
 }
 impl<T: Expression> SerializableAction for GraphQlServerParseErrorAction<T> {
-    fn serialize(&self) -> SerializedAction {
+    fn to_json(&self) -> SerializedAction {
         SerializedAction::from_iter([
             ("message", JsonValue::from(self.message.clone())),
             (
@@ -363,7 +364,7 @@ impl<T: Expression> SerializableAction for GraphQlServerParseErrorAction<T> {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct GraphQlServerEmitAction<T: Expression> {
     pub subscription_id: Uuid,
     pub result: T,
@@ -375,7 +376,7 @@ impl<T: Expression> NamedAction for GraphQlServerEmitAction<T> {
     }
 }
 impl<T: Expression> SerializableAction for GraphQlServerEmitAction<T> {
-    fn serialize(&self) -> SerializedAction {
+    fn to_json(&self) -> SerializedAction {
         SerializedAction::from_iter([
             (
                 "subscription_id",

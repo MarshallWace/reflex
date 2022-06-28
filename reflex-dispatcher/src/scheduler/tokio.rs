@@ -17,9 +17,12 @@ use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::sync::{PollSendError, PollSender};
 
 use crate::{
-    utils::with_unsubscribe_callback::WithUnsubscribeCallback, Action, Actor, BoxedDisposeCallback,
-    DisposeCallback, HandlerContext, MessageData, MessageOffset, ProcessId, Scheduler,
-    StateOperation, Worker, WorkerContext, WorkerFactory, WorkerMessageQueue,
+    utils::with_unsubscribe_callback::WithUnsubscribeCallback, Action, Actor, AsyncActionFilter,
+    AsyncActionStream, AsyncDispatchResult, AsyncScheduler, AsyncSubscriptionStream,
+    BoxedDisposeCallback, DisposeCallback, HandlerContext, MessageData, MessageOffset,
+    MiddlewareContext, NoopWorkerFactory, OperationStream, PostMiddleware, PreMiddleware,
+    ProcessId, Scheduler, SchedulerMiddleware, StateOperation, Worker, WorkerContext,
+    WorkerFactory, WorkerMessageQueue,
 };
 
 #[derive(Clone, Copy, Debug)]
@@ -133,6 +136,23 @@ where
 {
     type Action = TAction;
 }
+impl<TAction> AsyncScheduler for TokioScheduler<TAction>
+where
+    TAction: Action + Send + Clone + 'static,
+{
+    fn dispatch<TActions: AsyncActionStream<Self::Action>>(
+        &self,
+        actions: TActions,
+    ) -> AsyncDispatchResult {
+        TokioScheduler::dispatch(self, actions)
+    }
+    fn subscribe<V: Send + 'static, TFilter: AsyncActionFilter<TAction, V>>(
+        &self,
+        transform: TFilter,
+    ) -> AsyncSubscriptionStream<V> {
+        TokioScheduler::subscribe(self, transform)
+    }
+}
 enum TokioProcess<TAction>
 where
     TAction: Action + Send + 'static,
@@ -142,15 +162,24 @@ where
 }
 impl<TAction> TokioScheduler<TAction>
 where
-    TAction: Action + Send + 'static,
+    TAction: Action + Clone + Send + 'static,
 {
-    pub fn new(
-        main: impl Actor<TAction, State = impl Send> + Send + 'static,
+    pub fn new<TActor, TPreMiddleware, TPostMiddleware>(
+        actor: TActor,
+        middleware: SchedulerMiddleware<TPreMiddleware, TPostMiddleware, TAction>,
         metric_names: TokioSchedulerMetricNames,
-    ) -> Self {
+    ) -> Self
+    where
+        TActor: Actor<TAction> + Send + 'static,
+        TActor::State: Send + 'static,
+        TPreMiddleware: PreMiddleware<TAction> + Send + 'static,
+        TPreMiddleware::State: Send + 'static,
+        TPostMiddleware: PostMiddleware<TAction> + Send + 'static,
+        TPostMiddleware::State: Send + 'static,
+    {
         let metric_names = metric_names.init();
         let root_id = ProcessId::default();
-        let (task, commands) = Self::init(main, root_id, 1024, metric_names);
+        let (task, commands) = Self::init(actor, middleware, root_id, 1024, metric_names);
         Self {
             root_pid: root_id,
             commands,
@@ -158,13 +187,13 @@ where
             next_subscriber_id: Default::default(),
         }
     }
-    pub fn dispatch(
+    pub fn dispatch<TActions: AsyncActionStream<TAction>>(
         &self,
-        actions: impl Stream<Item = TAction> + Unpin,
-    ) -> impl Future<Output = ()> {
+        actions: TActions,
+    ) -> AsyncDispatchResult {
         let root_pid = self.root_pid;
         let commands = self.commands.clone();
-        async move {
+        Box::pin(async move {
             let mut actions = actions;
             while let Some(action) = actions.next().await {
                 let _ = commands
@@ -174,16 +203,16 @@ where
                     ))
                     .await;
             }
-        }
+        })
     }
-    pub fn subscribe<V: Send + 'static>(
+    pub fn subscribe<V: Send + 'static, TFilter: AsyncActionFilter<TAction, V>>(
         &self,
-        transform: impl for<'a> Fn(&'a TAction) -> Option<V> + Send + 'static,
-    ) -> impl Future<Output = impl Stream<Item = V>> {
+        transform: TFilter,
+    ) -> AsyncSubscriptionStream<V> {
         let (results_tx, results_rx) = mpsc::channel(32);
         let subscriber_id = increment_atomic_counter(&self.next_subscriber_id).into();
         let subscriber = TokioSubscriber::new(move |action| {
-            let value = transform(action)?;
+            let value = transform.transform(action)?;
             let results = results_tx.clone();
             Some(Box::pin(async move {
                 let _ = results.send(value).await;
@@ -206,17 +235,19 @@ where
             }
         };
         let results_stream = ReceiverStream::new(results_rx);
-        async move {
+        Box::pin(async move {
             let _ = subscribe_action.await;
-            WithUnsubscribeCallback::new(results_stream, {
-                let mut unsubscribe_action = Some(unsubscribe_action);
-                move || {
-                    if let Some(unsubscribe) = unsubscribe_action.take() {
-                        let _ = tokio::spawn(unsubscribe);
+            let results: Pin<Box<dyn Stream<Item = V> + Send + 'static>> =
+                Box::pin(WithUnsubscribeCallback::new(results_stream, {
+                    let mut unsubscribe_action = Some(unsubscribe_action);
+                    move || {
+                        if let Some(unsubscribe) = unsubscribe_action.take() {
+                            let _ = tokio::spawn(unsubscribe);
+                        }
                     }
-                }
-            })
-        }
+                }));
+            results
+        })
     }
     pub fn commands(&self) -> impl Sink<TAction> {
         let root_pid = self.root_pid;
@@ -226,15 +257,24 @@ where
             ))
         })
     }
-    fn init(
-        actor: impl Actor<TAction>,
+    fn init<TActor, TPreMiddleware, TPostMiddleware>(
+        actor: TActor,
+        middleware: SchedulerMiddleware<TPreMiddleware, TPostMiddleware, TAction>,
         root_pid: ProcessId,
         buffer_capacity: usize,
         metric_names: TokioSchedulerMetricNames,
     ) -> (
         impl Future<Output = ()>,
         mpsc::Sender<TokioCommand<TAction>>,
-    ) {
+    )
+    where
+        TActor: Actor<TAction> + Send + 'static,
+        TActor::State: Send + 'static,
+        TPreMiddleware: PreMiddleware<TAction> + Send + 'static,
+        TPreMiddleware::State: Send + 'static,
+        TPostMiddleware: PostMiddleware<TAction> + Send + 'static,
+        TPostMiddleware::State: Send + 'static,
+    {
         let (commands_tx, mut commands_rx) =
             mpsc::channel::<TokioCommand<TAction>>(buffer_capacity);
         let metric_labels = [("pid", format!("{}", usize::from(root_pid)))];
@@ -245,8 +285,9 @@ where
         );
         gauge!(metric_names.event_bus_queued_messages, 0.0, &metric_labels);
         let task = {
-            let initial_state = actor.init();
-            let mut actor_state = Some(initial_state);
+            let mut actor_state = Some(actor.init());
+            let mut pre_middleware_state = Some(middleware.pre.init());
+            let mut post_middleware_state = Some(middleware.post.init());
             let mut subscribers = HashMap::<TokioSubscriberId, TokioSubscriber<TAction>>::new();
             let child_commands = commands_tx.clone();
             async move {
@@ -260,89 +301,124 @@ where
                         &metric_labels
                     );
                     match operation {
-                        TokioCommand::Event(operation, caller) => match operation {
-                            StateOperation::Send(pid, action) => {
-                                let metadata = MessageData {
-                                    offset: {
-                                        let next_value = next_offset.next();
-                                        std::mem::replace(&mut next_offset, next_value)
-                                    },
-                                    parent: caller.map(|(parent_offset, _)| parent_offset),
-                                    timestamp: std::time::Instant::now(),
-                                };
-                                let mut context = TokioContext {
-                                    pid,
-                                    caller_pid: caller.map(|(_, caller_pid)| caller_pid),
-                                    next_pid: Arc::clone(&next_pid),
-                                };
-                                if pid == root_pid {
-                                    let (updated_state, actions) = actor
-                                        .handle(
-                                            actor_state.take().unwrap(),
-                                            &action,
-                                            &metadata,
-                                            &mut context,
-                                        )
-                                        .into_parts();
-                                    actor_state.replace(updated_state);
-                                    for subscriber in subscribers.values() {
-                                        if let Some(task) = subscriber.emit(&action) {
-                                            let _ = tokio::spawn(task);
-                                        }
-                                    }
-                                    for operation in actions {
-                                        let _ = child_commands
-                                            .send(TokioCommand::Event(
-                                                operation,
-                                                Some((metadata.offset, pid)),
-                                            ))
-                                            .await;
-                                    }
-                                } else if let Some(TokioProcess::Worker(worker)) =
-                                    processes.get_mut(&pid)
-                                {
-                                    let _ = worker.inbox.send((action, metadata, context)).await;
-                                };
-                            }
-                            StateOperation::Task(pid, task) => {
-                                if let Entry::Vacant(entry) = processes.entry(pid) {
-                                    let (mut stream, dispose) = task.into_parts();
-                                    entry.insert(TokioProcess::Task(TokioTask {
-                                        handle: tokio::spawn({
-                                            let results = child_commands.clone();
-                                            async move {
-                                                while let Some(operation) = stream.next().await {
-                                                    let _ = results
-                                                        .send(TokioCommand::Event(
-                                                            operation, caller,
-                                                        ))
-                                                        .await;
-                                                }
+                        TokioCommand::Event(operation, caller) => {
+                            let metadata = MessageData {
+                                offset: {
+                                    let next_value = next_offset.next();
+                                    std::mem::replace(&mut next_offset, next_value)
+                                },
+                                parent: caller.map(|(parent_offset, _)| parent_offset),
+                                timestamp: std::time::Instant::now(),
+                            };
+                            let caller_pid = caller.map(|(_, caller_pid)| caller_pid);
+                            let operation = {
+                                let (updated_state, operation) = middleware
+                                    .pre
+                                    .handle(
+                                        pre_middleware_state.take().unwrap(),
+                                        operation,
+                                        &metadata,
+                                        &MiddlewareContext { caller_pid },
+                                    )
+                                    .into_parts();
+                                pre_middleware_state.replace(updated_state);
+                                operation
+                            };
+                            let operation = match operation {
+                                StateOperation::Send(pid, action) => {
+                                    let mut context = TokioContext {
+                                        pid,
+                                        caller_pid,
+                                        next_pid: Arc::clone(&next_pid),
+                                    };
+                                    if pid == root_pid {
+                                        let (updated_state, actions) = actor
+                                            .handle(
+                                                actor_state.take().unwrap(),
+                                                &action,
+                                                &metadata,
+                                                &mut context,
+                                            )
+                                            .into_parts();
+                                        actor_state.replace(updated_state);
+                                        for subscriber in subscribers.values() {
+                                            if let Some(task) = subscriber.emit(&action) {
+                                                let _ = tokio::spawn(task);
                                             }
-                                        }),
-                                        dispose: Some(dispose),
-                                    }));
-                                }
-                            }
-                            StateOperation::Spawn(pid, factory) => {
-                                if let Entry::Vacant(entry) = processes.entry(pid) {
-                                    entry.insert(TokioProcess::Worker(TokioWorker::new(
-                                        factory,
-                                        child_commands.clone(),
-                                    )));
-                                }
-                            }
-                            StateOperation::Kill(pid) => {
-                                if let Entry::Occupied(entry) = processes.entry(pid) {
-                                    match entry.remove() {
-                                        TokioProcess::Task(mut task) => {
-                                            tokio::spawn(async move { task.abort().await });
                                         }
-                                        TokioProcess::Worker(_) => {}
-                                    }
+                                        for operation in actions {
+                                            let _ = child_commands
+                                                .send(TokioCommand::Event(
+                                                    operation,
+                                                    Some((metadata.offset, pid)),
+                                                ))
+                                                .await;
+                                        }
+                                    } else if let Some(TokioProcess::Worker(worker)) =
+                                        processes.get_mut(&pid)
+                                    {
+                                        let action = action.clone();
+                                        let _ =
+                                            worker.inbox.send((action, metadata, context)).await;
+                                    };
+                                    StateOperation::Send(pid, action)
                                 }
+                                StateOperation::Task(pid, task) => {
+                                    if let Entry::Vacant(entry) = processes.entry(pid) {
+                                        let (mut stream, dispose) = task.into_parts();
+                                        entry.insert(TokioProcess::Task(TokioTask {
+                                            handle: tokio::spawn({
+                                                let results = child_commands.clone();
+                                                async move {
+                                                    while let Some(operation) = stream.next().await
+                                                    {
+                                                        let _ = results
+                                                            .send(TokioCommand::Event(
+                                                                operation, caller,
+                                                            ))
+                                                            .await;
+                                                    }
+                                                }
+                                            }),
+                                            dispose: Some(dispose),
+                                        }));
+                                    }
+                                    StateOperation::Task(pid, OperationStream::noop())
+                                }
+                                StateOperation::Spawn(pid, factory) => {
+                                    if let Entry::Vacant(entry) = processes.entry(pid) {
+                                        entry.insert(TokioProcess::Worker(TokioWorker::new(
+                                            factory,
+                                            child_commands.clone(),
+                                        )));
+                                    }
+                                    StateOperation::spawn(pid, NoopWorkerFactory)
+                                }
+                                StateOperation::Kill(pid) => {
+                                    if let Entry::Occupied(entry) = processes.entry(pid) {
+                                        match entry.remove() {
+                                            TokioProcess::Task(mut task) => {
+                                                tokio::spawn(async move { task.abort().await });
+                                            }
+                                            TokioProcess::Worker(_) => {}
+                                        }
+                                    }
+                                    StateOperation::Kill(pid)
+                                }
+                            };
+                            {
+                                let updated_state = middleware
+                                    .post
+                                    .handle(
+                                        post_middleware_state.take().unwrap(),
+                                        operation,
+                                        &metadata,
+                                        &MiddlewareContext { caller_pid },
+                                    )
+                                    .into_inner();
+                                post_middleware_state.replace(updated_state);
                             }
-                        },
+                        }
                         TokioCommand::Subscribe(subscriber_id, subscriber) => {
                             if let Entry::Vacant(entry) = subscribers.entry(subscriber_id) {
                                 entry.insert(subscriber);

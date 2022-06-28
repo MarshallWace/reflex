@@ -1,7 +1,9 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use reflex_dispatcher::{Action, HandlerContext, MessageData};
+use std::marker::PhantomData;
+
+use reflex_dispatcher::{Action, MessageData, MiddlewareContext, StateOperation};
 
 pub mod formatted;
 pub mod json;
@@ -10,10 +12,39 @@ pub trait ActionLogger {
     type Action: Action;
     fn log(
         &mut self,
-        action: &Self::Action,
+        operation: &StateOperation<Self::Action>,
         metadata: Option<&MessageData>,
-        context: Option<&impl HandlerContext>,
+        context: Option<&MiddlewareContext>,
     );
+}
+
+#[derive(Copy, Clone, Debug)]
+struct NoopLogger<TAction: Action> {
+    _action: PhantomData<TAction>,
+}
+impl<TAction: Action> ActionLogger for NoopLogger<TAction> {
+    type Action = TAction;
+    fn log(
+        &mut self,
+        _operation: &StateOperation<Self::Action>,
+        _metadata: Option<&MessageData>,
+        _context: Option<&MiddlewareContext>,
+    ) {
+    }
+}
+
+impl<T: ActionLogger<Action = TAction>, TAction: Action> ActionLogger for Option<T> {
+    type Action = TAction;
+    fn log(
+        &mut self,
+        operation: &StateOperation<Self::Action>,
+        metadata: Option<&MessageData>,
+        context: Option<&MiddlewareContext>,
+    ) {
+        if let Some(inner) = self {
+            inner.log(operation, metadata, context);
+        }
+    }
 }
 
 pub enum EitherLogger<T1, T2> {
@@ -32,20 +63,50 @@ where
         }
     }
 }
-
 impl<T1: ActionLogger<Action = TAction>, T2: ActionLogger<Action = TAction>, TAction: Action>
     ActionLogger for EitherLogger<T1, T2>
 {
     type Action = TAction;
     fn log(
         &mut self,
-        action: &Self::Action,
+        operation: &StateOperation<Self::Action>,
         metadata: Option<&MessageData>,
-        context: Option<&impl HandlerContext>,
+        context: Option<&MiddlewareContext>,
     ) {
         match self {
-            Self::Left(logger) => logger.log(action, metadata, context),
-            Self::Right(logger) => logger.log(action, metadata, context),
+            Self::Left(logger) => logger.log(operation, metadata, context),
+            Self::Right(logger) => logger.log(operation, metadata, context),
         }
+    }
+}
+
+pub struct ChainLogger<T1, T2> {
+    left: T1,
+    right: T2,
+}
+impl<T1, T2> Clone for ChainLogger<T1, T2>
+where
+    T1: Clone,
+    T2: Clone,
+{
+    fn clone(&self) -> Self {
+        Self {
+            left: self.left.clone(),
+            right: self.right.clone(),
+        }
+    }
+}
+impl<T1: ActionLogger<Action = TAction>, T2: ActionLogger<Action = TAction>, TAction: Action>
+    ActionLogger for ChainLogger<T1, T2>
+{
+    type Action = TAction;
+    fn log(
+        &mut self,
+        operation: &StateOperation<Self::Action>,
+        metadata: Option<&MessageData>,
+        context: Option<&MiddlewareContext>,
+    ) {
+        self.left.log(operation, metadata, context);
+        self.right.log(operation, metadata, context);
     }
 }

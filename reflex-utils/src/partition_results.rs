@@ -3,9 +3,7 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use std::iter::once;
 
-pub fn partition_results<T1, T2, V, E>(
-    results: impl IntoIterator<Item = Result<V, E>>,
-) -> (T1, T2)
+pub fn partition_results<T1, T2, V, E>(results: impl IntoIterator<Item = Result<V, E>>) -> (T1, T2)
 where
     T1: Default + Extend<V>,
     T2: Default + Extend<E>,

@@ -8,19 +8,20 @@ use reflex_graphql::subscriptions::{
     GraphQlSubscriptionClientMessage, GraphQlSubscriptionServerMessage,
 };
 use reflex_json::{JsonMap, JsonValue};
+use serde::{Deserialize, Serialize};
 
-use crate::server::utils::clone_request_wrapper;
+use crate::{server::utils::clone_http_request_wrapper, utils::serialize::SerializedRequest};
 
-#[derive(Clone, Debug)]
-pub enum WebSocketServerAction {
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum WebSocketServerActions {
     Connect(WebSocketServerConnectAction),
     Receive(WebSocketServerReceiveAction),
     Send(WebSocketServerSendAction),
     Disconnect(WebSocketServerDisconnectAction),
     ThrottleTimeout(WebSocketServerThrottleTimeoutAction),
 }
-impl Action for WebSocketServerAction {}
-impl NamedAction for WebSocketServerAction {
+impl Action for WebSocketServerActions {}
+impl NamedAction for WebSocketServerActions {
     fn name(&self) -> &'static str {
         match self {
             Self::Connect(action) => action.name(),
@@ -31,121 +32,121 @@ impl NamedAction for WebSocketServerAction {
         }
     }
 }
-impl SerializableAction for WebSocketServerAction {
-    fn serialize(&self) -> SerializedAction {
+impl SerializableAction for WebSocketServerActions {
+    fn to_json(&self) -> SerializedAction {
         match self {
-            Self::Connect(action) => action.serialize(),
-            Self::Receive(action) => action.serialize(),
-            Self::Send(action) => action.serialize(),
-            Self::Disconnect(action) => action.serialize(),
-            Self::ThrottleTimeout(action) => action.serialize(),
+            Self::Connect(action) => action.to_json(),
+            Self::Receive(action) => action.to_json(),
+            Self::Send(action) => action.to_json(),
+            Self::Disconnect(action) => action.to_json(),
+            Self::ThrottleTimeout(action) => action.to_json(),
         }
     }
 }
 
-impl From<WebSocketServerConnectAction> for WebSocketServerAction {
+impl From<WebSocketServerConnectAction> for WebSocketServerActions {
     fn from(value: WebSocketServerConnectAction) -> Self {
         Self::Connect(value)
     }
 }
-impl From<WebSocketServerAction> for Option<WebSocketServerConnectAction> {
-    fn from(value: WebSocketServerAction) -> Self {
+impl From<WebSocketServerActions> for Option<WebSocketServerConnectAction> {
+    fn from(value: WebSocketServerActions) -> Self {
         match value {
-            WebSocketServerAction::Connect(value) => Some(value),
+            WebSocketServerActions::Connect(value) => Some(value),
             _ => None,
         }
     }
 }
-impl<'a> From<&'a WebSocketServerAction> for Option<&'a WebSocketServerConnectAction> {
-    fn from(value: &'a WebSocketServerAction) -> Self {
+impl<'a> From<&'a WebSocketServerActions> for Option<&'a WebSocketServerConnectAction> {
+    fn from(value: &'a WebSocketServerActions) -> Self {
         match value {
-            WebSocketServerAction::Connect(value) => Some(value),
+            WebSocketServerActions::Connect(value) => Some(value),
             _ => None,
         }
     }
 }
-impl From<WebSocketServerReceiveAction> for WebSocketServerAction {
+impl From<WebSocketServerReceiveAction> for WebSocketServerActions {
     fn from(value: WebSocketServerReceiveAction) -> Self {
         Self::Receive(value)
     }
 }
-impl From<WebSocketServerAction> for Option<WebSocketServerReceiveAction> {
-    fn from(value: WebSocketServerAction) -> Self {
+impl From<WebSocketServerActions> for Option<WebSocketServerReceiveAction> {
+    fn from(value: WebSocketServerActions) -> Self {
         match value {
-            WebSocketServerAction::Receive(value) => Some(value),
+            WebSocketServerActions::Receive(value) => Some(value),
             _ => None,
         }
     }
 }
-impl<'a> From<&'a WebSocketServerAction> for Option<&'a WebSocketServerReceiveAction> {
-    fn from(value: &'a WebSocketServerAction) -> Self {
+impl<'a> From<&'a WebSocketServerActions> for Option<&'a WebSocketServerReceiveAction> {
+    fn from(value: &'a WebSocketServerActions) -> Self {
         match value {
-            WebSocketServerAction::Receive(value) => Some(value),
+            WebSocketServerActions::Receive(value) => Some(value),
             _ => None,
         }
     }
 }
 
-impl From<WebSocketServerSendAction> for WebSocketServerAction {
+impl From<WebSocketServerSendAction> for WebSocketServerActions {
     fn from(value: WebSocketServerSendAction) -> Self {
         Self::Send(value)
     }
 }
-impl From<WebSocketServerAction> for Option<WebSocketServerSendAction> {
-    fn from(value: WebSocketServerAction) -> Self {
+impl From<WebSocketServerActions> for Option<WebSocketServerSendAction> {
+    fn from(value: WebSocketServerActions) -> Self {
         match value {
-            WebSocketServerAction::Send(value) => Some(value),
+            WebSocketServerActions::Send(value) => Some(value),
             _ => None,
         }
     }
 }
-impl<'a> From<&'a WebSocketServerAction> for Option<&'a WebSocketServerSendAction> {
-    fn from(value: &'a WebSocketServerAction) -> Self {
+impl<'a> From<&'a WebSocketServerActions> for Option<&'a WebSocketServerSendAction> {
+    fn from(value: &'a WebSocketServerActions) -> Self {
         match value {
-            WebSocketServerAction::Send(value) => Some(value),
+            WebSocketServerActions::Send(value) => Some(value),
             _ => None,
         }
     }
 }
-impl From<WebSocketServerDisconnectAction> for WebSocketServerAction {
+impl From<WebSocketServerDisconnectAction> for WebSocketServerActions {
     fn from(value: WebSocketServerDisconnectAction) -> Self {
         Self::Disconnect(value)
     }
 }
-impl From<WebSocketServerAction> for Option<WebSocketServerDisconnectAction> {
-    fn from(value: WebSocketServerAction) -> Self {
+impl From<WebSocketServerActions> for Option<WebSocketServerDisconnectAction> {
+    fn from(value: WebSocketServerActions) -> Self {
         match value {
-            WebSocketServerAction::Disconnect(value) => Some(value),
+            WebSocketServerActions::Disconnect(value) => Some(value),
             _ => None,
         }
     }
 }
-impl<'a> From<&'a WebSocketServerAction> for Option<&'a WebSocketServerDisconnectAction> {
-    fn from(value: &'a WebSocketServerAction) -> Self {
+impl<'a> From<&'a WebSocketServerActions> for Option<&'a WebSocketServerDisconnectAction> {
+    fn from(value: &'a WebSocketServerActions) -> Self {
         match value {
-            WebSocketServerAction::Disconnect(value) => Some(value),
+            WebSocketServerActions::Disconnect(value) => Some(value),
             _ => None,
         }
     }
 }
 
-impl From<WebSocketServerThrottleTimeoutAction> for WebSocketServerAction {
+impl From<WebSocketServerThrottleTimeoutAction> for WebSocketServerActions {
     fn from(value: WebSocketServerThrottleTimeoutAction) -> Self {
         Self::ThrottleTimeout(value)
     }
 }
-impl From<WebSocketServerAction> for Option<WebSocketServerThrottleTimeoutAction> {
-    fn from(value: WebSocketServerAction) -> Self {
+impl From<WebSocketServerActions> for Option<WebSocketServerThrottleTimeoutAction> {
+    fn from(value: WebSocketServerActions) -> Self {
         match value {
-            WebSocketServerAction::ThrottleTimeout(value) => Some(value),
+            WebSocketServerActions::ThrottleTimeout(value) => Some(value),
             _ => None,
         }
     }
 }
-impl<'a> From<&'a WebSocketServerAction> for Option<&'a WebSocketServerThrottleTimeoutAction> {
-    fn from(value: &'a WebSocketServerAction) -> Self {
+impl<'a> From<&'a WebSocketServerActions> for Option<&'a WebSocketServerThrottleTimeoutAction> {
+    fn from(value: &'a WebSocketServerActions) -> Self {
         match value {
-            WebSocketServerAction::ThrottleTimeout(value) => Some(value),
+            WebSocketServerActions::ThrottleTimeout(value) => Some(value),
             _ => None,
         }
     }
@@ -160,7 +161,7 @@ impl Clone for WebSocketServerConnectAction {
     fn clone(&self) -> Self {
         Self {
             connection_id: self.connection_id.clone(),
-            request: clone_request_wrapper(&self.request),
+            request: clone_http_request_wrapper(&self.request),
         }
     }
 }
@@ -171,15 +172,60 @@ impl NamedAction for WebSocketServerConnectAction {
     }
 }
 impl SerializableAction for WebSocketServerConnectAction {
-    fn serialize(&self) -> SerializedAction {
+    fn to_json(&self) -> SerializedAction {
         SerializedAction::from_iter([(
             "connection_id",
             JsonValue::from(format!("{}", self.connection_id.as_hyphenated())),
         )])
     }
 }
+impl Serialize for WebSocketServerConnectAction {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        SerializedWebSocketServerConnectAction::from(self).serialize(serializer)
+    }
+}
+impl<'de> Deserialize<'de> for WebSocketServerConnectAction {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        SerializedWebSocketServerConnectAction::deserialize(deserializer).map(Into::into)
+    }
+}
+#[derive(Clone, Serialize, Deserialize)]
+struct SerializedWebSocketServerConnectAction {
+    connection_id: Uuid,
+    request: SerializedRequest,
+}
+impl<'a> From<&'a WebSocketServerConnectAction> for SerializedWebSocketServerConnectAction {
+    fn from(value: &'a WebSocketServerConnectAction) -> Self {
+        let WebSocketServerConnectAction {
+            connection_id,
+            request,
+        } = value;
+        Self {
+            connection_id: *connection_id,
+            request: request.into(),
+        }
+    }
+}
+impl From<SerializedWebSocketServerConnectAction> for WebSocketServerConnectAction {
+    fn from(value: SerializedWebSocketServerConnectAction) -> Self {
+        let SerializedWebSocketServerConnectAction {
+            connection_id,
+            request,
+        } = value;
+        Self {
+            connection_id,
+            request: request.into(),
+        }
+    }
+}
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct WebSocketServerReceiveAction {
     pub connection_id: Uuid,
     pub message: GraphQlSubscriptionClientMessage,
@@ -191,7 +237,7 @@ impl NamedAction for WebSocketServerReceiveAction {
     }
 }
 impl SerializableAction for WebSocketServerReceiveAction {
-    fn serialize(&self) -> SerializedAction {
+    fn to_json(&self) -> SerializedAction {
         SerializedAction::from_iter([
             (
                 "connection_id",
@@ -202,7 +248,7 @@ impl SerializableAction for WebSocketServerReceiveAction {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct WebSocketServerSendAction {
     pub connection_id: Uuid,
     pub message: GraphQlSubscriptionServerMessage,
@@ -214,7 +260,7 @@ impl NamedAction for WebSocketServerSendAction {
 }
 impl Action for WebSocketServerSendAction {}
 impl SerializableAction for WebSocketServerSendAction {
-    fn serialize(&self) -> SerializedAction {
+    fn to_json(&self) -> SerializedAction {
         SerializedAction::from_iter([
             (
                 "connection_id",
@@ -248,7 +294,7 @@ impl SerializableAction for WebSocketServerSendAction {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct WebSocketServerDisconnectAction {
     pub connection_id: Uuid,
 }
@@ -259,7 +305,7 @@ impl NamedAction for WebSocketServerDisconnectAction {
     }
 }
 impl SerializableAction for WebSocketServerDisconnectAction {
-    fn serialize(&self) -> SerializedAction {
+    fn to_json(&self) -> SerializedAction {
         SerializedAction::from_iter([(
             "connection_id",
             JsonValue::from(format!("{}", self.connection_id.as_hyphenated())),
@@ -267,7 +313,7 @@ impl SerializableAction for WebSocketServerDisconnectAction {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct WebSocketServerThrottleTimeoutAction {
     pub subscription_id: Uuid,
 }
@@ -278,7 +324,7 @@ impl NamedAction for WebSocketServerThrottleTimeoutAction {
     }
 }
 impl SerializableAction for WebSocketServerThrottleTimeoutAction {
-    fn serialize(&self) -> SerializedAction {
+    fn to_json(&self) -> SerializedAction {
         SerializedAction::from_iter([(
             "subscription_id",
             JsonValue::from(format!("{}", self.subscription_id.as_hyphenated())),

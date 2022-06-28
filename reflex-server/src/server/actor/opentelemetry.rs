@@ -29,7 +29,7 @@ use reflex_handlers::{
 };
 
 use crate::{
-    middleware::action::telemetry::{
+    server::action::telemetry::{
         TelemetryMiddlewareTransactionEndAction, TelemetryMiddlewareTransactionStartAction,
         TelemetryTransaction,
     },

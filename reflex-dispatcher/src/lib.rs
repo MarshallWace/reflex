@@ -1,20 +1,24 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use std::{collections::VecDeque, marker::PhantomData};
+use std::{collections::VecDeque, iter::empty, marker::PhantomData, pin::Pin, rc::Rc, sync::Arc};
 
 use futures::{
     future::{self, AbortHandle, Abortable},
-    Future, Stream,
+    stream, Future, Stream,
 };
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{Map as JsonMap, Value as JsonValue};
-
-pub mod utils;
 
 mod actor;
 pub mod scheduler;
+pub mod session_playback;
+pub mod session_recorder;
+pub mod utils;
 
 pub use actor::*;
+pub use session_playback::*;
+pub use session_recorder::*;
 
 pub trait Matcher<T>
 where
@@ -57,7 +61,7 @@ pub trait NamedAction: Action {
 }
 
 pub trait SerializableAction: NamedAction {
-    fn serialize(&self) -> SerializedAction;
+    fn to_json(&self) -> SerializedAction;
 }
 
 pub struct SerializedAction {
@@ -86,16 +90,114 @@ impl IntoIterator for SerializedAction {
     }
 }
 
-pub trait Actor<T: Action> {
+pub trait Actor<TAction: Action> {
     type State;
     fn init(&self) -> Self::State;
     fn handle(
         &self,
         state: Self::State,
-        action: &T,
+        action: &TAction,
         metadata: &MessageData,
         context: &mut impl HandlerContext,
-    ) -> ActorTransition<Self::State, T>;
+    ) -> ActorTransition<Self::State, TAction>;
+}
+
+pub struct SchedulerMiddleware<TPre, TPost, TAction> {
+    pub pre: TPre,
+    pub post: TPost,
+    _action: PhantomData<TAction>,
+}
+impl<TPre, TPost, TAction> Clone for SchedulerMiddleware<TPre, TPost, TAction>
+where
+    TPre: Clone,
+    TPost: Clone,
+{
+    fn clone(&self) -> Self {
+        Self {
+            pre: self.pre.clone(),
+            post: self.post.clone(),
+            _action: Default::default(),
+        }
+    }
+}
+impl<TPre, TPost, TAction: Action> SchedulerMiddleware<TPre, TPost, TAction>
+where
+    TPre: PreMiddleware<TAction>,
+    TPost: PostMiddleware<TAction>,
+{
+    pub fn new(pre: TPre, post: TPost) -> Self {
+        Self {
+            pre,
+            post,
+            _action: Default::default(),
+        }
+    }
+    pub fn into_parts(self) -> (TPre, TPost) {
+        let Self { pre, post, _action } = self;
+        (pre, post)
+    }
+}
+impl<TPre, TAction: Action> SchedulerMiddleware<TPre, NoopActor, TAction>
+where
+    TPre: PreMiddleware<TAction>,
+{
+    pub fn pre(pre: TPre) -> Self {
+        Self {
+            pre,
+            post: NoopActor,
+            _action: Default::default(),
+        }
+    }
+}
+impl<TPost, TAction: Action> SchedulerMiddleware<NoopActor, TPost, TAction>
+where
+    TPost: PostMiddleware<TAction>,
+{
+    pub fn post(post: TPost) -> Self {
+        Self {
+            pre: NoopActor,
+            post,
+            _action: Default::default(),
+        }
+    }
+}
+impl<TAction: Action> SchedulerMiddleware<NoopActor, NoopActor, TAction> {
+    pub fn noop() -> Self {
+        Self {
+            pre: NoopActor,
+            post: NoopActor,
+            _action: Default::default(),
+        }
+    }
+}
+
+pub trait PreMiddleware<TAction: Action> {
+    type State;
+    fn init(&self) -> Self::State;
+    fn handle(
+        &self,
+        state: Self::State,
+        operation: StateOperation<TAction>,
+        metadata: &MessageData,
+        context: &MiddlewareContext,
+    ) -> PreMiddlewareTransition<Self::State, TAction>;
+}
+
+pub trait PostMiddleware<TAction: Action> {
+    type State;
+    fn init(&self) -> Self::State;
+    fn handle(
+        &self,
+        state: Self::State,
+        operation: StateOperation<TAction>,
+        metadata: &MessageData,
+        context: &MiddlewareContext,
+    ) -> PostMiddlewareTransition<Self::State>;
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct MiddlewareContext {
+    pub caller_pid: Option<ProcessId>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -105,7 +207,7 @@ pub struct MessageData {
     pub timestamp: std::time::Instant,
 }
 
-#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Default, Debug)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Default, Debug, Serialize, Deserialize)]
 pub struct MessageOffset(usize);
 impl MessageOffset {
     pub fn next(&self) -> MessageOffset {
@@ -130,66 +232,161 @@ impl From<MessageOffset> for JsonValue {
     }
 }
 
-pub struct StateTransition<T: Action>(Vec<StateOperation<T>>);
-impl<T: Action> Default for StateTransition<T> {
+pub struct StateTransition<TAction: Action>(Vec<StateOperation<TAction>>);
+impl<TAction: Action> Default for StateTransition<TAction> {
     fn default() -> Self {
         Self(Default::default())
     }
 }
-impl<T: Action> StateTransition<T> {
-    pub fn new(actions: impl IntoIterator<Item = StateOperation<T>>) -> Self {
+impl<TAction: Action> StateTransition<TAction> {
+    pub fn new(actions: impl IntoIterator<Item = StateOperation<TAction>>) -> Self {
         Self::from_iter(actions)
     }
-    pub fn append(self, other: StateTransition<T>) -> StateTransition<T> {
+    pub fn append(self, other: StateTransition<TAction>) -> StateTransition<TAction> {
         let Self(mut actions) = self;
         let Self(other_actions) = other;
         actions.extend(other_actions);
         Self(actions)
     }
 }
-impl<A: Action> FromIterator<StateOperation<A>> for StateTransition<A> {
-    fn from_iter<T: IntoIterator<Item = StateOperation<A>>>(iter: T) -> Self {
+impl<TAction: Action> FromIterator<StateOperation<TAction>> for StateTransition<TAction> {
+    fn from_iter<T: IntoIterator<Item = StateOperation<TAction>>>(iter: T) -> Self {
         Self(iter.into_iter().collect())
     }
 }
-impl<T: Action> IntoIterator for StateTransition<T> {
-    type Item = StateOperation<T>;
-    type IntoIter = std::vec::IntoIter<StateOperation<T>>;
+impl<TAction: Action> IntoIterator for StateTransition<TAction> {
+    type Item = StateOperation<TAction>;
+    type IntoIter = std::vec::IntoIter<StateOperation<TAction>>;
     fn into_iter(self) -> Self::IntoIter {
         let Self(actions) = self;
         actions.into_iter()
     }
 }
 
-pub struct ActorTransition<S, T: Action> {
+pub struct ActorTransition<S, TAction: Action> {
     state: S,
-    actions: StateTransition<T>,
+    actions: StateTransition<TAction>,
 }
-impl<S, T: Action> ActorTransition<S, T> {
-    pub fn new(state: S, actions: StateTransition<T>) -> Self {
+impl<S, TAction: Action> ActorTransition<S, TAction> {
+    pub fn new(state: S, actions: StateTransition<TAction>) -> Self {
         Self { state, actions }
     }
-    pub fn into_parts(self) -> (S, StateTransition<T>) {
+    pub fn into_parts(self) -> (S, StateTransition<TAction>) {
         let Self { state, actions } = self;
         (state, actions)
     }
 }
 
-pub enum StateOperation<T: Action> {
-    Send(ProcessId, T),
-    Task(ProcessId, OperationStream<T>),
-    Spawn(
-        ProcessId,
-        Box<dyn WorkerFactory<T, Worker = WorkerInstance<T>> + Send + 'static>,
-    ),
+pub struct PreMiddlewareTransition<S, TAction: Action> {
+    state: S,
+    operation: StateOperation<TAction>,
+}
+impl<S, TAction: Action> PreMiddlewareTransition<S, TAction> {
+    pub fn new(state: S, operation: StateOperation<TAction>) -> Self {
+        Self { state, operation }
+    }
+    pub fn into_parts(self) -> (S, StateOperation<TAction>) {
+        let Self { state, operation } = self;
+        (state, operation)
+    }
+}
+
+pub struct PostMiddlewareTransition<S> {
+    state: S,
+}
+impl<S> PostMiddlewareTransition<S> {
+    pub fn new(state: S) -> Self {
+        Self { state }
+    }
+    pub fn into_inner(self) -> S {
+        let Self { state } = self;
+        state
+    }
+}
+
+pub enum StateOperation<TAction: Action> {
+    Send(ProcessId, TAction),
+    Task(ProcessId, OperationStream<TAction>),
+    Spawn(ProcessId, BoxedWorkerFactory<TAction>),
     Kill(ProcessId),
 }
-impl<T: Action + Send + 'static> StateOperation<T> {
-    pub fn spawn(
-        pid: ProcessId,
-        worker: impl WorkerFactory<T, Worker = impl Worker<T> + Send + 'static> + Send + 'static,
-    ) -> Self {
-        Self::Spawn(pid, Box::new(BoxedWorkerFactory::new(worker)))
+impl<TAction> StateOperation<TAction>
+where
+    TAction: Action + Send + 'static,
+{
+    pub fn spawn(pid: ProcessId, worker: impl WorkerFactory<TAction>) -> Self {
+        Self::Spawn(pid, BoxedWorkerFactory::new(worker))
+    }
+}
+
+// FIXME: Support fully-serializable task/worker types to prevent losing information when serializing/deserializing/hydrating
+// Required for session playback: operations need to be hydrated from recorded values
+impl<'a, TAction: Action + Clone + Send + 'static> From<&'a StateOperation<TAction>>
+    for StateOperation<TAction>
+{
+    fn from(value: &'a StateOperation<TAction>) -> Self {
+        match value {
+            StateOperation::Send(pid, action) => StateOperation::Send(*pid, action.clone()),
+            StateOperation::Task(pid, _) => StateOperation::Task(*pid, OperationStream::noop()),
+            StateOperation::Spawn(pid, _) => {
+                StateOperation::Spawn(*pid, BoxedWorkerFactory::noop())
+            }
+            StateOperation::Kill(pid) => StateOperation::Kill(*pid),
+        }
+    }
+}
+// Required for file recorder: operations need to be serializable to / deserializable from the filesystem
+impl<TAction: Action + Clone> Serialize for StateOperation<TAction>
+where
+    TAction: Serialize,
+{
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        SerializedStateOperation::from(self).serialize(serializer)
+    }
+}
+impl<'de, TAction: Action + Send + 'static> Deserialize<'de> for StateOperation<TAction>
+where
+    TAction: Deserialize<'de>,
+{
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        SerializedStateOperation::deserialize(deserializer).map(Into::into)
+    }
+}
+#[derive(Serialize, Deserialize)]
+pub enum SerializedStateOperation<TAction> {
+    Send(ProcessId, TAction),
+    Task(ProcessId),
+    Spawn(ProcessId),
+    Kill(ProcessId),
+}
+impl<'a, TAction: Action + Clone> From<&'a StateOperation<TAction>>
+    for SerializedStateOperation<TAction>
+{
+    fn from(value: &'a StateOperation<TAction>) -> Self {
+        match value {
+            StateOperation::Send(pid, action) => Self::Send(*pid, action.clone()),
+            StateOperation::Task(pid, _) => Self::Task(*pid),
+            StateOperation::Spawn(pid, _) => Self::Spawn(*pid),
+            StateOperation::Kill(pid) => Self::Kill(*pid),
+        }
+    }
+}
+impl<TAction: Action + Send + 'static> From<SerializedStateOperation<TAction>>
+    for StateOperation<TAction>
+{
+    fn from(value: SerializedStateOperation<TAction>) -> Self {
+        match value {
+            SerializedStateOperation::Send(pid, action) => Self::Send(pid, action),
+            SerializedStateOperation::Task(pid) => Self::Task(pid, OperationStream::noop()),
+            SerializedStateOperation::Spawn(pid) => Self::Spawn(pid, BoxedWorkerFactory::noop()),
+            SerializedStateOperation::Kill(pid) => Self::Kill(pid),
+        }
     }
 }
 
@@ -236,12 +433,15 @@ impl DisposeCallback for BoxedDisposeCallback {
     }
 }
 
-pub struct OperationStream<T: Action> {
-    task: Box<dyn Stream<Item = StateOperation<T>> + Send + Unpin + 'static>,
+pub struct OperationStream<TAction: Action> {
+    task: Box<dyn Stream<Item = StateOperation<TAction>> + Send + Unpin + 'static>,
     dispose: BoxedDisposeCallback,
 }
-impl<T: Action + 'static> OperationStream<T> {
-    pub fn new(task: impl Stream<Item = StateOperation<T>> + Send + Unpin + 'static) -> Self {
+impl<TAction> OperationStream<TAction>
+where
+    TAction: Action + Send + 'static,
+{
+    pub fn new(task: impl Stream<Item = StateOperation<TAction>> + Send + Unpin + 'static) -> Self {
         let (abort_handle, abort_registration) = AbortHandle::new_pair();
         let task = Abortable::new(task, abort_registration);
         Self {
@@ -250,7 +450,7 @@ impl<T: Action + 'static> OperationStream<T> {
         }
     }
     pub fn disposable(
-        task: impl Stream<Item = StateOperation<T>> + Send + Unpin + 'static,
+        task: impl Stream<Item = StateOperation<TAction>> + Send + Unpin + 'static,
         dispose: impl DisposeCallback,
     ) -> Self {
         Self {
@@ -258,8 +458,14 @@ impl<T: Action + 'static> OperationStream<T> {
             dispose: BoxedDisposeCallback::new(dispose),
         }
     }
+    pub fn noop() -> Self {
+        Self {
+            task: Box::new(stream::empty()),
+            dispose: BoxedDisposeCallback::new(NoopDisposeCallback),
+        }
+    }
     pub(crate) fn from_parts(
-        task: Box<dyn Stream<Item = StateOperation<T>> + Send + Unpin + 'static>,
+        task: Box<dyn Stream<Item = StateOperation<TAction>> + Send + Unpin + 'static>,
         dispose: BoxedDisposeCallback,
     ) -> Self {
         Self { task, dispose }
@@ -267,7 +473,7 @@ impl<T: Action + 'static> OperationStream<T> {
     pub(crate) fn into_parts(
         self,
     ) -> (
-        Box<dyn Stream<Item = StateOperation<T>> + Send + Unpin + 'static>,
+        Box<dyn Stream<Item = StateOperation<TAction>> + Send + Unpin + 'static>,
         BoxedDisposeCallback,
     ) {
         (self.task, self.dispose)
@@ -278,7 +484,80 @@ pub trait Scheduler {
     type Action: Action;
 }
 
-#[derive(PartialEq, Eq, Hash, Clone, Copy, Default, Debug)]
+pub trait AsyncScheduler: Scheduler {
+    // TODO: refactor method return values into static associated types once GATs are stabilized
+    fn dispatch<TActions: AsyncActionStream<Self::Action>>(
+        &self,
+        actions: TActions,
+    ) -> AsyncDispatchResult;
+    fn subscribe<V: Send + 'static, TFilter: AsyncActionFilter<Self::Action, V>>(
+        &self,
+        transform: TFilter,
+    ) -> AsyncSubscriptionStream<V>;
+}
+impl<T: AsyncScheduler> Scheduler for Rc<T> {
+    type Action = T::Action;
+}
+impl<T: AsyncScheduler> AsyncScheduler for Rc<T> {
+    fn dispatch<TActions: AsyncActionStream<Self::Action>>(
+        &self,
+        actions: TActions,
+    ) -> AsyncDispatchResult {
+        self.as_ref().dispatch(actions)
+    }
+    fn subscribe<V: Send + 'static, TFilter: AsyncActionFilter<Self::Action, V>>(
+        &self,
+        transform: TFilter,
+    ) -> AsyncSubscriptionStream<V> {
+        self.as_ref().subscribe(transform)
+    }
+}
+impl<T: AsyncScheduler> Scheduler for Arc<T> {
+    type Action = T::Action;
+}
+impl<T: AsyncScheduler> AsyncScheduler for Arc<T> {
+    fn dispatch<TActions: AsyncActionStream<Self::Action>>(
+        &self,
+        actions: TActions,
+    ) -> AsyncDispatchResult {
+        self.as_ref().dispatch(actions)
+    }
+    fn subscribe<V: Send + 'static, TFilter: AsyncActionFilter<Self::Action, V>>(
+        &self,
+        transform: TFilter,
+    ) -> AsyncSubscriptionStream<V> {
+        self.as_ref().subscribe(transform)
+    }
+}
+
+pub trait AsyncActionStream<TAction: Action>:
+    Stream<Item = TAction> + Unpin + Send + 'static
+{
+}
+impl<T, TAction: Action> AsyncActionStream<TAction> for T where
+    T: Stream<Item = TAction> + Unpin + Send + 'static
+{
+}
+
+pub type AsyncDispatchResult = Pin<Box<dyn Future<Output = ()> + Send + 'static>>;
+
+pub trait AsyncActionFilter<TAction: Action, TResult>: Send + 'static {
+    fn transform(&self, action: &TAction) -> Option<TResult>;
+}
+impl<T, TAction, TResult> AsyncActionFilter<TAction, TResult> for T
+where
+    TAction: Action,
+    T: for<'a> Fn(&'a TAction) -> Option<TResult> + Send + 'static,
+{
+    fn transform(&self, action: &TAction) -> Option<TResult> {
+        (self)(action)
+    }
+}
+
+pub type AsyncSubscriptionStream<T> =
+    Pin<Box<dyn Future<Output = Pin<Box<dyn Stream<Item = T> + Send + 'static>>> + Send + 'static>>;
+
+#[derive(PartialEq, Eq, Hash, Clone, Copy, Default, Debug, Serialize, Deserialize)]
 pub struct ProcessId(usize);
 impl ProcessId {
     pub fn next(&self) -> Self {
@@ -310,12 +589,12 @@ pub trait HandlerContext {
     fn generate_pid(&mut self) -> ProcessId;
 }
 
-pub trait Worker<T: Action> {
+pub trait Worker<TAction: Action>: Send + 'static {
     fn handle(
         &mut self,
-        queue: WorkerMessageQueue<T>,
+        queue: WorkerMessageQueue<TAction>,
         context: &mut WorkerContext,
-    ) -> WorkerTransition<T>;
+    ) -> WorkerTransition<TAction>;
 }
 
 pub struct WorkerContext {
@@ -340,86 +619,142 @@ impl HandlerContext for WorkerContext {
     }
 }
 
-pub type WorkerMessageQueue<T> = VecDeque<(T, MessageData)>;
+pub type WorkerMessageQueue<TAction> = VecDeque<(TAction, MessageData)>;
 
-pub struct WorkerTransition<T: Action> {
-    operations: Vec<(MessageOffset, StateOperation<T>)>,
+pub struct WorkerTransition<TAction: Action> {
+    operations: Vec<(MessageOffset, StateOperation<TAction>)>,
 }
-impl<T: Action> WorkerTransition<T> {
-    pub fn new(operations: impl IntoIterator<Item = (MessageOffset, StateOperation<T>)>) -> Self {
+impl<TAction: Action> WorkerTransition<TAction> {
+    pub fn new(
+        operations: impl IntoIterator<Item = (MessageOffset, StateOperation<TAction>)>,
+    ) -> Self {
         Self {
             operations: operations.into_iter().collect(),
         }
     }
-    pub fn append(self, other: WorkerTransition<T>) -> WorkerTransition<T> {
+    pub fn append(self, other: WorkerTransition<TAction>) -> WorkerTransition<TAction> {
         let mut combined = self;
         combined.operations.extend(other.operations);
         combined
     }
 }
-impl<T: Action> IntoIterator for WorkerTransition<T> {
-    type Item = (MessageOffset, StateOperation<T>);
-    type IntoIter = std::vec::IntoIter<(MessageOffset, StateOperation<T>)>;
+impl<TAction: Action> IntoIterator for WorkerTransition<TAction> {
+    type Item = (MessageOffset, StateOperation<TAction>);
+    type IntoIter = std::vec::IntoIter<(MessageOffset, StateOperation<TAction>)>;
     fn into_iter(self) -> Self::IntoIter {
         self.operations.into_iter()
     }
 }
 
-pub trait WorkerFactory<TAction: Action + Send + 'static> {
+pub trait WorkerFactory<TAction: Action>: Send + 'static {
     type Worker: Worker<TAction>;
     fn create(&self) -> Self::Worker;
 }
-impl<TWorker, TAction> WorkerFactory<TAction>
-    for Box<dyn WorkerFactory<TAction, Worker = TWorker> + Send + 'static>
+pub struct NoopWorkerFactory;
+impl<TAction: Action> WorkerFactory<TAction> for NoopWorkerFactory {
+    type Worker = NoopWorker;
+    fn create(&self) -> Self::Worker {
+        NoopWorker
+    }
+}
+pub struct NoopWorker;
+impl<TAction: Action> Worker<TAction> for NoopWorker {
+    fn handle(
+        &mut self,
+        _queue: WorkerMessageQueue<TAction>,
+        _context: &mut WorkerContext,
+    ) -> WorkerTransition<TAction> {
+        WorkerTransition::new(empty())
+    }
+}
+impl<TWorker, TAction> WorkerFactory<TAction> for Box<dyn WorkerFactory<TAction, Worker = TWorker>>
 where
-    TWorker: Worker<TAction> + Send + 'static,
+    TWorker: Worker<TAction>,
     TAction: Action + Send + 'static,
 {
-    type Worker = WorkerInstance<TAction>;
+    type Worker = BoxedWorkerInstance<TAction>;
     fn create(&self) -> Self::Worker {
         let inner = &**self;
         Box::new(inner.create())
     }
 }
-pub struct BoxedWorkerFactory<TFactory, TWorker, TAction>
+pub struct BoxedWorkerFactory<TAction: Action> {
+    factory: Box<dyn WorkerFactory<TAction, Worker = BoxedWorkerInstance<TAction>>>,
+}
+impl<TAction> BoxedWorkerFactory<TAction>
 where
-    TFactory: WorkerFactory<TAction, Worker = TWorker>,
-    TWorker: Worker<TAction>,
     TAction: Action + Send + 'static,
 {
+    pub fn new<TFactory>(factory: TFactory) -> Self
+    where
+        TFactory: WorkerFactory<TAction>,
+    {
+        Self {
+            factory: Box::new(BoxedWorkerFactoryWrapper::new(factory)),
+        }
+    }
+}
+impl<TAction> BoxedWorkerFactory<TAction>
+where
+    TAction: Action + Send + 'static,
+{
+    pub fn noop() -> BoxedWorkerFactory<TAction> {
+        Self {
+            factory: Box::new(BoxedNoopWorkerFactory),
+        }
+    }
+}
+struct BoxedWorkerFactoryWrapper<TFactory: WorkerFactory<TAction>, TAction: Action> {
     factory: TFactory,
-    _worker: PhantomData<TWorker>,
     _action: PhantomData<TAction>,
 }
-impl<TFactory, TWorker, TAction> BoxedWorkerFactory<TFactory, TWorker, TAction>
+impl<TAction, TFactory> BoxedWorkerFactoryWrapper<TFactory, TAction>
 where
-    TFactory: WorkerFactory<TAction, Worker = TWorker>,
-    TWorker: Worker<TAction> + Send + 'static,
-    TAction: Action + Send + 'static,
+    TAction: Action,
+    TFactory: WorkerFactory<TAction>,
 {
-    pub fn new(factory: TFactory) -> Self {
+    fn new(factory: TFactory) -> Self {
         Self {
             factory,
-            _worker: Default::default(),
             _action: Default::default(),
         }
     }
 }
-impl<TFactory, TWorker, TAction> WorkerFactory<TAction>
-    for BoxedWorkerFactory<TFactory, TWorker, TAction>
+impl<TAction> WorkerFactory<TAction> for BoxedWorkerFactory<TAction>
 where
-    TFactory: WorkerFactory<TAction, Worker = TWorker>,
-    TWorker: Worker<TAction> + Send + 'static,
     TAction: Action + Send + 'static,
 {
-    type Worker = WorkerInstance<TAction>;
+    type Worker = BoxedWorkerInstance<TAction>;
     fn create(&self) -> Self::Worker {
         Box::new(self.factory.create())
     }
 }
+impl<TFactory, TAction> WorkerFactory<TAction> for BoxedWorkerFactoryWrapper<TFactory, TAction>
+where
+    TFactory: WorkerFactory<TAction>,
+    TAction: Action + Send + 'static,
+{
+    type Worker = BoxedWorkerInstance<TAction>;
+    fn create(&self) -> Self::Worker {
+        Box::new(self.factory.create())
+    }
+}
+pub struct BoxedNoopWorkerFactory;
+impl<TAction> WorkerFactory<TAction> for BoxedNoopWorkerFactory
+where
+    TAction: Action + Send + 'static,
+{
+    type Worker = BoxedWorkerInstance<TAction>;
+    fn create(&self) -> Self::Worker {
+        Box::new(NoopWorker)
+    }
+}
 
-pub type WorkerInstance<TAction> = Box<dyn Worker<TAction> + Send + 'static>;
-impl<TAction: Action + Send + 'static> Worker<TAction> for WorkerInstance<TAction> {
+pub type BoxedWorkerInstance<TAction> = Box<dyn Worker<TAction>>;
+impl<TAction> Worker<TAction> for BoxedWorkerInstance<TAction>
+where
+    TAction: Action + Send + 'static,
+{
     fn handle(
         &mut self,
         queue: WorkerMessageQueue<TAction>,
@@ -430,16 +765,9 @@ impl<TAction: Action + Send + 'static> Worker<TAction> for WorkerInstance<TActio
     }
 }
 
-pub fn compose_actors<T: Action, T1: Actor<T>, T2: Actor<T>>(
-    left: T1,
-    right: T2,
-) -> ChainedActor<T, T1, T2> {
-    ChainedActor::new(left, right)
-}
-
-pub fn find_earliest_typed_message<'a, T: Action, TAction: Action + InboundAction<T>>(
+pub fn find_earliest_typed_message<'a, V, TAction: InboundAction<V>>(
     queue: &mut WorkerMessageQueue<TAction>,
-) -> (Option<(T, MessageData)>, WorkerMessageQueue<TAction>) {
+) -> (Option<(V, MessageData)>, WorkerMessageQueue<TAction>) {
     let mut preceding_actions = WorkerMessageQueue::default();
     while let Some((action, metadata)) = queue.pop_front() {
         match action.try_into_type() {
@@ -454,9 +782,9 @@ pub fn find_earliest_typed_message<'a, T: Action, TAction: Action + InboundActio
     (None, preceding_actions)
 }
 
-pub fn find_latest_typed_message<'a, T: Action, TAction: Action + InboundAction<T>>(
+pub fn find_latest_typed_message<'a, V, TAction: InboundAction<V>>(
     queue: &mut WorkerMessageQueue<TAction>,
-) -> (Option<(T, MessageData)>, WorkerMessageQueue<TAction>) {
+) -> (Option<(V, MessageData)>, WorkerMessageQueue<TAction>) {
     let mut trailing_actions = WorkerMessageQueue::default();
     while let Some((action, metadata)) = queue.pop_back() {
         match action.try_into_type() {

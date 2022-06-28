@@ -612,36 +612,29 @@ mod test {
     use crate::lang::{CachedSharedTerm, SharedTermFactory, ValueTerm};
     use crate::parser::sexpr::parse;
     use crate::stdlib::Stdlib;
-    use rmp_serde::Serializer;
 
     #[test]
-    fn round_trip_serde() {
+    fn serialization() {
         let factory = SharedTermFactory::<Stdlib>::default();
         let allocator = DefaultAllocator::default();
 
-        let value = factory.create_value_term(ValueTerm::Int(5));
-        let serialized = serde_json::to_string(&value).unwrap();
-        let deser: CachedSharedTerm<Stdlib> = serde_json::from_str(&serialized).unwrap();
-        assert_eq!(value, deser);
+        let input = factory.create_value_term(ValueTerm::Int(5));
+        let serialized = serde_json::to_string(&input).unwrap();
+        let deserialized: CachedSharedTerm<Stdlib> = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(input, deserialized);
 
-        let value =
+        let input =
             factory.create_signal_term(allocator.create_signal_list([allocator.create_signal(
                 SignalType::Custom(String::from("foo")),
                 allocator.create_unit_list(factory.create_value_term(ValueTerm::Int(3))),
             )]));
-        let serialized = serde_json::to_string(&value).unwrap();
-        let deser: CachedSharedTerm<Stdlib> = serde_json::from_str(&serialized).unwrap();
-        assert_eq!(value, deser);
+        let serialized = serde_json::to_string(&input).unwrap();
+        let deserialized: CachedSharedTerm<Stdlib> = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(input, deserialized);
 
-        let value = parse("((lambda (foo) (* (+ 2 3) foo)) 2)", &factory, &allocator).unwrap();
-        let serialized = serde_json::to_string(&value).unwrap();
-        let deser: CachedSharedTerm<Stdlib> = serde_json::from_str(&serialized).unwrap();
-        assert_eq!(value, deser);
-
-        // Since serde_json is somewhat special lets also test rmp_serde
-        let mut buf = Vec::new();
-        value.serialize(&mut Serializer::new(&mut buf)).unwrap();
-        let deser: CachedSharedTerm<Stdlib> = rmp_serde::from_read_ref(&buf).unwrap();
-        assert_eq!(value, deser);
+        let input = parse("((lambda (foo) (* (+ 2 3) foo)) 2)", &factory, &allocator).unwrap();
+        let serialized = serde_json::to_string(&input).unwrap();
+        let deserialized: CachedSharedTerm<Stdlib> = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(input, deserialized);
     }
 }

@@ -3,15 +3,16 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use reflex_dispatcher::{Action, NamedAction, SerializableAction, SerializedAction};
 use reflex_json::JsonValue;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-#[derive(Clone, Debug)]
-pub enum GrpcHandlerAction {
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum GrpcHandlerActions {
     ConnectSuccess(GrpcHandlerConnectSuccessAction),
     ConnectError(GrpcHandlerConnectErrorAction),
 }
-impl Action for GrpcHandlerAction {}
-impl NamedAction for GrpcHandlerAction {
+impl Action for GrpcHandlerActions {}
+impl NamedAction for GrpcHandlerActions {
     fn name(&self) -> &'static str {
         match self {
             Self::ConnectSuccess(action) => action.name(),
@@ -19,60 +20,60 @@ impl NamedAction for GrpcHandlerAction {
         }
     }
 }
-impl SerializableAction for GrpcHandlerAction {
-    fn serialize(&self) -> SerializedAction {
+impl SerializableAction for GrpcHandlerActions {
+    fn to_json(&self) -> SerializedAction {
         match self {
-            Self::ConnectSuccess(action) => action.serialize(),
-            Self::ConnectError(action) => action.serialize(),
+            Self::ConnectSuccess(action) => action.to_json(),
+            Self::ConnectError(action) => action.to_json(),
         }
     }
 }
 
-impl From<GrpcHandlerConnectSuccessAction> for GrpcHandlerAction {
+impl From<GrpcHandlerConnectSuccessAction> for GrpcHandlerActions {
     fn from(value: GrpcHandlerConnectSuccessAction) -> Self {
         Self::ConnectSuccess(value)
     }
 }
-impl From<GrpcHandlerAction> for Option<GrpcHandlerConnectSuccessAction> {
-    fn from(value: GrpcHandlerAction) -> Self {
+impl From<GrpcHandlerActions> for Option<GrpcHandlerConnectSuccessAction> {
+    fn from(value: GrpcHandlerActions) -> Self {
         match value {
-            GrpcHandlerAction::ConnectSuccess(value) => Some(value),
+            GrpcHandlerActions::ConnectSuccess(value) => Some(value),
             _ => None,
         }
     }
 }
-impl<'a> From<&'a GrpcHandlerAction> for Option<&'a GrpcHandlerConnectSuccessAction> {
-    fn from(value: &'a GrpcHandlerAction) -> Self {
+impl<'a> From<&'a GrpcHandlerActions> for Option<&'a GrpcHandlerConnectSuccessAction> {
+    fn from(value: &'a GrpcHandlerActions) -> Self {
         match value {
-            GrpcHandlerAction::ConnectSuccess(value) => Some(value),
+            GrpcHandlerActions::ConnectSuccess(value) => Some(value),
             _ => None,
         }
     }
 }
 
-impl From<GrpcHandlerConnectErrorAction> for GrpcHandlerAction {
+impl From<GrpcHandlerConnectErrorAction> for GrpcHandlerActions {
     fn from(value: GrpcHandlerConnectErrorAction) -> Self {
         Self::ConnectError(value)
     }
 }
-impl From<GrpcHandlerAction> for Option<GrpcHandlerConnectErrorAction> {
-    fn from(value: GrpcHandlerAction) -> Self {
+impl From<GrpcHandlerActions> for Option<GrpcHandlerConnectErrorAction> {
+    fn from(value: GrpcHandlerActions) -> Self {
         match value {
-            GrpcHandlerAction::ConnectError(value) => Some(value),
+            GrpcHandlerActions::ConnectError(value) => Some(value),
             _ => None,
         }
     }
 }
-impl<'a> From<&'a GrpcHandlerAction> for Option<&'a GrpcHandlerConnectErrorAction> {
-    fn from(value: &'a GrpcHandlerAction) -> Self {
+impl<'a> From<&'a GrpcHandlerActions> for Option<&'a GrpcHandlerConnectErrorAction> {
+    fn from(value: &'a GrpcHandlerActions) -> Self {
         match value {
-            GrpcHandlerAction::ConnectError(value) => Some(value),
+            GrpcHandlerActions::ConnectError(value) => Some(value),
             _ => None,
         }
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct GrpcHandlerConnectSuccessAction {
     pub connection_id: Uuid,
     pub url: String,
@@ -84,7 +85,7 @@ impl NamedAction for GrpcHandlerConnectSuccessAction {
     }
 }
 impl SerializableAction for GrpcHandlerConnectSuccessAction {
-    fn serialize(&self) -> SerializedAction {
+    fn to_json(&self) -> SerializedAction {
         SerializedAction::from_iter([
             (
                 "connection_id",
@@ -95,7 +96,7 @@ impl SerializableAction for GrpcHandlerConnectSuccessAction {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct GrpcHandlerConnectErrorAction {
     pub connection_id: Uuid,
     pub url: String,
@@ -108,7 +109,7 @@ impl NamedAction for GrpcHandlerConnectErrorAction {
     }
 }
 impl SerializableAction for GrpcHandlerConnectErrorAction {
-    fn serialize(&self) -> SerializedAction {
+    fn to_json(&self) -> SerializedAction {
         SerializedAction::from_iter([
             (
                 "connection_id",

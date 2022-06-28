@@ -6,14 +6,15 @@ use std::marker::PhantomData;
 use futures::StreamExt;
 
 use crate::{
-    Action, Actor, ActorTransition, HandlerContext, InboundAction, MessageData, OperationStream,
-    OutboundAction, StateOperation, StateTransition, Worker, WorkerContext, WorkerFactory,
+    Action, Actor, ActorTransition, HandlerContext, InboundAction, MessageData, MiddlewareContext,
+    OperationStream, OutboundAction, PostMiddleware, PostMiddlewareTransition, PreMiddleware,
+    PreMiddlewareTransition, StateOperation, StateTransition, Worker, WorkerContext, WorkerFactory,
     WorkerMessageQueue, WorkerTransition,
 };
 
 #[derive(Clone, Copy)]
 pub struct NoopActor;
-impl<T: Action> Actor<T> for NoopActor {
+impl<TAction: Action> Actor<TAction> for NoopActor {
     type State = ();
     fn init(&self) -> Self::State {
         ()
@@ -21,11 +22,121 @@ impl<T: Action> Actor<T> for NoopActor {
     fn handle(
         &self,
         state: Self::State,
-        _action: &T,
+        _action: &TAction,
         _metadata: &MessageData,
         _context: &mut impl HandlerContext,
-    ) -> ActorTransition<Self::State, T> {
+    ) -> ActorTransition<Self::State, TAction> {
         ActorTransition::new(state, Default::default())
+    }
+}
+impl<TAction: Action> PreMiddleware<TAction> for NoopActor {
+    type State = ();
+    fn init(&self) -> Self::State {
+        ()
+    }
+    fn handle(
+        &self,
+        state: Self::State,
+        action: StateOperation<TAction>,
+        _metadata: &MessageData,
+        _context: &MiddlewareContext,
+    ) -> PreMiddlewareTransition<Self::State, TAction> {
+        PreMiddlewareTransition::new(state, action)
+    }
+}
+impl<TAction: Action> PostMiddleware<TAction> for NoopActor {
+    type State = ();
+    fn init(&self) -> Self::State {
+        ()
+    }
+    fn handle(
+        &self,
+        state: Self::State,
+        _action: StateOperation<TAction>,
+        _metadata: &MessageData,
+        _context: &MiddlewareContext,
+    ) -> PostMiddlewareTransition<Self::State> {
+        PostMiddlewareTransition::new(state)
+    }
+}
+
+impl<T, TAction> Actor<TAction> for Option<T>
+where
+    T: Actor<TAction>,
+    TAction: Action,
+{
+    type State = Option<T::State>;
+    fn init(&self) -> Self::State {
+        self.as_ref().map(|inner| inner.init())
+    }
+    fn handle(
+        &self,
+        state: Self::State,
+        action: &TAction,
+        metadata: &MessageData,
+        context: &mut impl HandlerContext,
+    ) -> ActorTransition<Self::State, TAction> {
+        match (self, state) {
+            (Some(inner), Some(state)) => {
+                let (state, actions) = inner.handle(state, action, metadata, context).into_parts();
+                ActorTransition::new(Some(state), actions)
+            }
+            (_, state) => ActorTransition::new(state, Default::default()),
+        }
+    }
+}
+impl<T, TAction> PreMiddleware<TAction> for Option<T>
+where
+    T: PreMiddleware<TAction>,
+    TAction: Action,
+{
+    type State = Option<T::State>;
+    fn init(&self) -> Self::State {
+        self.as_ref().map(|inner| inner.init())
+    }
+    fn handle(
+        &self,
+        state: Self::State,
+        operation: StateOperation<TAction>,
+        metadata: &MessageData,
+        context: &MiddlewareContext,
+    ) -> PreMiddlewareTransition<Self::State, TAction> {
+        match (self, state) {
+            (Some(inner), Some(state)) => {
+                let (state, operation) = inner
+                    .handle(state, operation, metadata, context)
+                    .into_parts();
+                PreMiddlewareTransition::new(Some(state), operation)
+            }
+            (_, state) => PreMiddlewareTransition::new(state, operation),
+        }
+    }
+}
+impl<T, TAction> PostMiddleware<TAction> for Option<T>
+where
+    T: PostMiddleware<TAction>,
+    TAction: Action,
+{
+    type State = Option<T::State>;
+    fn init(&self) -> Self::State {
+        self.as_ref().map(|inner| inner.init())
+    }
+    fn handle(
+        &self,
+        state: Self::State,
+        operation: StateOperation<TAction>,
+        metadata: &MessageData,
+        context: &MiddlewareContext,
+    ) -> PostMiddlewareTransition<Self::State> {
+        match (self, state) {
+            (Some(inner), Some(state)) => {
+                let state = inner
+                    .handle(state, operation, metadata, context)
+                    .into_inner();
+                PostMiddlewareTransition::new(Some(state))
+            }
+            (_, state) => PostMiddlewareTransition::new(state),
+        }
     }
 }
 
@@ -82,12 +193,213 @@ where
         }
     }
 }
+impl<T1, T2, TAction> PreMiddleware<TAction> for EitherActor<T1, T2>
+where
+    T1: PreMiddleware<TAction>,
+    T2: PreMiddleware<TAction>,
+    TAction: Action,
+{
+    type State = EitherActorState<T1::State, T2::State>;
+    fn init(&self) -> Self::State {
+        match self {
+            Self::Left(actor) => Self::State::Left(actor.init()),
+            Self::Right(actor) => Self::State::Right(actor.init()),
+        }
+    }
+    fn handle(
+        &self,
+        state: Self::State,
+        operation: StateOperation<TAction>,
+        metadata: &MessageData,
+        context: &MiddlewareContext,
+    ) -> PreMiddlewareTransition<Self::State, TAction> {
+        match (self, state) {
+            (Self::Left(actor), Self::State::Left(state)) => {
+                let (state, operation) = actor
+                    .handle(state, operation, metadata, context)
+                    .into_parts();
+                PreMiddlewareTransition::new(Self::State::Left(state), operation)
+            }
+            (Self::Right(actor), Self::State::Right(state)) => {
+                let (state, operation) = actor
+                    .handle(state, operation, metadata, context)
+                    .into_parts();
+                PreMiddlewareTransition::new(Self::State::Right(state), operation)
+            }
+            (_, state) => PreMiddlewareTransition::new(state, operation),
+        }
+    }
+}
+impl<T1, T2, TAction> PostMiddleware<TAction> for EitherActor<T1, T2>
+where
+    T1: PostMiddleware<TAction>,
+    T2: PostMiddleware<TAction>,
+    TAction: Action,
+{
+    type State = EitherActorState<T1::State, T2::State>;
+    fn init(&self) -> Self::State {
+        match self {
+            Self::Left(actor) => Self::State::Left(actor.init()),
+            Self::Right(actor) => Self::State::Right(actor.init()),
+        }
+    }
+    fn handle(
+        &self,
+        state: Self::State,
+        operation: StateOperation<TAction>,
+        metadata: &MessageData,
+        context: &MiddlewareContext,
+    ) -> PostMiddlewareTransition<Self::State> {
+        match (self, state) {
+            (Self::Left(actor), Self::State::Left(state)) => {
+                let state = actor
+                    .handle(state, operation, metadata, context)
+                    .into_inner();
+                PostMiddlewareTransition::new(Self::State::Left(state))
+            }
+            (Self::Right(actor), Self::State::Right(state)) => {
+                let state = actor
+                    .handle(state, operation, metadata, context)
+                    .into_inner();
+                PostMiddlewareTransition::new(Self::State::Right(state))
+            }
+            (_, state) => PostMiddlewareTransition::new(state),
+        }
+    }
+}
+
+pub struct ChainedActor<T1, T2> {
+    left: T1,
+    right: T2,
+}
+impl<T1: Clone, T2: Clone> Clone for ChainedActor<T1, T2> {
+    fn clone(&self) -> Self {
+        Self {
+            left: self.left.clone(),
+            right: self.right.clone(),
+        }
+    }
+}
+impl<T1, T2> ChainedActor<T1, T2> {
+    pub fn new(left: T1, right: T2) -> Self {
+        Self { left, right }
+    }
+}
+pub struct ChainedActorState<TAction, T1, T2>
+where
+    T1: Actor<TAction>,
+    T2: Actor<TAction>,
+    TAction: Action,
+{
+    left: T1::State,
+    right: T2::State,
+    _action: PhantomData<TAction>,
+}
+impl<T1, T2, TAction> Actor<TAction> for ChainedActor<T1, T2>
+where
+    T1: Actor<TAction>,
+    T2: Actor<TAction>,
+    TAction: Action,
+{
+    type State = ChainedActorState<TAction, T1, T2>;
+    fn init(&self) -> Self::State {
+        Self::State {
+            left: self.left.init(),
+            right: self.right.init(),
+            _action: Default::default(),
+        }
+    }
+    fn handle(
+        &self,
+        state: Self::State,
+        action: &TAction,
+        metadata: &MessageData,
+        context: &mut impl HandlerContext,
+    ) -> ActorTransition<Self::State, TAction> {
+        let Self::State {
+            left: left_state,
+            right: right_state,
+            ..
+        } = state;
+        let (left_state, left_actions) = self
+            .left
+            .handle(left_state, action, metadata, context)
+            .into_parts();
+        let (right_state, right_actions) = self
+            .right
+            .handle(right_state, action, metadata, context)
+            .into_parts();
+        ActorTransition::new(
+            Self::State {
+                left: left_state,
+                right: right_state,
+                _action: Default::default(),
+            },
+            StateTransition::new(left_actions.into_iter().chain(right_actions)),
+        )
+    }
+}
+pub struct ChainedMiddlewareState<TAction, T1, T2>
+where
+    T1: PreMiddleware<TAction>,
+    T2: PreMiddleware<TAction>,
+    TAction: Action,
+{
+    left: T1::State,
+    right: T2::State,
+    _action: PhantomData<TAction>,
+}
+impl<T1, T2, TAction> PreMiddleware<TAction> for ChainedActor<T1, T2>
+where
+    T1: PreMiddleware<TAction>,
+    T2: PreMiddleware<TAction>,
+    TAction: Action,
+{
+    type State = ChainedMiddlewareState<TAction, T1, T2>;
+    fn init(&self) -> Self::State {
+        Self::State {
+            left: self.left.init(),
+            right: self.right.init(),
+            _action: Default::default(),
+        }
+    }
+    fn handle(
+        &self,
+        state: Self::State,
+        operation: StateOperation<TAction>,
+        metadata: &MessageData,
+        context: &MiddlewareContext,
+    ) -> PreMiddlewareTransition<Self::State, TAction> {
+        let Self::State {
+            left: left_state,
+            right: right_state,
+            ..
+        } = state;
+        let (left_state, operation) = self
+            .left
+            .handle(left_state, operation, metadata, context)
+            .into_parts();
+        let (right_state, operation) = self
+            .right
+            .handle(right_state, operation, metadata, context)
+            .into_parts();
+        PreMiddlewareTransition::new(
+            Self::State {
+                left: left_state,
+                right: right_state,
+                _action: Default::default(),
+            },
+            operation,
+        )
+    }
+}
 
 pub struct FilteredActor<TOuter, TInner, TActor>
 where
-    TOuter: Action + InboundAction<TInner> + OutboundAction<TInner>,
-    TInner: Action,
+    TOuter: InboundAction<TInner> + OutboundAction<TInner>,
     TActor: Actor<TInner>,
+    TOuter: Action,
+    TInner: Action,
 {
     actor: TActor,
     _outer: PhantomData<TOuter>,
@@ -95,9 +407,9 @@ where
 }
 impl<TOuter, TInner, TActor> Clone for FilteredActor<TOuter, TInner, TActor>
 where
+    TActor: Actor<TInner> + Clone,
     TOuter: Action + InboundAction<TInner> + OutboundAction<TInner>,
     TInner: Action,
-    TActor: Actor<TInner> + Clone,
 {
     fn clone(&self) -> Self {
         Self {
@@ -109,9 +421,9 @@ where
 }
 impl<TOuter, TInner, TActor> FilteredActor<TOuter, TInner, TActor>
 where
+    TActor: Actor<TInner>,
     TOuter: Action + InboundAction<TInner> + OutboundAction<TInner>,
     TInner: Action,
-    TActor: Actor<TInner>,
 {
     pub fn new(actor: TActor) -> Self {
         Self {
@@ -123,9 +435,9 @@ where
 }
 impl<TOuter, TInner, TActor> Actor<TOuter> for FilteredActor<TOuter, TInner, TActor>
 where
+    TActor: Actor<TInner>,
     TOuter: Action + InboundAction<TInner> + OutboundAction<TInner> + Send + 'static,
     TInner: Action + Send + 'static,
-    TActor: Actor<TInner>,
 {
     type State = TActor::State;
     fn init(&self) -> Self::State {
@@ -155,10 +467,10 @@ where
 
 struct FilteredWorkerFactory<TOuter, TInner, TFactory, TWorker>
 where
-    TOuter: Action + InboundAction<TInner> + OutboundAction<TInner> + Send + 'static,
-    TInner: Action + Send + 'static,
-    TFactory: WorkerFactory<TInner, Worker = TWorker> + Send + 'static,
-    TWorker: Worker<TInner> + Send + 'static,
+    TFactory: WorkerFactory<TInner, Worker = TWorker>,
+    TWorker: Worker<TInner>,
+    TOuter: Action + InboundAction<TInner> + OutboundAction<TInner>,
+    TInner: Action,
 {
     factory: TFactory,
     _outer: PhantomData<TOuter>,
@@ -167,10 +479,10 @@ where
 }
 impl<TOuter, TInner, TFactory, TWorker> FilteredWorkerFactory<TOuter, TInner, TFactory, TWorker>
 where
-    TOuter: Action + InboundAction<TInner> + OutboundAction<TInner> + Send + 'static,
-    TInner: Action + Send + 'static,
-    TFactory: WorkerFactory<TInner, Worker = TWorker> + Send + 'static,
-    TWorker: Worker<TInner> + Send + 'static,
+    TFactory: WorkerFactory<TInner, Worker = TWorker>,
+    TWorker: Worker<TInner>,
+    TOuter: Action + InboundAction<TInner> + OutboundAction<TInner>,
+    TInner: Action,
 {
     fn new(factory: TFactory) -> Self {
         Self {
@@ -184,10 +496,10 @@ where
 impl<TOuter, TInner, TFactory, TWorker> WorkerFactory<TOuter>
     for FilteredWorkerFactory<TOuter, TInner, TFactory, TWorker>
 where
+    TFactory: WorkerFactory<TInner, Worker = TWorker>,
+    TWorker: Worker<TInner>,
     TOuter: Action + InboundAction<TInner> + OutboundAction<TInner> + Send + 'static,
     TInner: Action + Send + 'static,
-    TFactory: WorkerFactory<TInner, Worker = TWorker> + Send + 'static,
-    TWorker: Worker<TInner> + Send + 'static,
 {
     type Worker = FilteredWorker<TOuter, TInner, TWorker>;
     fn create(&self) -> Self::Worker {
@@ -197,9 +509,9 @@ where
 
 struct FilteredWorker<TOuter, TInner, TWorker>
 where
-    TOuter: Action + InboundAction<TInner> + OutboundAction<TInner>,
-    TInner: Action,
     TWorker: Worker<TInner>,
+    TOuter: InboundAction<TInner> + OutboundAction<TInner>,
+    TInner: Action,
 {
     worker: TWorker,
     _outer: PhantomData<TOuter>,
@@ -207,9 +519,9 @@ where
 }
 impl<TOuter, TInner, TWorker> FilteredWorker<TOuter, TInner, TWorker>
 where
+    TWorker: Worker<TInner>,
     TOuter: Action + InboundAction<TInner> + OutboundAction<TInner>,
     TInner: Action,
-    TWorker: Worker<TInner>,
 {
     fn new(worker: TWorker) -> Self {
         Self {
@@ -221,9 +533,9 @@ where
 }
 impl<TOuter, TInner, TWorker> Worker<TOuter> for FilteredWorker<TOuter, TInner, TWorker>
 where
+    TWorker: Worker<TInner>,
     TOuter: Action + InboundAction<TInner> + OutboundAction<TInner> + Send + 'static,
     TInner: Action + Send + 'static,
-    TWorker: Worker<TInner>,
 {
     fn handle(
         &mut self,
@@ -286,80 +598,5 @@ where
             FilteredWorkerFactory::<TOuter, TInner, _, _>::new(factory),
         ),
         StateOperation::Kill(pid) => StateOperation::<TOuter>::Kill(pid),
-    }
-}
-
-pub struct ChainedActor<TAction: Action, T1: Actor<TAction>, T2: Actor<TAction>> {
-    left: T1,
-    right: T2,
-    _action: PhantomData<TAction>,
-}
-impl<TAction, T1, T2> Clone for ChainedActor<TAction, T1, T2>
-where
-    TAction: Action,
-    T1: Actor<TAction> + Clone,
-    T2: Actor<TAction> + Clone,
-{
-    fn clone(&self) -> Self {
-        Self {
-            left: self.left.clone(),
-            right: self.right.clone(),
-            _action: Default::default(),
-        }
-    }
-}
-impl<T: Action, T1: Actor<T>, T2: Actor<T>> ChainedActor<T, T1, T2> {
-    pub fn new(left: T1, right: T2) -> Self {
-        Self {
-            left,
-            right,
-            _action: Default::default(),
-        }
-    }
-}
-pub struct ChainedActorState<TAction: Action, T1: Actor<TAction>, T2: Actor<TAction>> {
-    left: T1::State,
-    right: T2::State,
-    _action: PhantomData<TAction>,
-}
-impl<TAction: Action, T1: Actor<TAction>, T2: Actor<TAction>> Actor<TAction>
-    for ChainedActor<TAction, T1, T2>
-{
-    type State = ChainedActorState<TAction, T1, T2>;
-    fn init(&self) -> Self::State {
-        Self::State {
-            left: self.left.init(),
-            right: self.right.init(),
-            _action: Default::default(),
-        }
-    }
-    fn handle(
-        &self,
-        state: Self::State,
-        action: &TAction,
-        metadata: &MessageData,
-        context: &mut impl HandlerContext,
-    ) -> ActorTransition<Self::State, TAction> {
-        let Self::State {
-            left: left_state,
-            right: right_state,
-            ..
-        } = state;
-        let (left_state, left_actions) = self
-            .left
-            .handle(left_state, action, metadata, context)
-            .into_parts();
-        let (right_state, right_actions) = self
-            .right
-            .handle(right_state, action, metadata, context)
-            .into_parts();
-        ActorTransition::new(
-            Self::State {
-                left: left_state,
-                right: right_state,
-                _action: Default::default(),
-            },
-            StateTransition::new(left_actions.into_iter().chain(right_actions)),
-        )
     }
 }

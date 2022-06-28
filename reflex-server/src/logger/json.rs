@@ -4,7 +4,9 @@
 use std::marker::PhantomData;
 
 use chrono::{DateTime, Duration, SecondsFormat, Utc};
-use reflex_dispatcher::{Action, HandlerContext, MessageData, SerializableAction};
+use reflex_dispatcher::{
+    Action, MessageData, MiddlewareContext, ProcessId, SerializableAction, StateOperation,
+};
 use reflex_json::{JsonMap, JsonValue};
 
 use crate::{logger::ActionLogger, utils::sanitize::sanitize_json_value};
@@ -72,60 +74,74 @@ impl<TOut: std::io::Write, TAction: JsonLoggerAction> ActionLogger
     type Action = TAction;
     fn log(
         &mut self,
-        action: &Self::Action,
+        action: &StateOperation<Self::Action>,
         metadata: Option<&MessageData>,
-        context: Option<&impl HandlerContext>,
+        context: Option<&MiddlewareContext>,
     ) {
-        let serialized_message = JsonValue::Object(JsonMap::from_iter([
-            (
-                String::from("pid"),
-                match context {
-                    Some(context) => JsonValue::from(usize::from(context.pid())),
-                    None => JsonValue::Null,
-                },
-            ),
-            (
-                String::from("offset"),
-                match metadata {
-                    Some(metadata) => JsonValue::from(usize::from(metadata.offset)),
-                    None => JsonValue::Null,
-                },
-            ),
-            (
-                String::from("timestamp"),
-                match metadata.and_then(|metadata| self.startup_time.timestamp(metadata.timestamp))
-                {
-                    Some(timestamp) => {
-                        JsonValue::from(timestamp.to_rfc3339_opts(SecondsFormat::Millis, true))
-                    }
-                    None => JsonValue::Null,
-                },
-            ),
-            (
-                String::from("caller_pid"),
-                match context.and_then(|context| context.caller_pid()) {
-                    Some(pid) => JsonValue::from(usize::from(pid)),
-                    None => JsonValue::Null,
-                },
-            ),
-            (
-                String::from("parent_offset"),
-                match metadata.and_then(|metadata| metadata.parent) {
-                    Some(offset) => JsonValue::from(usize::from(offset)),
-                    None => JsonValue::Null,
-                },
-            ),
-            (
-                String::from("event"),
-                JsonValue::String(String::from(action.name())),
-            ),
-            (
-                String::from("args"),
-                sanitize_json_value(JsonValue::Object(JsonMap::from_iter(action.serialize()))),
-            ),
-        ]));
-        let _ = writeln!(self.output, "{}", serialized_message.to_string());
+        let serialized_message = match action {
+            StateOperation::Send(pid, action) => Some(serialize_action_operation(
+                action,
+                *pid,
+                metadata,
+                context,
+                &self.startup_time,
+            )),
+            _ => None,
+        };
+        if let Some(serialized_message) = serialized_message {
+            let _ = writeln!(self.output, "{}", serialized_message.to_string());
+        }
     }
+}
+
+fn serialize_action_operation<TAction: JsonLoggerAction>(
+    action: &TAction,
+    pid: ProcessId,
+    metadata: Option<&MessageData>,
+    context: Option<&MiddlewareContext>,
+    startup_time: &StartupTime,
+) -> JsonValue {
+    JsonValue::Object(JsonMap::from_iter([
+        (String::from("pid"), JsonValue::from(usize::from(pid))),
+        (
+            String::from("offset"),
+            match metadata {
+                Some(metadata) => JsonValue::from(usize::from(metadata.offset)),
+                None => JsonValue::Null,
+            },
+        ),
+        (
+            String::from("timestamp"),
+            match metadata.and_then(|metadata| startup_time.timestamp(metadata.timestamp)) {
+                Some(timestamp) => {
+                    JsonValue::from(timestamp.to_rfc3339_opts(SecondsFormat::Millis, true))
+                }
+                None => JsonValue::Null,
+            },
+        ),
+        (
+            String::from("caller_pid"),
+            match context.and_then(|context| context.caller_pid) {
+                Some(pid) => JsonValue::from(usize::from(pid)),
+                None => JsonValue::Null,
+            },
+        ),
+        (
+            String::from("parent_offset"),
+            match metadata.and_then(|metadata| metadata.parent) {
+                Some(offset) => JsonValue::from(usize::from(offset)),
+                None => JsonValue::Null,
+            },
+        ),
+        (
+            String::from("event"),
+            JsonValue::String(String::from(action.name())),
+        ),
+        (
+            String::from("args"),
+            sanitize_json_value(JsonValue::Object(JsonMap::from_iter(action.to_json()))),
+        ),
+    ]))
 }
 
 #[derive(Clone, Copy, Debug)]

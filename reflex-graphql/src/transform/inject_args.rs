@@ -3,13 +3,18 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use std::{collections::HashMap, iter::once};
 
-use graphql_parser::query::{
-    Definition, Document, Field, FragmentDefinition, FragmentSpread, Mutation, OperationDefinition,
-    Query, Selection, SelectionSet, Subscription, Value,
-};
 use reflex_json::JsonValue;
 
-use crate::{get_query_root_operation, GraphQlExtensions, GraphQlQueryTransform, GraphQlText};
+use crate::{
+    ast::{
+        common::Value,
+        query::{
+            Definition, Document, Field, FragmentDefinition, FragmentSpread, Mutation,
+            OperationDefinition, Query, Selection, SelectionSet, Subscription,
+        },
+    },
+    get_query_root_operation, GraphQlExtensions, GraphQlQuery, GraphQlQueryTransform,
+};
 
 #[derive(Clone, PartialEq, Debug)]
 pub struct InjectedQueryArguments {
@@ -19,11 +24,11 @@ pub struct InjectedQueryArguments {
 }
 #[derive(Clone, PartialEq, Debug)]
 pub struct NestedArgs {
-    value: Option<Vec<(String, Value<'static, String>)>>,
+    value: Option<Vec<(String, Value)>>,
     children: Vec<(String, NestedArgs)>,
 }
 
-type QueryFragments<'src, 'a, T> = HashMap<&'a T, &'a FragmentDefinition<'src, T>>;
+type QueryFragments<'a> = HashMap<&'a String, &'a FragmentDefinition>;
 
 /// Generates a nested tree of injected query arguments from the provided GraphQL template.
 ///
@@ -37,9 +42,12 @@ type QueryFragments<'src, 'a, T> = HashMap<&'a T, &'a FragmentDefinition<'src, T
 /// # Examples
 ///
 /// ```
-/// use reflex_graphql::transform::inject_args::{parse_argument_template, InjectQueryArgumentsGraphQlTransform};
+/// use reflex_graphql::{
+///   transform::inject_args::{parse_argument_template, InjectQueryArgumentsGraphQlTransform},
+///   GraphQlQuery,
+/// };
 ///
-/// let template = graphql_parser::parse_query("
+/// let template = GraphQlQuery::from(&graphql_parser::parse_query("
 ///     query {
 ///         ...QueryArguments
 ///     }
@@ -51,7 +59,7 @@ type QueryFragments<'src, 'a, T> = HashMap<&'a T, &'a FragmentDefinition<'src, T
 ///             lastLogin(ip: $ipAddress)
 ///         }
 ///     }
-/// ").unwrap();
+/// ").unwrap().into_static());
 ///
 /// let injected_args = parse_argument_template(&template, [
 ///     (String::from("username"), reflex_json::JsonValue::String(String::from("jdoe"))),
@@ -61,7 +69,7 @@ type QueryFragments<'src, 'a, T> = HashMap<&'a T, &'a FragmentDefinition<'src, T
 /// let transform = InjectQueryArgumentsGraphQlTransform::new(injected_args);
 /// ```
 pub fn parse_argument_template(
-    template: &Document<String>,
+    template: &GraphQlQuery,
     variables: impl IntoIterator<Item = (String, JsonValue)>,
 ) -> Result<InjectedQueryArguments, String> {
     let variables = variables.into_iter().collect::<HashMap<_, _>>();
@@ -122,10 +130,10 @@ pub fn parse_argument_template(
     })
 }
 
-fn parse_operation_root_argument_template<'src>(
-    selection_set: &SelectionSet<'src, String>,
+fn parse_operation_root_argument_template(
+    selection_set: &SelectionSet,
     variables: &HashMap<String, JsonValue>,
-    fragments: &HashMap<String, &FragmentDefinition<'src, String>>,
+    fragments: &HashMap<String, &FragmentDefinition>,
 ) -> Result<Option<NestedArgs>, String> {
     parse_selection_set_argument_template(selection_set, variables, fragments).map(|result| {
         result.map(|children| NestedArgs {
@@ -135,10 +143,10 @@ fn parse_operation_root_argument_template<'src>(
     })
 }
 
-fn parse_selection_set_argument_template<'src>(
-    selection_set: &SelectionSet<'src, String>,
+fn parse_selection_set_argument_template(
+    selection_set: &SelectionSet,
     variables: &HashMap<String, JsonValue>,
-    fragments: &HashMap<String, &FragmentDefinition<'src, String>>,
+    fragments: &HashMap<String, &FragmentDefinition>,
 ) -> Result<Option<Vec<(String, NestedArgs)>>, String> {
     let fields = selection_set
         .items
@@ -171,10 +179,10 @@ fn parse_selection_set_argument_template<'src>(
     }
 }
 
-fn parse_field_argument_template<'src>(
-    field: &Field<'src, String>,
+fn parse_field_argument_template(
+    field: &Field,
     variables: &HashMap<String, JsonValue>,
-    fragments: &HashMap<String, &FragmentDefinition<'src, String>>,
+    fragments: &HashMap<String, &FragmentDefinition>,
 ) -> Result<Option<NestedArgs>, String> {
     let injected_arguments = field
         .arguments
@@ -185,7 +193,7 @@ fn parse_field_argument_template<'src>(
                     .get(name)
                     .ok_or_else(|| format!("Unrecognized variable name: {}", name))
                     .and_then(|value| parse_json_value(value)),
-                _ => Ok(instantiate_template_arg_value(value)),
+                _ => Ok(value.clone()),
             }
             .map(|value| (String::from(key), value))
         })
@@ -217,9 +225,12 @@ fn parse_field_argument_template<'src>(
 /// # Examples
 ///
 /// ```
-/// use reflex_graphql::transform::inject_args::{parse_argument_template, InjectQueryArgumentsGraphQlTransform};
+/// use reflex_graphql::{
+///   transform::inject_args::{parse_argument_template, InjectQueryArgumentsGraphQlTransform},
+///   GraphQlQuery,
+/// };
 ///
-/// let template = graphql_parser::parse_query("
+/// let template = GraphQlQuery::from(&graphql_parser::parse_query("
 ///     query {
 ///         ...QueryArguments
 ///     }
@@ -231,7 +242,7 @@ fn parse_field_argument_template<'src>(
 ///             lastLogin(ip: $ipAddress)
 ///         }
 ///     }
-/// ").unwrap();
+/// ").unwrap().into_static());
 ///
 /// let injected_args = parse_argument_template(&template, [
 ///     (String::from("username"), reflex_json::JsonValue::String(String::from("jdoe"))),
@@ -248,11 +259,11 @@ impl InjectQueryArgumentsGraphQlTransform {
     }
 }
 impl GraphQlQueryTransform for InjectQueryArgumentsGraphQlTransform {
-    fn transform<'src, T: GraphQlText<'src>>(
+    fn transform(
         &self,
-        document: Document<'src, T>,
+        document: GraphQlQuery,
         extensions: GraphQlExtensions,
-    ) -> Result<(Document<'src, T>, GraphQlExtensions), String> {
+    ) -> Result<(GraphQlQuery, GraphQlExtensions), String> {
         inject_document_arguments(&document, &self.arguments)
             .map(|transformed| match transformed {
                 Some(document) => document,
@@ -262,10 +273,10 @@ impl GraphQlQueryTransform for InjectQueryArgumentsGraphQlTransform {
     }
 }
 
-fn inject_document_arguments<'src, T: GraphQlText<'src>>(
-    document: &Document<'src, T>,
+fn inject_document_arguments(
+    document: &Document,
     arguments: &InjectedQueryArguments,
-) -> Result<Option<Document<'src, T>>, String> {
+) -> Result<Option<Document>, String> {
     let fragments = document
         .definitions
         .iter()
@@ -273,7 +284,7 @@ fn inject_document_arguments<'src, T: GraphQlText<'src>>(
             Definition::Fragment(fragment) => Some((&fragment.name, fragment)),
             _ => None,
         })
-        .collect::<QueryFragments<'src, '_, T>>();
+        .collect::<QueryFragments<'_>>();
     get_query_root_operation(document).and_then(|operation| {
         match inject_operation_arguments(operation, arguments, &fragments) {
             None => Ok(None),
@@ -291,11 +302,11 @@ fn inject_document_arguments<'src, T: GraphQlText<'src>>(
     })
 }
 
-fn inject_operation_arguments<'src, T: GraphQlText<'src>>(
-    operation: &OperationDefinition<'src, T>,
+fn inject_operation_arguments(
+    operation: &OperationDefinition,
     arguments: &InjectedQueryArguments,
-    fragments: &QueryFragments<'src, '_, T>,
-) -> Option<OperationDefinition<'src, T>> {
+    fragments: &QueryFragments<'_>,
+) -> Option<OperationDefinition> {
     match operation {
         OperationDefinition::Query(operation) => arguments.query.as_ref().and_then(|arguments| {
             inject_selection_set_arguments(&operation.selection_set, arguments, fragments).map(
@@ -338,11 +349,11 @@ fn inject_operation_arguments<'src, T: GraphQlText<'src>>(
     }
 }
 
-fn inject_selection_set_arguments<'src, T: GraphQlText<'src>>(
-    selection_set: &SelectionSet<'src, T>,
+fn inject_selection_set_arguments(
+    selection_set: &SelectionSet,
     arguments: &NestedArgs,
-    fragments: &QueryFragments<'src, '_, T>,
-) -> Option<SelectionSet<'src, T>> {
+    fragments: &QueryFragments<'_>,
+) -> Option<SelectionSet> {
     collect_optionally_transformed_items(
         &selection_set.items,
         |item| inject_selection_arguments(item, arguments, fragments),
@@ -354,11 +365,11 @@ fn inject_selection_set_arguments<'src, T: GraphQlText<'src>>(
     })
 }
 
-fn inject_selection_arguments<'src, T: GraphQlText<'src>>(
-    selection: &Selection<'src, T>,
+fn inject_selection_arguments(
+    selection: &Selection,
     arguments: &NestedArgs,
-    fragments: &QueryFragments<'src, '_, T>,
-) -> Option<Vec<Selection<'src, T>>> {
+    fragments: &QueryFragments<'_>,
+) -> Option<Vec<Selection>> {
     match selection {
         Selection::Field(field) => inject_field_arguments(field, arguments, fragments)
             .map(|field| vec![Selection::Field(field)]),
@@ -369,32 +380,30 @@ fn inject_selection_arguments<'src, T: GraphQlText<'src>>(
     }
 }
 
-fn inject_fragment_spread_arguments<'src, T: GraphQlText<'src>>(
-    fragment: &FragmentSpread<'src, T>,
+fn inject_fragment_spread_arguments(
+    fragment: &FragmentSpread,
     arguments: &NestedArgs,
-    fragments: &QueryFragments<'src, '_, T>,
-) -> Option<Vec<Selection<'src, T>>> {
+    fragments: &QueryFragments<'_>,
+) -> Option<Vec<Selection>> {
     fragments.get(&fragment.fragment_name).and_then(|fragment| {
         inject_selection_set_arguments(&fragment.selection_set, arguments, fragments)
             .map(|selection_set| selection_set.items)
     })
 }
 
-fn inject_field_arguments<'src, T: GraphQlText<'src>>(
-    field: &Field<'src, T>,
+fn inject_field_arguments(
+    field: &Field,
     arguments: &NestedArgs,
-    fragments: &QueryFragments<'src, '_, T>,
-) -> Option<Field<'src, T>> {
+    fragments: &QueryFragments<'_>,
+) -> Option<Field> {
     find_named_argument(arguments, field.name.as_ref()).and_then(|(_, branch)| {
         let selection_set = inject_selection_set_arguments(&field.selection_set, branch, fragments);
         match &branch.value {
             Some(injected_args) => {
-                let injected_args = injected_args.iter().cloned().map(|(name, value)| {
-                    (
-                        T::from(String::from(name)),
-                        instantiate_runtime_arg_value(&value),
-                    )
-                });
+                let injected_args = injected_args
+                    .iter()
+                    .cloned()
+                    .map(|(name, value)| (String::from(name), value));
                 let arguments = field
                     .arguments
                     .iter()
@@ -425,59 +434,8 @@ fn find_named_argument<'a>(
         .find(|(existing_name, _)| name == *existing_name)
 }
 
-/// Converts a lifetime-bound GraphQL value into a static GraphQL value
-fn instantiate_template_arg_value<'a>(value: &Value<'a, String>) -> Value<'static, String> {
-    match &value {
-        Value::Variable(name) => Value::Variable(String::from(name)),
-        Value::Int(value) => Value::Int(value.clone()),
-        Value::Float(value) => Value::Float(*value),
-        Value::String(value) => Value::String(value.clone()),
-        Value::Boolean(value) => Value::Boolean(*value),
-        Value::Null => Value::Null,
-        Value::Enum(variant) => Value::Enum(String::from(variant)),
-        Value::List(items) => {
-            Value::List(items.iter().map(instantiate_template_arg_value).collect())
-        }
-        Value::Object(fields) => Value::Object(
-            fields
-                .iter()
-                .map(|(key, value)| (String::from(key), instantiate_template_arg_value(value)))
-                .collect(),
-        ),
-    }
-}
-
-/// Converts a static GraphQL value into a lifetime-bound GraphQL value
-fn instantiate_runtime_arg_value<'a, T: GraphQlText<'a>>(
-    value: &Value<'static, String>,
-) -> Value<'a, T> {
-    match &value {
-        Value::Variable(name) => Value::Variable(T::from(String::from(name))),
-        Value::Int(value) => Value::Int(value.clone()),
-        Value::Float(value) => Value::Float(*value),
-        Value::String(value) => Value::String(value.clone()),
-        Value::Boolean(value) => Value::Boolean(*value),
-        Value::Null => Value::Null,
-        Value::Enum(variant) => Value::Enum(T::from(String::from(variant))),
-        Value::List(items) => {
-            Value::List(items.iter().map(instantiate_runtime_arg_value).collect())
-        }
-        Value::Object(fields) => Value::Object(
-            fields
-                .iter()
-                .map(|(key, value)| {
-                    (
-                        T::from(String::from(key)),
-                        instantiate_runtime_arg_value(value),
-                    )
-                })
-                .collect(),
-        ),
-    }
-}
-
 /// Converts a JSON value into a static GraphQL value
-fn parse_json_value(value: &JsonValue) -> Result<Value<'static, String>, String> {
+fn parse_json_value(value: &JsonValue) -> Result<Value, String> {
     match value {
         JsonValue::Null => Ok(Value::Null),
         JsonValue::Bool(value) => Ok(Value::Boolean(*value)),
@@ -566,12 +524,10 @@ fn find_replace_list_item<T: Clone>(
 
 #[cfg(test)]
 mod tests {
-    use std::borrow::Cow;
-
     use graphql_parser::parse_query;
     use reflex_json::JsonValue;
 
-    use crate::GraphQlQueryTransform;
+    use crate::{GraphQlQuery, GraphQlQueryTransform};
 
     use super::{parse_argument_template, InjectQueryArgumentsGraphQlTransform};
 
@@ -580,9 +536,9 @@ mod tests {
         input: &str,
         expected: &str,
     ) {
-        let input = parse_query::<Cow<str>>(input).unwrap();
-        let expected = parse_query::<Cow<str>>(expected).unwrap();
-        let result = transform.transform(input, Default::default());
+        let input = parse_query::<String>(input).unwrap().into_static();
+        let expected = parse_query::<String>(expected).unwrap().into_static();
+        let result = transform.transform(GraphQlQuery::from(&input).into(), Default::default());
         assert_eq!(
             result.map(|(result, _)| format!("{}", result)),
             Ok(format!("{}", expected))
@@ -602,7 +558,7 @@ mod tests {
         }
         ";
         let injected_args = parse_argument_template(
-            &parse_query(template).unwrap(),
+            &GraphQlQuery::from(&parse_query(template).unwrap().into_static()),
             [
                 (
                     String::from("foo"),
@@ -669,7 +625,9 @@ mod tests {
             foo(bar: true)
         }
         ";
-        let injected_args = parse_argument_template(&parse_query(template).unwrap(), []).unwrap();
+        let injected_args =
+            parse_argument_template(&GraphQlQuery::from(&parse_query(template).unwrap()), [])
+                .unwrap();
         let transform = InjectQueryArgumentsGraphQlTransform::new(injected_args);
 
         let input = "query {

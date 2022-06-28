@@ -4,18 +4,19 @@
 use reflex::core::{EvaluationResult, Expression, StateToken};
 use reflex_dispatcher::{Action, MessageOffset, NamedAction, SerializableAction, SerializedAction};
 use reflex_json::JsonValue;
+use serde::{Deserialize, Serialize};
 
 use crate::{QueryEvaluationMode, QueryInvalidationStrategy};
 
-#[derive(Clone, Debug)]
-pub enum EvaluateAction<T: Expression> {
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum EvaluateActions<T: Expression> {
     Start(EvaluateStartAction<T>),
     Update(EvaluateUpdateAction<T>),
     Stop(EvaluateStopAction),
     Result(EvaluateResultAction<T>),
 }
-impl<T: Expression> Action for EvaluateAction<T> {}
-impl<T: Expression> NamedAction for EvaluateAction<T> {
+impl<T: Expression> Action for EvaluateActions<T> {}
+impl<T: Expression> NamedAction for EvaluateActions<T> {
     fn name(&self) -> &'static str {
         match self {
             Self::Start(action) => action.name(),
@@ -25,106 +26,106 @@ impl<T: Expression> NamedAction for EvaluateAction<T> {
         }
     }
 }
-impl<T: Expression> SerializableAction for EvaluateAction<T> {
-    fn serialize(&self) -> SerializedAction {
+impl<T: Expression> SerializableAction for EvaluateActions<T> {
+    fn to_json(&self) -> SerializedAction {
         match self {
-            Self::Start(action) => action.serialize(),
-            Self::Update(action) => action.serialize(),
-            Self::Stop(action) => action.serialize(),
-            Self::Result(action) => action.serialize(),
+            Self::Start(action) => action.to_json(),
+            Self::Update(action) => action.to_json(),
+            Self::Stop(action) => action.to_json(),
+            Self::Result(action) => action.to_json(),
         }
     }
 }
 
-impl<T: Expression> From<EvaluateStartAction<T>> for EvaluateAction<T> {
+impl<T: Expression> From<EvaluateStartAction<T>> for EvaluateActions<T> {
     fn from(value: EvaluateStartAction<T>) -> Self {
         Self::Start(value)
     }
 }
-impl<T: Expression> From<EvaluateAction<T>> for Option<EvaluateStartAction<T>> {
-    fn from(value: EvaluateAction<T>) -> Self {
+impl<T: Expression> From<EvaluateActions<T>> for Option<EvaluateStartAction<T>> {
+    fn from(value: EvaluateActions<T>) -> Self {
         match value {
-            EvaluateAction::Start(value) => Some(value),
+            EvaluateActions::Start(value) => Some(value),
             _ => None,
         }
     }
 }
-impl<'a, T: Expression> From<&'a EvaluateAction<T>> for Option<&'a EvaluateStartAction<T>> {
-    fn from(value: &'a EvaluateAction<T>) -> Self {
+impl<'a, T: Expression> From<&'a EvaluateActions<T>> for Option<&'a EvaluateStartAction<T>> {
+    fn from(value: &'a EvaluateActions<T>) -> Self {
         match value {
-            EvaluateAction::Start(value) => Some(value),
+            EvaluateActions::Start(value) => Some(value),
             _ => None,
         }
     }
 }
 
-impl<T: Expression> From<EvaluateUpdateAction<T>> for EvaluateAction<T> {
+impl<T: Expression> From<EvaluateUpdateAction<T>> for EvaluateActions<T> {
     fn from(value: EvaluateUpdateAction<T>) -> Self {
         Self::Update(value)
     }
 }
-impl<T: Expression> From<EvaluateAction<T>> for Option<EvaluateUpdateAction<T>> {
-    fn from(value: EvaluateAction<T>) -> Self {
+impl<T: Expression> From<EvaluateActions<T>> for Option<EvaluateUpdateAction<T>> {
+    fn from(value: EvaluateActions<T>) -> Self {
         match value {
-            EvaluateAction::Update(value) => Some(value),
+            EvaluateActions::Update(value) => Some(value),
             _ => None,
         }
     }
 }
-impl<'a, T: Expression> From<&'a EvaluateAction<T>> for Option<&'a EvaluateUpdateAction<T>> {
-    fn from(value: &'a EvaluateAction<T>) -> Self {
+impl<'a, T: Expression> From<&'a EvaluateActions<T>> for Option<&'a EvaluateUpdateAction<T>> {
+    fn from(value: &'a EvaluateActions<T>) -> Self {
         match value {
-            EvaluateAction::Update(value) => Some(value),
+            EvaluateActions::Update(value) => Some(value),
             _ => None,
         }
     }
 }
 
-impl<T: Expression> From<EvaluateStopAction> for EvaluateAction<T> {
+impl<T: Expression> From<EvaluateStopAction> for EvaluateActions<T> {
     fn from(value: EvaluateStopAction) -> Self {
         Self::Stop(value)
     }
 }
-impl<T: Expression> From<EvaluateAction<T>> for Option<EvaluateStopAction> {
-    fn from(value: EvaluateAction<T>) -> Self {
+impl<T: Expression> From<EvaluateActions<T>> for Option<EvaluateStopAction> {
+    fn from(value: EvaluateActions<T>) -> Self {
         match value {
-            EvaluateAction::Stop(value) => Some(value),
+            EvaluateActions::Stop(value) => Some(value),
             _ => None,
         }
     }
 }
-impl<'a, T: Expression> From<&'a EvaluateAction<T>> for Option<&'a EvaluateStopAction> {
-    fn from(value: &'a EvaluateAction<T>) -> Self {
+impl<'a, T: Expression> From<&'a EvaluateActions<T>> for Option<&'a EvaluateStopAction> {
+    fn from(value: &'a EvaluateActions<T>) -> Self {
         match value {
-            EvaluateAction::Stop(value) => Some(value),
+            EvaluateActions::Stop(value) => Some(value),
             _ => None,
         }
     }
 }
 
-impl<T: Expression> From<EvaluateResultAction<T>> for EvaluateAction<T> {
+impl<T: Expression> From<EvaluateResultAction<T>> for EvaluateActions<T> {
     fn from(value: EvaluateResultAction<T>) -> Self {
         Self::Result(value)
     }
 }
-impl<T: Expression> From<EvaluateAction<T>> for Option<EvaluateResultAction<T>> {
-    fn from(value: EvaluateAction<T>) -> Self {
+impl<T: Expression> From<EvaluateActions<T>> for Option<EvaluateResultAction<T>> {
+    fn from(value: EvaluateActions<T>) -> Self {
         match value {
-            EvaluateAction::Result(value) => Some(value),
+            EvaluateActions::Result(value) => Some(value),
             _ => None,
         }
     }
 }
-impl<'a, T: Expression> From<&'a EvaluateAction<T>> for Option<&'a EvaluateResultAction<T>> {
-    fn from(value: &'a EvaluateAction<T>) -> Self {
+impl<'a, T: Expression> From<&'a EvaluateActions<T>> for Option<&'a EvaluateResultAction<T>> {
+    fn from(value: &'a EvaluateActions<T>) -> Self {
         match value {
-            EvaluateAction::Result(value) => Some(value),
+            EvaluateActions::Result(value) => Some(value),
             _ => None,
         }
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct EvaluateStartAction<T: Expression> {
     pub cache_id: StateToken,
     pub label: String,
@@ -139,7 +140,7 @@ impl<T: Expression> NamedAction for EvaluateStartAction<T> {
     }
 }
 impl<T: Expression> SerializableAction for EvaluateStartAction<T> {
-    fn serialize(&self) -> SerializedAction {
+    fn to_json(&self) -> SerializedAction {
         SerializedAction::from_iter([
             ("cache_id", JsonValue::from(self.cache_id)),
             ("label", JsonValue::from(self.label.clone())),
@@ -162,7 +163,7 @@ impl<T: Expression> SerializableAction for EvaluateStartAction<T> {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct EvaluateUpdateAction<T: Expression> {
     pub cache_id: StateToken,
     pub state_index: Option<MessageOffset>,
@@ -175,7 +176,7 @@ impl<T: Expression> NamedAction for EvaluateUpdateAction<T> {
     }
 }
 impl<T: Expression> SerializableAction for EvaluateUpdateAction<T> {
-    fn serialize(&self) -> SerializedAction {
+    fn to_json(&self) -> SerializedAction {
         SerializedAction::from_iter([
             ("cache_id", JsonValue::from(self.cache_id)),
             (
@@ -193,7 +194,7 @@ impl<T: Expression> SerializableAction for EvaluateUpdateAction<T> {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct EvaluateStopAction {
     pub cache_id: StateToken,
 }
@@ -204,12 +205,12 @@ impl NamedAction for EvaluateStopAction {
     }
 }
 impl SerializableAction for EvaluateStopAction {
-    fn serialize(&self) -> SerializedAction {
+    fn to_json(&self) -> SerializedAction {
         SerializedAction::from_iter([("cache_id", JsonValue::from(self.cache_id))])
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct EvaluateResultAction<T: Expression> {
     pub cache_id: StateToken,
     pub state_index: Option<MessageOffset>,
@@ -222,7 +223,7 @@ impl<T: Expression> NamedAction for EvaluateResultAction<T> {
     }
 }
 impl<T: Expression> SerializableAction for EvaluateResultAction<T> {
-    fn serialize(&self) -> SerializedAction {
+    fn to_json(&self) -> SerializedAction {
         SerializedAction::from_iter([
             ("cache_id", JsonValue::from(self.cache_id)),
             (

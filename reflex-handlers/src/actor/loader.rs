@@ -527,10 +527,14 @@ where
                 let batch = loader_state.active_batches.get_mut(batch_keys)?;
                 let (value, _) = match update {
                     StateUpdate::Value(value) => parse_evaluate_effect_result(value, &self.factory),
-                    StateUpdate::Patch(updater) => parse_evaluate_effect_result(
-                        &updater(batch.latest_result.as_ref()),
-                        &self.factory,
-                    ),
+                    StateUpdate::Patch(operation) => {
+                        let updated_value = operation.apply(
+                            batch.latest_result.as_ref(),
+                            &self.factory,
+                            &self.allocator,
+                        );
+                        parse_evaluate_effect_result(&updated_value, &self.factory)
+                    }
                 }?
                 .into_parts();
                 batch.latest_result.replace(value.clone());

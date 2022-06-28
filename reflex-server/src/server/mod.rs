@@ -7,9 +7,8 @@ pub mod actor;
 pub(crate) mod playground;
 pub(crate) mod utils;
 
-pub use self::actor::http_graphql_server::{
-    HttpGraphQlServerQueryTransform, NoopHttpGraphQlServerQueryTransform,
+pub use self::actor::{
+    graphql_server::*, http_graphql_server::*, opentelemetry::*, query_inspector_server::*,
+    server::*, session_playback_server::*, telemetry::*, websocket_graphql_server::*,
 };
-pub use self::actor::websocket_graphql_server::{
-    NoopWebSocketGraphQlServerQueryTransform, WebSocketGraphQlServerQueryTransform,
-};
+pub use self::utils::*;

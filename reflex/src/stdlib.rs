@@ -131,7 +131,7 @@ mod subtract;
 mod values;
 
 #[derive(Hash, Eq, PartialEq, Clone, Copy, Debug, Serialize, Deserialize, EnumIter)]
-#[serde(tag = "type")]
+#[serde(tag = "uid")]
 pub enum Stdlib {
     Abs,
     Add,

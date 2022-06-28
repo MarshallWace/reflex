@@ -19,7 +19,6 @@ pub type IntValue = i32;
 pub type FloatValue = f64;
 
 #[derive(PartialEq, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", content = "value")]
 pub enum ValueTerm<TString: StringValue> {
     Null,
     Boolean(bool),

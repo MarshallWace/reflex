@@ -17,6 +17,3 @@ strum = "0.22"
 strum_macros = "0.22"
 tracing = { version = "0.1.0", features = ["release_max_level_info"] }
 uuid = { version = "1.0.0-alpha.1", features = ["macro-diagnostics", "serde"] }
-
-[dev-dependencies]
-rmp-serde = "0.15"

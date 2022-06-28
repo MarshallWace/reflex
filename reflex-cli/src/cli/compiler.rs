@@ -32,7 +32,6 @@ pub struct CompilerCliOptions {
 
 pub enum OutputFormat {
     Json,
-    Rmp,
     Debug,
 }
 impl FromStr for OutputFormat {
@@ -40,7 +39,6 @@ impl FromStr for OutputFormat {
     fn from_str(input: &str) -> Result<Self, Self::Err> {
         match input.to_lowercase().as_str() {
             "json" => Ok(Self::Json),
-            "rmp" => Ok(Self::Rmp),
             "log" | "debug" => Ok(Self::Debug),
             _ => Err(anyhow!("Unknown syntax {}", input)),
         }
@@ -79,7 +77,6 @@ where
     )?;
     match options.output_format {
         OutputFormat::Json => serde_json::to_writer(output, &program)?,
-        OutputFormat::Rmp => rmp_serde::encode::write(&mut output, &program)?,
         OutputFormat::Debug => write!(output, "{}", &program)?,
     }
     Ok(())

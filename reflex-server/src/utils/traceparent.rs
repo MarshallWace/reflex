@@ -5,6 +5,7 @@ use opentelemetry::{
     sdk,
     trace::{IdGenerator, SpanId, TraceFlags, TraceId},
 };
+use serde::{Deserialize, Serialize};
 
 #[derive(PartialEq, Eq, Clone, Copy, Debug, Hash)]
 pub struct Traceparent {
@@ -37,6 +38,45 @@ impl std::fmt::Display for Traceparent {
             "{}-{}-{}-{}",
             version, self.trace_id, self.span_id, flags
         )
+    }
+}
+impl serde::Serialize for Traceparent {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        SerializedTraceparent::from(self).serialize(serializer)
+    }
+}
+impl<'de> serde::Deserialize<'de> for Traceparent {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        SerializedTraceparent::deserialize(deserializer).map(Into::into)
+    }
+}
+#[derive(Debug, Serialize, Deserialize)]
+struct SerializedTraceparent {
+    trace_id: [u8; 16],
+    span_id: [u8; 8],
+}
+impl<'a> From<&'a Traceparent> for SerializedTraceparent {
+    fn from(value: &'a Traceparent) -> Self {
+        let Traceparent { trace_id, span_id } = value;
+        SerializedTraceparent {
+            trace_id: trace_id.clone().to_bytes(),
+            span_id: span_id.clone().to_bytes(),
+        }
+    }
+}
+impl From<SerializedTraceparent> for Traceparent {
+    fn from(value: SerializedTraceparent) -> Self {
+        let SerializedTraceparent { trace_id, span_id } = value;
+        Self {
+            trace_id: TraceId::from_bytes(trace_id),
+            span_id: SpanId::from_bytes(span_id),
+        }
     }
 }
 

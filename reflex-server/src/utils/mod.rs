@@ -3,5 +3,7 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 pub mod operation;
 pub mod sanitize;
+pub mod serialize;
+pub mod server;
 pub mod traceparent;
 pub mod transform;

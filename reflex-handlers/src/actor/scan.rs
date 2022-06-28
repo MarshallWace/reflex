@@ -371,10 +371,14 @@ where
                         StateUpdate::Value(value) => {
                             parse_evaluate_effect_result(value, &self.factory)
                         }
-                        StateUpdate::Patch(updater) => parse_evaluate_effect_result(
-                            &updater(reducer_state.source_value.as_ref()),
-                            &self.factory,
-                        ),
+                        StateUpdate::Patch(operation) => {
+                            let updated_value = operation.apply(
+                                reducer_state.source_value.as_ref(),
+                                &self.factory,
+                                &self.allocator,
+                            );
+                            parse_evaluate_effect_result(&updated_value, &self.factory)
+                        }
                     }?
                     .into_parts();
                     reducer_state.source_value.replace(value.clone());
@@ -393,10 +397,14 @@ where
                         StateUpdate::Value(value) => {
                             parse_evaluate_effect_result(value, &self.factory)
                         }
-                        StateUpdate::Patch(updater) => parse_evaluate_effect_result(
-                            &updater(Some(&reducer_state.state_value)),
-                            &self.factory,
-                        ),
+                        StateUpdate::Patch(operation) => {
+                            let updated_value = operation.apply(
+                                Some(&reducer_state.state_value),
+                                &self.factory,
+                                &self.allocator,
+                            );
+                            parse_evaluate_effect_result(&updated_value, &self.factory)
+                        }
                     }?
                     .into_parts();
                     reducer_state.state_value = value.clone();

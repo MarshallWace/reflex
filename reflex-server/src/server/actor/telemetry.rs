@@ -33,13 +33,15 @@ use reflex_utils::partition_results;
 use uuid::Uuid;
 
 use crate::{
-    middleware::action::telemetry::{
-        TelemetryMiddlewareTransactionEndAction, TelemetryMiddlewareTransactionStartAction,
-        TelemetryTransaction,
-    },
-    server::action::graphql_server::{
-        GraphQlServerParseSuccessAction, GraphQlServerSubscribeAction,
-        GraphQlServerUnsubscribeAction,
+    server::action::{
+        graphql_server::{
+            GraphQlServerParseSuccessAction, GraphQlServerSubscribeAction,
+            GraphQlServerUnsubscribeAction,
+        },
+        telemetry::{
+            TelemetryMiddlewareTransactionEndAction, TelemetryMiddlewareTransactionStartAction,
+            TelemetryTransaction,
+        },
     },
     utils::{
         sanitize::sanitize_json_value,
@@ -636,9 +638,11 @@ where
                     .map(|effect_state| {
                         let value = match update {
                             StateUpdate::Value(value) => value.clone(),
-                            StateUpdate::Patch(updater) => {
-                                updater(effect_state.latest_value.as_ref())
-                            }
+                            StateUpdate::Patch(operation) => operation.apply(
+                                effect_state.latest_value.as_ref(),
+                                &self.factory,
+                                &self.allocator,
+                            ),
                         };
                         effect_state.latest_value.replace(value);
                         if effect_state.query_result.is_some() {

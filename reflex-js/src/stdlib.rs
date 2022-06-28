@@ -48,7 +48,6 @@ mod throw;
 mod to_string;
 
 #[derive(Hash, Eq, PartialEq, Clone, Copy, Debug, Serialize, Deserialize, EnumIter)]
-#[serde(tag = "type")]
 pub enum Stdlib {
     Construct,
     DateConstructor,

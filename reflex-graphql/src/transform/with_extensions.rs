@@ -1,9 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use graphql_parser::query::Document;
-
-use crate::{GraphQlExtensions, GraphQlQueryTransform, GraphQlText};
+use crate::{GraphQlExtensions, GraphQlQuery, GraphQlQueryTransform};
 
 pub struct WithExtensionsGraphQlTransform {
     extensions: GraphQlExtensions,
@@ -14,11 +12,11 @@ impl WithExtensionsGraphQlTransform {
     }
 }
 impl GraphQlQueryTransform for WithExtensionsGraphQlTransform {
-    fn transform<'src, T: GraphQlText<'src>>(
+    fn transform(
         &self,
-        document: Document<'src, T>,
+        document: GraphQlQuery,
         extensions: GraphQlExtensions,
-    ) -> Result<(Document<'src, T>, GraphQlExtensions), String> {
+    ) -> Result<(GraphQlQuery, GraphQlExtensions), String> {
         let extensions = {
             let mut combined_extensions = extensions;
             combined_extensions.extend(

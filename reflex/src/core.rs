@@ -553,7 +553,7 @@ where
     where
         S: serde::Serializer,
     {
-        Into::<SerializedExpressionList<T>>::into(self).serialize(serializer)
+        SerializedExpressionList::from(self).serialize(serializer)
     }
 }
 impl<'de, T: Expression> serde::Deserialize<'de> for ExpressionList<T>
@@ -564,21 +564,21 @@ where
     where
         D: serde::Deserializer<'de>,
     {
-        Ok(SerializedExpressionList::<T>::deserialize(deserializer)?.into())
+        SerializedExpressionList::deserialize(deserializer).map(Into::into)
     }
 }
 #[derive(Debug, Serialize, Deserialize)]
 struct SerializedExpressionList<T: Expression>(Vec<T>);
-impl<'a, T: Expression> Into<SerializedExpressionList<T>> for &'a ExpressionList<T> {
-    fn into(self) -> SerializedExpressionList<T> {
-        let ExpressionList { items, .. } = self.clone();
-        SerializedExpressionList(items)
+impl<'a, T: Expression> From<&'a ExpressionList<T>> for SerializedExpressionList<T> {
+    fn from(value: &'a ExpressionList<T>) -> Self {
+        let ExpressionList { items, hash: _ } = value;
+        SerializedExpressionList(items.iter().cloned().collect())
     }
 }
-impl<T: Expression> Into<ExpressionList<T>> for SerializedExpressionList<T> {
-    fn into(self) -> ExpressionList<T> {
-        let SerializedExpressionList(items) = self;
-        ExpressionList::new(items)
+impl<T: Expression> From<SerializedExpressionList<T>> for ExpressionList<T> {
+    fn from(value: SerializedExpressionList<T>) -> Self {
+        let SerializedExpressionList(items) = value;
+        Self::new(items)
     }
 }
 
@@ -624,7 +624,7 @@ where
     where
         S: serde::Serializer,
     {
-        Into::<SerializedSignalList<T>>::into(self).serialize(serializer)
+        SerializedSignalList::from(self).serialize(serializer)
     }
 }
 impl<'de, T: Expression> serde::Deserialize<'de> for SignalList<T>
@@ -635,20 +635,21 @@ where
     where
         D: serde::Deserializer<'de>,
     {
-        Ok(SerializedSignalList::<T>::deserialize(deserializer)?.into())
+        SerializedSignalList::deserialize(deserializer).map(Into::into)
     }
 }
 #[derive(Debug, Serialize, Deserialize)]
 struct SerializedSignalList<T: Expression>(Vec<Signal<T>>);
-impl<'a, T: Expression> Into<SerializedSignalList<T>> for &'a SignalList<T> {
-    fn into(self) -> SerializedSignalList<T> {
-        SerializedSignalList(self.signals.iter().cloned().collect())
+impl<'a, T: Expression> From<&'a SignalList<T>> for SerializedSignalList<T> {
+    fn from(value: &'a SignalList<T>) -> Self {
+        let SignalList { signals } = value;
+        SerializedSignalList(signals.iter().cloned().collect())
     }
 }
-impl<T: Expression> Into<SignalList<T>> for SerializedSignalList<T> {
-    fn into(self) -> SignalList<T> {
-        let SerializedSignalList(signals) = self;
-        SignalList::new(signals)
+impl<T: Expression> From<SerializedSignalList<T>> for SignalList<T> {
+    fn from(value: SerializedSignalList<T>) -> Self {
+        let SerializedSignalList(signals) = value;
+        Self::new(signals)
     }
 }
 
@@ -1338,18 +1339,15 @@ impl<'a, T: Expression + Rewritable<T>> Substitutions<'a, T> {
 
 #[derive(Default, Hash, Eq, PartialEq, Clone, Debug)]
 pub struct DependencyList {
-    state_tokens: Option<OrdSet<StateToken>>,
+    state_tokens: OrdSet<StateToken>,
 }
 impl Extend<StateToken> for DependencyList {
     fn extend<T: IntoIterator<Item = StateToken>>(&mut self, state_tokens: T) {
-        if let Some(existing) = &mut self.state_tokens {
-            for state_token in state_tokens {
-                existing.insert(state_token);
-            }
+        if self.state_tokens.is_empty() {
+            self.state_tokens = OrdSet::from_iter(state_tokens);
         } else {
-            let state_tokens = OrdSet::from_iter(state_tokens);
-            if !state_tokens.is_empty() {
-                self.state_tokens = Some(state_tokens);
+            for state_token in state_tokens {
+                self.state_tokens.insert(state_token);
             }
         }
     }
@@ -1367,145 +1365,94 @@ impl DependencyList {
     }
     pub fn of(state_token: StateToken) -> Self {
         Self {
-            state_tokens: Some(OrdSet::unit(state_token)),
-        }
-    }
-    pub fn from(state_tokens: impl IntoIterator<Item = StateToken>) -> Self {
-        let dependencies = state_tokens.into_iter().collect::<OrdSet<_>>();
-        Self {
-            state_tokens: if dependencies.is_empty() {
-                None
-            } else {
-                Some(dependencies)
-            },
+            state_tokens: OrdSet::unit(state_token),
         }
     }
     pub fn len(&self) -> usize {
-        match &self.state_tokens {
-            None => 0,
-            Some(dependencies) => dependencies.len(),
-        }
+        self.state_tokens.len()
     }
     pub fn is_empty(&self) -> bool {
-        self.state_tokens.is_none()
+        self.state_tokens.is_empty()
     }
     pub fn contains(&self, state_token: StateToken) -> bool {
-        match &self.state_tokens {
-            None => false,
-            Some(dependencies) => dependencies.contains(&state_token),
-        }
+        self.state_tokens.contains(&state_token)
     }
     pub fn intersects(&self, entries: &BTreeSet<StateToken>) -> bool {
-        match &self.state_tokens {
-            None => false,
-            Some(dependencies) => dependencies
+        if self.state_tokens.is_empty() {
+            false
+        } else {
+            self.state_tokens
                 .iter()
-                .any(|dependency| entries.contains(dependency)),
+                .any(|dependency| entries.contains(dependency))
         }
     }
     pub fn insert(&mut self, state_token: StateToken) {
-        if let Some(state_tokens) = &mut self.state_tokens {
-            state_tokens.insert(state_token);
-        } else {
-            self.state_tokens = Some(OrdSet::unit(state_token));
-        }
+        self.state_tokens.insert(state_token);
     }
     pub fn union(self, other: Self) -> Self {
-        match self.state_tokens {
-            None => other,
-            Some(existing) => Self {
-                state_tokens: Some(match other.state_tokens {
-                    Some(other) => existing.union(other),
-                    None => existing,
-                }),
-            },
+        if self.is_empty() {
+            other
+        } else if other.is_empty() {
+            self
+        } else {
+            Self {
+                state_tokens: self.state_tokens.union(other.state_tokens),
+            }
         }
     }
-    pub fn iter(&self) -> DependencyListIterator {
-        match &self.state_tokens {
-            Some(dependencies) => DependencyListIterator::Some(dependencies.iter()),
-            None => DependencyListIterator::None,
+    pub fn iter(&self) -> impl Iterator<Item = StateToken> + ExactSizeIterator + '_ {
+        self.state_tokens.iter().copied()
+    }
+}
+impl FromIterator<StateToken> for DependencyList {
+    fn from_iter<T: IntoIterator<Item = StateToken>>(iter: T) -> Self {
+        Self {
+            state_tokens: iter.into_iter().collect::<OrdSet<_>>(),
         }
     }
 }
 impl IntoIterator for DependencyList {
     type Item = StateToken;
-    type IntoIter = ConsumingDependencyListIterator;
+    type IntoIter = im::ordset::ConsumingIter<StateToken>;
     fn into_iter(self) -> Self::IntoIter {
-        match self.state_tokens {
-            Some(dependencies) => {
-                let remaining = dependencies.len();
-                ConsumingDependencyListIterator::Some(dependencies.into_iter(), remaining)
-            }
-            None => ConsumingDependencyListIterator::None,
-        }
+        self.state_tokens.into_iter()
     }
 }
 impl<'a> IntoIterator for &'a DependencyList {
     type Item = StateToken;
-    type IntoIter = DependencyListIterator<'a>;
+    type IntoIter = std::iter::Copied<im::ordset::Iter<'a, StateToken>>;
     fn into_iter(self) -> Self::IntoIter {
-        self.iter()
+        self.state_tokens.iter().copied()
     }
 }
-pub enum ConsumingDependencyListIterator {
-    Some(im::ordset::ConsumingIter<StateToken>, usize),
-    None,
-}
-impl Iterator for ConsumingDependencyListIterator {
-    type Item = StateToken;
-    fn next(&mut self) -> Option<Self::Item> {
-        match self {
-            Self::Some(iter, remaining) => iter.next().map(|result| {
-                *remaining -= 1;
-                result
-            }),
-            Self::None => None,
-        }
-    }
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        let len = ExactSizeIterator::len(self);
-        (len, Some(len))
-    }
-    fn count(self) -> usize
+impl serde::Serialize for DependencyList {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
-        Self: Sized,
+        S: serde::Serializer,
     {
-        let len = ExactSizeIterator::len(&self);
-        len
+        SerializedDependencyList::from(self).serialize(serializer)
     }
 }
-impl ExactSizeIterator for ConsumingDependencyListIterator {
-    fn len(&self) -> usize {
-        match self {
-            Self::Some(_, remaining) => *remaining,
-            Self::None => 0,
-        }
+impl<'de> serde::Deserialize<'de> for DependencyList {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        SerializedDependencyList::deserialize(deserializer).map(Into::into)
     }
 }
-pub enum DependencyListIterator<'a> {
-    Some(im::ordset::Iter<'a, StateToken>),
-    None,
-}
-impl<'a> Iterator for DependencyListIterator<'a> {
-    type Item = StateToken;
-    fn next(&mut self) -> Option<Self::Item> {
-        match self {
-            Self::Some(iter) => iter.next().copied(),
-            Self::None => None,
-        }
-    }
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        let len = ExactSizeIterator::len(self);
-        (len, Some(len))
+#[derive(Debug, Serialize, Deserialize)]
+struct SerializedDependencyList(Vec<StateToken>);
+impl<'a> From<&'a DependencyList> for SerializedDependencyList {
+    fn from(value: &'a DependencyList) -> Self {
+        let DependencyList { state_tokens } = value;
+        SerializedDependencyList(state_tokens.iter().cloned().collect())
     }
 }
-impl<'a> ExactSizeIterator for DependencyListIterator<'a> {
-    fn len(&self) -> usize {
-        match self {
-            Self::Some(items) => items.len(),
-            Self::None => 0,
-        }
+impl From<SerializedDependencyList> for DependencyList {
+    fn from(value: SerializedDependencyList) -> Self {
+        let SerializedDependencyList(state_tokens) = value;
+        Self::from_iter(state_tokens)
     }
 }
 
@@ -1567,7 +1514,7 @@ pub fn evaluate<T: Expression + Rewritable<T> + Reducible<T> + Evaluate<T>>(
         .unwrap_or_else(|| EvaluationResult::new(expression.clone(), DependencyList::empty()))
 }
 
-#[derive(Clone, Eq, PartialEq, Debug)]
+#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 pub struct EvaluationResult<T: Expression> {
     result: T,
     dependencies: DependencyList,

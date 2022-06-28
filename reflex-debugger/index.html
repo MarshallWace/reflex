@@ -1,0 +1,863 @@
+<!-- SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com> -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw -->
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <title>Session Debugger</title>
+
+  <style>
+    html,
+    body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      font-family: monospace;
+    }
+  </style>
+
+  <style>
+    .App {
+      width: 100%;
+      height: 100%;
+      display: flex;
+      flex-direction: row;
+    }
+
+    .App__content {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+    }
+
+    .App__header {
+      flex: none;
+    }
+
+    .App__output {
+      width: 100%;
+      flex: 1;
+      padding-left: 1em;
+    }
+
+    .App__controls {
+      flex: none;
+      display: flex;
+      flex-direction: column;
+      border-left: 1px solid #CCC;
+      height: 100%;
+      width: 33%;
+      min-width: 320px;
+      overflow: hidden;
+    }
+
+    .App__controls__controls {
+      flex: none;
+      background-color: #EEE;
+      border-top: 1px solid #FFF;
+      border-bottom: 1px solid #CCC;
+    }
+
+
+    .App__controls__events {
+      flex: 1;
+      background-color: #FCFCFC;
+      padding-left: 1em;
+      padding-top: 0.5em;
+      overflow-x: hidden;
+      overflow-y: scroll;
+      box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.1);
+    }
+
+    .App__event_selected {
+      font-weight: bold;
+    }
+
+    .App__status {
+      display: flex;
+    }
+
+    .App__errors {
+      flex: 1;
+    }
+
+    .App__loading {
+      flex: none;
+    }
+  </style>
+
+  <style>
+    .ErrorMessage {
+      display: flex;
+    }
+
+    .ErrorMessage__message {
+      flex: 1;
+    }
+
+    .ErrorMessage__dismiss {
+      flex: none;
+    }
+  </style>
+
+  <style>
+    .PlaybackControls {
+      display: flex;
+      padding: 0.5em;
+    }
+
+    .PlaybackControls__timeline {
+      flex: 1;
+      margin-right: 0.5em;
+    }
+
+    .PlaybackControls__controls {
+      flex: none;
+      display: flex;
+    }
+
+    .PlaybackControls__control {
+      flex: none;
+    }
+
+    .PlaybackControls__control + .PlaybackControls__control {
+      margin-left: 0.25em;
+    }
+  </style>
+
+  <style>
+    .QueryOverview {}
+  </style>
+
+  <style>
+    .EffectOverview {}
+  </style>
+
+  <style>
+    .EventOverview {}
+  </style>
+
+  <style>
+    .Panel {}
+
+    .Panel__title {
+      padding: 0.25em 0;
+      user-select: none;
+    }
+
+    .Panel__content {}
+  </style>
+
+  <style>
+    .List {
+      list-style: none;
+      padding: 0 0 0 1.5em;
+    }
+  </style>
+
+  <style>
+    .ListItem {}
+  </style>
+
+  <style>
+    .LoadingIndicator {
+      display: inline-block;
+    }
+  </style>
+
+  <style>
+    .Code {
+      max-width: 500px;
+      overflow: hidden;
+    }
+  </style>
+
+</head>
+
+<body>
+  <script>
+    function createAction(type, payload) {
+      return { type, payload };
+    }
+
+    function transition(state, actions) {
+      return [state, actions || []];
+    }
+
+    class ComposedActor {
+      constructor(actors) {
+        this.actors = Array.from(Object.entries(actors));
+      }
+      init() {
+        return Object.fromEntries(this.actors.map(([name, actor]) => [name, actor.init()]));
+      }
+      handle(state, action, dispatch) {
+        return this.actors.reduce(
+          ([state, actions], [name, actor]) => {
+            const [actorState, actorActions] = actor.handle(state[name], action, dispatch);
+            state[name] = actorState;
+            actions.push(...actorActions);
+            return transition(state, actions);
+          },
+          transition({ ...state }),
+        );
+      };
+    }
+
+    class LogActor {
+      constructor(actor) {
+        this.actor = actor;
+      }
+      init() {
+        return this.actor.init();
+      }
+      handle(state, action, dispatch) {
+        const [updatedState, actions] = this.actor.handle(state, action, dispatch);
+        console.debug(action, updatedState);
+        return transition(updatedState, actions);
+      }
+    }
+
+    const AppAction = {
+      APP_INIT: 'AppAction:APP_INIT',
+      DISMISS_ERROR: 'AppAction:DISMISS_ERROR',
+    }
+
+    function createAppInitAction() {
+      return createAction(AppAction.APP_INIT, null)
+    }
+
+    function createDismissErrorAction(id) {
+      return createAction(AppAction.DISMISS_ERROR, { id })
+    }
+
+    const InspectorAction = {
+      LOAD_INSPECTOR_DATA: 'InspectorAction:LOAD_INSPECTOR_DATA',
+      LOAD_INSPECTOR_DATA_COMPLETE: 'InspectorAction:LOAD_INSPECTOR_DATA_COMPLETE',
+    };
+
+    function createLoadInspectorDataAction({ token }) {
+      return createAction(InspectorAction.LOAD_INSPECTOR_DATA, { token })
+    }
+
+    function createLoadInspectorDataCompleteAction({ token, queries, effects }) {
+      return createAction(InspectorAction.LOAD_INSPECTOR_DATA_COMPLETE, { token, queries, effects })
+    }
+
+    const DebugAction = {
+      LOAD_EVENTS: 'DebugAction:LOAD_EVENTS',
+      LOAD_EVENTS_COMPLETE: 'DebugAction:LOAD_EVENTS_COMPLETE',
+      DEBUG_OPERATION: 'DebugAction:DEBUG_OPERATION',
+      DEBUG_OPERATION_COMPLETE: 'DebugAction:DEBUG_OPERATION_COMPLETE',
+    };
+
+    const DebuggerMethod = {
+      STEP: 'step',
+      CONTINUE: 'continue',
+      END: 'end',
+      RESET: 'reset',
+    };
+
+    function createDebugLoadEventsAction({ token }) {
+      return createAction(DebugAction.LOAD_EVENTS, { token })
+    }
+
+    function createDebugLoadEventsCompleteAction({ token, events, currentFrame }) {
+      return createAction(DebugAction.LOAD_EVENTS_COMPLETE, { token, events, currentFrame })
+    }
+
+    function createDebugOperationAction({ action, token }) {
+      return createAction(DebugAction.DEBUG_OPERATION, { action, token })
+    }
+
+    function createDebugOperationCompleteAction({ token, action, currentFrame, numFrames }) {
+      return createAction(DebugAction.DEBUG_OPERATION_COMPLETE, { token, action, currentFrame, numFrames })
+    }
+
+    const FetchJsonAction = {
+      FETCH_JSON_START: 'FetchJsonAction:FETCH_JSON_START',
+      FETCH_JSON_ERROR: 'FetchJsonAction:FETCH_JSON_ERROR',
+      FETCH_JSON_COMPLETE: 'FetchJsonAction:FETCH_JSON_COMPLETE',
+    };
+
+    function createFetchJsonStartAction({ token, method, url, headers, body }) {
+      return createAction(FetchJsonAction.FETCH_JSON_START, { token, method, url, headers, body })
+    }
+
+    function createFetchJsonErrorAction({ token, status, headers, error }) {
+      return createAction(FetchJsonAction.FETCH_JSON_ERROR, { token, status, headers, error })
+    }
+
+    function createFetchJsonCompleteAction({ token, status, headers, value }) {
+      return createAction(FetchJsonAction.FETCH_JSON_COMPLETE, { token, status, headers, value })
+    }
+
+    class AppActor {
+      init() {
+        return {
+          currentFrame: 0,
+          numFrames: 0,
+          queries: [],
+          effects: [],
+          events: null,
+          loading: 0,
+          errors: [],
+          errorCount: 0,
+        };
+      }
+      handle(state, action, dispatch) {
+        switch (action.type) {
+          case AppAction.APP_INIT: return this.handleAppInit(state, action, dispatch);
+          case AppAction.DISMISS_ERROR: return this.handleDismissError(state, action, dispatch);
+          case InspectorAction.LOAD_INSPECTOR_DATA_COMPLETE: return this.handleLoadInspectorDataComplete(state, action, dispatch);
+          case DebugAction.LOAD_EVENTS_COMPLETE: return this.handleDebugLoadEventsComplete(state, action, dispatch);
+          case DebugAction.DEBUG_OPERATION_COMPLETE: return this.handleDebugOperationComplete(state, action, dispatch);
+          case FetchJsonAction.FETCH_JSON_START: return this.handleFetchJsonStart(state, action, dispatch);
+          case FetchJsonAction.FETCH_JSON_ERROR: return this.handleFetchJsonError(state, action, dispatch);
+          case FetchJsonAction.FETCH_JSON_COMPLETE: return this.handleFetchJsonComplete(state, action, dispatch);
+          default: return transition(state);
+        }
+      }
+      handleAppInit(state, action, dispatch) {
+        return transition(state, [
+          createDebugLoadEventsAction({ token: Symbol(action.type) }),
+          createLoadInspectorDataAction({ token: Symbol(action.type) }),
+        ]);
+      }
+      handleDismissError(state, action, dispatch) {
+        const { id } = action.payload;
+        const index = state.errors.findIndex((error) => error.id === id);
+        if (index === -1) return transition(state);
+        const updatedState = {
+          ...state,
+          errors: [
+            ...state.errors.slice(0, index),
+            ...state.errors.slice(index + 1),
+          ],
+        };
+        return transition(updatedState);
+      }
+      handleLoadInspectorDataComplete(state, action, dispatch) {
+        const { queries, effects } = action.payload;
+        const updatedState = {
+          ...state,
+          queries,
+          effects,
+        };
+        return transition(updatedState);
+      }
+      handleDebugLoadEventsComplete(state, action, dispatch) {
+        const { events, currentFrame } = action.payload;
+        const updatedState = {
+          ...state,
+          events,
+          currentFrame,
+        };
+        return transition(updatedState);
+      }
+      handleDebugOperationComplete(state, action, dispatch) {
+        const { action: debuggerAction, currentFrame } = action.payload;
+        const updatedState = {
+          ...state,
+          currentFrame,
+        };
+        return transition(updatedState, [createLoadInspectorDataAction({ token: Symbol(action.type) })]);
+      }
+      handleFetchJsonStart(state, action, dispatch) {
+        const updatedState = {
+          ...state,
+          loading: state.loading + 1,
+        };
+        return transition(updatedState);
+      }
+      handleFetchJsonError(state, action, dispatch) {
+        const { error } = action.payload;
+        const updatedState = {
+          ...state,
+          loading: state.loading - 1,
+          errorCount: state.errorCount + 1,
+          errors: [
+            ...state.errors,
+            { id: state.errorCount, message: error },
+          ],
+        };
+        return transition(updatedState);
+      }
+      handleFetchJsonComplete(state, action, dispatch) {
+        const updatedState = {
+          ...state,
+          loading: state.loading - 1,
+        };
+        return transition(updatedState);
+      }
+    }
+
+    class InspectorActor {
+      constructor(url) {
+        this.url = url;
+      }
+      init() {
+        return [];
+      }
+      handle(state, action, dispatch) {
+        switch (action.type) {
+          case InspectorAction.LOAD_INSPECTOR_DATA: return this.handleLoadInspectorDataMethod(state, action, dispatch);
+          case FetchJsonAction.FETCH_JSON_ERROR: return this.handleFetchJsonError(state, action, dispatch);
+          case FetchJsonAction.FETCH_JSON_COMPLETE: return this.handleFetchJsonComplete(state, action, dispatch);
+          default: return transition(state);
+        }
+      }
+      handleLoadInspectorDataMethod(state, action, dispatch) {
+        const { method } = action.payload;
+        const token = Symbol(method);
+        const updatedState = [...state, token];
+        return transition(updatedState, updatedState.length > 1 ? [] : [this.createFetchAction(token)]);
+      }
+      handleFetchJsonError(state, action, dispatch) {
+        const { token } = action.payload;
+        const [operation, ...updatedState] = state;
+        if (!operation || (token !== operation.token)) return transition(state);
+        const [nextOperation] = updatedState;
+        if (!nextOperation) return transition(updatedState);
+        return transition(updatedState, [this.createFetchAction(nextOperation)]);
+      }
+      handleFetchJsonComplete(state, action, dispatch) {
+        const { token, value } = action.payload;
+        const [activeToken, ...updatedState] = state;
+        if (!activeToken || (token !== activeToken)) return transition(state);
+        const { queries, effects } = value;
+        const [nextOperation] = updatedState;
+        return transition(updatedState, [
+          createLoadInspectorDataCompleteAction({ token, queries, effects }),
+          ...nextOperation ? [this.createFetchAction(nextOperation)] : [],
+        ]);
+      }
+      createFetchAction(token) {
+        return createFetchJsonStartAction({
+          method: 'GET',
+          url: this.url,
+          headers: null,
+          body: null,
+          token,
+        });
+      }
+    }
+
+    class DebugActor {
+      constructor(url) {
+        this.url = url;
+      }
+      init() {
+        return [];
+      }
+      handle(state, action, dispatch) {
+        switch (action.type) {
+          case DebugAction.LOAD_EVENTS: return this.handleLoadEventsOperation(state, action, dispatch);
+          case DebugAction.DEBUG_OPERATION: return this.handleDebugOperation(state, action, dispatch);
+          case FetchJsonAction.FETCH_JSON_ERROR: return this.handleFetchJsonError(state, action, dispatch);
+          case FetchJsonAction.FETCH_JSON_COMPLETE: return this.handleFetchJsonComplete(state, action, dispatch);
+          default: return transition(state);
+        }
+      }
+      handleLoadEventsOperation(state, action, dispatch) {
+        const token = Symbol(DebugAction.LOAD_EVENTS);
+        const operation = { action: null, token };
+        const updatedState = [...state, operation];
+        return transition(updatedState, updatedState.length > 1 ? [] : [this.createFetchAction(operation)]);
+      }
+      handleDebugOperation(state, action, dispatch) {
+        const { action: debugAction } = action.payload;
+        const token = Symbol(debugAction);
+        const operation = { action: debugAction, token };
+        const updatedState = [...state, operation];
+        return transition(updatedState, updatedState.length > 1 ? [] : [this.createFetchAction(operation)]);
+      }
+      handleFetchJsonError(state, action, dispatch) {
+        const { token } = action.payload;
+        const [operation, ...updatedState] = state;
+        if (!operation || (token !== operation.token)) return transition(state);
+        const [nextOperation] = updatedState;
+        if (!nextOperation) return transition(updatedState);
+        return transition(updatedState, [this.createFetchAction(nextOperation)]);
+      }
+      handleFetchJsonComplete(state, action, dispatch) {
+        const { token, value } = action.payload;
+        const [operation, ...updatedState] = state;
+        if (!operation || (token !== operation.token)) return transition(state);
+        const completeAction = (() => {
+          if (operation.action !== null) {
+            const { currentFrame } = value;
+            return createDebugOperationCompleteAction({ token, action: operation.action, currentFrame });
+          }
+          else {
+            const { events, currentFrame } = value;
+            return createDebugLoadEventsCompleteAction({ token, events, currentFrame });
+          }
+        })();
+        const [nextOperation] = updatedState;
+        return transition(updatedState, [
+          completeAction,
+          ...nextOperation ? [this.createFetchAction(nextOperation)] : [],
+        ]);
+      }
+      createFetchAction(operation) {
+        const { action, token } = operation;
+        if (action !== null) {
+          return createFetchJsonStartAction({
+            method: 'POST',
+            url: this.url,
+            headers: {
+              'Content-type': 'application/json',
+            },
+            body: JSON.stringify({ action }),
+            token,
+          });
+        } else {
+          return createFetchJsonStartAction({
+            method: 'GET',
+            url: this.url,
+            token,
+          });
+        }
+      }
+    }
+
+    class JsonLoaderActor {
+      init() {
+        return null;
+      }
+      handle(state, action, dispatch) {
+        switch (action.type) {
+          case FetchJsonAction.FETCH_JSON_START: return this.handleFetchJsonStartMethod(state, action, dispatch);
+          default: return transition(state);
+        }
+      }
+      handleFetchJsonStartMethod(state, action, dispatch) {
+        const { token, url, method, headers, body } = action.payload;
+        this.fetchJson({ token, url, method, headers, body }).then(dispatch);
+        return transition(state);
+      }
+      fetchJson({ token, url, method, headers, body }) {
+        return fetch(url, {
+          method,
+          headers: {
+            ...headers,
+            'Accept': 'application/json',
+          },
+          body,
+        })
+          .then((result) => {
+            const status = result.status;
+            const headers = Object.fromEntries(result.headers.entries());
+            if (!result.ok) {
+              return createFetchJsonErrorAction({
+                token,
+                status,
+                headers,
+                error: `HTTP error ${result.status} ${result.statusText}`,
+              });
+            }
+            return result.json().then((payload) => createFetchJsonCompleteAction({
+              token,
+              status,
+              headers,
+              value: payload,
+            }));
+          })
+          .catch((err) => createFetchJsonErrorAction({
+            token,
+            status: null,
+            headers: null,
+            error: err.message,
+          }));
+      }
+    }
+  </script>
+
+  <script type="text/babel">
+    const { useCallback, useEffect, useMemo, useState } = React;
+
+    function cx(...classnames) {
+      return classnames.filter(Boolean).join(' ');
+    }
+
+    function useActor(actor) {
+      const [[state, actions], setState] = useState([actor.init(), []]);
+      const dispatch = useCallback(
+        (action) => setState(([state, actions]) => [state, [...actions, action]]),
+        [actor],
+      );
+      useEffect(
+        () => {
+          if (actions.length === 0) return;
+          setState(([state, actions]) => actions.reduce(
+            ([existingState, existingActions], action) => {
+              const [state, actions] = actor.handle(existingState, action, dispatch)
+              return [state, [...existingActions, ...actions]];
+            },
+            [state, []]
+          ));
+        },
+        [actions, dispatch],
+      );
+      return [state, dispatch];
+    }
+
+    function App(props) {
+      const { env } = props;
+      const actor = useMemo(() => new LogActor(new ComposedActor({
+        inspector: new InspectorActor(env.INSPECTOR_URL),
+        debug: new DebugActor(env.DEBUGGER_URL),
+        loader: new JsonLoaderActor(),
+        app: new AppActor(),
+      })), [env]);
+      const [state, dispatch] = useActor(actor);
+      const invokeDebuggerAction = useCallback(
+        (action) => dispatch(createDebugOperationAction({ action, token: Symbol() })),
+        [dispatch],
+      );
+      const handleDismissError = useCallback(
+        (id) => dispatch(createDismissErrorAction(Number(id))),
+        [dispatch],
+      );
+      useEffect(() => {
+        dispatch(createAppInitAction());
+      }, [actor]);
+      const { app } = state;
+      const { currentFrame, queries, effects, events, errors, loading } = app;
+      return (
+        <div className="App">
+          <div className="App__content">
+            <div className="App__header">
+              <div className="App__status">
+                <ul className="App__errors">
+                  {errors.map((error) => (
+                    <ErrorMessage
+                      key={error.id}
+                      onDismiss={handleDismissError.bind(null, error.id)}
+                    >
+                      {error.message}
+                    </ErrorMessage>
+                  ))}
+                </ul>
+                <div className="App__loading">
+                  {loading ? <LoadingIndicator /> : null}
+                </div>
+              </div>
+            </div>
+            <div className="App__output">
+              <Panel title="Active Queries" open>
+                <List>
+                  {queries.map((query) => (
+                    <ListItem key={query.id}>
+                      <Panel title={query.label}>
+                        <QueryOverview query={query} />
+                      </Panel>
+                    </ListItem>
+                  ))}
+                </List>
+              </Panel>
+              <Panel title="Effects" open>
+                <List>
+                  {effects.map(({ effect, value }) => (
+                    <ListItem key={effect.id}>
+                      <Panel title={getEffectLabel(effect)}>
+                        <EffectOverview effect={effect} />
+                      </Panel>
+                    </ListItem>
+                  ))}
+                </List>
+              </Panel>
+            </div>
+          </div>
+          <div className="App__controls">
+            <PlaybackControls
+              className="App__controls__controls"
+              currentFrame={currentFrame}
+              numFrames={events ? events.length : 0}
+              onDebuggerAction={invokeDebuggerAction}
+            />
+            <Panel
+              className="App__controls__events"
+              title="Events" open>
+              {events ? (
+                <List>
+                  {events.map((event, index) => (
+                    <ListItem key={index}>
+                      <Panel className={index === currentFrame ? 'App__event_selected' : null} title={getEventLabel(event)} open={index === currentFrame}>
+                        <EventOverview event={event} />
+                      </Panel>
+                    </ListItem>
+                  ))}
+                </List>
+              ) : (
+                "Loading events..."
+              )}
+            </Panel>
+          </div>
+        </div>
+      );
+    }
+
+    function getEffectLabel(effect) {
+      return effect.type;
+    }
+
+    function getEventLabel(event) {
+      switch (event.type) {
+        case 'send': return `<send:${event.pid}:${getActionLabel(event.action)}>`;
+        case 'spawn': return `<spawn:${event.pid}>`;
+        case 'task': return `<task:${event.pid}>`;
+        case 'kill': return `<kill:${event.pid}>`;
+        default: return event.type;
+      }
+    }
+
+    function getActionLabel(action) {
+      return action.type;
+    }
+
+    function PlaybackControls(props) {
+      const { className, currentFrame, numFrames, onDebuggerAction } = props;
+      const onSubmit = useCallback((event) => {
+        const submitter = event.nativeEvent && event.nativeEvent.submitter;
+        if (!submitter) return;
+        const action = (() => {
+          switch (submitter.getAttribute('data-action')) {
+            case 'step': return DebuggerMethod.STEP;
+            case 'continue': return DebuggerMethod.CONTINUE;
+            case 'end': return DebuggerMethod.END;
+            case 'reset': return DebuggerMethod.RESET;
+            default: return null;
+          }
+        })();
+        if (!action) return;
+        event.preventDefault();
+        onDebuggerAction(action);
+      }, []);
+      return (
+        <form className={cx('PlaybackControls', className)} onSubmit={onSubmit}>
+          <input
+            className="PlaybackControls__timeline"
+            type="range"
+            title={`Frame ${currentFrame + 1} of ${numFrames}`}
+            value={currentFrame}
+            max={Math.max(0, numFrames - 1)}
+            disabled
+          />
+          <div className="PlaybackControls__controls">
+            <button className="PlaybackControls__control" data-action="continue" type="submit" title="Continue to next breakpoint">&#x23EF;</button>
+            <button className="PlaybackControls__control" data-action="step" type="submit" title="Step forward">&#x23E9;</button>
+            <button className="PlaybackControls__control" data-action="reset" type="submit" title="Rewind to start">&#x23EE;</button>
+            <button className="PlaybackControls__control" data-action="end" type="submit" title="Skip to end">&#x23ED;</button>
+          </div>
+        </form>
+      );
+    }
+
+    function QueryOverview(props) {
+      const { query } = props;
+      return (
+        <div className="QueryOverview">
+          <Code>{JSON.stringify(query, null, 2)}</Code>
+        </div>
+      );
+    }
+
+    function EffectOverview(props) {
+      const { effect } = props;
+      return (
+        <div className="EffectOverview">
+          <Code>{JSON.stringify(effect, null, 2)}</Code>
+        </div>
+      );
+    }
+
+    function EventOverview(props) {
+      const { event } = props;
+      return (
+        <div className="EventOverview">
+          <Code>{JSON.stringify(event, null, 2)}</Code>
+        </div>
+      );
+    }
+
+    function Panel(props) {
+      const { className, title, open, children } = props;
+      return (
+        <details className={cx('Panel', className)} open={open}>
+          <summary className="Panel__title">{title}</summary>
+          <div className="Panel__content">{children}</div>
+        </details>
+      );
+    }
+
+    function List(props) {
+      const { className, children } = props;
+      return (
+        <ul className={cx('List', className)}>
+          {children}
+        </ul>
+      );
+    }
+
+    function ListItem(props) {
+      const { className, children } = props;
+      return (
+        <li className={cx('ListItem', className)}>
+          {children}
+        </li>
+      );
+    }
+
+    function ErrorMessage(props) {
+      const { className, children, onDismiss } = props;
+      const handleDismiss = useCallback((event) => {
+        event.preventDefault();
+        onDismiss();
+      }, [onDismiss]);
+      return (
+        <li className={cx('ErrorMessage', className)}>
+          <div className="ErrorMessage__message">
+            {children}
+          </div>
+          <button type="button" className="ErrorMessage__dismiss" onClick={handleDismiss}>
+            &#x274C;
+          </button>
+        </li>
+      );
+    }
+
+    function LoadingIndicator(props) {
+      const { className, children } = props;
+      return <div className={cx('LoadingIndicator', className)}>&#x231B;</div>;
+    }
+
+    function Code(props) {
+      const { className, children } = props;
+      return <pre className={cx('Code', className)}>{children}</pre>;
+    }
+
+  </script>
+
+  <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+  <script src="https://unpkg.com/babel-standalone@6/babel.min.js" crossorigin></script>
+
+  <script>
+    window.addEventListener('load', () => {
+      const root = ReactDOM.createRoot(document.body);
+      root.render(React.createElement(App, {
+        env: {
+          DEBUGGER_URL: './debugger',
+          INSPECTOR_URL: './inspect',
+        },
+      }));
+    });
+  </script>
+</body>
+
+</html>

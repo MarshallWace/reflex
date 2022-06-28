@@ -23,7 +23,7 @@ struct Args {
     #[clap(long, default_value = "javascript")]
     syntax: Syntax,
     /// Output file serialization format
-    #[clap(long, default_value = "rmp")]
+    #[clap(long, default_value = "json")]
     output_format: OutputFormat,
     /// Inline current environment variables into compiled output
     #[clap(long)]

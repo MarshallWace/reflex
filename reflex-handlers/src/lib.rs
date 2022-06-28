@@ -14,7 +14,7 @@ use actor::{
 };
 use hyper::Body;
 use reflex::core::{Applicable, Expression};
-use reflex_dispatcher::{compose_actors, Action, Actor};
+use reflex_dispatcher::{Action, Actor, ChainedActor};
 use reflex_runtime::{AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator};
 use reflex_utils::reconnect::ReconnectTimeout;
 
@@ -78,16 +78,16 @@ where
     TReconnect: ReconnectTimeout + Send + Clone,
     TAction: DefaultHandlersAction<T> + Send + 'static,
 {
-    compose_actors(
+    ChainedActor::new(
         AssignHandler::new(factory.clone(), allocator.clone()),
-        compose_actors(
+        ChainedActor::new(
             FetchHandler::new(
                 https_client.clone(),
                 factory.clone(),
                 allocator.clone(),
                 metric_names.fetch_handler,
             ),
-            compose_actors(
+            ChainedActor::new(
                 GraphQlHandler::new(
                     https_client,
                     factory.clone(),
@@ -95,17 +95,17 @@ where
                     reconnect_timeout,
                     metric_names.graphql_handler,
                 ),
-                compose_actors(
+                ChainedActor::new(
                     IncrementHandler::new(factory.clone(), allocator.clone()),
-                    compose_actors(
+                    ChainedActor::new(
                         LoaderHandler::new(
                             factory.clone(),
                             allocator.clone(),
                             metric_names.loader_handler,
                         ),
-                        compose_actors(
+                        ChainedActor::new(
                             ScanHandler::new(factory.clone(), allocator.clone()),
-                            compose_actors(
+                            ChainedActor::new(
                                 TimeoutHandler::new(factory.clone(), allocator.clone()),
                                 TimestampHandler::new(factory.clone(), allocator.clone()),
                             ),

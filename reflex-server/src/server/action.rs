@@ -4,4 +4,8 @@
 pub mod graphql_server;
 pub mod http_server;
 pub mod init;
+pub mod opentelemetry;
+pub mod query_inspector_server;
+pub mod session_playback_server;
+pub mod telemetry;
 pub mod websocket_server;

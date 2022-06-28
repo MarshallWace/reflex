@@ -7,7 +7,7 @@ use std::{
 };
 
 use reflex::core::{Expression, SignalType, StateToken};
-use reflex_dispatcher::{Action, HandlerContext, InboundAction, MessageData};
+use reflex_dispatcher::{Action, InboundAction, MessageData, MiddlewareContext, StateOperation};
 use reflex_handlers::action::{
     graphql::{
         GraphQlHandlerWebSocketConnectErrorAction, GraphQlHandlerWebSocketConnectSuccessAction,
@@ -22,13 +22,13 @@ use reflex_runtime::{
 use crate::{
     cli::reflex_server::OpenTelemetryConfig,
     logger::ActionLogger,
-    middleware::action::opentelemetry::OpenTelemetryMiddlewareErrorAction,
     server::action::{
         graphql_server::GraphQlServerSubscribeAction,
         init::{
             InitGraphRootAction, InitHttpServerAction, InitOpenTelemetryAction,
-            InitPrometheusMetricsAction,
+            InitPrometheusMetricsAction, InitSessionRecordingAction,
         },
+        opentelemetry::OpenTelemetryMiddlewareErrorAction,
     },
 };
 
@@ -37,6 +37,7 @@ pub trait FormattedLoggerAction<T: Expression>:
     + InboundAction<InitGraphRootAction>
     + InboundAction<InitHttpServerAction>
     + InboundAction<InitOpenTelemetryAction>
+    + InboundAction<InitSessionRecordingAction>
     + InboundAction<InitPrometheusMetricsAction>
     + InboundAction<OpenTelemetryMiddlewareErrorAction>
     + InboundAction<GraphQlServerSubscribeAction<T>>
@@ -54,6 +55,7 @@ impl<T: Expression, TAction> FormattedLoggerAction<T> for TAction where
         + InboundAction<InitGraphRootAction>
         + InboundAction<InitHttpServerAction>
         + InboundAction<InitOpenTelemetryAction>
+        + InboundAction<InitSessionRecordingAction>
         + InboundAction<InitPrometheusMetricsAction>
         + InboundAction<OpenTelemetryMiddlewareErrorAction>
         + InboundAction<GraphQlServerSubscribeAction<T>>
@@ -133,41 +135,43 @@ impl<T: Expression, TOut: std::io::Write, TAction: FormattedLoggerAction<T>> Act
     type Action = TAction;
     fn log(
         &mut self,
-        action: &Self::Action,
+        operation: &StateOperation<Self::Action>,
         _metadata: Option<&MessageData>,
-        _context: Option<&impl HandlerContext>,
+        _context: Option<&MiddlewareContext>,
     ) {
-        if let Some(EffectSubscribeAction {
-            effect_type,
-            effects,
-        }) = action.match_type()
-        {
-            if effect_type.as_str() != EFFECT_TYPE_EVALUATE {
-                self.active_effects
-                    .extend(
-                        effects
-                            .iter()
-                            .filter_map(|effect| match &effect.signal_type() {
-                                SignalType::Custom(signal_type) => {
-                                    Some((effect.id(), signal_type.clone()))
-                                }
-                                _ => None,
-                            }),
-                    );
-            }
-        } else if let Some(EffectUnsubscribeAction {
-            effect_type,
-            effects,
-        }) = action.match_type()
-        {
-            if effect_type.as_str() != EFFECT_TYPE_EVALUATE {
-                for effect in effects.iter() {
-                    self.active_effects.remove(&effect.id());
+        if let StateOperation::Send(_pid, action) = operation {
+            if let Some(EffectSubscribeAction {
+                effect_type,
+                effects,
+            }) = action.match_type()
+            {
+                if effect_type.as_str() != EFFECT_TYPE_EVALUATE {
+                    self.active_effects
+                        .extend(
+                            effects
+                                .iter()
+                                .filter_map(|effect| match &effect.signal_type() {
+                                    SignalType::Custom(signal_type) => {
+                                        Some((effect.id(), signal_type.clone()))
+                                    }
+                                    _ => None,
+                                }),
+                        );
+                }
+            } else if let Some(EffectUnsubscribeAction {
+                effect_type,
+                effects,
+            }) = action.match_type()
+            {
+                if effect_type.as_str() != EFFECT_TYPE_EVALUATE {
+                    for effect in effects.iter() {
+                        self.active_effects.remove(&effect.id());
+                    }
                 }
             }
-        }
-        if let Some(message) = format_action_message(action, &self.active_effects) {
-            let _ = writeln!(self.output, "[{}] {}", self.prefix, message);
+            if let Some(message) = format_action_message(action, &self.active_effects) {
+                let _ = writeln!(self.output, "[{}] {}", self.prefix, message);
+            }
         }
     }
 }
@@ -192,6 +196,11 @@ fn format_action_message<T: Expression, TAction: FormattedLoggerAction<T>>(
                 OpenTelemetryConfig::Http(config) => &config.endpoint,
                 OpenTelemetryConfig::Grpc(config) => &config.endpoint,
             },
+        ))
+    } else if let Option::<&InitSessionRecordingAction>::Some(action) = action.match_type() {
+        Some(format!(
+            "Recording to session playback file {}",
+            action.output_path
         ))
     } else if let Option::<&InitGraphRootAction>::Some(action) = action.match_type() {
         Some(format!(

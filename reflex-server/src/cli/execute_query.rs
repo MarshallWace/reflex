@@ -1,8 +1,6 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use std::path::PathBuf;
-
 use anyhow::{anyhow, Context, Result};
 use futures::{future, Future, FutureExt};
 use http::{header, HeaderMap, Request, Response};
@@ -12,15 +10,15 @@ use reflex::{
     interpreter::InterpreterOptions,
     stdlib::Stdlib,
 };
-use reflex_dispatcher::{compose_actors, Action, Actor, EitherActor, SerializableAction};
+use reflex_dispatcher::{
+    Action, Actor, PostMiddleware, PreMiddleware, SchedulerMiddleware, SerializableAction,
+};
 use reflex_graphql::{stdlib::Stdlib as GraphQlStdlib, GraphQlOperation, GraphQlSchema};
 use reflex_js::stdlib::Stdlib as JsStdlib;
 use reflex_json::{json, stdlib::Stdlib as JsonStdlib, JsonValue};
 use reflex_runtime::{AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator};
 
 use crate::{
-    logger::json::JsonActionLogger,
-    middleware::{LoggerMiddleware, ServerMiddleware},
     server::{HttpGraphQlServerQueryTransform, NoopWebSocketGraphQlServerQueryTransform},
     utils::operation::format_graphql_operation_label,
     GraphQlWebServer, GraphQlWebServerAction, GraphQlWebServerMetricNames,
@@ -33,10 +31,6 @@ pub struct ExecuteQueryCliOptions {
     pub query: String,
     pub variables: Option<String>,
     pub headers: Option<HeaderMap>,
-    pub capture_effects: Option<PathBuf>,
-    pub replay_effects: Option<PathBuf>,
-    pub captured_effects: Vec<String>,
-    pub debug_actions: bool,
     pub debug_compiler: bool,
     pub debug_interpreter: bool,
     pub debug_stack: bool,
@@ -48,7 +42,6 @@ pub async fn cli<
     T,
     TFactory,
     TAllocator,
-    TMiddleware,
     TTransform,
     THttpMiddleware,
     THttpPre,
@@ -57,7 +50,12 @@ pub async fn cli<
     options: ExecuteQueryCliOptions,
     graph_root: (Program, InstructionPointer),
     schema: Option<GraphQlSchema>,
-    middleware: TMiddleware,
+    actor: impl Actor<TAction, State = impl Send + 'static> + Send + 'static,
+    middleware: SchedulerMiddleware<
+        impl PreMiddleware<TAction, State = impl Send + 'static> + Send + 'static,
+        impl PostMiddleware<TAction, State = impl Send + 'static> + Send + 'static,
+        TAction,
+    >,
     factory: &TFactory,
     allocator: &TAllocator,
     query_transform: TTransform,
@@ -75,12 +73,10 @@ where
     T::Builtin: From<Stdlib> + From<JsonStdlib> + From<JsStdlib> + From<GraphQlStdlib>,
     TFactory: AsyncExpressionFactory<T> + Sync,
     TAllocator: AsyncHeapAllocator<T> + Sync,
-    TMiddleware: Actor<TAction> + Send + 'static,
     THttpMiddleware: HttpMiddleware<THttpPre, THttpPost>,
-    TMiddleware::State: Send,
     THttpPre: Future<Output = Request<Body>>,
     THttpPost: Future<Output = Response<Body>>,
-    TAction: Action + SerializableAction + GraphQlWebServerAction<T> + Send + 'static,
+    TAction: Action + SerializableAction + GraphQlWebServerAction<T> + Clone + Send + 'static,
     TTransform: HttpGraphQlServerQueryTransform + Send + 'static,
 {
     let compiler_options = if options.debug_compiler {
@@ -92,14 +88,6 @@ where
         debug_instructions: options.debug_interpreter,
         debug_stack: options.debug_stack,
         ..InterpreterOptions::default()
-    };
-    let middleware = if options.debug_actions {
-        EitherActor::Left(compose_actors(
-            LoggerMiddleware::new(JsonActionLogger::stderr()),
-            middleware,
-        ))
-    } else {
-        EitherActor::Right(middleware)
     };
     let query = options.query;
     let variables = match options.variables {
@@ -131,7 +119,8 @@ where
     let app = GraphQlWebServer::<TAction>::new(
         graph_root,
         schema,
-        ServerMiddleware::post(middleware),
+        actor,
+        middleware,
         compiler_options,
         interpreter_options,
         factory.clone(),

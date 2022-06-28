@@ -6,7 +6,6 @@ use std::{convert::Infallible, iter::once, sync::Arc};
 use futures::{future, stream, Future, FutureExt, Sink, SinkExt, Stream, StreamExt};
 use http::{header, HeaderMap, HeaderValue, Method, Request, Response, StatusCode};
 use hyper::{
-    body,
     service::{service_fn, Service},
     upgrade::Upgraded,
     Body,
@@ -19,10 +18,11 @@ use reflex::{
     stdlib::Stdlib,
 };
 use reflex_dispatcher::{
-    compose_actors,
     scheduler::tokio::{TokioScheduler, TokioSchedulerMetricNames},
     utils::take_until_final_item::TakeUntilFinalItem,
-    Action, Actor, InboundAction, OutboundAction,
+    Action, Actor, AsyncActionFilter, AsyncActionStream, AsyncDispatchResult, AsyncScheduler,
+    AsyncSubscriptionStream, ChainedActor, InboundAction, OutboundAction, PostMiddleware,
+    PreMiddleware, Scheduler, SchedulerMiddleware,
 };
 use reflex_graphql::{
     create_json_error_object,
@@ -42,10 +42,15 @@ use reflex_runtime::{
 use uuid::Uuid;
 
 use crate::{
-    middleware::ServerMiddleware,
     server::{
         action::{
             http_server::{HttpServerRequestAction, HttpServerResponseAction},
+            query_inspector_server::{
+                QueryInspectorServerHttpRequestAction, QueryInspectorServerHttpResponseAction,
+            },
+            session_playback_server::{
+                SessionPlaybackServerHttpRequestAction, SessionPlaybackServerHttpResponseAction,
+            },
             websocket_server::{
                 WebSocketServerConnectAction, WebSocketServerDisconnectAction,
                 WebSocketServerReceiveAction, WebSocketServerSendAction,
@@ -53,15 +58,17 @@ use crate::{
         },
         actor::{
             http_graphql_server::HttpGraphQlServerQueryTransform,
-            websocket_graphql_server::WebSocketGraphQlServerQueryTransform, ServerAction,
-            ServerActor, ServerMetricNames,
+            server::{ServerAction, ServerActor, ServerMetricNames},
+            websocket_graphql_server::WebSocketGraphQlServerQueryTransform,
         },
         playground::handle_playground_http_request,
         utils::{
-            clone_request_wrapper, clone_response_wrapper, create_http_response,
-            create_json_http_response, get_cors_headers,
+            clone_http_request_wrapper, clone_http_response, clone_http_response_wrapper,
+            create_http_response, create_json_http_response, get_cors_headers,
         },
+        SessionPlaybackServerAction,
     },
+    utils::server::handle_http_request,
 };
 
 pub trait GraphQlWebServerAction<T: Expression>:
@@ -71,10 +78,12 @@ pub trait GraphQlWebServerAction<T: Expression>:
     + InboundAction<HttpServerResponseAction>
     + InboundAction<WebSocketServerSendAction>
     + InboundAction<WebSocketServerDisconnectAction>
+    + InboundAction<QueryInspectorServerHttpResponseAction>
     + OutboundAction<HttpServerRequestAction>
     + OutboundAction<HttpServerResponseAction>
     + OutboundAction<WebSocketServerConnectAction>
     + OutboundAction<WebSocketServerReceiveAction>
+    + OutboundAction<QueryInspectorServerHttpRequestAction>
 {
 }
 impl<T: Expression, TAction> GraphQlWebServerAction<T> for TAction where
@@ -84,10 +93,12 @@ impl<T: Expression, TAction> GraphQlWebServerAction<T> for TAction where
         + InboundAction<HttpServerResponseAction>
         + InboundAction<WebSocketServerSendAction>
         + InboundAction<WebSocketServerDisconnectAction>
+        + InboundAction<QueryInspectorServerHttpResponseAction>
         + OutboundAction<HttpServerRequestAction>
         + OutboundAction<HttpServerResponseAction>
         + OutboundAction<WebSocketServerConnectAction>
         + OutboundAction<WebSocketServerReceiveAction>
+        + OutboundAction<QueryInspectorServerHttpRequestAction>
 {
 }
 
@@ -102,13 +113,18 @@ pub struct GraphQlWebServer<TAction: Action + Send + 'static> {
     runtime: TokioScheduler<TAction>,
 }
 impl<TAction: Action + Send + 'static> GraphQlWebServer<TAction> {
-    pub fn new<T, TPre, TPost>(
+    pub fn new<T, TFactory>(
         graph_root: (Program, InstructionPointer),
         schema: Option<GraphQlSchema>,
-        middleware: ServerMiddleware<TAction, TPre, TPost>,
+        actor: impl Actor<TAction, State = impl Send + 'static> + Send + 'static,
+        middleware: SchedulerMiddleware<
+            impl PreMiddleware<TAction, State = impl Send + 'static> + Send + 'static,
+            impl PostMiddleware<TAction, State = impl Send + 'static> + Send + 'static,
+            TAction,
+        >,
         compiler_options: CompilerOptions,
         interpreter_options: InterpreterOptions,
-        factory: impl AsyncExpressionFactory<T>,
+        factory: TFactory,
         allocator: impl AsyncHeapAllocator<T>,
         transform_http: impl HttpGraphQlServerQueryTransform + Send + 'static,
         transform_ws: impl WebSocketGraphQlServerQueryTransform + Send + 'static,
@@ -127,11 +143,8 @@ impl<TAction: Action + Send + 'static> GraphQlWebServer<TAction> {
     where
         T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
         T::Builtin: From<Stdlib> + From<GraphQlStdlib> + 'static,
-        TPre: Actor<TAction> + Send + 'static,
-        TPre::State: Send,
-        TPost: Actor<TAction> + Send + 'static,
-        TPost::State: Send,
-        TAction: GraphQlWebServerAction<T> + Send + 'static,
+        TFactory: AsyncExpressionFactory<T>,
+        TAction: GraphQlWebServerAction<T> + Clone + Send + 'static,
     {
         let server = ServerActor::new(
             schema,
@@ -146,23 +159,21 @@ impl<TAction: Action + Send + 'static> GraphQlWebServer<TAction> {
             get_operation_metric_labels,
         )?;
         let runtime = TokioScheduler::<TAction>::new(
-            compose_actors(
-                middleware.pre,
-                compose_actors(
-                    server,
-                    compose_actors(
-                        BytecodeInterpreter::new(
-                            graph_root,
-                            compiler_options,
-                            interpreter_options,
-                            factory,
-                            allocator,
-                            metric_names.interpreter,
-                        ),
-                        middleware.post,
+            ChainedActor::new(
+                server,
+                ChainedActor::new(
+                    BytecodeInterpreter::new(
+                        graph_root,
+                        compiler_options,
+                        interpreter_options,
+                        factory,
+                        allocator,
+                        metric_names.interpreter,
                     ),
+                    actor,
                 ),
             ),
+            middleware,
             metric_names.scheduler,
         );
         Ok(Self { runtime })
@@ -172,136 +183,270 @@ impl<TAction: Action + Send + 'static> GraphQlWebServer<TAction> {
         request: Request<Body>,
     ) -> impl Future<Output = Response<Body>>
     where
-        TAction: InboundAction<HttpServerResponseAction>
+        TAction: Clone
+            + InboundAction<HttpServerResponseAction>
             + OutboundAction<HttpServerRequestAction>
             + OutboundAction<HttpServerResponseAction>,
     {
-        let (headers, body) = request.into_parts();
-        let request_id = Uuid::new_v4();
-        let dispatch_request = self.runtime.dispatch(Box::pin(
-            body::to_bytes(body)
-                .map(move |bytes| match bytes {
-                    Err(err) => HttpServerResponseAction {
-                        request_id,
-                        response: create_http_response(
-                            StatusCode::BAD_REQUEST,
-                            None,
-                            Some(format!("Failed to parse incoming request: {}", err)),
-                        ),
-                    }
-                    .into(),
-                    Ok(bytes) => {
-                        let request = Request::from_parts(headers, bytes);
-                        HttpServerRequestAction {
-                            request_id,
-                            request,
-                        }
-                        .into()
-                    }
-                })
-                .into_stream(),
-        ));
-        let subscribe_response_stream = self
-            .runtime
-            .subscribe(move |action| {
-                let HttpServerResponseAction {
-                    request_id: response_id,
-                    response,
-                } = action.match_type()?;
-                if *response_id != request_id {
-                    return None;
-                }
-                Some(clone_response_wrapper(response).map(|_| response.body().clone()))
-            })
-            .map(|stream| stream.take(1));
-        subscribe_response_stream.then({
-            |response_stream| {
-                dispatch_request.then(|_| {
-                    response_stream.into_future().map(|(response, _)| {
-                        response
-                            .map(|response| response.map(Body::from))
-                            .unwrap_or_else(|| {
-                                Response::builder()
-                                    .status(StatusCode::SERVICE_UNAVAILABLE)
-                                    .body(Default::default())
-                                    .unwrap()
-                            })
-                    })
-                })
-            }
-        })
+        handle_graphql_http_request(&self.runtime, request)
     }
-    pub fn handle_graphql_websocket_request(
+}
+impl<TAction: Action + Send + 'static> Scheduler for GraphQlWebServer<TAction> {
+    type Action = TAction;
+}
+impl<TAction> AsyncScheduler for GraphQlWebServer<TAction>
+where
+    TAction: Action + Clone + Send + 'static,
+{
+    fn dispatch<TActions: AsyncActionStream<Self::Action>>(
         &self,
-        request: Request<Body>,
-    ) -> impl Future<Output = Result<(Response<Body>, impl Future<Output = ()>), Response<Body>>>
-    where
-        TAction: InboundAction<HttpServerResponseAction>
-            + InboundAction<WebSocketServerSendAction>
-            + InboundAction<WebSocketServerDisconnectAction>
-            + OutboundAction<HttpServerResponseAction>
-            + OutboundAction<WebSocketServerConnectAction>
-            + OutboundAction<WebSocketServerSendAction>
-            + OutboundAction<WebSocketServerReceiveAction>,
-    {
-        let connection_id = Uuid::new_v4();
-        let request_headers = clone_request_wrapper(&request);
-        match upgrade_websocket(request, "graphql-ws") {
-            Err(response) => future::ready(Err(response)).left_future(),
-            Ok((response, connection)) => future::ready(Ok((
-                response,
-                connection.then({
-                    let subscribe_websocket_responses =
-                        create_websocket_response_stream(&self.runtime, connection_id);
-                    let commands = self.runtime.commands();
-                    move |connection| match connection {
-                        Err(err) => {
-                            let err = WebSocketServerSendAction {
-                                connection_id,
-                                message: GraphQlSubscriptionServerMessage::ConnectionError(
-                                    create_json_error_object(
-                                        format!("Failed to initiate WebSocket connection: {}", err),
-                                        None,
-                                    ),
-                                ),
-                            };
-                            let mut commands = commands;
-                            async move {
-                                let _ = commands.send(err.into());
-                            }
-                        }
-                        .left_future(),
-                        Ok(upgraded_socket) => {
-                            let actions = create_websocket_action_stream(
-                                WebSocketServerConnectAction {
-                                    connection_id,
-                                    request: request_headers,
-                                },
-                                upgraded_socket,
-                                subscribe_websocket_responses,
-                            );
-                            pipe_stream(actions, commands).right_future()
-                        }
-                    }
-                }),
-            )))
-            .right_future(),
-        }
+        actions: TActions,
+    ) -> AsyncDispatchResult {
+        self.runtime.dispatch(actions)
+    }
+    fn subscribe<V: Send + 'static, TFilter: AsyncActionFilter<Self::Action, V>>(
+        &self,
+        transform: TFilter,
+    ) -> AsyncSubscriptionStream<V> {
+        self.runtime.subscribe(transform)
     }
 }
 
-fn create_websocket_response_stream<TAction>(
-    runtime: &TokioScheduler<TAction>,
+pub fn graphql_service<TAction>(
+    server: Arc<GraphQlWebServer<TAction>>,
+) -> impl Service<
+    Request<Body>,
+    Response = Response<Body>,
+    Error = Infallible,
+    Future = impl Future<Output = Result<Response<Body>, Infallible>> + Send,
+>
+where
+    TAction: Action
+        + Clone
+        + Send
+        + 'static
+        + InboundAction<HttpServerResponseAction>
+        + InboundAction<WebSocketServerSendAction>
+        + InboundAction<WebSocketServerDisconnectAction>
+        + OutboundAction<HttpServerRequestAction>
+        + OutboundAction<HttpServerResponseAction>
+        + OutboundAction<WebSocketServerConnectAction>
+        + OutboundAction<WebSocketServerSendAction>
+        + OutboundAction<WebSocketServerReceiveAction>,
+{
+    service_fn({
+        move |req: Request<Body>| {
+            let server = server.clone();
+            async move {
+                let cors_headers = get_cors_headers(&req).into_iter().collect::<Vec<_>>();
+                let mut response = match req.method() {
+                    &Method::POST => handle_graphql_http_request(&server.runtime, req).await,
+                    &Method::GET => {
+                        if hyper_tungstenite::is_upgrade_request(&req) {
+                            match handle_graphql_websocket_request(&server.runtime, req).await {
+                                Err(response) => response,
+                                Ok((response, listen_task)) => {
+                                    let _ = tokio::spawn(listen_task);
+                                    response
+                                }
+                            }
+                        } else {
+                            handle_playground_http_request(req).await
+                        }
+                    }
+                    &Method::OPTIONS => handle_cors_preflight_request(req),
+                    _ => method_not_allowed(req),
+                };
+                response.headers_mut().extend(cors_headers);
+                Ok(response)
+            }
+        }
+    })
+}
+
+pub fn query_inspector_service<TScheduler, TAction>(
+    scheduler: Arc<TScheduler>,
+) -> impl Service<
+    Request<Body>,
+    Response = Response<Body>,
+    Error = Infallible,
+    Future = impl Future<Output = Result<Response<Body>, Infallible>> + Send,
+>
+where
+    TScheduler: AsyncScheduler<Action = TAction> + Send + Sync,
+    TAction: Action
+        + Clone
+        + Send
+        + 'static
+        + InboundAction<QueryInspectorServerHttpResponseAction>
+        + OutboundAction<QueryInspectorServerHttpRequestAction>
+        + OutboundAction<QueryInspectorServerHttpResponseAction>,
+{
+    service_fn({
+        move |req: Request<Body>| {
+            let scheduler = scheduler.clone();
+            async move {
+                let cors_headers = get_cors_headers(&req).into_iter().collect::<Vec<_>>();
+                let mut response = match req.method() {
+                    &Method::OPTIONS => handle_cors_preflight_request(req),
+                    _ => handle_query_inspector_http_request(&scheduler, req).await,
+                };
+                response.headers_mut().extend(cors_headers);
+                Ok(response)
+            }
+        }
+    })
+}
+
+pub fn session_playback_service<T, TScheduler, TAction>(
+    scheduler: Arc<TScheduler>,
+) -> impl Service<
+    Request<Body>,
+    Response = Response<Body>,
+    Error = Infallible,
+    Future = impl Future<Output = Result<Response<Body>, Infallible>> + Send,
+>
+where
+    T: Expression,
+    TScheduler: AsyncScheduler<Action = TAction> + Send + Sync,
+    TAction: Action + Clone + Send + 'static + SessionPlaybackServerAction<T>,
+{
+    service_fn({
+        move |req: Request<Body>| {
+            let scheduler = scheduler.clone();
+            async move {
+                let cors_headers = get_cors_headers(&req).into_iter().collect::<Vec<_>>();
+                let mut response = match req.method() {
+                    &Method::OPTIONS => handle_cors_preflight_request(req),
+                    _ => handle_session_playback_http_request(&scheduler, req).await,
+                };
+                response.headers_mut().extend(cors_headers);
+                Ok(response)
+            }
+        }
+    })
+}
+
+fn handle_graphql_http_request<TScheduler, TAction>(
+    scheduler: &TScheduler,
+    request: Request<Body>,
+) -> impl Future<Output = Response<Body>>
+where
+    TScheduler: AsyncScheduler<Action = TAction>,
+    TAction: Action
+        + Send
+        + Clone
+        + 'static
+        + InboundAction<HttpServerResponseAction>
+        + OutboundAction<HttpServerRequestAction>
+        + OutboundAction<HttpServerResponseAction>,
+{
+    handle_http_request(
+        request,
+        scheduler,
+        |request_id, request| {
+            HttpServerRequestAction {
+                request_id,
+                request,
+            }
+            .into()
+        },
+        |request_id, response| {
+            HttpServerResponseAction {
+                request_id,
+                response,
+            }
+            .into()
+        },
+        |request_id, action| {
+            let HttpServerResponseAction {
+                request_id: response_id,
+                response,
+            } = action.match_type()?;
+            if *response_id != request_id {
+                return None;
+            }
+            Some(clone_http_response_wrapper(response).map(|_| response.body().clone()))
+        },
+    )
+}
+
+fn handle_graphql_websocket_request<TAction>(
+    scheduler: &TokioScheduler<TAction>,
+    request: Request<Body>,
+) -> impl Future<Output = Result<(Response<Body>, impl Future<Output = ()>), Response<Body>>>
+where
+    TAction: Action
+        + Send
+        + Clone
+        + 'static
+        + InboundAction<HttpServerResponseAction>
+        + InboundAction<WebSocketServerSendAction>
+        + InboundAction<WebSocketServerDisconnectAction>
+        + OutboundAction<HttpServerResponseAction>
+        + OutboundAction<WebSocketServerConnectAction>
+        + OutboundAction<WebSocketServerSendAction>
+        + OutboundAction<WebSocketServerReceiveAction>,
+{
+    let connection_id = Uuid::new_v4();
+    let request_headers = clone_http_request_wrapper(&request);
+    match upgrade_websocket(request, "graphql-ws") {
+        Err(response) => future::ready(Err(response)).left_future(),
+        Ok((response, connection)) => future::ready(Ok((
+            response,
+            connection.then({
+                let subscribe_websocket_responses =
+                    create_websocket_response_stream(scheduler, connection_id);
+                let commands = scheduler.commands();
+                move |connection| match connection {
+                    Err(err) => {
+                        let err = WebSocketServerSendAction {
+                            connection_id,
+                            message: GraphQlSubscriptionServerMessage::ConnectionError(
+                                create_json_error_object(
+                                    format!("Failed to initiate WebSocket connection: {}", err),
+                                    None,
+                                ),
+                            ),
+                        };
+                        let mut commands = commands;
+                        async move {
+                            let _ = commands.send(err.into());
+                        }
+                    }
+                    .left_future(),
+                    Ok(upgraded_socket) => {
+                        let actions = create_websocket_action_stream(
+                            WebSocketServerConnectAction {
+                                connection_id,
+                                request: request_headers,
+                            },
+                            upgraded_socket,
+                            subscribe_websocket_responses,
+                        );
+                        pipe_stream(actions, commands).right_future()
+                    }
+                }
+            }),
+        )))
+        .right_future(),
+    }
+}
+
+fn create_websocket_response_stream<TScheduler, TAction>(
+    scheduler: &TScheduler,
     connection_id: Uuid,
 ) -> impl Future<Output = impl Stream<Item = Message>>
 where
+    TScheduler: AsyncScheduler<Action = TAction>,
     TAction: Action
+        + Clone
         + Send
         + InboundAction<WebSocketServerSendAction>
         + InboundAction<WebSocketServerDisconnectAction>,
 {
-    runtime
-        .subscribe(move |action| {
+    scheduler
+        .subscribe(move |action: &TAction| {
             if let Some(action) = action.match_type() {
                 let WebSocketServerSendAction {
                     connection_id: emitted_connection_id,
@@ -376,55 +521,92 @@ where
     connect_action.chain(message_actions)
 }
 
-pub fn graphql_service<TAction>(
-    server: Arc<GraphQlWebServer<TAction>>,
-) -> impl Service<
-    Request<Body>,
-    Response = Response<Body>,
-    Error = Infallible,
-    Future = impl Future<Output = Result<Response<Body>, Infallible>> + Send,
->
+fn handle_query_inspector_http_request<TScheduler, TAction>(
+    scheduler: &TScheduler,
+    request: Request<Body>,
+) -> impl Future<Output = Response<Body>>
 where
+    TScheduler: AsyncScheduler<Action = TAction>,
     TAction: Action
         + Send
+        + Clone
         + 'static
-        + InboundAction<HttpServerResponseAction>
-        + InboundAction<WebSocketServerSendAction>
-        + InboundAction<WebSocketServerDisconnectAction>
-        + OutboundAction<HttpServerRequestAction>
-        + OutboundAction<HttpServerResponseAction>
-        + OutboundAction<WebSocketServerConnectAction>
-        + OutboundAction<WebSocketServerSendAction>
-        + OutboundAction<WebSocketServerReceiveAction>,
+        + InboundAction<QueryInspectorServerHttpResponseAction>
+        + OutboundAction<QueryInspectorServerHttpRequestAction>
+        + OutboundAction<QueryInspectorServerHttpResponseAction>,
 {
-    service_fn({
-        move |req: Request<Body>| {
-            let server = server.clone();
-            async move {
-                let cors_headers = get_cors_headers(&req).into_iter().collect::<Vec<_>>();
-                let mut response = match req.method() {
-                    &Method::POST => server.handle_graphql_http_request(req).await,
-                    &Method::GET => {
-                        if hyper_tungstenite::is_upgrade_request(&req) {
-                            match server.handle_graphql_websocket_request(req).await {
-                                Err(response) => response,
-                                Ok((response, listen_task)) => {
-                                    let _ = tokio::spawn(listen_task);
-                                    response
-                                }
-                            }
-                        } else {
-                            handle_playground_http_request(req).await
-                        }
-                    }
-                    &Method::OPTIONS => handle_cors_preflight_request(req),
-                    _ => method_not_allowed(req),
-                };
-                response.headers_mut().extend(cors_headers);
-                Ok(response)
+    handle_http_request(
+        request,
+        scheduler,
+        |request_id, request| {
+            QueryInspectorServerHttpRequestAction {
+                request_id,
+                request,
             }
-        }
-    })
+            .into()
+        },
+        |request_id, response| {
+            QueryInspectorServerHttpResponseAction {
+                request_id,
+                response,
+            }
+            .into()
+        },
+        |request_id, action| {
+            let QueryInspectorServerHttpResponseAction {
+                request_id: response_id,
+                response,
+            } = action.match_type()?;
+            if *response_id != request_id {
+                return None;
+            }
+            Some(clone_http_response(response))
+        },
+    )
+}
+
+fn handle_session_playback_http_request<TScheduler, TAction>(
+    scheduler: &TScheduler,
+    request: Request<Body>,
+) -> impl Future<Output = Response<Body>>
+where
+    TScheduler: AsyncScheduler<Action = TAction>,
+    TAction: Action
+        + Send
+        + Clone
+        + 'static
+        + InboundAction<SessionPlaybackServerHttpResponseAction>
+        + OutboundAction<SessionPlaybackServerHttpRequestAction>
+        + OutboundAction<SessionPlaybackServerHttpResponseAction>,
+{
+    handle_http_request(
+        request,
+        scheduler,
+        |request_id, request| {
+            SessionPlaybackServerHttpRequestAction {
+                request_id,
+                request,
+            }
+            .into()
+        },
+        |request_id, response| {
+            SessionPlaybackServerHttpResponseAction {
+                request_id,
+                response,
+            }
+            .into()
+        },
+        |request_id, action| {
+            let SessionPlaybackServerHttpResponseAction {
+                request_id: response_id,
+                response,
+            } = action.match_type()?;
+            if *response_id != request_id {
+                return None;
+            }
+            Some(clone_http_response(response))
+        },
+    )
 }
 
 fn handle_cors_preflight_request<T: From<String> + Default>(_req: Request<T>) -> Response<T> {

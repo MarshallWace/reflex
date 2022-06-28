@@ -5,7 +5,7 @@ use crate::server::utils::create_http_response;
 use http::{header, HeaderValue, Request, Response, StatusCode};
 use std::borrow::Cow;
 
-const PLAYGROUND_TEMPLATE: &'static [u8] = include_bytes!("static/index.html");
+const PLAYGROUND_TEMPLATE: &'static [u8] = include_bytes!("./template/playground/index.html");
 
 pub(crate) async fn handle_playground_http_request<T: From<String> + Default>(
     _req: Request<T>,

@@ -4,10 +4,11 @@
 use std::{collections::HashMap, iter::FromIterator};
 
 use reflex_json::{JsonMap, JsonValue};
+use serde::{Deserialize, Serialize};
 
 use crate::{GraphQlExtensions, GraphQlQuery};
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct GraphQlOperation {
     query: GraphQlQuery,
     operation_name: Option<String>,

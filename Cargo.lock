@@ -760,6 +760,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "http-serde"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6d98b3d9662de70952b14c4840ee0f37e23973542a363e2275f4b9d024ff6cca"
+dependencies = [
+ "http",
+ "serde",
+]
+
+[[package]]
 name = "httparse"
 version = "1.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1670,7 +1680,6 @@ dependencies = [
  "fnv",
  "im",
  "rayon",
- "rmp-serde",
  "serde",
  "serde_json",
  "strum",
@@ -1693,7 +1702,6 @@ dependencies = [
  "reflex-json",
  "reflex-runtime",
  "reflex-utils",
- "rmp-serde",
  "serde_json",
  "tokio",
  "tokio-stream",
@@ -1706,6 +1714,7 @@ dependencies = [
  "futures",
  "metrics",
  "pin-project",
+ "serde",
  "serde_json",
  "tokio",
  "tokio-stream",
@@ -1790,6 +1799,7 @@ dependencies = [
  "reflex-dispatcher",
  "reflex-json",
  "reflex-utils",
+ "serde",
 ]
 
 [[package]]
@@ -1803,6 +1813,7 @@ dependencies = [
  "console-subscriber",
  "futures",
  "http",
+ "http-serde",
  "hyper",
  "hyper-tungstenite",
  "metrics",
@@ -1890,9 +1901,9 @@ dependencies = [
 
 [[package]]
 name = "rmp-serde"
-version = "0.15.5"
+version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "723ecff9ad04f4ad92fe1c8ca6c20d2196d9286e9c60727c4cb5511629260e9d"
+checksum = "25786b0d276110195fa3d6f3f31299900cf71dfbd6c28450f3f58a0e7f7a347e"
 dependencies = [
  "byteorder",
  "rmp",

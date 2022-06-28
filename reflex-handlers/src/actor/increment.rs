@@ -15,7 +15,7 @@ use reflex_dispatcher::{
 
 use reflex_runtime::{
     action::effect::{EffectEmitAction, EffectSubscribeAction},
-    AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator, StateUpdate,
+    AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator, StatePatch, StateUpdate,
 };
 
 pub const EFFECT_TYPE_INCREMENT: &'static str = "reflex::increment";
@@ -115,14 +115,7 @@ where
             let entry = parse_increment_effect_args(effect, &self.factory);
             let (update, result) = match entry {
                 Ok(key) => (
-                    Some((
-                        key,
-                        StateUpdate::patch({
-                            let factory = self.factory.clone();
-                            let allocator = self.allocator.clone();
-                            move |existing| increment_value(existing, &factory, &allocator)
-                        }),
-                    )),
+                    Some((key, StateUpdate::patch(StatePatch::Increment))),
                     StateUpdate::Value(self.factory.create_dynamic_variable_term(
                         key,
                         create_pending_expression(&self.factory, &self.allocator),
@@ -146,39 +139,6 @@ where
             }
             .into(),
         ))))
-    }
-}
-
-fn increment_value<T: Expression>(
-    existing: Option<&T>,
-    factory: &impl ExpressionFactory<T>,
-    allocator: &impl HeapAllocator<T>,
-) -> T {
-    match existing {
-        None => factory.create_value_term(ValueTerm::Int(1)),
-        Some(existing) => {
-            let result = if let Some(value) = factory.match_value_term(existing) {
-                if let Some(value) = value.match_int() {
-                    Some(factory.create_value_term(ValueTerm::Int(value + 1)))
-                } else if let Some(value) = value.match_float() {
-                    Some(factory.create_value_term(ValueTerm::Float(value + 1.0)))
-                } else {
-                    None
-                }
-            } else if let Some(_) = factory.match_signal_term(existing) {
-                Some(existing.clone())
-            } else {
-                None
-            };
-            match result {
-                Some(result) => result,
-                None => create_error_expression(
-                    format!("Unable to increment non-numeric value: {}", existing),
-                    factory,
-                    allocator,
-                ),
-            }
-        }
     }
 }
 

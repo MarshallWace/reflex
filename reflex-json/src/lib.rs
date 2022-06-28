@@ -12,7 +12,7 @@ use serde_json::{Map, Value};
 
 pub mod stdlib;
 
-pub use serde_json::{json, Map as JsonMap, Value as JsonValue, Number as JsonNumber};
+pub use serde_json::{json, Map as JsonMap, Number as JsonNumber, Value as JsonValue};
 
 pub fn json_object(properties: impl IntoIterator<Item = (String, JsonValue)>) -> JsonValue {
     JsonValue::Object(JsonMap::from_iter(properties))

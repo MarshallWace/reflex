@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use reflex_graphql::{
-    graphql_parser::query::{Definition, OperationDefinition},
+    ast::query::{Definition, OperationDefinition},
     GraphQlOperation, GraphQlQuery,
 };
 

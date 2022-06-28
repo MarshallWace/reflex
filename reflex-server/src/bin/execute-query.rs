@@ -4,15 +4,16 @@
 use std::{
     fs,
     path::{Path, PathBuf},
+    str::FromStr,
 };
 
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use clap::Parser;
 use reflex::{allocator::DefaultAllocator, compiler::CompilerOptions, lang::SharedTermFactory};
 use reflex_cli::{compile_entry_point, syntax::js::default_js_loaders, Syntax};
+use reflex_dispatcher::{session_recorder::SessionRecorder, SchedulerMiddleware};
 use reflex_graphql::{parse_graphql_schema, GraphQlSchema, NoopGraphQlQueryTransform};
 use reflex_handlers::{
-    actor::{fetch::EFFECT_TYPE_FETCH, graphql::EFFECT_TYPE_GRAPHQL, grpc::EFFECT_TYPE_GRPC},
     default_handlers,
     utils::tls::{create_https_client, tokio_native_tls::native_tls::Certificate},
     DefaultHandlersMetricNames,
@@ -21,7 +22,11 @@ use reflex_server::{
     action::ServerCliAction,
     builtins::ServerBuiltins,
     cli::execute_query::{cli, ExecuteQueryCliOptions, NoopHttpMiddleware},
+    generate_session_recording_filename,
     imports::server_imports,
+    logger::{formatted::FormattedLogger, json::JsonActionLogger, EitherLogger},
+    middleware::LoggerMiddleware,
+    recorder::FileRecorder,
     GraphQlWebServerMetricNames,
 };
 use reflex_utils::reconnect::NoopReconnectTimeout;
@@ -47,18 +52,12 @@ pub struct Args {
     /// Path to custom TLS certificate
     #[clap(long)]
     tls_cert: Option<PathBuf>,
-    /// Path to capture runtime signal playback file
+    /// Path to capture runtime event playback file
     #[clap(long)]
-    capture_effects: Option<PathBuf>,
-    /// Path to previously-captured signal playback file
-    #[clap(long)]
-    replay_effects: Option<PathBuf>,
-    /// Comma-separated list of captured signal types
-    #[clap(long)]
-    captured_effects: Option<Vec<String>>,
+    capture_events: Option<Option<PathBuf>>,
     /// Log runtime actions
     #[clap(long)]
-    log: bool,
+    log: Option<Option<LogFormat>>,
     /// Log compiler output
     #[clap(long)]
     debug_compiler: bool,
@@ -75,25 +74,25 @@ impl Into<ExecuteQueryCliOptions> for Args {
             query: self.query,
             variables: self.variables,
             headers: None,
-            capture_effects: self.capture_effects,
-            replay_effects: self.replay_effects,
-            debug_actions: self.log,
             debug_compiler: self.debug_compiler,
             debug_interpreter: self.debug_interpreter,
             debug_stack: self.debug_stack,
-            captured_effects: self
-                .captured_effects
-                .unwrap_or_else(|| default_captured_effects()),
         }
     }
 }
 
-fn default_captured_effects() -> Vec<String> {
-    vec![
-        String::from(EFFECT_TYPE_FETCH),
-        String::from(EFFECT_TYPE_GRAPHQL),
-        String::from(EFFECT_TYPE_GRPC),
-    ]
+#[derive(Clone, Copy, Debug)]
+enum LogFormat {
+    Json,
+}
+impl FromStr for LogFormat {
+    type Err = anyhow::Error;
+    fn from_str(input: &str) -> Result<Self, Self::Err> {
+        match input.to_lowercase().as_str() {
+            "json" => Ok(Self::Json),
+            _ => Err(anyhow!("Unrecognized log format: {}", input)),
+        }
+    }
 }
 
 #[tokio::main]
@@ -116,6 +115,23 @@ async fn main() -> Result<()> {
         debug: args.debug_compiler,
         ..Default::default()
     };
+    let logger_middleware = args.log.map(|format| {
+        LoggerMiddleware::new(match format {
+            Some(LogFormat::Json) => EitherLogger::Left(JsonActionLogger::stderr()),
+            None => EitherLogger::Right(FormattedLogger::stderr("server")),
+        })
+    });
+    let recorder_middleware = match args.capture_events.as_ref() {
+        Some(output_path) => {
+            let recorder = match output_path {
+                Some(path) => FileRecorder::new(path),
+                None => FileRecorder::new(PathBuf::from(generate_session_recording_filename(None))),
+            };
+            Some(SessionRecorder::new(recorder))
+        }
+        None => None,
+    };
+    let middleware = SchedulerMiddleware::new(logger_middleware, recorder_middleware);
     let module_loader = Some(default_js_loaders(
         server_imports(&factory, &allocator),
         &factory,
@@ -131,7 +147,7 @@ async fn main() -> Result<()> {
         &factory,
         &allocator,
     )?;
-    let middleware = default_handlers::<ServerCliAction<_>, _, _, _, _, _>(
+    let actor = default_handlers::<ServerCliAction<_>, _, _, _, _, _>(
         https_client,
         &factory,
         &allocator,
@@ -142,6 +158,7 @@ async fn main() -> Result<()> {
         args.into(),
         graph_root,
         schema,
+        actor,
         middleware,
         &factory,
         &allocator,

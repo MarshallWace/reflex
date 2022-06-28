@@ -13,7 +13,7 @@ use std::{
 };
 
 use opentelemetry::KeyValue;
-use reflex_dispatcher::{compose_actors, Actor};
+use reflex_dispatcher::{Actor, ChainedActor, PostMiddleware, PreMiddleware, SchedulerMiddleware};
 
 use anyhow::{anyhow, Context, Result};
 use futures::{future, Future};
@@ -36,17 +36,16 @@ use reflex_handlers::{actor::grpc::tonic, utils::tls::tokio_native_tls::native_t
 use reflex_js::stdlib::Stdlib as JsStdlib;
 use reflex_json::{stdlib::Stdlib as JsonStdlib, JsonMap, JsonValue};
 use reflex_runtime::{AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator};
+use serde::{Deserialize, Serialize};
 
 use crate::{
     graphql_service,
-    middleware::{
-        create_grpc_otlp_tracer, create_http_otlp_tracer, OpenTelemetryMiddleware,
-        OpenTelemetryMiddlewareAction, ServerMiddleware, TelemetryMiddleware,
-        TelemetryMiddlewareAction, TelemetryMiddlewareMetricNames,
-    },
     server::actor::{
+        create_grpc_otlp_tracer, create_http_otlp_tracer,
         http_graphql_server::HttpGraphQlServerQueryTransform,
-        websocket_graphql_server::WebSocketGraphQlServerQueryTransform,
+        websocket_graphql_server::WebSocketGraphQlServerQueryTransform, OpenTelemetryMiddleware,
+        OpenTelemetryMiddlewareAction, TelemetryMiddleware, TelemetryMiddlewareAction,
+        TelemetryMiddlewareMetricNames,
     },
     utils::operation::format_graphql_operation_label,
     GraphQlWebServer, GraphQlWebServerAction, GraphQlWebServerMetricNames,
@@ -62,7 +61,7 @@ pub struct ReflexServerCliOptions {
     pub address: SocketAddr,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum OpenTelemetryConfig {
     Http(OpenTelemetryHttpConfig),
     Grpc(OpenTelemetryGrpcConfig),
@@ -126,7 +125,7 @@ impl OpenTelemetryConfig {
             }
         }
     }
-    pub fn into_middleware<
+    pub fn into_actor<
         T: AsyncExpression,
         TAction: TelemetryMiddlewareAction<T> + OpenTelemetryMiddlewareAction + Send,
     >(
@@ -161,7 +160,7 @@ impl OpenTelemetryConfig {
         }
         .map_err(|err| anyhow!("{}", err))
         .with_context(|| anyhow!("Failed to initialize OpenTelemetry agent"))?;
-        Ok(compose_actors(
+        Ok(ChainedActor::new(
             TelemetryMiddleware::new(
                 factory.clone(),
                 allocator.clone(),
@@ -191,6 +190,88 @@ impl std::fmt::Debug for OpenTelemetryHttpConfig {
             .finish()
     }
 }
+impl Serialize for OpenTelemetryHttpConfig {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        SerializedOpenTelemetryHttpConfig::from(self).serialize(serializer)
+    }
+}
+impl<'de> Deserialize<'de> for OpenTelemetryHttpConfig {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        SerializedOpenTelemetryHttpConfig::deserialize(deserializer).map(Into::into)
+    }
+}
+#[derive(Serialize, Deserialize)]
+struct SerializedOpenTelemetryHttpConfig {
+    endpoint: String,
+    http_headers: Vec<(String, String)>,
+    resource_attributes: Vec<(String, String)>,
+    tls_cert: Option<Vec<u8>>,
+}
+impl<'a> From<&'a OpenTelemetryHttpConfig> for SerializedOpenTelemetryHttpConfig {
+    fn from(value: &'a OpenTelemetryHttpConfig) -> Self {
+        let OpenTelemetryHttpConfig {
+            endpoint,
+            http_headers,
+            resource_attributes,
+            tls_cert,
+        } = value;
+        Self {
+            endpoint: endpoint.clone(),
+            http_headers: http_headers
+                .into_iter()
+                .filter_map(|(key, value)| {
+                    value
+                        .to_str()
+                        .ok()
+                        .map(|value| (String::from(key.as_str()), String::from(value)))
+                })
+                .collect(),
+            resource_attributes: resource_attributes
+                .into_iter()
+                .map(|entry| {
+                    (
+                        String::from(entry.key.as_str()),
+                        String::from(entry.value.as_str()),
+                    )
+                })
+                .collect(),
+            tls_cert: tls_cert.as_ref().and_then(|value| value.to_der().ok()),
+        }
+    }
+}
+impl From<SerializedOpenTelemetryHttpConfig> for OpenTelemetryHttpConfig {
+    fn from(value: SerializedOpenTelemetryHttpConfig) -> Self {
+        let SerializedOpenTelemetryHttpConfig {
+            endpoint,
+            http_headers,
+            resource_attributes,
+            tls_cert,
+        } = value;
+        Self {
+            endpoint,
+            http_headers: http_headers
+                .into_iter()
+                .filter_map(|(key, value)| {
+                    match (HeaderName::from_str(&key), HeaderValue::from_str(&value)) {
+                        (Ok(key), Ok(value)) => Some((key, value)),
+                        _ => None,
+                    }
+                })
+                .collect(),
+            resource_attributes: resource_attributes
+                .into_iter()
+                .map(|(key, value)| KeyValue::new(key, value))
+                .collect(),
+            tls_cert: tls_cert.and_then(|value| native_tls::Certificate::from_der(&value).ok()),
+        }
+    }
+}
 
 #[derive(Clone)]
 pub struct OpenTelemetryGrpcConfig {
@@ -207,12 +288,78 @@ impl std::fmt::Debug for OpenTelemetryGrpcConfig {
             .finish()
     }
 }
+impl Serialize for OpenTelemetryGrpcConfig {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        SerializedOpenTelemetryGrpcConfig::from(self).serialize(serializer)
+    }
+}
+impl<'de> Deserialize<'de> for OpenTelemetryGrpcConfig {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        SerializedOpenTelemetryGrpcConfig::deserialize(deserializer).map(Into::into)
+    }
+}
+#[derive(Serialize, Deserialize)]
+struct SerializedOpenTelemetryGrpcConfig {
+    endpoint: String,
+    resource_attributes: Vec<(String, String)>,
+    tls_cert: Option<Vec<u8>>,
+}
+impl<'a> From<&'a OpenTelemetryGrpcConfig> for SerializedOpenTelemetryGrpcConfig {
+    fn from(value: &'a OpenTelemetryGrpcConfig) -> Self {
+        let OpenTelemetryGrpcConfig {
+            endpoint,
+            resource_attributes,
+            tls_cert,
+        } = value;
+        Self {
+            endpoint: endpoint.clone(),
+            resource_attributes: resource_attributes
+                .into_iter()
+                .map(|entry| {
+                    (
+                        String::from(entry.key.as_str()),
+                        String::from(entry.value.as_str()),
+                    )
+                })
+                .collect(),
+            tls_cert: tls_cert.as_ref().map(|value| value.clone().into_inner()),
+        }
+    }
+}
+impl From<SerializedOpenTelemetryGrpcConfig> for OpenTelemetryGrpcConfig {
+    fn from(value: SerializedOpenTelemetryGrpcConfig) -> Self {
+        let SerializedOpenTelemetryGrpcConfig {
+            endpoint,
+            resource_attributes,
+            tls_cert,
+        } = value;
+        Self {
+            endpoint,
+            resource_attributes: resource_attributes
+                .into_iter()
+                .map(|(key, value)| KeyValue::new(key, value))
+                .collect(),
+            tls_cert: tls_cert.map(|value| tonic::transport::Certificate::from_pem(&value)),
+        }
+    }
+}
 
-pub fn cli<T, TFactory, TAllocator, TAction, TPre, TPost>(
+pub fn cli<T, TFactory, TAllocator, TAction>(
     args: ReflexServerCliOptions,
     graph_root: (Program, InstructionPointer),
     schema: Option<GraphQlSchema>,
-    middleware: ServerMiddleware<TAction, TPre, TPost>,
+    actor: impl Actor<TAction, State = impl Send + 'static> + Send + 'static,
+    middleware: SchedulerMiddleware<
+        impl PreMiddleware<TAction, State = impl Send + 'static> + Send + 'static,
+        impl PostMiddleware<TAction, State = impl Send + 'static> + Send + 'static,
+        TAction,
+    >,
     factory: &TFactory,
     allocator: &TAllocator,
     compiler_options: CompilerOptions,
@@ -241,15 +388,12 @@ where
     T::Builtin: From<Stdlib> + From<JsonStdlib> + From<JsStdlib> + From<GraphQlStdlib>,
     TFactory: AsyncExpressionFactory<T>,
     TAllocator: AsyncHeapAllocator<T>,
-    TPre: Actor<TAction> + Send + 'static,
-    TPre::State: Send,
-    TPost: Actor<TAction> + Send + 'static,
-    TPost::State: Send,
-    TAction: GraphQlWebServerAction<T> + Send + 'static,
+    TAction: GraphQlWebServerAction<T> + Clone + Send + 'static,
 {
     let app = GraphQlWebServer::new(
         graph_root,
         schema,
+        actor,
         middleware,
         compiler_options,
         interpreter_options,

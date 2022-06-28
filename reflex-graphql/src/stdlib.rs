@@ -22,7 +22,6 @@ mod dynamic_query_branch;
 mod flatten_deep;
 
 #[derive(Hash, Eq, PartialEq, Clone, Copy, Debug, Serialize, Deserialize, EnumIter)]
-#[serde(tag = "type")]
 pub enum Stdlib {
     CollectQueryListItems,
     DynamicQueryBranch,

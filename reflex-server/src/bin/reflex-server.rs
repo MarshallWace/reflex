@@ -21,7 +21,9 @@ use reflex::{
     lang::{CachedSharedTerm, SharedTermFactory},
 };
 use reflex_cli::{compile_entry_point, syntax::js::default_js_loaders, Syntax};
-use reflex_dispatcher::{compose_actors, scheduler::sync::SyncContext, EitherActor};
+use reflex_dispatcher::{
+    ChainedActor, EitherActor, SchedulerMiddleware, SessionRecorder, StateOperation,
+};
 use reflex_graphql::{
     parse_graphql_schema, GraphQlOperation, GraphQlSchema, NoopGraphQlQueryTransform,
 };
@@ -38,12 +40,17 @@ use reflex_server::{
         cli, get_graphql_query_label, get_operation_transaction_labels, OpenTelemetryConfig,
         ReflexServerCliOptions,
     },
+    generate_session_recording_filename,
     imports::server_imports,
     logger::{formatted::FormattedLogger, json::JsonActionLogger, ActionLogger, EitherLogger},
-    middleware::{LoggerMiddleware, ServerMiddleware, TelemetryMiddlewareMetricNames},
-    server::action::init::{
-        InitGraphRootAction, InitHttpServerAction, InitOpenTelemetryAction,
-        InitPrometheusMetricsAction,
+    middleware::LoggerMiddleware,
+    recorder::FileRecorder,
+    server::{
+        action::init::{
+            InitGraphRootAction, InitHttpServerAction, InitOpenTelemetryAction,
+            InitPrometheusMetricsAction, InitSessionRecordingAction,
+        },
+        TelemetryMiddlewareMetricNames,
     },
     GraphQlWebServerMetricNames,
 };
@@ -72,6 +79,9 @@ struct Args {
     /// Log runtime actions
     #[clap(long)]
     log: Option<LogFormat>,
+    /// Path to capture runtime event playback file
+    #[clap(long)]
+    capture_events: Option<Option<PathBuf>>,
     /// Prevent static compiler optimizations
     #[clap(long)]
     unoptimized: bool,
@@ -133,9 +143,37 @@ pub async fn main() -> Result<()> {
     } else {
         None
     };
+    let logger_middleware = args.log.map(|_| LoggerMiddleware::new(logger.clone()));
+    let recorder_middleware = match args.capture_events.as_ref() {
+        Some(output_path) => {
+            let (recorder, serialized_path) = match output_path {
+                Some(path) => {
+                    let serialized_path = format!("{}", path.to_string_lossy());
+                    (FileRecorder::new(path), serialized_path)
+                }
+                None => {
+                    let output_path = generate_session_recording_filename(None);
+                    let serialized_path = output_path.clone();
+                    (
+                        FileRecorder::new(PathBuf::from(output_path)),
+                        serialized_path,
+                    )
+                }
+            };
+            log_server_action(
+                &mut logger,
+                InitSessionRecordingAction {
+                    output_path: serialized_path,
+                },
+            );
+            Some(SessionRecorder::new(recorder))
+        }
+        None => None,
+    };
+    let middleware = SchedulerMiddleware::new(logger_middleware, recorder_middleware);
     let factory = SharedTermFactory::<ServerBuiltins>::default();
     let allocator = DefaultAllocator::default();
-    let middleware = default_handlers(
+    let actor = default_handlers::<ServerCliAction<CachedSharedTerm<ServerBuiltins>>, _, _, _, _, _>(
         https_client,
         &factory,
         &allocator,
@@ -145,8 +183,8 @@ pub async fn main() -> Result<()> {
         },
         DefaultHandlersMetricNames::default(),
     );
-    let middleware = match OpenTelemetryConfig::parse_env(std::env::vars())? {
-        None => EitherActor::Left(middleware),
+    let actor = match OpenTelemetryConfig::parse_env(std::env::vars())? {
+        None => EitherActor::Left(actor),
         Some(config) => {
             log_server_action(
                 &mut logger,
@@ -154,9 +192,9 @@ pub async fn main() -> Result<()> {
                     config: config.clone(),
                 },
             );
-            EitherActor::Right(compose_actors(
-                middleware,
-                config.into_middleware(
+            EitherActor::Right(ChainedActor::new(
+                actor,
+                config.into_actor(
                     get_graphql_query_label,
                     get_operation_transaction_labels,
                     &factory,
@@ -210,14 +248,12 @@ pub async fn main() -> Result<()> {
             address: config.address,
         },
     );
-    let middleware = compose_actors(LoggerMiddleware::new(logger), middleware);
     let server = cli(
         config,
         graph_root,
         schema,
-        ServerMiddleware::<ServerCliAction<CachedSharedTerm<ServerBuiltins>>, _, _>::post(
-            middleware,
-        ),
+        actor,
+        middleware,
         &factory,
         &allocator,
         compiler_options,
@@ -262,7 +298,11 @@ fn log_server_action<T: Expression>(
     logger: &mut impl ActionLogger<Action = ServerCliAction<T>>,
     action: impl Into<ServerCliAction<T>>,
 ) {
-    logger.log(&(action.into()), None, Option::<&SyncContext>::None)
+    logger.log(
+        &StateOperation::Send(Default::default(), action.into()),
+        None,
+        None,
+    )
 }
 
 fn load_graphql_schema(path: &Path) -> Result<GraphQlSchema> {

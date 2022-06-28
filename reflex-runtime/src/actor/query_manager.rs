@@ -266,9 +266,11 @@ where
                 let subscription = state.subscriptions.get_mut(state_token)?;
                 let effect_result = match update {
                     StateUpdate::Value(value) => value.clone(),
-                    StateUpdate::Patch(updater) => {
-                        updater(subscription.result.as_ref().map(|result| result.result()))
-                    }
+                    StateUpdate::Patch(updater) => updater.apply(
+                        subscription.result.as_ref().map(|result| result.result()),
+                        &self.factory,
+                        &self.allocator,
+                    ),
                 };
                 let result = parse_evaluate_effect_result(&effect_result, &self.factory)?;
                 subscription.result.replace(result.clone());

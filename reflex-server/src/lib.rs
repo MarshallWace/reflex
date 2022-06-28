@@ -2,29 +2,34 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
-use std::sync::{Arc, Mutex};
+use std::{
+    sync::{Arc, Mutex},
+    time::SystemTime,
+};
 
 pub use ::bytes;
 pub use ::http;
 pub use ::metrics;
 pub use ::metrics_exporter_prometheus;
 pub use ::opentelemetry;
+use chrono::{DateTime, Utc};
 
 use http::StatusCode;
 use logger::ActionLogger;
-use middleware::action::opentelemetry::OpenTelemetryMiddlewareErrorAction;
+use server::action::opentelemetry::OpenTelemetryMiddlewareErrorAction;
 
 pub mod action;
 pub mod imports;
 pub mod logger;
 pub mod middleware;
+pub mod recorder;
 pub mod server;
 pub mod stdlib;
 pub mod utils;
 
 pub(crate) mod service;
 
-use reflex_dispatcher::{scheduler::sync::SyncContext, Action, OutboundAction};
+use reflex_dispatcher::{Action, OutboundAction, StateOperation};
 use reflex_graphql::{
     create_json_error_object, validate::ValidateQueryGraphQlTransform, GraphQlOperation,
     GraphQlQueryTransform, GraphQlSchemaTypes,
@@ -115,11 +120,24 @@ where
                 let action = OpenTelemetryMiddlewareErrorAction {
                     error: format!("{}", error),
                 };
-                logger.log(&(action.into()), None, Option::<&SyncContext>::None)
+                logger.log(
+                    &StateOperation::Send(Default::default(), action.into()),
+                    None,
+                    None,
+                )
             }
         }
     })
     .map_err(|err| OpenTelemetryMiddlewareErrorAction {
         error: format!("{}", err),
     })
+}
+
+pub fn generate_session_recording_filename(suffix: Option<&str>) -> String {
+    let datetime: DateTime<Utc> = SystemTime::now().into();
+    format!(
+        "{}{}.session",
+        datetime.format("%Y-%m-%d-%s"),
+        suffix.unwrap_or("")
+    )
 }

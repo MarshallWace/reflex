@@ -7,18 +7,17 @@ use std::{
     vec::IntoIter,
 };
 
-use graphql_parser::{
-    query::{self, OperationDefinition},
-    schema,
-};
+use graphql_parser::schema;
 use reflex_json::{JsonMap, JsonValue};
 
+use crate::ast::{common::Value, query};
+
 use crate::{
-    create_json_error_object, get_query_root_operation, GraphQlExtensions, GraphQlQueryTransform,
-    GraphQlSchemaTypes, GraphQlText,
+    create_json_error_object, get_query_root_operation, GraphQlExtensions, GraphQlQuery,
+    GraphQlQueryTransform, GraphQlSchemaTypes, GraphQlText,
 };
 
-type GraphQlQueryFragments<'src, 'a, T> = HashMap<&'a T, &'a query::FragmentDefinition<'src, T>>;
+type GraphQlQueryFragments<'a> = HashMap<&'a String, &'a query::FragmentDefinition>;
 
 /// GraphQL transform that validates the incoming GraphQL query against the provided GraphQL schema.
 ///
@@ -50,11 +49,11 @@ impl<'schema, TSchema: GraphQlText<'schema>> ValidateQueryGraphQlTransform<'sche
 impl<'schema, TSchema: GraphQlText<'schema>> GraphQlQueryTransform
     for ValidateQueryGraphQlTransform<'schema, TSchema>
 {
-    fn transform<'query, TQuery: GraphQlText<'query>>(
+    fn transform(
         &self,
-        document: query::Document<'query, TQuery>,
+        document: GraphQlQuery,
         extensions: GraphQlExtensions,
-    ) -> Result<(query::Document<'query, TQuery>, GraphQlExtensions), String> {
+    ) -> Result<(GraphQlQuery, GraphQlExtensions), String> {
         validate_graphql_query(&document, &self.schema_types)
             .map(|transformed| match transformed {
                 Some(document) => document,
@@ -269,15 +268,10 @@ fn extend_schema_type<'schema, TSchema: GraphQlText<'schema>>(
     }
 }
 
-pub fn validate_graphql_query<
-    'schema,
-    'query,
-    TSchema: GraphQlText<'schema>,
-    TQuery: GraphQlText<'query>,
->(
-    document: &query::Document<'query, TQuery>,
+pub fn validate_graphql_query<'schema, TSchema: GraphQlText<'schema>>(
+    document: &query::Document,
     schema_types: &GraphQlSchemaTypes<'schema, TSchema>,
-) -> Result<Option<query::Document<'query, TQuery>>, String> {
+) -> Result<Option<query::Document>, String> {
     let fragments = parse_query_fragments(document);
     get_query_root_operation(document).and_then(|operation| {
         validate_operation(operation, schema_types, &fragments).map(|result| {
@@ -295,9 +289,7 @@ pub fn validate_graphql_query<
     })
 }
 
-fn parse_query_fragments<'a, 'query, TQuery: GraphQlText<'query>>(
-    document: &'a query::Document<'query, TQuery>,
-) -> GraphQlQueryFragments<'query, 'a, TQuery> {
+fn parse_query_fragments<'a>(document: &'a query::Document) -> GraphQlQueryFragments<'a> {
     document
         .definitions
         .iter()
@@ -305,7 +297,7 @@ fn parse_query_fragments<'a, 'query, TQuery: GraphQlText<'query>>(
             query::Definition::Fragment(fragment) => Some((&fragment.name, fragment)),
             _ => None,
         })
-        .collect::<GraphQlQueryFragments<'query, '_, TQuery>>()
+        .collect::<GraphQlQueryFragments<'_>>()
 }
 
 struct GraphQlResultValidationError {
@@ -389,14 +381,9 @@ impl GraphQlQueryPathSegment {
     }
 }
 
-pub fn validate_graphql_result<
-    'schema,
-    'query,
-    TSchema: GraphQlText<'schema>,
-    TQuery: GraphQlText<'query>,
->(
+pub fn validate_graphql_result<'schema, TSchema: GraphQlText<'schema>>(
     payload: &JsonValue,
-    operation: &query::Document<'query, TQuery>,
+    operation: &query::Document,
     schema_types: &GraphQlSchemaTypes<'schema, TSchema>,
 ) -> Result<(), Vec<JsonValue>> {
     let fragments = parse_query_fragments(operation);
@@ -404,26 +391,21 @@ pub fn validate_graphql_result<
         .map_err(|errors| errors.into_iter().map(|err| err.into_json()).collect())
 }
 
-fn validate_graphql_result_root<
-    'schema,
-    'query,
-    TSchema: GraphQlText<'schema>,
-    TQuery: GraphQlText<'query>,
->(
+fn validate_graphql_result_root<'schema, TSchema: GraphQlText<'schema>>(
     payload: &JsonValue,
-    operation: &query::Document<'query, TQuery>,
+    operation: &query::Document,
     schema_types: &GraphQlSchemaTypes<'schema, TSchema>,
-    fragments: &GraphQlQueryFragments<'query, '_, TQuery>,
+    fragments: &GraphQlQueryFragments<'_>,
 ) -> Result<(), Vec<GraphQlResultValidationError>> {
     let operation_root =
         get_query_root_operation(operation).map_err(|err| vec![format_validation_error(err)])?;
     let operation_root_type = get_operation_root_type(operation_root, schema_types)
         .map_err(|err| vec![format_validation_error(err)])?;
     let selection_set = match operation_root {
-        OperationDefinition::Query(operation) => &operation.selection_set,
-        OperationDefinition::Mutation(operation) => &operation.selection_set,
-        OperationDefinition::Subscription(operation) => &operation.selection_set,
-        OperationDefinition::SelectionSet(selection_set) => selection_set,
+        query::OperationDefinition::Query(operation) => &operation.selection_set,
+        query::OperationDefinition::Mutation(operation) => &operation.selection_set,
+        query::OperationDefinition::Subscription(operation) => &operation.selection_set,
+        query::OperationDefinition::SelectionSet(selection_set) => selection_set,
     };
     let errors = validate_result_selection_set(
         payload,
@@ -439,17 +421,12 @@ fn validate_graphql_result_root<
     }
 }
 
-fn validate_result_selection_set<
-    'schema,
-    'query,
-    TSchema: GraphQlText<'schema>,
-    TQuery: GraphQlText<'query>,
->(
+fn validate_result_selection_set<'schema, TSchema: GraphQlText<'schema>>(
     payload: &JsonValue,
-    selection_set: &query::SelectionSet<'query, TQuery>,
+    selection_set: &query::SelectionSet,
     schema_type: &schema::TypeDefinition<'schema, TSchema>,
     schema_types: &GraphQlSchemaTypes<'schema, TSchema>,
-    fragments: &GraphQlQueryFragments<'query, '_, TQuery>,
+    fragments: &GraphQlQueryFragments<'_>,
 ) -> Vec<GraphQlResultValidationError> {
     match schema_type {
         schema::TypeDefinition::Scalar(schema_type) => validate_result_scalar_selection_set(
@@ -489,17 +466,12 @@ fn validate_result_selection_set<
     }
 }
 
-fn validate_result_scalar_selection_set<
-    'schema,
-    'query,
-    TSchema: GraphQlText<'schema>,
-    TQuery: GraphQlText<'query>,
->(
+fn validate_result_scalar_selection_set<'schema, TSchema: GraphQlText<'schema>>(
     payload: &JsonValue,
-    _selection_set: &query::SelectionSet<'query, TQuery>,
+    _selection_set: &query::SelectionSet,
     schema_type: &schema::ScalarType<'schema, TSchema>,
     _schema_types: &GraphQlSchemaTypes<'schema, TSchema>,
-    _fragments: &GraphQlQueryFragments<'query, '_, TQuery>,
+    _fragments: &GraphQlQueryFragments<'_>,
 ) -> Vec<GraphQlResultValidationError> {
     match schema_type.name.as_ref() {
         "Int" => validate_result_scalar_int_selection_set(payload, schema_type),
@@ -599,17 +571,12 @@ fn validate_result_scalar_id_selection_set<'schema, TSchema: GraphQlText<'schema
     }
 }
 
-fn validate_result_enum_selection_set<
-    'schema,
-    'query,
-    TSchema: GraphQlText<'schema>,
-    TQuery: GraphQlText<'query>,
->(
+fn validate_result_enum_selection_set<'schema, TSchema: GraphQlText<'schema>>(
     payload: &JsonValue,
-    _selection_set: &query::SelectionSet<'query, TQuery>,
+    _selection_set: &query::SelectionSet,
     schema_type: &schema::EnumType<'schema, TSchema>,
     _schema_types: &GraphQlSchemaTypes<'schema, TSchema>,
-    _fragments: &GraphQlQueryFragments<'query, '_, TQuery>,
+    _fragments: &GraphQlQueryFragments<'_>,
 ) -> Vec<GraphQlResultValidationError> {
     let parsed_value = payload
         .as_str()
@@ -635,17 +602,12 @@ fn match_enum_value<'a, 'schema, TSchema: GraphQlText<'schema>>(
         .find(|&enum_value| enum_value.as_ref() == value)
 }
 
-fn validate_result_object_selection_set<
-    'schema,
-    'query,
-    TSchema: GraphQlText<'schema>,
-    TQuery: GraphQlText<'query>,
->(
+fn validate_result_object_selection_set<'schema, TSchema: GraphQlText<'schema>>(
     payload: &JsonValue,
-    selection_set: &query::SelectionSet<'query, TQuery>,
+    selection_set: &query::SelectionSet,
     schema_type: &schema::ObjectType<'schema, TSchema>,
     schema_types: &GraphQlSchemaTypes<'schema, TSchema>,
-    fragments: &GraphQlQueryFragments<'query, '_, TQuery>,
+    fragments: &GraphQlQueryFragments<'_>,
 ) -> Vec<GraphQlResultValidationError> {
     match payload.as_object() {
         None => once(format_type_validation_error(
@@ -670,17 +632,12 @@ fn validate_result_object_selection_set<
     }
 }
 
-fn validate_result_object_field_selection_set<
-    'schema,
-    'query,
-    TSchema: GraphQlText<'schema>,
-    TQuery: GraphQlText<'query>,
->(
+fn validate_result_object_field_selection_set<'schema, TSchema: GraphQlText<'schema>>(
     payload_fields: &JsonMap<String, JsonValue>,
-    selection_set: &query::SelectionSet<'query, TQuery>,
+    selection_set: &query::SelectionSet,
     schema_type: &schema::ObjectType<'schema, TSchema>,
     schema_types: &GraphQlSchemaTypes<'schema, TSchema>,
-    fragments: &GraphQlQueryFragments<'query, '_, TQuery>,
+    fragments: &GraphQlQueryFragments<'_>,
 ) -> Vec<GraphQlResultValidationError> {
     selection_set
         .items
@@ -691,7 +648,7 @@ fn validate_result_object_field_selection_set<
                     let schema_field_name = &query_field.name;
                     let query_field_name = get_aliased_field_name(query_field);
                     let expected_type = get_object_field_type(schema_type, schema_field_name);
-                    match (expected_type, payload_fields.get(query_field_name.as_ref())) {
+                    match (expected_type, payload_fields.get(query_field_name.as_str())) {
                         (None, received) => {
                             once(format_type_validation_error(None, received)).collect()
                         }
@@ -713,7 +670,7 @@ fn validate_result_object_field_selection_set<
                                 .alias
                                 .as_ref()
                                 .unwrap_or(&query_field.name)
-                                .as_ref(),
+                                .as_str(),
                         )))
                     })
                     .collect()
@@ -739,17 +696,12 @@ fn validate_result_object_field_selection_set<
         .collect()
 }
 
-fn validate_result_field<
-    'schema,
-    'query,
-    TSchema: GraphQlText<'schema>,
-    TQuery: GraphQlText<'query>,
->(
+fn validate_result_field<'schema, TSchema: GraphQlText<'schema>>(
     payload: &JsonValue,
-    selection_set: &query::SelectionSet<'query, TQuery>,
+    selection_set: &query::SelectionSet,
     schema_type: &schema::Type<'schema, TSchema>,
     schema_types: &GraphQlSchemaTypes<'schema, TSchema>,
-    fragments: &GraphQlQueryFragments<'query, '_, TQuery>,
+    fragments: &GraphQlQueryFragments<'_>,
 ) -> Vec<GraphQlResultValidationError> {
     match schema_type {
         schema::Type::NamedType(type_name) => {
@@ -825,17 +777,11 @@ fn validate_result_field<
     }
 }
 
-fn get_object_field_type<
-    'a,
-    'schema,
-    'query,
-    TSchema: GraphQlText<'schema>,
-    TQuery: GraphQlText<'query>,
->(
+fn get_object_field_type<'a, 'schema, TSchema: GraphQlText<'schema>>(
     schema_type: &'a schema::ObjectType<'schema, TSchema>,
-    field_name: &TQuery,
+    field_name: &String,
 ) -> Option<&'a schema::Type<'schema, TSchema>> {
-    let field_name = field_name.as_ref();
+    let field_name = field_name.as_str();
     schema_type
         .fields
         .iter()
@@ -843,9 +789,7 @@ fn get_object_field_type<
         .map(|field| &field.field_type)
 }
 
-fn get_aliased_field_name<'a, 'query, TQuery: GraphQlText<'query>>(
-    field: &'a query::Field<'query, TQuery>,
-) -> &'a TQuery {
+fn get_aliased_field_name<'a>(field: &'a query::Field) -> &'a String {
     field.alias.as_ref().unwrap_or(&field.name)
 }
 
@@ -922,14 +866,8 @@ fn format_validation_error(message: impl Into<String>) -> GraphQlResultValidatio
     GraphQlResultValidationError::new(message.into())
 }
 
-fn get_operation_root_type<
-    'a,
-    'schema,
-    'query,
-    TSchema: GraphQlText<'schema>,
-    TQuery: GraphQlText<'query>,
->(
-    operation: &query::OperationDefinition<'query, TQuery>,
+fn get_operation_root_type<'a, 'schema, TSchema: GraphQlText<'schema>>(
+    operation: &query::OperationDefinition,
     schema_types: &'a GraphQlSchemaTypes<'schema, TSchema>,
 ) -> Result<&'a schema::TypeDefinition<'schema, TSchema>, String> {
     match operation {
@@ -948,9 +886,7 @@ fn get_operation_root_type<
     })
 }
 
-fn format_operation_root_type<'query, TQuery: GraphQlText<'query>>(
-    operation: &query::OperationDefinition<'query, TQuery>,
-) -> &'static str {
+fn format_operation_root_type(operation: &query::OperationDefinition) -> &'static str {
     match operation {
         query::OperationDefinition::Query(_) | query::OperationDefinition::SelectionSet(_) => {
             "query"
@@ -986,16 +922,11 @@ fn get_schema_type_extension_name<'a, 'schema, TSchema: GraphQlText<'schema>>(
     }
 }
 
-fn validate_operation<
-    'schema,
-    'query,
-    TSchema: GraphQlText<'schema>,
-    TQuery: GraphQlText<'query>,
->(
-    operation: &query::OperationDefinition<'query, TQuery>,
+fn validate_operation<'schema, TSchema: GraphQlText<'schema>>(
+    operation: &query::OperationDefinition,
     schema_types: &GraphQlSchemaTypes<'schema, TSchema>,
-    fragments: &GraphQlQueryFragments<'query, '_, TQuery>,
-) -> Result<Option<query::OperationDefinition<'query, TQuery>>, String> {
+    fragments: &GraphQlQueryFragments<'_>,
+) -> Result<Option<query::OperationDefinition>, String> {
     let operation_root_type = get_operation_root_type(operation, schema_types)?;
     match operation {
         query::OperationDefinition::Query(operation) => validate_selection_set(
@@ -1047,17 +978,12 @@ fn validate_operation<
     }
 }
 
-fn validate_selection_set<
-    'schema,
-    'query,
-    TSchema: GraphQlText<'schema>,
-    TQuery: GraphQlText<'query>,
->(
-    selection_set: &query::SelectionSet<'query, TQuery>,
+fn validate_selection_set<'schema, TSchema: GraphQlText<'schema>>(
+    selection_set: &query::SelectionSet,
     schema_type: &schema::TypeDefinition<'schema, TSchema>,
     schema_types: &GraphQlSchemaTypes<'schema, TSchema>,
-    fragments: &GraphQlQueryFragments<'query, '_, TQuery>,
-) -> Result<Option<query::SelectionSet<'query, TQuery>>, String> {
+    fragments: &GraphQlQueryFragments<'_>,
+) -> Result<Option<query::SelectionSet>, String> {
     match schema_type {
         schema::TypeDefinition::Scalar(schema_type) => {
             validate_scalar_selection_set(selection_set, schema_type)
@@ -1080,15 +1006,10 @@ fn validate_selection_set<
     }
 }
 
-fn validate_scalar_selection_set<
-    'schema,
-    'query,
-    TSchema: GraphQlText<'schema>,
-    TQuery: GraphQlText<'query>,
->(
-    selection_set: &query::SelectionSet<'query, TQuery>,
+fn validate_scalar_selection_set<'schema, TSchema: GraphQlText<'schema>>(
+    selection_set: &query::SelectionSet,
     schema_type: &schema::ScalarType<'schema, TSchema>,
-) -> Result<Option<query::SelectionSet<'query, TQuery>>, String> {
+) -> Result<Option<query::SelectionSet>, String> {
     if selection_set.items.is_empty() {
         Ok(None)
     } else {
@@ -1099,15 +1020,10 @@ fn validate_scalar_selection_set<
     }
 }
 
-fn validate_enum_selection_set<
-    'schema,
-    'query,
-    TSchema: GraphQlText<'schema>,
-    TQuery: GraphQlText<'query>,
->(
-    selection_set: &query::SelectionSet<'query, TQuery>,
+fn validate_enum_selection_set<'schema, TSchema: GraphQlText<'schema>>(
+    selection_set: &query::SelectionSet,
     schema_type: &schema::EnumType<'schema, TSchema>,
-) -> Result<Option<query::SelectionSet<'query, TQuery>>, String> {
+) -> Result<Option<query::SelectionSet>, String> {
     if selection_set.items.is_empty() {
         Ok(None)
     } else {
@@ -1118,17 +1034,12 @@ fn validate_enum_selection_set<
     }
 }
 
-fn validate_object_selection_set<
-    'schema,
-    'query,
-    TSchema: GraphQlText<'schema>,
-    TQuery: GraphQlText<'query>,
->(
-    selection_set: &query::SelectionSet<'query, TQuery>,
+fn validate_object_selection_set<'schema, TSchema: GraphQlText<'schema>>(
+    selection_set: &query::SelectionSet,
     schema_type: &schema::ObjectType<'schema, TSchema>,
     schema_types: &GraphQlSchemaTypes<'schema, TSchema>,
-    fragments: &GraphQlQueryFragments<'query, '_, TQuery>,
-) -> Result<Option<query::SelectionSet<'query, TQuery>>, String> {
+    fragments: &GraphQlQueryFragments<'_>,
+) -> Result<Option<query::SelectionSet>, String> {
     if selection_set.items.is_empty() {
         Err(String::from("No fields selected"))
     } else {
@@ -1146,17 +1057,12 @@ fn validate_object_selection_set<
     }
 }
 
-fn validate_object_selection<
-    'schema,
-    'query,
-    TSchema: GraphQlText<'schema>,
-    TQuery: GraphQlText<'query>,
->(
-    selection: &query::Selection<'query, TQuery>,
+fn validate_object_selection<'schema, TSchema: GraphQlText<'schema>>(
+    selection: &query::Selection,
     schema_type: &schema::ObjectType<'schema, TSchema>,
     schema_types: &GraphQlSchemaTypes<'schema, TSchema>,
-    fragments: &GraphQlQueryFragments<'query, '_, TQuery>,
-) -> Result<Option<Vec<query::Selection<'query, TQuery>>>, String> {
+    fragments: &GraphQlQueryFragments<'_>,
+) -> Result<Option<Vec<query::Selection>>, String> {
     match selection {
         query::Selection::Field(field) => {
             validate_object_field_selection(field, schema_type, schema_types, fragments)
@@ -1174,17 +1080,12 @@ fn validate_object_selection<
     }
 }
 
-fn validate_object_fragment_spread_selection<
-    'schema,
-    'query,
-    TSchema: GraphQlText<'schema>,
-    TQuery: GraphQlText<'query>,
->(
-    fragment: &query::FragmentSpread<'query, TQuery>,
+fn validate_object_fragment_spread_selection<'schema, TSchema: GraphQlText<'schema>>(
+    fragment: &query::FragmentSpread,
     schema_type: &schema::ObjectType<'schema, TSchema>,
     schema_types: &GraphQlSchemaTypes<'schema, TSchema>,
-    fragments: &GraphQlQueryFragments<'query, '_, TQuery>,
-) -> Result<Option<Vec<query::Selection<'query, TQuery>>>, String> {
+    fragments: &GraphQlQueryFragments<'_>,
+) -> Result<Option<Vec<query::Selection>>, String> {
     get_named_fragment(&fragment.fragment_name, fragments).and_then(|fragment| {
         validate_object_selection_set(
             &fragment.selection_set,
@@ -1196,34 +1097,29 @@ fn validate_object_fragment_spread_selection<
     })
 }
 
-fn get_named_fragment<'a, 'query, 'fragments, TQuery: GraphQlText<'query>>(
-    fragment_name: &TQuery,
-    fragments: &'a GraphQlQueryFragments<'query, 'fragments, TQuery>,
-) -> Result<&'a &'fragments query::FragmentDefinition<'query, TQuery>, String> {
+fn get_named_fragment<'a, 'fragments>(
+    fragment_name: &String,
+    fragments: &'a GraphQlQueryFragments<'fragments>,
+) -> Result<&'a &'fragments query::FragmentDefinition, String> {
     fragments
         .get(fragment_name)
-        .ok_or_else(|| format!("Undefined fragment: {}", fragment_name.as_ref()))
+        .ok_or_else(|| format!("Undefined fragment: {}", fragment_name.as_str()))
 }
 
-fn validate_object_field_selection<
-    'schema,
-    'query,
-    TSchema: GraphQlText<'schema>,
-    TQuery: GraphQlText<'query>,
->(
-    query_field: &query::Field<'query, TQuery>,
+fn validate_object_field_selection<'schema, TSchema: GraphQlText<'schema>>(
+    query_field: &query::Field,
     schema_type: &schema::ObjectType<'schema, TSchema>,
     schema_types: &GraphQlSchemaTypes<'schema, TSchema>,
-    fragments: &GraphQlQueryFragments<'query, '_, TQuery>,
-) -> Result<Option<query::Field<'query, TQuery>>, String> {
+    fragments: &GraphQlQueryFragments<'_>,
+) -> Result<Option<query::Field>, String> {
     let schema_field = schema_type
         .fields
         .iter()
-        .find(|schema_field| schema_field.name.as_ref() == query_field.name.as_ref())
+        .find(|schema_field| schema_field.name.as_ref() == query_field.name.as_str())
         .ok_or_else(|| {
             format!(
                 "Field \"{}\" not found on type {}",
-                query_field.name.as_ref(),
+                query_field.name.as_str(),
                 schema_type.name.as_ref()
             )
         })?;
@@ -1234,7 +1130,7 @@ fn validate_object_field_selection<
     let arguments = validate_object_field_arguments(query_field, schema_field).map_err(|err| {
         format!(
             "Invalid arguments for field \"{}\" on type {}: {}",
-            query_field.name.as_ref(),
+            query_field.name.as_str(),
             schema_type.name.as_ref(),
             err
         )
@@ -1248,7 +1144,7 @@ fn validate_object_field_selection<
     .map_err(|err| {
         format!(
             "Invalid selection set for field \"{}\" on type {}: {}",
-            query_field.name.as_ref(),
+            query_field.name.as_str(),
             schema_type.name.as_ref(),
             err
         )
@@ -1263,15 +1159,10 @@ fn validate_object_field_selection<
     })
 }
 
-fn validate_object_field_arguments<
-    'schema,
-    'query,
-    TSchema: GraphQlText<'schema>,
-    TQuery: GraphQlText<'query>,
->(
-    query_field: &query::Field<'query, TQuery>,
+fn validate_object_field_arguments<'schema, TSchema: GraphQlText<'schema>>(
+    query_field: &query::Field,
     schema_field: &schema::Field<'schema, TSchema>,
-) -> Result<Option<Vec<(TQuery, query::Value<'query, TQuery>)>>, String> {
+) -> Result<Option<Vec<(String, Value)>>, String> {
     let (missing_required_arguments, missing_optional_arguments): (Vec<_>, Vec<_>) = schema_field
         .arguments
         .iter()
@@ -1279,7 +1170,7 @@ fn validate_object_field_arguments<
             query_field
                 .arguments
                 .iter()
-                .find(|(key, _)| key.as_ref() == schema_argument.name.as_ref())
+                .find(|(key, _)| key.as_str() == schema_argument.name.as_ref())
                 .is_none()
         })
         .partition(|schema_argument| match &schema_argument.value_type {
@@ -1296,11 +1187,11 @@ fn validate_object_field_arguments<
         schema_field
             .arguments
             .iter()
-            .find(|schema_argument| schema_argument.name.as_ref() == key.as_ref())
+            .find(|schema_argument| schema_argument.name.as_ref() == key.as_str())
             .is_none()
     });
     if let Some((key, _value)) = undeclared_arguments.next() {
-        return Err(format!("Unexpected argument \"{}\"", key.as_ref(),));
+        return Err(format!("Unexpected argument \"{}\"", key.as_str(),));
     }
     // TODO: Validate query field argument types against schema types
     Ok(if missing_optional_arguments.is_empty() {
@@ -1326,16 +1217,11 @@ fn validate_object_field_arguments<
     })
 }
 
-fn get_default_argument_value<
-    'schema,
-    'query,
-    TSchema: GraphQlText<'schema>,
-    TQuery: GraphQlText<'query>,
->(
+fn get_default_argument_value<'schema, TSchema: GraphQlText<'schema>>(
     schema_argument: &schema::InputValue<'schema, TSchema>,
-) -> query::Value<'query, TQuery> {
+) -> Value {
     match &schema_argument.default_value {
-        None => query::Value::Null,
+        None => Value::Null,
         Some(value) => instantiate_schema_value(value),
     }
 }
@@ -1351,26 +1237,21 @@ fn get_type_identifier_name<'a, 'schema, TSchema: GraphQlText<'schema>>(
 }
 
 /// Converts a GraphQL schema value into a GraphQL query value
-fn instantiate_schema_value<
-    'schema,
-    'query,
-    TSchema: GraphQlText<'schema>,
-    TQuery: GraphQlText<'query>,
->(
+fn instantiate_schema_value<'schema, TSchema: GraphQlText<'schema>>(
     value: &schema::Value<'schema, TSchema>,
-) -> query::Value<'query, TQuery> {
+) -> Value {
     match value {
-        schema::Value::Variable(name) => query::Value::Variable(String::from(name.as_ref()).into()),
-        schema::Value::Int(value) => query::Value::Int(value.clone()),
-        schema::Value::Float(value) => query::Value::Float(*value),
-        schema::Value::String(value) => query::Value::String(value.clone()),
-        schema::Value::Boolean(value) => query::Value::Boolean(*value),
-        schema::Value::Null => query::Value::Null,
-        schema::Value::Enum(variant) => query::Value::Enum(String::from(variant.as_ref()).into()),
+        schema::Value::Variable(name) => Value::Variable(String::from(name.as_ref()).into()),
+        schema::Value::Int(value) => Value::Int(value.into()),
+        schema::Value::Float(value) => Value::Float(*value),
+        schema::Value::String(value) => Value::String(value.clone()),
+        schema::Value::Boolean(value) => Value::Boolean(*value),
+        schema::Value::Null => Value::Null,
+        schema::Value::Enum(variant) => Value::Enum(String::from(variant.as_ref()).into()),
         schema::Value::List(items) => {
-            query::Value::List(items.iter().map(instantiate_schema_value).collect())
+            Value::List(items.iter().map(instantiate_schema_value).collect())
         }
-        schema::Value::Object(fields) => query::Value::Object(
+        schema::Value::Object(fields) => Value::Object(
             fields
                 .iter()
                 .map(|(key, value)| {
@@ -1452,7 +1333,7 @@ mod tests {
     use graphql_parser::{parse_query, parse_schema};
     use reflex_json::json;
 
-    use crate::GraphQlQueryTransform;
+    use crate::{GraphQlQuery, GraphQlQueryTransform};
 
     use super::{
         parse_graphql_schema_types, validate_graphql_result, ValidateQueryGraphQlTransform,
@@ -1463,9 +1344,9 @@ mod tests {
         input: &str,
         expected: &str,
     ) {
-        let input = parse_query::<Cow<str>>(input).unwrap();
-        let expected = parse_query::<Cow<str>>(expected).unwrap();
-        let result = transform.transform(input, Default::default());
+        let input = parse_query::<String>(input).unwrap().into_static();
+        let expected = parse_query::<String>(expected).unwrap().into_static();
+        let result = transform.transform(GraphQlQuery::from(&input), Default::default());
         assert_eq!(
             result.map(|(result, _)| format!("{}", result)),
             Ok(format!("{}", expected))
@@ -1637,8 +1518,9 @@ mod tests {
         let schema = parse_schema::<Cow<str>>(schema).unwrap();
         let schema_types = parse_graphql_schema_types(schema).unwrap();
 
-        let query = parse_query::<Cow<str>>(
-            "query {
+        let query = GraphQlQuery::from(
+            &parse_query(
+                "query {
                 boolean
                 int
                 string
@@ -1652,8 +1534,10 @@ mod tests {
                     int
                 }
             }",
-        )
-        .unwrap();
+            )
+            .unwrap()
+            .into_static(),
+        );
         let payload = json!({
             "int": null,
             "string": 3,
@@ -1686,8 +1570,9 @@ mod tests {
             ])
         );
 
-        let query = parse_query::<Cow<str>>(
-            "query {
+        let query = GraphQlQuery::from(
+            &parse_query(
+                "query {
                 boolean
                 int
                 string
@@ -1715,8 +1600,10 @@ mod tests {
                     }
                 }
             }",
-        )
-        .unwrap();
+            )
+            .unwrap()
+            .into_static(),
+        );
         let payload = json!({
             "boolean": true,
             "int": 3,
@@ -1781,12 +1668,15 @@ mod tests {
         let schema = parse_schema::<Cow<str>>(schema).unwrap();
         let schema_types = parse_graphql_schema_types(schema).unwrap();
 
-        let query = parse_query::<Cow<str>>(
-            "query {
+        let query = GraphQlQuery::from(
+            &parse_query(
+                "query {
                 bar: foo
             }",
-        )
-        .unwrap();
+            )
+            .unwrap()
+            .into_static(),
+        );
 
         let payload = json!({
             "bar": "foo",
@@ -1816,12 +1706,15 @@ mod tests {
         let schema = parse_schema::<Cow<str>>(schema).unwrap();
         let schema_types = parse_graphql_schema_types(schema).unwrap();
 
-        let query = parse_query::<Cow<str>>(
-            "query {
+        let query = GraphQlQuery::from(
+            &parse_query(
+                "query {
                 string
             }",
-        )
-        .unwrap();
+            )
+            .unwrap()
+            .into_static(),
+        );
 
         let payload = json!({
             "string": reflex_json::JsonValue::Null,
@@ -1852,8 +1745,9 @@ mod tests {
         let schema = parse_schema::<Cow<str>>(schema).unwrap();
         let schema_types = parse_graphql_schema_types(schema).unwrap();
 
-        let query = parse_query::<Cow<str>>(
-            "query {
+        let query = GraphQlQuery::from(
+            &parse_query(
+                "query {
                 ...Foo
                 ...Bar
                 baz
@@ -1865,8 +1759,10 @@ mod tests {
                 bar
             }
             ",
-        )
-        .unwrap();
+            )
+            .unwrap()
+            .into_static(),
+        );
 
         let payload = json!({
             "foo": "foo",
