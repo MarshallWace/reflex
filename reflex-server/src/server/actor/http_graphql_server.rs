@@ -11,7 +11,7 @@ use std::{
 use bytes::Bytes;
 use http::{
     header::{self, HeaderName, HeaderValue, InvalidHeaderValue},
-    HeaderMap, Request, StatusCode,
+    HeaderMap, Request, Response, StatusCode,
 };
 use metrics::{
     decrement_gauge, describe_counter, describe_gauge, increment_counter, increment_gauge, Unit,
@@ -44,6 +44,54 @@ use crate::{
     },
     utils::transform::apply_graphql_query_transform,
 };
+
+const HEADER_NAME_GRAPHQL_HTTP_RESPONSE_STATUS: &'static str = "x-graphql-response-type";
+const HEADER_VALUE_GRAPHQL_HTTP_RESPONSE_STATUS_SUCCESS: &'static str = "success";
+const HEADER_VALUE_GRAPHQL_HTTP_RESPONSE_STATUS_ERROR: &'static str = "error";
+
+pub fn get_http_response_graphql_status<T>(
+    response: &Response<T>,
+) -> Option<HttpGraphQlServerResponseStatus> {
+    response
+        .headers()
+        .get(HEADER_NAME_GRAPHQL_HTTP_RESPONSE_STATUS)
+        .and_then(|value| value.as_bytes().try_into().ok())
+}
+
+pub enum HttpGraphQlServerResponseStatus {
+    Success,
+    Error,
+}
+impl Into<(HeaderName, HeaderValue)> for HttpGraphQlServerResponseStatus {
+    fn into(self) -> (HeaderName, HeaderValue) {
+        (
+            HeaderName::from_static(HEADER_NAME_GRAPHQL_HTTP_RESPONSE_STATUS),
+            match self {
+                Self::Success => {
+                    HeaderValue::from_static(HEADER_VALUE_GRAPHQL_HTTP_RESPONSE_STATUS_SUCCESS)
+                }
+                Self::Error => {
+                    HeaderValue::from_static(HEADER_VALUE_GRAPHQL_HTTP_RESPONSE_STATUS_ERROR)
+                }
+            },
+        )
+    }
+}
+impl<'a> TryFrom<&'a [u8]> for HttpGraphQlServerResponseStatus {
+    type Error = ();
+    fn try_from(value: &'a [u8]) -> Result<Self, ()> {
+        let value = std::str::from_utf8(value).map_err(|_| ())?;
+        match value {
+            HEADER_VALUE_GRAPHQL_HTTP_RESPONSE_STATUS_SUCCESS => {
+                Ok(HttpGraphQlServerResponseStatus::Success)
+            }
+            HEADER_VALUE_GRAPHQL_HTTP_RESPONSE_STATUS_ERROR => {
+                Ok(HttpGraphQlServerResponseStatus::Error)
+            }
+            _ => Err(()),
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug)]
 pub struct HttpGraphQlServerMetricNames {
@@ -317,7 +365,7 @@ where
                     request_id,
                     response: create_json_http_response(
                         status_code,
-                        None,
+                        once(HttpGraphQlServerResponseStatus::Error.into()),
                         &JsonValue::from(message),
                     ),
                 }
@@ -444,7 +492,17 @@ where
                     });
                 create_json_http_response(
                     StatusCode::OK,
-                    create_etag_header(&response_etag).ok(),
+                    create_etag_header(&response_etag)
+                        .ok()
+                        .into_iter()
+                        .chain(once(
+                            (if matches!(&payload, Err(_)) {
+                                HttpGraphQlServerResponseStatus::Error
+                            } else {
+                                HttpGraphQlServerResponseStatus::Success
+                            })
+                            .into(),
+                        )),
                     &match payload {
                         Ok(payload) => create_graphql_success_response(payload),
                         Err(errors) => create_graphql_error_response(errors),
