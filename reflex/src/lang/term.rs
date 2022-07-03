@@ -16,6 +16,8 @@ mod constructor;
 pub use constructor::*;
 mod compiled;
 pub use compiled::*;
+mod effect;
+pub use effect::*;
 mod float;
 pub use float::*;
 mod int;
@@ -74,8 +76,8 @@ pub enum Term<T: Expression> {
     Float(FloatTerm),
     String(StringTerm<T::String>),
     Symbol(SymbolTerm),
-    StaticVariable(StaticVariableTerm),
-    DynamicVariable(DynamicVariableTerm<T>),
+    Variable(VariableTerm),
+    Effect(EffectTerm<T>),
     Let(LetTerm<T>),
     Lambda(LambdaTerm<T>),
     Application(ApplicationTerm<T>),
@@ -106,8 +108,8 @@ impl<T: Expression + Applicable<T>> GraphNode for Term<T> {
             Self::Float(term) => term.capture_depth(),
             Self::String(term) => term.capture_depth(),
             Self::Symbol(term) => term.capture_depth(),
-            Self::StaticVariable(term) => term.capture_depth(),
-            Self::DynamicVariable(term) => term.capture_depth(),
+            Self::Variable(term) => term.capture_depth(),
+            Self::Effect(term) => term.capture_depth(),
             Self::Let(term) => term.capture_depth(),
             Self::Lambda(term) => term.capture_depth(),
             Self::Application(term) => term.capture_depth(),
@@ -131,8 +133,8 @@ impl<T: Expression + Applicable<T>> GraphNode for Term<T> {
             Self::Float(term) => term.free_variables(),
             Self::String(term) => term.free_variables(),
             Self::Symbol(term) => term.free_variables(),
-            Self::StaticVariable(term) => term.free_variables(),
-            Self::DynamicVariable(term) => term.free_variables(),
+            Self::Variable(term) => term.free_variables(),
+            Self::Effect(term) => term.free_variables(),
             Self::Let(term) => term.free_variables(),
             Self::Lambda(term) => term.free_variables(),
             Self::Application(term) => term.free_variables(),
@@ -156,8 +158,8 @@ impl<T: Expression + Applicable<T>> GraphNode for Term<T> {
             Self::Float(term) => term.count_variable_usages(offset),
             Self::String(term) => term.count_variable_usages(offset),
             Self::Symbol(term) => term.count_variable_usages(offset),
-            Self::StaticVariable(term) => term.count_variable_usages(offset),
-            Self::DynamicVariable(term) => term.count_variable_usages(offset),
+            Self::Variable(term) => term.count_variable_usages(offset),
+            Self::Effect(term) => term.count_variable_usages(offset),
             Self::Let(term) => term.count_variable_usages(offset),
             Self::Lambda(term) => term.count_variable_usages(offset),
             Self::Application(term) => term.count_variable_usages(offset),
@@ -181,8 +183,8 @@ impl<T: Expression + Applicable<T>> GraphNode for Term<T> {
             Self::Float(term) => term.dynamic_dependencies(deep),
             Self::String(term) => term.dynamic_dependencies(deep),
             Self::Symbol(term) => term.dynamic_dependencies(deep),
-            Self::StaticVariable(term) => term.dynamic_dependencies(deep),
-            Self::DynamicVariable(term) => term.dynamic_dependencies(deep),
+            Self::Variable(term) => term.dynamic_dependencies(deep),
+            Self::Effect(term) => term.dynamic_dependencies(deep),
             Self::Let(term) => term.dynamic_dependencies(deep),
             Self::Lambda(term) => term.dynamic_dependencies(deep),
             Self::Application(term) => term.dynamic_dependencies(deep),
@@ -206,8 +208,8 @@ impl<T: Expression + Applicable<T>> GraphNode for Term<T> {
             Self::Float(term) => term.has_dynamic_dependencies(deep),
             Self::String(term) => term.has_dynamic_dependencies(deep),
             Self::Symbol(term) => term.has_dynamic_dependencies(deep),
-            Self::StaticVariable(term) => term.has_dynamic_dependencies(deep),
-            Self::DynamicVariable(term) => term.has_dynamic_dependencies(deep),
+            Self::Variable(term) => term.has_dynamic_dependencies(deep),
+            Self::Effect(term) => term.has_dynamic_dependencies(deep),
             Self::Let(term) => term.has_dynamic_dependencies(deep),
             Self::Lambda(term) => term.has_dynamic_dependencies(deep),
             Self::Application(term) => term.has_dynamic_dependencies(deep),
@@ -231,8 +233,8 @@ impl<T: Expression + Applicable<T>> GraphNode for Term<T> {
             Self::Float(term) => term.is_static(),
             Self::String(term) => term.is_static(),
             Self::Symbol(term) => term.is_static(),
-            Self::StaticVariable(term) => term.is_static(),
-            Self::DynamicVariable(term) => term.is_static(),
+            Self::Variable(term) => term.is_static(),
+            Self::Effect(term) => term.is_static(),
             Self::Let(term) => term.is_static(),
             Self::Lambda(term) => term.is_static(),
             Self::Application(term) => term.is_static(),
@@ -256,8 +258,8 @@ impl<T: Expression + Applicable<T>> GraphNode for Term<T> {
             Self::Float(term) => term.is_atomic(),
             Self::String(term) => term.is_atomic(),
             Self::Symbol(term) => term.is_atomic(),
-            Self::StaticVariable(term) => term.is_atomic(),
-            Self::DynamicVariable(term) => term.is_atomic(),
+            Self::Variable(term) => term.is_atomic(),
+            Self::Effect(term) => term.is_atomic(),
             Self::Let(term) => term.is_atomic(),
             Self::Lambda(term) => term.is_atomic(),
             Self::Application(term) => term.is_atomic(),
@@ -281,8 +283,8 @@ impl<T: Expression + Applicable<T>> GraphNode for Term<T> {
             Self::Float(term) => term.is_complex(),
             Self::String(term) => term.is_complex(),
             Self::Symbol(term) => term.is_complex(),
-            Self::StaticVariable(term) => term.is_complex(),
-            Self::DynamicVariable(term) => term.is_complex(),
+            Self::Variable(term) => term.is_complex(),
+            Self::Effect(term) => term.is_complex(),
             Self::Let(term) => term.is_complex(),
             Self::Lambda(term) => term.is_complex(),
             Self::Application(term) => term.is_complex(),
@@ -300,7 +302,6 @@ impl<T: Expression + Applicable<T>> GraphNode for Term<T> {
     }
 }
 pub enum TermChildren<'a, T: Expression> {
-    DynamicVariable(DynamicVariableTermChildren<'a, T>),
     Let(LetTermChildren<'a, T>),
     Lambda(LambdaTermChildren<'a, T>),
     Application(ApplicationTermChildren<'a, T>),
@@ -316,7 +317,6 @@ impl<'a, T: Expression> Iterator for TermChildren<'a, T> {
     type Item = &'a T;
     fn next(&mut self) -> Option<Self::Item> {
         match self {
-            Self::DynamicVariable(iter) => iter.next(),
             Self::Let(iter) => iter.next(),
             Self::Lambda(iter) => iter.next(),
             Self::Application(iter) => iter.next(),
@@ -334,7 +334,6 @@ impl<'a, T: Expression + 'a> CompoundNode<'a, T> for Term<T> {
     type Children = TermChildren<'a, T>;
     fn children(&'a self) -> Self::Children {
         match self {
-            Self::DynamicVariable(term) => TermChildren::DynamicVariable(term.children()),
             Self::Let(term) => TermChildren::Let(term.children()),
             Self::Lambda(term) => TermChildren::Lambda(term.children()),
             Self::Application(term) => TermChildren::Application(term.children()),
@@ -359,12 +358,10 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Evaluate<T>>
         cache: &mut impl EvaluationCache<T>,
     ) -> Option<T> {
         match self {
-            Self::StaticVariable(term) => {
+            Self::Variable(term) => {
                 term.substitute_static(substitutions, factory, allocator, cache)
             }
-            Self::DynamicVariable(term) => {
-                term.substitute_static(substitutions, factory, allocator, cache)
-            }
+            Self::Effect(term) => term.substitute_static(substitutions, factory, allocator, cache),
             Self::Let(term) => term.substitute_static(substitutions, factory, allocator, cache),
             Self::Lambda(term) => term.substitute_static(substitutions, factory, allocator, cache),
             Self::Application(term) => {
@@ -392,12 +389,8 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Evaluate<T>>
         cache: &mut impl EvaluationCache<T>,
     ) -> Option<T> {
         match self {
-            Self::StaticVariable(term) => {
-                term.substitute_dynamic(deep, state, factory, allocator, cache)
-            }
-            Self::DynamicVariable(term) => {
-                term.substitute_dynamic(deep, state, factory, allocator, cache)
-            }
+            Self::Variable(term) => term.substitute_dynamic(deep, state, factory, allocator, cache),
+            Self::Effect(term) => term.substitute_dynamic(deep, state, factory, allocator, cache),
             Self::Let(term) => term.substitute_dynamic(deep, state, factory, allocator, cache),
             Self::Lambda(term) => term.substitute_dynamic(deep, state, factory, allocator, cache),
             Self::Application(term) => {
@@ -423,8 +416,8 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Evaluate<T>>
         cache: &mut impl EvaluationCache<T>,
     ) -> Option<T> {
         match self {
-            Self::StaticVariable(term) => term.normalize(factory, allocator, cache),
-            Self::DynamicVariable(term) => term.normalize(factory, allocator, cache),
+            Self::Variable(term) => term.normalize(factory, allocator, cache),
+            Self::Effect(term) => term.normalize(factory, allocator, cache),
             Self::Let(term) => term.normalize(factory, allocator, cache),
             Self::Lambda(term) => term.normalize(factory, allocator, cache),
             Self::Application(term) => term.normalize(factory, allocator, cache),
@@ -443,8 +436,8 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Evaluate<T>>
         allocator: &impl HeapAllocator<T>,
     ) -> Option<T> {
         match self {
-            Self::StaticVariable(term) => term.hoist_free_variables(factory, allocator),
-            Self::DynamicVariable(term) => term.hoist_free_variables(factory, allocator),
+            Self::Variable(term) => term.hoist_free_variables(factory, allocator),
+            Self::Effect(term) => term.hoist_free_variables(factory, allocator),
             Self::Let(term) => term.hoist_free_variables(factory, allocator),
             Self::Lambda(term) => term.hoist_free_variables(factory, allocator),
             Self::Application(term) => term.hoist_free_variables(factory, allocator),
@@ -532,7 +525,7 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Evaluate<T>>
         cache: &mut impl EvaluationCache<T>,
     ) -> Option<EvaluationResult<T>> {
         match self {
-            Self::DynamicVariable(term) => term.evaluate(state, factory, allocator, cache),
+            Self::Effect(term) => term.evaluate(state, factory, allocator, cache),
             Self::Application(term) => term.evaluate(state, factory, allocator, cache),
             _ => {
                 if self.is_reducible() {
@@ -568,12 +561,8 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>> 
             Self::Float(term) => term.compile(eager, stack_offset, factory, allocator, compiler),
             Self::String(term) => term.compile(eager, stack_offset, factory, allocator, compiler),
             Self::Symbol(term) => term.compile(eager, stack_offset, factory, allocator, compiler),
-            Self::StaticVariable(term) => {
-                term.compile(eager, stack_offset, factory, allocator, compiler)
-            }
-            Self::DynamicVariable(term) => {
-                term.compile(eager, stack_offset, factory, allocator, compiler)
-            }
+            Self::Variable(term) => term.compile(eager, stack_offset, factory, allocator, compiler),
+            Self::Effect(term) => term.compile(eager, stack_offset, factory, allocator, compiler),
             Self::Let(term) => term.compile(eager, stack_offset, factory, allocator, compiler),
             Self::Lambda(term) => term.compile(eager, stack_offset, factory, allocator, compiler),
             Self::Application(term) => {
@@ -609,8 +598,8 @@ impl<T: Expression> std::fmt::Display for Term<T> {
             Self::Float(term) => std::fmt::Display::fmt(term, f),
             Self::String(term) => std::fmt::Display::fmt(term, f),
             Self::Symbol(term) => std::fmt::Display::fmt(term, f),
-            Self::StaticVariable(term) => std::fmt::Display::fmt(term, f),
-            Self::DynamicVariable(term) => std::fmt::Display::fmt(term, f),
+            Self::Variable(term) => std::fmt::Display::fmt(term, f),
+            Self::Effect(term) => std::fmt::Display::fmt(term, f),
             Self::Let(term) => std::fmt::Display::fmt(term, f),
             Self::Lambda(term) => std::fmt::Display::fmt(term, f),
             Self::Application(term) => std::fmt::Display::fmt(term, f),
@@ -636,8 +625,8 @@ impl<T: Expression> SerializeJson for Term<T> {
             Self::Float(term) => term.to_json(),
             Self::String(term) => term.to_json(),
             Self::Symbol(term) => term.to_json(),
-            Self::StaticVariable(term) => term.to_json(),
-            Self::DynamicVariable(term) => term.to_json(),
+            Self::Variable(term) => term.to_json(),
+            Self::Effect(term) => term.to_json(),
             Self::Let(term) => term.to_json(),
             Self::Lambda(term) => term.to_json(),
             Self::Application(term) => term.to_json(),

@@ -26,7 +26,7 @@ where
                 String::from("graph"),
                 factory.create_lambda_term(
                     1,
-                    factory.create_recursive_term(factory.create_static_variable_term(0)),
+                    factory.create_recursive_term(factory.create_variable_term(0)),
                 ),
             ),
             (

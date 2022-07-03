@@ -95,7 +95,7 @@ impl<T: Expression> SerializeJson for SignalTerm<T> {
     }
 }
 
-fn compile_signal<T: Expression + Compile<T>>(
+pub(crate) fn compile_signal<T: Expression + Compile<T>>(
     signal: &Signal<T>,
     stack_offset: StackOffset,
     factory: &impl ExpressionFactory<T>,
@@ -111,7 +111,7 @@ fn compile_signal<T: Expression + Compile<T>>(
         compiler,
     )?;
     let mut result = compiled_args;
-    result.push(Instruction::PushSignal {
+    result.push(Instruction::ConstructCondition {
         signal_type: signal.signal_type().clone(),
         num_args: signal.args().len(),
     });

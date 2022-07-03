@@ -24,7 +24,7 @@ pub fn global_error<T: Expression>(
             ))
             .chain(once((
                 String::from("message"),
-                factory.create_static_variable_term(0),
+                factory.create_variable_term(0),
             ))),
             factory,
             allocator,
@@ -51,14 +51,14 @@ where
                 String::from("message"),
                 factory.create_application_term(
                     factory.create_builtin_term(JsStdlib::FormatErrorMessage),
-                    allocator.create_unit_list(factory.create_static_variable_term(0)),
+                    allocator.create_unit_list(factory.create_variable_term(0)),
                 ),
             )))
             .chain(once((
                 String::from("errors"),
                 factory.create_application_term(
                     factory.create_builtin_term(Stdlib::ResolveList),
-                    allocator.create_unit_list(factory.create_static_variable_term(0)),
+                    allocator.create_unit_list(factory.create_variable_term(0)),
                 ),
             ))),
             factory,

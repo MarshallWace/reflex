@@ -36,7 +36,7 @@ where
                                 factory.create_application_term(
                                     factory.create_builtin_term(Stdlib::Get),
                                     allocator.create_pair(
-                                        factory.create_static_variable_term(2),
+                                        factory.create_variable_term(2),
                                         factory.create_string_term(
                                             allocator.create_string(String::from("url")),
                                         ),
@@ -47,8 +47,7 @@ where
                                 ),
                                 factory.create_application_term(
                                     factory.create_builtin_term(Stdlib::ResolveDeep),
-                                    allocator
-                                        .create_unit_list(factory.create_static_variable_term(1)),
+                                    allocator.create_unit_list(factory.create_variable_term(1)),
                                 ),
                                 factory.create_application_term(
                                     factory.create_builtin_term(Stdlib::If),
@@ -56,7 +55,7 @@ where
                                         factory.create_application_term(
                                             factory.create_builtin_term(Stdlib::Contains),
                                             allocator.create_pair(
-                                                factory.create_static_variable_term(0),
+                                                factory.create_variable_term(0),
                                                 factory.create_string_term(
                                                     allocator
                                                         .create_string(String::from("accumulate")),
@@ -66,7 +65,7 @@ where
                                         factory.create_application_term(
                                             factory.create_builtin_term(Stdlib::Get),
                                             allocator.create_pair(
-                                                factory.create_static_variable_term(0),
+                                                factory.create_variable_term(0),
                                                 factory.create_string_term(
                                                     allocator
                                                         .create_string(String::from("accumulate")),
@@ -79,7 +78,7 @@ where
                                 factory.create_application_term(
                                     factory.create_builtin_term(Stdlib::Get),
                                     allocator.create_pair(
-                                        factory.create_static_variable_term(0),
+                                        factory.create_variable_term(0),
                                         factory.create_string_term(
                                             allocator.create_string(String::from("token")),
                                         ),

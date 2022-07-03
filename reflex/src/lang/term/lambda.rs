@@ -129,16 +129,13 @@ impl<T: Expression + Rewritable<T>> Rewritable<T> for LambdaTerm<T> {
                 .iter()
                 .enumerate()
                 .map(|(arg_offset, target_offset)| {
-                    (
-                        *target_offset,
-                        factory.create_static_variable_term(arg_offset),
-                    )
+                    (*target_offset, factory.create_variable_term(arg_offset))
                 })
                 .collect::<Vec<_>>();
             let arg_values = stack_offsets
                 .into_iter()
                 .rev()
-                .map(|offset| factory.create_static_variable_term(offset));
+                .map(|offset| factory.create_variable_term(offset));
             let substitutions = Substitutions::named(&substitutions, None).offset(self.num_args);
             let body = hoisted_body.as_ref().unwrap_or(&self.body);
             match body.substitute_static(
@@ -230,7 +227,7 @@ fn apply_eta_reduction<'a, T: Expression>(
             if term.target().capture_depth() == 0
                 && term.args().len() <= num_args
                 && term.args().iter().enumerate().all(|(index, arg)| {
-                    match factory.match_static_variable_term(arg) {
+                    match factory.match_variable_term(arg) {
                         Some(term) => term.offset() == num_args - index - 1,
                         _ => false,
                     }
@@ -322,18 +319,18 @@ mod tests {
                                 factory.create_application_term(
                                     factory.create_builtin_term(Stdlib::Add),
                                     allocator.create_pair(
-                                        factory.create_static_variable_term(0),
-                                        factory.create_static_variable_term(1),
+                                        factory.create_variable_term(0),
+                                        factory.create_variable_term(1),
                                     ),
                                 ),
-                                factory.create_static_variable_term(2),
+                                factory.create_variable_term(2),
                             ),
                         ),
                     ),
                     allocator.create_list(vec![
-                        factory.create_static_variable_term(2),
-                        factory.create_static_variable_term(1),
-                        factory.create_static_variable_term(0),
+                        factory.create_variable_term(2),
+                        factory.create_variable_term(1),
+                        factory.create_variable_term(0),
                     ]),
                 )
             )),
@@ -382,21 +379,21 @@ mod tests {
                                         factory.create_application_term(
                                             factory.create_builtin_term(Stdlib::Add),
                                             allocator.create_pair(
-                                                factory.create_static_variable_term(0),
-                                                factory.create_static_variable_term(1),
+                                                factory.create_variable_term(0),
+                                                factory.create_variable_term(1),
                                             ),
                                         ),
-                                        factory.create_static_variable_term(2),
+                                        factory.create_variable_term(2),
                                     ),
                                 ),
-                                factory.create_static_variable_term(3),
+                                factory.create_variable_term(3),
                             ),
                         ),
                     ),
                     allocator.create_list(vec![
-                        factory.create_static_variable_term(2),
-                        factory.create_static_variable_term(1),
-                        factory.create_static_variable_term(0),
+                        factory.create_variable_term(2),
+                        factory.create_variable_term(1),
+                        factory.create_variable_term(0),
                     ]),
                 ),
             )),
@@ -458,35 +455,35 @@ mod tests {
                                                                 factory.create_application_term(
                                                                     factory.create_builtin_term(Stdlib::Add),
                                                                     allocator.create_pair(
-                                                                        factory.create_static_variable_term(0),
-                                                                        factory.create_static_variable_term(1),
+                                                                        factory.create_variable_term(0),
+                                                                        factory.create_variable_term(1),
                                                                     ),
                                                                 ),
-                                                                factory.create_static_variable_term(2),
+                                                                factory.create_variable_term(2),
                                                             ),
                                                         ),
-                                                        factory.create_static_variable_term(3),
+                                                        factory.create_variable_term(3),
                                                     ),
                                                 ),
-                                                factory.create_static_variable_term(4),
+                                                factory.create_variable_term(4),
                                             ),
                                         ),
-                                        factory.create_static_variable_term(5),
+                                        factory.create_variable_term(5),
                                     ),
                                 ),
                             ),
                             allocator.create_list(vec![
-                                factory.create_static_variable_term(3),
-                                factory.create_static_variable_term(2),
-                                factory.create_static_variable_term(1),
-                                factory.create_static_variable_term(0),
+                                factory.create_variable_term(3),
+                                factory.create_variable_term(2),
+                                factory.create_variable_term(1),
+                                factory.create_variable_term(0),
                             ]),
                         ),
                     ),
                     allocator.create_list(vec![
-                        factory.create_static_variable_term(2),
-                        factory.create_static_variable_term(1),
-                        factory.create_static_variable_term(0),
+                        factory.create_variable_term(2),
+                        factory.create_variable_term(1),
+                        factory.create_variable_term(0),
                     ])
                 )
             )),

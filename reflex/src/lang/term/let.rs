@@ -287,16 +287,17 @@ mod tests {
         let allocator = DefaultAllocator::default();
         let mut cache = DefaultInterpreterCache::default();
 
-        let expression = factory.create_let_term(
-            factory.create_int_term(3),
-            factory.create_application_term(
-                factory.create_builtin_term(Stdlib::Abs),
-                allocator.create_unit_list(factory.create_let_term(
-                    factory.create_nil_term(),
-                    factory.create_static_variable_term(1),
-                )),
-            ),
-        );
+        let expression =
+            factory.create_let_term(
+                factory.create_int_term(3),
+                factory.create_application_term(
+                    factory.create_builtin_term(Stdlib::Abs),
+                    allocator.create_unit_list(factory.create_let_term(
+                        factory.create_nil_term(),
+                        factory.create_variable_term(1),
+                    )),
+                ),
+            );
         let program = Compiler::new(CompilerOptions::unoptimized(), None)
             .compile(&expression, CompilerMode::Function, &factory, &allocator)
             .unwrap();
@@ -329,7 +330,7 @@ mod tests {
                     factory.create_int_term(4),
                     factory.create_let_term(
                         factory.create_nil_term(),
-                        factory.create_static_variable_term(1),
+                        factory.create_variable_term(1),
                     ),
                 ),
             ),
@@ -371,7 +372,7 @@ mod tests {
                             factory.create_int_term(4),
                             factory.create_let_term(
                                 factory.create_nil_term(),
-                                factory.create_static_variable_term(1),
+                                factory.create_variable_term(1),
                             ),
                         ),
                     ),
@@ -404,14 +405,14 @@ mod tests {
 
         let expression = factory.create_application_term(
             factory.create_let_term(
-                factory.create_lambda_term(1, factory.create_static_variable_term(0)),
+                factory.create_lambda_term(1, factory.create_variable_term(0)),
                 factory.create_lambda_term(
                     1,
                     factory.create_application_term(
                         factory.create_builtin_term(Stdlib::Abs),
                         allocator.create_unit_list(factory.create_application_term(
-                            factory.create_static_variable_term(1),
-                            allocator.create_unit_list(factory.create_static_variable_term(0)),
+                            factory.create_variable_term(1),
+                            allocator.create_unit_list(factory.create_variable_term(0)),
                         )),
                     ),
                 ),

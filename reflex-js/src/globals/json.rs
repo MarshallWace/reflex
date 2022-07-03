@@ -29,7 +29,7 @@ where
                         factory.create_builtin_term(JsonStdlib::JsonSerialize),
                         allocator.create_unit_list(factory.create_application_term(
                             factory.create_builtin_term(Stdlib::ResolveDeep),
-                            allocator.create_unit_list(factory.create_static_variable_term(0)),
+                            allocator.create_unit_list(factory.create_variable_term(0)),
                         )),
                     ),
                 ),

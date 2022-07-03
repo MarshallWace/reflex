@@ -52,7 +52,7 @@ where
         factory.create_let_term(
             factory.create_application_term(
                 factory.create_builtin_term(HandlersStdlib::ToRequest),
-                allocator.create_unit_list(factory.create_static_variable_term(0)),
+                allocator.create_unit_list(factory.create_variable_term(0)),
             ),
             factory.create_let_term(
                 factory.create_application_term(
@@ -63,14 +63,14 @@ where
                         factory.create_application_term(
                             factory.create_builtin_term(Stdlib::Get),
                             allocator.create_pair(
-                                factory.create_static_variable_term(0),
+                                factory.create_variable_term(0),
                                 factory.create_string_term(allocator.create_static_string("url")),
                             ),
                         ),
                         factory.create_application_term(
                             factory.create_builtin_term(Stdlib::Get),
                             allocator.create_pair(
-                                factory.create_static_variable_term(0),
+                                factory.create_variable_term(0),
                                 factory
                                     .create_string_term(allocator.create_static_string("method")),
                             ),
@@ -80,7 +80,7 @@ where
                             allocator.create_unit_list(factory.create_application_term(
                                 factory.create_builtin_term(Stdlib::Get),
                                 allocator.create_pair(
-                                    factory.create_static_variable_term(0),
+                                    factory.create_variable_term(0),
                                     factory.create_string_term(
                                         allocator.create_static_string("headers"),
                                     ),
@@ -90,7 +90,7 @@ where
                         factory.create_application_term(
                             factory.create_builtin_term(Stdlib::Get),
                             allocator.create_pair(
-                                factory.create_static_variable_term(0),
+                                factory.create_variable_term(0),
                                 factory.create_string_term(allocator.create_static_string("body")),
                             ),
                         ),
@@ -107,7 +107,7 @@ where
                         factory.create_application_term(
                             factory.create_builtin_term(Stdlib::Get),
                             allocator.create_pair(
-                                factory.create_static_variable_term(0),
+                                factory.create_variable_term(0),
                                 factory.create_int_term(0),
                             ),
                         ),
@@ -117,7 +117,7 @@ where
                                 factory.create_application_term(
                                     factory.create_builtin_term(Stdlib::Get),
                                     allocator.create_pair(
-                                        factory.create_static_variable_term(0),
+                                        factory.create_variable_term(0),
                                         factory.create_int_term(0),
                                     ),
                                 ),
@@ -129,7 +129,7 @@ where
                             factory.create_application_term(
                                 factory.create_builtin_term(Stdlib::Get),
                                 allocator.create_pair(
-                                    factory.create_static_variable_term(0),
+                                    factory.create_variable_term(0),
                                     factory.create_int_term(1),
                                 ),
                             ),
@@ -141,7 +141,7 @@ where
                                 allocator.create_unit_list(factory.create_application_term(
                                     factory.create_builtin_term(Stdlib::Get),
                                     allocator.create_pair(
-                                        factory.create_static_variable_term(0),
+                                        factory.create_variable_term(0),
                                         factory.create_int_term(1),
                                     ),
                                 )),

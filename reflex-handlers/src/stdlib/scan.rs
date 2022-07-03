@@ -1,8 +1,6 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use std::iter::once;
-
 use reflex::core::{
     uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
     FunctionArity, HeapAllocator, SignalType, Uid, Uuid,
@@ -62,14 +60,10 @@ impl<T: Expression> Applicable<T> for Scan {
                 } else if !is_pure_expression(&iteratee) {
                     Err(format!("Scan iteratee must be a pure expression"))
                 } else {
-                    let signal = allocator.create_signal(
+                    Ok(factory.create_effect_term(allocator.create_signal(
                         SignalType::Custom(String::from(EFFECT_TYPE_SCAN)),
                         allocator.create_list([name, target, seed, iteratee]),
-                    );
-                    Ok(factory.create_dynamic_variable_term(
-                        signal.id(),
-                        factory.create_signal_term(allocator.create_signal_list(once(signal))),
-                    ))
+                    )))
                 }
             }
         }

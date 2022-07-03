@@ -207,7 +207,7 @@ fn deeply_nested_function_application(b: &mut Bencher) {
                 1,
                 factory.create_application_term(
                     factory.create_builtin_term(Stdlib::Add),
-                    allocator.create_list(vec![factory.create_static_variable_term(0), acc]),
+                    allocator.create_list(vec![factory.create_variable_term(0), acc]),
                 ),
             ),
             allocator.create_list(once(factory.create_int_term(i))),

@@ -42,14 +42,10 @@ impl<T: Expression> Applicable<T> for Effect {
     ) -> Result<T, String> {
         let signal_type = args.next().unwrap();
         if let Some(signal_type) = factory.match_string_term(&signal_type) {
-            let signal = allocator.create_signal(
+            Ok(factory.create_effect_term(allocator.create_signal(
                 SignalType::Custom(String::from(signal_type.value.as_str())),
                 allocator.create_list(args),
-            );
-            Ok(factory.create_dynamic_variable_term(
-                signal.id(),
-                factory.create_signal_term(allocator.create_signal_list(once(signal))),
-            ))
+            )))
         } else {
             Err(format!(
                 "Expected (String, ...), received ({})",

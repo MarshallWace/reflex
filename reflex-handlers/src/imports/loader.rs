@@ -35,9 +35,9 @@ where
                                         factory.create_string_term(
                                             allocator.create_static_string(EFFECT_TYPE_LOADER),
                                         ),
-                                        factory.create_static_variable_term(2),
-                                        factory.create_static_variable_term(1),
-                                        factory.create_static_variable_term(0),
+                                        factory.create_variable_term(2),
+                                        factory.create_variable_term(1),
+                                        factory.create_variable_term(0),
                                     ]),
                                 ),
                             ),
@@ -49,7 +49,7 @@ where
                                 factory.create_application_term(
                                     factory.create_builtin_term(Stdlib::Map),
                                     allocator.create_pair(
-                                        factory.create_static_variable_term(0),
+                                        factory.create_variable_term(0),
                                         factory.create_lambda_term(
                                             1,
                                             factory.create_application_term(
@@ -60,9 +60,9 @@ where
                                                             EFFECT_TYPE_LOADER,
                                                         ),
                                                     ),
-                                                    factory.create_static_variable_term(3),
-                                                    factory.create_static_variable_term(2),
-                                                    factory.create_static_variable_term(0),
+                                                    factory.create_variable_term(3),
+                                                    factory.create_variable_term(2),
+                                                    factory.create_variable_term(0),
                                                 ]),
                                             ),
                                         ),

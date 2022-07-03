@@ -296,25 +296,25 @@ mod tests {
         );
 
         let expression = factory.create_partial_application_term(
-            factory.create_lambda_term(1, factory.create_static_variable_term(0)),
+            factory.create_lambda_term(1, factory.create_variable_term(0)),
             allocator.create_empty_list(),
         );
         let result = expression.normalize(&factory, &allocator, &mut SubstitutionCache::new());
         assert_eq!(
             result,
-            Some(factory.create_lambda_term(1, factory.create_static_variable_term(0)))
+            Some(factory.create_lambda_term(1, factory.create_variable_term(0)))
         );
 
         let expression = factory.create_partial_application_term(
-            factory.create_lambda_term(1, factory.create_static_variable_term(0)),
-            allocator.create_unit_list(factory.create_static_variable_term(0)),
+            factory.create_lambda_term(1, factory.create_variable_term(0)),
+            allocator.create_unit_list(factory.create_variable_term(0)),
         );
         let result = expression.normalize(&factory, &allocator, &mut SubstitutionCache::new());
         assert_eq!(result, None);
 
         let expression = factory.create_application_term(
             factory.create_partial_application_term(
-                factory.create_lambda_term(1, factory.create_static_variable_term(0)),
+                factory.create_lambda_term(1, factory.create_variable_term(0)),
                 allocator.create_unit_list(factory.create_int_term(3)),
             ),
             allocator.create_empty_list(),
@@ -334,7 +334,7 @@ mod tests {
 
         let expression = factory.create_application_term(
             factory.create_partial_application_term(
-                factory.create_lambda_term(1, factory.create_static_variable_term(0)),
+                factory.create_lambda_term(1, factory.create_variable_term(0)),
                 allocator.create_empty_list(),
             ),
             allocator.create_unit_list(factory.create_int_term(3)),

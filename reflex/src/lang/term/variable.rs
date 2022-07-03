@@ -11,17 +11,16 @@ use std::{
 use crate::{
     compiler::{Compile, Compiler, Instruction, Program},
     core::{
-        CompoundNode, DependencyList, DynamicState, Evaluate, EvaluationCache, EvaluationResult,
-        Expression, ExpressionFactory, GraphNode, HeapAllocator, Rewritable, SerializeJson,
-        StackOffset, StateToken, Substitutions, VarArgs,
+        DependencyList, DynamicState, EvaluationCache, Expression, ExpressionFactory, GraphNode,
+        HeapAllocator, Rewritable, SerializeJson, StackOffset, Substitutions, VarArgs,
     },
 };
 
 #[derive(Hash, Eq, PartialEq, Clone, Debug, Serialize, Deserialize)]
-pub struct StaticVariableTerm {
+pub struct VariableTerm {
     offset: StackOffset,
 }
-impl StaticVariableTerm {
+impl VariableTerm {
     pub fn new(offset: StackOffset) -> Self {
         Self { offset }
     }
@@ -29,7 +28,7 @@ impl StaticVariableTerm {
         self.offset
     }
 }
-impl GraphNode for StaticVariableTerm {
+impl GraphNode for VariableTerm {
     fn capture_depth(&self) -> StackOffset {
         self.offset + 1
     }
@@ -59,7 +58,7 @@ impl GraphNode for StaticVariableTerm {
         false
     }
 }
-impl<T: Expression + Rewritable<T>> Rewritable<T> for StaticVariableTerm {
+impl<T: Expression + Rewritable<T>> Rewritable<T> for VariableTerm {
     fn substitute_static(
         &self,
         substitutions: &Substitutions<T>,
@@ -95,7 +94,7 @@ impl<T: Expression + Rewritable<T>> Rewritable<T> for StaticVariableTerm {
         None
     }
 }
-impl<T: Expression + Compile<T>> Compile<T> for StaticVariableTerm {
+impl<T: Expression + Compile<T>> Compile<T> for VariableTerm {
     fn compile(
         &self,
         _eager: VarArgs,
@@ -104,152 +103,17 @@ impl<T: Expression + Compile<T>> Compile<T> for StaticVariableTerm {
         _allocator: &impl HeapAllocator<T>,
         _compiler: &mut Compiler,
     ) -> Result<Program, String> {
-        Ok(Program::new(once(Instruction::PushStatic {
+        Ok(Program::new(once(Instruction::PushLocal {
             offset: self.offset + stack_offset,
         })))
     }
 }
-impl std::fmt::Display for StaticVariableTerm {
+impl std::fmt::Display for VariableTerm {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "<static:{}>", self.offset)
     }
 }
-impl SerializeJson for StaticVariableTerm {
-    fn to_json(&self) -> Result<serde_json::Value, String> {
-        Err(format!("Unable to serialize term: {}", self))
-    }
-}
-
-#[derive(Hash, Eq, PartialEq, Clone, Debug, Serialize, Deserialize)]
-pub struct DynamicVariableTerm<T: Expression> {
-    state_token: StateToken,
-    fallback: T,
-}
-impl<T: Expression> DynamicVariableTerm<T> {
-    pub fn new(state_token: StateToken, fallback: T) -> Self {
-        Self {
-            state_token,
-            fallback,
-        }
-    }
-    pub fn state_token(&self) -> StateToken {
-        self.state_token
-    }
-    pub fn fallback(&self) -> &T {
-        &self.fallback
-    }
-}
-impl<T: Expression> GraphNode for DynamicVariableTerm<T> {
-    fn capture_depth(&self) -> StackOffset {
-        0
-    }
-    fn free_variables(&self) -> HashSet<StackOffset> {
-        HashSet::new()
-    }
-    fn count_variable_usages(&self, _offset: StackOffset) -> usize {
-        0
-    }
-    fn dynamic_dependencies(&self, _deep: bool) -> DependencyList {
-        DependencyList::of(self.state_token)
-    }
-    fn has_dynamic_dependencies(&self, _deep: bool) -> bool {
-        true
-    }
-    fn is_static(&self) -> bool {
-        false
-    }
-    fn is_atomic(&self) -> bool {
-        false
-    }
-    fn is_complex(&self) -> bool {
-        true
-    }
-}
-pub type DynamicVariableTermChildren<'a, T> = std::iter::Once<&'a T>;
-impl<'a, T: Expression + 'a> CompoundNode<'a, T> for DynamicVariableTerm<T> {
-    type Children = DynamicVariableTermChildren<'a, T>;
-    fn children(&'a self) -> Self::Children {
-        once(&self.fallback)
-    }
-}
-impl<T: Expression> Evaluate<T> for DynamicVariableTerm<T> {
-    fn evaluate(
-        &self,
-        state: &impl DynamicState<T>,
-        _factory: &impl ExpressionFactory<T>,
-        _allocator: &impl HeapAllocator<T>,
-        _cache: &mut impl EvaluationCache<T>,
-    ) -> Option<EvaluationResult<T>> {
-        Some(EvaluationResult::new(
-            state
-                .get(&self.state_token)
-                .unwrap_or(&self.fallback)
-                .clone(),
-            DependencyList::of(self.state_token),
-        ))
-    }
-}
-impl<T: Expression + Rewritable<T>> Rewritable<T> for DynamicVariableTerm<T> {
-    fn substitute_static(
-        &self,
-        _substitutions: &Substitutions<T>,
-        _factory: &impl ExpressionFactory<T>,
-        _allocator: &impl HeapAllocator<T>,
-        _cache: &mut impl EvaluationCache<T>,
-    ) -> Option<T> {
-        None
-    }
-    fn substitute_dynamic(
-        &self,
-        _deep: bool,
-        state: &impl DynamicState<T>,
-        _factory: &impl ExpressionFactory<T>,
-        _allocator: &impl HeapAllocator<T>,
-        _cache: &mut impl EvaluationCache<T>,
-    ) -> Option<T> {
-        state.get(&self.state_token).cloned()
-    }
-    fn hoist_free_variables(
-        &self,
-        _factory: &impl ExpressionFactory<T>,
-        _allocator: &impl HeapAllocator<T>,
-    ) -> Option<T> {
-        None
-    }
-    fn normalize(
-        &self,
-        _factory: &impl ExpressionFactory<T>,
-        _allocator: &impl HeapAllocator<T>,
-        _cache: &mut impl EvaluationCache<T>,
-    ) -> Option<T> {
-        None
-    }
-}
-impl<T: Expression + Compile<T>> Compile<T> for DynamicVariableTerm<T> {
-    fn compile(
-        &self,
-        _eager: VarArgs,
-        stack_offset: StackOffset,
-        factory: &impl ExpressionFactory<T>,
-        allocator: &impl HeapAllocator<T>,
-        compiler: &mut Compiler,
-    ) -> Result<Program, String> {
-        let compiled_fallback =
-            self.fallback
-                .compile(VarArgs::Lazy, stack_offset, factory, allocator, compiler)?;
-        let mut result = compiled_fallback;
-        result.push(Instruction::PushDynamic {
-            state_token: self.state_token,
-        });
-        Ok(result)
-    }
-}
-impl<T: Expression> std::fmt::Display for DynamicVariableTerm<T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "<dynamic:{}:{}>", self.state_token, self.fallback)
-    }
-}
-impl<T: Expression> SerializeJson for DynamicVariableTerm<T> {
+impl SerializeJson for VariableTerm {
     fn to_json(&self) -> Result<serde_json::Value, String> {
         Err(format!("Unable to serialize term: {}", self))
     }

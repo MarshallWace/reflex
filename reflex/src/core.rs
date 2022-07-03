@@ -988,8 +988,8 @@ pub trait ExpressionFactory<T: Expression> {
     fn create_float_term(&self, value: FloatValue) -> T;
     fn create_string_term(&self, value: T::String) -> T;
     fn create_symbol_term(&self, value: SymbolId) -> T;
-    fn create_static_variable_term(&self, offset: StackOffset) -> T;
-    fn create_dynamic_variable_term(&self, state_token: StateToken, fallback: T) -> T;
+    fn create_variable_term(&self, offset: StackOffset) -> T;
+    fn create_effect_term(&self, condition: Signal<T>) -> T;
     fn create_let_term(&self, initializer: T, body: T) -> T;
     fn create_lambda_term(&self, num_args: StackOffset, body: T) -> T;
     fn create_application_term(&self, target: T, args: ExpressionList<T>) -> T;
@@ -1016,11 +1016,8 @@ pub trait ExpressionFactory<T: Expression> {
     fn match_float_term<'a>(&self, expression: &'a T) -> Option<&'a FloatTerm>;
     fn match_string_term<'a>(&self, expression: &'a T) -> Option<&'a StringTerm<T::String>>;
     fn match_symbol_term<'a>(&self, expression: &'a T) -> Option<&'a SymbolTerm>;
-    fn match_static_variable_term<'a>(&self, expression: &'a T) -> Option<&'a StaticVariableTerm>;
-    fn match_dynamic_variable_term<'a>(
-        &self,
-        expression: &'a T,
-    ) -> Option<&'a DynamicVariableTerm<T>>;
+    fn match_variable_term<'a>(&self, expression: &'a T) -> Option<&'a VariableTerm>;
+    fn match_effect_term<'a>(&self, expression: &'a T) -> Option<&'a EffectTerm<T>>;
     fn match_let_term<'a>(&self, expression: &'a T) -> Option<&'a LetTerm<T>>;
     fn match_lambda_term<'a>(&self, expression: &'a T) -> Option<&'a LambdaTerm<T>>;
     fn match_application_term<'a>(&self, expression: &'a T) -> Option<&'a ApplicationTerm<T>>;
@@ -1334,7 +1331,7 @@ impl<'a, T: Expression + Rewritable<T>> Substitutions<'a, T> {
                         ScopeOffset::Unwrap(scope_offset) => offset - scope_offset,
                     };
                     if target_offset != offset {
-                        Some(factory.create_static_variable_term(target_offset))
+                        Some(factory.create_variable_term(target_offset))
                     } else {
                         None
                     }

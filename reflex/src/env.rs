@@ -4,12 +4,23 @@
 use crate::{
     cache::SubstitutionCache,
     core::{
-        Expression, ExpressionFactory, HeapAllocator, Reducible, Rewritable, StateCache, StateToken,
+        Expression, ExpressionFactory, HeapAllocator, Reducible, Rewritable, Signal, SignalType,
+        StateCache,
     },
     lang::create_record,
 };
 
-pub const ENV_STATE_TOKEN: StateToken = 0;
+const EVENT_TYPE_ENV: &'static str = "reflex::env";
+
+pub fn create_env_args_accessor<T: Expression>(
+    _factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> Signal<T> {
+    allocator.create_signal(
+        SignalType::Custom(String::from(EVENT_TYPE_ENV)),
+        allocator.create_empty_list(),
+    )
+}
 
 pub fn inject_env_vars<T: Expression + Rewritable<T> + Reducible<T>>(
     expression: T,
@@ -28,7 +39,7 @@ pub fn inject_env_vars<T: Expression + Rewritable<T> + Reducible<T>>(
         allocator,
     );
     let mut state = StateCache::default();
-    state.set(ENV_STATE_TOKEN, env);
+    state.set(create_env_args_accessor(factory, allocator).id(), env);
     expression
         .substitute_dynamic(
             true,

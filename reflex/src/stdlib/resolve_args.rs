@@ -59,7 +59,7 @@ where
                     1,
                     factory.create_application_term(
                         factory.create_builtin_term(Stdlib::Sequence),
-                        allocator.create_pair(factory.create_static_variable_term(0), target),
+                        allocator.create_pair(factory.create_variable_term(0), target),
                     ),
                 ))
             } else {
@@ -74,7 +74,7 @@ where
                                 allocator.create_sized_list(
                                     num_args,
                                     (0..num_args).map(|index| {
-                                        factory.create_static_variable_term(num_args - 1 - index)
+                                        factory.create_variable_term(num_args - 1 - index)
                                     }),
                                 ),
                             ),

@@ -566,7 +566,7 @@ fn create_query_entry_point_function(
 fn create_compiler_error_program(message: String) -> (Program, InstructionPointer) {
     let program = create_main_function([
         Instruction::PushString { value: message },
-        Instruction::PushSignal {
+        Instruction::ConstructCondition {
             signal_type: SignalType::Error,
             num_args: 1,
         },

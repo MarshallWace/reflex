@@ -28,8 +28,8 @@ where
                             factory.create_string_term(
                                 allocator.create_string(String::from(EFFECT_TYPE_TIMEOUT)),
                             ),
-                            factory.create_static_variable_term(1),
-                            factory.create_static_variable_term(0),
+                            factory.create_variable_term(1),
+                            factory.create_variable_term(0),
                         ),
                     ),
                 ),
@@ -47,7 +47,7 @@ where
                             factory.create_application_term(
                                 factory.create_builtin_term(Stdlib::Get),
                                 allocator.create_pair(
-                                    factory.create_static_variable_term(0),
+                                    factory.create_variable_term(0),
                                     factory.create_string_term(
                                         allocator.create_static_string("interval"),
                                     ),

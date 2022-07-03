@@ -2,20 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use std::{
-    collections::{
-        hash_map::{DefaultHasher, Entry},
-        HashMap,
-    },
-    hash::Hasher,
+    collections::{hash_map::Entry, HashMap},
     iter::once,
     marker::PhantomData,
 };
 
-use reflex::{
-    core::{
-        Expression, ExpressionFactory, HeapAllocator, Signal, SignalType, StateToken, StringValue,
-    },
-    hash::HashId,
+use reflex::core::{
+    Expression, ExpressionFactory, HeapAllocator, Signal, SignalType, StateToken, StringValue,
 };
 use reflex_dispatcher::{
     Action, Actor, ActorTransition, HandlerContext, InboundAction, MessageData, OutboundAction,
@@ -32,8 +25,8 @@ use reflex_runtime::{
 
 pub const EFFECT_TYPE_SCAN: &'static str = "reflex::scan";
 
-const HASH_NAMESPACE_SCAN_SOURCE: &'static str = "reflex::scan::source";
-const HASH_NAMESPACE_SCAN_STATE: &'static str = "reflex::scan::result";
+const EVENT_TYPE_SCAN_SOURCE: &'static str = "reflex::scan::source";
+const EVENT_TYPE_SCAN_STATE: &'static str = "reflex::scan::state";
 
 pub trait ScanHandlerAction<T: Expression>:
     Action
@@ -95,111 +88,12 @@ impl<T: Expression> Default for ScanHandlerState<T> {
         }
     }
 }
-impl<T: Expression> ScanHandlerState<T> {
-    fn subscribe<TAction>(
-        &mut self,
-        scan_effect: &Signal<T>,
-        args: ScanEffectArgs<T>,
-        factory: &impl ExpressionFactory<T>,
-        allocator: &impl HeapAllocator<T>,
-    ) -> Option<TAction>
-    where
-        TAction: Action + OutboundAction<EffectSubscribeAction<T>>,
-    {
-        let (source_effect, result_effect) = if let Entry::Vacant(entry) =
-            self.effect_state.entry(scan_effect.id())
-        {
-            let ScanEffectArgs {
-                name,
-                target,
-                seed,
-                iteratee,
-            } = args;
-            let source_value_token =
-                generate_hash(HASH_NAMESPACE_SCAN_SOURCE, [&target, &seed, &iteratee]);
-            let state_value_token =
-                generate_hash(HASH_NAMESPACE_SCAN_STATE, [&target, &seed, &iteratee]);
-            let source_effect = create_evaluate_effect(
-                format!("{} [input]", name),
-                target,
-                QueryEvaluationMode::Standalone,
-                QueryInvalidationStrategy::Exact,
-                factory,
-                allocator,
-            );
-            let pending_value = create_pending_expression(factory, allocator);
-            let result_effect = create_evaluate_effect(
-                name,
-                factory.create_application_term(
-                    iteratee,
-                    allocator.create_pair(
-                        factory
-                            .create_dynamic_variable_term(state_value_token, pending_value.clone()),
-                        factory.create_dynamic_variable_term(source_value_token, pending_value),
-                    ),
-                ),
-                QueryEvaluationMode::Standalone,
-                QueryInvalidationStrategy::Exact,
-                factory,
-                allocator,
-            );
-            entry.insert(ScanHandlerReducerState {
-                source_effect: source_effect.clone(),
-                source_value_token,
-                source_value: None,
-                state_value_token,
-                state_value: seed,
-                result_effect: result_effect.clone(),
-            });
-            Some((source_effect, result_effect))
-        } else {
-            None
-        }?;
-        self.effect_mappings
-            .insert(source_effect.id(), scan_effect.id());
-        self.effect_mappings
-            .insert(result_effect.id(), scan_effect.id());
-        Some(
-            EffectSubscribeAction {
-                effect_type: String::from(EFFECT_TYPE_EVALUATE),
-                effects: vec![source_effect, result_effect],
-            }
-            .into(),
-        )
-    }
-    fn unsubscribe<TAction>(&mut self, scan_effect: &Signal<T>) -> Option<TAction>
-    where
-        TAction: Action + OutboundAction<EffectUnsubscribeAction<T>>,
-    {
-        if let Entry::Occupied(entry) = self.effect_state.entry(scan_effect.id()) {
-            let ScanHandlerReducerState {
-                source_effect,
-                source_value_token: _,
-                source_value: _,
-                state_value_token: _,
-                state_value: _,
-                result_effect,
-            } = entry.remove();
-            self.effect_mappings.remove(&source_effect.id());
-            self.effect_mappings.remove(&result_effect.id());
-            Some(
-                EffectUnsubscribeAction {
-                    effect_type: String::from(EFFECT_TYPE_EVALUATE),
-                    effects: vec![source_effect, result_effect],
-                }
-                .into(),
-            )
-        } else {
-            None
-        }
-    }
-}
 
 struct ScanHandlerReducerState<T: Expression> {
     source_effect: Signal<T>,
-    source_value_token: StateToken,
+    source_value_effect: Signal<T>,
     source_value: Option<T>,
-    state_value_token: StateToken,
+    state_value_effect: Signal<T>,
     state_value: T,
     result_effect: Signal<T>,
 }
@@ -265,16 +159,13 @@ where
         let current_pid = context.pid();
         let (initial_values, tasks): (Vec<_>, Vec<_>) = effects
             .iter()
-            .filter_map(|effect| {
-                let state_token = effect.id();
-                match parse_scan_effect_args(effect, &self.factory) {
+            .filter_map(
+                |effect| match parse_scan_effect_args(effect, &self.factory) {
                     Ok(args) => {
-                        if let Some(action) =
-                            state.subscribe(effect, args, &self.factory, &self.allocator)
-                        {
+                        if let Some(action) = self.subscribe_scan_effect(state, effect, args) {
                             Some((
                                 (
-                                    state_token,
+                                    effect.id(),
                                     StateUpdate::Value(create_pending_expression(
                                         &self.factory,
                                         &self.allocator,
@@ -288,7 +179,7 @@ where
                     }
                     Err(err) => Some((
                         (
-                            state_token,
+                            effect.id(),
                             StateUpdate::Value(create_error_expression(
                                 err,
                                 &self.factory,
@@ -297,8 +188,8 @@ where
                         ),
                         None,
                     )),
-                }
-            })
+                },
+            )
             .unzip();
         let initial_values_action = if initial_values.is_empty() {
             None
@@ -336,7 +227,7 @@ where
         }
         let current_pid = context.pid();
         let unsubscribe_actions = effects.iter().filter_map(|effect| {
-            if let Some(operation) = state.unsubscribe(effect) {
+            if let Some(operation) = self.unsubscribe_scan_effect(state, effect) {
                 Some(StateOperation::Send(current_pid, operation))
             } else {
                 None
@@ -383,9 +274,12 @@ where
                     reducer_state.source_value.replace(value.clone());
                     // Assign values for both reducer arguments (this will trigger the reducer query to be re-evaluated)
                     Some([
-                        (reducer_state.source_value_token, StateUpdate::Value(value)),
                         (
-                            reducer_state.state_value_token,
+                            reducer_state.source_value_effect.id(),
+                            StateUpdate::Value(value),
+                        ),
+                        (
+                            reducer_state.state_value_effect.id(),
                             StateUpdate::Value(reducer_state.state_value.clone()),
                         ),
                     ])
@@ -412,7 +306,7 @@ where
                     // when the next source value arrives)
                     Some([
                         (
-                            reducer_state.state_value_token,
+                            reducer_state.state_value_effect.id(),
                             StateUpdate::Value(create_pending_expression(
                                 &self.factory,
                                 &self.allocator,
@@ -435,6 +329,111 @@ where
             ))
         };
         Some(StateTransition::new(update_action))
+    }
+    fn subscribe_scan_effect<TAction>(
+        &self,
+        state: &mut ScanHandlerState<T>,
+        effect: &Signal<T>,
+        args: ScanEffectArgs<T>,
+    ) -> Option<TAction>
+    where
+        TAction: Action + OutboundAction<EffectSubscribeAction<T>>,
+    {
+        let (source_effect, result_effect) = match state.effect_state.entry(effect.id()) {
+            Entry::Occupied(_) => None,
+            Entry::Vacant(entry) => {
+                let ScanEffectArgs {
+                    name,
+                    target,
+                    seed,
+                    iteratee,
+                } = args;
+                let source_value_effect = self.allocator.create_signal(
+                    SignalType::Custom(String::from(EVENT_TYPE_SCAN_SOURCE)),
+                    self.allocator
+                        .create_triple(target.clone(), seed.clone(), iteratee.clone()),
+                );
+                let state_value_effect = self.allocator.create_signal(
+                    SignalType::Custom(String::from(EVENT_TYPE_SCAN_STATE)),
+                    self.allocator
+                        .create_triple(target.clone(), seed.clone(), iteratee.clone()),
+                );
+                let source_effect = create_evaluate_effect(
+                    format!("{} [input]", name),
+                    target,
+                    QueryEvaluationMode::Standalone,
+                    QueryInvalidationStrategy::Exact,
+                    &self.factory,
+                    &self.allocator,
+                );
+                let result_effect = create_evaluate_effect(
+                    name,
+                    self.factory.create_application_term(
+                        iteratee,
+                        self.allocator.create_pair(
+                            self.factory.create_effect_term(state_value_effect.clone()),
+                            self.factory.create_effect_term(source_value_effect.clone()),
+                        ),
+                    ),
+                    QueryEvaluationMode::Standalone,
+                    QueryInvalidationStrategy::Exact,
+                    &self.factory,
+                    &self.allocator,
+                );
+                entry.insert(ScanHandlerReducerState {
+                    source_effect: source_effect.clone(),
+                    source_value_effect,
+                    source_value: None,
+                    state_value_effect,
+                    state_value: seed,
+                    result_effect: result_effect.clone(),
+                });
+                Some((source_effect, result_effect))
+            }
+        }?;
+        state
+            .effect_mappings
+            .insert(source_effect.id(), effect.id());
+        state
+            .effect_mappings
+            .insert(result_effect.id(), effect.id());
+        Some(
+            EffectSubscribeAction {
+                effect_type: String::from(EFFECT_TYPE_EVALUATE),
+                effects: vec![source_effect, result_effect],
+            }
+            .into(),
+        )
+    }
+    fn unsubscribe_scan_effect<TAction>(
+        &self,
+        state: &mut ScanHandlerState<T>,
+        effect: &Signal<T>,
+    ) -> Option<TAction>
+    where
+        TAction: Action + OutboundAction<EffectUnsubscribeAction<T>>,
+    {
+        if let Entry::Occupied(entry) = state.effect_state.entry(effect.id()) {
+            let ScanHandlerReducerState {
+                source_effect,
+                source_value_effect: _,
+                source_value: _,
+                state_value_effect: _,
+                state_value: _,
+                result_effect,
+            } = entry.remove();
+            state.effect_mappings.remove(&source_effect.id());
+            state.effect_mappings.remove(&result_effect.id());
+            Some(
+                EffectUnsubscribeAction {
+                    effect_type: String::from(EFFECT_TYPE_EVALUATE),
+                    effects: vec![source_effect, result_effect],
+                }
+                .into(),
+            )
+        } else {
+            None
+        }
     }
 }
 
@@ -476,18 +475,6 @@ fn parse_scan_effect_args<T: Expression>(
             iteratee,
         ))
     }
-}
-
-fn generate_hash<'a, T: std::hash::Hash + 'a>(
-    namespace: &str,
-    args: impl IntoIterator<Item = &'a T>,
-) -> HashId {
-    let mut hasher = DefaultHasher::new();
-    hasher.write(namespace.as_bytes());
-    for arg in args {
-        arg.hash(&mut hasher);
-    }
-    hasher.finish()
 }
 
 fn create_pending_expression<T: Expression>(

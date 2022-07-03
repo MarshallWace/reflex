@@ -134,7 +134,7 @@ impl<T: Expression + Compile<T>> Compile<T> for RecursiveTerm<T> {
             self.factory
                 .compile(eager, stack_offset, factory, allocator, compiler)?;
         let mut result = compiled_factory;
-        result.push(Instruction::PushStatic { offset: 0 });
+        result.push(Instruction::PushLocal { offset: 0 });
         result.push(Instruction::Apply { num_args: 1 });
         Ok(result)
     }

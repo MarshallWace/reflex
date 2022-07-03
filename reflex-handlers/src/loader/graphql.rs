@@ -83,7 +83,7 @@ where
         factory.create_application_term(
             create_graphql_client_instance(schema, factory, allocator),
             allocator.create_unit_list(get_struct_field(
-                factory.create_static_variable_term(0),
+                factory.create_variable_term(0),
                 String::from("url"),
                 factory,
                 allocator,
@@ -113,15 +113,15 @@ where
                             factory.create_string_term(
                                 allocator.create_static_string(EFFECT_TYPE_GRAPHQL),
                             ),
-                            factory.create_static_variable_term(1),
+                            factory.create_variable_term(1),
                             get_struct_field(
-                                factory.create_static_variable_term(0),
+                                factory.create_variable_term(0),
                                 String::from("query"),
                                 factory,
                                 allocator,
                             ),
                             get_optional_struct_field(
-                                factory.create_static_variable_term(0),
+                                factory.create_variable_term(0),
                                 String::from("operationName"),
                                 factory.create_nil_term(),
                                 factory,
@@ -130,7 +130,7 @@ where
                             factory.create_application_term(
                                 factory.create_builtin_term(Stdlib::ResolveDeep),
                                 allocator.create_list([get_struct_field(
-                                    factory.create_static_variable_term(0),
+                                    factory.create_variable_term(0),
                                     String::from("variables"),
                                     factory,
                                     allocator,
@@ -138,7 +138,7 @@ where
                             ),
                             create_record(empty(), factory, allocator),
                             get_optional_struct_field(
-                                factory.create_static_variable_term(0),
+                                factory.create_variable_term(0),
                                 String::from("token"),
                                 factory.create_nil_term(),
                                 factory,

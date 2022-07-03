@@ -10,8 +10,8 @@ use crate::{
     core::{
         Applicable, Arity, Builtin, CompoundNode, DependencyList, DynamicState, Evaluate,
         EvaluationCache, EvaluationResult, Expression, ExpressionFactory, ExpressionList,
-        GraphNode, HeapAllocator, Reducible, Rewritable, SerializeJson, SignalList, StackOffset,
-        StateToken, StructPrototype, Substitutions, VarArgs,
+        GraphNode, HeapAllocator, Reducible, Rewritable, SerializeJson, Signal, SignalList,
+        StackOffset, StructPrototype, Substitutions, VarArgs,
     },
     hash::HashId,
 };
@@ -70,20 +70,16 @@ impl<TBuiltin: Builtin> ExpressionFactory<CachedSharedTerm<TBuiltin>>
         trace!(factory_create = "symbol_term");
         self.create_expression(Term::Symbol(SymbolTerm { id }))
     }
-    fn create_static_variable_term(&self, offset: StackOffset) -> CachedSharedTerm<TBuiltin> {
-        trace!(factory_create = "static_variable");
-        self.create_expression(Term::StaticVariable(StaticVariableTerm::new(offset)))
+    fn create_variable_term(&self, offset: StackOffset) -> CachedSharedTerm<TBuiltin> {
+        trace!(factory_create = "variable");
+        self.create_expression(Term::Variable(VariableTerm::new(offset)))
     }
-    fn create_dynamic_variable_term(
+    fn create_effect_term(
         &self,
-        state_token: StateToken,
-        fallback: CachedSharedTerm<TBuiltin>,
+        condition: Signal<CachedSharedTerm<TBuiltin>>,
     ) -> CachedSharedTerm<TBuiltin> {
-        trace!(factory_create = "dynamic_variable");
-        self.create_expression(Term::DynamicVariable(DynamicVariableTerm::new(
-            state_token,
-            fallback,
-        )))
+        trace!(factory_create = "effect");
+        self.create_expression(Term::Effect(EffectTerm::new(condition)))
     }
     fn create_let_term(
         &self,
@@ -240,21 +236,21 @@ impl<TBuiltin: Builtin> ExpressionFactory<CachedSharedTerm<TBuiltin>>
             _ => None,
         }
     }
-    fn match_static_variable_term<'a>(
+    fn match_variable_term<'a>(
         &self,
         expression: &'a CachedSharedTerm<TBuiltin>,
-    ) -> Option<&'a StaticVariableTerm> {
+    ) -> Option<&'a VariableTerm> {
         match expression.inner_term() {
-            Term::StaticVariable(term) => Some(term),
+            Term::Variable(term) => Some(term),
             _ => None,
         }
     }
-    fn match_dynamic_variable_term<'a>(
+    fn match_effect_term<'a>(
         &self,
         expression: &'a CachedSharedTerm<TBuiltin>,
-    ) -> Option<&'a DynamicVariableTerm<CachedSharedTerm<TBuiltin>>> {
+    ) -> Option<&'a EffectTerm<CachedSharedTerm<TBuiltin>>> {
         match expression.inner_term() {
-            Term::DynamicVariable(term) => Some(term),
+            Term::Effect(term) => Some(term),
             _ => None,
         }
     }

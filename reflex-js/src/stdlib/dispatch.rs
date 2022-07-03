@@ -160,8 +160,8 @@ where
                     allocator.create_unit_list(factory.create_application_term(
                         factory.create_builtin_term(Stdlib::Map),
                         allocator.create_pair(
-                            factory.create_static_variable_term(1),
-                            factory.create_static_variable_term(0),
+                            factory.create_variable_term(1),
+                            factory.create_variable_term(0),
                         ),
                     )),
                 )),
@@ -196,12 +196,12 @@ where
                 factory.create_application_term(
                     factory.create_builtin_term(Stdlib::Sequence),
                     allocator.create_pair(
-                        factory.create_static_variable_term(0),
+                        factory.create_variable_term(0),
                         factory.create_partial_application_term(
                             factory.create_builtin_term(Stdlib::Insert),
                             allocator.create_pair(
-                                factory.create_static_variable_term(2),
-                                factory.create_static_variable_term(1),
+                                factory.create_variable_term(2),
+                                factory.create_variable_term(1),
                             ),
                         ),
                     ),

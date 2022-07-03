@@ -514,7 +514,7 @@ where
             allocator.create_unit_list(factory.create_application_term(
                 factory.create_builtin_term(Stdlib::Get),
                 allocator.create_pair(
-                    factory.create_static_variable_term(0),
+                    factory.create_variable_term(0),
                     factory.create_string_term(allocator.create_static_string(operation_type)),
                 ),
             )),
@@ -599,7 +599,7 @@ where
                         .chain(values.into_iter().map(|query| {
                             factory.create_application_term(
                                 query,
-                                allocator.create_unit_list(factory.create_static_variable_term(0)),
+                                allocator.create_unit_list(factory.create_variable_term(0)),
                             )
                         })),
                     ),
@@ -718,7 +718,7 @@ where
                 let field = factory.create_application_term(
                     factory.create_builtin_term(Stdlib::Get),
                     allocator.create_pair(
-                        factory.create_static_variable_term(0),
+                        factory.create_variable_term(0),
                         factory.create_string_term(allocator.create_string(field.name.to_string())),
                     ),
                 );
@@ -812,7 +812,7 @@ where
         1,
         factory.create_application_term(
             factory.create_builtin_term(GraphQlStdlib::DynamicQueryBranch),
-            allocator.create_pair(factory.create_static_variable_term(0), shape),
+            allocator.create_pair(factory.create_variable_term(0), shape),
         ),
     )
 }
@@ -977,7 +977,7 @@ mod tests {
                                             factory.create_builtin_term(Stdlib::Add),
                                             allocator.create_pair(
                                                 factory.create_int_term(3),
-                                                factory.create_static_variable_term(0),
+                                                factory.create_variable_term(0),
                                             ),
                                         ),
                                     ),
@@ -987,7 +987,7 @@ mod tests {
                                             factory.create_builtin_term(Stdlib::Add),
                                             allocator.create_pair(
                                                 factory.create_int_term(4),
-                                                factory.create_static_variable_term(0),
+                                                factory.create_variable_term(0),
                                             ),
                                         ),
                                     ),
@@ -997,7 +997,7 @@ mod tests {
                                             factory.create_builtin_term(Stdlib::Add),
                                             allocator.create_pair(
                                                 factory.create_int_term(5),
-                                                factory.create_static_variable_term(0),
+                                                factory.create_variable_term(0),
                                             ),
                                         ),
                                     ),

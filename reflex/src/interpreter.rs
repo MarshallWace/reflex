@@ -476,7 +476,7 @@ fn evaluate_instruction<'a, T: Expression + Rewritable<T> + Reducible<T> + Appli
     cache_entries: &mut MultithreadedCacheEntries<'a, T>,
 ) -> Result<(ExecutionResult<T>, DependencyList), String> {
     match instruction {
-        Instruction::PushStatic { offset } => {
+        Instruction::PushLocal { offset } => {
             trace!(instruction = "Instruction::PushStatic");
             let value = stack.get(*offset).cloned();
             match value {
@@ -484,21 +484,6 @@ fn evaluate_instruction<'a, T: Expression + Rewritable<T> + Reducible<T> + Appli
                 Some(value) => {
                     stack.push(value);
                     Ok((ExecutionResult::Advance, DependencyList::empty()))
-                }
-            }
-        }
-        Instruction::PushDynamic { state_token } => {
-            trace!(instruction = "Instruction::PushDynamic");
-            let fallback = stack.pop();
-            match fallback {
-                None => Err(format!(
-                    "Missing dynamic variable fallback: {}",
-                    state_token
-                )),
-                Some(fallback) => {
-                    let value = state.get(state_token).cloned().unwrap_or(fallback);
-                    stack.push(value);
-                    Ok((ExecutionResult::Advance, DependencyList::of(*state_token)))
                 }
             }
         }
@@ -567,24 +552,30 @@ fn evaluate_instruction<'a, T: Expression + Rewritable<T> + Reducible<T> + Appli
                 Err(_) => Err(format!("Invalid builtin function id: {}", uid)),
             }
         }
-        Instruction::PushSignal {
-            signal_type,
-            num_args,
-        } => {
-            trace!(instruction = "Instruction::PushSignal");
-            let num_args = *num_args;
-            if stack.len() < num_args {
-                Err(format!(
-                    "Unable to create {} signal: insufficient arguments on stack",
-                    signal_type,
-                ))
-            } else {
-                let args = stack.pop_multiple(num_args).into_iter();
-                let signal = factory.create_signal_term(allocator.create_signal_list(once(
-                    allocator.create_signal(signal_type.clone(), allocator.create_list(args)),
-                )));
-                stack.push(signal);
-                Ok((ExecutionResult::Advance, DependencyList::empty()))
+        Instruction::LoadEffect => {
+            trace!(instruction = "Instruction::LoadEffect");
+            let effect = stack.pop();
+            match effect {
+                None => Err(String::from("Missing effect condition")),
+                Some(effect) => {
+                    let condition = factory
+                        .match_signal_term(&effect)
+                        .filter(|effect| effect.signals().len() == 1)
+                        .and_then(|effect| effect.signals().iter().next());
+                    match condition {
+                        None => Err(format!("Invalid effect condition: {}", effect)),
+                        Some(condition) => {
+                            let value = match state.get(&condition.id()) {
+                                Some(value) => value.clone(),
+                                None => factory.create_signal_term(
+                                    allocator.create_signal_list(once(condition.clone())),
+                                ),
+                            };
+                            stack.push(value);
+                            Ok((ExecutionResult::Advance, DependencyList::of(condition.id())))
+                        }
+                    }
+                }
             }
         }
         Instruction::Pop { count } => {
@@ -845,6 +836,26 @@ fn evaluate_instruction<'a, T: Expression + Rewritable<T> + Reducible<T> + Appli
                 Ok((ExecutionResult::Advance, DependencyList::empty()))
             }
         }
+        Instruction::ConstructCondition {
+            signal_type,
+            num_args,
+        } => {
+            trace!(instruction = "Instruction::ConstructCondition");
+            let num_args = *num_args;
+            if stack.len() < num_args {
+                Err(format!(
+                    "Unable to construct {} signal: insufficient arguments on stack",
+                    signal_type,
+                ))
+            } else {
+                let args = stack.pop_multiple(num_args).into_iter();
+                let signal = factory.create_signal_term(allocator.create_signal_list(once(
+                    allocator.create_signal(signal_type.clone(), allocator.create_list(args)),
+                )));
+                stack.push(signal);
+                Ok((ExecutionResult::Advance, DependencyList::empty()))
+            }
+        }
         Instruction::CombineSignals { count } => {
             trace!(instruction = "Instruction::CombineSignals");
             let count = *count;
@@ -967,7 +978,7 @@ fn evaluate_expression<T: Expression + Applicable<T>>(
                     }
                 }
             }
-        } else if let Some(expression) = factory.match_static_variable_term(expression) {
+        } else if let Some(expression) = factory.match_variable_term(expression) {
             match stack.get(expression.offset()).cloned() {
                 None => Err(format!("Invalid stack offset: {}", expression.offset())),
                 Some(value) => {
@@ -975,16 +986,17 @@ fn evaluate_expression<T: Expression + Applicable<T>>(
                     Ok((ExecutionResult::ResolveExpression, DependencyList::empty()))
                 }
             }
-        } else if let Some(expression) = factory.match_dynamic_variable_term(expression) {
-            stack.push(
-                state
-                    .get(&expression.state_token())
-                    .unwrap_or(expression.fallback())
-                    .clone(),
-            );
+        } else if let Some(expression) = factory.match_effect_term(expression) {
+            let condition = expression.condition();
+            let value = match state.get(&condition.id()) {
+                Some(value) => value.clone(),
+                None => factory
+                    .create_signal_term(allocator.create_signal_list(once(condition.clone()))),
+            };
+            stack.push(value);
             Ok((
                 ExecutionResult::ResolveExpression,
-                DependencyList::of(expression.state_token()),
+                DependencyList::of(condition.id()),
             ))
         } else if let Some(term) = factory.match_recursive_term(expression) {
             stack.push(factory.create_application_term(
@@ -1599,17 +1611,15 @@ mod tests {
         let allocator = DefaultAllocator::default();
         let mut cache = DefaultInterpreterCache::default();
         let target = parse("(lambda (foo bar) (+ foo bar))", &factory, &allocator).unwrap();
-        let state_token = 345;
+        let condition = allocator.create_signal(
+            SignalType::Custom(String::from("foo")),
+            allocator.create_empty_list(),
+        );
         let expression = factory.create_application_term(
             target,
             allocator.create_pair(
                 factory.create_int_term(3),
-                factory.create_dynamic_variable_term(
-                    state_token,
-                    factory.create_signal_term(allocator.create_signal_list(once(
-                        allocator.create_signal(SignalType::Pending, allocator.create_empty_list()),
-                    ))),
-                ),
+                factory.create_effect_term(condition.clone()),
             ),
         );
         let compiler = Compiler::new(CompilerOptions::unoptimized(), None);
@@ -1635,14 +1645,12 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                factory.create_signal_term(allocator.create_signal_list(once(
-                    allocator.create_signal(SignalType::Pending, allocator.create_empty_list()),
-                ))),
-                DependencyList::of(state_token),
+                factory.create_signal_term(allocator.create_signal_list(once(condition.clone()))),
+                DependencyList::of(condition.id()),
             ),
         );
 
-        state.set(state_token, factory.create_int_term(4));
+        state.set(condition.id(), factory.create_int_term(4));
         let state_id = 1;
         let (result, _) = execute(
             cache_key,
@@ -1660,7 +1668,7 @@ mod tests {
             result,
             EvaluationResult::new(
                 factory.create_int_term(3 + 4),
-                DependencyList::of(state_token),
+                DependencyList::of(condition.id()),
             ),
         );
     }

@@ -613,7 +613,7 @@ where
                         let (identifier, field_accessor) = property;
                         let scope_offset = existing_scope.depth() - initializer_depth;
                         let initializer = get_dynamic_field(
-                            factory.create_static_variable_term(scope_offset),
+                            factory.create_variable_term(scope_offset),
                             field_accessor,
                             factory,
                             allocator,
@@ -678,7 +678,7 @@ where
                     let (identifier, index) = property;
                     let scope_offset = existing_scope.depth() - initializer_depth;
                     let initializer = get_indexed_field(
-                        factory.create_static_variable_term(scope_offset),
+                        factory.create_variable_term(scope_offset),
                         index,
                         factory,
                         allocator,
@@ -852,7 +852,7 @@ fn parse_variable_reference<T: Expression + Rewritable<T>>(
     let name = parse_identifier(node);
     let offset = scope.get(name);
     match offset {
-        Some(offset) => Ok(factory.create_static_variable_term(offset)),
+        Some(offset) => Ok(factory.create_variable_term(offset)),
         None => match env.global(name) {
             Some(value) => Ok(value),
             None => Err(err(&format!("Invalid reference: '{}'", name), node)),
@@ -1611,7 +1611,7 @@ where
                         .unwrap_or(handler),
                     allocator.create_unit_list(factory.create_application_term(
                         global_aggregate_error(factory, allocator),
-                        allocator.create_unit_list(factory.create_static_variable_term(0)),
+                        allocator.create_unit_list(factory.create_variable_term(0)),
                     )),
                 ),
             ),
@@ -1647,8 +1647,8 @@ where
                     Pat::Ident(_) => Ok((combined_initializers, existing_scope)),
                     Pat::Object(pattern) => {
                         let scope_offset = existing_scope.depth() - inner_depth;
-                        let arg = factory
-                            .create_static_variable_term(num_args - arg_index - 1 + scope_offset);
+                        let arg =
+                            factory.create_variable_term(num_args - arg_index - 1 + scope_offset);
                         let (initializers, child_scope) =
                             parse_object_destructuring_pattern_bindings(
                                 arg,
@@ -1664,8 +1664,8 @@ where
                     }
                     Pat::Array(node) => {
                         let scope_offset = existing_scope.depth() - inner_depth;
-                        let arg = factory
-                            .create_static_variable_term(num_args - arg_index - 1 + scope_offset);
+                        let arg =
+                            factory.create_variable_term(num_args - arg_index - 1 + scope_offset);
                         let (initializers, child_scope) =
                             parse_array_destructuring_pattern_bindings(
                                 arg,
@@ -2830,7 +2830,7 @@ mod tests {
                             factory.create_application_term(
                                 factory.create_builtin_term(Stdlib::Multiply),
                                 allocator.create_pair(
-                                    factory.create_static_variable_term(0),
+                                    factory.create_variable_term(0),
                                     factory.create_float_term(2.0),
                                 ),
                             ),
@@ -2841,7 +2841,7 @@ mod tests {
                         factory.create_application_term(
                             factory.create_builtin_term(Stdlib::Multiply),
                             allocator.create_pair(
-                                factory.create_static_variable_term(0),
+                                factory.create_variable_term(0),
                                 factory.create_float_term(2.0),
                             ),
                         ),
@@ -2895,7 +2895,7 @@ mod tests {
             parse("const foo = 3; foo;", &env, &factory, &allocator),
             Ok(factory.create_let_term(
                 factory.create_float_term(3.0),
-                factory.create_static_variable_term(0),
+                factory.create_variable_term(0),
             )),
         );
         assert_eq!(
@@ -2909,7 +2909,7 @@ mod tests {
                 factory.create_float_term(3.0),
                 factory.create_let_term(
                     factory.create_float_term(4.0),
-                    factory.create_static_variable_term(1),
+                    factory.create_variable_term(1),
                 ),
             )),
         );
@@ -2924,7 +2924,7 @@ mod tests {
                 factory.create_float_term(3.0),
                 factory.create_let_term(
                     factory.create_float_term(4.0),
-                    factory.create_static_variable_term(0),
+                    factory.create_variable_term(0),
                 ),
             )),
         );
@@ -3001,7 +3001,7 @@ mod tests {
                     factory.create_application_term(
                         factory.create_builtin_term(Stdlib::Get),
                         allocator.create_pair(
-                            factory.create_static_variable_term(0),
+                            factory.create_variable_term(0),
                             factory.create_string_term(allocator.create_static_string("bar")),
                         ),
                     ),
@@ -3009,11 +3009,11 @@ mod tests {
                         factory.create_application_term(
                             factory.create_builtin_term(Stdlib::Get),
                             allocator.create_pair(
-                                factory.create_static_variable_term(1),
+                                factory.create_variable_term(1),
                                 factory.create_string_term(allocator.create_static_string("foo")),
                             ),
                         ),
-                        factory.create_static_variable_term(0),
+                        factory.create_variable_term(0),
                     ),
                 ),
             )),
@@ -3042,7 +3042,7 @@ mod tests {
                     factory.create_application_term(
                         factory.create_builtin_term(Stdlib::Get),
                         allocator.create_pair(
-                            factory.create_static_variable_term(0),
+                            factory.create_variable_term(0),
                             factory.create_string_term(allocator.create_static_string("bar")),
                         ),
                     ),
@@ -3050,11 +3050,11 @@ mod tests {
                         factory.create_application_term(
                             factory.create_builtin_term(Stdlib::Get),
                             allocator.create_pair(
-                                factory.create_static_variable_term(1),
+                                factory.create_variable_term(1),
                                 factory.create_string_term(allocator.create_static_string("foo")),
                             ),
                         ),
-                        factory.create_static_variable_term(1),
+                        factory.create_variable_term(1),
                     ),
                 ),
             )),
@@ -3083,7 +3083,7 @@ mod tests {
                     factory.create_application_term(
                         factory.create_builtin_term(Stdlib::Get),
                         allocator.create_pair(
-                            factory.create_static_variable_term(0),
+                            factory.create_variable_term(0),
                             factory.create_string_term(allocator.create_static_string("bar")),
                         ),
                     ),
@@ -3091,11 +3091,11 @@ mod tests {
                         factory.create_application_term(
                             factory.create_builtin_term(Stdlib::Get),
                             allocator.create_pair(
-                                factory.create_static_variable_term(1),
+                                factory.create_variable_term(1),
                                 factory.create_string_term(allocator.create_static_string("foo")),
                             ),
                         ),
-                        factory.create_static_variable_term(1),
+                        factory.create_variable_term(1),
                     ),
                 ),
             )),
@@ -3124,7 +3124,7 @@ mod tests {
                     factory.create_application_term(
                         factory.create_builtin_term(Stdlib::Get),
                         allocator.create_pair(
-                            factory.create_static_variable_term(0),
+                            factory.create_variable_term(0),
                             factory.create_string_term(allocator.create_static_string("bar")),
                         ),
                     ),
@@ -3132,11 +3132,11 @@ mod tests {
                         factory.create_application_term(
                             factory.create_builtin_term(Stdlib::Get),
                             allocator.create_pair(
-                                factory.create_static_variable_term(1),
+                                factory.create_variable_term(1),
                                 factory.create_string_term(allocator.create_static_string("foo")),
                             ),
                         ),
-                        factory.create_static_variable_term(1),
+                        factory.create_variable_term(1),
                     ),
                 ),
             )),
@@ -3162,12 +3162,12 @@ mod tests {
                     ]),
                 ),
                 factory.create_let_term(
-                    factory.create_static_variable_term(0),
+                    factory.create_variable_term(0),
                     factory.create_let_term(
                         factory.create_application_term(
                             factory.create_builtin_term(Stdlib::Get),
                             allocator.create_pair(
-                                factory.create_static_variable_term(0),
+                                factory.create_variable_term(0),
                                 factory.create_string_term(
                                     allocator.create_static_string("first"),
                                 ),
@@ -3177,13 +3177,13 @@ mod tests {
                             factory.create_application_term(
                                 factory.create_builtin_term(Stdlib::Get),
                                 allocator.create_pair(
-                                    factory.create_static_variable_term(1),
+                                    factory.create_variable_term(1),
                                     factory.create_string_term(
                                         allocator.create_static_string("second"),
                                     ),
                                 ),
                             ),
-                            factory.create_static_variable_term(1),
+                            factory.create_variable_term(1),
                         ),
                     ),
                 ),
@@ -3212,12 +3212,12 @@ mod tests {
                 factory.create_let_term(
                     factory.create_boolean_term(true),
                     factory.create_let_term(
-                        factory.create_static_variable_term(1),
+                        factory.create_variable_term(1),
                         factory.create_let_term(
                             factory.create_application_term(
                                 factory.create_builtin_term(Stdlib::Get),
                                 allocator.create_pair(
-                                    factory.create_static_variable_term(0),
+                                    factory.create_variable_term(0),
                                     factory.create_string_term(
                                         allocator.create_static_string("first"),
                                     ),
@@ -3227,13 +3227,13 @@ mod tests {
                                 factory.create_application_term(
                                     factory.create_builtin_term(Stdlib::Get),
                                     allocator.create_pair(
-                                        factory.create_static_variable_term(1),
+                                        factory.create_variable_term(1),
                                         factory.create_string_term(
                                             allocator.create_static_string("second"),
                                         ),
                                     ),
                                 ),
-                                factory.create_static_variable_term(1),
+                                factory.create_variable_term(1),
                             ),
                         ),
                     ),
@@ -3280,7 +3280,7 @@ mod tests {
                     factory.create_application_term(
                         factory.create_builtin_term(Stdlib::Get),
                         allocator.create_pair(
-                            factory.create_static_variable_term(0),
+                            factory.create_variable_term(0),
                             factory.create_string_term(allocator.create_string(
                                 "one"
                             )),
@@ -3290,19 +3290,19 @@ mod tests {
                         factory.create_application_term(
                             factory.create_builtin_term(Stdlib::Get),
                             allocator.create_pair(
-                                factory.create_static_variable_term(1),
+                                factory.create_variable_term(1),
                                 factory.create_string_term(allocator.create_string(
                                     "two"
                                 )),
                             ),
                         ),
                         factory.create_let_term(
-                            factory.create_static_variable_term(1),
+                            factory.create_variable_term(1),
                             factory.create_let_term(
                                 factory.create_application_term(
                                     factory.create_builtin_term(Stdlib::Get),
                                     allocator.create_pair(
-                                        factory.create_static_variable_term(0),
+                                        factory.create_variable_term(0),
                                         factory.create_string_term(allocator.create_static_string("a")),
                                     ),
                                 ),
@@ -3310,17 +3310,17 @@ mod tests {
                                     factory.create_application_term(
                                         factory.create_builtin_term(Stdlib::Get),
                                         allocator.create_pair(
-                                            factory.create_static_variable_term(1),
+                                            factory.create_variable_term(1),
                                             factory.create_string_term(allocator.create_static_string("b")),
                                         ),
                                     ),
                                     factory.create_let_term(
-                                        factory.create_static_variable_term(3),
+                                        factory.create_variable_term(3),
                                         factory.create_let_term(
                                             factory.create_application_term(
                                                 factory.create_builtin_term(Stdlib::Get),
                                                 allocator.create_pair(
-                                                    factory.create_static_variable_term(0),
+                                                    factory.create_variable_term(0),
                                                     factory.create_string_term(allocator.create_static_string("c")),
                                                 ),
                                             ),
@@ -3328,11 +3328,11 @@ mod tests {
                                                 factory.create_application_term(
                                                     factory.create_builtin_term(Stdlib::Get),
                                                     allocator.create_pair(
-                                                        factory.create_static_variable_term(1),
+                                                        factory.create_variable_term(1),
                                                         factory.create_string_term(allocator.create_static_string("d")),
                                                     ),
                                                 ),
-                                                factory.create_static_variable_term(4),
+                                                factory.create_variable_term(4),
                                             ),
                                         ),
                                     ),
@@ -3349,12 +3349,12 @@ mod tests {
                 factory.create_lambda_term(
                     1,
                     factory.create_let_term(
-                        factory.create_static_variable_term(0),
+                        factory.create_variable_term(0),
                         factory.create_let_term(
                             factory.create_application_term(
                                 factory.create_builtin_term(Stdlib::Get),
                                 allocator.create_pair(
-                                    factory.create_static_variable_term(0),
+                                    factory.create_variable_term(0),
                                     factory.create_string_term(allocator.create_static_string("foo")),
                                 ),
                             ),
@@ -3362,11 +3362,11 @@ mod tests {
                                 factory.create_application_term(
                                     factory.create_builtin_term(Stdlib::Get),
                                     allocator.create_pair(
-                                        factory.create_static_variable_term(1),
+                                        factory.create_variable_term(1),
                                         factory.create_string_term(allocator.create_static_string("bar")),
                                     ),
                                 ),
-                                factory.create_static_variable_term(0),
+                                factory.create_variable_term(0),
                             ),
                         ),
                     ),
@@ -3408,7 +3408,7 @@ mod tests {
                         factory.create_int_term(0),
                     ),
                 ),
-                factory.create_static_variable_term(0),
+                factory.create_variable_term(0),
             )),
         );
         assert_eq!(
@@ -3428,7 +3428,7 @@ mod tests {
                     factory.create_application_term(
                         factory.create_builtin_term(Stdlib::Get),
                         allocator.create_pair(
-                            factory.create_static_variable_term(0),
+                            factory.create_variable_term(0),
                             factory.create_int_term(0),
                         ),
                     ),
@@ -3436,11 +3436,11 @@ mod tests {
                         factory.create_application_term(
                             factory.create_builtin_term(Stdlib::Get),
                             allocator.create_pair(
-                                factory.create_static_variable_term(1),
+                                factory.create_variable_term(1),
                                 factory.create_int_term(1),
                             ),
                         ),
-                        factory.create_static_variable_term(1),
+                        factory.create_variable_term(1),
                     ),
                 ),
             )),
@@ -3464,7 +3464,7 @@ mod tests {
                         factory.create_int_term(2),
                     ),
                 ),
-                factory.create_static_variable_term(0),
+                factory.create_variable_term(0),
             )),
         );
         assert_eq!(
@@ -3484,7 +3484,7 @@ mod tests {
                     factory.create_application_term(
                         factory.create_builtin_term(Stdlib::Get),
                         allocator.create_pair(
-                            factory.create_static_variable_term(0),
+                            factory.create_variable_term(0),
                             factory.create_int_term(1),
                         ),
                     ),
@@ -3492,11 +3492,11 @@ mod tests {
                         factory.create_application_term(
                             factory.create_builtin_term(Stdlib::Get),
                             allocator.create_pair(
-                                factory.create_static_variable_term(1),
+                                factory.create_variable_term(1),
                                 factory.create_int_term(2),
                             ),
                         ),
-                        factory.create_static_variable_term(1),
+                        factory.create_variable_term(1),
                     ),
                 ),
             )),
@@ -3522,7 +3522,7 @@ mod tests {
                             factory.create_int_term(0),
                         ),
                     ),
-                    factory.create_static_variable_term(1),
+                    factory.create_variable_term(1),
                 )
             )),
         );
@@ -3545,7 +3545,7 @@ mod tests {
                         factory.create_application_term(
                             factory.create_builtin_term(Stdlib::Get),
                             allocator.create_pair(
-                                factory.create_static_variable_term(0),
+                                factory.create_variable_term(0),
                                 factory.create_int_term(0),
                             ),
                         ),
@@ -3553,11 +3553,11 @@ mod tests {
                             factory.create_application_term(
                                 factory.create_builtin_term(Stdlib::Get),
                                 allocator.create_pair(
-                                    factory.create_static_variable_term(1),
+                                    factory.create_variable_term(1),
                                     factory.create_int_term(1),
                                 ),
                             ),
-                            factory.create_static_variable_term(3),
+                            factory.create_variable_term(3),
                         ),
                     )
                 )
@@ -3967,8 +3967,8 @@ mod tests {
                                     factory.create_application_term(
                                         factory.create_builtin_term(Stdlib::Add),
                                         allocator.create_pair(
-                                            factory.create_static_variable_term(1),
-                                            factory.create_static_variable_term(0),
+                                            factory.create_variable_term(1),
+                                            factory.create_variable_term(0),
                                         ),
                                     ),
                                 ),
@@ -3980,8 +3980,8 @@ mod tests {
                                     factory.create_application_term(
                                         factory.create_builtin_term(Stdlib::Add),
                                         allocator.create_pair(
-                                            factory.create_static_variable_term(1),
-                                            factory.create_static_variable_term(0),
+                                            factory.create_variable_term(1),
+                                            factory.create_variable_term(0),
                                         ),
                                     ),
                                 ),
@@ -4008,8 +4008,8 @@ mod tests {
                                     factory.create_application_term(
                                         factory.create_builtin_term(Stdlib::Add),
                                         allocator.create_pair(
-                                            factory.create_static_variable_term(1),
-                                            factory.create_static_variable_term(0),
+                                            factory.create_variable_term(1),
+                                            factory.create_variable_term(0),
                                         ),
                                     ),
                                 ),
@@ -4021,8 +4021,8 @@ mod tests {
                                     factory.create_application_term(
                                         factory.create_builtin_term(Stdlib::Add),
                                         allocator.create_pair(
-                                            factory.create_static_variable_term(1),
-                                            factory.create_static_variable_term(0),
+                                            factory.create_variable_term(1),
+                                            factory.create_variable_term(0),
                                         ),
                                     ),
                                 ),
@@ -4059,8 +4059,8 @@ mod tests {
                                     factory.create_application_term(
                                         factory.create_builtin_term(Stdlib::Add),
                                         allocator.create_pair(
-                                            factory.create_static_variable_term(1),
-                                            factory.create_static_variable_term(0),
+                                            factory.create_variable_term(1),
+                                            factory.create_variable_term(0),
                                         ),
                                     ),
                                 ),
@@ -4483,7 +4483,7 @@ mod tests {
         );
         assert_eq!(
             parse("(foo) => foo", &env, &factory, &allocator),
-            Ok(factory.create_lambda_term(1, factory.create_static_variable_term(0))),
+            Ok(factory.create_lambda_term(1, factory.create_variable_term(0))),
         );
         assert_eq!(
             parse("(foo) => foo + foo", &env, &factory, &allocator),
@@ -4492,8 +4492,8 @@ mod tests {
                 factory.create_application_term(
                     factory.create_builtin_term(Stdlib::Add),
                     allocator.create_pair(
-                        factory.create_static_variable_term(0),
-                        factory.create_static_variable_term(0),
+                        factory.create_variable_term(0),
+                        factory.create_variable_term(0),
                     ),
                 ),
             )),
@@ -4505,8 +4505,8 @@ mod tests {
                 factory.create_application_term(
                     factory.create_builtin_term(Stdlib::Add),
                     allocator.create_pair(
-                        factory.create_static_variable_term(2),
-                        factory.create_static_variable_term(1),
+                        factory.create_variable_term(2),
+                        factory.create_variable_term(1),
                     ),
                 ),
             )),
@@ -4527,8 +4527,8 @@ mod tests {
                         factory.create_application_term(
                             factory.create_builtin_term(Stdlib::Add),
                             allocator.create_pair(
-                                factory.create_static_variable_term(2),
-                                factory.create_static_variable_term(1),
+                                factory.create_variable_term(2),
+                                factory.create_variable_term(1),
                             ),
                         ),
                     ),
@@ -4554,11 +4554,11 @@ mod tests {
                     factory.create_application_term(
                         factory.create_builtin_term(Stdlib::Get),
                         allocator.create_pair(
-                            factory.create_static_variable_term(0),
+                            factory.create_variable_term(0),
                             factory.create_string_term(allocator.create_static_string("foo")),
                         ),
                     ),
-                    factory.create_static_variable_term(0),
+                    factory.create_variable_term(0),
                 ),
             )),
         );
@@ -4567,12 +4567,12 @@ mod tests {
             Ok(factory.create_lambda_term(
                 1,
                 factory.create_let_term(
-                    factory.create_static_variable_term(0),
+                    factory.create_variable_term(0),
                     factory.create_let_term(
                         factory.create_application_term(
                             factory.create_builtin_term(Stdlib::Get),
                             allocator.create_pair(
-                                factory.create_static_variable_term(0),
+                                factory.create_variable_term(0),
                                 factory.create_string_term(allocator.create_static_string("foo")),
                             ),
                         ),
@@ -4580,7 +4580,7 @@ mod tests {
                             factory.create_application_term(
                                 factory.create_builtin_term(Stdlib::Get),
                                 allocator.create_pair(
-                                    factory.create_static_variable_term(1),
+                                    factory.create_variable_term(1),
                                     factory
                                         .create_string_term(allocator.create_static_string("bar")),
                                 ),
@@ -4588,8 +4588,8 @@ mod tests {
                             factory.create_application_term(
                                 factory.create_builtin_term(Stdlib::Add),
                                 allocator.create_pair(
-                                    factory.create_static_variable_term(1),
-                                    factory.create_static_variable_term(0),
+                                    factory.create_variable_term(1),
+                                    factory.create_variable_term(0),
                                 ),
                             ),
                         ),
@@ -4607,12 +4607,12 @@ mod tests {
             Ok(factory.create_lambda_term(
                 4,
                 factory.create_let_term(
-                    factory.create_static_variable_term(2),
+                    factory.create_variable_term(2),
                     factory.create_let_term(
                         factory.create_application_term(
                             factory.create_builtin_term(Stdlib::Get),
                             allocator.create_pair(
-                                factory.create_static_variable_term(0),
+                                factory.create_variable_term(0),
                                 factory.create_string_term(allocator.create_static_string("foo")),
                             ),
                         ),
@@ -4620,7 +4620,7 @@ mod tests {
                             factory.create_application_term(
                                 factory.create_builtin_term(Stdlib::Get),
                                 allocator.create_pair(
-                                    factory.create_static_variable_term(1),
+                                    factory.create_variable_term(1),
                                     factory
                                         .create_string_term(allocator.create_static_string("bar")),
                                 ),
@@ -4634,14 +4634,14 @@ mod tests {
                                             factory.create_application_term(
                                                 factory.create_builtin_term(Stdlib::Add),
                                                 allocator.create_pair(
-                                                    factory.create_static_variable_term(6),
-                                                    factory.create_static_variable_term(1),
+                                                    factory.create_variable_term(6),
+                                                    factory.create_variable_term(1),
                                                 ),
                                             ),
-                                            factory.create_static_variable_term(0),
+                                            factory.create_variable_term(0),
                                         ),
                                     ),
-                                    factory.create_static_variable_term(3),
+                                    factory.create_variable_term(3),
                                 ),
                             ),
                         ),
@@ -4668,11 +4668,11 @@ mod tests {
                     factory.create_application_term(
                         factory.create_builtin_term(Stdlib::Get),
                         allocator.create_pair(
-                            factory.create_static_variable_term(0),
+                            factory.create_variable_term(0),
                             factory.create_int_term(0),
                         ),
                     ),
-                    factory.create_static_variable_term(0),
+                    factory.create_variable_term(0),
                 ),
             )),
         );
@@ -4681,12 +4681,12 @@ mod tests {
             Ok(factory.create_lambda_term(
                 1,
                 factory.create_let_term(
-                    factory.create_static_variable_term(0),
+                    factory.create_variable_term(0),
                     factory.create_let_term(
                         factory.create_application_term(
                             factory.create_builtin_term(Stdlib::Get),
                             allocator.create_pair(
-                                factory.create_static_variable_term(0),
+                                factory.create_variable_term(0),
                                 factory.create_int_term(0),
                             ),
                         ),
@@ -4694,15 +4694,15 @@ mod tests {
                             factory.create_application_term(
                                 factory.create_builtin_term(Stdlib::Get),
                                 allocator.create_pair(
-                                    factory.create_static_variable_term(1),
+                                    factory.create_variable_term(1),
                                     factory.create_int_term(1),
                                 ),
                             ),
                             factory.create_application_term(
                                 factory.create_builtin_term(Stdlib::Add),
                                 allocator.create_pair(
-                                    factory.create_static_variable_term(1),
-                                    factory.create_static_variable_term(0),
+                                    factory.create_variable_term(1),
+                                    factory.create_variable_term(0),
                                 ),
                             ),
                         ),
@@ -4718,11 +4718,11 @@ mod tests {
                     factory.create_application_term(
                         factory.create_builtin_term(Stdlib::Get),
                         allocator.create_pair(
-                            factory.create_static_variable_term(0),
+                            factory.create_variable_term(0),
                             factory.create_int_term(2),
                         ),
                     ),
-                    factory.create_static_variable_term(0),
+                    factory.create_variable_term(0),
                 ),
             )),
         );
@@ -4731,12 +4731,12 @@ mod tests {
             Ok(factory.create_lambda_term(
                 1,
                 factory.create_let_term(
-                    factory.create_static_variable_term(0),
+                    factory.create_variable_term(0),
                     factory.create_let_term(
                         factory.create_application_term(
                             factory.create_builtin_term(Stdlib::Get),
                             allocator.create_pair(
-                                factory.create_static_variable_term(0),
+                                factory.create_variable_term(0),
                                 factory.create_int_term(1),
                             ),
                         ),
@@ -4744,11 +4744,11 @@ mod tests {
                             factory.create_application_term(
                                 factory.create_builtin_term(Stdlib::Get),
                                 allocator.create_pair(
-                                    factory.create_static_variable_term(1),
+                                    factory.create_variable_term(1),
                                     factory.create_int_term(2),
                                 ),
                             ),
-                            factory.create_static_variable_term(1),
+                            factory.create_variable_term(1),
                         ),
                     ),
                 ),
@@ -4764,12 +4764,12 @@ mod tests {
             Ok(factory.create_lambda_term(
                 4,
                 factory.create_let_term(
-                    factory.create_static_variable_term(2),
+                    factory.create_variable_term(2),
                     factory.create_let_term(
                         factory.create_application_term(
                             factory.create_builtin_term(Stdlib::Get),
                             allocator.create_pair(
-                                factory.create_static_variable_term(0),
+                                factory.create_variable_term(0),
                                 factory.create_int_term(0),
                             ),
                         ),
@@ -4777,7 +4777,7 @@ mod tests {
                             factory.create_application_term(
                                 factory.create_builtin_term(Stdlib::Get),
                                 allocator.create_pair(
-                                    factory.create_static_variable_term(1),
+                                    factory.create_variable_term(1),
                                     factory.create_int_term(1),
                                 ),
                             ),
@@ -4790,14 +4790,14 @@ mod tests {
                                             factory.create_application_term(
                                                 factory.create_builtin_term(Stdlib::Add),
                                                 allocator.create_pair(
-                                                    factory.create_static_variable_term(6),
-                                                    factory.create_static_variable_term(1),
+                                                    factory.create_variable_term(6),
+                                                    factory.create_variable_term(1),
                                                 ),
                                             ),
-                                            factory.create_static_variable_term(0),
+                                            factory.create_variable_term(0),
                                         ),
                                     ),
-                                    factory.create_static_variable_term(3),
+                                    factory.create_variable_term(3),
                                 ),
                             ),
                         ),
@@ -4822,7 +4822,7 @@ mod tests {
         assert_eq!(
             parse("((foo) => foo)(3)", &env, &factory, &allocator),
             Ok(factory.create_application_term(
-                factory.create_lambda_term(1, factory.create_static_variable_term(0)),
+                factory.create_lambda_term(1, factory.create_variable_term(0)),
                 allocator.create_unit_list(factory.create_float_term(3.0)),
             )),
         );
@@ -4839,8 +4839,8 @@ mod tests {
                     factory.create_application_term(
                         factory.create_builtin_term(Stdlib::Add),
                         allocator.create_pair(
-                            factory.create_static_variable_term(2),
-                            factory.create_static_variable_term(1),
+                            factory.create_variable_term(2),
+                            factory.create_variable_term(1),
                         ),
                     ),
                 ),
@@ -4870,8 +4870,8 @@ mod tests {
                                     factory.create_application_term(
                                         factory.create_builtin_term(Stdlib::Add),
                                         allocator.create_pair(
-                                            factory.create_static_variable_term(2),
-                                            factory.create_static_variable_term(1),
+                                            factory.create_variable_term(2),
+                                            factory.create_variable_term(1),
                                         ),
                                     ),
                                 ),
@@ -4901,8 +4901,8 @@ mod tests {
                         factory.create_application_term(
                             factory.create_builtin_term(Stdlib::Add),
                             allocator.create_pair(
-                                factory.create_static_variable_term(1),
-                                factory.create_static_variable_term(0)
+                                factory.create_variable_term(1),
+                                factory.create_variable_term(0)
                             ),
                         )
                     ),
@@ -4929,8 +4929,8 @@ mod tests {
                             factory.create_application_term(
                                 factory.create_builtin_term(Stdlib::Add),
                                 allocator.create_pair(
-                                    factory.create_static_variable_term(1),
-                                    factory.create_static_variable_term(0)
+                                    factory.create_variable_term(1),
+                                    factory.create_variable_term(0)
                                 ),
                             )
                         ),

@@ -3,14 +3,13 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use actor::{
-    assign::AssignHandlerAction,
     fetch::{FetchHandlerAction, FetchHandlerMetricNames},
     graphql::{GraphQlHandlerAction, GraphQlHandlerMetricNames},
-    increment::IncrementHandlerAction,
     loader::{LoaderHandlerAction, LoaderHandlerMetricNames},
     scan::ScanHandlerAction,
     timeout::TimeoutHandlerAction,
     timestamp::TimestampHandlerAction,
+    variable::VariableHandlerAction,
 };
 use hyper::Body;
 use reflex::core::{Applicable, Expression};
@@ -19,9 +18,8 @@ use reflex_runtime::{AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator
 use reflex_utils::reconnect::ReconnectTimeout;
 
 use crate::actor::{
-    assign::AssignHandler, fetch::FetchHandler, graphql::GraphQlHandler,
-    increment::IncrementHandler, loader::LoaderHandler, scan::ScanHandler, timeout::TimeoutHandler,
-    timestamp::TimestampHandler,
+    fetch::FetchHandler, graphql::GraphQlHandler, loader::LoaderHandler, scan::ScanHandler,
+    timeout::TimeoutHandler, timestamp::TimestampHandler, variable::VariableHandler,
 };
 
 pub mod action;
@@ -33,26 +31,24 @@ pub mod utils;
 
 pub trait DefaultHandlersAction<T: Expression>:
     Action
-    + AssignHandlerAction<T>
     + FetchHandlerAction<T>
     + GraphQlHandlerAction<T>
-    + IncrementHandlerAction<T>
     + LoaderHandlerAction<T>
     + ScanHandlerAction<T>
     + TimeoutHandlerAction<T>
     + TimestampHandlerAction<T>
+    + VariableHandlerAction<T>
 {
 }
 impl<T: Expression, TAction> DefaultHandlersAction<T> for TAction where
     Self: Action
-        + AssignHandlerAction<T>
         + FetchHandlerAction<T>
         + GraphQlHandlerAction<T>
-        + IncrementHandlerAction<T>
         + LoaderHandlerAction<T>
         + ScanHandlerAction<T>
         + TimeoutHandlerAction<T>
         + TimestampHandlerAction<T>
+        + VariableHandlerAction<T>
 {
 }
 
@@ -79,36 +75,33 @@ where
     TAction: DefaultHandlersAction<T> + Send + 'static,
 {
     ChainedActor::new(
-        AssignHandler::new(factory.clone(), allocator.clone()),
+        FetchHandler::new(
+            https_client.clone(),
+            factory.clone(),
+            allocator.clone(),
+            metric_names.fetch_handler,
+        ),
         ChainedActor::new(
-            FetchHandler::new(
-                https_client.clone(),
+            GraphQlHandler::new(
+                https_client,
                 factory.clone(),
                 allocator.clone(),
-                metric_names.fetch_handler,
+                reconnect_timeout,
+                metric_names.graphql_handler,
             ),
             ChainedActor::new(
-                GraphQlHandler::new(
-                    https_client,
+                LoaderHandler::new(
                     factory.clone(),
                     allocator.clone(),
-                    reconnect_timeout,
-                    metric_names.graphql_handler,
+                    metric_names.loader_handler,
                 ),
                 ChainedActor::new(
-                    IncrementHandler::new(factory.clone(), allocator.clone()),
+                    ScanHandler::new(factory.clone(), allocator.clone()),
                     ChainedActor::new(
-                        LoaderHandler::new(
-                            factory.clone(),
-                            allocator.clone(),
-                            metric_names.loader_handler,
-                        ),
+                        TimeoutHandler::new(factory.clone(), allocator.clone()),
                         ChainedActor::new(
-                            ScanHandler::new(factory.clone(), allocator.clone()),
-                            ChainedActor::new(
-                                TimeoutHandler::new(factory.clone(), allocator.clone()),
-                                TimestampHandler::new(factory.clone(), allocator.clone()),
-                            ),
+                            TimestampHandler::new(factory.clone(), allocator.clone()),
+                            VariableHandler::new(factory.clone(), allocator.clone()),
                         ),
                     ),
                 ),

@@ -910,12 +910,12 @@ mod tests {
                 factory.create_application_term(
                     factory.create_builtin_term(Stdlib::Subtract),
                     allocator.create_pair(
-                        factory.create_static_variable_term(2),
+                        factory.create_variable_term(2),
                         factory.create_application_term(
                             factory.create_builtin_term(Stdlib::Add),
                             allocator.create_pair(
-                                factory.create_static_variable_term(1),
-                                factory.create_static_variable_term(0),
+                                factory.create_variable_term(1),
+                                factory.create_variable_term(0),
                             ),
                         ),
                     ),
@@ -941,19 +941,19 @@ mod tests {
                 factory.create_application_term(
                     factory.create_builtin_term(Stdlib::Subtract),
                     allocator.create_pair(
-                        factory.create_static_variable_term(2),
+                        factory.create_variable_term(2),
                         factory.create_application_term(
                             factory.create_builtin_term(Stdlib::Add),
                             allocator.create_pair(
-                                factory.create_static_variable_term(1),
-                                factory.create_static_variable_term(0),
+                                factory.create_variable_term(1),
+                                factory.create_variable_term(0),
                             ),
                         ),
                     ),
                 ),
             ),
             allocator.create_triple(
-                factory.create_static_variable_term(123),
+                factory.create_variable_term(123),
                 factory.create_int_term(4),
                 factory.create_int_term(5),
             ),
@@ -964,7 +964,7 @@ mod tests {
             Some(factory.create_application_term(
                 factory.create_builtin_term(Stdlib::Subtract),
                 allocator.create_pair(
-                    factory.create_static_variable_term(123),
+                    factory.create_variable_term(123),
                     factory.create_int_term(4 + 5),
                 ),
             ))
@@ -984,15 +984,15 @@ mod tests {
                         factory.create_application_term(
                             factory.create_builtin_term(Stdlib::Get),
                             allocator.create_pair(
-                                factory.create_static_variable_term(2),
-                                factory.create_static_variable_term(1),
+                                factory.create_variable_term(2),
+                                factory.create_variable_term(1),
                             ),
                         ),
                         factory.create_application_term(
                             factory.create_builtin_term(Stdlib::Get),
                             allocator.create_pair(
-                                factory.create_static_variable_term(2),
-                                factory.create_static_variable_term(0),
+                                factory.create_variable_term(2),
+                                factory.create_variable_term(0),
                             ),
                         ),
                     ),
@@ -1003,7 +1003,7 @@ mod tests {
                     allocator.create_pair(factory.create_int_term(3), factory.create_int_term(4)),
                 ),
                 factory.create_int_term(0),
-                factory.create_static_variable_term(0),
+                factory.create_variable_term(0),
             ),
         );
         let result = expression.normalize(&factory, &allocator, &mut SubstitutionCache::new());
@@ -1018,15 +1018,15 @@ mod tests {
                             factory.create_application_term(
                                 factory.create_builtin_term(Stdlib::Get),
                                 allocator.create_pair(
-                                    factory.create_static_variable_term(0),
+                                    factory.create_variable_term(0),
                                     factory.create_int_term(0),
                                 ),
                             ),
                             factory.create_application_term(
                                 factory.create_builtin_term(Stdlib::Get),
                                 allocator.create_pair(
-                                    factory.create_static_variable_term(0),
-                                    factory.create_static_variable_term(1),
+                                    factory.create_variable_term(0),
+                                    factory.create_variable_term(1),
                                 ),
                             ),
                         ),

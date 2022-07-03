@@ -248,7 +248,7 @@ where
                 input,
             )),
         },
-        Some(offset) => Ok(factory.create_static_variable_term(offset)),
+        Some(offset) => Ok(factory.create_variable_term(offset)),
     }
 }
 
@@ -710,7 +710,7 @@ where
                                     factory.create_application_term(
                                         factory.create_builtin_term(Stdlib::Get),
                                         allocator.create_pair(
-                                            factory.create_static_variable_term(0),
+                                            factory.create_variable_term(0),
                                             factory.create_int_term(index as i32),
                                         ),
                                     ),
@@ -1276,7 +1276,7 @@ mod tests {
         assert_eq!(
             parse("(letrec ((foo 3)) foo)", &factory, &allocator),
             Ok(factory.create_application_term(
-                factory.create_lambda_term(1, factory.create_static_variable_term(0)),
+                factory.create_lambda_term(1, factory.create_variable_term(0)),
                 allocator.create_unit_list(factory.create_recursive_term(
                     factory.create_lambda_term(1, factory.create_int_term(3))
                 )),
@@ -1285,7 +1285,7 @@ mod tests {
         assert_eq!(
             parse("(letrec ((foo 3) (bar 4)) foo)", &factory, &allocator),
             Ok(factory.create_application_term(
-                factory.create_lambda_term(2, factory.create_static_variable_term(1)),
+                factory.create_lambda_term(2, factory.create_variable_term(1)),
                 allocator.create_pair(
                     factory.create_application_term(
                         factory.create_builtin_term(Stdlib::Get),
@@ -1319,7 +1319,7 @@ mod tests {
         assert_eq!(
             parse("(letrec ((foo 3) (bar 4)) bar)", &factory, &allocator),
             Ok(factory.create_application_term(
-                factory.create_lambda_term(2, factory.create_static_variable_term(0)),
+                factory.create_lambda_term(2, factory.create_variable_term(0)),
                 allocator.create_pair(
                     factory.create_application_term(
                         factory.create_builtin_term(Stdlib::Get),
@@ -1359,7 +1359,7 @@ mod tests {
             Ok(factory.create_lambda_term(
                 1,
                 factory.create_application_term(
-                    factory.create_lambda_term(1, factory.create_static_variable_term(1)),
+                    factory.create_lambda_term(1, factory.create_variable_term(1)),
                     allocator.create_unit_list(factory.create_recursive_term(
                         factory.create_lambda_term(1, factory.create_int_term(3)),
                     )),
@@ -1375,7 +1375,7 @@ mod tests {
             Ok(factory.create_lambda_term(
                 1,
                 factory.create_application_term(
-                    factory.create_lambda_term(2, factory.create_static_variable_term(2)),
+                    factory.create_lambda_term(2, factory.create_variable_term(2)),
                     allocator.create_pair(
                         factory.create_application_term(
                             factory.create_builtin_term(Stdlib::Get),
@@ -1410,7 +1410,7 @@ mod tests {
         assert_eq!(
             parse("(letrec ((foo 3) (bar foo)) foo)", &factory, &allocator),
             Ok(factory.create_application_term(
-                factory.create_lambda_term(2, factory.create_static_variable_term(1)),
+                factory.create_lambda_term(2, factory.create_variable_term(1)),
                 allocator.create_pair(
                     factory.create_application_term(
                         factory.create_builtin_term(Stdlib::Get),
@@ -1422,7 +1422,7 @@ mod tests {
                                     factory.create_application_term(
                                         factory.create_builtin_term(Stdlib::Get),
                                         allocator.create_pair(
-                                            factory.create_static_variable_term(0),
+                                            factory.create_variable_term(0),
                                             factory.create_int_term(0),
                                         ),
                                     ),
@@ -1441,7 +1441,7 @@ mod tests {
                                     factory.create_application_term(
                                         factory.create_builtin_term(Stdlib::Get),
                                         allocator.create_pair(
-                                            factory.create_static_variable_term(0),
+                                            factory.create_variable_term(0),
                                             factory.create_int_term(0),
                                         ),
                                     ),
@@ -1456,7 +1456,7 @@ mod tests {
         assert_eq!(
             parse("(letrec ((foo 3) (bar foo)) bar)", &factory, &allocator),
             Ok(factory.create_application_term(
-                factory.create_lambda_term(2, factory.create_static_variable_term(0)),
+                factory.create_lambda_term(2, factory.create_variable_term(0)),
                 allocator.create_pair(
                     factory.create_application_term(
                         factory.create_builtin_term(Stdlib::Get),
@@ -1468,7 +1468,7 @@ mod tests {
                                     factory.create_application_term(
                                         factory.create_builtin_term(Stdlib::Get),
                                         allocator.create_pair(
-                                            factory.create_static_variable_term(0),
+                                            factory.create_variable_term(0),
                                             factory.create_int_term(0),
                                         ),
                                     ),
@@ -1487,7 +1487,7 @@ mod tests {
                                     factory.create_application_term(
                                         factory.create_builtin_term(Stdlib::Get),
                                         allocator.create_pair(
-                                            factory.create_static_variable_term(0),
+                                            factory.create_variable_term(0),
                                             factory.create_int_term(0),
                                         ),
                                     ),
@@ -1511,8 +1511,8 @@ mod tests {
                     factory.create_application_term(
                         factory.create_builtin_term(Stdlib::Add),
                         allocator.create_pair(
-                            factory.create_static_variable_term(1),
-                            factory.create_static_variable_term(0),
+                            factory.create_variable_term(1),
+                            factory.create_variable_term(0),
                         ),
                     )
                 ),
@@ -1527,7 +1527,7 @@ mod tests {
                                     factory.create_application_term(
                                         factory.create_builtin_term(Stdlib::Get),
                                         allocator.create_pair(
-                                            factory.create_static_variable_term(0),
+                                            factory.create_variable_term(0),
                                             factory.create_int_term(0),
                                         ),
                                     ),
@@ -1546,7 +1546,7 @@ mod tests {
                                     factory.create_application_term(
                                         factory.create_builtin_term(Stdlib::Get),
                                         allocator.create_pair(
-                                            factory.create_static_variable_term(0),
+                                            factory.create_variable_term(0),
                                             factory.create_int_term(0),
                                         ),
                                     ),
@@ -1561,7 +1561,7 @@ mod tests {
         assert_eq!(
             parse("(letrec ((foo bar) (bar 3)) foo)", &factory, &allocator),
             Ok(factory.create_application_term(
-                factory.create_lambda_term(2, factory.create_static_variable_term(1)),
+                factory.create_lambda_term(2, factory.create_variable_term(1)),
                 allocator.create_pair(
                     factory.create_application_term(
                         factory.create_builtin_term(Stdlib::Get),
@@ -1572,7 +1572,7 @@ mod tests {
                                     factory.create_application_term(
                                         factory.create_builtin_term(Stdlib::Get),
                                         allocator.create_pair(
-                                            factory.create_static_variable_term(0),
+                                            factory.create_variable_term(0),
                                             factory.create_int_term(1),
                                         )
                                     ),
@@ -1591,7 +1591,7 @@ mod tests {
                                     factory.create_application_term(
                                         factory.create_builtin_term(Stdlib::Get),
                                         allocator.create_pair(
-                                            factory.create_static_variable_term(0),
+                                            factory.create_variable_term(0),
                                             factory.create_int_term(1),
                                         )
                                     ),
@@ -1607,7 +1607,7 @@ mod tests {
         assert_eq!(
             parse("(letrec ((foo bar) (bar 3)) bar)", &factory, &allocator),
             Ok(factory.create_application_term(
-                factory.create_lambda_term(2, factory.create_static_variable_term(0)),
+                factory.create_lambda_term(2, factory.create_variable_term(0)),
                 allocator.create_pair(
                     factory.create_application_term(
                         factory.create_builtin_term(Stdlib::Get),
@@ -1618,7 +1618,7 @@ mod tests {
                                     factory.create_application_term(
                                         factory.create_builtin_term(Stdlib::Get),
                                         allocator.create_pair(
-                                            factory.create_static_variable_term(0),
+                                            factory.create_variable_term(0),
                                             factory.create_int_term(1),
                                         )
                                     ),
@@ -1637,7 +1637,7 @@ mod tests {
                                     factory.create_application_term(
                                         factory.create_builtin_term(Stdlib::Get),
                                         allocator.create_pair(
-                                            factory.create_static_variable_term(0),
+                                            factory.create_variable_term(0),
                                             factory.create_int_term(1),
                                         )
                                     ),
@@ -1654,7 +1654,7 @@ mod tests {
         parse("(letrec ((foo (lambda (bar baz) (+ (+ first bar) (+ second baz)))) (first 3) (second 4)) (foo 5 6))", &factory, &allocator),
         Ok(factory.create_application_term(
             factory.create_lambda_term(3, factory.create_application_term(
-                factory.create_static_variable_term(2),
+                factory.create_variable_term(2),
                 allocator.create_pair(
                     factory.create_int_term(5),
                     factory.create_int_term(6),
@@ -1676,11 +1676,11 @@ mod tests {
                                                     factory.create_application_term(
                                                         factory.create_builtin_term(Stdlib::Get),
                                                         allocator.create_pair(
-                                                            factory.create_static_variable_term(2),
+                                                            factory.create_variable_term(2),
                                                             factory.create_int_term(1),
                                                         ),
                                                     ),
-                                                    factory.create_static_variable_term(1),
+                                                    factory.create_variable_term(1),
                                                 ),
                                             ),
                                             factory.create_application_term(
@@ -1689,11 +1689,11 @@ mod tests {
                                                     factory.create_application_term(
                                                         factory.create_builtin_term(Stdlib::Get),
                                                         allocator.create_pair(
-                                                            factory.create_static_variable_term(2),
+                                                            factory.create_variable_term(2),
                                                             factory.create_int_term(2),
                                                         ),
                                                     ),
-                                                    factory.create_static_variable_term(0),
+                                                    factory.create_variable_term(0),
                                                 ),
                                             ),
                                         ),
@@ -1721,11 +1721,11 @@ mod tests {
                                                     factory.create_application_term(
                                                         factory.create_builtin_term(Stdlib::Get),
                                                         allocator.create_pair(
-                                                            factory.create_static_variable_term(2),
+                                                            factory.create_variable_term(2),
                                                             factory.create_int_term(1),
                                                         ),
                                                     ),
-                                                    factory.create_static_variable_term(1),
+                                                    factory.create_variable_term(1),
                                                 ),
                                             ),
                                             factory.create_application_term(
@@ -1734,11 +1734,11 @@ mod tests {
                                                     factory.create_application_term(
                                                         factory.create_builtin_term(Stdlib::Get),
                                                         allocator.create_pair(
-                                                            factory.create_static_variable_term(2),
+                                                            factory.create_variable_term(2),
                                                             factory.create_int_term(2),
                                                         ),
                                                     ),
-                                                    factory.create_static_variable_term(0),
+                                                    factory.create_variable_term(0),
                                                 ),
                                             ),
                                         ),
@@ -1766,11 +1766,11 @@ mod tests {
                                                     factory.create_application_term(
                                                         factory.create_builtin_term(Stdlib::Get),
                                                         allocator.create_pair(
-                                                            factory.create_static_variable_term(2),
+                                                            factory.create_variable_term(2),
                                                             factory.create_int_term(1),
                                                         ),
                                                     ),
-                                                    factory.create_static_variable_term(1),
+                                                    factory.create_variable_term(1),
                                                 ),
                                             ),
                                             factory.create_application_term(
@@ -1779,11 +1779,11 @@ mod tests {
                                                     factory.create_application_term(
                                                         factory.create_builtin_term(Stdlib::Get),
                                                         allocator.create_pair(
-                                                            factory.create_static_variable_term(2),
+                                                            factory.create_variable_term(2),
                                                             factory.create_int_term(2),
                                                         ),
                                                     ),
-                                                    factory.create_static_variable_term(0),
+                                                    factory.create_variable_term(0),
                                                 ),
                                             ),
                                         ),
@@ -1809,7 +1809,7 @@ mod tests {
                 factory.create_lambda_term(
                     1,
                     factory.create_application_term(
-                        factory.create_static_variable_term(0),
+                        factory.create_variable_term(0),
                         allocator.create_unit_list(factory.create_int_term(5)),
                     )
                 ),
@@ -1825,25 +1825,24 @@ mod tests {
                                         factory.create_application_term(
                                             factory.create_builtin_term(Stdlib::Equal),
                                             allocator.create_pair(
-                                                factory.create_static_variable_term(0),
+                                                factory.create_variable_term(0),
                                                 factory.create_int_term(1),
                                             ),
                                         ),
-                                        factory.create_static_variable_term(0),
+                                        factory.create_variable_term(0),
                                         factory.create_application_term(
                                             factory.create_builtin_term(Stdlib::Multiply),
                                             allocator.create_pair(
-                                                factory.create_static_variable_term(0),
+                                                factory.create_variable_term(0),
                                                 factory.create_application_term(
-                                                    factory.create_static_variable_term(1),
+                                                    factory.create_variable_term(1),
                                                     allocator.create_unit_list(
                                                         factory.create_application_term(
                                                             factory.create_builtin_term(
                                                                 Stdlib::Subtract
                                                             ),
                                                             allocator.create_pair(
-                                                                factory
-                                                                    .create_static_variable_term(0),
+                                                                factory.create_variable_term(0),
                                                                 factory.create_int_term(1),
                                                             ),
                                                         ),

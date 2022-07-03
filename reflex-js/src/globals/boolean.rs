@@ -18,7 +18,7 @@ where
         factory.create_application_term(
             factory.create_builtin_term(Stdlib::If),
             allocator.create_triple(
-                factory.create_static_variable_term(0),
+                factory.create_variable_term(0),
                 factory.create_boolean_term(true),
                 factory.create_boolean_term(false),
             ),
