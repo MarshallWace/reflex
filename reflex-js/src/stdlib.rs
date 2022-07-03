@@ -121,10 +121,7 @@ impl TryFrom<Uuid> for Stdlib {
     }
 }
 impl Stdlib {
-    pub fn arity<T: Expression>(&self) -> Arity
-    where
-        T::Builtin: From<Self> + From<BuiltinStdlib>,
-    {
+    pub fn arity(&self) -> Arity {
         match self {
             Self::Construct => Construct::arity(),
             Self::DateConstructor => DateConstructor::arity(),

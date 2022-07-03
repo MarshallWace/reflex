@@ -20,23 +20,23 @@ use crate::{
 };
 
 #[derive(Hash, Eq, PartialEq, Clone, Copy, Debug)]
-pub struct BuiltinTerm<T: Expression> {
-    target: T::Builtin,
+pub struct BuiltinTerm<TBuiltin: Builtin> {
+    target: TBuiltin,
 }
-impl<T: Expression> BuiltinTerm<T> {
-    pub fn new(target: T::Builtin) -> Self {
+impl<TBuiltin: Builtin> BuiltinTerm<TBuiltin> {
+    pub fn new(target: TBuiltin) -> Self {
         Self { target }
     }
     pub fn arity(&self) -> Arity {
-        self.target.arity::<T>()
+        self.target.arity()
     }
 }
-impl<T: Expression> Uid for BuiltinTerm<T> {
+impl<TBuiltin: Builtin> Uid for BuiltinTerm<TBuiltin> {
     fn uid(&self) -> Uuid {
         self.target.uid()
     }
 }
-impl<T: Expression> GraphNode for BuiltinTerm<T> {
+impl<TBuiltin: Builtin> GraphNode for BuiltinTerm<TBuiltin> {
     fn capture_depth(&self) -> StackOffset {
         0
     }
@@ -62,9 +62,9 @@ impl<T: Expression> GraphNode for BuiltinTerm<T> {
         false
     }
 }
-impl<T: Expression + Applicable<T>> Applicable<T> for BuiltinTerm<T> {
+impl<T: Expression + Applicable<T>> Applicable<T> for BuiltinTerm<T::Builtin> {
     fn arity(&self) -> Option<Arity> {
-        Some(self.target.arity::<T>())
+        Some(self.target.arity())
     }
     fn apply(
         &self,
@@ -81,7 +81,7 @@ impl<T: Expression + Applicable<T>> Applicable<T> for BuiltinTerm<T> {
         self.target.should_parallelize(args)
     }
 }
-impl<T: Expression> Compile<T> for BuiltinTerm<T> {
+impl<T: Expression> Compile<T> for BuiltinTerm<T::Builtin> {
     fn compile(
         &self,
         _eager: VarArgs,
@@ -95,17 +95,17 @@ impl<T: Expression> Compile<T> for BuiltinTerm<T> {
         })))
     }
 }
-impl<T: Expression> std::fmt::Display for BuiltinTerm<T> {
+impl<TBuiltin: Builtin> std::fmt::Display for BuiltinTerm<TBuiltin> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         std::fmt::Display::fmt(&self.target, f)
     }
 }
-impl<T: Expression> SerializeJson for BuiltinTerm<T> {
+impl<TBuiltin: Builtin> SerializeJson for BuiltinTerm<TBuiltin> {
     fn to_json(&self) -> Result<serde_json::Value, String> {
         Err(format!("Unable to serialize term: {}", self))
     }
 }
-impl<T: Expression> serde::ser::Serialize for BuiltinTerm<T> {
+impl<TBuiltin: Builtin> serde::ser::Serialize for BuiltinTerm<TBuiltin> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
@@ -113,26 +113,26 @@ impl<T: Expression> serde::ser::Serialize for BuiltinTerm<T> {
         serializer.serialize_bytes(self.target.uid().as_ref())
     }
 }
-impl<'de, T: Expression> serde::de::Deserialize<'de> for BuiltinTerm<T> {
+impl<'de, TBuiltin: Builtin> serde::de::Deserialize<'de> for BuiltinTerm<TBuiltin> {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
-        deserializer.deserialize_bytes(BuiltinTermDeserializeVisitor::<T>::new())
+        deserializer.deserialize_bytes(BuiltinTermDeserializeVisitor::<TBuiltin>::new())
     }
 }
-struct BuiltinTermDeserializeVisitor<T: Expression> {
-    _phantom: PhantomData<T>,
+struct BuiltinTermDeserializeVisitor<TBuiltin: Builtin> {
+    _phantom: PhantomData<TBuiltin>,
 }
-impl<T: Expression> BuiltinTermDeserializeVisitor<T> {
+impl<TBuiltin: Builtin> BuiltinTermDeserializeVisitor<TBuiltin> {
     fn new() -> Self {
         Self {
             _phantom: PhantomData,
         }
     }
 }
-impl<'de, T: Expression> Visitor<'de> for BuiltinTermDeserializeVisitor<T> {
-    type Value = BuiltinTerm<T>;
+impl<'de, TBuiltin: Builtin> Visitor<'de> for BuiltinTermDeserializeVisitor<TBuiltin> {
+    type Value = BuiltinTerm<TBuiltin>;
     fn expecting(&self, formatter: &mut Formatter) -> std::fmt::Result {
         formatter.write_str("Only accepts bytes representing a valid uuid")
     }
@@ -141,7 +141,7 @@ impl<'de, T: Expression> Visitor<'de> for BuiltinTermDeserializeVisitor<T> {
         E: Error,
     {
         let uuid = Uuid::from_slice(v).map_err(|err| E::custom(format!("{:?}", err)))?;
-        let builtin: T::Builtin = uuid
+        let builtin: TBuiltin = uuid
             .try_into()
             .map_err(|_err| E::custom("uuid not found"))?;
         Ok(BuiltinTerm::new(builtin))

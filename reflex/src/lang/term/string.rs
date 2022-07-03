@@ -43,7 +43,7 @@ impl<TString: StringValue> GraphNode for StringTerm<TString> {
         false
     }
 }
-impl<TString: StringValue, T: Expression + Compile<T>> Compile<T> for StringTerm<TString> {
+impl<T: Expression + Compile<T>> Compile<T> for StringTerm<T::String> {
     fn compile(
         &self,
         _eager: VarArgs,

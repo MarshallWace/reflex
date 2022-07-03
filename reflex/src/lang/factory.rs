@@ -302,7 +302,7 @@ impl<TBuiltin: Builtin> ExpressionFactory<CachedSharedTerm<TBuiltin>>
     fn match_builtin_term<'a>(
         &self,
         expression: &'a CachedSharedTerm<TBuiltin>,
-    ) -> Option<&'a BuiltinTerm<CachedSharedTerm<TBuiltin>>> {
+    ) -> Option<&'a BuiltinTerm<TBuiltin>> {
         match expression.inner_term() {
             Term::Builtin(term) => Some(term),
             _ => None,

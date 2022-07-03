@@ -56,11 +56,11 @@ impl Uid for JsBuiltins {
     }
 }
 impl Builtin for JsBuiltins {
-    fn arity<T: Expression<Builtin = Self>>(&self) -> Arity {
+    fn arity(&self) -> Arity {
         match self {
-            JsBuiltins::Stdlib(term) => term.arity::<T>(),
-            JsBuiltins::Json(term) => term.arity::<T>(),
-            JsBuiltins::Js(term) => term.arity::<T>(),
+            JsBuiltins::Stdlib(term) => term.arity(),
+            JsBuiltins::Json(term) => term.arity(),
+            JsBuiltins::Js(term) => term.arity(),
         }
     }
     fn apply<T: Expression<Builtin = Self> + Applicable<T>>(

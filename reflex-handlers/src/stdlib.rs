@@ -59,10 +59,7 @@ impl Uid for Stdlib {
     }
 }
 impl Stdlib {
-    pub fn arity<T: Expression>(&self) -> Arity
-    where
-        T::Builtin: From<Self> + From<reflex::stdlib::Stdlib>,
-    {
+    pub fn arity(&self) -> Arity {
         match self {
             Self::Scan => Scan::arity(),
             Self::ToRequest => ToRequest::arity(),

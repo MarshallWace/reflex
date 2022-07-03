@@ -83,7 +83,7 @@ pub enum Term<T: Expression> {
     Application(ApplicationTerm<T>),
     PartialApplication(PartialApplicationTerm<T>),
     Recursive(RecursiveTerm<T>),
-    Builtin(BuiltinTerm<T>),
+    Builtin(BuiltinTerm<T::Builtin>),
     CompiledFunction(CompiledFunctionTerm),
     Record(RecordTerm<T>),
     Constructor(ConstructorTerm),

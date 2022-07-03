@@ -94,14 +94,14 @@ impl TryFrom<Uuid> for ServerBuiltins {
     }
 }
 impl Builtin for ServerBuiltins {
-    fn arity<T: Expression<Builtin = Self>>(&self) -> Arity {
+    fn arity(&self) -> Arity {
         match self {
-            ServerBuiltins::Stdlib(term) => term.arity::<T>(),
-            ServerBuiltins::Json(term) => term.arity::<T>(),
-            ServerBuiltins::Js(term) => term.arity::<T>(),
-            ServerBuiltins::GraphQl(term) => term.arity::<T>(),
-            ServerBuiltins::Handlers(term) => term.arity::<T>(),
-            ServerBuiltins::Server(term) => term.arity::<T>(),
+            ServerBuiltins::Stdlib(term) => term.arity(),
+            ServerBuiltins::Json(term) => term.arity(),
+            ServerBuiltins::Js(term) => term.arity(),
+            ServerBuiltins::GraphQl(term) => term.arity(),
+            ServerBuiltins::Handlers(term) => term.arity(),
+            ServerBuiltins::Server(term) => term.arity(),
         }
     }
     fn apply<T: Expression<Builtin = Self> + Applicable<T>>(

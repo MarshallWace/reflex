@@ -53,10 +53,7 @@ impl Uid for Stdlib {
     }
 }
 impl Stdlib {
-    pub fn arity<T: Expression>(&self) -> Arity
-    where
-        T::Builtin: From<Self> + From<BuiltinStdlib>,
-    {
+    pub fn arity(&self) -> Arity {
         match self {
             Self::CollectQueryListItems => CollectQueryListItems::arity(),
             Self::DynamicQueryBranch => DynamicQueryBranch::arity(),

@@ -361,10 +361,7 @@ impl Uid for Stdlib {
     }
 }
 impl Stdlib {
-    pub fn arity<T: Expression>(&self) -> Arity
-    where
-        T::Builtin: From<Self>,
-    {
+    pub fn arity(&self) -> Arity {
         match self {
             Self::Abs => Abs::arity(),
             Self::Add => Add::arity(),
@@ -643,8 +640,8 @@ impl Stdlib {
     }
 }
 impl Builtin for Stdlib {
-    fn arity<T: Expression<Builtin = Self>>(&self) -> Arity {
-        self.arity::<T>()
+    fn arity(&self) -> Arity {
+        self.arity()
     }
     fn should_parallelize<T: Expression<Builtin = Self>>(&self, args: &[T]) -> bool {
         self.should_parallelize(args)

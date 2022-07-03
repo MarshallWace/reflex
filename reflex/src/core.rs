@@ -49,7 +49,7 @@ pub trait Builtin:
     + TryFrom<Uuid, Error = ()>
     + std::fmt::Display
 {
-    fn arity<T: Expression<Builtin = Self>>(&self) -> Arity;
+    fn arity(&self) -> Arity;
     fn apply<T: Expression<Builtin = Self> + Applicable<T>>(
         &self,
         args: impl ExactSizeIterator<Item = T>,
@@ -1026,7 +1026,7 @@ pub trait ExpressionFactory<T: Expression> {
         expression: &'a T,
     ) -> Option<&'a PartialApplicationTerm<T>>;
     fn match_recursive_term<'a>(&self, expression: &'a T) -> Option<&'a RecursiveTerm<T>>;
-    fn match_builtin_term<'a>(&self, expression: &'a T) -> Option<&'a BuiltinTerm<T>>;
+    fn match_builtin_term<'a>(&self, expression: &'a T) -> Option<&'a BuiltinTerm<T::Builtin>>;
     fn match_compiled_function_term<'a>(&self, target: &'a T) -> Option<&'a CompiledFunctionTerm>;
     fn match_record_term<'a>(&self, expression: &'a T) -> Option<&'a RecordTerm<T>>;
     fn match_constructor_term<'a>(&self, expression: &'a T) -> Option<&'a ConstructorTerm>;

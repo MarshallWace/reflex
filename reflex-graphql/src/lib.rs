@@ -975,10 +975,10 @@ mod tests {
         }
     }
     impl Builtin for GraphQlTestBuiltins {
-        fn arity<T: Expression<Builtin = Self>>(&self) -> Arity {
+        fn arity(&self) -> Arity {
             match self {
-                GraphQlTestBuiltins::Stdlib(term) => term.arity::<T>(),
-                GraphQlTestBuiltins::GraphQl(term) => term.arity::<T>(),
+                GraphQlTestBuiltins::Stdlib(term) => term.arity(),
+                GraphQlTestBuiltins::GraphQl(term) => term.arity(),
             }
         }
         fn should_parallelize<T: Expression<Builtin = Self> + Applicable<T>>(

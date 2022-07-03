@@ -62,12 +62,12 @@ impl TryFrom<Uuid> for CliBuiltins {
     }
 }
 impl Builtin for CliBuiltins {
-    fn arity<T: Expression<Builtin = Self>>(&self) -> Arity {
+    fn arity(&self) -> Arity {
         match self {
-            CliBuiltins::Stdlib(term) => term.arity::<T>(),
-            CliBuiltins::Json(term) => term.arity::<T>(),
-            CliBuiltins::Js(term) => term.arity::<T>(),
-            CliBuiltins::Handlers(term) => term.arity::<T>(),
+            CliBuiltins::Stdlib(term) => term.arity(),
+            CliBuiltins::Json(term) => term.arity(),
+            CliBuiltins::Js(term) => term.arity(),
+            CliBuiltins::Handlers(term) => term.arity(),
         }
     }
     fn apply<T: Expression<Builtin = Self> + Applicable<T>>(
