@@ -358,8 +358,10 @@ where
                     self.allocator
                         .create_triple(target.clone(), seed.clone(), iteratee.clone()),
                 );
+                let reducer_label = format!("{} [reducer]", name);
+                let source_label = name;
                 let source_effect = create_evaluate_effect(
-                    format!("{} [input]", name),
+                    source_label,
                     target,
                     QueryEvaluationMode::Standalone,
                     QueryInvalidationStrategy::Exact,
@@ -367,7 +369,7 @@ where
                     &self.allocator,
                 );
                 let result_effect = create_evaluate_effect(
-                    name,
+                    reducer_label,
                     self.factory.create_application_term(
                         iteratee,
                         self.allocator.create_pair(
