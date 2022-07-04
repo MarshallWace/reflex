@@ -32,9 +32,12 @@ use reflex_runtime::{
     action::effect::{EffectEmitAction, EffectSubscribeAction, EffectUnsubscribeAction},
     AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator,
 };
-use reflex_utils::{partition_results, reconnect::ReconnectTimeout};
+use reflex_utils::{
+    partition_results,
+    reconnect::{FibonacciReconnectTimeout, ReconnectTimeout},
+};
 use tokio::time::sleep;
-use tonic::Status;
+use tonic::{Code, Status};
 use uuid::Uuid;
 
 use crate::action::grpc::{GrpcHandlerConnectErrorAction, GrpcHandlerConnectSuccessAction};
@@ -388,7 +391,7 @@ impl<T: AsyncExpression> GrpcResponse<T> {
             }
         })))
     }
-    pub fn stream<V: 'static>(
+    pub fn stream<V: Send + 'static>(
         result: impl Future<Output = Result<tonic::Response<tonic::codec::Streaming<V>>, tonic::Status>>
             + Send
             + 'static,
@@ -401,13 +404,23 @@ impl<T: AsyncExpression> GrpcResponse<T> {
                         Err(error) => {
                             stream::iter(once(Err(format_grpc_error_message(error)))).left_stream()
                         }
-                        Ok(stream) => stream
-                            .into_inner()
+                        Ok(stream) => {
+                            // It appears that when the underlying HTTP connection is broken, the tonic response stream
+                            // will emit a deluge of errors (maybe one for every time the underlying stream is polled?),
+                            // so we need to filter out duplicate errors to prevent them from overloading the event bus
+                            ignore_repeated_grpc_errors(
+                                stream.into_inner(),
+                                FibonacciReconnectTimeout {
+                                    units: Duration::from_secs(1),
+                                    max_timeout: Duration::from_secs(30),
+                                },
+                            )
                             .map(move |result| match result {
                                 Ok(result) => parse(result),
                                 Err(error) => Err(format_grpc_error_message(error)),
                             })
-                            .right_stream(),
+                            .right_stream()
+                        }
                     }
                 }
             }
@@ -418,6 +431,45 @@ impl<T: AsyncExpression> GrpcResponse<T> {
     pub fn into_stream(self) -> impl Stream<Item = Result<T, String>> + 'static {
         self.0
     }
+}
+
+pub fn ignore_repeated_grpc_errors<V: Send>(
+    stream: impl Stream<Item = Result<V, Status>>,
+    retry: impl ReconnectTimeout,
+) -> impl Stream<Item = Result<V, Status>> {
+    stream
+        .scan(
+            None,
+            move |existing_err: &mut Option<(Code, String, usize)>, result: Result<V, Status>| {
+                let repeated_error =
+                    existing_err
+                        .take()
+                        .and_then(|(code, message, repeat_count)| match &result {
+                            Err(err) if err.code() == code && err.message() == message.as_str() => {
+                                Some((code, message, repeat_count))
+                            }
+                            _ => None,
+                        });
+                if let Some((code, message, repeat_count)) = repeated_error {
+                    *existing_err = Some((code, message, repeat_count + 1));
+                    tokio::time::sleep(
+                        retry
+                            .duration(repeat_count)
+                            .unwrap_or(Duration::from_millis(1)),
+                    )
+                    .map(|_| Some(None))
+                    .left_future()
+                } else {
+                    let (err, result) = match result {
+                        Ok(payload) => (None, Ok(payload)),
+                        Err(err) => (Some((err.code(), String::from(err.message()), 0)), Err(err)),
+                    };
+                    *existing_err = err;
+                    future::ready(Some(Some(result))).right_future()
+                }
+            },
+        )
+        .filter_map(|result| future::ready(result))
 }
 
 #[derive(PartialEq, Eq, Clone, Copy, Hash, Debug)]
@@ -1204,7 +1256,7 @@ where
     }
 }
 
-fn format_grpc_error_message(error: Status) -> String {
+fn format_grpc_error_message(error: impl std::fmt::Display) -> String {
     format!("gRPC error: {}", error)
 }
 
