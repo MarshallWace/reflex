@@ -27,7 +27,7 @@ use reflex_runtime::{
         evaluate::{EvaluateResultAction, EvaluateStartAction, EvaluateStopAction},
     },
     actor::evaluate_handler::{create_evaluate_effect, parse_evaluate_effect_query},
-    QueryEvaluationMode, QueryInvalidationStrategy, StateUpdate,
+    QueryEvaluationMode, QueryInvalidationStrategy,
 };
 use reflex_utils::partition_results;
 use uuid::Uuid;
@@ -636,15 +636,7 @@ where
                     .effect_mappings
                     .get_mut(effect_id)
                     .map(|effect_state| {
-                        let value = match update {
-                            StateUpdate::Value(value) => value.clone(),
-                            StateUpdate::Patch(operation) => operation.apply(
-                                effect_state.latest_value.as_ref(),
-                                &self.factory,
-                                &self.allocator,
-                            ),
-                        };
-                        effect_state.latest_value.replace(value);
+                        effect_state.latest_value.replace(update.clone());
                         if effect_state.query_result.is_some() {
                             let completed_transaction_id = effect_state.end_transaction();
                             Ok(completed_transaction_id)

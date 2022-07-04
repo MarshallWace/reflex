@@ -7,8 +7,8 @@ use std::{
 };
 
 use reflex::core::{
-    DependencyList, EvaluationResult, Expression, ExpressionFactory, ExpressionList, HeapAllocator,
-    Signal, SignalType, StateToken,
+    DependencyList, EvaluationResult, Expression, ExpressionFactory, ExpressionList, Signal,
+    SignalType, StateToken,
 };
 use reflex_dispatcher::{
     Action, Actor, ActorTransition, HandlerContext, InboundAction, MessageData, StateTransition,
@@ -20,7 +20,7 @@ use crate::{
         effect::{EffectEmitAction, EffectSubscribeAction, EffectUnsubscribeAction},
         evaluate::{EvaluateResultAction, EvaluateStartAction, EvaluateStopAction},
     },
-    QueryEvaluationMode, QueryInvalidationStrategy, StateUpdate,
+    QueryEvaluationMode, QueryInvalidationStrategy,
 };
 
 pub trait QueryInspectorAction<T: Expression>:
@@ -44,25 +44,12 @@ impl<T: Expression, TAction> QueryInspectorAction<T> for TAction where
 {
 }
 
-pub struct QueryInspector<
-    T: Expression,
-    TFactory: ExpressionFactory<T>,
-    TAllocator: HeapAllocator<T>,
-> {
-    factory: TFactory,
-    allocator: TAllocator,
+pub struct QueryInspector<T: Expression> {
     _expression: PhantomData<T>,
 }
-impl<T, TFactory, TAllocator> QueryInspector<T, TFactory, TAllocator>
-where
-    T: Expression,
-    TFactory: ExpressionFactory<T>,
-    TAllocator: HeapAllocator<T>,
-{
-    pub fn new(factory: TFactory, allocator: TAllocator) -> Self {
+impl<T: Expression> Default for QueryInspector<T> {
+    fn default() -> Self {
         Self {
-            factory,
-            allocator,
             _expression: Default::default(),
         }
     }
@@ -230,11 +217,8 @@ fn serialize_json_list<T: Expression>(items: &ExpressionList<T>) -> JsonValue {
     )
 }
 
-impl<T, TFactory, TAllocator, TAction> Actor<TAction> for QueryInspector<T, TFactory, TAllocator>
+impl<T: Expression, TAction> Actor<TAction> for QueryInspector<T>
 where
-    T: Expression,
-    TFactory: ExpressionFactory<T>,
-    TAllocator: HeapAllocator<T>,
     TAction: QueryInspectorAction<T>,
 {
     type State = QueryInspectorState<T>;
@@ -268,12 +252,7 @@ where
         ActorTransition::new(state, actions)
     }
 }
-impl<T, TFactory, TAllocator> QueryInspector<T, TFactory, TAllocator>
-where
-    T: Expression,
-    TFactory: ExpressionFactory<T>,
-    TAllocator: HeapAllocator<T>,
-{
+impl<T: Expression> QueryInspector<T> {
     fn handle_evaluate_start<TAction>(
         &self,
         state: &mut QueryInspectorState<T>,
@@ -400,12 +379,7 @@ where
         let EffectEmitAction { updates } = action;
         for (state_token, value) in updates.iter() {
             if let Some(effect_state) = state.active_effects.get_mut(state_token) {
-                effect_state.value.replace(match value {
-                    StateUpdate::Value(value) => value.clone(),
-                    StateUpdate::Patch(operation) => {
-                        operation.apply(effect_state.value.as_ref(), &self.factory, &self.allocator)
-                    }
-                });
+                effect_state.value.replace(value.clone());
             }
         }
         None

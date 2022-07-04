@@ -16,7 +16,7 @@ use reflex_dispatcher::{
 };
 use reflex_runtime::{
     action::effect::{EffectEmitAction, EffectSubscribeAction, EffectUnsubscribeAction},
-    AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator, StateUpdate,
+    AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator,
 };
 use tokio::time::sleep;
 
@@ -128,13 +128,7 @@ where
                 let state_token = effect.id();
                 match parse_timeout_effect_args(effect, &self.factory) {
                     Ok(duration) => match duration {
-                        None => Some((
-                            (
-                                state_token,
-                                StateUpdate::Value(self.factory.create_nil_term()),
-                            ),
-                            None,
-                        )),
+                        None => Some(((state_token, self.factory.create_nil_term()), None)),
                         Some(duration) => {
                             if let Entry::Vacant(entry) = state.tasks.entry(state_token) {
                                 let (task_pid, task) = create_timeout_task(
@@ -147,10 +141,7 @@ where
                                 Some((
                                     (
                                         state_token,
-                                        StateUpdate::Value(create_pending_expression(
-                                            &self.factory,
-                                            &self.allocator,
-                                        )),
+                                        create_pending_expression(&self.factory, &self.allocator),
                                     ),
                                     Some(StateOperation::Task(task_pid, task)),
                                 ))
@@ -162,11 +153,7 @@ where
                     Err(err) => Some((
                         (
                             state_token,
-                            StateUpdate::Value(create_error_expression(
-                                err,
-                                &self.factory,
-                                &self.allocator,
-                            )),
+                            create_error_expression(err, &self.factory, &self.allocator),
                         ),
                         None,
                     )),
@@ -238,7 +225,7 @@ where
                 StateOperation::Send(
                     main_pid,
                     EffectEmitAction {
-                        updates: vec![(state_token, StateUpdate::Value(factory.create_nil_term()))],
+                        updates: vec![(state_token, factory.create_nil_term())],
                     }
                     .into(),
                 )

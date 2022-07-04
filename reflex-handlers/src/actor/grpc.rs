@@ -30,7 +30,7 @@ use reflex_dispatcher::{
 };
 use reflex_runtime::{
     action::effect::{EffectEmitAction, EffectSubscribeAction, EffectUnsubscribeAction},
-    AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator, StateUpdate,
+    AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator,
 };
 use reflex_utils::{partition_results, reconnect::ReconnectTimeout};
 use tokio::time::sleep;
@@ -556,14 +556,11 @@ where
                     Ok((connect_action, subscribe_action)) => (
                         (
                             state_token,
-                            StateUpdate::Value(create_pending_expression(
-                                &self.factory,
-                                &self.allocator,
-                            )),
+                            create_pending_expression(&self.factory, &self.allocator),
                         ),
                         (connect_action, subscribe_action),
                     ),
-                    Err(err) => ((state_token, StateUpdate::Value(err)), (None, None)),
+                    Err(err) => ((state_token, err), (None, None)),
                 }
             })
             .unzip();
@@ -755,7 +752,7 @@ where
                                     &self.factory,
                                     &self.allocator,
                                 );
-                                move |effect_id| (effect_id, StateUpdate::Value(error.clone()))
+                                move |effect_id| (effect_id, error.clone())
                             })
                             .collect(),
                     }
@@ -884,7 +881,7 @@ where
                         let error_task = StateOperation::Send(
                             context.pid(),
                             EffectEmitAction {
-                                updates: vec![(effect.id(), StateUpdate::Value(error))],
+                                updates: vec![(effect.id(), error)],
                             }
                             .into(),
                         );
@@ -1032,7 +1029,7 @@ fn listen_grpc_operation<T, TFactory, TAllocator, TClient, TAction>(
     factory: &TFactory,
     allocator: &TAllocator,
     context: &mut impl HandlerContext,
-) -> Result<(StateOperation<TAction>, ProcessId), (StateToken, StateUpdate<T>)>
+) -> Result<(StateOperation<TAction>, ProcessId), (StateToken, T)>
 where
     T: AsyncExpression + Rewritable<T> + Reducible<T>,
     TFactory: AsyncExpressionFactory<T>,
@@ -1103,7 +1100,7 @@ where
                                 StateOperation::Send(
                                     current_pid,
                                     EffectEmitAction {
-                                        updates: vec![(effect_id, StateUpdate::Value(result))],
+                                        updates: vec![(effect_id, result)],
                                     }
                                     .into(),
                                 )
@@ -1116,9 +1113,7 @@ where
         }
         Err(message) => Err((
             effect_id,
-            StateUpdate::Value(create_grpc_error_message_expression(
-                &url, &request, &message, factory, allocator,
-            )),
+            create_grpc_error_message_expression(&url, &request, &message, factory, allocator),
         )),
     }
 }

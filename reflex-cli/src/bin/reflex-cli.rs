@@ -34,7 +34,7 @@ use reflex_runtime::{
     },
     worker::bytecode_worker::BytecodeWorkerMetricNames,
     AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator, QueryEvaluationMode,
-    QueryInvalidationStrategy, StateUpdate,
+    QueryInvalidationStrategy,
 };
 use reflex_utils::reconnect::NoopReconnectTimeout;
 
@@ -217,12 +217,7 @@ pub async fn main() -> Result<()> {
                             .filter(|(key, _)| *key == evaluate_effect.id())
                             .filter_map({
                                 let factory = factory.clone();
-                                move |(_, value)| match value {
-                                    StateUpdate::Value(value) => {
-                                        parse_evaluate_effect_result(value, &factory)
-                                    }
-                                    StateUpdate::Patch(_) => None,
-                                }
+                                move |(_, value)| parse_evaluate_effect_result(value, &factory)
                             })
                             .next()?;
                         Some(update.result().clone())

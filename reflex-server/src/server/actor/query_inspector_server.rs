@@ -7,7 +7,7 @@ use std::{
 };
 
 use http::StatusCode;
-use reflex::core::{Expression, ExpressionFactory, HeapAllocator};
+use reflex::core::{Expression, ExpressionFactory};
 use reflex_dispatcher::{
     Action, Actor, ActorTransition, HandlerContext, InboundAction, MessageData, OutboundAction,
     StateOperation, StateTransition,
@@ -42,25 +42,20 @@ impl<T: Expression, TAction> QueryInspectorServerAction<T> for TAction where
 {
 }
 
-pub struct QueryInspectorServer<
-    T: Expression,
-    TFactory: ExpressionFactory<T>,
-    TAllocator: HeapAllocator<T>,
-> {
-    query_inspector: QueryInspector<T, TFactory, TAllocator>,
+pub struct QueryInspectorServer<T: Expression, TFactory: ExpressionFactory<T>> {
+    query_inspector: QueryInspector<T>,
     factory: TFactory,
     _expression: PhantomData<T>,
 }
-impl<T, TFactory, TAllocator> QueryInspectorServer<T, TFactory, TAllocator>
+impl<T, TFactory> QueryInspectorServer<T, TFactory>
 where
     T: Expression,
     TFactory: ExpressionFactory<T> + Clone,
-    TAllocator: HeapAllocator<T>,
 {
-    pub fn new(factory: TFactory, allocator: TAllocator) -> Self {
+    pub fn new(factory: TFactory) -> Self {
         Self {
             factory: factory.clone(),
-            query_inspector: QueryInspector::new(factory, allocator),
+            query_inspector: QueryInspector::default(),
             _expression: Default::default(),
         }
     }
@@ -84,12 +79,10 @@ impl<T: Expression> QueryInspectorServerState<T> {
     }
 }
 
-impl<T, TFactory, TAllocator, TAction> Actor<TAction>
-    for QueryInspectorServer<T, TFactory, TAllocator>
+impl<T, TFactory, TAction> Actor<TAction> for QueryInspectorServer<T, TFactory>
 where
     T: Expression,
     TFactory: ExpressionFactory<T>,
-    TAllocator: HeapAllocator<T>,
     TAction: QueryInspectorServerAction<T>,
 {
     type State = QueryInspectorServerState<T>;
@@ -126,11 +119,10 @@ where
         ActorTransition::new(state, inner_transition.append(actions))
     }
 }
-impl<T, TFactory, TAllocator> QueryInspectorServer<T, TFactory, TAllocator>
+impl<T, TFactory> QueryInspectorServer<T, TFactory>
 where
     T: Expression,
     TFactory: ExpressionFactory<T>,
-    TAllocator: HeapAllocator<T>,
 {
     fn handle_query_inspector_server_http_request<TAction>(
         &self,

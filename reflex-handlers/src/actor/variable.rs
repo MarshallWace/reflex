@@ -14,7 +14,7 @@ use reflex_dispatcher::{
 };
 use reflex_runtime::{
     action::effect::{EffectEmitAction, EffectSubscribeAction, EffectUnsubscribeAction},
-    AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator, StateUpdate,
+    AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator,
 };
 
 use crate::stdlib::{
@@ -164,7 +164,7 @@ where
                                 value: None,
                                 effect_ids: once(effect.id()).collect(),
                             });
-                            (effect.id(), StateUpdate::Value(initial_value.clone()))
+                            (effect.id(), initial_value.clone())
                         }
                         Entry::Occupied(mut entry) => {
                             let value = {
@@ -172,17 +172,13 @@ where
                                 existing_value.unwrap_or(initial_value).clone()
                             };
                             entry.get_mut().effect_ids.insert(effect.id());
-                            (effect.id(), StateUpdate::Value(value))
+                            (effect.id(), value)
                         }
                     }
                 }
                 Err(err) => (
                     effect.id(),
-                    StateUpdate::Value(create_error_expression(
-                        err,
-                        &self.factory,
-                        &self.allocator,
-                    )),
+                    create_error_expression(err, &self.factory, &self.allocator),
                 ),
             }
         });
@@ -235,9 +231,7 @@ where
                                     .cloned()
                                     .map({
                                         let updated_value = updated_value.clone();
-                                        move |state_token| {
-                                            (state_token, StateUpdate::Value(updated_value.clone()))
-                                        }
+                                        move |state_token| (state_token, updated_value.clone())
                                     })
                                     .collect::<Vec<_>>();
                                 (updated_value, Some(updates))
@@ -253,7 +247,7 @@ where
                 updates
                     .into_iter()
                     .flatten()
-                    .chain(once((effect.id(), StateUpdate::Value(value))))
+                    .chain(once((effect.id(), value)))
             })
             .collect();
         Some(StateTransition::new(once(StateOperation::Send(
@@ -305,11 +299,7 @@ where
                                     .effect_ids
                                     .iter()
                                     .cloned()
-                                    .map({
-                                        |state_token| {
-                                            (state_token, StateUpdate::Value(updated_value.clone()))
-                                        }
-                                    })
+                                    .map(|state_token| (state_token, updated_value.clone()))
                                     .collect::<Vec<_>>();
                                 (updated_value, Some(updates))
                             }
@@ -324,7 +314,7 @@ where
                 actions
                     .into_iter()
                     .flatten()
-                    .chain(once((effect.id(), StateUpdate::Value(value))))
+                    .chain(once((effect.id(), value)))
             })
             .collect();
         Some(StateTransition::new(once(StateOperation::Send(
@@ -376,11 +366,7 @@ where
                                     .effect_ids
                                     .iter()
                                     .cloned()
-                                    .map({
-                                        |state_token| {
-                                            (state_token, StateUpdate::Value(updated_value.clone()))
-                                        }
-                                    })
+                                    .map(|state_token| (state_token, updated_value.clone()))
                                     .collect::<Vec<_>>();
                                 (updated_value, Some(updates))
                             }
@@ -395,7 +381,7 @@ where
                 updates
                     .into_iter()
                     .flatten()
-                    .chain(once((effect.id(), StateUpdate::Value(value))))
+                    .chain(once((effect.id(), value)))
             })
             .collect();
         Some(StateTransition::new(once(StateOperation::Send(

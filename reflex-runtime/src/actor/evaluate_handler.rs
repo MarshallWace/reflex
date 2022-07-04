@@ -29,7 +29,7 @@ use crate::{
             EvaluateResultAction, EvaluateStartAction, EvaluateStopAction, EvaluateUpdateAction,
         },
     },
-    QueryEvaluationMode, QueryInvalidationStrategy, StateUpdate,
+    QueryEvaluationMode, QueryInvalidationStrategy,
 };
 
 pub const EFFECT_TYPE_EVALUATE: &'static str = "reflex::core::evaluate";
@@ -600,9 +600,9 @@ where
                         Entry::Occupied(mut entry) => {
                             let worker = entry.get_mut();
                             worker.subscription_count += 1;
-                            worker.latest_result().map(|result| {
-                                Err((cache_key, StateUpdate::Value(result.result().clone())))
-                            })
+                            worker
+                                .latest_result()
+                                .map(|result| Err((cache_key, result.result().clone())))
                         }
                         // For any queries that are not yet subscribed, kick off evaluation of that query
                         Entry::Vacant(entry) => {
@@ -836,11 +836,7 @@ where
                     EffectEmitAction {
                         updates: vec![(
                             *cache_key,
-                            StateUpdate::Value(create_evaluate_effect_result(
-                                result,
-                                &self.factory,
-                                &self.allocator,
-                            )),
+                            create_evaluate_effect_result(result, &self.factory, &self.allocator),
                         )],
                     }
                     .into(),
@@ -902,22 +898,14 @@ where
         } else {
             let existing_state = &state.state_cache.combined_state;
             let updates = updates.iter().filter_map(|(state_token, update)| {
-                let updated_value = match update {
-                    StateUpdate::Value(value) => value.clone(),
-                    StateUpdate::Patch(operation) => operation.apply(
-                        state.state_cache.combined_state.get(state_token),
-                        &self.factory,
-                        &self.allocator,
-                    ),
-                };
                 let is_unchanged = existing_state
                     .get(state_token)
-                    .map(|existing_value| updated_value.id() == existing_value.id())
+                    .map(|existing_value| update.id() == existing_value.id())
                     .unwrap_or(false);
                 if is_unchanged {
                     None
                 } else {
-                    Some((*state_token, updated_value))
+                    Some((*state_token, update.clone()))
                 }
             });
             let (updated_state_tokens, updates) = updates

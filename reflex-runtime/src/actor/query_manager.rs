@@ -24,7 +24,7 @@ use crate::{
     actor::evaluate_handler::{
         create_evaluate_effect, parse_evaluate_effect_result, EFFECT_TYPE_EVALUATE,
     },
-    QueryEvaluationMode, QueryInvalidationStrategy, StateUpdate,
+    QueryEvaluationMode, QueryInvalidationStrategy,
 };
 
 #[derive(Clone, Copy, Debug)]
@@ -264,15 +264,7 @@ where
         let updated_queries = {
             updates.iter().filter_map(|(state_token, update)| {
                 let subscription = state.subscriptions.get_mut(state_token)?;
-                let effect_result = match update {
-                    StateUpdate::Value(value) => value.clone(),
-                    StateUpdate::Patch(updater) => updater.apply(
-                        subscription.result.as_ref().map(|result| result.result()),
-                        &self.factory,
-                        &self.allocator,
-                    ),
-                };
-                let result = parse_evaluate_effect_result(&effect_result, &self.factory)?;
+                let result = parse_evaluate_effect_result(update, &self.factory)?;
                 subscription.result.replace(result.clone());
                 Some((subscription.query.clone(), result))
             })

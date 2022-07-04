@@ -20,7 +20,7 @@ use reflex_runtime::{
         create_evaluate_effect, parse_evaluate_effect_result, EFFECT_TYPE_EVALUATE,
     },
     AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator, QueryEvaluationMode,
-    QueryInvalidationStrategy, StateUpdate,
+    QueryInvalidationStrategy,
 };
 
 pub const EFFECT_TYPE_SCAN: &'static str = "reflex::scan";
@@ -166,10 +166,7 @@ where
                             Some((
                                 (
                                     effect.id(),
-                                    StateUpdate::Value(create_pending_expression(
-                                        &self.factory,
-                                        &self.allocator,
-                                    )),
+                                    create_pending_expression(&self.factory, &self.allocator),
                                 ),
                                 Some(StateOperation::Send(current_pid, action)),
                             ))
@@ -180,11 +177,7 @@ where
                     Err(err) => Some((
                         (
                             effect.id(),
-                            StateUpdate::Value(create_error_expression(
-                                err,
-                                &self.factory,
-                                &self.allocator,
-                            )),
+                            create_error_expression(err, &self.factory, &self.allocator),
                         ),
                         None,
                     )),
@@ -257,49 +250,22 @@ where
                 let updated_state_token = *updated_state_token;
                 if updated_state_token == reducer_state.source_effect.id() {
                     // The source input has emitted, so trigger the next reducer iteration
-                    let (value, _) = match update {
-                        StateUpdate::Value(value) => {
-                            parse_evaluate_effect_result(value, &self.factory)
-                        }
-                        StateUpdate::Patch(operation) => {
-                            let updated_value = operation.apply(
-                                reducer_state.source_value.as_ref(),
-                                &self.factory,
-                                &self.allocator,
-                            );
-                            parse_evaluate_effect_result(&updated_value, &self.factory)
-                        }
-                    }?
-                    .into_parts();
+                    let (value, _) =
+                        parse_evaluate_effect_result(update, &self.factory)?.into_parts();
                     reducer_state.source_value.replace(value.clone());
                     // Assign values for both reducer arguments (this will trigger the reducer query to be re-evaluated)
                     Some([
-                        (
-                            reducer_state.source_value_effect.id(),
-                            StateUpdate::Value(value),
-                        ),
+                        (reducer_state.source_value_effect.id(), value),
                         (
                             reducer_state.state_value_effect.id(),
-                            StateUpdate::Value(reducer_state.state_value.clone()),
+                            reducer_state.state_value.clone(),
                         ),
                     ])
                 } else if updated_state_token == reducer_state.result_effect.id() {
                     // The reducer has emitted a result, so emit a new result and reset the reducer to a pending state
                     // while we wait for the next input value to arrive
-                    let (value, _) = match update {
-                        StateUpdate::Value(value) => {
-                            parse_evaluate_effect_result(value, &self.factory)
-                        }
-                        StateUpdate::Patch(operation) => {
-                            let updated_value = operation.apply(
-                                Some(&reducer_state.state_value),
-                                &self.factory,
-                                &self.allocator,
-                            );
-                            parse_evaluate_effect_result(&updated_value, &self.factory)
-                        }
-                    }?
-                    .into_parts();
+                    let (value, _) =
+                        parse_evaluate_effect_result(update, &self.factory)?.into_parts();
                     reducer_state.state_value = value.clone();
                     // Emit a result for the overall scan effect, resetting the reducer state to a pending value
                     // (this effectively blocks the reducer query from being prematurely re-evaluated with a stale state
@@ -307,12 +273,9 @@ where
                     Some([
                         (
                             reducer_state.state_value_effect.id(),
-                            StateUpdate::Value(create_pending_expression(
-                                &self.factory,
-                                &self.allocator,
-                            )),
+                            create_pending_expression(&self.factory, &self.allocator),
                         ),
-                        (*scan_effect_id, StateUpdate::Value(value)),
+                        (*scan_effect_id, value),
                     ])
                 } else {
                     None

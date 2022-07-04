@@ -8,7 +8,7 @@ use std::{
 
 use bytes::Bytes;
 use http::{Method, Request, StatusCode};
-use reflex::core::{Expression, ExpressionFactory, HeapAllocator, SignalType};
+use reflex::core::{Expression, ExpressionFactory, SignalType};
 use reflex_dispatcher::{
     session_playback::{SessionPlayback, SessionPlaybackState},
     Action, Actor, ActorTransition, HandlerContext, InboundAction, MessageData, OutboundAction,
@@ -79,31 +79,27 @@ impl<T: Expression, TAction> SessionPlaybackServerAction<T> for TAction where
 pub struct SessionPlaybackServer<
     T: Expression,
     TFactory: ExpressionFactory<T>,
-    TAllocator: HeapAllocator<T>,
     TRecordedAction: Action + SerializableAction + InboundAction<EvaluateResultAction<T>>,
 > {
     session_playback: SessionPlayback<TRecordedAction>,
-    query_inspector_server: QueryInspectorServer<T, TFactory, TAllocator>,
+    query_inspector_server: QueryInspectorServer<T, TFactory>,
     factory: TFactory,
     _expression: PhantomData<T>,
 }
-impl<T, TFactory, TAllocator, TRecordedAction>
-    SessionPlaybackServer<T, TFactory, TAllocator, TRecordedAction>
+impl<T, TFactory, TRecordedAction> SessionPlaybackServer<T, TFactory, TRecordedAction>
 where
     T: Expression,
     TFactory: ExpressionFactory<T> + Clone,
-    TAllocator: HeapAllocator<T>,
     TRecordedAction: Action + SerializableAction + InboundAction<EvaluateResultAction<T>>,
 {
     pub fn new(
         captured_session: impl IntoIterator<Item = StateOperation<TRecordedAction>>,
         factory: TFactory,
-        allocator: TAllocator,
     ) -> Self {
         Self {
             factory: factory.clone(),
             session_playback: SessionPlayback::new(captured_session),
-            query_inspector_server: QueryInspectorServer::new(factory, allocator),
+            query_inspector_server: QueryInspectorServer::new(factory),
             _expression: Default::default(),
         }
     }
@@ -144,12 +140,11 @@ impl<T: Expression> SessionPlaybackServerState<T> {
     }
 }
 
-impl<T, TFactory, TAllocator, TRecordedAction, TAction> Actor<TAction>
-    for SessionPlaybackServer<T, TFactory, TAllocator, TRecordedAction>
+impl<T, TFactory, TRecordedAction, TAction> Actor<TAction>
+    for SessionPlaybackServer<T, TFactory, TRecordedAction>
 where
     T: Expression,
     TFactory: ExpressionFactory<T>,
-    TAllocator: HeapAllocator<T>,
     TRecordedAction:
         Action + SerializableAction + InboundAction<EvaluateResultAction<T>> + SerializableAction,
     TAction: SessionPlaybackServerAction<T>,
@@ -207,12 +202,10 @@ where
         ActorTransition::new(state, actions)
     }
 }
-impl<T, TFactory, TAllocator, TRecordedAction>
-    SessionPlaybackServer<T, TFactory, TAllocator, TRecordedAction>
+impl<T, TFactory, TRecordedAction> SessionPlaybackServer<T, TFactory, TRecordedAction>
 where
     T: Expression,
     TFactory: ExpressionFactory<T>,
-    TAllocator: HeapAllocator<T>,
     TRecordedAction: Action + SerializableAction + InboundAction<EvaluateResultAction<T>>,
 {
     fn handle_session_playback_end<TAction>(

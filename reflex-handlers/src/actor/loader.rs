@@ -25,7 +25,7 @@ use reflex_runtime::{
         create_evaluate_effect, parse_evaluate_effect_result, EFFECT_TYPE_EVALUATE,
     },
     AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator, QueryEvaluationMode,
-    QueryInvalidationStrategy, StateUpdate,
+    QueryInvalidationStrategy,
 };
 
 pub const EFFECT_TYPE_LOADER: &'static str = "reflex::loader";
@@ -360,7 +360,7 @@ where
         let current_pid = context.pid();
         let (initial_values, effects_by_loader) = effects.iter().fold(
             (
-                Vec::<(StateToken, StateUpdate<T>)>::with_capacity(effects.len()),
+                Vec::<(StateToken, T)>::with_capacity(effects.len()),
                 HashMap::<T, (String, Vec<LoaderEntitySubscription<T>>)>::default(),
             ),
             |(mut initial_values, mut results), effect| {
@@ -383,20 +383,13 @@ where
                         }
                         initial_values.push((
                             effect.id(),
-                            StateUpdate::Value(create_pending_expression(
-                                &self.factory,
-                                &self.allocator,
-                            )),
+                            create_pending_expression(&self.factory, &self.allocator),
                         ))
                     }
                     Err(message) => {
                         initial_values.push((
                             effect.id(),
-                            StateUpdate::Value(create_error_expression(
-                                message,
-                                &self.factory,
-                                &self.allocator,
-                            )),
+                            create_error_expression(message, &self.factory, &self.allocator),
                         ));
                     }
                 }
@@ -525,18 +518,7 @@ where
                     .batch_effect_mappings
                     .get(updated_state_token)?;
                 let batch = loader_state.active_batches.get_mut(batch_keys)?;
-                let (value, _) = match update {
-                    StateUpdate::Value(value) => parse_evaluate_effect_result(value, &self.factory),
-                    StateUpdate::Patch(operation) => {
-                        let updated_value = operation.apply(
-                            batch.latest_result.as_ref(),
-                            &self.factory,
-                            &self.allocator,
-                        );
-                        parse_evaluate_effect_result(&updated_value, &self.factory)
-                    }
-                }?
-                .into_parts();
+                let (value, _) = parse_evaluate_effect_result(update, &self.factory)?.into_parts();
                 batch.latest_result.replace(value.clone());
                 let mut results = if let Some(value) = self.factory.match_list_term(&value) {
                     if value.items().len() != batch.subscriptions.len() {
@@ -628,9 +610,7 @@ where
                                 Ok(results) => results.remove(&subscription.key),
                             };
                             match result {
-                                Some(result) => {
-                                    Some((subscription.effect.id(), StateUpdate::Value(result)))
-                                }
+                                Some(result) => Some((subscription.effect.id(), result)),
                                 None => None,
                             }
                         })

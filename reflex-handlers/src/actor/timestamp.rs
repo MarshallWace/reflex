@@ -16,7 +16,7 @@ use reflex_dispatcher::{
 };
 use reflex_runtime::{
     action::effect::{EffectEmitAction, EffectSubscribeAction, EffectUnsubscribeAction},
-    AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator, StateUpdate,
+    AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator,
 };
 use tokio::time::{interval_at, Instant};
 use tokio_stream::wrappers::IntervalStream;
@@ -140,9 +140,7 @@ where
                             Some((
                                 (
                                     state_token,
-                                    StateUpdate::Value(
-                                        self.factory.create_float_term(get_current_time()),
-                                    ),
+                                    self.factory.create_float_term(get_current_time()),
                                 ),
                                 Some(StateOperation::Task(task_pid, task)),
                             ))
@@ -153,11 +151,7 @@ where
                     Err(err) => Some((
                         (
                             state_token,
-                            StateUpdate::Value(create_error_expression(
-                                err,
-                                &self.factory,
-                                &self.allocator,
-                            )),
+                            create_error_expression(err, &self.factory, &self.allocator),
                         ),
                         None,
                     )),
@@ -230,10 +224,7 @@ where
             StateOperation::Send(
                 main_pid,
                 EffectEmitAction {
-                    updates: vec![(
-                        state_token,
-                        StateUpdate::Value(factory.create_float_term(get_current_time())),
-                    )],
+                    updates: vec![(state_token, factory.create_float_term(get_current_time()))],
                 }
                 .into(),
             )

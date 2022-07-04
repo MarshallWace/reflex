@@ -36,7 +36,7 @@ use reflex_graphql::{
 use reflex_json::JsonValue;
 use reflex_runtime::{
     action::effect::{EffectEmitAction, EffectSubscribeAction, EffectUnsubscribeAction},
-    AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator, StateUpdate,
+    AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator,
 };
 use reflex_utils::reconnect::ReconnectTimeout;
 use tokio::{net::TcpStream, sync::mpsc, time::sleep};
@@ -373,10 +373,7 @@ where
                             (
                                 (
                                     state_token,
-                                    StateUpdate::Value(create_pending_expression(
-                                        &self.factory,
-                                        &self.allocator,
-                                    )),
+                                    create_pending_expression(&self.factory, &self.allocator),
                                 ),
                                 (connect_action, subscribe_action),
                             )
@@ -387,26 +384,22 @@ where
                                     (
                                         (
                                             state_token,
-                                            StateUpdate::Value(create_pending_expression(
+                                            create_pending_expression(
                                                 &self.factory,
                                                 &self.allocator,
-                                            )),
+                                            ),
                                         ),
                                         (connect_action, Some(subscribe_action)),
                                     )
                                 }
-                                Err(err) => ((state_token, StateUpdate::Value(err)), (None, None)),
+                                Err(err) => ((state_token, err), (None, None)),
                             }
                         }
                     }
                     Err(err) => (
                         (
                             state_token,
-                            StateUpdate::Value(create_error_message_expression(
-                                err,
-                                &self.factory,
-                                &self.allocator,
-                            )),
+                            create_error_message_expression(err, &self.factory, &self.allocator),
                         ),
                         (None, None),
                     ),
@@ -672,7 +665,7 @@ where
                     updates: connection_state
                         .effects
                         .values()
-                        .map(|effect_id| (*effect_id, StateUpdate::Value(value.clone())))
+                        .map(|effect_id| (*effect_id, value.clone()))
                         .collect(),
                 }
                 .into(),
@@ -698,7 +691,7 @@ where
         Some(StateTransition::new(once(StateOperation::Send(
             context.pid(),
             EffectEmitAction {
-                updates: vec![(*effect_id, StateUpdate::Value(value))],
+                updates: vec![(*effect_id, value)],
             }
             .into(),
         ))))
@@ -727,7 +720,7 @@ where
         Some(StateTransition::new(once(StateOperation::Send(
             context.pid(),
             EffectEmitAction {
-                updates: vec![(*effect_id, StateUpdate::Value(value))],
+                updates: vec![(*effect_id, value)],
             }
             .into(),
         ))))
@@ -751,7 +744,7 @@ where
         Some(StateTransition::new(once(StateOperation::Send(
             context.pid(),
             EffectEmitAction {
-                updates: vec![(*effect_id, StateUpdate::Value(value))],
+                updates: vec![(*effect_id, value)],
             }
             .into(),
         ))))
@@ -825,7 +818,7 @@ where
                                 StateOperation::Send(
                                     current_pid,
                                     (EffectEmitAction {
-                                        updates: vec![(effect_id, StateUpdate::Value(result))],
+                                        updates: vec![(effect_id, result)],
                                     })
                                     .into(),
                                 )

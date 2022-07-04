@@ -6,8 +6,6 @@ use reflex_dispatcher::{Action, NamedAction, SerializableAction, SerializedActio
 use reflex_json::{JsonMap, JsonValue};
 use serde::{Deserialize, Serialize};
 
-use crate::StateUpdate;
-
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum EffectActions<T: Expression> {
     Subscribe(EffectSubscribeAction<T>),
@@ -178,7 +176,7 @@ impl<T: Expression> SerializableAction for EffectUnsubscribeAction<T> {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct EffectEmitAction<T: Expression> {
-    pub updates: Vec<(StateToken, StateUpdate<T>)>,
+    pub updates: Vec<(StateToken, T)>,
 }
 impl<T: Expression> Action for EffectEmitAction<T> {}
 impl<T: Expression> NamedAction for EffectEmitAction<T> {
@@ -193,23 +191,10 @@ impl<T: Expression> SerializableAction for EffectEmitAction<T> {
             JsonValue::from(
                 self.updates
                     .iter()
-                    .map(|(state_token, update)| {
+                    .map(|(state_token, value)| {
                         JsonValue::Object(JsonMap::from_iter([
                             (String::from("id"), JsonValue::from(*state_token)),
-                            (
-                                String::from("update"),
-                                match update {
-                                    StateUpdate::Value(value) => {
-                                        JsonValue::Object(JsonMap::from_iter([
-                                            (String::from("type"), JsonValue::from("value")),
-                                            (String::from("id"), JsonValue::from(value.id())),
-                                        ]))
-                                    }
-                                    StateUpdate::Patch(_) => JsonValue::Object(JsonMap::from_iter(
-                                        [(String::from("type"), JsonValue::from("patch"))],
-                                    )),
-                                },
-                            ),
+                            (String::from("value"), JsonValue::from(value.id())),
                         ]))
                     })
                     .collect::<Vec<_>>(),

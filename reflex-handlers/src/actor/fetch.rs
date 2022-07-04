@@ -25,7 +25,7 @@ use reflex_dispatcher::{
 };
 use reflex_runtime::{
     action::effect::{EffectEmitAction, EffectSubscribeAction, EffectUnsubscribeAction},
-    AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator, StateUpdate,
+    AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator,
 };
 
 use crate::utils::fetch::{fetch, FetchError, FetchRequest};
@@ -211,17 +211,17 @@ where
                                 self.metric_names,
                                 metric_labels,
                             ) {
-                                Err(err) => Some(((state_token, StateUpdate::Value(err)), None)),
+                                Err(err) => Some(((state_token, err), None)),
                                 Ok((request_state, task)) => {
                                     let task_pid = request_state.task_pid;
                                     entry.insert(request_state);
                                     Some((
                                         (
                                             state_token,
-                                            StateUpdate::Value(create_pending_expression(
+                                            create_pending_expression(
                                                 &self.factory,
                                                 &self.allocator,
-                                            )),
+                                            ),
                                         ),
                                         Some(StateOperation::Task(task_pid, task)),
                                     ))
@@ -234,11 +234,7 @@ where
                     Err(err) => Some((
                         (
                             state_token,
-                            StateUpdate::Value(create_error_expression(
-                                err,
-                                &self.factory,
-                                &self.allocator,
-                            )),
+                            create_error_expression(err, &self.factory, &self.allocator),
                         ),
                         None,
                     )),
@@ -344,7 +340,7 @@ where
                 StateOperation::Send(
                     main_pid,
                     EffectEmitAction {
-                        updates: vec![(state_token, StateUpdate::Value(value))],
+                        updates: vec![(state_token, value)],
                     }
                     .into(),
                 )
