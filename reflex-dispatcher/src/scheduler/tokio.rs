@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use std::{
-    collections::{hash_map::Entry, HashMap},
+    collections::{hash_map::Entry, HashMap, VecDeque},
     pin::Pin,
     sync::{
         atomic::{AtomicUsize, Ordering},
@@ -27,20 +27,20 @@ use crate::{
 
 #[derive(Clone, Copy, Debug)]
 pub struct TokioSchedulerMetricNames {
-    pub event_bus_capacity: &'static str,
-    pub event_bus_queued_messages: &'static str,
+    pub event_bus_queued_microtasks: &'static str,
+    pub event_bus_microtask_queue_capacity: &'static str,
 }
 impl TokioSchedulerMetricNames {
     fn init(self) -> Self {
         describe_gauge!(
-            self.event_bus_capacity,
+            self.event_bus_queued_microtasks,
             Unit::Count,
-            "Event bus queue capacity"
+            "Number of event bus async microtasks currently queued awaiting processing"
         );
         describe_gauge!(
-            self.event_bus_queued_messages,
+            self.event_bus_microtask_queue_capacity,
             Unit::Count,
-            "Number of event bus messages currently queued awaiting processing"
+            "Event bus async microtask queue capacity"
         );
         self
     }
@@ -48,8 +48,8 @@ impl TokioSchedulerMetricNames {
 impl Default for TokioSchedulerMetricNames {
     fn default() -> Self {
         Self {
-            event_bus_capacity: "event_bus_capacity",
-            event_bus_queued_messages: "event_bus_queued_messages",
+            event_bus_queued_microtasks: "event_bus_queued_microtasks",
+            event_bus_microtask_queue_capacity: "event_bus_microtask_capacity",
         }
     }
 }
@@ -92,16 +92,16 @@ impl From<usize> for TokioSubscriberId {
     }
 }
 
-struct TokioSubscriber<TAction> {
+struct TokioSubscriber<TAction: Send + 'static> {
     emit:
         Box<dyn for<'a> Fn(&'a TAction) -> Option<Pin<Box<dyn Future<Output = ()> + Send>>> + Send>,
 }
-impl<TAction> TokioSubscriber<TAction> {
+impl<TAction: Send + 'static> TokioSubscriber<TAction> {
     fn emit(&self, action: &TAction) -> Option<impl Future<Output = ()> + Send + Unpin> {
         (self.emit)(action)
     }
 }
-impl<TAction> TokioSubscriber<TAction> {
+impl<TAction: Send + 'static> TokioSubscriber<TAction> {
     fn new(
         emit: impl for<'a> Fn(&'a TAction) -> Option<Pin<Box<dyn Future<Output = ()> + Send>>>
             + Send
@@ -261,10 +261,10 @@ where
         actor: TActor,
         middleware: SchedulerMiddleware<TPreMiddleware, TPostMiddleware, TAction>,
         root_pid: ProcessId,
-        buffer_capacity: usize,
+        async_buffer_capacity: usize,
         metric_names: TokioSchedulerMetricNames,
     ) -> (
-        impl Future<Output = ()>,
+        impl Future<Output = ()> + Send,
         mpsc::Sender<TokioCommand<TAction>>,
     )
     where
@@ -276,163 +276,266 @@ where
         TPostMiddleware::State: Send + 'static,
     {
         let (commands_tx, mut commands_rx) =
-            mpsc::channel::<TokioCommand<TAction>>(buffer_capacity);
+            mpsc::channel::<TokioCommand<TAction>>(async_buffer_capacity);
         let metric_labels = [("pid", format!("{}", usize::from(root_pid)))];
         gauge!(
-            metric_names.event_bus_capacity,
-            buffer_capacity as f64,
+            metric_names.event_bus_microtask_queue_capacity,
+            async_buffer_capacity as f64,
             &metric_labels
         );
-        gauge!(metric_names.event_bus_queued_messages, 0.0, &metric_labels);
+        gauge!(
+            metric_names.event_bus_queued_microtasks,
+            0.0,
+            &metric_labels
+        );
         let task = {
             let mut actor_state = Some(actor.init());
             let mut pre_middleware_state = Some(middleware.pre.init());
             let mut post_middleware_state = Some(middleware.post.init());
             let mut subscribers = HashMap::<TokioSubscriberId, TokioSubscriber<TAction>>::new();
-            let child_commands = commands_tx.clone();
+            let async_commands = commands_tx.clone();
             async move {
                 let mut next_offset = MessageOffset::default();
                 let next_pid = Arc::new(AtomicUsize::new(root_pid.next().into()));
                 let mut processes = HashMap::<ProcessId, TokioProcess<TAction>>::default();
-                while let Some(operation) = commands_rx.recv().await {
-                    gauge!(
-                        metric_names.event_bus_queued_messages,
-                        (buffer_capacity - child_commands.capacity()) as f64,
-                        &metric_labels
-                    );
-                    match operation {
-                        TokioCommand::Event(operation, caller) => {
-                            let metadata = MessageData {
-                                offset: {
-                                    let next_value = next_offset.next();
-                                    std::mem::replace(&mut next_offset, next_value)
-                                },
-                                parent: caller.map(|(parent_offset, _)| parent_offset),
-                                timestamp: std::time::Instant::now(),
-                            };
-                            let caller_pid = caller.map(|(_, caller_pid)| caller_pid);
-                            let operation = {
-                                let (updated_state, operation) = middleware
-                                    .pre
-                                    .handle(
-                                        pre_middleware_state.take().unwrap(),
-                                        operation,
-                                        &metadata,
-                                        &MiddlewareContext { caller_pid },
-                                    )
-                                    .into_parts();
-                                pre_middleware_state.replace(updated_state);
-                                operation
-                            };
-                            let operation = match operation {
-                                StateOperation::Send(pid, action) => {
-                                    let mut context = TokioContext {
-                                        pid,
-                                        caller_pid,
-                                        next_pid: Arc::clone(&next_pid),
-                                    };
-                                    if pid == root_pid {
-                                        let (updated_state, actions) = actor
-                                            .handle(
-                                                actor_state.take().unwrap(),
-                                                &action,
-                                                &metadata,
-                                                &mut context,
-                                            )
-                                            .into_parts();
-                                        actor_state.replace(updated_state);
-                                        for subscriber in subscribers.values() {
-                                            if let Some(task) = subscriber.emit(&action) {
-                                                let _ = tokio::spawn(task);
-                                            }
-                                        }
-                                        for operation in actions {
-                                            let _ = child_commands
-                                                .send(TokioCommand::Event(
-                                                    operation,
-                                                    Some((metadata.offset, pid)),
-                                                ))
-                                                .await;
-                                        }
-                                    } else if let Some(TokioProcess::Worker(worker)) =
-                                        processes.get_mut(&pid)
-                                    {
-                                        let action = action.clone();
-                                        let _ =
-                                            worker.inbox.send((action, metadata, context)).await;
-                                    };
-                                    StateOperation::Send(pid, action)
+                let mut worker_command_queue = Vec::new();
+                let mut command_queue = VecDeque::new();
+                // Main runtime event loop
+                loop {
+                    // Process any queued synchronous commands
+                    while let Some(command) = command_queue.pop_front() {
+                        let (action, child_commands, worker_commands) = process_command(
+                            command,
+                            &actor,
+                            &middleware,
+                            &mut subscribers,
+                            &mut processes,
+                            root_pid,
+                            &next_pid,
+                            &mut next_offset,
+                            &mut actor_state,
+                            &mut pre_middleware_state,
+                            &mut post_middleware_state,
+                            &async_commands,
+                        );
+                        // Add any spawned child commands to the event queue
+                        command_queue.extend(child_commands.into_iter().map(
+                            |(operation, parent_offset)| {
+                                TokioCommand::Event(operation, Some((parent_offset, root_pid)))
+                            },
+                        ));
+                        // Collect any spawned worker commands for dispatching once all synchronous commands have been processed
+                        worker_command_queue.extend(worker_commands);
+                        // If an action was dispatched on the main process, notify any subscribers before processing the next command
+                        if let Some(action) = action {
+                            for subscriber in subscribers.values() {
+                                if let Some(task) = subscriber.emit(&action) {
+                                    let _ = tokio::spawn(task);
                                 }
-                                StateOperation::Task(pid, task) => {
-                                    if let Entry::Vacant(entry) = processes.entry(pid) {
-                                        let (mut stream, dispose) = task.into_parts();
-                                        entry.insert(TokioProcess::Task(TokioTask {
-                                            handle: tokio::spawn({
-                                                let results = child_commands.clone();
-                                                async move {
-                                                    while let Some(operation) = stream.next().await
-                                                    {
-                                                        let _ = results
-                                                            .send(TokioCommand::Event(
-                                                                operation, caller,
-                                                            ))
-                                                            .await;
-                                                    }
-                                                }
-                                            }),
-                                            dispose: Some(dispose),
-                                        }));
-                                    }
-                                    StateOperation::Task(pid, OperationStream::noop())
-                                }
-                                StateOperation::Spawn(pid, factory) => {
-                                    if let Entry::Vacant(entry) = processes.entry(pid) {
-                                        entry.insert(TokioProcess::Worker(TokioWorker::new(
-                                            factory,
-                                            child_commands.clone(),
-                                        )));
-                                    }
-                                    StateOperation::spawn(pid, NoopWorkerFactory)
-                                }
-                                StateOperation::Kill(pid) => {
-                                    if let Entry::Occupied(entry) = processes.entry(pid) {
-                                        match entry.remove() {
-                                            TokioProcess::Task(mut task) => {
-                                                tokio::spawn(async move { task.abort().await });
-                                            }
-                                            TokioProcess::Worker(_) => {}
-                                        }
-                                    }
-                                    StateOperation::Kill(pid)
-                                }
-                            };
-                            {
-                                let updated_state = middleware
-                                    .post
-                                    .handle(
-                                        post_middleware_state.take().unwrap(),
-                                        operation,
-                                        &metadata,
-                                        &MiddlewareContext { caller_pid },
-                                    )
-                                    .into_inner();
-                                post_middleware_state.replace(updated_state);
                             }
                         }
-                        TokioCommand::Subscribe(subscriber_id, subscriber) => {
-                            if let Entry::Vacant(entry) = subscribers.entry(subscriber_id) {
-                                entry.insert(subscriber);
-                            }
-                        }
-                        TokioCommand::Unsubscribe(subscriber_id) => {
-                            subscribers.remove(&subscriber_id);
-                        }
+                    }
+                    // Dispatch worker messages to the corresponding async workers
+                    let worker_tasks = worker_command_queue
+                        .drain(..)
+                        .filter_map(|(pid, (action, metadata, context))| {
+                            processes.get(&pid).and_then(|process| match process {
+                                TokioProcess::Worker(worker) => {
+                                    Some(worker.inbox.send((action, metadata, context)))
+                                }
+                                _ => None,
+                            })
+                        })
+                        .collect::<Vec<_>>();
+                    for task in worker_tasks {
+                        let _ = task.await;
+                    }
+                    // All synchronous tasks have been processed, so wait until the next asynchronous microtask arrives
+                    if let Some(operation) = commands_rx.recv().await {
+                        gauge!(
+                            metric_names.event_bus_queued_microtasks,
+                            (async_buffer_capacity - async_commands.capacity()) as f64,
+                            &metric_labels
+                        );
+                        // Push the microtask onto the event queue and continue the event loop
+                        command_queue.push_back(operation);
+                    } else {
+                        // The async microtask command stream has ended; break out of the event loop
+                        break;
                     }
                 }
             }
         };
         (task, commands_tx)
     }
+}
+
+fn process_command<
+    TActor: Actor<TAction>,
+    TPreMiddleware: PreMiddleware<TAction>,
+    TPostMiddleware: PostMiddleware<TAction>,
+    TAction: Action + Send + Clone,
+>(
+    command: TokioCommand<TAction>,
+    actor: &TActor,
+    middleware: &SchedulerMiddleware<TPreMiddleware, TPostMiddleware, TAction>,
+    subscribers: &mut HashMap<TokioSubscriberId, TokioSubscriber<TAction>>,
+    processes: &mut HashMap<ProcessId, TokioProcess<TAction>>,
+    root_pid: ProcessId,
+    next_pid: &Arc<AtomicUsize>,
+    next_offset: &mut MessageOffset,
+    actor_state: &mut Option<TActor::State>,
+    pre_middleware_state: &mut Option<TPreMiddleware::State>,
+    post_middleware_state: &mut Option<TPostMiddleware::State>,
+    async_commands: &mpsc::Sender<TokioCommand<TAction>>,
+) -> (
+    Option<TAction>,
+    impl IntoIterator<
+            Item = (StateOperation<TAction>, MessageOffset),
+            IntoIter = impl Iterator<Item = (StateOperation<TAction>, MessageOffset)> + Send,
+        > + Send,
+    impl IntoIterator<
+            Item = (ProcessId, (TAction, MessageData, TokioContext)),
+            IntoIter = impl Iterator<Item = (ProcessId, (TAction, MessageData, TokioContext))> + Send,
+        > + Send,
+) {
+    let (action, child_commands, worker_commands) = match command {
+        TokioCommand::Event(operation, caller) => {
+            let metadata = MessageData {
+                offset: {
+                    let next_value = next_offset.next();
+                    std::mem::replace(next_offset, next_value)
+                },
+                parent: caller.map(|(parent_offset, _)| parent_offset),
+                timestamp: std::time::Instant::now(),
+            };
+            let caller_pid = caller.map(|(_, caller_pid)| caller_pid);
+            let operation = {
+                let (updated_state, operation) = middleware
+                    .pre
+                    .handle(
+                        pre_middleware_state.take().unwrap(),
+                        operation,
+                        &metadata,
+                        &MiddlewareContext { caller_pid },
+                    )
+                    .into_parts();
+                pre_middleware_state.replace(updated_state);
+                operation
+            };
+            let (cloned_operation, action, child_commands, worker_commands) = match operation {
+                StateOperation::Send(pid, action) => {
+                    let mut context = TokioContext {
+                        pid,
+                        caller_pid,
+                        next_pid: Arc::clone(&next_pid),
+                    };
+                    let cloned_operation = StateOperation::Send(pid, action.clone());
+                    let (emitted_action, child_commands, worker_commands) = if pid == root_pid {
+                        let (updated_state, child_commands) = actor
+                            .handle(
+                                actor_state.take().unwrap(),
+                                &action,
+                                &metadata,
+                                &mut context,
+                            )
+                            .into_parts();
+                        actor_state.replace(updated_state);
+                        (
+                            Some(action),
+                            Some(child_commands.into_iter().map({
+                                let parent_offset = metadata.offset;
+                                move |operation| (operation, parent_offset)
+                            })),
+                            None,
+                        )
+                    } else {
+                        (None, None, Some((pid, (action, metadata, context))))
+                    };
+                    (
+                        cloned_operation,
+                        emitted_action,
+                        child_commands,
+                        worker_commands,
+                    )
+                }
+                StateOperation::Task(pid, task) => {
+                    if let Entry::Vacant(entry) = processes.entry(pid) {
+                        let (mut stream, dispose) = task.into_parts();
+                        entry.insert(TokioProcess::Task(TokioTask {
+                            handle: tokio::spawn({
+                                let results = async_commands.clone();
+                                async move {
+                                    while let Some(operation) = stream.next().await {
+                                        let _ = results
+                                            .send(TokioCommand::Event(operation, caller))
+                                            .await;
+                                    }
+                                }
+                            }),
+                            dispose: Some(dispose),
+                        }));
+                    }
+                    (
+                        StateOperation::Task(pid, OperationStream::noop()),
+                        None,
+                        None,
+                        None,
+                    )
+                }
+                StateOperation::Spawn(pid, factory) => {
+                    if let Entry::Vacant(entry) = processes.entry(pid) {
+                        entry.insert(TokioProcess::Worker(TokioWorker::new(
+                            factory,
+                            async_commands.clone(),
+                        )));
+                    }
+                    (
+                        StateOperation::spawn(pid, NoopWorkerFactory),
+                        None,
+                        None,
+                        None,
+                    )
+                }
+                StateOperation::Kill(pid) => {
+                    if let Entry::Occupied(entry) = processes.entry(pid) {
+                        match entry.remove() {
+                            TokioProcess::Task(mut task) => {
+                                tokio::spawn(async move { task.abort().await });
+                            }
+                            TokioProcess::Worker(_) => {}
+                        }
+                    }
+                    (StateOperation::Kill(pid), None, None, None)
+                }
+            };
+            {
+                let updated_state = middleware
+                    .post
+                    .handle(
+                        post_middleware_state.take().unwrap(),
+                        cloned_operation,
+                        &metadata,
+                        &MiddlewareContext { caller_pid },
+                    )
+                    .into_inner();
+                post_middleware_state.replace(updated_state);
+            }
+            (action, child_commands, worker_commands)
+        }
+        TokioCommand::Subscribe(subscriber_id, subscriber) => {
+            if let Entry::Vacant(entry) = subscribers.entry(subscriber_id) {
+                entry.insert(subscriber);
+            }
+            (None, None, None)
+        }
+        TokioCommand::Unsubscribe(subscriber_id) => {
+            subscribers.remove(&subscriber_id);
+            (None, None, None)
+        }
+    };
+    let child_commands = child_commands.into_iter().flatten();
+    (action, child_commands, worker_commands)
 }
 
 #[derive(Debug, Clone)]
