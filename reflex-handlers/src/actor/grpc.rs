@@ -1119,8 +1119,6 @@ where
                                 .scan(factory.create_nil_term(), {
                                     let factory = factory.clone();
                                     let allocator = allocator.clone();
-                                    // TODO: Garbage-collect cache used for gRPC allocator iteratee
-                                    let mut cache = Mutex::new(SubstitutionCache::new());
                                     move |state, value| {
                                         let result = match factory.match_signal_term(&value) {
                                             Some(_effect) => value,
@@ -1133,7 +1131,7 @@ where
                                                     .reduce(
                                                         &factory,
                                                         &allocator,
-                                                        cache.get_mut().unwrap(),
+                                                        &mut SubstitutionCache::new(),
                                                     )
                                                     .unwrap_or(result);
                                                 *state = result.clone();
