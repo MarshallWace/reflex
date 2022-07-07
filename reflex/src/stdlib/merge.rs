@@ -2,7 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
-use std::collections::{hash_map::Entry, HashMap};
+use std::{
+    collections::{hash_map::Entry, HashMap},
+    iter::once,
+};
 
 use crate::core::{
     uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
@@ -41,71 +44,62 @@ impl<T: Expression> Applicable<T> for Merge {
         _cache: &mut impl EvaluationCache<T>,
     ) -> Result<T, String> {
         let target = args.next().unwrap();
-        let base = factory
-            .match_record_term(&target)
-            .map(|target| (target.prototype(), target.values()));
-        match base {
-            None => Err(format!(
-                "Expected (<struct>, ...), received ({}{})",
-                target,
-                args.map(|arg| format!("{}", arg))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            )),
-            Some((base_prototype, base_values)) => {
-                let (prototype, values) = {
-                    if args.len() == 0 {
-                        (
-                            allocator.clone_struct_prototype(base_prototype),
-                            allocator.clone_list(base_values),
-                        )
-                    } else {
-                        let base_entries = base_prototype
-                            .keys()
-                            .iter()
-                            .cloned()
-                            .zip(base_values.iter().cloned())
-                            .collect::<Vec<_>>();
-                        let (keys, values): (Vec<_>, Vec<_>) = args
-                            .fold(Ok(base_entries), |result, arg| {
-                                let mut combined_properties = result?;
-                                let properties = match factory.match_record_term(&arg) {
-                                    Some(value) => {
-                                        combined_properties.extend(
-                                            value
-                                                .prototype()
-                                                .keys()
-                                                .iter()
-                                                .cloned()
-                                                .zip(value.values().iter().cloned()),
-                                        );
-                                        Some(combined_properties)
-                                    }
-                                    _ => None,
-                                };
-                                match properties {
-                                    Some(properties) => Ok(properties),
-                                    None => Err(format!("Expected <struct>..., received {}", arg)),
-                                }
-                            })?
-                            .into_iter()
-                            .unzip();
-                        let mut deduplicated_keys = keys.iter().enumerate().fold(
-                            HashMap::with_capacity(keys.len()),
-                            |mut result, (index, key)| {
-                                match result.entry(key) {
-                                    Entry::Vacant(entry) => {
-                                        entry.insert(index);
-                                    }
-                                    Entry::Occupied(mut entry) => {
-                                        entry.insert(index);
-                                    }
-                                }
-                                result
+        let args = args.collect::<Vec<_>>();
+        let result = match factory.match_record_term(&target) {
+            None => Err((target, args)),
+            Some(base) => {
+                if args.is_empty() {
+                    Ok(target.clone())
+                } else {
+                    let records = args
+                        .iter()
+                        .map(|arg| match factory.match_record_term(arg) {
+                            Some(term) => Some(Some((term.prototype(), term.values()))),
+                            None => match factory.match_nil_term(arg) {
+                                Some(_) => Some(None),
+                                _ => None,
                             },
-                        );
-                        let (prototype, values) =
-                            if deduplicated_keys.len() == base_prototype.keys().len() {
+                        })
+                        .collect::<Option<Vec<_>>>();
+                    match records {
+                        None => Err((target, args)),
+                        Some(records) => {
+                            let (keys, values): (Vec<_>, Vec<_>) =
+                                once((base.prototype(), base.values()))
+                                    .chain(records.into_iter().filter_map(|record| record))
+                                    .fold(
+                                        Vec::new(),
+                                        |mut combined_properties, (prototype, values)| {
+                                            combined_properties.extend(
+                                                prototype
+                                                    .keys()
+                                                    .iter()
+                                                    .cloned()
+                                                    .zip(values.iter().cloned()),
+                                            );
+                                            combined_properties
+                                        },
+                                    )
+                                    .into_iter()
+                                    .unzip();
+                            let mut deduplicated_keys = keys.iter().enumerate().fold(
+                                HashMap::with_capacity(keys.len()),
+                                |mut result, (index, key)| {
+                                    match result.entry(key) {
+                                        Entry::Vacant(entry) => {
+                                            entry.insert(index);
+                                        }
+                                        Entry::Occupied(mut entry) => {
+                                            entry.insert(index);
+                                        }
+                                    }
+                                    result
+                                },
+                            );
+                            let base_prototype = base.prototype();
+                            let (prototype, values) = if deduplicated_keys.len()
+                                == base_prototype.keys().len()
+                            {
                                 let values = if keys.len() == deduplicated_keys.len() {
                                     allocator.create_list(values)
                                 } else {
@@ -143,11 +137,23 @@ impl<T: Expression> Applicable<T> for Merge {
                                     allocator.create_list(values),
                                 )
                             };
-                        (prototype, values)
+                            Ok(factory.create_record_term(prototype, values))
+                        }
                     }
-                };
-                Ok(factory.create_record_term(prototype, values))
+                }
             }
+        };
+        match result {
+            Ok(result) => Ok(result),
+            Err((target, args)) => Err(format!(
+                "Expected (<struct>...), received ({})",
+                once(target)
+                    .chain(args)
+                    .into_iter()
+                    .map(|arg| format!("{}", arg))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )),
         }
     }
 }
