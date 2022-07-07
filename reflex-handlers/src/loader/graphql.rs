@@ -1,11 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use std::{
-    fs,
-    iter::{empty, once},
-    path::Path,
-};
+use std::{fs, iter::once, path::Path};
 
 use reflex::{
     core::{Expression, ExpressionFactory, HeapAllocator},
@@ -129,14 +125,34 @@ where
                             ),
                             factory.create_application_term(
                                 factory.create_builtin_term(Stdlib::ResolveDeep),
-                                allocator.create_list([get_struct_field(
+                                allocator.create_unit_list(get_optional_struct_field(
                                     factory.create_variable_term(0),
                                     String::from("variables"),
+                                    factory.create_nil_term(),
                                     factory,
                                     allocator,
-                                )]),
+                                )),
                             ),
-                            create_record(empty(), factory, allocator),
+                            factory.create_application_term(
+                                factory.create_builtin_term(Stdlib::ResolveDeep),
+                                allocator.create_unit_list(get_optional_struct_field(
+                                    factory.create_variable_term(0),
+                                    String::from("extensions"),
+                                    factory.create_nil_term(),
+                                    factory,
+                                    allocator,
+                                )),
+                            ),
+                            factory.create_application_term(
+                                factory.create_builtin_term(Stdlib::ResolveDeep),
+                                allocator.create_unit_list(get_optional_struct_field(
+                                    factory.create_variable_term(0),
+                                    String::from("headers"),
+                                    factory.create_nil_term(),
+                                    factory,
+                                    allocator,
+                                )),
+                            ),
                             get_optional_struct_field(
                                 factory.create_variable_term(0),
                                 String::from("token"),

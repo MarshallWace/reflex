@@ -11,8 +11,8 @@ use std::{
 
 use futures::{future, stream, Future, FutureExt, SinkExt, Stream, StreamExt};
 use http::{
-    header::{self, CONTENT_TYPE},
-    HeaderValue, Uri,
+    header::{self, HeaderName, CONTENT_TYPE},
+    HeaderMap, HeaderValue, Uri,
 };
 use hyper::Body;
 use metrics::{
@@ -759,12 +759,17 @@ where
     where
         TAction: Action + Send + 'static + OutboundAction<EffectEmitAction<T>>,
     {
-        let GraphQlEffectArgs { url, operation } = operation;
+        let GraphQlEffectArgs {
+            url,
+            operation,
+            headers,
+        } = operation;
         let operation_name = operation.operation_name.clone();
         match fetch_http_graphql_request(
             self.client.clone(),
             url.as_str(),
             operation,
+            headers,
             &self.factory,
             &self.allocator,
         ) {
@@ -878,7 +883,11 @@ where
             + OutboundAction<GraphQlHandlerWebSocketConnectErrorAction>
             + OutboundAction<GraphQlHandlerWebSocketServerMessageAction>,
     {
-        let GraphQlEffectArgs { url, operation } = operation;
+        let GraphQlEffectArgs {
+            url,
+            operation,
+            headers: _,
+        } = operation;
         let connection_id = match state.websocket_connection_mappings.entry(url.clone()) {
             Entry::Occupied(entry) => *entry.get(),
             Entry::Vacant(entry) => {
@@ -1135,6 +1144,7 @@ fn fetch_http_graphql_request<T: AsyncExpression, TConnect>(
     client: hyper::Client<TConnect, Body>,
     url: &str,
     operation: GraphQlOperationPayload,
+    headers: Option<HeaderMap<HeaderValue>>,
     factory: &impl AsyncExpressionFactory<T>,
     allocator: &impl AsyncHeapAllocator<T>,
 ) -> Result<impl Future<Output = T>, FetchError>
@@ -1144,7 +1154,15 @@ where
     let request = FetchRequest {
         url: String::from(url),
         method: String::from("POST"),
-        headers: vec![(CONTENT_TYPE, HeaderValue::from_static("application/json"))],
+        headers: headers
+            .into_iter()
+            .flatten()
+            .filter_map(|(key, value)| key.map(|key| (key, value)))
+            .chain(once((
+                CONTENT_TYPE,
+                HeaderValue::from_static("application/json"),
+            )))
+            .collect(),
         body: Some(format!("{}", operation.into_json()).into()),
     };
     let factory = factory.clone();
@@ -1308,6 +1326,7 @@ fn create_websocket_handshake_request(
 struct GraphQlEffectArgs {
     url: GraphQlConnectionUrl,
     operation: GraphQlOperationPayload,
+    headers: Option<HeaderMap<HeaderValue>>,
 }
 
 fn parse_graphql_effect_args<T: Expression>(
@@ -1315,30 +1334,37 @@ fn parse_graphql_effect_args<T: Expression>(
     factory: &impl ExpressionFactory<T>,
 ) -> Result<GraphQlEffectArgs, String> {
     let mut args = effect.args().into_iter();
-    if args.len() != 6 {
+    if args.len() != 7 {
         return Err(format!(
-            "Invalid graphql signal: Expected 6 arguments, received {}",
+            "Invalid graphql signal: Expected 7 arguments, received {}",
             args.len()
         ));
     }
     let url = parse_string_arg(args.next().unwrap(), factory);
     let query = parse_string_arg(args.next().unwrap(), factory);
     let operation_name = parse_optional_string_arg(args.next().unwrap(), factory);
-    let variables = parse_object_arg(args.next().unwrap(), factory)?;
-    let extensions = parse_object_arg(args.next().unwrap(), factory)?;
+    let variables = parse_optional_object_arg(args.next().unwrap(), factory)?;
+    let extensions = parse_optional_object_arg(args.next().unwrap(), factory)?;
+    let headers = parse_optional_headers_arg(args.next().unwrap(), factory);
     let _token = args.next().unwrap();
-    match (url, query, operation_name, variables, extensions) {
-        (Some(url), Some(query), Some(operation_name), Some(variables), Some(extensions)) => {
-            Ok(GraphQlEffectArgs {
-                url: GraphQlConnectionUrl(url),
-                operation: GraphQlOperationPayload {
-                    query,
-                    operation_name,
-                    variables: variables.into_iter().collect(),
-                    extensions: extensions.into_iter().collect(),
-                },
-            })
-        }
+    match (url, query, operation_name, variables, extensions, headers) {
+        (
+            Some(url),
+            Some(query),
+            Some(operation_name),
+            Some(variables),
+            Some(extensions),
+            Some(headers),
+        ) => Ok(GraphQlEffectArgs {
+            url: GraphQlConnectionUrl(url),
+            operation: GraphQlOperationPayload {
+                query,
+                operation_name,
+                variables: variables.into_iter().flatten().collect(),
+                extensions: extensions.into_iter().flatten().collect(),
+            },
+            headers,
+        }),
         _ => Err(format!(
             "Invalid graphql signal arguments: {}",
             effect
@@ -1374,6 +1400,38 @@ fn parse_optional_string_arg<T: Expression>(
     }
 }
 
+fn parse_headers_arg<T: Expression>(
+    value: &T,
+    factory: &impl ExpressionFactory<T>,
+) -> Option<HeaderMap<HeaderValue>> {
+    match factory.match_record_term(value) {
+        Some(term) => term
+            .entries()
+            .into_iter()
+            .map(|(key, value)| {
+                Some((
+                    HeaderName::try_from(key).ok()?,
+                    HeaderValue::try_from(parse_string_arg(value, factory)?).ok()?,
+                ))
+            })
+            .collect::<Option<HeaderMap<_>>>(),
+        _ => None,
+    }
+}
+
+fn parse_optional_headers_arg<T: Expression>(
+    value: &T,
+    factory: &impl ExpressionFactory<T>,
+) -> Option<Option<HeaderMap<HeaderValue>>> {
+    match factory.match_record_term(value) {
+        Some(_) => parse_headers_arg(value, factory).map(Some),
+        _ => match factory.match_nil_term(value) {
+            Some(_) => Some(None),
+            _ => None,
+        },
+    }
+}
+
 fn parse_object_arg<T: Expression>(
     value: &T,
     factory: &impl ExpressionFactory<T>,
@@ -1390,6 +1448,19 @@ fn parse_object_arg<T: Expression>(
             Ok(Some(properties))
         }
         _ => Ok(None),
+    }
+}
+
+fn parse_optional_object_arg<T: Expression>(
+    value: &T,
+    factory: &impl ExpressionFactory<T>,
+) -> Result<Option<Option<impl IntoIterator<Item = (String, JsonValue)>>>, String> {
+    match factory.match_record_term(value) {
+        Some(_) => parse_object_arg(value, factory).map(Some),
+        _ => match factory.match_nil_term(value) {
+            Some(_) => Ok(Some(None)),
+            _ => Ok(None),
+        },
     }
 }
 
