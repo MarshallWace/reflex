@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use reflex_dispatcher::{Action, NamedAction, SerializableAction, SerializedAction};
-use reflex_json::JsonValue;
 use serde::{Deserialize, Serialize};
+use serde_json::Value as JsonValue;
 use uuid::Uuid;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -89,9 +89,9 @@ impl SerializableAction for GrpcHandlerConnectSuccessAction {
         SerializedAction::from_iter([
             (
                 "connection_id",
-                JsonValue::from(self.connection_id.to_string()),
+                JsonValue::String(self.connection_id.to_string()),
             ),
-            ("url", JsonValue::from(self.url.clone())),
+            ("url", JsonValue::String(self.url.clone())),
         ])
     }
 }
@@ -113,10 +113,10 @@ impl SerializableAction for GrpcHandlerConnectErrorAction {
         SerializedAction::from_iter([
             (
                 "connection_id",
-                JsonValue::from(self.connection_id.to_string()),
+                JsonValue::String(self.connection_id.to_string()),
             ),
-            ("url", JsonValue::from(self.url.clone())),
-            ("error", JsonValue::from(self.error.clone())),
+            ("url", JsonValue::String(self.url.clone())),
+            ("error", JsonValue::String(self.error.clone())),
         ])
     }
 }

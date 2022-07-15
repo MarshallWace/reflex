@@ -5,7 +5,6 @@ use std::{
     collections::{hash_map::Entry, HashMap},
     iter::once,
     marker::PhantomData,
-    pin::Pin,
     str::FromStr,
     sync::{Arc, Mutex},
     time::Duration,
@@ -21,12 +20,15 @@ use reflex::{
         Expression, ExpressionFactory, HeapAllocator, Reducible, Rewritable, Signal, SignalType,
         StateToken, StringValue,
     },
-    lang::create_record,
-    stdlib::Stdlib,
+    lang::term::SymbolId,
 };
 use reflex_dispatcher::{
     Action, Actor, ActorTransition, HandlerContext, InboundAction, MessageData, OperationStream,
     OutboundAction, ProcessId, StateOperation, StateTransition,
+};
+use reflex_protobuf::{
+    reflection::{DynamicMessage, MessageDescriptor, MethodDescriptor},
+    Message, ProtoTranscoder,
 };
 use reflex_runtime::{
     action::effect::{EffectEmitAction, EffectSubscribeAction, EffectUnsubscribeAction},
@@ -37,18 +39,20 @@ use reflex_utils::{
     reconnect::{FibonacciReconnectTimeout, ReconnectTimeout},
 };
 use tokio::time::sleep;
-use tonic::{Code, Status};
+use tonic::{
+    codec::{Codec, DecodeBuf, Decoder, EncodeBuf, Encoder},
+    Code, Status,
+};
 use uuid::Uuid;
 
-use crate::action::grpc::{GrpcHandlerConnectErrorAction, GrpcHandlerConnectSuccessAction};
-
-pub use schema::GrpcServiceId;
-
-pub use ::tonic;
-
-pub mod imports;
-pub mod loader;
-pub mod schema;
+use crate::{
+    action::{GrpcHandlerConnectErrorAction, GrpcHandlerConnectSuccessAction},
+    utils::{
+        ignore_repeated_grpc_errors, GrpcMethod, GrpcMethodName, GrpcServiceLibrary,
+        GrpcServiceName, ProtoId,
+    },
+    GrpcConfig,
+};
 
 pub const EFFECT_TYPE_GRPC: &'static str = "reflex::grpc";
 
@@ -88,23 +92,6 @@ impl Default for GrpcHandlerMetricNames {
     }
 }
 
-pub trait GrpcConfig {
-    fn configure(&self, endpoint: tonic::transport::Endpoint) -> tonic::transport::Endpoint;
-}
-
-#[derive(Clone, Copy, Debug)]
-pub struct DefaultGrpcConfig;
-impl GrpcConfig for DefaultGrpcConfig {
-    fn configure(&self, endpoint: tonic::transport::Endpoint) -> tonic::transport::Endpoint {
-        endpoint
-            .keep_alive_while_idle(true)
-            .tcp_keepalive(Some(Duration::from_secs(30)))
-            .http2_keep_alive_interval(Duration::from_secs(30))
-            .keep_alive_timeout(Duration::from_secs(20))
-            .concurrency_limit(100)
-    }
-}
-
 pub trait GrpcHandlerAction<T: Expression>:
     Action
     + InboundAction<EffectSubscribeAction<T>>
@@ -128,18 +115,77 @@ impl<T: Expression, TAction> GrpcHandlerAction<T> for TAction where
 {
 }
 
+type TonicClient = tonic::client::Grpc<tonic::transport::Channel>;
+
+#[derive(Clone, Debug)]
+struct GrpcClient(TonicClient);
+impl GrpcClient {
+    fn execute(
+        &self,
+        method: &GrpcMethod,
+        request: DynamicMessage,
+    ) -> Result<impl Stream<Item = Result<DynamicMessage, Status>> + Unpin, Status> {
+        let client = self.clone();
+        match method.descriptor.is_server_streaming() {
+            true => execute_streaming_grpc_request(client, method, request).map(|response| {
+                response
+                    .map(|result| match result {
+                        Err(err) => stream::iter(once(Err(err))).left_stream(),
+                        Ok(response) => {
+                            // It appears that when the underlying HTTP connection is broken, the tonic response stream
+                            // will emit a deluge of errors (maybe one for every time the underlying stream is polled?),
+                            // so we need to filter out duplicate errors to prevent them from overloading the event bus
+                            ignore_repeated_grpc_errors(
+                                response.into_inner(),
+                                FibonacciReconnectTimeout {
+                                    units: Duration::from_secs(1),
+                                    max_timeout: Duration::from_secs(30),
+                                },
+                            )
+                            .right_stream()
+                        }
+                    })
+                    .into_stream()
+                    .flatten()
+                    .left_stream()
+            }),
+            false => execute_unary_grpc_request(client, method, request).map({
+                |response| {
+                    response
+                        .map(|result| result.map(|response| response.into_inner()))
+                        .into_stream()
+                        .right_stream()
+                }
+            }),
+        }
+        .map(Box::pin)
+    }
+    fn into_inner(self) -> impl Future<Output = Result<TonicClient, Status>> {
+        let Self(mut client) = self;
+        async move {
+            let _ = client.ready().await.map_err(|err| {
+                Status::new(
+                    Code::Unknown,
+                    format!("Failed to initialize gRPC client: {}", err),
+                )
+            })?;
+            Ok(client)
+        }
+    }
+}
+
 #[derive(Clone)]
-pub struct GrpcHandler<T, TFactory, TAllocator, TService, TClient, TConfig, TReconnect>
+pub struct GrpcHandler<T, TFactory, TAllocator, TTranscoder, TConfig, TReconnect>
 where
     T: AsyncExpression + Rewritable<T> + Reducible<T>,
     TFactory: AsyncExpressionFactory<T>,
     TAllocator: AsyncHeapAllocator<T>,
-    TService: GrpcService<TClient> + 'static,
-    TClient: GrpcClient + 'static,
+    TTranscoder: ProtoTranscoder + Clone + Send + 'static,
     TConfig: GrpcConfig + 'static,
     TReconnect: ReconnectTimeout + Send,
 {
-    services: HashMap<GrpcServiceId, TService>,
+    services: GrpcServiceLibrary,
+    transcoder: TTranscoder,
     factory: TFactory,
     allocator: TAllocator,
     reconnect_timeout: TReconnect,
@@ -147,21 +193,20 @@ where
     config: TConfig,
     metric_names: GrpcHandlerMetricNames,
     _expression: PhantomData<T>,
-    _client: PhantomData<TClient>,
 }
-impl<T, TFactory, TAllocator, TService, TClient, TConfig, TReconnect>
-    GrpcHandler<T, TFactory, TAllocator, TService, TClient, TConfig, TReconnect>
+impl<T, TFactory, TAllocator, TTranscoder, TConfig, TReconnect>
+    GrpcHandler<T, TFactory, TAllocator, TTranscoder, TConfig, TReconnect>
 where
     T: AsyncExpression + Rewritable<T> + Reducible<T>,
     TFactory: AsyncExpressionFactory<T>,
     TAllocator: AsyncHeapAllocator<T>,
-    TService: GrpcService<TClient> + 'static,
-    TClient: GrpcClient + 'static,
+    TTranscoder: ProtoTranscoder + Clone + Send + 'static,
     TConfig: GrpcConfig,
     TReconnect: ReconnectTimeout + Send,
 {
     pub fn new(
-        services: impl IntoIterator<Item = TService>,
+        services: GrpcServiceLibrary,
+        transcoder: TTranscoder,
         factory: TFactory,
         allocator: TAllocator,
         reconnect_timeout: TReconnect,
@@ -170,10 +215,8 @@ where
         metric_names: GrpcHandlerMetricNames,
     ) -> Self {
         Self {
-            services: services
-                .into_iter()
-                .map(|service| (service.id(), service))
-                .collect(),
+            services,
+            transcoder,
             factory,
             allocator,
             reconnect_timeout,
@@ -181,26 +224,21 @@ where
             config,
             metric_names: metric_names.init(),
             _expression: Default::default(),
-            _client: Default::default(),
         }
     }
 }
 
-pub struct GrpcHandlerState<T, TService, TClient>
+pub struct GrpcHandlerState<T>
 where
     T: AsyncExpression + Rewritable<T> + Reducible<T>,
-    TService: GrpcService<TClient> + 'static,
-    TClient: GrpcClient + 'static,
 {
     active_requests: HashMap<StateToken, GrpcRequestState>,
-    active_connections: HashMap<GrpcConnectionId, GrpcConnectionState<T, TService, TClient>>,
-    active_connection_mappings: HashMap<(GrpcServiceId, GrpcServiceUrl), Vec<GrpcConnectionId>>,
+    active_connections: HashMap<GrpcConnectionId, GrpcConnectionState<T>>,
+    active_connection_mappings: HashMap<(ProtoId, GrpcServiceUrl), Vec<GrpcConnectionId>>,
 }
-impl<T, TService, TClient> Default for GrpcHandlerState<T, TService, TClient>
+impl<T> Default for GrpcHandlerState<T>
 where
     T: AsyncExpression + Rewritable<T> + Reducible<T>,
-    TService: GrpcService<TClient> + 'static,
-    TClient: GrpcClient + 'static,
 {
     fn default() -> Self {
         Self {
@@ -216,17 +254,14 @@ struct GrpcRequestState {
     metric_labels: [(&'static str, String); 2],
 }
 
-struct GrpcConnectionState<T, TService, TClient>
+struct GrpcConnectionState<T>
 where
     T: AsyncExpression + Rewritable<T> + Reducible<T>,
-    TService: GrpcService<TClient> + 'static,
-    TClient: GrpcClient + 'static,
 {
-    protocol: GrpcServiceId,
-    service: TService,
+    protocol: ProtoId,
     url: GrpcServiceUrl,
     operations: HashMap<StateToken, GrpcOperationState>,
-    connection: GrpcConnection<T, TClient>,
+    connection: GrpcConnection<T>,
 }
 
 enum GrpcOperationState {
@@ -234,21 +269,19 @@ enum GrpcOperationState {
     Active(ProcessId),
 }
 
-enum GrpcConnection<T, TClient>
+enum GrpcConnection<T>
 where
     T: AsyncExpression + Rewritable<T> + Reducible<T>,
-    TClient: GrpcClient + 'static,
 {
-    Pending(ProcessId, PendingGrpcConnection<T, TClient>),
-    Connected(TClient),
+    Pending(ProcessId, PendingGrpcConnection<T>),
+    Connected(GrpcClient),
     Error(String),
 }
-struct PendingGrpcConnection<T, TClient>
+struct PendingGrpcConnection<T>
 where
     T: AsyncExpression + Rewritable<T> + Reducible<T>,
-    TClient: GrpcClient + 'static,
 {
-    client: Arc<Mutex<Option<TClient>>>,
+    client: Arc<Mutex<Option<GrpcClient>>>,
     pending_operations: Vec<PendingGrpcOperation<T>>,
     connection_attempt: usize,
 }
@@ -257,10 +290,9 @@ struct PendingGrpcOperation<T: AsyncExpression> {
     request: GrpcRequest<T>,
     accumulate: Option<T>,
 }
-impl<T, TClient> GrpcConnection<T, TClient>
+impl<T> GrpcConnection<T>
 where
     T: AsyncExpression + Rewritable<T> + Reducible<T>,
-    TClient: GrpcClient + 'static,
 {
     fn dispose(self) -> Option<ProcessId> {
         match self {
@@ -275,7 +307,7 @@ where
 }
 
 #[derive(PartialEq, Eq, Clone, Hash, Debug)]
-pub struct GrpcServiceUrl(String);
+struct GrpcServiceUrl(String);
 impl GrpcServiceUrl {
     fn as_str(&self) -> &str {
         let Self(value) = self;
@@ -292,184 +324,21 @@ impl std::fmt::Display for GrpcServiceUrl {
     }
 }
 
-#[derive(PartialEq, Eq, Clone, Hash, Debug)]
-pub struct GrpcRequest<T: AsyncExpression> {
-    pub method: GrpcMethodName,
-    pub message: T,
+#[derive(Clone, Debug)]
+struct GrpcRequest<T: Expression> {
+    method: GrpcMethod,
+    input: T,
+    message: DynamicMessage,
 }
-
-#[derive(PartialEq, Eq, Clone, Hash, Debug)]
-pub struct GrpcMethodName(String);
-impl GrpcMethodName {
-    pub fn as_str(&self) -> &str {
-        let Self(value) = self;
-        value.as_str()
+impl<T: Expression> GrpcRequest<T> {
+    fn into_parts(self) -> (GrpcMethod, T, DynamicMessage) {
+        let Self {
+            method,
+            input,
+            message,
+        } = self;
+        (method, input, message)
     }
-    pub fn into_string(self) -> String {
-        let Self(value) = self;
-        value
-    }
-}
-impl std::fmt::Display for GrpcMethodName {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        std::fmt::Display::fmt(self.as_str(), f)
-    }
-}
-
-pub fn create_grpc_exports<'a, T: Expression, TService, TClient>(
-    services: impl IntoIterator<Item = &'a TService>,
-    factory: &impl ExpressionFactory<T>,
-    allocator: &impl HeapAllocator<T>,
-) -> Vec<(GrpcServiceId, T)>
-where
-    TService: GrpcService<TClient> + 'a,
-    TClient: GrpcClient + 'a,
-    T::Builtin: From<Stdlib>,
-{
-    services
-        .into_iter()
-        .map(|service| {
-            (
-                service.id(),
-                create_default_module_export(
-                    service.factory(factory, allocator),
-                    factory,
-                    allocator,
-                ),
-            )
-        })
-        .collect::<Vec<_>>()
-}
-
-fn create_default_module_export<T: Expression>(
-    value: T,
-    factory: &impl ExpressionFactory<T>,
-    allocator: &impl HeapAllocator<T>,
-) -> T {
-    create_record(once((String::from("default"), value)), factory, allocator)
-}
-
-pub trait GrpcService<TClient: GrpcClient>: Send + Clone {
-    fn id(&self) -> GrpcServiceId;
-    fn factory<T: Expression>(
-        &self,
-        factory: &impl ExpressionFactory<T>,
-        allocator: &impl HeapAllocator<T>,
-    ) -> T
-    where
-        T::Builtin: From<Stdlib>;
-    fn connect(
-        &self,
-        url: tonic::transport::Endpoint,
-    ) -> Pin<Box<dyn Future<Output = Result<TClient, String>> + Send>>;
-}
-
-pub trait GrpcClient: Send + Clone {
-    fn execute<T: AsyncExpression>(
-        self,
-        request: GrpcRequest<T>,
-        factory: &impl AsyncExpressionFactory<T>,
-        allocator: &impl AsyncHeapAllocator<T>,
-    ) -> Result<GrpcResponse<T>, String>;
-}
-
-pub struct GrpcResponse<T: AsyncExpression>(
-    Pin<Box<dyn Stream<Item = Result<T, String>> + Send + 'static>>,
-);
-impl<T: AsyncExpression> GrpcResponse<T> {
-    pub fn new(stream: Pin<Box<dyn Stream<Item = Result<T, String>> + Send + 'static>>) -> Self {
-        Self(stream)
-    }
-    pub fn unary<V>(
-        result: impl Future<Output = Result<tonic::Response<V>, tonic::Status>> + Send + 'static,
-        parse: impl Fn(V) -> Result<T, String> + Send + 'static,
-    ) -> Self {
-        Self::new(Box::pin(result.into_stream().map({
-            move |result| match result {
-                Ok(result) => parse(result.into_inner()),
-                Err(error) => Err(format_grpc_error_message(error)),
-            }
-        })))
-    }
-    pub fn stream<V: Send + 'static>(
-        result: impl Future<Output = Result<tonic::Response<tonic::codec::Streaming<V>>, tonic::Status>>
-            + Send
-            + 'static,
-        parse: impl Fn(V) -> Result<T, String> + Send + 'static,
-    ) -> Self {
-        Self::new(Box::pin({
-            {
-                async move {
-                    match result.await {
-                        Err(error) => {
-                            stream::iter(once(Err(format_grpc_error_message(error)))).left_stream()
-                        }
-                        Ok(stream) => {
-                            // It appears that when the underlying HTTP connection is broken, the tonic response stream
-                            // will emit a deluge of errors (maybe one for every time the underlying stream is polled?),
-                            // so we need to filter out duplicate errors to prevent them from overloading the event bus
-                            ignore_repeated_grpc_errors(
-                                stream.into_inner(),
-                                FibonacciReconnectTimeout {
-                                    units: Duration::from_secs(1),
-                                    max_timeout: Duration::from_secs(30),
-                                },
-                            )
-                            .map(move |result| match result {
-                                Ok(result) => parse(result),
-                                Err(error) => Err(format_grpc_error_message(error)),
-                            })
-                            .right_stream()
-                        }
-                    }
-                }
-            }
-            .into_stream()
-            .flatten()
-        }))
-    }
-    pub fn into_stream(self) -> impl Stream<Item = Result<T, String>> + 'static {
-        self.0
-    }
-}
-
-pub fn ignore_repeated_grpc_errors<V: Send>(
-    stream: impl Stream<Item = Result<V, Status>>,
-    retry: impl ReconnectTimeout,
-) -> impl Stream<Item = Result<V, Status>> {
-    stream
-        .scan(
-            None,
-            move |existing_err: &mut Option<(Code, String, usize)>, result: Result<V, Status>| {
-                let repeated_error =
-                    existing_err
-                        .take()
-                        .and_then(|(code, message, repeat_count)| match &result {
-                            Err(err) if err.code() == code && err.message() == message.as_str() => {
-                                Some((code, message, repeat_count))
-                            }
-                            _ => None,
-                        });
-                if let Some((code, message, repeat_count)) = repeated_error {
-                    *existing_err = Some((code, message, repeat_count + 1));
-                    tokio::time::sleep(
-                        retry
-                            .duration(repeat_count)
-                            .unwrap_or(Duration::from_millis(1)),
-                    )
-                    .map(|_| Some(None))
-                    .left_future()
-                } else {
-                    let (err, result) = match result {
-                        Ok(payload) => (None, Ok(payload)),
-                        Err(err) => (Some((err.code(), String::from(err.message()), 0)), Err(err)),
-                    };
-                    *existing_err = err;
-                    future::ready(Some(Some(result))).right_future()
-                }
-            },
-        )
-        .filter_map(|result| future::ready(result))
 }
 
 #[derive(PartialEq, Eq, Clone, Copy, Hash, Debug)]
@@ -500,19 +369,18 @@ impl std::fmt::Display for GrpcOperationId {
     }
 }
 
-impl<T, TFactory, TAllocator, TService, TClient, TConfig, TReconnect, TAction> Actor<TAction>
-    for GrpcHandler<T, TFactory, TAllocator, TService, TClient, TConfig, TReconnect>
+impl<T, TFactory, TAllocator, TTranscoder, TConfig, TReconnect, TAction> Actor<TAction>
+    for GrpcHandler<T, TFactory, TAllocator, TTranscoder, TConfig, TReconnect>
 where
     T: AsyncExpression + Rewritable<T> + Reducible<T>,
     TFactory: AsyncExpressionFactory<T>,
     TAllocator: AsyncHeapAllocator<T>,
-    TService: GrpcService<TClient> + 'static,
-    TClient: GrpcClient + 'static,
+    TTranscoder: ProtoTranscoder + Clone + Send + 'static,
     TConfig: GrpcConfig,
     TReconnect: ReconnectTimeout + Send,
     TAction: GrpcHandlerAction<T> + Send + 'static,
 {
-    type State = GrpcHandlerState<T, TService, TClient>;
+    type State = GrpcHandlerState<T>;
     fn init(&self) -> Self::State {
         Default::default()
     }
@@ -539,20 +407,19 @@ where
         ActorTransition::new(state, actions)
     }
 }
-impl<T, TFactory, TAllocator, TService, TClient, TConfig, TReconnect>
-    GrpcHandler<T, TFactory, TAllocator, TService, TClient, TConfig, TReconnect>
+impl<T, TFactory, TAllocator, TTranscoder, TConfig, TReconnect>
+    GrpcHandler<T, TFactory, TAllocator, TTranscoder, TConfig, TReconnect>
 where
     T: AsyncExpression + Rewritable<T> + Reducible<T>,
     TFactory: AsyncExpressionFactory<T>,
     TAllocator: AsyncHeapAllocator<T>,
-    TService: GrpcService<TClient> + 'static,
-    TClient: GrpcClient + 'static,
+    TTranscoder: ProtoTranscoder + Clone + Send + 'static,
     TConfig: GrpcConfig,
     TReconnect: ReconnectTimeout + Send,
 {
     fn handle_effect_subscribe<TAction>(
         &self,
-        state: &mut GrpcHandlerState<T, TService, TClient>,
+        state: &mut GrpcHandlerState<T>,
         action: &EffectSubscribeAction<T>,
         _metadata: &MessageData,
         context: &mut impl HandlerContext,
@@ -577,33 +444,59 @@ where
             .map(|effect| {
                 let state_token = effect.id();
                 match parse_grpc_effect_args(effect, &self.factory)
-                    .map_err(|message| {
-                        create_error_message_expression(message, &self.factory, &self.allocator)
-                    })
                     .and_then(|args| {
+                        let proto_id = args.proto_id;
                         let url = args.url;
+                        let service_name = args.service;
+                        let method_name = args.method;
+                        let input = args.message;
+                        let method = self
+                            .services
+                            .get(&proto_id, &service_name, &method_name)
+                            .cloned()
+                            .ok_or_else(|| {
+                                format_grpc_error_message(
+                                    "Unrecognized gRPC method",
+                                    &url,
+                                    format!("{}:{}.{}", proto_id, service_name, method_name),
+                                    &input,
+                                )
+                            })?;
+                        let request_message_type = method.descriptor.input();
+                        let message = self
+                            .transcoder
+                            .serialize_message(
+                                &input,
+                                &request_message_type,
+                                &self.transcoder,
+                                &self.factory,
+                            )
+                            .map_err(|err| {
+                                format_grpc_error_message(
+                                    err,
+                                    &url,
+                                    method.descriptor.full_name(),
+                                    &input,
+                                )
+                            })?;
                         let request = GrpcRequest {
-                            method: args.method,
-                            message: args.message,
+                            method,
+                            input,
+                            message,
                         };
-                        self.subscribe_grpc_operation(
+                        let (connect_action, subscribe_action) = self.subscribe_grpc_operation(
                             state,
                             effect,
-                            args.protocol,
-                            url.clone(),
-                            request.clone(),
+                            proto_id,
+                            url,
+                            request,
                             args.accumulate,
                             context,
-                        )
-                        .map_err(|message| {
-                            create_grpc_error_message_expression(
-                                &url,
-                                &request,
-                                &message,
-                                &self.factory,
-                                &self.allocator,
-                            )
-                        })
+                        );
+                        Ok((connect_action, subscribe_action))
+                    })
+                    .map_err(|message| {
+                        create_error_message_expression(message, &self.factory, &self.allocator)
                     }) {
                     Ok((connect_action, subscribe_action)) => (
                         (
@@ -641,7 +534,7 @@ where
     }
     fn handle_effect_unsubscribe<TAction>(
         &self,
-        state: &mut GrpcHandlerState<T, TService, TClient>,
+        state: &mut GrpcHandlerState<T>,
         action: &EffectUnsubscribeAction<T>,
         _metadata: &MessageData,
         _context: &mut impl HandlerContext,
@@ -672,7 +565,7 @@ where
     }
     fn handle_grpc_handler_connect_success<TAction>(
         &self,
-        state: &mut GrpcHandlerState<T, TService, TClient>,
+        state: &mut GrpcHandlerState<T>,
         action: &GrpcHandlerConnectSuccessAction,
         _metadata: &MessageData,
         context: &mut impl HandlerContext,
@@ -708,6 +601,7 @@ where
                         &connection_state.url,
                         client.clone(),
                         operation,
+                        &self.transcoder,
                         &self.factory,
                         &self.allocator,
                         context,
@@ -741,7 +635,7 @@ where
     }
     fn handle_grpc_handler_connect_error<TAction>(
         &self,
-        state: &mut GrpcHandlerState<T, TService, TClient>,
+        state: &mut GrpcHandlerState<T>,
         action: &GrpcHandlerConnectErrorAction,
         _metadata: &MessageData,
         context: &mut impl HandlerContext,
@@ -773,7 +667,6 @@ where
         connection.connection_attempt += 1;
         let reconnect_task = create_grpc_connect_task(
             connection_id,
-            connection_state.service.clone(),
             &self.config,
             connection_state.url.clone(),
             connection.client.clone(),
@@ -815,20 +708,17 @@ where
     }
     fn subscribe_grpc_operation<TAction>(
         &self,
-        state: &mut GrpcHandlerState<T, TService, TClient>,
+        state: &mut GrpcHandlerState<T>,
         effect: &Signal<T>,
-        protocol: GrpcServiceId,
+        proto_id: ProtoId,
         url: GrpcServiceUrl,
         request: GrpcRequest<T>,
         accumulate: Option<T>,
         context: &mut impl HandlerContext,
-    ) -> Result<
-        (
-            Option<StateOperation<TAction>>,
-            Option<StateOperation<TAction>>,
-        ),
-        String,
-    >
+    ) -> (
+        Option<StateOperation<TAction>>,
+        Option<StateOperation<TAction>>,
+    )
     where
         TAction: Action
             + Send
@@ -837,14 +727,9 @@ where
             + OutboundAction<GrpcHandlerConnectErrorAction>
             + OutboundAction<EffectEmitAction<T>>,
     {
-        let service = self
-            .services
-            .get(&protocol)
-            .cloned()
-            .ok_or_else(|| format!("Unrecognized gRPC service identifier: {}", protocol))?;
         let connection_id = match state
             .active_connection_mappings
-            .entry((protocol.clone(), url.clone()))
+            .entry((proto_id.clone(), url.clone()))
         {
             Entry::Occupied(mut entry) => {
                 let connection_ids = entry.get_mut();
@@ -881,7 +766,10 @@ where
         };
         let metric_labels = [
             ("url", String::from(url.as_str())),
-            ("method", String::from(request.method.as_str())),
+            (
+                "method",
+                String::from(request.method.descriptor.full_name()),
+            ),
         ];
         increment_counter!(
             self.metric_names.grpc_effect_total_request_count,
@@ -905,7 +793,6 @@ where
                 let client = Arc::new(Mutex::new(None));
                 let connection = create_grpc_connect_task(
                     connection_id,
-                    service.clone(),
                     &self.config,
                     url.clone(),
                     client.clone(),
@@ -947,8 +834,7 @@ where
                     &metric_labels
                 );
                 let connection_state = entry.insert(GrpcConnectionState {
-                    service,
-                    protocol,
+                    protocol: proto_id,
                     url,
                     operations: Default::default(),
                     connection,
@@ -976,6 +862,7 @@ where
                         &connection_state.url,
                         client.clone(),
                         operation,
+                        &self.transcoder,
                         &self.factory,
                         &self.allocator,
                         context,
@@ -996,11 +883,11 @@ where
                 GrpcConnection::Error(_) => None,
             }
         };
-        Ok((connect_task, subscribe_task))
+        (connect_task, subscribe_task)
     }
     fn unsubscribe_grpc_operation<TAction>(
         &self,
-        state: &mut GrpcHandlerState<T, TService, TClient>,
+        state: &mut GrpcHandlerState<T>,
         effect: &Signal<T>,
     ) -> Option<(
         Option<StateOperation<TAction>>,
@@ -1074,19 +961,85 @@ where
     }
 }
 
-fn listen_grpc_operation<T, TFactory, TAllocator, TClient, TAction>(
+fn create_grpc_connect_task<TConfig, TAction>(
+    connection_id: GrpcConnectionId,
+    config: &TConfig,
+    url: GrpcServiceUrl,
+    result: Arc<Mutex<Option<GrpcClient>>>,
+    context: &mut impl HandlerContext,
+    delay: Option<Duration>,
+) -> Result<(ProcessId, StateOperation<TAction>), String>
+where
+    TConfig: GrpcConfig + 'static,
+    TAction: Action
+        + Send
+        + 'static
+        + OutboundAction<GrpcHandlerConnectSuccessAction>
+        + OutboundAction<GrpcHandlerConnectErrorAction>,
+{
+    let current_pid = context.pid();
+    let task_pid = context.generate_pid();
+    let connection = create_grpc_connection(config, &url)?;
+    let task = StateOperation::Task(
+        task_pid,
+        OperationStream::new(
+            {
+                Box::pin({
+                    async move {
+                        let _ = match delay {
+                            Some(duration) => sleep(duration).await,
+                            None => (),
+                        };
+                        let connection = connection.await.and_then(|client| match result.lock() {
+                            Ok(mut result) => {
+                                result.replace(client);
+                                Ok(())
+                            }
+                            Err(err) => Err(format!("{}", err)),
+                        });
+                        [
+                            StateOperation::Kill(task_pid),
+                            StateOperation::Send(
+                                current_pid,
+                                match connection {
+                                    Ok(_) => GrpcHandlerConnectSuccessAction {
+                                        connection_id: connection_id.as_uuid(),
+                                        url: url.into_string(),
+                                    }
+                                    .into(),
+                                    Err(message) => GrpcHandlerConnectErrorAction {
+                                        connection_id: connection_id.as_uuid(),
+                                        url: url.into_string(),
+                                        error: message,
+                                    }
+                                    .into(),
+                                },
+                            ),
+                        ]
+                    }
+                })
+            }
+            .into_stream()
+            .flat_map(|results| stream::iter(results)),
+        ),
+    );
+    Ok((task_pid, task))
+}
+
+fn listen_grpc_operation<T, TFactory, TAllocator, TTranscoder, TAction>(
     url: &GrpcServiceUrl,
-    client: TClient,
+    client: GrpcClient,
     operation: PendingGrpcOperation<T>,
+    transcoder: &TTranscoder,
     factory: &TFactory,
     allocator: &TAllocator,
     context: &mut impl HandlerContext,
 ) -> Result<(StateOperation<TAction>, ProcessId), (StateToken, T)>
 where
     T: AsyncExpression + Rewritable<T> + Reducible<T>,
+    TTranscoder: ProtoTranscoder + Clone + Send + 'static,
     TFactory: AsyncExpressionFactory<T>,
     TAllocator: AsyncHeapAllocator<T>,
-    TClient: GrpcClient + 'static,
     TAction: Action + Send + 'static + OutboundAction<EffectEmitAction<T>>,
 {
     let PendingGrpcOperation {
@@ -1094,7 +1047,14 @@ where
         request,
         accumulate,
     } = operation;
-    match client.clone().execute(request.clone(), factory, allocator) {
+    let (method, input, message) = request.into_parts();
+    match client.execute(&method, message) {
+        Err(message) => Err((
+            effect_id,
+            create_grpc_operation_error_message_expression(
+                &message, &url, &method, &input, factory, allocator,
+            ),
+        )),
         Ok(operation) => {
             let current_pid = context.pid();
             let task_pid = context.generate_pid();
@@ -1102,14 +1062,25 @@ where
                 StateOperation::Task(
                     task_pid,
                     OperationStream::new({
-                        let results = operation.into_stream().map({
+                        let results = operation.map({
+                            let transcoder = transcoder.clone();
                             let factory = factory.clone();
                             let allocator = allocator.clone();
                             let url = url.clone();
                             move |result| match result {
-                                Ok(result) => result,
-                                Err(message) => create_grpc_error_message_expression(
-                                    &url, &request, &message, &factory, &allocator,
+                                Ok(message) => match transcoder.deserialize_message(
+                                    &message,
+                                    &transcoder,
+                                    &factory,
+                                    &allocator,
+                                ) {
+                                    Ok(payload) => payload,
+                                    Err(err) => create_grpc_operation_error_message_expression(
+                                        &err, &url, &method, &input, &factory, &allocator,
+                                    ),
+                                },
+                                Err(err) => create_grpc_operation_error_message_expression(
+                                    &err, &url, &method, &input, &factory, &allocator,
                                 ),
                             }
                         });
@@ -1161,106 +1132,158 @@ where
                 task_pid,
             ))
         }
-        Err(message) => Err((
-            effect_id,
-            create_grpc_error_message_expression(&url, &request, &message, factory, allocator),
-        )),
     }
 }
 
-fn create_grpc_connect_task<TService, TClient, TConfig, TAction>(
-    connection_id: GrpcConnectionId,
-    service: TService,
-    config: &TConfig,
-    url: GrpcServiceUrl,
-    result: Arc<Mutex<Option<TClient>>>,
-    context: &mut impl HandlerContext,
-    delay: Option<Duration>,
-) -> Result<(ProcessId, StateOperation<TAction>), String>
-where
-    TService: GrpcService<TClient> + 'static,
-    TClient: GrpcClient + 'static,
-    TConfig: GrpcConfig + 'static,
-    TAction: Action
-        + Send
-        + 'static
-        + OutboundAction<GrpcHandlerConnectSuccessAction>
-        + OutboundAction<GrpcHandlerConnectErrorAction>,
-{
-    let current_pid = context.pid();
-    let task_pid = context.generate_pid();
-    let connection = create_grpc_connection(service, config, &url)?;
-    let task = StateOperation::Task(
-        task_pid,
-        OperationStream::new(
-            {
-                Box::pin({
-                    async move {
-                        let _ = match delay {
-                            Some(duration) => sleep(duration).await,
-                            None => (),
-                        };
-                        let connection = connection.await.and_then(|socket| match result.lock() {
-                            Ok(mut connection) => {
-                                connection.replace(socket);
-                                Ok(())
-                            }
-                            Err(err) => Err(format!("{}", err)),
-                        });
-                        [
-                            StateOperation::Kill(task_pid),
-                            StateOperation::Send(
-                                current_pid,
-                                match connection {
-                                    Ok(_) => GrpcHandlerConnectSuccessAction {
-                                        connection_id: connection_id.as_uuid(),
-                                        url: url.into_string(),
-                                    }
-                                    .into(),
-                                    Err(message) => GrpcHandlerConnectErrorAction {
-                                        connection_id: connection_id.as_uuid(),
-                                        url: url.into_string(),
-                                        error: message,
-                                    }
-                                    .into(),
-                                },
-                            ),
-                        ]
-                    }
-                })
-            }
-            .into_stream()
-            .flat_map(|results| stream::iter(results)),
-        ),
-    );
-    Ok((task_pid, task))
-}
-
-fn create_grpc_connection<TService, TClient>(
-    service: TService,
+fn create_grpc_connection(
     config: &impl GrpcConfig,
     url: &GrpcServiceUrl,
-) -> Result<impl Future<Output = Result<TClient, String>>, String>
-where
-    TService: GrpcService<TClient> + 'static,
-    TClient: GrpcClient + 'static,
-{
+) -> Result<impl Future<Output = Result<GrpcClient, String>>, String> {
     match tonic::transport::Endpoint::from_str(url.as_str()) {
         Err(err) => Err(format!("Invalid gRPC endpoint URL: {}", err)),
         Ok(endpoint) => {
             let endpoint = config.configure(endpoint);
-            Ok(service.connect(endpoint))
+            let connection = async move { endpoint.connect().await };
+            Ok(connection.map(|channel| match channel {
+                Err(err) => Err(format!("gRPC connection error: {}", err)),
+                Ok(channel) => Ok(GrpcClient(tonic::client::Grpc::new(channel))),
+            }))
         }
     }
 }
 
-fn format_grpc_error_message(error: impl std::fmt::Display) -> String {
-    format!("gRPC error: {}", error)
+fn execute_unary_grpc_request(
+    client: GrpcClient,
+    method: &GrpcMethod,
+    request: impl tonic::IntoRequest<DynamicMessage>,
+) -> Result<impl Future<Output = Result<tonic::Response<DynamicMessage>, Status>>, Status> {
+    let path = get_grpc_method_path(method)?;
+    Ok(client
+        .into_inner()
+        .map({
+            let descriptor = method.descriptor.clone();
+            move |result| match result {
+                Err(err) => future::ready(Err(err)).left_future(),
+                Ok(mut client) => {
+                    let codec = DynamicMessageCodec::new(descriptor);
+                    async move { client.unary(request.into_request(), path, codec).await }
+                }
+                .right_future(),
+            }
+        })
+        .flatten())
+}
+
+fn execute_streaming_grpc_request(
+    client: GrpcClient,
+    method: &GrpcMethod,
+    request: impl tonic::IntoRequest<DynamicMessage>,
+) -> Result<
+    impl Future<Output = Result<tonic::Response<tonic::codec::Streaming<DynamicMessage>>, Status>>,
+    Status,
+> {
+    let path = get_grpc_method_path(method)?;
+    Ok(client
+        .into_inner()
+        .map({
+            let descriptor = method.descriptor.clone();
+            move |result| match result {
+                Err(err) => future::ready(Err(err)).left_future(),
+                Ok(mut client) => {
+                    let codec = DynamicMessageCodec::new(descriptor);
+                    async move {
+                        client
+                            .server_streaming(request.into_request(), path, codec)
+                            .await
+                    }
+                }
+                .right_future(),
+            }
+        })
+        .flatten())
+}
+
+#[derive(Debug, Clone)]
+struct DynamicMessageCodec {
+    descriptor: MethodDescriptor,
+}
+impl DynamicMessageCodec {
+    fn new(descriptor: MethodDescriptor) -> Self {
+        Self { descriptor }
+    }
+}
+impl Codec for DynamicMessageCodec {
+    type Encode = DynamicMessage;
+    type Decode = DynamicMessage;
+    type Encoder = DynamicMessageEncoder;
+    type Decoder = DynamicMessageDecoder;
+    fn encoder(&mut self) -> Self::Encoder {
+        DynamicMessageEncoder
+    }
+    fn decoder(&mut self) -> Self::Decoder {
+        DynamicMessageDecoder(self.descriptor.output())
+    }
+}
+#[derive(Debug, Clone)]
+struct DynamicMessageEncoder;
+impl Encoder for DynamicMessageEncoder {
+    type Item = DynamicMessage;
+    type Error = Status;
+    fn encode(&mut self, item: Self::Item, buf: &mut EncodeBuf<'_>) -> Result<(), Self::Error> {
+        item.encode(buf)
+            .map_err(|err| Status::new(Code::Unknown, format!("{}", err)))
+    }
+}
+#[derive(Debug, Clone)]
+struct DynamicMessageDecoder(MessageDescriptor);
+impl Decoder for DynamicMessageDecoder {
+    type Item = DynamicMessage;
+    type Error = Status;
+    fn decode(&mut self, buf: &mut DecodeBuf<'_>) -> Result<Option<Self::Item>, Self::Error> {
+        let Self(descriptor) = &self;
+        let descriptor = descriptor.clone();
+        let item = DynamicMessage::decode(descriptor, buf)
+            .map(Option::Some)
+            .map_err(|err| Status::new(Code::Internal, err.to_string()))?;
+        Ok(item)
+    }
+}
+
+fn get_grpc_method_path(
+    method: &GrpcMethod,
+) -> Result<tonic::codegen::http::uri::PathAndQuery, Status> {
+    let method_path = format!(
+        "/{}/{}",
+        method.descriptor.parent_service().full_name(),
+        method.descriptor.name()
+    );
+    tonic::codegen::http::uri::PathAndQuery::try_from(method_path.as_str()).map_err(|_| {
+        Status::new(
+            Code::Unknown,
+            format!("Invalid gRPC method: {}", method_path),
+        )
+    })
+}
+
+fn create_grpc_operation_error_message_expression<T: AsyncExpression>(
+    message: impl std::fmt::Display,
+    url: &GrpcServiceUrl,
+    method: &GrpcMethod,
+    input: &T,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> T {
+    create_error_message_expression(
+        format_grpc_error_message(message, url, method.descriptor.full_name(), input),
+        factory,
+        allocator,
+    )
 }
 
 struct GrpcEffectArgs<T: AsyncExpression> {
-    protocol: GrpcServiceId,
+    proto_id: ProtoId,
     url: GrpcServiceUrl,
+    service: GrpcServiceName,
     method: GrpcMethodName,
     message: T,
     accumulate: Option<T>,
@@ -1271,28 +1294,33 @@ fn parse_grpc_effect_args<T: AsyncExpression>(
     factory: &impl ExpressionFactory<T>,
 ) -> Result<GrpcEffectArgs<T>, String> {
     let mut args = effect.args().into_iter();
-    if args.len() < 5 {
+    if args.len() != 7 {
         return Err(format!(
-            "Invalid grpc signal: Expected 5 or more arguments, received {}",
+            "Invalid grpc signal: Expected 7 arguments, received {}",
             args.len()
         ));
     }
-    let protocol = parse_integer_arg(args.next().unwrap(), factory);
+    let proto_id = parse_symbol_arg(args.next().unwrap(), factory);
     let url = parse_string_arg(args.next().unwrap(), factory);
+    let service = parse_string_arg(args.next().unwrap(), factory);
     let method = parse_string_arg(args.next().unwrap(), factory);
     let message = args.next().unwrap().clone();
     let accumulate = args
         .next()
         .cloned()
         .filter(|value| match_null_expression(value, factory).is_none());
-    match (protocol, url, method, message, accumulate) {
-        (Some(protocol), Some(url), Some(method), message, accumulate) => Ok(GrpcEffectArgs {
-            protocol: GrpcServiceId(protocol),
-            url: GrpcServiceUrl(url),
-            method: GrpcMethodName(method),
-            message,
-            accumulate,
-        }),
+    let _token = args.next().unwrap();
+    match (proto_id, url, service, method, message, accumulate) {
+        (Some(protocol), Some(url), Some(service), Some(method), message, accumulate) => {
+            Ok(GrpcEffectArgs {
+                proto_id: ProtoId::from(protocol),
+                url: GrpcServiceUrl(url),
+                service: GrpcServiceName(service),
+                method: GrpcMethodName(method),
+                message,
+                accumulate,
+            })
+        }
         _ => Err(format!(
             "Invalid grpc signal arguments: {}",
             effect
@@ -1305,9 +1333,12 @@ fn parse_grpc_effect_args<T: AsyncExpression>(
     }
 }
 
-fn parse_integer_arg<T: Expression>(value: &T, factory: &impl ExpressionFactory<T>) -> Option<i32> {
-    match factory.match_int_term(value) {
-        Some(term) => Some(term.value),
+fn parse_symbol_arg<T: Expression>(
+    value: &T,
+    factory: &impl ExpressionFactory<T>,
+) -> Option<SymbolId> {
+    match factory.match_symbol_term(value) {
+        Some(term) => Some(term.id),
         _ => None,
     }
 }
@@ -1341,24 +1372,13 @@ fn create_pending_expression<T: Expression>(
     )))
 }
 
-fn create_grpc_error_message_expression<T: AsyncExpression>(
+fn format_grpc_error_message(
+    message: impl std::fmt::Display,
     url: &GrpcServiceUrl,
-    request: &GrpcRequest<T>,
-    message: &str,
-    factory: &impl ExpressionFactory<T>,
-    allocator: &impl HeapAllocator<T>,
-) -> T {
-    create_error_message_expression(
-        format!(
-            "{}: {}({}): {}",
-            url,
-            request.method,
-            reflex_json::stringify(&request.message).unwrap_or_else(|_| String::from("...")),
-            message
-        ),
-        factory,
-        allocator,
-    )
+    method_path: impl std::fmt::Display,
+    input: impl std::fmt::Display,
+) -> String {
+    format!("{}: {}({}): {}", url, method_path, input, message)
 }
 
 fn create_error_message_expression<T: Expression>(

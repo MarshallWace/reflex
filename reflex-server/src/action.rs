@@ -3,7 +3,8 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use reflex::core::Expression;
 use reflex_dispatcher::{Action, NamedAction, SerializableAction, SerializedAction};
-use reflex_handlers::action::{graphql::*, grpc::*};
+use reflex_grpc::action::*;
+use reflex_handlers::action::graphql::*;
 use reflex_runtime::action::{effect::*, evaluate::*, query::*, RuntimeActions};
 use serde::Serialize;
 

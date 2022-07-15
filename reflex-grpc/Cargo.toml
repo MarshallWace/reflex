@@ -1,8 +1,8 @@
 [package]
-name = "reflex-handlers"
+name = "reflex-grpc"
 version = "0.1.0"
 license = "Apache-2.0"
-authors = ["Marshall Wace LLP <opensource@mwam.com>", "Tim Kendrick <t.kendrick@mwam.com>", "Jordan Hall <j.hall@mwam.com>", "Chris Campbell <c.campbell@mwam.com>"]
+authors = ["Marshall Wace LLP <opensource@mwam.com>", "Tim Kendrick <t.kendrick@mwam.com>"]
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -10,22 +10,17 @@ edition = "2021"
 [dependencies]
 reflex = { path = "../reflex" }
 reflex-dispatcher = { path = "../reflex-dispatcher" }
-reflex-graphql = { path = "../reflex-graphql" }
-reflex-json = { path = "../reflex-json" }
+reflex-protobuf = { path = "../reflex-protobuf" }
 reflex-runtime = { path = "../reflex-runtime" }
 reflex-utils = { path = "../reflex-utils" }
-bytes = "1.1.0"
-crc = "2.0.0"
 futures = "*"
-http = "0.2.6"
-hyper = { version = "0.14", features = ["full"] }
-hyper-tls = "0.5.0"
 metrics = "0.18"
-tokio-native-tls = "0.3"
+prost = "0.10"
 serde = { version = "1.0", features = ["derive"] }
-strum = "0.22"
-strum_macros = "0.22"
+serde_json = "1.0"
 tokio = { version = "1", features = ["full", "tracing"] }
-tokio-stream = { version = "0.1", features = ["sync"] }
-tokio-tungstenite = { version = "0.17.1" }
+tonic = "0.7.2"
 uuid = { version = "1.0.0-alpha.1", features = ["v4", "fast-rng"] }
+
+[build-dependencies]
+prost-build = "0.10.4"

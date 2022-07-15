@@ -13,6 +13,7 @@ reflex = { path = "../reflex" }
 reflex-cli = { path = "../reflex-cli" }
 reflex-dispatcher = { path = "../reflex-dispatcher" }
 reflex-graphql = { path = "../reflex-graphql" }
+reflex-grpc = { path = "../reflex-grpc" }
 reflex-handlers = { path = "../reflex-handlers" }
 reflex-js = { path = "../reflex-js" }
 reflex-json = { path = "../reflex-json" }
@@ -41,6 +42,7 @@ strum = "0.22"
 strum_macros = "0.22"
 tokio = { version = "1", features = ["full", "tracing"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
+tonic = { version = "0.6.2", features = ["tls"] }
 tracing = { version = "0.1.0", features = ["release_max_level_info"] }
 tracing-subscriber = "0.3"
 uuid = { version = "1.0.0-alpha.1", features = ["v4", "fast-rng"] }

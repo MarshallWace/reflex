@@ -22,6 +22,8 @@ use crate::actor::{
     timeout::TimeoutHandler, timestamp::TimestampHandler, variable::VariableHandler,
 };
 
+pub use hyper;
+
 pub mod action;
 pub mod actor;
 pub mod imports;

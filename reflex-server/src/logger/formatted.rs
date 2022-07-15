@@ -8,11 +8,9 @@ use std::{
 
 use reflex::core::{Expression, SignalType, StateToken};
 use reflex_dispatcher::{Action, InboundAction, MessageData, MiddlewareContext, StateOperation};
-use reflex_handlers::action::{
-    graphql::{
-        GraphQlHandlerWebSocketConnectErrorAction, GraphQlHandlerWebSocketConnectSuccessAction,
-    },
-    grpc::{GrpcHandlerConnectErrorAction, GrpcHandlerConnectSuccessAction},
+use reflex_grpc::action::{GrpcHandlerConnectErrorAction, GrpcHandlerConnectSuccessAction};
+use reflex_handlers::action::graphql::{
+    GraphQlHandlerWebSocketConnectErrorAction, GraphQlHandlerWebSocketConnectSuccessAction,
 };
 use reflex_runtime::{
     action::effect::{EffectEmitAction, EffectSubscribeAction, EffectUnsubscribeAction},

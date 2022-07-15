@@ -20,13 +20,13 @@ use reflex_dispatcher::{
     Action, Actor, ActorTransition, HandlerContext, InboundAction, MessageData, StateTransition,
 };
 use reflex_handlers::{
-    actor::grpc::tonic::{self, transport::ClientTlsConfig},
     utils::tls::{
         create_https_client,
         hyper::{body::HttpBody, client::connect::Connect},
         tokio_native_tls::native_tls,
     },
 };
+use tonic::{self, transport::ClientTlsConfig};
 
 use crate::{
     server::action::telemetry::{
