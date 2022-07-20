@@ -59,7 +59,7 @@ impl<T: Expression + Compile<T>> Compile<T> for SymbolTerm {
 }
 impl std::fmt::Display for SymbolTerm {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "<symbol:{}>", self.id)
+        write!(f, "<symbol:0x{:016x}>", self.id)
     }
 }
 impl std::fmt::Debug for SymbolTerm {

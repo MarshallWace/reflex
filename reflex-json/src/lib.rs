@@ -112,7 +112,7 @@ mod tests {
         assert_eq!(
             stringify(&factory.create_symbol_term(3)),
             Err(String::from(
-                "JSON serialization failed: Unable to serialize term: <symbol:3>"
+                "JSON serialization failed: Unable to serialize term: <symbol:0x0000000000000003>"
             )),
         );
         assert_eq!(
