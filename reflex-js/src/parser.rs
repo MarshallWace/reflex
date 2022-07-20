@@ -32,8 +32,8 @@ use crate::{
 pub type ParserResult<T> = Result<T, ParserError>;
 pub type ParserError = String;
 
-fn err<T: std::fmt::Debug>(message: &str, node: T) -> String {
-    format!("{}: {:?}", message, node)
+fn err<T: std::fmt::Debug>(message: &str, _node: T) -> ParserError {
+    String::from(message)
 }
 
 fn err_unimplemented<T: std::fmt::Debug>(node: T) -> String {
