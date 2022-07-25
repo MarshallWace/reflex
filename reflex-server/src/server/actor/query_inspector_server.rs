@@ -15,13 +15,17 @@ use reflex_dispatcher::{
 use reflex_runtime::actor::query_inspector::{
     QueryInspector, QueryInspectorAction, QueryInspectorState,
 };
+use serde_json::json;
 
 use crate::server::{
     action::query_inspector_server::{
         QueryInspectorServerHttpRequestAction, QueryInspectorServerHttpResponseAction,
     },
+    create_content_type_header, create_html_http_response, create_http_response, is_json_request,
     utils::{create_accepted_http_response, create_json_http_response},
 };
+
+const INDEX_FILE: &'static str = include_str!("../template/debugger/index.html");
 
 pub trait QueryInspectorServerAction<T: Expression>:
     Action
@@ -140,6 +144,9 @@ where
         } = action;
         match request.uri().path() {
             "/" => self.handle_query_inspector_server_root_path(state, action, metadata, context),
+            "/env.js" => {
+                self.handle_query_inspector_server_env_path(state, action, metadata, context)
+            }
             _ => {
                 self.handle_query_inspector_server_path_not_found(state, action, metadata, context)
             }
@@ -157,17 +164,55 @@ where
     {
         let QueryInspectorServerHttpRequestAction {
             request_id,
-            request: _,
+            request,
         } = action;
         let inner_state = state.as_inner()?;
         Some(StateTransition::new(once(StateOperation::Send(
             context.pid(),
             QueryInspectorServerHttpResponseAction {
                 request_id: *request_id,
-                response: create_json_http_response(
+                response: if is_json_request(request.headers()) {
+                    create_json_http_response(
+                        StatusCode::OK,
+                        empty(),
+                        &inner_state.to_json(&self.factory),
+                    )
+                } else {
+                    create_html_http_response(StatusCode::OK, empty(), INDEX_FILE)
+                },
+            }
+            .into(),
+        ))))
+    }
+    fn handle_query_inspector_server_env_path<TAction>(
+        &self,
+        _state: &mut QueryInspectorServerState<T>,
+        action: &QueryInspectorServerHttpRequestAction,
+        _metadata: &MessageData,
+        context: &mut impl HandlerContext,
+    ) -> Option<StateTransition<TAction>>
+    where
+        TAction: Action + OutboundAction<QueryInspectorServerHttpResponseAction>,
+    {
+        let QueryInspectorServerHttpRequestAction {
+            request_id,
+            request: _,
+        } = action;
+        Some(StateTransition::new(once(StateOperation::Send(
+            context.pid(),
+            QueryInspectorServerHttpResponseAction {
+                request_id: *request_id,
+                response: create_http_response(
                     StatusCode::OK,
-                    empty(),
-                    &inner_state.to_json(&self.factory),
+                    once(create_content_type_header("application/javascript")),
+                    Some(format!(
+                        "window.ENV = {};\n",
+                        json!({
+                          "DEBUGGER_URL": Option::<String>::None,
+                          "INSPECTOR_URL": "/inspect",
+                        })
+                        .to_string()
+                    )),
                 ),
             }
             .into(),

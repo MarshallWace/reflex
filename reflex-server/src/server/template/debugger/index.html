@@ -16,6 +16,7 @@
       margin: 0;
       font-family: monospace;
     }
+
   </style>
 
   <style>
@@ -87,6 +88,7 @@
     .App__loading {
       flex: none;
     }
+
   </style>
 
   <style>
@@ -101,6 +103,7 @@
     .ErrorMessage__dismiss {
       flex: none;
     }
+
   </style>
 
   <style>
@@ -123,21 +126,25 @@
       flex: none;
     }
 
-    .PlaybackControls__control + .PlaybackControls__control {
+    .PlaybackControls__control+.PlaybackControls__control {
       margin-left: 0.25em;
     }
+
   </style>
 
   <style>
     .QueryOverview {}
+
   </style>
 
   <style>
     .EffectOverview {}
+
   </style>
 
   <style>
     .EventOverview {}
+
   </style>
 
   <style>
@@ -149,6 +156,7 @@
     }
 
     .Panel__content {}
+
   </style>
 
   <style>
@@ -156,16 +164,19 @@
       list-style: none;
       padding: 0 0 0 1.5em;
     }
+
   </style>
 
   <style>
     .ListItem {}
+
   </style>
 
   <style>
     .LoadingIndicator {
       display: inline-block;
     }
+
   </style>
 
   <style>
@@ -173,6 +184,7 @@
       max-width: 500px;
       overflow: hidden;
     }
+
   </style>
 
 </head>
@@ -185,6 +197,15 @@
 
     function transition(state, actions) {
       return [state, actions || []];
+    }
+
+    class NoopActor {
+      init() {
+        return null;
+      }
+      handle(state, action, dispatch) {
+        return transition(state);
+      }
     }
 
     class ComposedActor {
@@ -204,7 +225,7 @@
           },
           transition({ ...state }),
         );
-      };
+      }
     }
 
     class LogActor {
@@ -226,11 +247,11 @@
       DISMISS_ERROR: 'AppAction:DISMISS_ERROR',
     }
 
-    function createAppInitAction() {
-      return createAction(AppAction.APP_INIT, null)
+    function createAppInitAction({ debug }) {
+      return createAction(AppAction.APP_INIT, { debug })
     }
 
-    function createDismissErrorAction(id) {
+    function createDismissErrorAction({ id }) {
       return createAction(AppAction.DISMISS_ERROR, { id })
     }
 
@@ -322,8 +343,9 @@
         }
       }
       handleAppInit(state, action, dispatch) {
+        const { debug } = action.payload;
         return transition(state, [
-          createDebugLoadEventsAction({ token: Symbol(action.type) }),
+          ...debug ? [createDebugLoadEventsAction({ token: Symbol(action.type) })] : [],
           createLoadInspectorDataAction({ token: Symbol(action.type) }),
         ]);
       }
@@ -610,7 +632,7 @@
       const { env } = props;
       const actor = useMemo(() => new LogActor(new ComposedActor({
         inspector: new InspectorActor(env.INSPECTOR_URL),
-        debug: new DebugActor(env.DEBUGGER_URL),
+        debug: env.DEBUGGER_URL ? new DebugActor(env.DEBUGGER_URL) : new NoopActor(),
         loader: new JsonLoaderActor(),
         app: new AppActor(),
       })), [env]);
@@ -620,11 +642,12 @@
         [dispatch],
       );
       const handleDismissError = useCallback(
-        (id) => dispatch(createDismissErrorAction(Number(id))),
+        (id) => dispatch(createDismissErrorAction({ id: Number(id) })),
         [dispatch],
       );
+      const debug = Boolean(env.DEBUGGER_URL);
       useEffect(() => {
-        dispatch(createAppInitAction());
+        dispatch(createAppInitAction({ debug }));
       }, [actor]);
       const { app } = state;
       const { currentFrame, queries, effects, events, errors, loading } = app;
@@ -673,7 +696,7 @@
               </Panel>
             </div>
           </div>
-          <div className="App__controls">
+          {debug && <div className="App__controls">
             <PlaybackControls
               className="App__controls__controls"
               currentFrame={currentFrame}
@@ -697,7 +720,7 @@
                 "Loading events..."
               )}
             </Panel>
-          </div>
+          </div>}
         </div>
       );
     }
@@ -847,14 +870,12 @@
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
   <script src="https://unpkg.com/babel-standalone@6/babel.min.js" crossorigin></script>
 
+  <script src="env.js"></script>
   <script>
     window.addEventListener('load', () => {
       const root = ReactDOM.createRoot(document.body);
       root.render(React.createElement(App, {
-        env: {
-          DEBUGGER_URL: './debugger',
-          INSPECTOR_URL: './inspect',
-        },
+        env: window.ENV,
       }));
     });
   </script>
