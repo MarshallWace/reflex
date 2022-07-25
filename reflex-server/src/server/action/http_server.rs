@@ -101,10 +101,42 @@ impl NamedAction for HttpServerRequestAction {
 }
 impl SerializableAction for HttpServerRequestAction {
     fn to_json(&self) -> SerializedAction {
-        SerializedAction::from_iter([(
-            "request_id",
-            JsonValue::from(format!("{}", self.request_id.as_hyphenated())),
-        )])
+        SerializedAction::from_iter([
+            (
+                "request_id",
+                JsonValue::from(format!("{}", self.request_id.as_hyphenated())),
+            ),
+            (
+                "request",
+                JsonValue::Object(JsonMap::from_iter([
+                    (
+                        String::from("headers"),
+                        JsonValue::Object(JsonMap::from_iter(
+                            self.request.headers().iter().filter_map(|(key, value)| {
+                                String::from_utf8(value.as_bytes().iter().copied().collect())
+                                    .ok()
+                                    .map(|value| {
+                                        (String::from(key.as_str()), JsonValue::from(value))
+                                    })
+                            }),
+                        )),
+                    ),
+                    (
+                        String::from("body"),
+                        if self.request.body().is_empty() {
+                            JsonValue::Null
+                        } else {
+                            match String::from_utf8(self.request.body().iter().copied().collect())
+                                .ok()
+                            {
+                                Some(body) => JsonValue::from(body),
+                                None => JsonValue::Null,
+                            }
+                        },
+                    ),
+                ])),
+            ),
+        ])
     }
 }
 impl Serialize for HttpServerRequestAction {
@@ -201,10 +233,15 @@ impl SerializableAction for HttpServerResponseAction {
                     ),
                     (
                         String::from("body"),
-                        match String::from_utf8(self.response.body().iter().copied().collect()).ok()
-                        {
-                            Some(body) => JsonValue::from(body),
-                            None => JsonValue::Null,
+                        if self.response.body().is_empty() {
+                            JsonValue::Null
+                        } else {
+                            match String::from_utf8(self.response.body().iter().copied().collect())
+                                .ok()
+                            {
+                                Some(body) => JsonValue::from(body),
+                                None => JsonValue::Null,
+                            }
                         },
                     ),
                 ])),
