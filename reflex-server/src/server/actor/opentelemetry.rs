@@ -12,6 +12,7 @@ use futures::Future;
 use http::{header::HeaderName, HeaderValue, Request, Response};
 use hyper::Body;
 use opentelemetry::{
+    sdk::Resource,
     trace::{SpanContext, TraceContextExt, TraceFlags, TraceState, Tracer},
     Context, KeyValue,
 };
@@ -19,12 +20,10 @@ use opentelemetry_otlp::{SpanExporterBuilder, WithExportConfig};
 use reflex_dispatcher::{
     Action, Actor, ActorTransition, HandlerContext, InboundAction, MessageData, StateTransition,
 };
-use reflex_handlers::{
-    utils::tls::{
-        create_https_client,
-        hyper::{body::HttpBody, client::connect::Connect},
-        tokio_native_tls::native_tls,
-    },
+use reflex_handlers::utils::tls::{
+    create_https_client,
+    hyper::{body::HttpBody, client::connect::Connect},
+    tokio_native_tls::native_tls,
 };
 use tonic::{self, transport::ClientTlsConfig};
 
@@ -61,7 +60,7 @@ impl std::error::Error for OpenTelemetryClientError {
 pub fn create_grpc_otlp_tracer(
     endpoint: impl Into<String>,
     tls_cert: Option<tonic::transport::Certificate>,
-    resource_attributes: impl IntoIterator<Item = KeyValue>,
+    resource_attributes: Option<Resource>,
 ) -> Result<opentelemetry::sdk::trace::Tracer, OpenTelemetryClientError> {
     let exporter = opentelemetry_otlp::new_exporter()
         .tonic()
@@ -78,7 +77,7 @@ pub fn create_http_otlp_tracer(
     endpoint: impl Into<String>,
     http_headers: impl IntoIterator<Item = (HeaderName, HeaderValue)>,
     tls_cert: Option<native_tls::Certificate>,
-    resource_attributes: impl IntoIterator<Item = KeyValue>,
+    resource_attributes: Option<Resource>,
 ) -> Result<opentelemetry::sdk::trace::Tracer, OpenTelemetryClientError> {
     let client =
         create_https_client::<Body>(tls_cert).map_err(OpenTelemetryClientError::Certificate)?;
@@ -103,15 +102,19 @@ pub fn create_http_otlp_tracer(
 
 fn create_otlp_tracer(
     exporter: impl Into<SpanExporterBuilder>,
-    resource_attributes: impl IntoIterator<Item = KeyValue>,
+    resource_attributes: Option<Resource>,
 ) -> Result<opentelemetry::sdk::trace::Tracer, OpenTelemetryClientError> {
     opentelemetry_otlp::new_pipeline()
         .tracing()
         .with_exporter(exporter)
-        .with_trace_config(
-            opentelemetry::sdk::trace::config()
-                .with_resource(opentelemetry::sdk::Resource::new(resource_attributes)),
-        )
+        .with_trace_config({
+            let config = opentelemetry::sdk::trace::config();
+            if let Some(resource_attributes) = resource_attributes {
+                config.with_resource(resource_attributes)
+            } else {
+                config
+            }
+        })
         .install_batch(opentelemetry::runtime::Tokio)
         .map_err(OpenTelemetryClientError::Tracer)
 }

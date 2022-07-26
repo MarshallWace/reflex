@@ -12,7 +12,13 @@ use std::{
     sync::Arc,
 };
 
-use opentelemetry::KeyValue;
+use opentelemetry::{
+    sdk::{
+        resource::{EnvResourceDetector, ResourceDetector, SdkProvidedResourceDetector},
+        Resource,
+    },
+    KeyValue,
+};
 use reflex_dispatcher::{Actor, ChainedActor, PostMiddleware, PreMiddleware, SchedulerMiddleware};
 
 use anyhow::{anyhow, Context, Result};
@@ -32,7 +38,7 @@ use reflex::{
     stdlib::Stdlib,
 };
 use reflex_graphql::{stdlib::Stdlib as GraphQlStdlib, GraphQlOperation, GraphQlSchema};
-use reflex_handlers::{utils::tls::tokio_native_tls::native_tls};
+use reflex_handlers::utils::tls::tokio_native_tls::native_tls;
 use reflex_js::stdlib::Stdlib as JsStdlib;
 use reflex_json::{stdlib::Stdlib as JsonStdlib, JsonMap, JsonValue};
 use reflex_runtime::{AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator};
@@ -91,12 +97,9 @@ impl OpenTelemetryConfig {
                     } else {
                         Default::default()
                     };
-                let resource_attributes =
-                    if let Some(env_var) = named_args.get("OTEL_RESOURCE_ATTRIBUTES") {
-                        parse_otlp_resource_attributes(env_var)?
-                    } else {
-                        Default::default()
-                    };
+                let service_name_attribute = SdkProvidedResourceDetector.detect(Default::default());
+                let additional_attributes = EnvResourceDetector::new().detect(Default::default());
+                let combined_attributes = service_name_attribute.merge(&additional_attributes);
                 match protocol {
                     OpenTelemetryProtocol::Grpc => {
                         let tls_cert = tls_cert
@@ -106,7 +109,7 @@ impl OpenTelemetryConfig {
                         Ok(Some(Self::Grpc(OpenTelemetryGrpcConfig {
                             endpoint: String::from(endpoint),
                             tls_cert,
-                            resource_attributes,
+                            resource_attributes: combined_attributes,
                         })))
                     }
                     OpenTelemetryProtocol::Http => {
@@ -118,7 +121,7 @@ impl OpenTelemetryConfig {
                             endpoint: String::from(endpoint),
                             http_headers,
                             tls_cert,
-                            resource_attributes,
+                            resource_attributes: combined_attributes,
                         })))
                     }
                 }
@@ -147,7 +150,7 @@ impl OpenTelemetryConfig {
                     resource_attributes,
                     tls_cert,
                 } = config;
-                create_http_otlp_tracer(endpoint, http_headers, tls_cert, resource_attributes)
+                create_http_otlp_tracer(endpoint, http_headers, tls_cert, Some(resource_attributes))
             }
             Self::Grpc(config) => {
                 let OpenTelemetryGrpcConfig {
@@ -155,7 +158,7 @@ impl OpenTelemetryConfig {
                     resource_attributes,
                     tls_cert,
                 } = config;
-                create_grpc_otlp_tracer(endpoint, tls_cert, resource_attributes)
+                create_grpc_otlp_tracer(endpoint, tls_cert, Some(resource_attributes))
             }
         }
         .map_err(|err| anyhow!("{}", err))
@@ -177,7 +180,7 @@ impl OpenTelemetryConfig {
 pub struct OpenTelemetryHttpConfig {
     pub endpoint: String,
     pub http_headers: Vec<(HeaderName, HeaderValue)>,
-    pub resource_attributes: Vec<KeyValue>,
+    pub resource_attributes: Resource,
     pub tls_cert: Option<native_tls::Certificate>,
 }
 impl std::fmt::Debug for OpenTelemetryHttpConfig {
@@ -222,7 +225,7 @@ impl<'a> From<&'a OpenTelemetryHttpConfig> for SerializedOpenTelemetryHttpConfig
             tls_cert,
         } = value;
         Self {
-            endpoint: endpoint.clone(),
+            endpoint: String::from(endpoint),
             http_headers: http_headers
                 .into_iter()
                 .filter_map(|(key, value)| {
@@ -233,13 +236,8 @@ impl<'a> From<&'a OpenTelemetryHttpConfig> for SerializedOpenTelemetryHttpConfig
                 })
                 .collect(),
             resource_attributes: resource_attributes
-                .into_iter()
-                .map(|entry| {
-                    (
-                        String::from(entry.key.as_str()),
-                        String::from(entry.value.as_str()),
-                    )
-                })
+                .iter()
+                .map(|(key, value)| (String::from(key.as_str()), String::from(value.as_str())))
                 .collect(),
             tls_cert: tls_cert.as_ref().and_then(|value| value.to_der().ok()),
         }
@@ -264,10 +262,11 @@ impl From<SerializedOpenTelemetryHttpConfig> for OpenTelemetryHttpConfig {
                     }
                 })
                 .collect(),
-            resource_attributes: resource_attributes
-                .into_iter()
-                .map(|(key, value)| KeyValue::new(key, value))
-                .collect(),
+            resource_attributes: Resource::new(
+                resource_attributes
+                    .into_iter()
+                    .map(|(key, value)| KeyValue::new(key, value)),
+            ),
             tls_cert: tls_cert.and_then(|value| native_tls::Certificate::from_der(&value).ok()),
         }
     }
@@ -276,7 +275,7 @@ impl From<SerializedOpenTelemetryHttpConfig> for OpenTelemetryHttpConfig {
 #[derive(Clone)]
 pub struct OpenTelemetryGrpcConfig {
     pub endpoint: String,
-    pub resource_attributes: Vec<KeyValue>,
+    pub resource_attributes: Resource,
     pub tls_cert: Option<tonic::transport::Certificate>,
 }
 impl std::fmt::Debug for OpenTelemetryGrpcConfig {
@@ -318,15 +317,10 @@ impl<'a> From<&'a OpenTelemetryGrpcConfig> for SerializedOpenTelemetryGrpcConfig
             tls_cert,
         } = value;
         Self {
-            endpoint: endpoint.clone(),
+            endpoint: String::from(endpoint),
             resource_attributes: resource_attributes
-                .into_iter()
-                .map(|entry| {
-                    (
-                        String::from(entry.key.as_str()),
-                        String::from(entry.value.as_str()),
-                    )
-                })
+                .iter()
+                .map(|(key, value)| (String::from(key.as_str()), String::from(value.as_str())))
                 .collect(),
             tls_cert: tls_cert.as_ref().map(|value| value.clone().into_inner()),
         }
@@ -341,10 +335,11 @@ impl From<SerializedOpenTelemetryGrpcConfig> for OpenTelemetryGrpcConfig {
         } = value;
         Self {
             endpoint,
-            resource_attributes: resource_attributes
-                .into_iter()
-                .map(|(key, value)| KeyValue::new(key, value))
-                .collect(),
+            resource_attributes: Resource::new(
+                resource_attributes
+                    .into_iter()
+                    .map(|(key, value)| KeyValue::new(key, value)),
+            ),
             tls_cert: tls_cert.map(|value| tonic::transport::Certificate::from_pem(&value)),
         }
     }
@@ -489,30 +484,6 @@ fn parse_otlp_protocol(input: &str) -> Result<OpenTelemetryProtocol> {
             "Failed to parse OpenTelemetry protocol (allowed values: \"grpc\", \"http/protobuf\")"
         )),
     }
-}
-
-fn parse_otlp_resource_attributes(input: &str) -> Result<Vec<KeyValue>> {
-    let parse_key = take_while1(|chr| chr != '=');
-    let parse_equals = tag("=");
-    let parse_value = take_while1(|chr| chr != ',');
-    let parse_variable = tuple((parse_key, parse_equals, parse_value));
-    let parse_separator = tag(",");
-    let mut parse_variables = separated_list0(parse_separator, parse_variable);
-    let result: IResult<_, _> = parse_variables(input);
-    match result {
-        Ok((remaining, result)) => {
-            if !remaining.is_empty() {
-                return Err(anyhow!("Trailing characters: {}", remaining));
-            }
-            let values = result
-                .into_iter()
-                .map(|(key, _, value)| KeyValue::new(String::from(key), String::from(value)))
-                .collect::<Vec<_>>();
-            Ok(values)
-        }
-        Err(err) => Err(anyhow!("Parse error: {}", err)),
-    }
-    .with_context(|| anyhow!("Failed to parse OpenTelemetry resource attributes"))
 }
 
 fn parse_otlp_http_headers(input: &str) -> Result<Vec<(HeaderName, HeaderValue)>> {

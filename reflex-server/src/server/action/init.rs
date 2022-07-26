@@ -207,10 +207,10 @@ impl<'a> SerializableAction for InitOpenTelemetryAction {
                 (
                     "resource_attributes",
                     JsonValue::Object(JsonMap::from_iter(config.resource_attributes.iter().map(
-                        |variable| {
+                        |(key, value)| {
                             (
-                                String::from(variable.key.as_str()),
-                                JsonValue::String(variable.value.as_str().into()),
+                                String::from(key.as_str()),
+                                JsonValue::String(value.as_str().into()),
                             )
                         },
                     ))),
@@ -226,10 +226,10 @@ impl<'a> SerializableAction for InitOpenTelemetryAction {
                 (
                     "resource_attributes",
                     JsonValue::Object(JsonMap::from_iter(config.resource_attributes.iter().map(
-                        |variable| {
+                        |(key, value)| {
                             (
-                                String::from(variable.key.as_str()),
-                                JsonValue::String(variable.value.as_str().into()),
+                                String::from(key.as_str()),
+                                JsonValue::String(value.as_str().into()),
                             )
                         },
                     ))),
