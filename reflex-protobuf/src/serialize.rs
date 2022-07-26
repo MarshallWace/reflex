@@ -37,6 +37,7 @@ pub(crate) fn serialize_generic_message<T: Expression>(
         .fields()
         .filter_map(|field_type| {
             term.get(field_type.json_name())
+                .filter(|value| factory.match_nil_term(value).is_none())
                 .map(|value| (field_type, value))
         })
         .map(|(field_type, value)| {

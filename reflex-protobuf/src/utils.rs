@@ -56,7 +56,7 @@ pub(crate) fn get_optional_message_field<'a>(
         None => Err(format!(
             "Invalid field access: {} on {}",
             field_name,
-            message_type.name()
+            message_type.full_name()
         )),
         Some(field_type) => match message.get_field(&field_type) {
             Cow::Borrowed(value) => Ok(Some(value)),
@@ -75,7 +75,7 @@ pub(crate) fn get_message_field<'a>(
             format!(
                 "Missing value for required field: {} on {}",
                 field_name,
-                message_type.name()
+                message_type.full_name()
             )
         })
     })

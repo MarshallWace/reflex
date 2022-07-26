@@ -21,22 +21,20 @@ pub(crate) fn deserialize_generic_message<T: Expression>(
     allocator: &impl HeapAllocator<T>,
 ) -> Result<T, TranscodeError> {
     let message_type = message.descriptor();
-    let simple_fields = message_type
-        .fields()
-        .filter_map(|field| {
-            message
-                .get_field_by_number(field.number())
-                .map(|value| (field, value))
-        })
-        .map(|(field_type, value)| {
+    let simple_fields = message_type.fields().map(|field_type| {
+        let field_value = if message.has_field(&field_type) {
+            let value = message.get_field(&field_type);
             deserialize_field_value(&value, &field_type, transcoder, factory, allocator)
-                .map_err(|err| TranscodeError {
-                    error: err.error,
-                    message_type: err.message_type.or_else(|| Some(message_type.clone())),
-                    path: err.path.with_prefix(field_type.name().into()),
-                })
-                .map(|value| (field_type, value))
-        });
+        } else {
+            deserialize_missing_field_value(&field_type, message, transcoder, factory, allocator)
+        }
+        .map_err(|err| TranscodeError {
+            error: err.error,
+            message_type: err.message_type.or_else(|| Some(message_type.clone())),
+            path: err.path.with_prefix(field_type.name().into()),
+        })?;
+        Ok((field_type, field_value))
+    });
     let oneof_fields = message_type.oneofs().filter_map(|oneof_type| {
         deserialize_oneof_field(&oneof_type, message, transcoder, factory, allocator).transpose()
     });
@@ -132,6 +130,26 @@ fn deserialize_field_value<T: Expression>(
         Value::Map(value) => {
             deserialize_map_field_value(value, field_type, transcoder, factory, allocator)
         }
+    }
+}
+
+fn deserialize_missing_field_value<T: Expression>(
+    field_type: &FieldDescriptor,
+    message: &DynamicMessage,
+    transcoder: &impl ProtoTranscoder,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> Result<T, TranscodeError> {
+    if field_type.is_list() {
+        Ok(factory.create_list_term(allocator.create_empty_list()))
+    } else if field_type.is_map() {
+        Ok(factory
+            .create_hashmap_term(allocator.create_empty_list(), allocator.create_empty_list()))
+    } else if matches!(field_type.kind(), Kind::Message(_)) {
+        Ok(factory.create_nil_term())
+    } else {
+        let value = message.get_field(field_type);
+        deserialize_field_value(&value, &field_type, transcoder, factory, allocator)
     }
 }
 
