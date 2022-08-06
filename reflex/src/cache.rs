@@ -6,11 +6,100 @@ use std::collections::{hash_map::Entry, HashMap};
 
 use crate::{
     core::{
-        hash_state_values, DynamicState, EvaluationCache, EvaluationCacheMetrics, EvaluationResult,
-        Expression, Reducible, Rewritable, StateToken, Substitutions,
+        hash_state_values, DynamicState, EvaluationResult, Expression, Reducible, Rewritable,
+        StateToken, Substitutions,
     },
     hash::{hash_object, HashId},
 };
+
+pub trait EvaluationCache<T: Expression> {
+    fn retrieve_static_substitution(
+        &mut self,
+        expression: &impl Expression,
+        substitutions: &Substitutions<T>,
+    ) -> Option<Option<T>>;
+    fn store_static_substitution(
+        &mut self,
+        expression: &impl Expression,
+        substitutions: &Substitutions<T>,
+        result: Option<T>,
+    );
+    fn retrieve_dynamic_substitution(
+        &mut self,
+        expression: &impl Expression,
+        deep: bool,
+        state: &impl DynamicState<T>,
+    ) -> Option<Option<T>>;
+    fn store_dynamic_substitution(
+        &mut self,
+        expression: &impl Expression,
+        deep: bool,
+        state: &impl DynamicState<T>,
+        result: Option<T>,
+    );
+    fn retrieve_reduction(&mut self, expression: &impl Expression) -> Option<Option<T>>;
+    fn store_reduction(&mut self, expression: &impl Expression, result: Option<T>);
+    fn retrieve_normalization(&mut self, expression: &impl Expression) -> Option<Option<T>>;
+    fn store_normalization(&mut self, expression: &impl Expression, result: Option<T>);
+    fn retrieve_evaluation(
+        &mut self,
+        expression: &impl Expression,
+        state: &impl DynamicState<T>,
+    ) -> Option<Option<EvaluationResult<T>>>;
+    fn store_evaluation(
+        &mut self,
+        expression: &impl Expression,
+        state: &impl DynamicState<T>,
+        result: Option<EvaluationResult<T>>,
+    );
+    fn metrics(&self) -> Option<&EvaluationCacheMetrics> {
+        None
+    }
+    fn clear_metrics(&mut self) -> Option<EvaluationCacheMetrics> {
+        None
+    }
+}
+
+#[derive(Default)]
+pub struct EvaluationCacheMetrics {
+    pub(crate) reductions: CacheMetrics,
+    pub(crate) static_substitutions: CacheMetrics,
+    pub(crate) dynamic_substitutions: CacheMetrics,
+    pub(crate) evaluations: CacheMetrics,
+}
+impl std::fmt::Display for EvaluationCacheMetrics {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f,
+            "Evaluations:           {}\nReductions:            {}\nStatic substitutions:  {}\nDynamic substitutions: {}",
+            self.evaluations,
+            self.reductions,
+            self.static_substitutions,
+            self.dynamic_substitutions,
+        )
+    }
+}
+#[derive(Default)]
+pub struct CacheMetrics {
+    num_cache_hits: usize,
+    num_cache_misses: usize,
+}
+impl CacheMetrics {
+    pub(crate) fn cache_hit(&mut self) {
+        self.num_cache_hits = self.num_cache_hits + 1;
+    }
+    pub(crate) fn cache_miss(&mut self) {
+        self.num_cache_misses = self.num_cache_misses + 1
+    }
+}
+impl std::fmt::Display for CacheMetrics {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{} operations, {} skipped",
+            self.num_cache_hits, self.num_cache_misses
+        )
+    }
+}
 
 #[derive(Default)]
 pub struct NoopCache {}

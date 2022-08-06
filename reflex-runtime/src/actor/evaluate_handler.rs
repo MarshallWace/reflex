@@ -13,8 +13,9 @@ use metrics::{
     histogram, increment_gauge, Unit,
 };
 use reflex::core::{
-    DependencyList, DynamicState, EvaluationResult, Expression, ExpressionFactory, HeapAllocator,
-    Signal, SignalType, StateCache, StateToken, StringValue,
+    ConditionListType, ConditionType, DependencyList, DynamicState, EvaluationResult, Expression,
+    ExpressionFactory, ExpressionListType, HeapAllocator, ListTermType, SignalTermType, SignalType,
+    StateCache, StateToken, StringTermType, StringValue, SymbolTermType,
 };
 use reflex_dispatcher::{
     Action, Actor, ActorTransition, HandlerContext, InboundAction, MessageData, MessageOffset,
@@ -118,7 +119,7 @@ pub fn create_evaluate_effect<T: Expression>(
     invalidation_strategy: QueryInvalidationStrategy,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> Signal<T> {
+) -> T::Signal {
     allocator.create_signal(
         SignalType::Custom(String::from(EFFECT_TYPE_EVALUATE)),
         allocator.create_list([
@@ -131,7 +132,7 @@ pub fn create_evaluate_effect<T: Expression>(
 }
 
 pub fn parse_evaluate_effect_query<T: Expression>(
-    effect: &Signal<T>,
+    effect: &T::Signal,
     factory: &impl ExpressionFactory<T>,
 ) -> Option<(String, T, QueryEvaluationMode, QueryInvalidationStrategy)> {
     if effect.args().len() != 4 {
@@ -148,7 +149,7 @@ pub fn parse_evaluate_effect_query<T: Expression>(
         QueryInvalidationStrategy::deserialize(invalidation_strategy, factory),
     ) {
         (Some(label), Some(evaluation_mode), Some(invalidation_strategy)) => Some((
-            String::from(label.value.as_str()),
+            String::from(label.value().as_str()),
             query.clone(),
             evaluation_mode,
             invalidation_strategy,
@@ -187,7 +188,7 @@ pub fn parse_evaluate_effect_result<T: Expression>(
         .match_list_term(evalution_result.items().get(1)?)?
         .items()
         .iter()
-        .filter_map(|dependency| factory.match_symbol_term(dependency).map(|term| term.id));
+        .filter_map(|dependency| factory.match_symbol_term(dependency).map(|term| term.id()));
     Some(EvaluationResult::new(
         value.clone(),
         DependencyList::from_iter(dependencies),
@@ -257,7 +258,7 @@ where
 pub struct EvaluateHandlerState<T: Expression> {
     workers: HashMap<StateToken, WorkerState<T>>,
     // TODO: Use expressions as state tokens, removing need to map state tokens back to originating effects
-    effects: HashMap<StateToken, Signal<T>>,
+    effects: HashMap<StateToken, T::Signal>,
     state_cache: GlobalStateCache<T>,
 }
 impl<T: Expression> Default for EvaluateHandlerState<T> {
@@ -271,7 +272,7 @@ impl<T: Expression> Default for EvaluateHandlerState<T> {
 }
 struct WorkerState<T: Expression> {
     subscription_count: usize,
-    effect: Signal<T>,
+    effect: T::Signal,
     status: WorkerStatus<T>,
     state_index: Option<MessageOffset>,
     state_values: HashMap<StateToken, T>,
@@ -306,7 +307,7 @@ enum WorkerResultStatus {
     Blocked,
 }
 impl<T: Expression> EvaluateHandlerState<T> {
-    fn combined_effects<'a>(&'a self) -> impl Iterator<Item = &'a Signal<T>> + 'a {
+    fn combined_effects<'a>(&'a self) -> impl Iterator<Item = &'a T::Signal> + 'a {
         self.workers.values().flat_map(|worker| {
             once(&worker.effect).into_iter().chain(
                 worker
@@ -1044,30 +1045,29 @@ where
     ))
 }
 
-fn group_effects_by_type<T: Expression>(
-    signals: impl IntoIterator<Item = Signal<T>>,
-) -> impl Iterator<Item = (String, Vec<Signal<T>>)> {
-    signals
+fn group_effects_by_type<V: ConditionType<impl Expression<Signal = V>>>(
+    effects: impl IntoIterator<Item = V>,
+) -> impl Iterator<Item = (String, Vec<V>)> {
+    effects
         .into_iter()
         .filter(|signal| matches!(signal.signal_type(), SignalType::Custom(_)))
-        .fold(
-            HashMap::<String, Vec<Signal<T>>>::new(),
-            |mut result, signal| {
-                let existing_signals = get_custom_signal_type(&signal)
-                    .and_then(|signal_type| result.get_mut(signal_type));
-                if let Some(existing_signals) = existing_signals {
-                    existing_signals.push(signal);
-                } else if let Some(signal_type) = get_custom_signal_type(&signal) {
-                    result.insert(String::from(signal_type), vec![signal]);
-                }
-                result
-            },
-        )
+        .fold(HashMap::<String, Vec<V>>::new(), |mut result, signal| {
+            let existing_signals =
+                get_custom_signal_type(&signal).and_then(|signal_type| result.get_mut(signal_type));
+            if let Some(existing_signals) = existing_signals {
+                existing_signals.push(signal);
+            } else if let Some(signal_type) = get_custom_signal_type(&signal) {
+                result.insert(String::from(signal_type), vec![signal]);
+            }
+            result
+        })
         .into_iter()
 }
 
-fn get_custom_signal_type<T: Expression>(signal: &Signal<T>) -> Option<&String> {
-    match signal.signal_type() {
+fn get_custom_signal_type<V: ConditionType<impl Expression<Signal = V>>>(
+    effect: &V,
+) -> Option<&String> {
+    match effect.signal_type() {
         SignalType::Custom(signal_type) => Some(signal_type),
         _ => None,
     }
@@ -1083,7 +1083,7 @@ fn is_unresolved_result<T: Expression>(
         .unwrap_or(false)
 }
 
-fn is_unresolved_effect<T: Expression>(effect: &Signal<T>) -> bool {
+fn is_unresolved_effect<V: ConditionType<impl Expression<Signal = V>>>(effect: &V) -> bool {
     match effect.signal_type() {
         SignalType::Error => false,
         SignalType::Pending | SignalType::Custom(_) => true,
@@ -1093,7 +1093,7 @@ fn is_unresolved_effect<T: Expression>(effect: &Signal<T>) -> bool {
 fn parse_expression_effects<'a, T: Expression>(
     value: &'a T,
     factory: &'a impl ExpressionFactory<T>,
-) -> impl Iterator<Item = &'a Signal<T>> + 'a {
+) -> impl Iterator<Item = &'a T::Signal> + 'a {
     factory
         .match_signal_term(value)
         .map(|term| {

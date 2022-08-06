@@ -13,6 +13,7 @@ reflex-dispatcher = { path = "../reflex-dispatcher" }
 reflex-json = { path = "../reflex-json" }
 reflex-protobuf = { path = "../reflex-protobuf" }
 reflex-runtime = { path = "../reflex-runtime" }
+reflex-stdlib = { path = "../reflex-stdlib" }
 reflex-utils = { path = "../reflex-utils" }
 futures = "*"
 metrics = "0.18"

@@ -2,15 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
-use crate::stdlib::Stdlib as GraphQlStdlib;
-use reflex::{
-    core::{
-        uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
-        FunctionArity, HeapAllocator, Uid, Uuid,
-    },
-    stdlib::Stdlib,
+use reflex::core::{
+    uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
+    ExpressionListType, FunctionArity, HeapAllocator, ListTermType, Uid, Uuid,
 };
+use reflex_stdlib::Stdlib;
 
+use crate::stdlib::Stdlib as GraphQlStdlib;
 pub struct DynamicQueryBranch {}
 impl DynamicQueryBranch {
     pub(crate) const UUID: Uuid = uuid!("58dd19b7-c9f0-473b-84c5-34af607c176b");

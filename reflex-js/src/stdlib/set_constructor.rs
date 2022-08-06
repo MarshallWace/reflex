@@ -2,14 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
-use reflex::{
-    core::{
-        uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
-        FunctionArity, HeapAllocator, Uid, Uuid,
-    },
-    lang::deduplicate_hashset_entries,
-    stdlib::Stdlib,
+use reflex::core::{
+    deduplicate_hashset_entries, uuid, Applicable, ArgType, Arity, EvaluationCache, Expression,
+    ExpressionFactory, ExpressionListType, FunctionArity, HeapAllocator, ListTermType, Uid, Uuid,
 };
+use reflex_stdlib::Stdlib;
 
 pub struct SetConstructor {}
 impl SetConstructor {
@@ -81,14 +78,13 @@ fn is_nil_term<T: Expression>(expression: &T, factory: &impl ExpressionFactory<T
 mod tests {
     use crate::{builtins::JsBuiltins, globals::builtin_globals, parse, Env};
     use reflex::{
-        allocator::DefaultAllocator,
         cache::SubstitutionCache,
         core::{
             evaluate, DependencyList, EvaluationResult, ExpressionFactory, HeapAllocator,
             StateCache,
         },
-        lang::SharedTermFactory,
     };
+    use reflex_lang::{allocator::DefaultAllocator, SharedTermFactory};
 
     #[test]
     fn set_constructor() {

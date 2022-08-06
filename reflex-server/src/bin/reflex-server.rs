@@ -13,13 +13,7 @@ use anyhow::{anyhow, Context, Result};
 use clap::Parser;
 use http::HeaderMap;
 use metrics_exporter_prometheus::PrometheusBuilder;
-use reflex::{
-    allocator::DefaultAllocator,
-    compiler::CompilerOptions,
-    core::Expression,
-    interpreter::InterpreterOptions,
-    lang::{CachedSharedTerm, SharedTermFactory},
-};
+use reflex::core::Expression;
 use reflex_cli::{compile_entry_point, syntax::js::default_js_loaders, Syntax};
 use reflex_dispatcher::{
     ChainedActor, EitherActor, SchedulerMiddleware, SessionRecorder, StateOperation,
@@ -32,7 +26,9 @@ use reflex_handlers::{
     utils::tls::{create_https_client, tokio_native_tls::native_tls::Certificate},
     DefaultHandlersMetricNames,
 };
+use reflex_interpreter::{compiler::CompilerOptions, InterpreterOptions};
 use reflex_json::JsonValue;
+use reflex_lang::{allocator::DefaultAllocator, CachedSharedTerm, SharedTermFactory};
 use reflex_server::{
     action::ServerCliAction,
     builtins::ServerBuiltins,

@@ -70,6 +70,12 @@ pub fn default_handlers<TAction, T, TFactory, TAllocator, TConnect, TReconnect>(
 ) -> impl Actor<TAction, State = impl Send> + Send + Clone
 where
     T: AsyncExpression + Applicable<T>,
+    T::String: Send,
+    T::Builtin: Send,
+    T::Signal: Send,
+    T::SignalList: Send,
+    T::StructPrototype: Send,
+    T::ExpressionList: Send,
     TFactory: AsyncExpressionFactory<T>,
     TAllocator: AsyncHeapAllocator<T>,
     TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,

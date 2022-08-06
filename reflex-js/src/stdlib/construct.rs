@@ -3,8 +3,8 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use reflex::core::{
-    uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
-    FunctionArity, HeapAllocator, Uid, Uuid,
+    parse_record, uuid, Applicable, ArgType, Arity, ConstructorTermType, EvaluationCache,
+    Expression, ExpressionFactory, FunctionArity, HeapAllocator, Uid, Uuid,
 };
 
 pub struct Construct {}
@@ -43,9 +43,8 @@ impl<T: Expression> Applicable<T> for Construct {
         if let Some(constructor) = factory.match_constructor_term(&target) {
             let prototype = constructor.prototype();
             let properties = args.next().unwrap();
-            prototype
-                .parse_struct(&properties, factory, allocator)
-                .ok_or_else(|| format!("Invalid constructor call: {} {}", constructor, properties))
+            parse_record(prototype, &properties, factory, allocator)
+                .ok_or_else(|| format!("Invalid constructor call: {} {}", target, properties))
         } else {
             Ok(factory.create_application_term(target, allocator.create_list(args)))
         }

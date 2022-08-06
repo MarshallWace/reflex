@@ -8,11 +8,11 @@ use reflex::{
         Applicable, Arity, Builtin, EvaluationCache, Expression, ExpressionFactory, HeapAllocator,
         Uid, Uuid,
     },
-    stdlib::Stdlib,
 };
 use reflex_handlers::stdlib::Stdlib as HandlersStdlib;
 use reflex_js::stdlib::Stdlib as JsStdlib;
 use reflex_json::stdlib::Stdlib as JsonStdlib;
+use reflex_stdlib::Stdlib;
 
 #[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
 pub enum CliBuiltins {

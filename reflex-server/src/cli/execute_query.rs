@@ -4,19 +4,19 @@
 use anyhow::{anyhow, Context, Result};
 use futures::{future, Future, FutureExt};
 use http::{header, HeaderMap, Request, Response};
-use reflex::{
-    compiler::{Compile, CompilerOptions, InstructionPointer, Program},
-    core::{Applicable, Reducible, Rewritable},
-    interpreter::InterpreterOptions,
-    stdlib::Stdlib,
-};
+use reflex::core::{Applicable, InstructionPointer, Reducible, Rewritable};
 use reflex_dispatcher::{
     Action, Actor, PostMiddleware, PreMiddleware, SchedulerMiddleware, SerializableAction,
 };
 use reflex_graphql::{stdlib::Stdlib as GraphQlStdlib, GraphQlOperation, GraphQlSchema};
+use reflex_interpreter::{
+    compiler::{Compile, CompilerOptions, Program},
+    InterpreterOptions,
+};
 use reflex_js::stdlib::Stdlib as JsStdlib;
 use reflex_json::{json, stdlib::Stdlib as JsonStdlib, JsonValue};
 use reflex_runtime::{AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator};
+use reflex_stdlib::Stdlib;
 
 use crate::{
     server::{HttpGraphQlServerQueryTransform, NoopWebSocketGraphQlServerQueryTransform},
@@ -70,6 +70,12 @@ where
         + Compile<T>
         + serde::Serialize
         + serde::Deserialize<'de>,
+    T::String: Send,
+    T::Builtin: Send,
+    T::Signal: Send,
+    T::SignalList: Send,
+    T::StructPrototype: Send,
+    T::ExpressionList: Send,
     T::Builtin: From<Stdlib> + From<JsonStdlib> + From<JsStdlib> + From<GraphQlStdlib>,
     TFactory: AsyncExpressionFactory<T>,
     TAllocator: AsyncHeapAllocator<T>,

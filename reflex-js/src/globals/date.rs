@@ -2,10 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use crate::stdlib::Stdlib as JsStdlib;
-use reflex::{
-    core::{Expression, ExpressionFactory},
-    stdlib::Stdlib,
-};
+use reflex::core::{Expression, ExpressionFactory};
+use reflex_stdlib::Stdlib;
 
 pub fn global_date<T: Expression>(factory: &impl ExpressionFactory<T>) -> T
 where

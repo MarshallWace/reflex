@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use reflex::core::{
-    uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
-    FunctionArity, HeapAllocator, StructPrototype, Uid, Uuid,
+    parse_record, uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
+    FunctionArity, HeapAllocator, Uid, Uuid,
 };
 
 pub struct ToRequest {}
@@ -44,16 +44,21 @@ impl<T: Expression> Applicable<T> for ToRequest {
                 let url = target.clone();
                 let method = factory.create_string_term(allocator.create_static_string("GET"));
                 let headers = factory.create_record_term(
-                    allocator.create_struct_prototype(Vec::new()),
+                    allocator.create_struct_prototype(allocator.create_empty_list()),
                     allocator.create_empty_list(),
                 );
                 let body = factory.create_nil_term();
                 Some(factory.create_record_term(
-                    request_prototype(allocator),
+                    request_prototype(factory, allocator),
                     allocator.create_list(vec![url, method, headers, body]),
                 ))
             }
-            _ => request_prototype(allocator).parse_struct(&target, factory, allocator),
+            _ => parse_record(
+                &request_prototype(factory, allocator),
+                &target,
+                factory,
+                allocator,
+            ),
         };
         match result {
             Some(result) => Ok(result),
@@ -66,12 +71,13 @@ impl<T: Expression> Applicable<T> for ToRequest {
 }
 
 pub(crate) fn request_prototype<T: Expression>(
+    factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> StructPrototype {
-    allocator.create_struct_prototype(vec![
-        String::from("url"),
-        String::from("method"),
-        String::from("headers"),
-        String::from("body"),
-    ])
+) -> T::StructPrototype {
+    allocator.create_struct_prototype(allocator.create_list([
+        factory.create_string_term(allocator.create_static_string("url")),
+        factory.create_string_term(allocator.create_static_string("method")),
+        factory.create_string_term(allocator.create_static_string("headers")),
+        factory.create_string_term(allocator.create_static_string("body")),
+    ]))
 }

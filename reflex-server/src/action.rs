@@ -6,7 +6,7 @@ use reflex_dispatcher::{Action, NamedAction, SerializableAction, SerializedActio
 use reflex_grpc::action::*;
 use reflex_handlers::action::graphql::*;
 use reflex_runtime::action::{effect::*, evaluate::*, query::*, RuntimeActions};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::server::action::{
     graphql_server::*,
@@ -21,8 +21,12 @@ use crate::server::action::{
     websocket_server::*,
 };
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum ServerCliAction<T: Expression> {
+    #[serde(bound(
+        serialize = "<T as Expression>::Signal: Serialize",
+        deserialize = "<T as Expression>::Signal: Deserialize<'de>"
+    ))]
     Runtime(RuntimeActions<T>),
     HttpServer(HttpServerActions),
     WebSocketServer(WebSocketServerActions),

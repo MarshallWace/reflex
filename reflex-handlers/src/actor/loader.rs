@@ -8,12 +8,10 @@ use std::{
 };
 
 use metrics::{decrement_gauge, describe_gauge, increment_gauge, Unit};
-use reflex::{
-    core::{
-        Applicable, Arity, Expression, ExpressionFactory, ExpressionList, HeapAllocator, Signal,
-        SignalType, StateToken, StringValue,
-    },
-    lang::term::SignalTerm,
+use reflex::core::{
+    Applicable, Arity, ConditionListType, ConditionType, Expression, ExpressionFactory,
+    ExpressionListType, HashmapTermType, HeapAllocator, ListTermType, SignalTermType, SignalType,
+    StateToken, StringTermType, StringValue,
 };
 use reflex_dispatcher::{
     Action, Actor, ActorTransition, HandlerContext, InboundAction, MessageData, OutboundAction,
@@ -116,16 +114,16 @@ struct LoaderState<T: Expression> {
     name: String,
     active_keys: HashSet<T>,
     /// Maps keylists to the corresponding loader batch
-    active_batches: HashMap<ExpressionList<T>, LoaderBatch<T>>,
+    active_batches: HashMap<T::ExpressionList, LoaderBatch<T>>,
     /// Maps the individual entity load effect IDs to the keylist of the subscribed batch
-    entity_effect_mappings: HashMap<StateToken, ExpressionList<T>>,
+    entity_effect_mappings: HashMap<StateToken, T::ExpressionList>,
     /// Maps the combined loader batch evaluate effect ID to the keylist of the subscribed batch
-    batch_effect_mappings: HashMap<StateToken, ExpressionList<T>>,
+    batch_effect_mappings: HashMap<StateToken, T::ExpressionList>,
 }
 
 struct LoaderBatch<T: Expression> {
     /// Evaluate effect used to load the batch
-    effect: Signal<T>,
+    effect: T::Signal,
     /// List of entries for all the individual entities contained within this batch
     subscriptions: Vec<LoaderEntitySubscription<T>>,
     /// Maintain a list of which keys are actively subscribed - when this becomes empty the batch is unsubscribed
@@ -135,7 +133,7 @@ struct LoaderBatch<T: Expression> {
 
 struct LoaderEntitySubscription<T: Expression> {
     key: T,
-    effect: Signal<T>,
+    effect: T::Signal,
 }
 
 impl<T: Expression> Default for LoaderHandlerState<T> {
@@ -167,7 +165,7 @@ impl<T: Expression> LoaderHandlerState<T> {
         factory: &impl ExpressionFactory<T>,
         allocator: &impl HeapAllocator<T>,
         metric_names: LoaderHandlerMetricNames,
-    ) -> impl IntoIterator<Item = Signal<T>> {
+    ) -> impl IntoIterator<Item = T::Signal> {
         let loader_state = match self.loaders.entry(loader.clone()) {
             Entry::Occupied(entry) => entry.into_mut(),
             Entry::Vacant(entry) => entry.insert(LoaderState::new(name.clone())),
@@ -235,7 +233,7 @@ impl<T: Expression> LoaderHandlerState<T> {
             IntoIter = impl Iterator<Item = LoaderEntitySubscription<T>> + 'a,
         >,
         metric_names: LoaderHandlerMetricNames,
-    ) -> impl IntoIterator<Item = Signal<T>> {
+    ) -> impl IntoIterator<Item = T::Signal> {
         let (num_previous_keys, unsubscribed_effects) = match self.loaders.get_mut(&loader) {
             None => (None, None),
             Some(loader_state) => {
@@ -282,10 +280,10 @@ impl<T: Expression> LoaderHandlerState<T> {
 fn create_load_batch_effect<T: Expression>(
     label: String,
     loader: T,
-    keys: ExpressionList<T>,
+    keys: T::ExpressionList,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> Signal<T> {
+) -> T::Signal {
     create_evaluate_effect(
         label,
         factory.create_application_term(
@@ -364,7 +362,7 @@ where
                 HashMap::<T, (String, Vec<LoaderEntitySubscription<T>>)>::default(),
             ),
             |(mut initial_values, mut results), effect| {
-                match parse_loader_effect_args(&effect, &self.factory) {
+                match parse_loader_effect_args(effect, &self.factory) {
                     Ok(args) => {
                         let LoaderEffectArgs { name, loader, key } = args;
                         let subscription = LoaderEntitySubscription {
@@ -457,7 +455,7 @@ where
         let effects_by_loader = effects.iter().fold(
             HashMap::<T, (String, Vec<LoaderEntitySubscription<T>>)>::default(),
             |mut results, effect| {
-                if let Ok(args) = parse_loader_effect_args(&effect, &self.factory) {
+                if let Ok(args) = parse_loader_effect_args(effect, &self.factory) {
                     let LoaderEffectArgs { name, loader, key } = args;
                     let subscription = LoaderEntitySubscription {
                         key,
@@ -632,7 +630,7 @@ where
 }
 
 fn has_error_message_effects<T: Expression>(
-    term: &SignalTerm<T>,
+    term: &T::SignalTerm,
     factory: &impl ExpressionFactory<T>,
 ) -> bool {
     term.signals()
@@ -642,7 +640,7 @@ fn has_error_message_effects<T: Expression>(
 
 fn prefix_error_message_effects<T: Expression>(
     prefix: &str,
-    term: &SignalTerm<T>,
+    term: &T::SignalTerm,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
 ) -> T {
@@ -668,8 +666,8 @@ fn prefix_error_message_effects<T: Expression>(
     )
 }
 
-fn as_error_message_effect<'a, T: Expression>(
-    effect: &'a Signal<T>,
+fn as_error_message_effect<'a, T: Expression + 'a>(
+    effect: &'a T::Signal,
     factory: &impl ExpressionFactory<T>,
 ) -> Option<&'a T::String> {
     if !matches!(effect.signal_type(), SignalType::Error) {
@@ -679,7 +677,7 @@ fn as_error_message_effect<'a, T: Expression>(
         .args()
         .iter()
         .next()
-        .and_then(|arg| factory.match_string_term(arg).map(|term| &term.value))
+        .and_then(|arg| factory.match_string_term(arg).map(|term| term.value()))
 }
 
 struct LoaderEffectArgs<T: Expression> {
@@ -689,22 +687,23 @@ struct LoaderEffectArgs<T: Expression> {
 }
 
 fn parse_loader_effect_args<T: Expression + Applicable<T>>(
-    effect: &Signal<T>,
+    effect: &T::Signal,
     factory: &impl ExpressionFactory<T>,
 ) -> Result<LoaderEffectArgs<T>, String> {
-    let mut args = effect.args().into_iter();
+    let args = effect.args();
     if args.len() != 3 {
         return Err(format!(
             "Invalid loader signal: Expected 3 arguments, received {}",
             args.len()
         ));
     }
+    let mut args = args.iter();
     let name = args.next().unwrap();
     let loader = args.next().unwrap();
     let key = args.next().unwrap();
     let name = factory
         .match_string_term(name)
-        .map(|term| term.value.as_str())
+        .map(|term| term.value().as_str())
         .ok_or(name);
     match (name, loader.arity()) {
         (Ok(name), Some(arity)) if is_valid_loader_signature(&arity) => Ok(LoaderEffectArgs {

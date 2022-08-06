@@ -1,11 +1,8 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use reflex::{
-    core::{Expression, ExpressionFactory, HeapAllocator},
-    lang::create_record,
-    stdlib::Stdlib,
-};
+use reflex::core::{create_record, Expression, ExpressionFactory, HeapAllocator};
+use reflex_stdlib::Stdlib;
 
 pub fn import_core<T: Expression>(
     factory: &impl ExpressionFactory<T>,
@@ -17,256 +14,271 @@ where
     create_record(
         [
             (
-                String::from("abs"),
+                factory.create_string_term(allocator.create_static_string("abs")),
                 factory.create_builtin_term(Stdlib::Abs),
             ),
             (
-                String::from("add"),
+                factory.create_string_term(allocator.create_static_string("add")),
                 factory.create_builtin_term(Stdlib::Add),
             ),
             (
-                String::from("and"),
+                factory.create_string_term(allocator.create_static_string("and")),
                 factory.create_builtin_term(Stdlib::And),
             ),
             (
-                String::from("append"),
+                factory.create_string_term(allocator.create_static_string("append")),
                 factory.create_builtin_term(Stdlib::Append),
             ),
             (
-                String::from("apply"),
+                factory.create_string_term(allocator.create_static_string("apply")),
                 factory.create_builtin_term(Stdlib::Apply),
             ),
             (
-                String::from("car"),
+                factory.create_string_term(allocator.create_static_string("car")),
                 factory.create_builtin_term(Stdlib::Car),
             ),
             (
-                String::from("cdr"),
+                factory.create_string_term(allocator.create_static_string("cdr")),
                 factory.create_builtin_term(Stdlib::Cdr),
             ),
             (
-                String::from("ceil"),
+                factory.create_string_term(allocator.create_static_string("ceil")),
                 factory.create_builtin_term(Stdlib::Ceil),
             ),
             (
-                String::from("collect"),
+                factory.create_string_term(allocator.create_static_string("collect")),
                 factory.create_builtin_term(Stdlib::Collect),
             ),
             (
-                String::from("collectHashMap"),
+                factory.create_string_term(allocator.create_static_string("collectHashMap")),
                 factory.create_builtin_term(Stdlib::CollectHashMap),
             ),
             (
-                String::from("collectHashSet"),
+                factory.create_string_term(allocator.create_static_string("collectHashSet")),
                 factory.create_builtin_term(Stdlib::CollectHashSet),
             ),
             (
-                String::from("collectRecord"),
+                factory.create_string_term(allocator.create_static_string("collectRecord")),
                 factory.create_builtin_term(Stdlib::CollectRecord),
             ),
             (
-                String::from("collectList"),
+                factory.create_string_term(allocator.create_static_string("collectList")),
                 factory.create_builtin_term(Stdlib::CollectList),
             ),
             (
-                String::from("concat"),
+                factory.create_string_term(allocator.create_static_string("concat")),
                 factory.create_builtin_term(Stdlib::Concat),
             ),
             (
-                String::from("cons"),
+                factory.create_string_term(allocator.create_static_string("cons")),
                 factory.create_builtin_term(Stdlib::Cons),
             ),
             (
-                String::from("constructHashMap"),
+                factory.create_string_term(allocator.create_static_string("constructHashMap")),
                 factory.create_builtin_term(Stdlib::ConstructHashMap),
             ),
             (
-                String::from("constructHashSet"),
+                factory.create_string_term(allocator.create_static_string("constructHashSet")),
                 factory.create_builtin_term(Stdlib::ConstructHashSet),
             ),
             (
-                String::from("constructRecord"),
+                factory.create_string_term(allocator.create_static_string("constructRecord")),
                 factory.create_builtin_term(Stdlib::ConstructRecord),
             ),
             (
-                String::from("constructList"),
+                factory.create_string_term(allocator.create_static_string("constructList")),
                 factory.create_builtin_term(Stdlib::ConstructList),
             ),
             (
-                String::from("contains"),
+                factory.create_string_term(allocator.create_static_string("contains")),
                 factory.create_builtin_term(Stdlib::Contains),
             ),
             (
-                String::from("divide"),
+                factory.create_string_term(allocator.create_static_string("divide")),
                 factory.create_builtin_term(Stdlib::Divide),
             ),
             (
-                String::from("effect"),
+                factory.create_string_term(allocator.create_static_string("effect")),
                 factory.create_builtin_term(Stdlib::Effect),
             ),
             (
-                String::from("endsWith"),
+                factory.create_string_term(allocator.create_static_string("endsWith")),
                 factory.create_builtin_term(Stdlib::EndsWith),
             ),
             (
-                String::from("entries"),
+                factory.create_string_term(allocator.create_static_string("entries")),
                 factory.create_builtin_term(Stdlib::Entries),
             ),
-            (String::from("eq"), factory.create_builtin_term(Stdlib::Eq)),
             (
-                String::from("equal"),
+                factory.create_string_term(allocator.create_static_string("eq")),
+                factory.create_builtin_term(Stdlib::Eq),
+            ),
+            (
+                factory.create_string_term(allocator.create_static_string("equal")),
                 factory.create_builtin_term(Stdlib::Equal),
             ),
             (
-                String::from("filter"),
+                factory.create_string_term(allocator.create_static_string("filter")),
                 factory.create_builtin_term(Stdlib::Filter),
             ),
             (
-                String::from("floor"),
+                factory.create_string_term(allocator.create_static_string("floor")),
                 factory.create_builtin_term(Stdlib::Floor),
             ),
             (
-                String::from("get"),
+                factory.create_string_term(allocator.create_static_string("get")),
                 factory.create_builtin_term(Stdlib::Get),
             ),
-            (String::from("gt"), factory.create_builtin_term(Stdlib::Gt)),
             (
-                String::from("gte"),
+                factory.create_string_term(allocator.create_static_string("gt")),
+                factory.create_builtin_term(Stdlib::Gt),
+            ),
+            (
+                factory.create_string_term(allocator.create_static_string("gte")),
                 factory.create_builtin_term(Stdlib::Gte),
             ),
-            (String::from("if"), factory.create_builtin_term(Stdlib::If)),
             (
-                String::from("ifError"),
+                factory.create_string_term(allocator.create_static_string("if")),
+                factory.create_builtin_term(Stdlib::If),
+            ),
+            (
+                factory.create_string_term(allocator.create_static_string("ifError")),
                 factory.create_builtin_term(Stdlib::IfError),
             ),
             (
-                String::from("ifPending"),
+                factory.create_string_term(allocator.create_static_string("ifPending")),
                 factory.create_builtin_term(Stdlib::IfPending),
             ),
             (
-                String::from("insert"),
+                factory.create_string_term(allocator.create_static_string("insert")),
                 factory.create_builtin_term(Stdlib::Insert),
             ),
             (
-                String::from("keys"),
+                factory.create_string_term(allocator.create_static_string("keys")),
                 factory.create_builtin_term(Stdlib::Keys),
             ),
             (
-                String::from("length"),
+                factory.create_string_term(allocator.create_static_string("length")),
                 factory.create_builtin_term(Stdlib::Length),
             ),
-            (String::from("lt"), factory.create_builtin_term(Stdlib::Lt)),
             (
-                String::from("lte"),
+                factory.create_string_term(allocator.create_static_string("lt")),
+                factory.create_builtin_term(Stdlib::Lt),
+            ),
+            (
+                factory.create_string_term(allocator.create_static_string("lte")),
                 factory.create_builtin_term(Stdlib::Lte),
             ),
             (
-                String::from("map"),
+                factory.create_string_term(allocator.create_static_string("map")),
                 factory.create_builtin_term(Stdlib::Map),
             ),
             (
-                String::from("match"),
+                factory.create_string_term(allocator.create_static_string("match")),
                 factory.create_builtin_term(Stdlib::Match),
             ),
             (
-                String::from("max"),
+                factory.create_string_term(allocator.create_static_string("max")),
                 factory.create_builtin_term(Stdlib::Max),
             ),
             (
-                String::from("merge"),
+                factory.create_string_term(allocator.create_static_string("merge")),
                 factory.create_builtin_term(Stdlib::Merge),
             ),
             (
-                String::from("min"),
+                factory.create_string_term(allocator.create_static_string("min")),
                 factory.create_builtin_term(Stdlib::Min),
             ),
             (
-                String::from("multiply"),
+                factory.create_string_term(allocator.create_static_string("multiply")),
                 factory.create_builtin_term(Stdlib::Multiply),
             ),
             (
-                String::from("not"),
+                factory.create_string_term(allocator.create_static_string("not")),
                 factory.create_builtin_term(Stdlib::Not),
             ),
-            (String::from("or"), factory.create_builtin_term(Stdlib::Or)),
             (
-                String::from("pow"),
+                factory.create_string_term(allocator.create_static_string("or")),
+                factory.create_builtin_term(Stdlib::Or),
+            ),
+            (
+                factory.create_string_term(allocator.create_static_string("pow")),
                 factory.create_builtin_term(Stdlib::Pow),
             ),
             (
-                String::from("push"),
+                factory.create_string_term(allocator.create_static_string("push")),
                 factory.create_builtin_term(Stdlib::Push),
             ),
             (
-                String::from("pushFront"),
+                factory.create_string_term(allocator.create_static_string("pushFront")),
                 factory.create_builtin_term(Stdlib::PushFront),
             ),
             (
-                String::from("reduce"),
+                factory.create_string_term(allocator.create_static_string("reduce")),
                 factory.create_builtin_term(Stdlib::Reduce),
             ),
             (
-                String::from("remainder"),
+                factory.create_string_term(allocator.create_static_string("remainder")),
                 factory.create_builtin_term(Stdlib::Remainder),
             ),
             (
-                String::from("replace"),
+                factory.create_string_term(allocator.create_static_string("replace")),
                 factory.create_builtin_term(Stdlib::Replace),
             ),
             (
-                String::from("resolveArgs"),
+                factory.create_string_term(allocator.create_static_string("resolveArgs")),
                 factory.create_builtin_term(Stdlib::ResolveArgs),
             ),
             (
-                String::from("resolveDeep"),
+                factory.create_string_term(allocator.create_static_string("resolveDeep")),
                 factory.create_builtin_term(Stdlib::ResolveDeep),
             ),
             (
-                String::from("resolveHashMap"),
+                factory.create_string_term(allocator.create_static_string("resolveHashMap")),
                 factory.create_builtin_term(Stdlib::ResolveHashMap),
             ),
             (
-                String::from("resolveHashSet"),
+                factory.create_string_term(allocator.create_static_string("resolveHashSet")),
                 factory.create_builtin_term(Stdlib::ResolveHashSet),
             ),
             (
-                String::from("resolveShallow"),
+                factory.create_string_term(allocator.create_static_string("resolveShallow")),
                 factory.create_builtin_term(Stdlib::ResolveShallow),
             ),
             (
-                String::from("resolveRecord"),
+                factory.create_string_term(allocator.create_static_string("resolveRecord")),
                 factory.create_builtin_term(Stdlib::ResolveRecord),
             ),
             (
-                String::from("resolveList"),
+                factory.create_string_term(allocator.create_static_string("resolveList")),
                 factory.create_builtin_term(Stdlib::ResolveList),
             ),
             (
-                String::from("round"),
+                factory.create_string_term(allocator.create_static_string("round")),
                 factory.create_builtin_term(Stdlib::Round),
             ),
             (
-                String::from("sequence"),
+                factory.create_string_term(allocator.create_static_string("sequence")),
                 factory.create_builtin_term(Stdlib::Sequence),
             ),
             (
-                String::from("slice"),
+                factory.create_string_term(allocator.create_static_string("slice")),
                 factory.create_builtin_term(Stdlib::Slice),
             ),
             (
-                String::from("split"),
+                factory.create_string_term(allocator.create_static_string("split")),
                 factory.create_builtin_term(Stdlib::Split),
             ),
             (
-                String::from("startsWith"),
+                factory.create_string_term(allocator.create_static_string("startsWith")),
                 factory.create_builtin_term(Stdlib::StartsWith),
             ),
             (
-                String::from("subtract"),
+                factory.create_string_term(allocator.create_static_string("subtract")),
                 factory.create_builtin_term(Stdlib::Subtract),
             ),
             (
-                String::from("values"),
+                factory.create_string_term(allocator.create_static_string("values")),
                 factory.create_builtin_term(Stdlib::Values),
             ),
         ],

@@ -7,15 +7,11 @@ use std::{
 };
 
 use anyhow::{anyhow, Result};
-use reflex::{
-    compiler::Compile,
-    core::{Applicable, Expression, ExpressionFactory, HeapAllocator},
-    stdlib::Stdlib,
+use reflex::core::{
+    Applicable, Expression, ExpressionFactory, HeapAllocator, Reducible, Rewritable,
 };
-use reflex::{
-    compiler::CompilerOptions,
-    core::{Reducible, Rewritable},
-};
+use reflex_interpreter::compiler::{Compile, CompilerOptions};
+use reflex_stdlib::Stdlib;
 
 use crate::{compile_entry_point, Syntax};
 use reflex_js::stdlib::Stdlib as JsStdlib;

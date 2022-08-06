@@ -33,6 +33,7 @@ impl ProtoTranscoder for WellKnownTypesTranscoder {
         message_type: &MessageDescriptor,
         transcoder: &impl ProtoTranscoder,
         factory: &impl ExpressionFactory<T>,
+        allocator: &impl HeapAllocator<T>,
     ) -> Result<DynamicMessage, TranscodeError> {
         match message_type.full_name() {
             AnyMessage::NAME => AnyMessage
@@ -75,7 +76,7 @@ impl ProtoTranscoder for WellKnownTypesTranscoder {
                 .serialize(value, message_type, factory)
                 .map_err(TranscodeError::from),
             _ => GenericTranscoder
-                .serialize_message(value, message_type, transcoder, factory)
+                .serialize_message(value, message_type, transcoder, factory, allocator)
                 .map_err(TranscodeError::from),
         }
     }
@@ -135,11 +136,9 @@ impl ProtoTranscoder for WellKnownTypesTranscoder {
 mod tests {
     use bytes::Bytes;
     use prost_reflect::{ReflectMessage, Value};
-    use reflex::{
-        allocator::DefaultAllocator,
-        lang::{create_record, CachedSharedTerm, SharedTermFactory},
-        stdlib::Stdlib,
-    };
+    use reflex::core::create_record;
+    use reflex_lang::{allocator::DefaultAllocator, CachedSharedTerm, SharedTermFactory};
+    use reflex_stdlib::Stdlib;
 
     use crate::ErrorPath;
 
@@ -166,13 +165,19 @@ mod tests {
                 .unwrap();
             let value = create_record(
                 [(
-                    String::from("user"),
-                    factory.create_string_term(allocator.create_string("foo")),
+                    factory.create_string_term(allocator.create_static_string("user")),
+                    factory.create_string_term(allocator.create_static_string("foo")),
                 )],
                 &factory,
                 &allocator,
             );
-            let result = transcoder.serialize_message(&value, &message_type, &transcoder, &factory);
+            let result = transcoder.serialize_message(
+                &value,
+                &message_type,
+                &transcoder,
+                &factory,
+                &allocator,
+            );
             assert_eq!(
                 result,
                 Ok({
@@ -208,8 +213,8 @@ mod tests {
                 result,
                 Ok(create_record(
                     [(
-                        String::from("user"),
-                        factory.create_string_term(allocator.create_string("foo"))
+                        factory.create_string_term(allocator.create_static_string("user")),
+                        factory.create_string_term(allocator.create_static_string("foo"))
                     )],
                     &factory,
                     &allocator
@@ -232,18 +237,26 @@ mod tests {
             let value = create_record(
                 [
                     (
-                        String::from("typeUrl"),
-                        factory.create_string_term(allocator.create_string("http://example.com/")),
+                        factory.create_string_term(allocator.create_static_string("typeUrl")),
+                        factory.create_string_term(
+                            allocator.create_static_string("http://example.com/"),
+                        ),
                     ),
                     (
-                        String::from("value"),
-                        factory.create_string_term(allocator.create_string("foo")),
+                        factory.create_string_term(allocator.create_static_string("value")),
+                        factory.create_string_term(allocator.create_static_string("foo")),
                     ),
                 ],
                 &factory,
                 &allocator,
             );
-            let result = transcoder.serialize_message(&value, &message_type, &transcoder, &factory);
+            let result = transcoder.serialize_message(
+                &value,
+                &message_type,
+                &transcoder,
+                &factory,
+                &allocator,
+            );
             assert_eq!(
                 result,
                 Err(TranscodeError {
@@ -293,8 +306,14 @@ mod tests {
             let factory = SharedTermFactory::<Stdlib>::default();
             let allocator = DefaultAllocator::<CachedSharedTerm<Stdlib>>::default();
             let transcoder = WellKnownTypesTranscoder;
-            let value = factory.create_string_term(allocator.create_string("3.142s"));
-            let result = transcoder.serialize_message(&value, &message_type, &transcoder, &factory);
+            let value = factory.create_string_term(allocator.create_static_string("3.142s"));
+            let result = transcoder.serialize_message(
+                &value,
+                &message_type,
+                &transcoder,
+                &factory,
+                &allocator,
+            );
             assert_eq!(
                 result,
                 Ok({
@@ -322,7 +341,7 @@ mod tests {
                 transcoder.deserialize_message(&message, &transcoder, &factory, &allocator);
             assert_eq!(
                 result,
-                Ok(factory.create_string_term(allocator.create_string("3.142s"))),
+                Ok(factory.create_string_term(allocator.create_static_string("3.142s"))),
             );
         }
     }
@@ -337,7 +356,13 @@ mod tests {
             let allocator = DefaultAllocator::<CachedSharedTerm<Stdlib>>::default();
             let transcoder = WellKnownTypesTranscoder;
             let value = create_record([], &factory, &allocator);
-            let result = transcoder.serialize_message(&value, &message_type, &transcoder, &factory);
+            let result = transcoder.serialize_message(
+                &value,
+                &message_type,
+                &transcoder,
+                &factory,
+                &allocator,
+            );
             assert_eq!(result, Ok(DynamicMessage::new(message_type.clone())));
         }
 
@@ -365,8 +390,15 @@ mod tests {
             let factory = SharedTermFactory::<Stdlib>::default();
             let allocator = DefaultAllocator::<CachedSharedTerm<Stdlib>>::default();
             let transcoder = WellKnownTypesTranscoder;
-            let value = factory.create_string_term(allocator.create_string("2000-01-01T00:00:00Z"));
-            let result = transcoder.serialize_message(&value, &message_type, &transcoder, &factory);
+            let value =
+                factory.create_string_term(allocator.create_static_string("2000-01-01T00:00:00Z"));
+            let result = transcoder.serialize_message(
+                &value,
+                &message_type,
+                &transcoder,
+                &factory,
+                &allocator,
+            );
             assert_eq!(
                 result,
                 Ok({
@@ -394,7 +426,8 @@ mod tests {
                 transcoder.deserialize_message(&message, &transcoder, &factory, &allocator);
             assert_eq!(
                 result,
-                Ok(factory.create_string_term(allocator.create_string("2000-01-01T00:00:00Z"))),
+                Ok(factory
+                    .create_string_term(allocator.create_static_string("2000-01-01T00:00:00Z"))),
             );
         }
     }
@@ -409,10 +442,16 @@ mod tests {
             fn serialize() {
                 let message_type = f64::default().descriptor();
                 let factory = SharedTermFactory::<Stdlib>::default();
+                let allocator = DefaultAllocator::default();
                 let transcoder = WellKnownTypesTranscoder;
                 let value = factory.create_float_term(3.142);
-                let result =
-                    transcoder.serialize_message(&value, &message_type, &transcoder, &factory);
+                let result = transcoder.serialize_message(
+                    &value,
+                    &message_type,
+                    &transcoder,
+                    &factory,
+                    &allocator,
+                );
                 assert_eq!(
                     result,
                     Ok({
@@ -447,10 +486,16 @@ mod tests {
             fn serialize() {
                 let message_type = f32::default().descriptor();
                 let factory = SharedTermFactory::<Stdlib>::default();
+                let allocator = DefaultAllocator::default();
                 let transcoder = WellKnownTypesTranscoder;
                 let value = factory.create_float_term(3.142_f32 as f64);
-                let result =
-                    transcoder.serialize_message(&value, &message_type, &transcoder, &factory);
+                let result = transcoder.serialize_message(
+                    &value,
+                    &message_type,
+                    &transcoder,
+                    &factory,
+                    &allocator,
+                );
                 assert_eq!(
                     result,
                     Ok({
@@ -485,10 +530,16 @@ mod tests {
             fn serialize() {
                 let message_type = i64::default().descriptor();
                 let factory = SharedTermFactory::<Stdlib>::default();
+                let allocator = DefaultAllocator::default();
                 let transcoder = WellKnownTypesTranscoder;
                 let value = factory.create_int_term(3);
-                let result =
-                    transcoder.serialize_message(&value, &message_type, &transcoder, &factory);
+                let result = transcoder.serialize_message(
+                    &value,
+                    &message_type,
+                    &transcoder,
+                    &factory,
+                    &allocator,
+                );
                 assert_eq!(
                     result,
                     Ok({
@@ -523,10 +574,16 @@ mod tests {
             fn serialize() {
                 let message_type = u64::default().descriptor();
                 let factory = SharedTermFactory::<Stdlib>::default();
+                let allocator = DefaultAllocator::default();
                 let transcoder = WellKnownTypesTranscoder;
                 let value = factory.create_int_term(3);
-                let result =
-                    transcoder.serialize_message(&value, &message_type, &transcoder, &factory);
+                let result = transcoder.serialize_message(
+                    &value,
+                    &message_type,
+                    &transcoder,
+                    &factory,
+                    &allocator,
+                );
                 assert_eq!(
                     result,
                     Ok({
@@ -561,10 +618,16 @@ mod tests {
             fn serialize() {
                 let message_type = i32::default().descriptor();
                 let factory = SharedTermFactory::<Stdlib>::default();
+                let allocator = DefaultAllocator::default();
                 let transcoder = WellKnownTypesTranscoder;
                 let value = factory.create_int_term(3);
-                let result =
-                    transcoder.serialize_message(&value, &message_type, &transcoder, &factory);
+                let result = transcoder.serialize_message(
+                    &value,
+                    &message_type,
+                    &transcoder,
+                    &factory,
+                    &allocator,
+                );
                 assert_eq!(
                     result,
                     Ok({
@@ -599,10 +662,16 @@ mod tests {
             fn serialize() {
                 let message_type = u32::default().descriptor();
                 let factory = SharedTermFactory::<Stdlib>::default();
+                let allocator = DefaultAllocator::default();
                 let transcoder = WellKnownTypesTranscoder;
                 let value = factory.create_int_term(3);
-                let result =
-                    transcoder.serialize_message(&value, &message_type, &transcoder, &factory);
+                let result = transcoder.serialize_message(
+                    &value,
+                    &message_type,
+                    &transcoder,
+                    &factory,
+                    &allocator,
+                );
                 assert_eq!(
                     result,
                     Ok({
@@ -637,10 +706,16 @@ mod tests {
             fn serialize() {
                 let message_type = bool::default().descriptor();
                 let factory = SharedTermFactory::<Stdlib>::default();
+                let allocator = DefaultAllocator::default();
                 let transcoder = WellKnownTypesTranscoder;
                 let value = factory.create_boolean_term(true);
-                let result =
-                    transcoder.serialize_message(&value, &message_type, &transcoder, &factory);
+                let result = transcoder.serialize_message(
+                    &value,
+                    &message_type,
+                    &transcoder,
+                    &factory,
+                    &allocator,
+                );
                 assert_eq!(
                     result,
                     Ok({

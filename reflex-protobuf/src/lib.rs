@@ -47,6 +47,7 @@ pub trait ProtoTranscoder {
         message_type: &MessageDescriptor,
         transcoder: &impl ProtoTranscoder,
         factory: &impl ExpressionFactory<T>,
+        allocator: &impl HeapAllocator<T>,
     ) -> Result<DynamicMessage, TranscodeError>;
     fn deserialize_message<T: Expression>(
         &self,
@@ -66,8 +67,9 @@ impl ProtoTranscoder for GenericTranscoder {
         message_type: &MessageDescriptor,
         transcoder: &impl ProtoTranscoder,
         factory: &impl ExpressionFactory<T>,
+        allocator: &impl HeapAllocator<T>,
     ) -> Result<DynamicMessage, TranscodeError> {
-        serialize_generic_message(value, message_type, transcoder, factory)
+        serialize_generic_message(value, message_type, transcoder, factory, allocator)
     }
     fn deserialize_message<T: Expression>(
         &self,
@@ -237,13 +239,14 @@ pub fn serialize_message<'a, T: Expression>(
     protos: &ProtoLibrary,
     transcoder: &impl ProtoTranscoder,
     factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
 ) -> Result<Vec<u8>, SerializationError<'a>> {
     let message_type = protos
         .as_inner()
         .get_message_by_name(message_type)
         .ok_or_else(|| SerializationError::InvalidMessageName(message_type))?;
     let dynamic_message = transcoder
-        .serialize_message(value, &message_type, transcoder, factory)
+        .serialize_message(value, &message_type, transcoder, factory, allocator)
         .map_err(SerializationError::TranscodeError)?;
     Ok(dynamic_message.encode_to_vec())
 }

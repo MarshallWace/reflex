@@ -4,10 +4,7 @@
 use std::collections::HashMap;
 
 use prost_reflect::{DynamicMessage, FieldDescriptor, Kind, MapKey, ReflectMessage, Value};
-use reflex::{
-    core::{Expression, ExpressionFactory, HeapAllocator},
-    lang::create_record,
-};
+use reflex::core::{create_record, Expression, ExpressionFactory, HeapAllocator};
 
 use crate::{
     utils::{count_iterator_items, create_invalid_field_type_error_message, CountedIteratorItems},
@@ -41,7 +38,15 @@ pub(crate) fn deserialize_generic_message<T: Expression>(
     Ok(create_record(
         simple_fields
             .chain(oneof_fields)
-            .map(|result| result.map(|(field, value)| (String::from(field.json_name()), value)))
+            .map(|result| {
+                result.map(|(field, value)| {
+                    (
+                        // TODO: cache protobuf schema field name strings
+                        factory.create_string_term(allocator.create_string(field.json_name())),
+                        value,
+                    )
+                })
+            })
             .collect::<Result<Vec<_>, _>>()?,
         factory,
         allocator,
@@ -181,24 +186,41 @@ fn deserialize_map_field_value<T: Expression>(
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
 ) -> Result<T, TranscodeError> {
-    Ok(create_record(
-        value
-            .iter()
-            .map(|(key, value)| match key {
-                MapKey::String(key) => {
-                    deserialize_field_value(value, field_type, transcoder, factory, allocator)
-                        .map_err(|err| err.with_path_prefix(key.as_str().into()))
-                        .map(|value| (String::from(key.as_str()), value))
-                }
-                _ => Err(TranscodeError::from(format!(
-                    "Invalid map key: Expected string, received {}",
-                    format_map_key(key)
-                ))),
-            })
-            .collect::<Result<Vec<_>, _>>()?,
-        factory,
-        allocator,
-    ))
+    let (keys, values): (Vec<T>, Vec<T>) = value
+        .iter()
+        .map(|(key, value)| {
+            match (
+                deserialize_map_key(key, factory, allocator),
+                deserialize_field_value(value, field_type, transcoder, factory, allocator),
+            ) {
+                (Ok(key), Ok(value)) => Ok((key, value)),
+                (Err(key_err), _) => Err(key_err),
+                (_, Err(value_err)) => Err(value_err),
+            }
+            .map_err(|err| err.with_path_prefix(format_map_key(key).into()))
+        })
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
+        .unzip();
+    Ok(factory.create_hashmap_term(allocator.create_list(keys), allocator.create_list(values)))
+}
+
+fn deserialize_map_key<T: Expression>(
+    value: &MapKey,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> Result<T, TranscodeError> {
+    match value {
+        MapKey::Bool(value) => Ok(factory.create_boolean_term(*value)),
+        MapKey::I32(value) => Ok(factory.create_int_term(*value)),
+        MapKey::String(value) => {
+            Ok(factory.create_string_term(allocator.create_string(value.as_str())))
+        }
+        MapKey::U32(_) => Err("u32"),
+        MapKey::I64(_) => Err("i64"),
+        MapKey::U64(_) => Err("u64"),
+    }
+    .map_err(|value_type| TranscodeError::from(format!("Invalid map key type: {}", value_type)))
 }
 
 fn format_map_key(key: &MapKey) -> String {

@@ -1,11 +1,8 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use reflex::{
-    core::{Expression, ExpressionFactory, HeapAllocator},
-    lang::create_record,
-    stdlib::Stdlib,
-};
+use reflex::core::{create_record, Expression, ExpressionFactory, HeapAllocator};
+use reflex_stdlib::Stdlib;
 
 use crate::stdlib::Stdlib as HandlersStdlib;
 
@@ -17,29 +14,29 @@ where
     T::Builtin: From<Stdlib> + From<HandlersStdlib>,
 {
     create_record(
-        vec![
+        [
             (
-                String::from("scan"),
+                factory.create_string_term(allocator.create_static_string("scan")),
                 factory.create_builtin_term(HandlersStdlib::Scan),
             ),
             (
-                String::from("get"),
+                factory.create_string_term(allocator.create_static_string("get")),
                 factory.create_builtin_term(HandlersStdlib::GetVariable),
             ),
             (
-                String::from("set"),
+                factory.create_string_term(allocator.create_static_string("set")),
                 factory.create_builtin_term(HandlersStdlib::SetVariable),
             ),
             (
-                String::from("increment"),
+                factory.create_string_term(allocator.create_static_string("increment")),
                 factory.create_builtin_term(HandlersStdlib::IncrementVariable),
             ),
             (
-                String::from("decrement"),
+                factory.create_string_term(allocator.create_static_string("decrement")),
                 factory.create_builtin_term(HandlersStdlib::DecrementVariable),
             ),
             (
-                String::from("variable"),
+                factory.create_string_term(allocator.create_static_string("variable")),
                 factory.create_lambda_term(
                     2,
                     factory.create_list_term(allocator.create_pair(

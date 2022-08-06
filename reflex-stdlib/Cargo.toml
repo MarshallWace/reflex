@@ -1,0 +1,13 @@
+[package]
+name = "reflex-stdlib"
+version = "0.1.0"
+license = "Apache-2.0"
+authors = ["Marshall Wace LLP <opensource@mwam.com>", "Tim Kendrick <t.kendrick@mwam.com>"]
+edition = "2021"
+
+[dependencies]
+reflex = { path = "../reflex" }
+serde = { version = "1.0", features = ["derive", "rc"] }
+strum = "0.22"
+strum_macros = "0.22"
+

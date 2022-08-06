@@ -15,9 +15,12 @@ reflex-dispatcher = { path = "../reflex-dispatcher" }
 reflex-graphql = { path = "../reflex-graphql" }
 reflex-grpc = { path = "../reflex-grpc" }
 reflex-handlers = { path = "../reflex-handlers" }
+reflex-interpreter = { path = "../reflex-interpreter" }
 reflex-js = { path = "../reflex-js" }
 reflex-json = { path = "../reflex-json" }
+reflex-lang = { path = "../reflex-lang" }
 reflex-runtime = { path = "../reflex-runtime" }
+reflex-stdlib = { path = "../reflex-stdlib" }
 reflex-utils = { path = "../reflex-utils" }
 anyhow = "1.0"
 bytes = "1.1.0"
@@ -46,6 +49,9 @@ tonic = { version = "0.6.2", features = ["tls"] }
 tracing = { version = "0.1.0", features = ["release_max_level_info"] }
 tracing-subscriber = "0.3"
 uuid = { version = "1.0.0-alpha.1", features = ["v4", "fast-rng"] }
+
+[dev-dependencies]
+reflex-lisp = { path = "../reflex-lisp" }
 
 [[bin]]
 name = "reflex-server"

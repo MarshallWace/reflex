@@ -4,17 +4,15 @@
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use std::convert::{TryFrom, TryInto};
 
-use reflex::{
-    core::{
-        Applicable, Arity, Builtin, EvaluationCache, Expression, ExpressionFactory, HeapAllocator,
-        Uid, Uuid,
-    },
-    stdlib::Stdlib,
+use reflex::core::{
+    Applicable, Arity, Builtin, EvaluationCache, Expression, ExpressionFactory, HeapAllocator, Uid,
+    Uuid,
 };
 use reflex_graphql::stdlib::Stdlib as GraphQlStdlib;
 use reflex_handlers::stdlib::Stdlib as HandlersStdlib;
 use reflex_js::stdlib::Stdlib as JsStdlib;
 use reflex_json::stdlib::Stdlib as JsonStdlib;
+use reflex_stdlib::Stdlib;
 use serde::{Deserialize, Serialize};
 
 use crate::stdlib::Stdlib as ServerStdlib;
@@ -150,9 +148,8 @@ impl std::fmt::Display for ServerBuiltins {
 #[cfg(test)]
 mod test {
     use super::*;
-    use reflex::allocator::DefaultAllocator;
-    use reflex::lang::{CachedSharedTerm, SharedTermFactory};
-    use reflex::parser::sexpr::parse;
+    use reflex_lang::{allocator::DefaultAllocator, CachedSharedTerm, SharedTermFactory};
+    use reflex_lisp::parse;
 
     #[test]
     fn serialization() {

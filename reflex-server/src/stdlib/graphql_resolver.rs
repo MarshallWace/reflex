@@ -3,7 +3,7 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use reflex::core::{
     uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
-    FunctionArity, HeapAllocator, Uid, Uuid,
+    FunctionArity, HeapAllocator, RecordTermType, Uid, Uuid,
 };
 
 pub struct GraphQlResolver {}
@@ -34,15 +34,23 @@ impl<T: Expression + Applicable<T>> Applicable<T> for GraphQlResolver {
         &self,
         args: impl ExactSizeIterator<Item = T>,
         factory: &impl ExpressionFactory<T>,
-        _allocator: &impl HeapAllocator<T>,
+        allocator: &impl HeapAllocator<T>,
         _cache: &mut impl EvaluationCache<T>,
     ) -> Result<T, String> {
         let mut args = args.into_iter();
         let root = args.next().unwrap();
         if let Some(_) = factory.match_record_term(&root).filter(|value| {
-            value.get("query").is_some()
-                && value.get("mutation").is_some()
-                && value.get("subscription").is_some()
+            value
+                .get(&factory.create_string_term(allocator.create_static_string("query")))
+                .is_some()
+                && value
+                    .get(&factory.create_string_term(allocator.create_static_string("mutation")))
+                    .is_some()
+                && value
+                    .get(
+                        &factory.create_string_term(allocator.create_static_string("subscription")),
+                    )
+                    .is_some()
         }) {
             Ok(factory.create_lambda_term(1, root))
         } else if let Some(arity) = root.arity() {

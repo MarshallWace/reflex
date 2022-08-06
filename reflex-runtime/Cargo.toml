@@ -10,6 +10,7 @@ edition = "2021"
 [dependencies]
 reflex = { path = "../reflex" }
 reflex-dispatcher = { path = "../reflex-dispatcher" }
+reflex-interpreter = { path = "../reflex-interpreter" }
 reflex-json = { path = "../reflex-json" }
 reflex-utils = { path = "../reflex-utils" }
 serde = { version = "1.0", features = ["derive"] }

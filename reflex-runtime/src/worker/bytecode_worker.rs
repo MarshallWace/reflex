@@ -5,21 +5,24 @@ use std::{hash::Hash, iter::once, sync::Arc, time::Instant};
 
 use metrics::{describe_histogram, histogram, Unit};
 use reflex::{
-    compiler::{
-        create_main_function, Compile, Compiler, CompilerMode, CompilerOptions, Instruction,
-        InstructionPointer, Program,
-    },
     core::{
-        Applicable, DependencyList, EvaluationResult, Expression, ExpressionFactory, HeapAllocator,
-        Reducible, Rewritable, Signal, SignalType, StateCache,
+        Applicable, ConditionListType, ConditionType, DependencyList, EvaluationResult, Expression,
+        ExpressionFactory, HeapAllocator, InstructionPointer, Reducible, Rewritable,
+        SignalTermType, SignalType, StateCache,
     },
     hash::{hash_object, HashId},
-    interpreter::{execute, DefaultInterpreterCache, InterpreterOptions, MutableInterpreterCache},
 };
 use reflex_dispatcher::{
     find_earliest_typed_message, find_latest_typed_message, Action, HandlerContext, InboundAction,
     MessageData, MessageOffset, OutboundAction, StateOperation, Worker, WorkerContext,
     WorkerFactory, WorkerMessageQueue, WorkerTransition,
+};
+use reflex_interpreter::{
+    compiler::{
+        create_main_function, Compile, Compiler, CompilerMode, CompilerOptions, Instruction,
+        Program,
+    },
+    execute, DefaultInterpreterCache, InterpreterOptions, MutableInterpreterCache,
 };
 
 use crate::{
@@ -351,7 +354,7 @@ fn is_unresolved_result<T: Expression>(
         .unwrap_or(false)
 }
 
-fn is_unresolved_effect<T: Expression>(effect: &Signal<T>) -> bool {
+fn is_unresolved_effect<V: ConditionType<impl Expression<Signal = V>>>(effect: &V) -> bool {
     match effect.signal_type() {
         SignalType::Error => false,
         SignalType::Pending | SignalType::Custom(_) => true,

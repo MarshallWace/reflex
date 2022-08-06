@@ -2,14 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use chrono::{DateTime, NaiveDateTime};
-use reflex::{
-    core::{
-        uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
-        FunctionArity, HeapAllocator, StringValue, Uid, Uuid,
-    },
-    lang::create_record,
-    stdlib::Stdlib,
+use reflex::core::{
+    create_record, uuid, Applicable, ArgType, Arity, EvaluationCache, Expression,
+    ExpressionFactory, FloatTermType, FunctionArity, HeapAllocator, IntTermType, StringTermType,
+    StringValue, Uid, Uuid,
 };
+use reflex_stdlib::Stdlib;
 
 pub struct DateConstructor {}
 impl DateConstructor {
@@ -48,18 +46,18 @@ where
         let mut args = args.into_iter();
         let value = args.next().unwrap();
         let timestamp = if let Some(term) = factory.match_int_term(&value) {
-            Some(term.value as i64)
+            Some(term.value() as i64)
         } else if let Some(term) = factory.match_float_term(&value) {
-            Some(term.value.trunc() as i64)
+            Some(term.value().trunc() as i64)
         } else if let Some(term) = factory.match_string_term(&value) {
-            parse_string_timestamp(term.value.as_str())
+            parse_string_timestamp(term.value().as_str())
         } else {
             None
         };
         if let Some(timestamp) = timestamp {
             Ok(create_record(
                 [(
-                    String::from("getTime"),
+                    factory.create_string_term(allocator.create_static_string("getTime")),
                     factory.create_lambda_term(0, factory.create_float_term(timestamp as f64)),
                 )],
                 factory,

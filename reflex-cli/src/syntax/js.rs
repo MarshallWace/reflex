@@ -5,19 +5,22 @@ use std::{iter::empty, path::Path};
 
 use anyhow::{anyhow, Context, Result};
 use reflex::{
-    compiler::{Compile, CompilerMode, CompilerOptions, InstructionPointer, Program},
-    core::{Applicable, Expression, ExpressionFactory, HeapAllocator, Reducible, Rewritable},
+    core::{
+        Applicable, Expression, ExpressionFactory, HeapAllocator, InstructionPointer, Reducible,
+        Rewritable,
+    },
     env::inject_env_vars,
-    stdlib::Stdlib,
 };
 use reflex_handlers::{
     imports::handler_imports, loader::graphql_loader, stdlib::Stdlib as HandlersStdlib,
 };
+use reflex_interpreter::compiler::{Compile, CompilerMode, CompilerOptions, Program};
 use reflex_js::{
     builtin_imports, compose_module_loaders, create_js_env, create_module_loader, parse_module,
     static_module_loader, stdlib::Stdlib as JsStdlib,
 };
 use reflex_json::stdlib::Stdlib as JsonStdlib;
+use reflex_stdlib::Stdlib;
 
 use crate::{compile_graph_root, SyntaxParser};
 

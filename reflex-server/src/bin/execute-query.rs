@@ -9,7 +9,6 @@ use std::{
 
 use anyhow::{anyhow, Context, Result};
 use clap::Parser;
-use reflex::{allocator::DefaultAllocator, compiler::CompilerOptions, lang::SharedTermFactory};
 use reflex_cli::{compile_entry_point, syntax::js::default_js_loaders, Syntax};
 use reflex_dispatcher::{session_recorder::SessionRecorder, SchedulerMiddleware};
 use reflex_graphql::{parse_graphql_schema, GraphQlSchema, NoopGraphQlQueryTransform};
@@ -18,6 +17,8 @@ use reflex_handlers::{
     utils::tls::{create_https_client, tokio_native_tls::native_tls::Certificate},
     DefaultHandlersMetricNames,
 };
+use reflex_interpreter::compiler::CompilerOptions;
+use reflex_lang::{allocator::DefaultAllocator, SharedTermFactory};
 use reflex_server::{
     action::ServerCliAction,
     builtins::ServerBuiltins,

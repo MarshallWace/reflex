@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
-use reflex::core::{Expression, ExpressionFactory, HeapAllocator, StringValue};
+use reflex::core::{BooleanTermType, Expression, ExpressionFactory, HeapAllocator};
 use serde::{Deserialize, Serialize};
 
 pub mod action;
@@ -10,30 +10,21 @@ pub mod actor;
 pub mod worker;
 
 pub trait AsyncExpression: Expression + Send + 'static {}
-impl<T> AsyncExpression for T
-where
-    T: Expression + Send + 'static,
-    T::String: StringValue + Send,
-{
-}
+impl<T> AsyncExpression for T where T: Expression + Send + 'static {}
 pub trait AsyncExpressionFactory<T: AsyncExpression>:
     ExpressionFactory<T> + Send + Clone + 'static
 {
 }
-impl<T, E: AsyncExpression> AsyncExpressionFactory<E> for T
-where
-    T: ExpressionFactory<E> + Send + Clone + 'static,
-    E::String: StringValue + Send,
+impl<T, E: AsyncExpression> AsyncExpressionFactory<E> for T where
+    T: ExpressionFactory<E> + Send + Clone + 'static
 {
 }
 pub trait AsyncHeapAllocator<T: AsyncExpression>:
     HeapAllocator<T> + Send + Clone + 'static
 {
 }
-impl<T, E: AsyncExpression> AsyncHeapAllocator<E> for T
-where
-    T: HeapAllocator<E> + Send + Clone + 'static,
-    E::String: StringValue + Send,
+impl<T, E: AsyncExpression> AsyncHeapAllocator<E> for T where
+    T: HeapAllocator<E> + Send + Clone + 'static
 {
 }
 
@@ -57,7 +48,7 @@ impl QueryEvaluationMode {
     ) -> Option<Self> {
         factory
             .match_boolean_term(value)
-            .map(|term| match term.value {
+            .map(|term| match term.value() {
                 false => Self::Query,
                 true => Self::Standalone,
             })
@@ -89,7 +80,7 @@ impl QueryInvalidationStrategy {
     ) -> Option<Self> {
         factory
             .match_boolean_term(value)
-            .map(|term| match term.value {
+            .map(|term| match term.value() {
                 false => Self::CombineUpdateBatches,
                 true => Self::Exact,
             })

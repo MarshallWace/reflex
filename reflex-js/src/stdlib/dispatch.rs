@@ -4,13 +4,11 @@
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use std::iter::once;
 
-use reflex::{
-    core::{
-        uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
-        FunctionArity, HeapAllocator, StringValue, Uid, Uuid,
-    },
-    stdlib::Stdlib,
+use reflex::core::{
+    uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
+    FunctionArity, HeapAllocator, StringTermType, StringValue, Uid, Uuid,
 };
+use reflex_stdlib::Stdlib;
 
 pub struct Dispatch {}
 impl Dispatch {
@@ -53,7 +51,7 @@ where
         let builtin_method = match factory.match_string_term(&method_name) {
             Some(method_name) => get_builtin_field(
                 Some(&target),
-                method_name.value.as_str(),
+                method_name.value().as_str(),
                 factory,
                 allocator,
             ),

@@ -1,0 +1,212 @@
+// SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+use std::{collections::HashSet, hash::Hash, iter::once};
+
+use serde::{Deserialize, Serialize};
+
+use reflex::{
+    core::{
+        build_hashset_lookup_table, transform_expression_list, CompoundNode, DependencyList,
+        DynamicState, EvaluationCache, Expression, ExpressionFactory, ExpressionListSlice,
+        ExpressionListType, GraphNode, HashsetTermType, HeapAllocator, Rewritable, SerializeJson,
+        StackOffset, Substitutions, TermHash,
+    },
+    hash::HashId,
+};
+
+#[derive(Eq, PartialEq, Clone, Debug)]
+pub struct HashSetTerm<T: Expression> {
+    values: T::ExpressionList,
+    lookup: HashSet<HashId>,
+}
+impl<T: Expression> Hash for HashSetTerm<T> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        for key in self.values.iter() {
+            key.hash(state);
+        }
+    }
+}
+impl<T: Expression> TermHash for HashSetTerm<T> {}
+impl<T: Expression> HashSetTerm<T> {
+    pub fn new(values: T::ExpressionList) -> Self {
+        let lookup = build_hashset_lookup_table(values.iter());
+        Self { values, lookup }
+    }
+}
+impl<T: Expression> HashsetTermType<T> for HashSetTerm<T> {
+    type ValuesIterator<'a> = <T::ExpressionList as ExpressionListType<T>>::Iterator<'a> where T: 'a, Self: 'a;
+    fn contains(&self, value: &T) -> bool {
+        self.lookup.contains(&value.id())
+    }
+    fn values<'a>(&'a self) -> Self::ValuesIterator<'a> {
+        self.values.iter()
+    }
+}
+impl<T: Expression> GraphNode for HashSetTerm<T> {
+    fn capture_depth(&self) -> StackOffset {
+        self.values.capture_depth()
+    }
+    fn free_variables(&self) -> HashSet<StackOffset> {
+        self.values.free_variables()
+    }
+    fn count_variable_usages(&self, offset: StackOffset) -> usize {
+        self.values.count_variable_usages(offset)
+    }
+    fn dynamic_dependencies(&self, deep: bool) -> DependencyList {
+        if deep {
+            self.values.dynamic_dependencies(deep)
+        } else {
+            DependencyList::empty()
+        }
+    }
+    fn has_dynamic_dependencies(&self, deep: bool) -> bool {
+        if deep {
+            self.values.has_dynamic_dependencies(deep)
+        } else {
+            false
+        }
+    }
+    fn is_static(&self) -> bool {
+        true
+    }
+    fn is_atomic(&self) -> bool {
+        self.values.is_atomic()
+    }
+    fn is_complex(&self) -> bool {
+        true
+    }
+}
+pub type HashSetTermChildren<'a, T> = ExpressionListSlice<'a, T>;
+impl<'a, T: Expression + 'a> CompoundNode<'a, T> for HashSetTerm<T> {
+    type Children = HashSetTermChildren<'a, T>;
+    fn children(&'a self) -> Self::Children {
+        self.values.iter()
+    }
+}
+impl<T: Expression + Rewritable<T>> Rewritable<T> for HashSetTerm<T> {
+    fn substitute_static(
+        &self,
+        substitutions: &Substitutions<T>,
+        factory: &impl ExpressionFactory<T>,
+        allocator: &impl HeapAllocator<T>,
+        cache: &mut impl EvaluationCache<T>,
+    ) -> Option<T> {
+        transform_expression_list(&self.values, allocator, |value| {
+            value.substitute_static(substitutions, factory, allocator, cache)
+        })
+        .map(|values| factory.create_hashset_term(values))
+    }
+    fn substitute_dynamic(
+        &self,
+        deep: bool,
+        state: &impl DynamicState<T>,
+        factory: &impl ExpressionFactory<T>,
+        allocator: &impl HeapAllocator<T>,
+        cache: &mut impl EvaluationCache<T>,
+    ) -> Option<T> {
+        if deep {
+            transform_expression_list(&self.values, allocator, |value| {
+                value.substitute_dynamic(deep, state, factory, allocator, cache)
+            })
+            .map(|values| factory.create_list_term(values))
+        } else {
+            None
+        }
+    }
+    fn hoist_free_variables(
+        &self,
+        factory: &impl ExpressionFactory<T>,
+        allocator: &impl HeapAllocator<T>,
+    ) -> Option<T> {
+        transform_expression_list(&self.values, allocator, |value| {
+            value.hoist_free_variables(factory, allocator)
+        })
+        .map(|values| factory.create_list_term(values))
+    }
+    fn normalize(
+        &self,
+        factory: &impl ExpressionFactory<T>,
+        allocator: &impl HeapAllocator<T>,
+        cache: &mut impl EvaluationCache<T>,
+    ) -> Option<T> {
+        transform_expression_list(&self.values, allocator, |value| {
+            value.normalize(factory, allocator, cache)
+        })
+        .map(|values| factory.create_list_term(values))
+    }
+}
+impl<T: Expression> std::fmt::Display for HashSetTerm<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let max_displayed_values = 10;
+        let values = &self.values;
+        let num_values = values.len();
+        write!(
+            f,
+            "HashSet({})",
+            if num_values <= max_displayed_values {
+                values
+                    .iter()
+                    .map(|value| format!("{}", value))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            } else {
+                values
+                    .iter()
+                    .take(max_displayed_values - 1)
+                    .map(|value| format!("{}", value))
+                    .chain(once(format!(
+                        "...{} more values",
+                        num_values - (max_displayed_values - 1)
+                    )))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            }
+        )
+    }
+}
+impl<T: Expression> SerializeJson for HashSetTerm<T> {
+    fn to_json(&self) -> Result<serde_json::Value, String> {
+        Err(format!("Unable to serialize term: {}", self))
+    }
+}
+impl<T: Expression> serde::Serialize for HashSetTerm<T>
+where
+    T: serde::Serialize,
+    T::ExpressionList: serde::Serialize,
+{
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        Into::<SerializedHashSetTerm<T>>::into(self).serialize(serializer)
+    }
+}
+impl<'de, T: Expression> serde::Deserialize<'de> for HashSetTerm<T>
+where
+    T: serde::Deserialize<'de>,
+    T::ExpressionList: serde::Deserialize<'de>,
+{
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        Ok(SerializedHashSetTerm::<T>::deserialize(deserializer)?.into())
+    }
+}
+#[derive(Debug, Serialize, Deserialize)]
+struct SerializedHashSetTerm<T: Expression> {
+    values: T::ExpressionList,
+}
+impl<'a, T: Expression> Into<SerializedHashSetTerm<T>> for &'a HashSetTerm<T> {
+    fn into(self) -> SerializedHashSetTerm<T> {
+        let HashSetTerm { values, .. } = self.clone();
+        SerializedHashSetTerm { values }
+    }
+}
+impl<T: Expression> Into<HashSetTerm<T>> for SerializedHashSetTerm<T> {
+    fn into(self) -> HashSetTerm<T> {
+        let SerializedHashSetTerm { values } = self;
+        HashSetTerm::new(values)
+    }
+}

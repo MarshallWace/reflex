@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use prost_reflect::{DynamicMessage, MessageDescriptor, Value};
-use reflex::{
-    core::{Expression, ExpressionFactory, HeapAllocator},
-    lang::{as_integer, term::IntValue},
+use reflex::core::{
+    as_integer, BooleanTermType, Expression, ExpressionFactory, FloatTermType, FloatValue,
+    HeapAllocator, IntTermType, IntValue, StringTermType, StringValue,
 };
 
 use crate::{
@@ -28,12 +28,12 @@ impl CustomType for DoubleValueMessage {
         if let Some(term) = factory.match_float_term(value) {
             Ok(create_value_message_wrapper(
                 message_type,
-                Value::F64(term.value),
+                Value::F64(term.value()),
             ))
         } else if let Some(term) = factory.match_int_term(value) {
             Ok(create_value_message_wrapper(
                 message_type,
-                Value::F64(term.value as f64),
+                Value::F64(term.value() as f64),
             ))
         } else {
             Err(format!("Expected Float or Int, received {}", value))
@@ -48,9 +48,7 @@ impl CustomType for DoubleValueMessage {
         let value = get_optional_message_field(message, "value")?;
         match value {
             None => Ok(factory.create_float_term(Default::default())),
-            Some(Value::F64(value)) => {
-                Ok(factory.create_float_term(*value as reflex::lang::term::FloatValue))
-            }
+            Some(Value::F64(value)) => Ok(factory.create_float_term(*value as FloatValue)),
             _ => Err(format!("Expected f64, received {:?}", value)),
         }
     }
@@ -73,12 +71,12 @@ impl CustomType for FloatValueMessage {
         if let Some(term) = factory.match_float_term(value) {
             Ok(create_value_message_wrapper(
                 message_type,
-                Value::F32(term.value as f32),
+                Value::F32(term.value() as f32),
             ))
         } else if let Some(term) = factory.match_int_term(value) {
             Ok(create_value_message_wrapper(
                 message_type,
-                Value::F32(term.value as f32),
+                Value::F32(term.value() as f32),
             ))
         } else {
             Err(format!("Expected Float or Int, received {}", value))
@@ -93,9 +91,7 @@ impl CustomType for FloatValueMessage {
         let value = get_optional_message_field(message, "value")?;
         match value {
             None => Ok(factory.create_float_term(Default::default())),
-            Some(Value::F32(value)) => {
-                Ok(factory.create_float_term(*value as reflex::lang::term::FloatValue))
-            }
+            Some(Value::F32(value)) => Ok(factory.create_float_term(*value as FloatValue)),
             _ => Err(format!("Expected f32, received {:?}", value)),
         }
     }
@@ -117,7 +113,7 @@ impl CustomType for Int64ValueMessage {
     ) -> Result<DynamicMessage, String> {
         if let Some(value) = factory
             .match_float_term(value)
-            .and_then(|value| as_integer(value.value))
+            .and_then(|value| as_integer(value.value()))
         {
             Ok(create_value_message_wrapper(
                 message_type,
@@ -126,7 +122,7 @@ impl CustomType for Int64ValueMessage {
         } else if let Some(term) = factory.match_int_term(value) {
             Ok(create_value_message_wrapper(
                 message_type,
-                Value::I64(term.value as i64),
+                Value::I64(term.value() as i64),
             ))
         } else {
             Err(format!("Expected Int, received {}", value))
@@ -170,7 +166,7 @@ impl CustomType for UInt64ValueMessage {
     ) -> Result<DynamicMessage, String> {
         if let Some(value) = factory
             .match_float_term(value)
-            .and_then(|value| as_integer(value.value))
+            .and_then(|value| as_integer(value.value()))
         {
             if value < u64::MIN as IntValue {
                 Err(format!("Invalid u64 value: {}", value))
@@ -181,7 +177,7 @@ impl CustomType for UInt64ValueMessage {
                 ))
             }
         } else if let Some(term) = factory.match_int_term(value) {
-            let value = term.value;
+            let value = term.value();
             if value < (u64::MIN as IntValue) {
                 Err(format!("Invalid u64 value: {}", value))
             } else {
@@ -232,7 +228,7 @@ impl CustomType for Int32ValueMessage {
     ) -> Result<DynamicMessage, String> {
         if let Some(value) = factory
             .match_float_term(value)
-            .and_then(|value| as_integer(value.value))
+            .and_then(|value| as_integer(value.value()))
         {
             Ok(create_value_message_wrapper(
                 message_type,
@@ -241,7 +237,7 @@ impl CustomType for Int32ValueMessage {
         } else if let Some(term) = factory.match_int_term(value) {
             Ok(create_value_message_wrapper(
                 message_type,
-                Value::I32(term.value),
+                Value::I32(term.value()),
             ))
         } else {
             Err(format!("Expected Int, received {}", value))
@@ -278,7 +274,7 @@ impl CustomType for UInt32ValueMessage {
     ) -> Result<DynamicMessage, String> {
         if let Some(value) = factory
             .match_float_term(value)
-            .and_then(|value| as_integer(value.value))
+            .and_then(|value| as_integer(value.value()))
         {
             if value < (u32::MIN as IntValue) {
                 Err(format!("Invalid u32 value: {}", value))
@@ -289,7 +285,7 @@ impl CustomType for UInt32ValueMessage {
                 ))
             }
         } else if let Some(term) = factory.match_int_term(value) {
-            let value = term.value;
+            let value = term.value();
             if value < (u32::MIN as IntValue) {
                 Err(format!("Invalid u32 value: {}", value))
             } else {
@@ -341,7 +337,7 @@ impl CustomType for BoolValueMessage {
         if let Some(value) = factory.match_boolean_term(value) {
             Ok(create_value_message_wrapper(
                 message_type,
-                Value::Bool(value.value),
+                Value::Bool(value.value()),
             ))
         } else {
             Err(format!("Expected Boolean, received {}", value))
@@ -379,9 +375,7 @@ impl CustomType for StringValueMessage {
         if let Some(value) = factory.match_string_term(value) {
             Ok(create_value_message_wrapper(
                 message_type,
-                Value::String(String::from(reflex::core::StringValue::as_str(
-                    &value.value,
-                ))),
+                Value::String(String::from(value.value().as_str())),
             ))
         } else {
             Err(format!("Expected String, received {}", value))
@@ -439,11 +433,8 @@ fn create_value_message_wrapper(message_type: &MessageDescriptor, value: Value) 
 #[cfg(test)]
 mod tests {
     use prost_reflect::{ReflectMessage, Value};
-    use reflex::{
-        allocator::DefaultAllocator,
-        lang::{CachedSharedTerm, SharedTermFactory},
-        stdlib::Stdlib,
-    };
+    use reflex_lang::{allocator::DefaultAllocator, CachedSharedTerm, SharedTermFactory};
+    use reflex_stdlib::Stdlib;
 
     use super::*;
 

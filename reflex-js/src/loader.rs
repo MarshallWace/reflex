@@ -6,16 +6,15 @@ use std::{
     collections::HashMap,
     fs::{self, Metadata},
     io,
+    iter::once,
     path::{Path, PathBuf},
     rc::Rc,
 };
 
 use crate::{globals::builtin_globals, parse_module, stdlib::Stdlib as JsStdlib, Env};
-use reflex::{
-    core::{Expression, ExpressionFactory, HeapAllocator, Rewritable},
-    stdlib::Stdlib,
-};
+use reflex::core::{Expression, ExpressionFactory, HeapAllocator, Rewritable};
 use reflex_json::stdlib::Stdlib as JsonStdlib;
+use reflex_stdlib::Stdlib;
 
 pub fn create_module_loader<T: Expression + Rewritable<T> + 'static>(
     env: Env<T>,
@@ -158,7 +157,9 @@ fn create_default_module_export<T: Expression>(
     allocator: &impl HeapAllocator<T>,
 ) -> T {
     factory.create_record_term(
-        allocator.create_struct_prototype(vec![String::from("default")]),
+        allocator.create_struct_prototype(allocator.create_list(once(
+            factory.create_string_term(allocator.create_string(String::from("default"))),
+        ))),
         allocator.create_unit_list(value),
     )
 }

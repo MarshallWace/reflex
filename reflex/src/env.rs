@@ -4,10 +4,9 @@
 use crate::{
     cache::SubstitutionCache,
     core::{
-        Expression, ExpressionFactory, HeapAllocator, Reducible, Rewritable, Signal, SignalType,
-        StateCache,
+        create_record, ConditionType, Expression, ExpressionFactory, HeapAllocator, Reducible,
+        Rewritable, SignalType, StateCache,
     },
-    lang::create_record,
 };
 
 const EVENT_TYPE_ENV: &'static str = "reflex::env";
@@ -15,7 +14,7 @@ const EVENT_TYPE_ENV: &'static str = "reflex::env";
 pub fn create_env_args_accessor<T: Expression>(
     _factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> Signal<T> {
+) -> T::Signal {
     allocator.create_signal(
         SignalType::Custom(String::from(EVENT_TYPE_ENV)),
         allocator.create_empty_list(),
@@ -31,7 +30,7 @@ pub fn inject_env_vars<T: Expression + Rewritable<T> + Reducible<T>>(
     let env = create_record(
         vars.into_iter().map(|(key, value)| {
             (
-                key,
+                factory.create_string_term(allocator.create_string(key)),
                 factory.create_string_term(allocator.create_string(value)),
             )
         }),

@@ -17,10 +17,9 @@ use metrics::{
 use reflex::{
     cache::SubstitutionCache,
     core::{
-        Expression, ExpressionFactory, HeapAllocator, Reducible, Rewritable, Signal, SignalType,
-        StateToken, StringValue,
+        create_record, ConditionType, Expression, ExpressionFactory, ExpressionListType, HeapAllocator, Reducible,
+        Rewritable, SignalType, StateToken, StringTermType, StringValue, SymbolId, SymbolTermType,
     },
-    lang::{create_record, term::SymbolId},
 };
 use reflex_dispatcher::{
     Action, Actor, ActorTransition, HandlerContext, InboundAction, MessageData, OperationStream,
@@ -483,6 +482,7 @@ where
                                 &request_message_type,
                                 &self.transcoder,
                                 &self.factory,
+                                &self.allocator,
                             )
                             .map_err(|err| {
                                 format_grpc_error_message(
@@ -961,7 +961,7 @@ where
     fn unsubscribe_grpc_operation<TAction>(
         &self,
         state: &mut GrpcHandlerState<T>,
-        effect: &Signal<T>,
+        effect: &T::Signal,
     ) -> Option<impl Iterator<Item = StateOperation<TAction>> + '_>
     where
         TAction: Action + 'static,
@@ -1446,16 +1446,17 @@ struct GrpcEffectArgs<T: AsyncExpression> {
 }
 
 fn parse_grpc_effect_args<T: AsyncExpression>(
-    effect: &Signal<T>,
+    effect: &T::Signal,
     factory: &impl ExpressionFactory<T>,
 ) -> Result<GrpcEffectArgs<T>, String> {
-    let mut args = effect.args().into_iter();
+    let args = effect.args();
     if args.len() != 7 {
         return Err(format!(
             "Invalid grpc signal: Expected 7 arguments, received {}",
             args.len()
         ));
     }
+    let mut args = args.iter();
     let proto_id = parse_symbol_arg(args.next().unwrap(), factory);
     let url = parse_string_arg(args.next().unwrap(), factory);
     let service = parse_string_arg(args.next().unwrap(), factory);
@@ -1494,7 +1495,7 @@ fn parse_symbol_arg<T: Expression>(
     factory: &impl ExpressionFactory<T>,
 ) -> Option<SymbolId> {
     match factory.match_symbol_term(value) {
-        Some(term) => Some(term.id),
+        Some(term) => Some(term.id()),
         _ => None,
     }
 }
@@ -1504,7 +1505,7 @@ fn parse_string_arg<T: Expression>(
     factory: &impl ExpressionFactory<T>,
 ) -> Option<String> {
     match factory.match_string_term(value) {
-        Some(term) => Some(String::from(term.value.as_str())),
+        Some(term) => Some(String::from(term.value().as_str())),
         _ => None,
     }
 }
@@ -1559,12 +1560,12 @@ fn create_error_payload<T: Expression>(
     create_record(
         [
             Some((
-                String::from("message"),
+                factory.create_string_term(allocator.create_static_string("message")),
                 factory.create_string_term(allocator.create_string(message.into())),
             )),
             error_type.map(|error_type| {
                 (
-                    String::from("name"),
+                    factory.create_string_term(allocator.create_static_string("name")),
                     factory.create_string_term(allocator.create_static_string(error_type)),
                 )
             }),

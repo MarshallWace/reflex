@@ -9,7 +9,10 @@ use std::{
 };
 
 use futures::{stream, FutureExt, StreamExt};
-use reflex::core::{Expression, ExpressionFactory, HeapAllocator, Signal, SignalType, StateToken};
+use reflex::core::{
+    ConditionType, Expression, ExpressionFactory, ExpressionListType, FloatTermType, HeapAllocator,
+    IntTermType, SignalType, StateToken,
+};
 use reflex_dispatcher::{
     Action, Actor, ActorTransition, HandlerContext, InboundAction, MessageData, OperationStream,
     OutboundAction, ProcessId, StateOperation, StateTransition,
@@ -236,16 +239,17 @@ where
 }
 
 fn parse_timeout_effect_args<T: Expression>(
-    effect: &Signal<T>,
+    effect: &T::Signal,
     factory: &impl ExpressionFactory<T>,
 ) -> Result<Option<f64>, String> {
-    let mut args = effect.args().into_iter();
+    let args = effect.args();
     if args.len() != 2 {
         return Err(format!(
             "Invalid timeout signal: Expected 2 arguments, received {}",
             args.len()
         ));
     }
+    let mut args = args.iter();
     let duration = parse_number_arg(args.next().unwrap(), factory);
     let _token = args.next().unwrap();
     match duration {
@@ -265,9 +269,9 @@ fn parse_timeout_effect_args<T: Expression>(
 
 fn parse_number_arg<T: Expression>(value: &T, factory: &impl ExpressionFactory<T>) -> Option<f64> {
     match factory.match_int_term(value) {
-        Some(term) => Some(term.value as f64),
+        Some(term) => Some(term.value() as f64),
         _ => match factory.match_float_term(value) {
-            Some(term) => Some(term.value),
+            Some(term) => Some(term.value()),
             _ => None,
         },
     }

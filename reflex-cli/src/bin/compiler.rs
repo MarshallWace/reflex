@@ -5,13 +5,13 @@ use std::{iter::empty, path::PathBuf};
 
 use anyhow::Result;
 use clap::Parser;
-use reflex::{allocator::DefaultAllocator, lang::SharedTermFactory};
 use reflex_cli::{
     builtins::CliBuiltins,
     cli::compiler::{cli, CompilerCliOptions, OutputFormat},
     syntax::js::default_js_loaders,
     Syntax,
 };
+use reflex_lang::{allocator::DefaultAllocator, SharedTermFactory};
 
 /// Reflex bytecode compiler
 #[derive(Parser)]

@@ -13,6 +13,7 @@ reflex-dispatcher = { path = "../reflex-dispatcher" }
 reflex-graphql = { path = "../reflex-graphql" }
 reflex-json = { path = "../reflex-json" }
 reflex-runtime = { path = "../reflex-runtime" }
+reflex-stdlib = { path = "../reflex-stdlib" }
 reflex-utils = { path = "../reflex-utils" }
 bytes = "1.1.0"
 crc = "2.0.0"

@@ -19,7 +19,8 @@ use metrics::{
     decrement_gauge, describe_counter, describe_gauge, increment_counter, increment_gauge, Unit,
 };
 use reflex::core::{
-    Expression, ExpressionFactory, HeapAllocator, Signal, SignalType, StateToken, StringValue,
+    ConditionType, Expression, ExpressionFactory, ExpressionListType, HeapAllocator,
+    RecordTermType, SignalType, StateToken, StringTermType, StringValue, StructPrototypeType,
 };
 use reflex_dispatcher::{
     Action, Actor, ActorTransition, HandlerContext, InboundAction, MessageData, OperationStream,
@@ -752,7 +753,7 @@ where
     fn subscribe_http_operation<TAction>(
         &self,
         state: &mut GraphQlHandlerState,
-        effect: &Signal<T>,
+        effect: &T::Signal,
         operation: GraphQlEffectArgs,
         context: &mut impl HandlerContext,
     ) -> Result<StateOperation<TAction>, T>
@@ -843,7 +844,7 @@ where
     fn unsubscribe_http_operation<TAction>(
         &self,
         state: &mut GraphQlHandlerState,
-        effect: &Signal<T>,
+        effect: &T::Signal,
     ) -> Option<StateOperation<TAction>>
     where
         TAction: Action,
@@ -868,7 +869,7 @@ where
     fn subscribe_websocket_operation<TAction>(
         &self,
         state: &mut GraphQlHandlerState,
-        effect: &Signal<T>,
+        effect: &T::Signal,
         operation: GraphQlEffectArgs,
         context: &mut impl HandlerContext,
     ) -> (
@@ -977,7 +978,7 @@ where
     fn unsubscribe_websocket_operation<TAction>(
         &self,
         state: &mut GraphQlHandlerState,
-        effect: &Signal<T>,
+        effect: &T::Signal,
         context: &mut impl HandlerContext,
     ) -> Option<(
         Option<StateOperation<TAction>>,
@@ -1330,16 +1331,17 @@ struct GraphQlEffectArgs {
 }
 
 fn parse_graphql_effect_args<T: Expression>(
-    effect: &Signal<T>,
+    effect: &T::Signal,
     factory: &impl ExpressionFactory<T>,
 ) -> Result<GraphQlEffectArgs, String> {
-    let mut args = effect.args().into_iter();
+    let args = effect.args();
     if args.len() != 7 {
         return Err(format!(
             "Invalid graphql signal: Expected 7 arguments, received {}",
             args.len()
         ));
     }
+    let mut args = args.iter();
     let url = parse_string_arg(args.next().unwrap(), factory);
     let query = parse_string_arg(args.next().unwrap(), factory);
     let operation_name = parse_optional_string_arg(args.next().unwrap(), factory);
@@ -1382,7 +1384,7 @@ fn parse_string_arg<T: Expression>(
     factory: &impl ExpressionFactory<T>,
 ) -> Option<String> {
     match factory.match_string_term(value) {
-        Some(term) => Some(String::from(term.value.as_str())),
+        Some(term) => Some(String::from(term.value().as_str())),
         _ => None,
     }
 }
@@ -1392,7 +1394,7 @@ fn parse_optional_string_arg<T: Expression>(
     factory: &impl ExpressionFactory<T>,
 ) -> Option<Option<String>> {
     match factory.match_string_term(value) {
-        Some(term) => Some(Some(String::from(term.value.as_str()))),
+        Some(term) => Some(Some(String::from(term.value().as_str()))),
         _ => match factory.match_nil_term(value) {
             Some(_) => Some(None),
             _ => None,
@@ -1406,11 +1408,13 @@ fn parse_headers_arg<T: Expression>(
 ) -> Option<HeaderMap<HeaderValue>> {
     match factory.match_record_term(value) {
         Some(term) => term
-            .entries()
-            .into_iter()
+            .prototype()
+            .keys()
+            .iter()
+            .zip(term.values().iter())
             .map(|(key, value)| {
                 Some((
-                    HeaderName::try_from(key).ok()?,
+                    HeaderName::try_from(parse_string_arg(key, factory)?).ok()?,
                     HeaderValue::try_from(parse_string_arg(value, factory)?).ok()?,
                 ))
             })
@@ -1439,10 +1443,15 @@ fn parse_object_arg<T: Expression>(
     match factory.match_record_term(value) {
         Some(value) => {
             let properties = value
-                .entries()
-                .into_iter()
-                .map(|(key, value)| {
-                    reflex_json::sanitize(value).map(|value| (String::from(key.as_str()), value))
+                .prototype()
+                .keys()
+                .iter()
+                .zip(value.values().iter())
+                .filter_map(|(key, value)| {
+                    factory.match_string_term(key).map(|key| {
+                        reflex_json::sanitize(value)
+                            .map(|value| (String::from(key.value().as_str()), value))
+                    })
                 })
                 .collect::<Result<Vec<_>, _>>()?;
             Ok(Some(properties))

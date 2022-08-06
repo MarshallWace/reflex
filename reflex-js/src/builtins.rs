@@ -5,14 +5,11 @@
 use std::convert::{TryFrom, TryInto};
 
 use reflex::core::Uuid;
-use reflex::{
-    core::{
-        Applicable, Arity, Builtin, EvaluationCache, Expression, ExpressionFactory, HeapAllocator,
-        Uid,
-    },
-    stdlib::Stdlib,
+use reflex::core::{
+    Applicable, Arity, Builtin, EvaluationCache, Expression, ExpressionFactory, HeapAllocator, Uid,
 };
 use reflex_json::stdlib::Stdlib as JsonStdlib;
+use reflex_stdlib::Stdlib;
 use serde::{Deserialize, Serialize};
 
 use crate::stdlib::Stdlib as JsStdlib;
@@ -108,11 +105,10 @@ impl TryFrom<Uuid> for JsBuiltins {
 
 #[cfg(test)]
 mod test {
-    use crate::builtins::JsBuiltins;
-    use crate::{create_js_env, parse};
-    use reflex::allocator::DefaultAllocator;
     use reflex::core::ExpressionFactory;
-    use reflex::lang::{CachedSharedTerm, SharedTermFactory};
+    use reflex_lang::{allocator::DefaultAllocator, CachedSharedTerm, SharedTermFactory};
+
+    use crate::{builtins::JsBuiltins, create_js_env, parse};
 
     #[test]
     fn round_trip_serde() {

@@ -2,13 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
-use reflex::{
-    core::{
-        uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
-        FunctionArity, HeapAllocator, StringValue, Uid, Uuid,
-    },
-    stdlib::Stdlib,
+use reflex::core::{
+    uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
+    ExpressionListType, FunctionArity, HeapAllocator, ListTermType, Uid, Uuid,
 };
+use reflex_stdlib::Stdlib;
 
 pub struct FromEntries {}
 impl FromEntries {
@@ -68,18 +66,13 @@ where
                 Err(error) => Err(error),
                 Ok(entries) => {
                     let (keys, values): (Vec<_>, Vec<_>) = entries.into_iter().unzip();
-                    match get_static_prototype_keys(keys.iter(), factory) {
-                        Err(error) => Err(error),
-                        Ok(Some(keys)) => {
-                            let prototype = allocator.create_struct_prototype(
-                                keys.into_iter().map(|key| String::from(key.as_str())),
-                            );
-                            Ok(
-                                factory
-                                    .create_record_term(prototype, allocator.create_list(values)),
-                            )
-                        }
-                        Ok(None) => Ok(factory.create_application_term(
+                    let is_static_prototype = keys.iter().all(|key| key.is_static());
+                    Ok(if is_static_prototype {
+                        let prototype =
+                            allocator.create_struct_prototype(allocator.create_list(keys));
+                        factory.create_record_term(prototype, allocator.create_list(values))
+                    } else {
+                        factory.create_application_term(
                             factory.create_builtin_term(Stdlib::ConstructRecord),
                             allocator.create_pair(
                                 factory.create_application_term(
@@ -88,8 +81,8 @@ where
                                 ),
                                 factory.create_list_term(allocator.create_list(values)),
                             ),
-                        )),
-                    }
+                        )
+                    })
                 }
             }
         } else {
@@ -120,26 +113,4 @@ where
             allocator.create_pair(target.clone(), factory.create_int_term(index as i32)),
         ))
     }
-}
-
-fn get_static_prototype_keys<'a, T: Expression + 'a>(
-    items: impl IntoIterator<Item = &'a T>,
-    factory: &impl ExpressionFactory<T>,
-) -> Result<Option<Vec<&'a T::String>>, String> {
-    items
-        .into_iter()
-        .map(|item| match factory.match_string_term(item) {
-            Some(term) => Ok(Some(&term.value)),
-            _ => {
-                if !item.is_static() {
-                    Ok(None)
-                } else {
-                    Err(format!(
-                        "Invalid object key: Expected String, received {}",
-                        item
-                    ))
-                }
-            }
-        })
-        .collect::<Result<Option<Vec<_>>, _>>()
 }

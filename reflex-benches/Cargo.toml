@@ -1,0 +1,16 @@
+[package]
+name = "reflex-benches"
+version = "0.1.0"
+license = "Apache-2.0"
+authors = ["Marshall Wace LLP <opensource@mwam.com>", "Tim Kendrick <t.kendrick@mwam.com>", "Jordan Hall <j.hall@mwam.com>", "Chris Campbell <c.campbell@mwam.com>"]
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+reflex = { path = "../reflex"}
+reflex-interpreter = { path = "../reflex-interpreter"}
+reflex-js = { path = "../reflex-js"}
+reflex-lang = { path = "../reflex-lang"}
+reflex-lisp = { path = "../reflex-lisp"}
+reflex-stdlib = { path = "../reflex-stdlib"}

@@ -11,6 +11,15 @@ use std::{
 use anyhow::{anyhow, Context, Result};
 use clap::Parser;
 use futures::{stream, StreamExt};
+use reflex::{
+    cache::SubstitutionCache,
+    core::{
+        ConditionListType, ConditionType, Expression, ExpressionFactory, ExpressionListType,
+        InstructionPointer, SignalTermType, StateCache,
+    },
+    env::inject_env_vars,
+};
+use reflex_cli::{builtins::CliBuiltins, create_parser, repl, Syntax, SyntaxParser};
 use reflex_dispatcher::{
     scheduler::tokio::{TokioScheduler, TokioSchedulerMetricNames},
     Action, Actor, ActorTransition, ChainedActor, EitherActor, HandlerContext, Matcher,
@@ -22,7 +31,14 @@ use reflex_handlers::{
     utils::tls::{create_https_client, tokio_native_tls::native_tls::Certificate},
     DefaultHandlersMetricNames,
 };
+use reflex_interpreter::{
+    compiler::{hash_program_root, Compiler, CompilerMode, CompilerOptions, Program},
+    execute, DefaultInterpreterCache, InterpreterOptions,
+};
 use reflex_json::{JsonMap, JsonValue};
+use reflex_lang::{
+    allocator::DefaultAllocator, term::SignalTerm, CachedSharedTerm, SharedTermFactory,
+};
 use reflex_runtime::{
     action::{effect::*, evaluate::*, query::*, RuntimeActions},
     actor::{
@@ -37,20 +53,6 @@ use reflex_runtime::{
     QueryInvalidationStrategy,
 };
 use reflex_utils::reconnect::NoopReconnectTimeout;
-
-use reflex::{
-    allocator::DefaultAllocator,
-    cache::SubstitutionCache,
-    compiler::{
-        hash_program_root, Compiler, CompilerMode, CompilerOptions, InstructionPointer, Program,
-    },
-    core::{Expression, ExpressionFactory, Signal, StateCache},
-    env::inject_env_vars,
-    interpreter::{execute, DefaultInterpreterCache, InterpreterOptions},
-    lang::{term::SignalTerm, CachedSharedTerm, SharedTermFactory},
-};
-
-use reflex_cli::{builtins::CliBuiltins, create_parser, repl, Syntax, SyntaxParser};
 
 /// Reflex runtime evaluator
 #[derive(Parser)]
@@ -252,7 +254,7 @@ fn create_query<
     query: T,
     factory: &TFactory,
     allocator: &TAllocator,
-) -> (Signal<T>, EffectSubscribeAction<T>) {
+) -> (T::Signal, EffectSubscribeAction<T>) {
     let evaluate_effect = create_evaluate_effect(
         String::from("<anonymous>"),
         query,

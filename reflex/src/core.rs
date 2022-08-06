@@ -2,13 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
-use std::convert::TryFrom;
-use std::rc::Rc;
-use std::sync::Arc;
 use std::{
-    collections::{hash_map::DefaultHasher, BTreeSet, HashSet},
+    collections::{hash_map::DefaultHasher, BTreeSet, HashMap, HashSet},
+    convert::TryFrom,
     hash::{Hash, Hasher},
     iter::{once, repeat, FromIterator},
+    rc::Rc,
+    sync::Arc,
 };
 
 use fnv::FnvHashMap;
@@ -16,11 +16,220 @@ use im::OrdSet;
 use serde::{Deserialize, Serialize};
 pub use uuid::{uuid, Uuid};
 
-use crate::lang::*;
-use crate::{
-    compiler::InstructionPointer,
-    hash::{hash_object, HashId},
-};
+pub use crate::cache::EvaluationCache;
+use crate::hash::{hash_object, HashId};
+
+pub type IntValue = i32;
+pub type FloatValue = f64;
+pub type SymbolId = u64;
+
+pub fn is_integer(value: FloatValue) -> bool {
+    as_integer(value).is_some()
+}
+
+pub fn as_integer(value: FloatValue) -> Option<IntValue> {
+    let int_value = value as i32;
+    if value == int_value as f64 {
+        Some(int_value)
+    } else {
+        None
+    }
+}
+
+#[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Default, Clone, Copy, Serialize, Deserialize)]
+pub struct InstructionPointer(pub usize);
+impl InstructionPointer {
+    pub fn new(address: usize) -> Self {
+        Self(address)
+    }
+    pub fn get(&self) -> usize {
+        self.0
+    }
+    pub fn advance(&self) -> Self {
+        self.offset(1)
+    }
+    fn offset(&self, offset: usize) -> Self {
+        Self(self.0 + offset)
+    }
+}
+impl std::fmt::LowerHex for InstructionPointer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "0x{:08x}", self.0)
+    }
+}
+impl std::fmt::UpperHex for InstructionPointer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "0x{:08X}", self.0)
+    }
+}
+impl std::fmt::Debug for InstructionPointer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "<address:{:x}>", self)
+    }
+}
+
+pub trait TermHash: std::hash::Hash {}
+
+pub trait NilTermType: TermHash {}
+pub trait BooleanTermType: TermHash {
+    fn value(&self) -> bool;
+}
+pub trait IntTermType: TermHash {
+    fn value(&self) -> IntValue;
+}
+pub trait FloatTermType: TermHash {
+    fn value(&self) -> FloatValue;
+}
+pub trait StringTermType<TString: StringValue>: TermHash {
+    fn value(&self) -> &TString;
+}
+pub trait SymbolTermType: TermHash {
+    fn id(&self) -> SymbolId;
+}
+pub trait VariableTermType: TermHash {
+    fn offset(&self) -> StackOffset;
+}
+pub trait EffectTermType<T: Expression>: TermHash {
+    fn condition(&self) -> &T::Signal;
+}
+pub trait LetTermType<T: Expression>: TermHash {
+    fn initializer(&self) -> &T;
+    fn body(&self) -> &T;
+}
+pub trait LambdaTermType<T: Expression>: TermHash {
+    fn num_args(&self) -> StackOffset;
+    fn body(&self) -> &T;
+}
+pub trait ApplicationTermType<T: Expression>: TermHash {
+    fn target(&self) -> &T;
+    fn args(&self) -> &T::ExpressionList;
+}
+pub trait PartialApplicationTermType<T: Expression>: TermHash {
+    fn target(&self) -> &T;
+    fn args(&self) -> &T::ExpressionList;
+}
+pub trait RecursiveTermType<T: Expression>: TermHash {
+    fn factory(&self) -> &T;
+}
+pub trait BuiltinTermType<TBuiltin: Builtin>: TermHash {
+    fn target(&self) -> &TBuiltin;
+}
+pub trait CompiledFunctionTermType: TermHash {
+    fn address(&self) -> InstructionPointer;
+    fn hash(&self) -> HashId;
+    fn required_args(&self) -> StackOffset;
+    fn optional_args(&self) -> StackOffset;
+}
+pub trait RecordTermType<T: Expression>: TermHash {
+    fn prototype(&self) -> &T::StructPrototype;
+    fn values(&self) -> &T::ExpressionList;
+    fn get(&self, key: &T) -> Option<&T> {
+        let keys = self.prototype().keys();
+        let values = self.values();
+        let index = keys.iter().position(|field_name| field_name == key)?;
+        values.get(index)
+    }
+}
+pub trait ConstructorTermType<T: Expression>: TermHash {
+    fn prototype(&self) -> &T::StructPrototype;
+}
+pub trait ListTermType<T: Expression>: TermHash {
+    fn items(&self) -> &T::ExpressionList;
+}
+pub trait HashmapTermType<T: Expression>: TermHash {
+    type KeysIterator<'a>: ExactSizeIterator<Item = &'a T>
+    where
+        T: 'a,
+        Self: 'a;
+    type ValuesIterator<'a>: ExactSizeIterator<Item = &'a T>
+    where
+        T: 'a,
+        Self: 'a;
+    fn get(&self, value: &T) -> Option<&T>;
+    fn keys<'a>(&'a self) -> Self::KeysIterator<'a>;
+    fn values<'a>(&'a self) -> Self::ValuesIterator<'a>;
+}
+pub trait HashsetTermType<T: Expression>: TermHash {
+    type ValuesIterator<'a>: ExactSizeIterator<Item = &'a T>
+    where
+        T: 'a,
+        Self: 'a;
+    fn contains(&self, value: &T) -> bool;
+    fn values<'a>(&'a self) -> Self::ValuesIterator<'a>;
+}
+pub trait SignalTermType<T: Expression>: TermHash {
+    fn signals(&self) -> &T::SignalList;
+}
+
+pub trait ConditionType<T: Expression>:
+    Clone + PartialEq + Eq + std::fmt::Display + std::fmt::Debug + TermHash
+{
+    fn id(&self) -> StateToken;
+    fn signal_type(&self) -> &SignalType;
+    fn args(&self) -> &T::ExpressionList;
+}
+
+pub type ExpressionListSlice<'a, T> =
+    <<T as Expression>::ExpressionList as ExpressionListType<T>>::Iterator<'a>;
+
+pub trait ExpressionListType<T: Expression>:
+    Sized + PartialEq + Eq + Clone + std::fmt::Display + std::fmt::Debug + TermHash + GraphNode
+{
+    type Iterator<'a>: ExactSizeIterator<Item = &'a T>
+    where
+        T: 'a,
+        Self: 'a;
+    fn len(&self) -> usize;
+    fn get(&self, index: usize) -> Option<&T>;
+    fn iter<'a>(&'a self) -> Self::Iterator<'a>;
+}
+
+pub trait ConditionListType<T: Expression>:
+    Sized + PartialEq + Eq + Clone + std::fmt::Display + std::fmt::Debug + TermHash
+{
+    type Iterator<'a>: ExactSizeIterator<Item = &'a T::Signal>
+    where
+        T::Signal: 'a,
+        Self: 'a;
+    fn len(&self) -> usize;
+    fn iter<'a>(&'a self) -> Self::Iterator<'a>;
+}
+pub trait StructPrototypeType<T: Expression>:
+    PartialEq + Eq + Clone + std::fmt::Display + std::fmt::Debug + TermHash
+{
+    fn keys(&self) -> &T::ExpressionList;
+}
+
+pub fn parse_record<T: Expression>(
+    prototype: &T::StructPrototype,
+    values: &T,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> Option<T> {
+    if let Some(input_values) = factory.match_record_term(values) {
+        let input_prototype = input_values.prototype();
+        if hash_object(input_prototype) == hash_object(prototype) {
+            Some(values.clone())
+        } else if input_prototype.keys().len() >= prototype.keys().len() {
+            let values = prototype
+                .keys()
+                .iter()
+                .map(|key| input_values.get(key).cloned())
+                .collect::<Option<Vec<_>>>();
+            match values {
+                Some(field_values) => Some(factory.create_record_term(
+                    allocator.clone_struct_prototype(prototype),
+                    allocator.create_list(field_values),
+                )),
+                None => None,
+            }
+        } else {
+            None
+        }
+    } else {
+        None
+    }
+}
 
 pub trait Expression:
     GraphNode
@@ -36,6 +245,33 @@ where
 {
     type String: StringValue;
     type Builtin: Builtin;
+    type Signal: ConditionType<Self>;
+    type SignalList: ConditionListType<Self>;
+    type StructPrototype: StructPrototypeType<Self>;
+    type ExpressionList: ExpressionListType<Self>;
+
+    type NilTerm: NilTermType;
+    type BooleanTerm: BooleanTermType;
+    type IntTerm: IntTermType;
+    type FloatTerm: FloatTermType;
+    type StringTerm: StringTermType<Self::String>;
+    type SymbolTerm: SymbolTermType;
+    type VariableTerm: VariableTermType;
+    type EffectTerm: EffectTermType<Self>;
+    type LetTerm: LetTermType<Self>;
+    type LambdaTerm: LambdaTermType<Self>;
+    type ApplicationTerm: ApplicationTermType<Self>;
+    type PartialApplicationTerm: PartialApplicationTermType<Self>;
+    type RecursiveTerm: RecursiveTermType<Self>;
+    type BuiltinTerm: BuiltinTermType<Self::Builtin>;
+    type CompiledFunctionTerm: CompiledFunctionTermType;
+    type RecordTerm: RecordTermType<Self>;
+    type ConstructorTerm: ConstructorTermType<Self>;
+    type ListTerm: ListTermType<Self>;
+    type HashmapTerm: HashmapTermType<Self>;
+    type HashsetTerm: HashsetTermType<Self>;
+    type SignalTerm: SignalTermType<Self>;
+
     fn id(&self) -> HashId;
 }
 
@@ -443,216 +679,6 @@ impl ExactSizeIterator for HeterogeneousArityIterator {
     }
 }
 
-pub type ExpressionListSlice<'a, T> = std::slice::Iter<'a, T>;
-
-#[derive(Eq, PartialEq, Clone, Debug)]
-pub struct ExpressionList<T: Expression> {
-    hash: HashId,
-    items: Vec<T>,
-}
-impl<T: Expression> std::hash::Hash for ExpressionList<T> {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        state.write_u64(self.hash);
-    }
-}
-impl<T: Expression> ExpressionList<T> {
-    pub fn new(items: impl IntoIterator<Item = T>) -> Self {
-        let items = items.into_iter().collect::<Vec<_>>();
-        Self {
-            hash: hash_object(&items),
-            items,
-        }
-    }
-    pub fn id(&self) -> HashId {
-        self.hash
-    }
-    pub fn get(&self, index: usize) -> Option<&T> {
-        self.items.get(index)
-    }
-    pub fn len(&self) -> usize {
-        self.items.len()
-    }
-    pub fn is_empty(&self) -> bool {
-        self.items.is_empty()
-    }
-    pub fn iter<'a>(&'a self) -> ExpressionListSlice<'a, T> {
-        self.items.iter()
-    }
-    pub fn as_slice(&self) -> &[T] {
-        self.items.as_slice()
-    }
-    pub fn into_values(self) -> Vec<T> {
-        self.items
-    }
-}
-impl<T: Expression, I: std::slice::SliceIndex<[T]>> std::ops::Index<I> for ExpressionList<T> {
-    type Output = I::Output;
-    fn index(&self, index: I) -> &Self::Output {
-        &self.items[index]
-    }
-}
-impl<'a, T: Expression> IntoIterator for ExpressionList<T> {
-    type Item = T;
-    type IntoIter = std::vec::IntoIter<Self::Item>;
-    fn into_iter(self) -> Self::IntoIter {
-        self.items.into_iter()
-    }
-}
-impl<'a, T: Expression> IntoIterator for &'a ExpressionList<T> {
-    type Item = &'a T;
-    type IntoIter = std::slice::Iter<'a, T>;
-    fn into_iter(self) -> Self::IntoIter {
-        self.items.iter()
-    }
-}
-impl<T: Expression> GraphNode for ExpressionList<T> {
-    fn capture_depth(&self) -> StackOffset {
-        self.items
-            .iter()
-            .map(|term| term.capture_depth())
-            .fold(0, |acc, depth| acc.max(depth))
-    }
-    fn free_variables(&self) -> HashSet<StackOffset> {
-        self.items.iter().fold(HashSet::new(), |mut results, term| {
-            results.extend(term.free_variables());
-            results
-        })
-    }
-    fn count_variable_usages(&self, offset: StackOffset) -> usize {
-        self.items.iter().fold(0, |results, term| {
-            results + term.count_variable_usages(offset)
-        })
-    }
-    fn dynamic_dependencies(&self, deep: bool) -> DependencyList {
-        self.items
-            .iter()
-            .fold(DependencyList::empty(), |acc, term| {
-                acc.union(term.dynamic_dependencies(deep))
-            })
-    }
-    fn has_dynamic_dependencies(&self, deep: bool) -> bool {
-        self.items
-            .iter()
-            .any(|term| term.has_dynamic_dependencies(deep))
-    }
-    fn is_static(&self) -> bool {
-        true
-    }
-    fn is_atomic(&self) -> bool {
-        self.items.iter().all(|item| item.is_atomic())
-    }
-    fn is_complex(&self) -> bool {
-        true
-    }
-}
-impl<T: Expression> serde::Serialize for ExpressionList<T>
-where
-    T: serde::Serialize,
-{
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        SerializedExpressionList::from(self).serialize(serializer)
-    }
-}
-impl<'de, T: Expression> serde::Deserialize<'de> for ExpressionList<T>
-where
-    T: serde::Deserialize<'de>,
-{
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        SerializedExpressionList::deserialize(deserializer).map(Into::into)
-    }
-}
-#[derive(Debug, Serialize, Deserialize)]
-struct SerializedExpressionList<T: Expression>(Vec<T>);
-impl<'a, T: Expression> From<&'a ExpressionList<T>> for SerializedExpressionList<T> {
-    fn from(value: &'a ExpressionList<T>) -> Self {
-        let ExpressionList { items, hash: _ } = value;
-        SerializedExpressionList(items.iter().cloned().collect())
-    }
-}
-impl<T: Expression> From<SerializedExpressionList<T>> for ExpressionList<T> {
-    fn from(value: SerializedExpressionList<T>) -> Self {
-        let SerializedExpressionList(items) = value;
-        Self::new(items)
-    }
-}
-
-#[derive(Hash, Eq, PartialEq, Clone, Debug)]
-pub struct SignalList<T: Expression> {
-    signals: BTreeSet<Signal<T>>,
-}
-impl<T: Expression> SignalList<T> {
-    pub fn new(signals: impl IntoIterator<Item = Signal<T>>) -> Self {
-        Self {
-            signals: signals.into_iter().collect(),
-        }
-    }
-    pub fn len(&self) -> usize {
-        self.signals.len()
-    }
-    pub fn is_empty(&self) -> bool {
-        self.signals.is_empty()
-    }
-    pub fn iter(&self) -> impl ExactSizeIterator<Item = &Signal<T>> {
-        self.signals.iter()
-    }
-}
-impl<'a, T: Expression> IntoIterator for SignalList<T> {
-    type Item = Signal<T>;
-    type IntoIter = std::collections::btree_set::IntoIter<Self::Item>;
-    fn into_iter(self) -> Self::IntoIter {
-        self.signals.into_iter()
-    }
-}
-impl<'a, T: Expression> IntoIterator for &'a SignalList<T> {
-    type Item = &'a Signal<T>;
-    type IntoIter = std::collections::btree_set::Iter<'a, Signal<T>>;
-    fn into_iter(self) -> Self::IntoIter {
-        self.signals.iter()
-    }
-}
-impl<T: Expression> serde::Serialize for SignalList<T>
-where
-    T: serde::Serialize,
-{
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        SerializedSignalList::from(self).serialize(serializer)
-    }
-}
-impl<'de, T: Expression> serde::Deserialize<'de> for SignalList<T>
-where
-    T: serde::Deserialize<'de>,
-{
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        SerializedSignalList::deserialize(deserializer).map(Into::into)
-    }
-}
-#[derive(Debug, Serialize, Deserialize)]
-struct SerializedSignalList<T: Expression>(Vec<Signal<T>>);
-impl<'a, T: Expression> From<&'a SignalList<T>> for SerializedSignalList<T> {
-    fn from(value: &'a SignalList<T>) -> Self {
-        let SignalList { signals } = value;
-        SerializedSignalList(signals.iter().cloned().collect())
-    }
-}
-impl<T: Expression> From<SerializedSignalList<T>> for SignalList<T> {
-    fn from(value: SerializedSignalList<T>) -> Self {
-        let SerializedSignalList(signals) = value;
-        Self::new(signals)
-    }
-}
-
 pub trait StringValue:
     From<String>
     + for<'a> From<&'a str>
@@ -823,162 +849,6 @@ pub fn hash_state_values<T: Expression>(
     hasher.finish()
 }
 
-pub trait EvaluationCache<T: Expression> {
-    fn retrieve_static_substitution(
-        &mut self,
-        expression: &impl Expression,
-        substitutions: &Substitutions<T>,
-    ) -> Option<Option<T>>;
-    fn store_static_substitution(
-        &mut self,
-        expression: &impl Expression,
-        substitutions: &Substitutions<T>,
-        result: Option<T>,
-    );
-    fn retrieve_dynamic_substitution(
-        &mut self,
-        expression: &impl Expression,
-        deep: bool,
-        state: &impl DynamicState<T>,
-    ) -> Option<Option<T>>;
-    fn store_dynamic_substitution(
-        &mut self,
-        expression: &impl Expression,
-        deep: bool,
-        state: &impl DynamicState<T>,
-        result: Option<T>,
-    );
-    fn retrieve_reduction(&mut self, expression: &impl Expression) -> Option<Option<T>>;
-    fn store_reduction(&mut self, expression: &impl Expression, result: Option<T>);
-    fn retrieve_normalization(&mut self, expression: &impl Expression) -> Option<Option<T>>;
-    fn store_normalization(&mut self, expression: &impl Expression, result: Option<T>);
-    fn retrieve_evaluation(
-        &mut self,
-        expression: &impl Expression,
-        state: &impl DynamicState<T>,
-    ) -> Option<Option<EvaluationResult<T>>>;
-    fn store_evaluation(
-        &mut self,
-        expression: &impl Expression,
-        state: &impl DynamicState<T>,
-        result: Option<EvaluationResult<T>>,
-    );
-    fn metrics(&self) -> Option<&EvaluationCacheMetrics> {
-        None
-    }
-    fn clear_metrics(&mut self) -> Option<EvaluationCacheMetrics> {
-        None
-    }
-}
-
-#[derive(Default)]
-pub struct EvaluationCacheMetrics {
-    pub(crate) reductions: CacheMetrics,
-    pub(crate) static_substitutions: CacheMetrics,
-    pub(crate) dynamic_substitutions: CacheMetrics,
-    pub(crate) evaluations: CacheMetrics,
-}
-impl std::fmt::Display for EvaluationCacheMetrics {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f,
-            "Evaluations:           {}\nReductions:            {}\nStatic substitutions:  {}\nDynamic substitutions: {}",
-            self.evaluations,
-            self.reductions,
-            self.static_substitutions,
-            self.dynamic_substitutions,
-        )
-    }
-}
-#[derive(Default)]
-pub struct CacheMetrics {
-    num_cache_hits: usize,
-    num_cache_misses: usize,
-}
-impl CacheMetrics {
-    pub(crate) fn cache_hit(&mut self) {
-        self.num_cache_hits = self.num_cache_hits + 1;
-    }
-    pub(crate) fn cache_miss(&mut self) {
-        self.num_cache_misses = self.num_cache_misses + 1
-    }
-}
-impl std::fmt::Display for CacheMetrics {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{} operations, {} skipped",
-            self.num_cache_hits, self.num_cache_misses
-        )
-    }
-}
-
-#[derive(Hash, Eq, PartialEq, Clone, Debug, Serialize, Deserialize)]
-pub struct StructPrototype {
-    keys: Vec<String>,
-}
-impl StructPrototype {
-    pub fn new(keys: impl IntoIterator<Item = String>) -> Self {
-        Self {
-            keys: keys.into_iter().collect(),
-        }
-    }
-    pub fn keys(&self) -> &[String] {
-        &self.keys
-    }
-    pub fn field(&self, key: &str) -> Option<StructFieldOffset> {
-        self.keys
-            .iter()
-            .enumerate()
-            .find_map(|(offset, existing_key)| {
-                if *existing_key == *key {
-                    Some(offset)
-                } else {
-                    None
-                }
-            })
-    }
-    pub fn parse_struct<T: Expression>(
-        &self,
-        values: &T,
-        factory: &impl ExpressionFactory<T>,
-        allocator: &impl HeapAllocator<T>,
-    ) -> Option<T> {
-        if let Some(input_values) = factory.match_record_term(values) {
-            let prototype = input_values.prototype();
-            if hash_object(prototype) == hash_object(self) {
-                Some(values.clone())
-            } else if prototype.keys().len() >= self.keys().len() {
-                let values = self
-                    .keys()
-                    .iter()
-                    .map(|key| input_values.get(key).cloned())
-                    .collect::<Option<Vec<_>>>();
-                match values {
-                    Some(field_values) => Some(factory.create_record_term(
-                        allocator.clone_struct_prototype(self),
-                        allocator.create_list(field_values),
-                    )),
-                    None => None,
-                }
-            } else {
-                None
-            }
-        } else {
-            None
-        }
-    }
-}
-impl std::fmt::Display for StructPrototype {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{{{}}}",
-            self.keys.iter().cloned().collect::<Vec<_>>().join(",")
-        )
-    }
-}
-
-pub type StructFieldOffset = usize;
 pub type StackOffset = usize;
 
 pub trait ExpressionFactory<T: Expression> {
@@ -989,11 +859,11 @@ pub trait ExpressionFactory<T: Expression> {
     fn create_string_term(&self, value: T::String) -> T;
     fn create_symbol_term(&self, value: SymbolId) -> T;
     fn create_variable_term(&self, offset: StackOffset) -> T;
-    fn create_effect_term(&self, condition: Signal<T>) -> T;
+    fn create_effect_term(&self, condition: T::Signal) -> T;
     fn create_let_term(&self, initializer: T, body: T) -> T;
     fn create_lambda_term(&self, num_args: StackOffset, body: T) -> T;
-    fn create_application_term(&self, target: T, args: ExpressionList<T>) -> T;
-    fn create_partial_application_term(&self, target: T, args: ExpressionList<T>) -> T;
+    fn create_application_term(&self, target: T, args: T::ExpressionList) -> T;
+    fn create_partial_application_term(&self, target: T, args: T::ExpressionList) -> T;
     fn create_recursive_term(&self, factory: T) -> T;
     fn create_builtin_term(&self, target: impl Into<T::Builtin>) -> T;
     fn create_compiled_function_term(
@@ -1003,63 +873,63 @@ pub trait ExpressionFactory<T: Expression> {
         required_args: StackOffset,
         optional_args: StackOffset,
     ) -> T;
-    fn create_record_term(&self, prototype: StructPrototype, fields: ExpressionList<T>) -> T;
-    fn create_constructor_term(&self, prototype: StructPrototype) -> T;
-    fn create_list_term(&self, items: ExpressionList<T>) -> T;
-    fn create_hashmap_term(&self, keys: ExpressionList<T>, values: ExpressionList<T>) -> T;
-    fn create_hashset_term(&self, values: ExpressionList<T>) -> T;
-    fn create_signal_term(&self, signals: SignalList<T>) -> T;
+    fn create_record_term(&self, prototype: T::StructPrototype, fields: T::ExpressionList) -> T;
+    fn create_constructor_term(&self, prototype: T::StructPrototype) -> T;
+    fn create_list_term(&self, items: T::ExpressionList) -> T;
+    fn create_hashmap_term(&self, keys: T::ExpressionList, values: T::ExpressionList) -> T;
+    fn create_hashset_term(&self, values: T::ExpressionList) -> T;
+    fn create_signal_term(&self, signals: T::SignalList) -> T;
 
-    fn match_nil_term<'a>(&self, expression: &'a T) -> Option<&'a NilTerm>;
-    fn match_boolean_term<'a>(&self, expression: &'a T) -> Option<&'a BooleanTerm>;
-    fn match_int_term<'a>(&self, expression: &'a T) -> Option<&'a IntTerm>;
-    fn match_float_term<'a>(&self, expression: &'a T) -> Option<&'a FloatTerm>;
-    fn match_string_term<'a>(&self, expression: &'a T) -> Option<&'a StringTerm<T::String>>;
-    fn match_symbol_term<'a>(&self, expression: &'a T) -> Option<&'a SymbolTerm>;
-    fn match_variable_term<'a>(&self, expression: &'a T) -> Option<&'a VariableTerm>;
-    fn match_effect_term<'a>(&self, expression: &'a T) -> Option<&'a EffectTerm<T>>;
-    fn match_let_term<'a>(&self, expression: &'a T) -> Option<&'a LetTerm<T>>;
-    fn match_lambda_term<'a>(&self, expression: &'a T) -> Option<&'a LambdaTerm<T>>;
-    fn match_application_term<'a>(&self, expression: &'a T) -> Option<&'a ApplicationTerm<T>>;
+    fn match_nil_term<'a>(&self, expression: &'a T) -> Option<&'a T::NilTerm>;
+    fn match_boolean_term<'a>(&self, expression: &'a T) -> Option<&'a T::BooleanTerm>;
+    fn match_int_term<'a>(&self, expression: &'a T) -> Option<&'a T::IntTerm>;
+    fn match_float_term<'a>(&self, expression: &'a T) -> Option<&'a T::FloatTerm>;
+    fn match_string_term<'a>(&self, expression: &'a T) -> Option<&'a T::StringTerm>;
+    fn match_symbol_term<'a>(&self, expression: &'a T) -> Option<&'a T::SymbolTerm>;
+    fn match_variable_term<'a>(&self, expression: &'a T) -> Option<&'a T::VariableTerm>;
+    fn match_effect_term<'a>(&self, expression: &'a T) -> Option<&'a T::EffectTerm>;
+    fn match_let_term<'a>(&self, expression: &'a T) -> Option<&'a T::LetTerm>;
+    fn match_lambda_term<'a>(&self, expression: &'a T) -> Option<&'a T::LambdaTerm>;
+    fn match_application_term<'a>(&self, expression: &'a T) -> Option<&'a T::ApplicationTerm>;
     fn match_partial_application_term<'a>(
         &self,
         expression: &'a T,
-    ) -> Option<&'a PartialApplicationTerm<T>>;
-    fn match_recursive_term<'a>(&self, expression: &'a T) -> Option<&'a RecursiveTerm<T>>;
-    fn match_builtin_term<'a>(&self, expression: &'a T) -> Option<&'a BuiltinTerm<T::Builtin>>;
-    fn match_compiled_function_term<'a>(&self, target: &'a T) -> Option<&'a CompiledFunctionTerm>;
-    fn match_record_term<'a>(&self, expression: &'a T) -> Option<&'a RecordTerm<T>>;
-    fn match_constructor_term<'a>(&self, expression: &'a T) -> Option<&'a ConstructorTerm>;
-    fn match_list_term<'a>(&self, expression: &'a T) -> Option<&'a ListTerm<T>>;
-    fn match_hashmap_term<'a>(&self, expression: &'a T) -> Option<&'a HashMapTerm<T>>;
-    fn match_hashset_term<'a>(&self, expression: &'a T) -> Option<&'a HashSetTerm<T>>;
-    fn match_signal_term<'a>(&self, expression: &'a T) -> Option<&'a SignalTerm<T>>;
+    ) -> Option<&'a T::PartialApplicationTerm>;
+    fn match_recursive_term<'a>(&self, expression: &'a T) -> Option<&'a T::RecursiveTerm>;
+    fn match_builtin_term<'a>(&self, expression: &'a T) -> Option<&'a T::BuiltinTerm>;
+    fn match_compiled_function_term<'a>(
+        &self,
+        target: &'a T,
+    ) -> Option<&'a T::CompiledFunctionTerm>;
+    fn match_record_term<'a>(&self, expression: &'a T) -> Option<&'a T::RecordTerm>;
+    fn match_constructor_term<'a>(&self, expression: &'a T) -> Option<&'a T::ConstructorTerm>;
+    fn match_list_term<'a>(&self, expression: &'a T) -> Option<&'a T::ListTerm>;
+    fn match_hashmap_term<'a>(&self, expression: &'a T) -> Option<&'a T::HashmapTerm>;
+    fn match_hashset_term<'a>(&self, expression: &'a T) -> Option<&'a T::HashsetTerm>;
+    fn match_signal_term<'a>(&self, expression: &'a T) -> Option<&'a T::SignalTerm>;
 }
 
 pub trait HeapAllocator<T: Expression> {
     fn create_list(
         &self,
         expressions: impl IntoIterator<Item = T, IntoIter = impl ExactSizeIterator<Item = T>>,
-    ) -> ExpressionList<T>;
-    fn create_unsized_list(&self, expressions: impl IntoIterator<Item = T>) -> ExpressionList<T>;
+    ) -> T::ExpressionList;
+    fn create_unsized_list(&self, expressions: impl IntoIterator<Item = T>) -> T::ExpressionList;
     fn create_sized_list(
         &self,
         size: usize,
         expressions: impl IntoIterator<Item = T>,
-    ) -> ExpressionList<T>;
-    fn create_empty_list(&self) -> ExpressionList<T>;
-    fn create_unit_list(&self, value: T) -> ExpressionList<T>;
-    fn create_pair(&self, left: T, right: T) -> ExpressionList<T>;
-    fn create_triple(&self, first: T, second: T, third: T) -> ExpressionList<T>;
-    fn clone_list(&self, expressions: &ExpressionList<T>) -> ExpressionList<T>;
-    fn create_signal_list(&self, signals: impl IntoIterator<Item = Signal<T>>) -> SignalList<T>;
-    fn create_struct_prototype(
-        &self,
-        keys: impl IntoIterator<Item = String, IntoIter = impl ExactSizeIterator<Item = String>>,
-    ) -> StructPrototype;
-    fn clone_struct_prototype(&self, prototype: &StructPrototype) -> StructPrototype;
-    fn create_signal(&self, signal_type: SignalType, args: ExpressionList<T>) -> Signal<T>;
-    fn clone_signal(&self, signal: &Signal<T>) -> Signal<T>;
+    ) -> T::ExpressionList;
+    fn create_empty_list(&self) -> T::ExpressionList;
+    fn create_unit_list(&self, value: T) -> T::ExpressionList;
+    fn create_pair(&self, left: T, right: T) -> T::ExpressionList;
+    fn create_triple(&self, first: T, second: T, third: T) -> T::ExpressionList;
+    fn clone_list(&self, expressions: &T::ExpressionList) -> T::ExpressionList;
+    fn create_signal_list(&self, signals: impl IntoIterator<Item = T::Signal>) -> T::SignalList;
+    fn create_struct_prototype(&self, keys: T::ExpressionList) -> T::StructPrototype;
+    fn clone_struct_prototype(&self, prototype: &T::StructPrototype) -> T::StructPrototype;
+    fn create_signal(&self, signal_type: SignalType, args: T::ExpressionList) -> T::Signal;
+    fn clone_signal(&self, signal: &T::Signal) -> T::Signal;
     fn create_string(&self, value: impl Into<T::String>) -> T::String;
     fn create_static_string(&self, value: &'static str) -> T::String;
     fn clone_string(&self, value: &T::String) -> T::String;
@@ -1072,146 +942,6 @@ pub enum VarArgs {
 }
 
 pub type SignalId = HashId;
-
-#[derive(Eq, PartialEq, Clone, Debug)]
-pub struct Signal<T: Expression> {
-    hash: HashId,
-    signal_type: SignalType,
-    args: ExpressionList<T>,
-}
-impl<T: Expression> Signal<T> {
-    pub fn new(signal_type: SignalType, args: ExpressionList<T>) -> Self {
-        let hash = {
-            let mut hasher = DefaultHasher::new();
-            signal_type.hash(&mut hasher);
-            for arg in args.iter() {
-                arg.hash(&mut hasher);
-            }
-            hasher.finish()
-        };
-        Self {
-            hash,
-            signal_type,
-            args,
-        }
-    }
-    pub fn id(&self) -> SignalId {
-        self.hash
-    }
-    pub fn signal_type(&self) -> &SignalType {
-        &self.signal_type
-    }
-    pub fn args(&self) -> &ExpressionList<T> {
-        &self.args
-    }
-    pub fn is_type(&self, signal_type: &SignalType) -> bool {
-        &self.signal_type == signal_type
-    }
-}
-impl<T: Expression> Hash for Signal<T> {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        state.write_u64(self.hash)
-    }
-}
-impl<T: Expression> Ord for Signal<T> {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.hash.cmp(&other.hash)
-    }
-}
-impl<T: Expression> PartialOrd for Signal<T> {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        self.hash.partial_cmp(&other.hash)
-    }
-}
-impl<T: Expression> std::fmt::Display for Signal<T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "<signal:{}:{}>",
-            self.signal_type,
-            self.args
-                .iter()
-                .map(|arg| format!("{}", arg))
-                .collect::<Vec<_>>()
-                .join(",")
-        )
-    }
-}
-impl<T: Expression> serde::Serialize for Signal<T>
-where
-    T: serde::Serialize,
-{
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        Into::<SerializedSignal<T>>::into(self).serialize(serializer)
-    }
-}
-impl<'de, T: Expression> serde::Deserialize<'de> for Signal<T>
-where
-    T: serde::Deserialize<'de>,
-{
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        Ok((SerializedSignal::<T>::deserialize(deserializer)?).into())
-    }
-}
-#[derive(Debug, Serialize, Deserialize)]
-struct SerializedSignal<T: Expression> {
-    signal_type: SerializedSignalType,
-    custom_type: Option<String>,
-    args: ExpressionList<T>,
-}
-impl<'a, T: Expression> Into<SerializedSignal<T>> for &'a Signal<T> {
-    fn into(self) -> SerializedSignal<T> {
-        let (signal_type, custom_type) = serialize_signal_type(&self.signal_type);
-        let args = self.args.clone();
-        SerializedSignal {
-            signal_type,
-            custom_type,
-            args,
-        }
-    }
-}
-impl<T: Expression> Into<Signal<T>> for SerializedSignal<T> {
-    fn into(self) -> Signal<T> {
-        let SerializedSignal {
-            signal_type,
-            custom_type,
-            args,
-        } = self;
-        let signal_type = deserialize_signal_type(signal_type, custom_type);
-        Signal::new(signal_type, args)
-    }
-}
-#[derive(Debug, Serialize, Deserialize)]
-enum SerializedSignalType {
-    Error,
-    Pending,
-    Custom,
-}
-fn serialize_signal_type(signal_type: &SignalType) -> (SerializedSignalType, Option<String>) {
-    match signal_type {
-        SignalType::Pending => (SerializedSignalType::Pending, None),
-        SignalType::Error => (SerializedSignalType::Error, None),
-        SignalType::Custom(custom_type) => {
-            (SerializedSignalType::Custom, Some(custom_type.clone()))
-        }
-    }
-}
-fn deserialize_signal_type(
-    signal_type: SerializedSignalType,
-    custom_type: Option<String>,
-) -> SignalType {
-    match signal_type {
-        SerializedSignalType::Pending => SignalType::Pending,
-        SerializedSignalType::Error => SignalType::Error,
-        SerializedSignalType::Custom => SignalType::Custom(custom_type.unwrap_or(String::new())),
-    }
-}
 
 #[derive(Hash, Eq, PartialEq, Clone, Debug, Serialize, Deserialize)]
 pub enum SignalType {
@@ -1239,15 +969,12 @@ pub struct Substitutions<'a, T: Expression> {
     offset: StackOffset,
 }
 #[derive(Hash, Eq, PartialEq, Debug, Clone, Copy)]
-pub(crate) enum ScopeOffset {
+pub enum ScopeOffset {
     Wrap(usize),
     Unwrap(usize),
 }
 impl<'a, T: Expression + Rewritable<T>> Substitutions<'a, T> {
-    pub(crate) fn named(
-        entries: &'a Vec<(StackOffset, T)>,
-        scope_offset: Option<ScopeOffset>,
-    ) -> Self {
+    pub fn named(entries: &'a Vec<(StackOffset, T)>, scope_offset: Option<ScopeOffset>) -> Self {
         Self {
             entries: SubstitutionPatterns::Variable(entries, scope_offset),
             min_depth: entries
@@ -1271,14 +998,14 @@ impl<'a, T: Expression + Rewritable<T>> Substitutions<'a, T> {
             offset: 0,
         }
     }
-    pub(crate) fn offset(&self, offset: StackOffset) -> Self {
+    pub fn offset(&self, offset: StackOffset) -> Self {
         Self {
             entries: self.entries.clone(),
             min_depth: self.min_depth,
             offset: self.offset + offset,
         }
     }
-    pub(crate) fn can_skip(&self, expression: &impl Expression) -> bool {
+    pub fn can_skip(&self, expression: &impl Expression) -> bool {
         let capture_depth = expression.capture_depth();
         if capture_depth == 0 {
             true
@@ -1286,7 +1013,7 @@ impl<'a, T: Expression + Rewritable<T>> Substitutions<'a, T> {
             expression.capture_depth() - 1 < self.min_depth + self.offset
         }
     }
-    pub(crate) fn substitute_variable(
+    pub fn substitute_variable(
         &self,
         offset: StackOffset,
         factory: &impl ExpressionFactory<T>,
@@ -1461,7 +1188,7 @@ impl From<SerializedDependencyList> for DependencyList {
     }
 }
 
-pub(crate) fn match_typed_expression_list<'a, T: Expression + 'a, V, E>(
+pub fn match_typed_expression_list<'a, T: Expression + 'a, V, E>(
     expressions: impl IntoIterator<Item = &'a T, IntoIter = impl ExactSizeIterator<Item = &'a T>>,
     matcher: impl Fn(&'a T) -> Option<V>,
     err: impl Fn(&'a T) -> E,
@@ -1473,11 +1200,11 @@ pub(crate) fn match_typed_expression_list<'a, T: Expression + 'a, V, E>(
         .collect::<Result<Vec<_>, _>>()
 }
 
-pub(crate) fn transform_expression_list<T: Expression>(
-    expressions: &ExpressionList<T>,
+pub fn transform_expression_list<T: Expression>(
+    expressions: &T::ExpressionList,
     allocator: &impl HeapAllocator<T>,
     mut transform: impl FnMut(&T) -> Option<T>,
-) -> Option<ExpressionList<T>> {
+) -> Option<T::ExpressionList> {
     let mut result: Option<Vec<T>> = None;
     for (index, expression) in expressions.iter().enumerate() {
         let replaced = transform(expression);
@@ -1548,522 +1275,271 @@ impl<T: Expression> EvaluationResult<T> {
     }
 }
 
+pub fn validate_function_application_arity<T: Expression>(
+    target: &T,
+    arity: &Arity,
+    num_args: usize,
+) -> Result<usize, String> {
+    let num_required_args = arity.required().len();
+    let num_optional_args = arity.optional().len();
+    if num_args < num_required_args {
+        Err(format!(
+            "{}: Expected {} {}, received {}",
+            target,
+            num_required_args,
+            if num_optional_args > 0 || arity.variadic().is_some() {
+                "or more arguments"
+            } else if num_required_args != 1 {
+                "arguments"
+            } else {
+                "argument"
+            },
+            num_args,
+        ))
+    } else {
+        let num_args = match arity.variadic() {
+            Some(_) => num_args,
+            None => num_args.min(num_required_args + num_optional_args),
+        };
+        Ok(num_args)
+    }
+}
+
+pub fn create_record<T: Expression>(
+    properties: impl IntoIterator<Item = (T, T)>,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> T {
+    let (keys, values): (Vec<_>, Vec<_>) = properties.into_iter().unzip();
+    factory.create_record_term(
+        allocator.create_struct_prototype(allocator.create_list(keys)),
+        allocator.create_list(values),
+    )
+}
+
+pub fn apply_function<T: Expression + Applicable<T>>(
+    target: &T,
+    args: impl IntoIterator<Item = T, IntoIter = impl ExactSizeIterator<Item = T>>,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+    cache: &mut impl EvaluationCache<T>,
+) -> T {
+    target
+        .apply(args.into_iter(), factory, allocator, cache)
+        .unwrap_or_else(|error| {
+            create_error_expression(
+                factory.create_string_term(allocator.create_string(error)),
+                factory,
+                allocator,
+            )
+        })
+}
+
+pub fn create_pending_expression<T: Expression>(
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> T {
+    factory.create_signal_term(allocator.create_signal_list(once(
+        allocator.create_signal(SignalType::Pending, allocator.create_empty_list()),
+    )))
+}
+
+pub fn create_error_expression<T: Expression>(
+    payload: T,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> T {
+    factory.create_signal_term(allocator.create_signal_list(once(
+        allocator.create_signal(SignalType::Error, allocator.create_unit_list(payload)),
+    )))
+}
+
+pub fn get_short_circuit_signal<T: Expression>(
+    args: &[T],
+    arity: &Arity,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> Option<T> {
+    get_combined_short_circuit_signal(
+        get_num_short_circuit_signals(args, arity, factory),
+        args,
+        arity,
+        factory,
+        allocator,
+    )
+}
+
+#[derive(Eq, PartialEq, Copy, Clone, Debug)]
+pub enum ShortCircuitCount {
+    None,
+    Single,
+    Multiple,
+}
+impl ShortCircuitCount {
+    pub fn increment(&mut self) {
+        *self = match self {
+            Self::None => Self::Single,
+            Self::Single => Self::Multiple,
+            Self::Multiple => Self::Multiple,
+        }
+    }
+}
+
+pub fn get_num_short_circuit_signals<'a, T: Expression + 'a>(
+    args: impl IntoIterator<Item = &'a T>,
+    arity: &Arity,
+    factory: &'a impl ExpressionFactory<T>,
+) -> ShortCircuitCount {
+    let short_circuit_args = args
+        .into_iter()
+        .zip(arity.iter())
+        .filter(|(arg, arg_type)| match arg_type {
+            ArgType::Strict => factory.match_signal_term(arg).is_some(),
+            _ => false,
+        });
+    let mut num_short_circuit_args = ShortCircuitCount::None;
+    for _ in short_circuit_args {
+        if let ShortCircuitCount::None = num_short_circuit_args {
+            num_short_circuit_args = ShortCircuitCount::Single;
+        } else {
+            return ShortCircuitCount::Multiple;
+        }
+    }
+    num_short_circuit_args
+}
+
+pub fn get_combined_short_circuit_signal<'a, T: Expression + 'a>(
+    num_short_circuit_args: ShortCircuitCount,
+    args: impl IntoIterator<Item = &'a T>,
+    arity: &Arity,
+    factory: &'a impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> Option<T> {
+    match num_short_circuit_args.into() {
+        ShortCircuitCount::None => None,
+        ShortCircuitCount::Single => Some(
+            filter_short_circuit_args(args.into_iter(), arity, factory)
+                .into_iter()
+                .map(|(arg, _)| arg)
+                .cloned()
+                .next()
+                .unwrap(),
+        ),
+        ShortCircuitCount::Multiple => {
+            let combined_signal = factory.create_signal_term(
+                allocator.create_signal_list(
+                    filter_short_circuit_args(args.into_iter(), arity, factory)
+                        .into_iter()
+                        .flat_map(|(_, signal)| {
+                            signal
+                                .signals()
+                                .iter()
+                                .map(|signal| allocator.clone_signal(signal))
+                        }),
+                ),
+            );
+            Some(combined_signal)
+        }
+    }
+}
+
+fn filter_short_circuit_args<'a, T: Expression + 'a>(
+    args: impl IntoIterator<Item = &'a T>,
+    arity: &Arity,
+    matcher: &'a impl ExpressionFactory<T>,
+) -> impl IntoIterator<Item = (&'a T, &'a T::SignalTerm)> {
+    args.into_iter()
+        .zip(arity.iter())
+        .filter_map(move |(arg, arg_type)| match arg_type {
+            ArgType::Strict => matcher.match_signal_term(&arg).map(|signal| (arg, signal)),
+            ArgType::Eager | ArgType::Lazy => None,
+        })
+}
+
+pub fn get_hashmap_entries<'a, T: Expression + 'a>(
+    target: &'a T::HashmapTerm,
+    factory: &'a impl ExpressionFactory<T>,
+    allocator: &'a impl HeapAllocator<T>,
+) -> impl IntoIterator<Item = T, IntoIter = impl ExactSizeIterator<Item = T> + 'a> + 'a {
+    target
+        .keys()
+        .into_iter()
+        .cloned()
+        .zip(target.values().into_iter().cloned())
+        .map(move |(key, value)| factory.create_list_term(allocator.create_pair(key, value)))
+}
+
+pub fn deduplicate_hashmap_entries<T: Expression>(
+    keys: &[T],
+    values: &[T],
+) -> Option<(Vec<T>, Vec<T>)> {
+    let lookup = build_hashmap_lookup_table(keys.iter());
+    if lookup.len() == keys.len() {
+        None
+    } else {
+        let (keys, values, _) = keys.iter().fold(
+            (
+                Vec::with_capacity(lookup.len()),
+                Vec::with_capacity(lookup.len()),
+                HashSet::new(),
+            ),
+            |results, key| {
+                let (mut deduplicated_keys, mut deduplicated_values, mut processed_keys) = results;
+                let key_hash = key.id();
+                if !processed_keys.contains(&key_hash) {
+                    let target_index = *lookup.get(&key_hash).unwrap();
+                    let value = values.get(target_index).unwrap();
+                    deduplicated_keys.push(key.clone());
+                    deduplicated_values.push(value.clone());
+                    processed_keys.insert(key_hash);
+                }
+                (deduplicated_keys, deduplicated_values, processed_keys)
+            },
+        );
+        Some((keys, values))
+    }
+}
+
+pub fn build_hashmap_lookup_table<'a, T: Expression + 'a>(
+    keys: impl IntoIterator<Item = &'a T, IntoIter = impl ExactSizeIterator<Item = &'a T>>,
+) -> HashMap<HashId, usize> {
+    keys.into_iter()
+        .enumerate()
+        .map(|(index, key)| (key.id(), index))
+        .collect()
+}
+
+pub fn deduplicate_hashset_entries<T: Expression>(values: &[T]) -> Option<Vec<T>> {
+    let lookup = build_hashset_lookup_table(values.iter());
+    if lookup.len() == values.len() {
+        None
+    } else {
+        let (values, _) = values.iter().fold(
+            (Vec::with_capacity(lookup.len()), HashSet::new()),
+            |results, value| {
+                let (mut deduplicated_values, mut processed_values) = results;
+                let value_hash = value.id();
+                if !processed_values.contains(&value_hash) {
+                    deduplicated_values.push(value.clone());
+                    processed_values.insert(value_hash);
+                }
+                (deduplicated_values, processed_values)
+            },
+        );
+        Some(values)
+    }
+}
+
+pub fn build_hashset_lookup_table<'a, T: Expression + 'a>(
+    values: impl IntoIterator<Item = &'a T, IntoIter = impl ExactSizeIterator<Item = &'a T>>,
+) -> HashSet<HashId> {
+    let values = values.into_iter();
+    values.into_iter().map(|value| value.id()).collect()
+}
+
 #[cfg(test)]
 mod tests {
-    use std::iter::once;
-
-    use crate::{
-        allocator::DefaultAllocator,
-        cache::SubstitutionCache,
-        core::{
-            evaluate, ArgType, DependencyList, EvaluationResult, Expression, ExpressionFactory,
-            FunctionArity, GraphNode, HeapAllocator, Rewritable, Signal, SignalType, StateCache,
-        },
-        lang::SharedTermFactory,
-        parser::sexpr::parse,
-        stdlib::Stdlib,
-    };
-
-    fn create_error_signal_term<T: Expression>(
-        message: impl Into<T::String>,
-        factory: &impl ExpressionFactory<T>,
-        allocator: &impl HeapAllocator<T>,
-    ) -> T {
-        factory.create_signal_term(
-            allocator.create_signal_list(once(create_error_signal(message, factory, allocator))),
-        )
-    }
-
-    fn create_error_signal<T: Expression>(
-        message: impl Into<T::String>,
-        factory: &impl ExpressionFactory<T>,
-        allocator: &impl HeapAllocator<T>,
-    ) -> Signal<T> {
-        allocator.create_signal(
-            SignalType::Error,
-            allocator
-                .create_unit_list(factory.create_string_term(allocator.create_string(message))),
-        )
-    }
-
-    #[test]
-    fn value_expressions() {
-        let state = StateCache::default();
-        let mut cache = SubstitutionCache::new();
-        let factory = SharedTermFactory::<Stdlib>::default();
-        let allocator = DefaultAllocator::default();
-        let expression = parse("3", &factory, &allocator).unwrap();
-        let result = evaluate(&expression, &state, &factory, &allocator, &mut cache);
-        assert_eq!(
-            result,
-            EvaluationResult::new(factory.create_int_term(3), DependencyList::empty(),)
-        );
-    }
-
-    #[test]
-    fn lambda_optimizations() {
-        let mut cache = SubstitutionCache::new();
-        let factory = SharedTermFactory::<Stdlib>::default();
-        let allocator = DefaultAllocator::default();
-        let expression = parse("(lambda (foo) foo)", &factory, &allocator).unwrap();
-        let result = expression.normalize(&factory, &allocator, &mut cache);
-        assert_eq!(expression.capture_depth(), 0);
-        assert_eq!(result, None);
-
-        let expression = parse("(lambda (foo bar) (+ foo bar))", &factory, &allocator).unwrap();
-        let normalized = expression.normalize(&factory, &allocator, &mut cache);
-        assert_eq!(expression.capture_depth(), 0);
-        assert_eq!(normalized, Some(parse("+", &factory, &allocator).unwrap()));
-
-        let expression = parse("(lambda (foo bar baz) (+ foo bar))", &factory, &allocator).unwrap();
-        let normalized = expression.normalize(&factory, &allocator, &mut cache);
-        assert_eq!(expression.capture_depth(), 0);
-        assert_eq!(normalized, Some(parse("+", &factory, &allocator).unwrap()));
-    }
-
-    #[test]
-    fn lambda_application_expressions() {
-        let state = StateCache::default();
-        let mut cache = SubstitutionCache::new();
-        let factory = SharedTermFactory::<Stdlib>::default();
-        let allocator = DefaultAllocator::default();
-        let expression = parse("((lambda (foo) foo) 3)", &factory, &allocator).unwrap();
-        let result = evaluate(&expression, &state, &factory, &allocator, &mut cache);
-        assert_eq!(
-            result,
-            EvaluationResult::new(factory.create_int_term(3), DependencyList::empty(),),
-        );
-        let expression =
-            parse("((lambda (foo bar) (+ foo bar)) 3 4)", &factory, &allocator).unwrap();
-        let result = evaluate(&expression, &state, &factory, &allocator, &mut cache);
-        assert_eq!(
-            result,
-            EvaluationResult::new(factory.create_int_term(3 + 4), DependencyList::empty(),),
-        );
-        let expression =
-            parse("((lambda (foo bar) (((lambda (foo bar) (lambda (foo bar) (+ foo bar))) foo bar) foo bar)) 3 4)", &factory, &allocator)
-                .unwrap();
-        let result = evaluate(&expression, &state, &factory, &allocator, &mut cache);
-        assert_eq!(
-            result,
-            EvaluationResult::new(factory.create_int_term(3 + 4), DependencyList::empty(),),
-        );
-    }
-
-    #[test]
-    fn invalid_function_applications() {
-        let state = StateCache::default();
-        let mut cache = SubstitutionCache::new();
-        let factory = SharedTermFactory::<Stdlib>::default();
-        let allocator = DefaultAllocator::default();
-        let expression = parse("((lambda (foo) foo))", &factory, &allocator).unwrap();
-        let result = evaluate(&expression, &state, &factory, &allocator, &mut cache);
-        assert_eq!(
-            result,
-            EvaluationResult::new(
-                create_error_signal_term(
-                    "<function:1>: Expected 1 argument, received 0",
-                    &factory,
-                    &allocator
-                ),
-                DependencyList::empty(),
-            ),
-        );
-        let expression = parse(
-            "((lambda (first second third) first) 3)",
-            &factory,
-            &allocator,
-        )
-        .unwrap();
-        let result = evaluate(&expression, &state, &factory, &allocator, &mut cache);
-        assert_eq!(
-            result,
-            EvaluationResult::new(
-                create_error_signal_term(
-                    "<function:3>: Expected 3 arguments, received 1",
-                    &factory,
-                    &allocator
-                ),
-                DependencyList::empty(),
-            ),
-        );
-        let expression = parse(
-            "((lambda (first second third) first) 3 4)",
-            &factory,
-            &allocator,
-        )
-        .unwrap();
-        let result = evaluate(&expression, &state, &factory, &allocator, &mut cache);
-        assert_eq!(
-            result,
-            EvaluationResult::new(
-                create_error_signal_term(
-                    "<function:3>: Expected 3 arguments, received 2",
-                    &factory,
-                    &allocator
-                ),
-                DependencyList::empty(),
-            ),
-        );
-    }
-
-    #[test]
-    fn builtin_expressions() {
-        let state = StateCache::default();
-        let mut cache = SubstitutionCache::new();
-        let factory = SharedTermFactory::<Stdlib>::default();
-        let allocator = DefaultAllocator::default();
-        let expression = parse("+", &factory, &allocator).unwrap();
-        let result = evaluate(&expression, &state, &factory, &allocator, &mut cache);
-        assert_eq!(
-            result,
-            EvaluationResult::new(
-                factory.create_builtin_term(Stdlib::Add),
-                DependencyList::empty(),
-            ),
-        );
-    }
-
-    #[test]
-    fn builtin_application_expressions() {
-        let state = StateCache::default();
-        let mut cache = SubstitutionCache::new();
-        let factory = SharedTermFactory::<Stdlib>::default();
-        let allocator = DefaultAllocator::default();
-        let expression = parse("(+ 1 2)", &factory, &allocator).unwrap();
-        let result = evaluate(&expression, &state, &factory, &allocator, &mut cache);
-        assert_eq!(
-            result,
-            EvaluationResult::new(factory.create_int_term(3), DependencyList::empty(),),
-        );
-    }
-
-    #[test]
-    fn nested_expressions() {
-        let state = StateCache::default();
-        let mut cache = SubstitutionCache::new();
-        let factory = SharedTermFactory::<Stdlib>::default();
-        let allocator = DefaultAllocator::default();
-        let expression = parse("(+ (+ (abs -3) 4) 5)", &factory, &allocator).unwrap();
-        let result = evaluate(&expression, &state, &factory, &allocator, &mut cache);
-        assert_eq!(
-            result,
-            EvaluationResult::new(factory.create_int_term(3 + 4 + 5), DependencyList::empty(),),
-        );
-    }
-
-    #[test]
-    fn signal_short_circuiting() {
-        let state = StateCache::default();
-        let mut cache = SubstitutionCache::new();
-        let factory = SharedTermFactory::<Stdlib>::default();
-        let allocator = DefaultAllocator::default();
-        let expression = parse("((/ 3 0) 4 5)", &factory, &allocator).unwrap();
-        let result = evaluate(&expression, &state, &factory, &allocator, &mut cache);
-        assert_eq!(
-            result,
-            EvaluationResult::new(
-                create_error_signal_term(
-                    "<stdlib:Divide>: Division by zero: 3 / 0",
-                    &factory,
-                    &allocator,
-                ),
-                DependencyList::empty(),
-            ),
-        );
-        let expression = parse("(+ (/ 3 0) 4)", &factory, &allocator).unwrap();
-        let result = evaluate(&expression, &state, &factory, &allocator, &mut cache);
-        assert_eq!(
-            result,
-            EvaluationResult::new(
-                create_error_signal_term(
-                    "<stdlib:Divide>: Division by zero: 3 / 0",
-                    &factory,
-                    &allocator,
-                ),
-                DependencyList::empty(),
-            ),
-        );
-        let expression = parse("(+ 3 (/ 4 0))", &factory, &allocator).unwrap();
-        let result = evaluate(&expression, &state, &factory, &allocator, &mut cache);
-        assert_eq!(
-            result,
-            EvaluationResult::new(
-                create_error_signal_term(
-                    "<stdlib:Divide>: Division by zero: 4 / 0",
-                    &factory,
-                    &allocator,
-                ),
-                DependencyList::empty(),
-            ),
-        );
-        let expression = parse("(+ (/ 3 0) (/ 4 0))", &factory, &allocator).unwrap();
-        let result = evaluate(&expression, &state, &factory, &allocator, &mut cache);
-        assert_eq!(
-            result,
-            EvaluationResult::new(
-                factory.create_signal_term(HeapAllocator::create_signal_list(
-                    &allocator,
-                    vec![
-                        create_error_signal(
-                            "<stdlib:Divide>: Division by zero: 3 / 0",
-                            &factory,
-                            &allocator,
-                        ),
-                        create_error_signal(
-                            "<stdlib:Divide>: Division by zero: 4 / 0",
-                            &factory,
-                            &allocator,
-                        ),
-                    ]
-                )),
-                DependencyList::empty(),
-            ),
-        );
-        let expression = parse("(+ (/ 3 0) (/ 3 0))", &factory, &allocator).unwrap();
-        let result = evaluate(&expression, &state, &factory, &allocator, &mut cache);
-        assert_eq!(
-            result,
-            EvaluationResult::new(
-                create_error_signal_term(
-                    "<stdlib:Divide>: Division by zero: 3 / 0",
-                    &factory,
-                    &allocator,
-                ),
-                DependencyList::empty(),
-            ),
-        );
-        let expression = parse("(+ (+ (/ 3 0) 4) 5)", &factory, &allocator).unwrap();
-        let result = evaluate(&expression, &state, &factory, &allocator, &mut cache);
-        assert_eq!(
-            result,
-            EvaluationResult::new(
-                create_error_signal_term(
-                    "<stdlib:Divide>: Division by zero: 3 / 0",
-                    &factory,
-                    &allocator,
-                ),
-                DependencyList::empty(),
-            ),
-        );
-    }
-
-    #[test]
-    fn let_expressions() {
-        let state = StateCache::default();
-        let mut cache = SubstitutionCache::new();
-        let factory = SharedTermFactory::<Stdlib>::default();
-        let allocator = DefaultAllocator::default();
-        let expression = parse("(let () 3)", &factory, &allocator).unwrap();
-        let result = evaluate(&expression, &state, &factory, &allocator, &mut cache);
-        assert_eq!(
-            result,
-            EvaluationResult::new(factory.create_int_term(3), DependencyList::empty(),),
-        );
-        let expression = parse("(let ((foo 3)) foo)", &factory, &allocator).unwrap();
-        let result = evaluate(&expression, &state, &factory, &allocator, &mut cache);
-        assert_eq!(
-            result,
-            EvaluationResult::new(factory.create_int_term(3), DependencyList::empty(),),
-        );
-        let expression =
-            parse("(let ((foo 3) (bar 4)) (+ foo bar))", &factory, &allocator).unwrap();
-        let result = evaluate(&expression, &state, &factory, &allocator, &mut cache);
-        assert_eq!(
-            result,
-            EvaluationResult::new(factory.create_int_term(3 + 4), DependencyList::empty(),),
-        );
-        let expression = parse(
-            "(let ((first 3)) (let ((second 4)) first))",
-            &factory,
-            &allocator,
-        )
-        .unwrap();
-        let result = evaluate(&expression, &state, &factory, &allocator, &mut cache);
-        assert_eq!(
-            result,
-            EvaluationResult::new(factory.create_int_term(3), DependencyList::empty(),),
-        );
-        let expression = parse("(let ((first 3)) (let ((second 4)) (let ((third first) (fourth second)) (+ third fourth))))", &factory, &allocator).unwrap();
-        let result = evaluate(&expression, &state, &factory, &allocator, &mut cache);
-        assert_eq!(
-            result,
-            EvaluationResult::new(factory.create_int_term(3 + 4), DependencyList::empty(),),
-        );
-    }
-
-    #[test]
-    fn letrec_expressions() {
-        let state = StateCache::default();
-        let mut cache = SubstitutionCache::new();
-        let factory = SharedTermFactory::<Stdlib>::default();
-        let allocator = DefaultAllocator::default();
-        let expression = parse("(letrec () 3)", &factory, &allocator).unwrap();
-        let result = evaluate(&expression, &state, &factory, &allocator, &mut cache);
-        assert_eq!(
-            result,
-            EvaluationResult::new(factory.create_int_term(3), DependencyList::empty(),),
-        );
-        let expression = parse("(letrec ((foo 3)) foo)", &factory, &allocator).unwrap();
-        let result = evaluate(&expression, &state, &factory, &allocator, &mut cache);
-        assert_eq!(
-            result,
-            EvaluationResult::new(factory.create_int_term(3), DependencyList::empty(),),
-        );
-        let expression = parse(
-            "(letrec ((foo 3) (bar 4)) (+ foo bar))",
-            &factory,
-            &allocator,
-        )
-        .unwrap();
-        let result = evaluate(&expression, &state, &factory, &allocator, &mut cache);
-        assert_eq!(
-            result,
-            EvaluationResult::new(factory.create_int_term(3 + 4), DependencyList::empty(),),
-        );
-        let expression = parse(
-            "(letrec ((first 3)) (let ((second 4)) first))",
-            &factory,
-            &allocator,
-        )
-        .unwrap();
-        let result = evaluate(&expression, &state, &factory, &allocator, &mut cache);
-        assert_eq!(
-            result,
-            EvaluationResult::new(factory.create_int_term(3), DependencyList::empty(),),
-        );
-        let expression = parse("(letrec ((first 3)) (let ((second 4)) (let ((third first) (fourth second)) (+ third fourth))))", &factory, &allocator).unwrap();
-        let result = evaluate(&expression, &state, &factory, &allocator, &mut cache);
-        assert_eq!(
-            result,
-            EvaluationResult::new(factory.create_int_term(3 + 4), DependencyList::empty(),),
-        );
-
-        let expression = parse(
-            "(letrec ((foo 3) (bar foo)) (+ foo bar))",
-            &factory,
-            &allocator,
-        )
-        .unwrap();
-        let result = evaluate(&expression, &state, &factory, &allocator, &mut cache);
-        assert_eq!(
-            result,
-            EvaluationResult::new(factory.create_int_term(3 + 3), DependencyList::empty(),),
-        );
-        let expression = parse(
-            "(letrec ((foo bar) (bar 3)) (+ foo bar))",
-            &factory,
-            &allocator,
-        )
-        .unwrap();
-        let result = evaluate(&expression, &state, &factory, &allocator, &mut cache);
-        assert_eq!(
-            result,
-            EvaluationResult::new(factory.create_int_term(3 + 3), DependencyList::empty(),),
-        );
-        let expression = parse(
-            "(letrec ((foo 3) (bar (+ foo 1))) bar)",
-            &factory,
-            &allocator,
-        )
-        .unwrap();
-        let result = evaluate(&expression, &state, &factory, &allocator, &mut cache);
-        assert_eq!(
-            result,
-            EvaluationResult::new(factory.create_int_term(3 + 1), DependencyList::empty(),),
-        );
-        let expression = parse(
-            "(letrec ((foo (+ bar 1)) (bar 3)) foo)",
-            &factory,
-            &allocator,
-        )
-        .unwrap();
-        let result = evaluate(&expression, &state, &factory, &allocator, &mut cache);
-        assert_eq!(
-            result,
-            EvaluationResult::new(factory.create_int_term(3 + 1), DependencyList::empty(),),
-        );
-        let expression = parse(
-            "(letrec ((fac (lambda (n) (if (= n 1) n (* n (fac (- n 1))))))) (fac 5))",
-            &factory,
-            &allocator,
-        )
-        .unwrap();
-        let result = evaluate(&expression, &state, &factory, &allocator, &mut cache);
-        assert_eq!(
-            result,
-            EvaluationResult::new(
-                factory.create_int_term(5 * 4 * 3 * 2 * 1),
-                DependencyList::empty(),
-            ),
-        );
-        let expression = parse("(letrec ((is-even? (lambda (x) (if (= x 0) #t (is-odd? (- x 1))))) (is-odd? (lambda (x) (if (= x 0) #f (is-even? (- x 1)))))) (is-even? 3))", &factory, &allocator).unwrap();
-        let result = evaluate(&expression, &state, &factory, &allocator, &mut cache);
-        assert_eq!(
-            result,
-            EvaluationResult::new(factory.create_boolean_term(false), DependencyList::empty(),),
-        );
-        let expression = parse("(letrec ((is-even? (lambda (x) (if (= x 0) #t (is-odd? (- x 1))))) (is-odd? (lambda (x) (if (= x 0) #f (is-even? (- x 1)))))) (is-odd? 3))", &factory, &allocator).unwrap();
-        let result = evaluate(&expression, &state, &factory, &allocator, &mut cache);
-        assert_eq!(
-            result,
-            EvaluationResult::new(factory.create_boolean_term(true), DependencyList::empty(),),
-        );
-        let expression = parse(
-            "(letrec ((foo (cons 3 foo))) (car (cdr (cdr (cdr foo)))))",
-            &factory,
-            &allocator,
-        )
-        .unwrap();
-        let result = evaluate(&expression, &state, &factory, &allocator, &mut cache);
-        assert_eq!(
-            result,
-            EvaluationResult::new(factory.create_int_term(3), DependencyList::empty(),),
-        );
-        let expression = parse(
-            "(letrec ((foo (cons 1 bar)) (bar (cons 2 foo))) (car (cdr (cdr (cdr foo)))))",
-            &factory,
-            &allocator,
-        )
-        .unwrap();
-        let result = evaluate(&expression, &state, &factory, &allocator, &mut cache);
-        assert_eq!(
-            result,
-            EvaluationResult::new(factory.create_int_term(2), DependencyList::empty(),),
-        );
-    }
-
-    #[test]
-    fn partial_evaluation() {
-        let factory = SharedTermFactory::<Stdlib>::default();
-        let allocator = DefaultAllocator::default();
-        let expression = parse(
-            "((lambda (foo) ((lambda (bar) (foo 3)) #f)) (lambda (foo) #t))",
-            &factory,
-            &allocator,
-        )
-        .unwrap();
-        assert_eq!(
-            expression.normalize(&factory, &allocator, &mut SubstitutionCache::new()),
-            Some(factory.create_boolean_term(true))
-        );
-
-        let expression = parse(
-            "
-            (let ((identity (lambda (value) value)))
-                (let ((identity2 (lambda (value) (identity value))))
-                    ((lambda (value) (identity2 (* value 2)))
-                      3)))
-        ",
-            &factory,
-            &allocator,
-        )
-        .unwrap();
-        assert_eq!(
-            expression.normalize(&factory, &allocator, &mut SubstitutionCache::new()),
-            Some(factory.create_int_term(6))
-        );
-    }
+    use super::*;
 
     #[test]
     fn arity() {

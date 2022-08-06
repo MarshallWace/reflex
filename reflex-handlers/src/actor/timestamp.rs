@@ -9,7 +9,10 @@ use std::{
 };
 
 use futures::StreamExt;
-use reflex::core::{Expression, ExpressionFactory, HeapAllocator, Signal, SignalType, StateToken};
+use reflex::core::{
+    ConditionType, Expression, ExpressionFactory, ExpressionListType, FloatTermType, HeapAllocator,
+    IntTermType, SignalType, StateToken,
+};
 use reflex_dispatcher::{
     Action, Actor, ActorTransition, HandlerContext, InboundAction, MessageData, OperationStream,
     OutboundAction, ProcessId, StateOperation, StateTransition,
@@ -242,16 +245,17 @@ fn get_current_time() -> f64 {
 }
 
 fn parse_timestamp_effect_args<T: Expression>(
-    effect: &Signal<T>,
+    effect: &T::Signal,
     factory: &impl ExpressionFactory<T>,
 ) -> Result<f64, String> {
-    let mut args = effect.args().into_iter();
+    let args = effect.args();
     if args.len() != 1 {
         return Err(format!(
             "Invalid timestamp signal: Expected 1 argument, received {}",
             args.len()
         ));
     }
+    let mut args = args.iter();
     let interval = parse_number_arg(args.next().unwrap(), factory);
     match interval {
         Some(interval) if interval >= 1.0 => Ok(interval),
@@ -269,9 +273,9 @@ fn parse_timestamp_effect_args<T: Expression>(
 
 fn parse_number_arg<T: Expression>(value: &T, factory: &impl ExpressionFactory<T>) -> Option<f64> {
     match factory.match_int_term(value) {
-        Some(term) => Some(term.value as f64),
+        Some(term) => Some(term.value() as f64),
         _ => match factory.match_float_term(value) {
-            Some(term) => Some(term.value),
+            Some(term) => Some(term.value()),
             _ => None,
         },
     }

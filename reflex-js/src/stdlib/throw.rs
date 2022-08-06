@@ -6,7 +6,8 @@ use std::iter::once;
 
 use reflex::core::{
     uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
-    ExpressionList, FunctionArity, HeapAllocator, Signal, SignalType, StringValue, Uid, Uuid,
+    ExpressionListType, FunctionArity, HeapAllocator, ListTermType, RecordTermType, SignalType,
+    StringTermType, StringValue, Uid, Uuid,
 };
 
 pub struct Throw {}
@@ -47,7 +48,7 @@ impl<T: Expression> Applicable<T> for Throw {
                 "Thrown exceptions cannot contain dynamic values",
             ));
         }
-        let signals = if let Some(errors) = parse_aggregate_error(&error, factory) {
+        let signals = if let Some(errors) = parse_aggregate_error(&error, factory, allocator) {
             allocator.create_signal_list(
                 errors
                     .iter()
@@ -64,22 +65,30 @@ impl<T: Expression> Applicable<T> for Throw {
 fn parse_aggregate_error<'a, T: Expression + 'a>(
     target: &'a T,
     factory: &impl ExpressionFactory<T>,
-) -> Option<&'a ExpressionList<T>> {
+    allocator: &impl HeapAllocator<T>,
+) -> Option<&'a T::ExpressionList> {
     factory.match_record_term(target).and_then(|target| {
-        target.get("name").and_then(|error_type| {
-            factory.match_string_term(error_type).and_then(|name| {
-                if name.value.as_str() == "AggregateError" {
-                    target.get("errors").and_then(|errors| {
-                        factory.match_list_term(errors).map(|errors| errors.items())
-                    })
-                } else {
-                    None
-                }
+        target
+            .get(&factory.create_string_term(allocator.create_static_string("name")))
+            .and_then(|error_type| {
+                factory.match_string_term(error_type).and_then(|name| {
+                    if name.value().as_str() == "AggregateError" {
+                        target
+                            .get(
+                                &factory
+                                    .create_string_term(allocator.create_static_string("errors")),
+                            )
+                            .and_then(|errors| {
+                                factory.match_list_term(errors).map(|errors| errors.items())
+                            })
+                    } else {
+                        None
+                    }
+                })
             })
-        })
     })
 }
 
-fn create_error_signal<T: Expression>(error: T, allocator: &impl HeapAllocator<T>) -> Signal<T> {
+fn create_error_signal<T: Expression>(error: T, allocator: &impl HeapAllocator<T>) -> T::Signal {
     allocator.create_signal(SignalType::Error, allocator.create_unit_list(error))
 }

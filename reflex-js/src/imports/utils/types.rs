@@ -2,10 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use crate::stdlib::Stdlib as JsStdlib;
-use reflex::{
-    core::{Expression, ExpressionFactory, HeapAllocator},
-    lang::create_record,
-};
+use reflex::core::{create_record, Expression, ExpressionFactory, HeapAllocator};
 
 pub(crate) fn import_types<T: Expression>(
     factory: &impl ExpressionFactory<T>,
@@ -17,24 +14,36 @@ where
     let null = factory.create_nil_term();
     create_record(
         vec![
-            (String::from("Boolean"), null.clone()),
-            (String::from("Int"), null.clone()),
-            (String::from("Float"), null.clone()),
-            (String::from("String"), null.clone()),
             (
-                String::from("Shape"),
+                factory.create_string_term(allocator.create_static_string("Boolean")),
+                null.clone(),
+            ),
+            (
+                factory.create_string_term(allocator.create_static_string("Int")),
+                null.clone(),
+            ),
+            (
+                factory.create_string_term(allocator.create_static_string("Float")),
+                null.clone(),
+            ),
+            (
+                factory.create_string_term(allocator.create_static_string("String")),
+                null.clone(),
+            ),
+            (
+                factory.create_string_term(allocator.create_static_string("Shape")),
                 factory.create_builtin_term(JsStdlib::StructTypeFactory),
             ),
             (
-                String::from("Fn"),
+                factory.create_string_term(allocator.create_static_string("Fn")),
                 factory.create_lambda_term(0, factory.create_lambda_term(1, null.clone())),
             ),
             (
-                String::from("List"),
+                factory.create_string_term(allocator.create_static_string("List")),
                 factory.create_lambda_term(1, null.clone()),
             ),
             (
-                String::from("Maybe"),
+                factory.create_string_term(allocator.create_static_string("Maybe")),
                 factory.create_lambda_term(1, null.clone()),
             ),
         ],
@@ -51,15 +60,14 @@ mod tests {
         builtins::JsBuiltins, imports::builtin_imports, parse_module, static_module_loader, Env,
     };
     use reflex::{
-        allocator::DefaultAllocator,
         cache::SubstitutionCache,
         core::{
             evaluate, DependencyList, EvaluationResult, ExpressionFactory, HeapAllocator,
             StateCache,
         },
-        lang::SharedTermFactory,
-        stdlib::Stdlib,
     };
+    use reflex_lang::{allocator::DefaultAllocator, SharedTermFactory};
+    use reflex_stdlib::Stdlib;
 
     #[test]
     fn struct_types() {
@@ -94,11 +102,13 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                factory.create_constructor_term(allocator.create_struct_prototype(vec![
-                    allocator.create_static_string("foo"),
-                    allocator.create_static_string("bar"),
-                    allocator.create_static_string("baz"),
-                ])),
+                factory.create_constructor_term(allocator.create_struct_prototype(
+                    allocator.create_list([
+                        factory.create_string_term(allocator.create_static_string("foo")),
+                        factory.create_string_term(allocator.create_static_string("bar")),
+                        factory.create_string_term(allocator.create_static_string("baz")),
+                    ])
+                )),
                 DependencyList::empty(),
             ),
         );
@@ -130,11 +140,11 @@ mod tests {
             result,
             EvaluationResult::new(
                 factory.create_record_term(
-                    allocator.create_struct_prototype(vec![
-                        allocator.create_static_string("foo"),
-                        allocator.create_static_string("bar"),
-                        allocator.create_static_string("baz"),
-                    ]),
+                    allocator.create_struct_prototype(allocator.create_list([
+                        factory.create_string_term(allocator.create_static_string("foo")),
+                        factory.create_string_term(allocator.create_static_string("bar")),
+                        factory.create_string_term(allocator.create_static_string("baz")),
+                    ])),
                     allocator.create_list(vec![
                         factory.create_float_term(3.0),
                         factory.create_float_term(4.0),
@@ -172,11 +182,11 @@ mod tests {
             result,
             EvaluationResult::new(
                 factory.create_record_term(
-                    allocator.create_struct_prototype(vec![
-                        allocator.create_static_string("foo"),
-                        allocator.create_static_string("bar"),
-                        allocator.create_static_string("baz"),
-                    ]),
+                    allocator.create_struct_prototype(allocator.create_list([
+                        factory.create_string_term(allocator.create_static_string("foo")),
+                        factory.create_string_term(allocator.create_static_string("bar")),
+                        factory.create_string_term(allocator.create_static_string("baz")),
+                    ])),
                     allocator.create_list(vec![
                         factory.create_float_term(3.0),
                         factory.create_float_term(4.0),
@@ -214,11 +224,11 @@ mod tests {
             result,
             EvaluationResult::new(
                 factory.create_record_term(
-                    allocator.create_struct_prototype(vec![
-                        allocator.create_static_string("foo"),
-                        allocator.create_static_string("bar"),
-                        allocator.create_static_string("baz"),
-                    ]),
+                    allocator.create_struct_prototype(allocator.create_list([
+                        factory.create_string_term(allocator.create_static_string("foo")),
+                        factory.create_string_term(allocator.create_static_string("bar")),
+                        factory.create_string_term(allocator.create_static_string("baz")),
+                    ])),
                     allocator.create_list(vec![
                         factory.create_application_term(
                             factory.create_builtin_term(Stdlib::Add),

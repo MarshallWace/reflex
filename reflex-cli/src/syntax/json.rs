@@ -4,11 +4,12 @@
 use std::path::Path;
 
 use anyhow::{anyhow, Context, Result};
-use reflex::{
-    compiler::{Compile, CompilerMode, CompilerOptions, InstructionPointer, Program},
-    core::{Applicable, Expression, ExpressionFactory, HeapAllocator, Reducible, Rewritable},
-    stdlib::Stdlib,
+use reflex::core::{
+    Applicable, Expression, ExpressionFactory, HeapAllocator, InstructionPointer, Reducible,
+    Rewritable,
 };
+use reflex_interpreter::compiler::{Compile, CompilerMode, CompilerOptions, Program};
+use reflex_stdlib::Stdlib;
 
 use crate::{compile_graph_root, SyntaxParser};
 

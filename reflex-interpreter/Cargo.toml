@@ -1,0 +1,18 @@
+[package]
+name = "reflex-interpreter"
+version = "0.1.0"
+license = "Apache-2.0"
+authors = ["Marshall Wace LLP <opensource@mwam.com>", "Tim Kendrick <t.kendrick@mwam.com>"]
+edition = "2021"
+
+[dependencies]
+reflex = { path = "../reflex" }
+reflex-lang = { path = "../reflex-lang" }
+fnv = "1.0.7"
+rayon = "1.5.1"
+serde = { version = "1.0", features = ["derive", "rc"] }
+tracing = { version = "0.1.0", features = ["release_max_level_info"] }
+
+[dev-dependencies]
+reflex-lisp = { path = "../reflex-lisp" }
+reflex-stdlib = { path = "../reflex-stdlib" }

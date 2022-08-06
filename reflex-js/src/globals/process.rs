@@ -2,9 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use reflex::{
-    core::{Expression, ExpressionFactory, HeapAllocator},
+    core::{create_record, Expression, ExpressionFactory, HeapAllocator},
     env::create_env_args_accessor,
-    lang::create_record,
 };
 
 pub fn global_process<T: Expression>(
@@ -13,7 +12,7 @@ pub fn global_process<T: Expression>(
 ) -> T {
     create_record(
         vec![(
-            String::from("env"),
+            factory.create_string_term(allocator.create_static_string("env")),
             factory.create_effect_term(create_env_args_accessor(factory, allocator)),
         )],
         factory,

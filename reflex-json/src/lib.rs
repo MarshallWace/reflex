@@ -4,7 +4,7 @@
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use std::iter::FromIterator;
 
-use reflex::core::{Expression, ExpressionFactory, HeapAllocator};
+use reflex::core::{create_record, Expression, ExpressionFactory, HeapAllocator};
 use serde_json::{Map, Value};
 
 pub mod stdlib;
@@ -84,25 +84,25 @@ fn hydrate_object<T: Expression>(
 ) -> Result<T, String> {
     let entries = value
         .into_iter()
-        .map(|(key, value)| hydrate(value, factory, allocator).map(|value| (key, value)))
+        .map(|(key, value)| {
+            hydrate(value, factory, allocator).map(|value| {
+                (
+                    factory.create_string_term(allocator.create_string(key)),
+                    value,
+                )
+            })
+        })
         .collect::<Result<Vec<_>, _>>()?;
-    let (keys, values): (Vec<_>, Vec<_>) = entries.into_iter().unzip();
-    Ok(factory.create_record_term(
-        allocator.create_struct_prototype(keys),
-        allocator.create_list(values),
-    ))
+    Ok(create_record(entries, factory, allocator))
 }
 
 #[cfg(test)]
 mod tests {
     use std::iter::empty;
 
-    use reflex::{
-        allocator::DefaultAllocator,
-        core::{ExpressionFactory, HeapAllocator},
-        lang::{create_record, SharedTermFactory},
-        stdlib::Stdlib,
-    };
+    use reflex::core::{create_record, ExpressionFactory, HeapAllocator};
+    use reflex_lang::{allocator::DefaultAllocator, SharedTermFactory};
+    use reflex_stdlib::Stdlib;
 
     use super::{parse, stringify};
 
@@ -210,9 +210,18 @@ mod tests {
         assert_eq!(
             stringify(&create_record(
                 vec![
-                    (String::from("first"), factory.create_int_term(3),),
-                    (String::from("second"), factory.create_int_term(4),),
-                    (String::from("third"), factory.create_int_term(5),)
+                    (
+                        factory.create_string_term(allocator.create_static_string("first")),
+                        factory.create_int_term(3),
+                    ),
+                    (
+                        factory.create_string_term(allocator.create_static_string("second")),
+                        factory.create_int_term(4),
+                    ),
+                    (
+                        factory.create_string_term(allocator.create_static_string("third")),
+                        factory.create_int_term(5),
+                    )
                 ],
                 &factory,
                 &allocator
@@ -221,7 +230,10 @@ mod tests {
         );
         assert_eq!(
             stringify(&create_record(
-                vec![(String::from("\"\'\n\r"), factory.create_int_term(3),)],
+                vec![(
+                    factory.create_string_term(allocator.create_static_string("\"\'\n\r")),
+                    factory.create_int_term(3),
+                )],
                 &factory,
                 &allocator,
             )),

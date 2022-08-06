@@ -1,13 +1,17 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use reflex::core::{Expression, Signal, StateToken};
+use reflex::core::{ConditionType, Expression, ExpressionListType, StateToken};
 use reflex_dispatcher::{Action, NamedAction, SerializableAction, SerializedAction};
 use reflex_json::{JsonMap, JsonValue};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum EffectActions<T: Expression> {
+    #[serde(bound(
+        serialize = "<T as Expression>::Signal: Serialize",
+        deserialize = "<T as Expression>::Signal: Deserialize<'de>"
+    ))]
     Subscribe(EffectSubscribeAction<T>),
     Unsubscribe(EffectUnsubscribeAction<T>),
     Emit(EffectEmitAction<T>),
@@ -101,7 +105,11 @@ impl<'a, T: Expression> From<&'a EffectActions<T>> for Option<&'a EffectEmitActi
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct EffectSubscribeAction<T: Expression> {
     pub effect_type: String,
-    pub effects: Vec<Signal<T>>,
+    #[serde(bound(
+        serialize = "<T as Expression>::Signal: Serialize",
+        deserialize = "<T as Expression>::Signal: Deserialize<'de>"
+    ))]
+    pub effects: Vec<T::Signal>,
 }
 impl<T: Expression> Action for EffectSubscribeAction<T> {}
 impl<T: Expression> NamedAction for EffectSubscribeAction<T> {
@@ -139,7 +147,11 @@ impl<T: Expression> SerializableAction for EffectSubscribeAction<T> {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct EffectUnsubscribeAction<T: Expression> {
     pub effect_type: String,
-    pub effects: Vec<Signal<T>>,
+    #[serde(bound(
+        serialize = "<T as Expression>::Signal: Serialize",
+        deserialize = "<T as Expression>::Signal: Deserialize<'de>"
+    ))]
+    pub effects: Vec<T::Signal>,
 }
 impl<T: Expression> Action for EffectUnsubscribeAction<T> {}
 impl<T: Expression> NamedAction for EffectUnsubscribeAction<T> {

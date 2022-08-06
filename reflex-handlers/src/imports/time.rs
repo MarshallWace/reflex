@@ -1,11 +1,8 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use reflex::{
-    core::{Expression, ExpressionFactory, HeapAllocator},
-    lang::create_record,
-    stdlib::Stdlib,
-};
+use reflex::core::{create_record, Expression, ExpressionFactory, HeapAllocator};
+use reflex_stdlib::Stdlib;
 
 use crate::actor::{timeout::EFFECT_TYPE_TIMEOUT, timestamp::EFFECT_TYPE_TIMESTAMP};
 
@@ -17,9 +14,9 @@ where
     T::Builtin: From<Stdlib>,
 {
     create_record(
-        vec![
+        [
             (
-                String::from("timeout"),
+                factory.create_string_term(allocator.create_static_string("timeout")),
                 factory.create_lambda_term(
                     2,
                     factory.create_application_term(
@@ -35,7 +32,7 @@ where
                 ),
             ),
             (
-                String::from("timestamp"),
+                factory.create_string_term(allocator.create_static_string("timestamp")),
                 factory.create_lambda_term(
                     1,
                     factory.create_application_term(

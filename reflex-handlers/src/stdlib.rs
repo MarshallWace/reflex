@@ -77,7 +77,7 @@ impl Stdlib {
         cache: &mut impl EvaluationCache<T>,
     ) -> Result<T, String>
     where
-        T::Builtin: From<Self> + From<reflex::stdlib::Stdlib>,
+        T::Builtin: From<Self> + From<reflex_stdlib::Stdlib>,
     {
         match self {
             Self::Scan => Applicable::<T>::apply(&Scan {}, args, factory, allocator, cache),
@@ -100,7 +100,7 @@ impl Stdlib {
     }
     pub fn should_parallelize<T: Expression>(&self, args: &[T]) -> bool
     where
-        T::Builtin: From<Self> + From<reflex::stdlib::Stdlib>,
+        T::Builtin: From<Self> + From<reflex_stdlib::Stdlib>,
     {
         match self {
             Self::Scan => Applicable::<T>::should_parallelize(&Scan {}, args),

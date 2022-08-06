@@ -5,18 +5,16 @@
 use std::{path::Path, str::FromStr};
 
 use anyhow::{anyhow, Result};
-use reflex::{
-    compiler::{Compile, Compiler, CompilerMode, CompilerOptions, InstructionPointer, Program},
-    core::{
-        Applicable, Expression, ExpressionFactory, HeapAllocator, Reducible, Rewritable, Signal,
-        SignalType, StringValue,
-    },
-    lang::term::SignalTerm,
-    stdlib::Stdlib,
+use reflex::core::{
+    Applicable, ConditionListType, ConditionType, Expression, ExpressionFactory,
+    ExpressionListType, HeapAllocator, InstructionPointer, Reducible, Rewritable, SignalTermType,
+    SignalType, StringTermType, StringValue,
 };
 use reflex_handlers::stdlib::Stdlib as HandlersStdlib;
+use reflex_interpreter::compiler::{Compile, Compiler, CompilerMode, CompilerOptions, Program};
 use reflex_js::stdlib::Stdlib as JsStdlib;
 use reflex_json::stdlib::Stdlib as JsonStdlib;
+use reflex_stdlib::Stdlib;
 
 use crate::syntax::{
     js::compile_js_entry_point,
@@ -148,7 +146,7 @@ fn compile_graph_root<T: Expression + Rewritable<T> + Reducible<T> + Applicable<
 }
 
 pub fn format_signal_result<T: Expression>(
-    result: &SignalTerm<T>,
+    result: &T::SignalTerm,
     factory: &impl ExpressionFactory<T>,
 ) -> String {
     result
@@ -159,18 +157,42 @@ pub fn format_signal_result<T: Expression>(
         .join("\n")
 }
 
-fn format_signal<T: Expression>(signal: &Signal<T>, factory: &impl ExpressionFactory<T>) -> String {
+fn format_signal<T: Expression>(signal: &T::Signal, factory: &impl ExpressionFactory<T>) -> String {
     match signal.signal_type() {
         SignalType::Error => {
             let (message, args) = {
                 let args = signal.args();
-                match args.get(0).map(|arg| match factory.match_string_term(arg) {
-                    Some(message) => Some(String::from(message.value.as_str())),
-                    _ => None,
-                }) {
-                    Some(message) => (message, Some(&args[1..])),
-                    _ => (None, Some(&args[..])),
-                }
+                let (message, remaining_args) =
+                    match args.get(0).map(|arg| match factory.match_string_term(arg) {
+                        Some(message) => Some(String::from(message.value().as_str())),
+                        _ => None,
+                    }) {
+                        Some(message) => (
+                            message,
+                            if args.len() > 1 {
+                                Some((Some(args.iter().skip(1)), None))
+                            } else {
+                                None
+                            },
+                        ),
+                        _ => (
+                            None,
+                            if args.len() > 0 {
+                                Some((None, Some(args.iter())))
+                            } else {
+                                None
+                            },
+                        ),
+                    };
+                (
+                    message,
+                    remaining_args.map(|(remaining_args, original_args)| {
+                        remaining_args
+                            .into_iter()
+                            .flatten()
+                            .chain(original_args.into_iter().flatten())
+                    }),
+                )
             };
             format!(
                 "Error: {}",
@@ -180,8 +202,7 @@ fn format_signal<T: Expression>(signal: &Signal<T>, factory: &impl ExpressionFac
                         Some(args) => format!(
                             "{} {}",
                             message,
-                            args.iter()
-                                .map(|arg| format!("{}", arg))
+                            args.map(|arg| format!("{}", arg))
                                 .collect::<Vec<_>>()
                                 .join(" ")
                         ),

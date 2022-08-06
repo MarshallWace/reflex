@@ -4,8 +4,8 @@
 use crate::stdlib::Stdlib as JsStdlib;
 use reflex::{
     core::{Expression, ExpressionFactory, HeapAllocator},
-    stdlib::Stdlib,
 };
+use reflex_stdlib::Stdlib;
 
 pub(crate) mod core;
 pub(crate) mod utils;

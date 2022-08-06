@@ -1,15 +1,20 @@
 [workspace]
 members = [
   "reflex",
+  "reflex-benches",
   "reflex-cli",
   "reflex-dispatcher",
   "reflex-graphql",
   "reflex-grpc",
   "reflex-handlers",
+  "reflex-interpreter",
   "reflex-js",
   "reflex-json",
+  "reflex-lang",
+  "reflex-lisp",
   "reflex-protobuf",
   "reflex-runtime",
+  "reflex-stdlib",
   "reflex-server",
   "reflex-utils",
 ]

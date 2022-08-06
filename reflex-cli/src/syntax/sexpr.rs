@@ -4,11 +4,12 @@
 use std::path::Path;
 
 use anyhow::{anyhow, Context, Result};
-use reflex::{
-    compiler::{Compile, CompilerMode, CompilerOptions, InstructionPointer, Program},
-    core::{Applicable, Expression, ExpressionFactory, HeapAllocator, Reducible, Rewritable},
-    stdlib::Stdlib,
+use reflex::core::{
+    Applicable, Expression, ExpressionFactory, HeapAllocator, InstructionPointer, Reducible,
+    Rewritable,
 };
+use reflex_interpreter::compiler::{Compile, CompilerMode, CompilerOptions, Program};
+use reflex_stdlib::Stdlib;
 
 use crate::{compile_graph_root, SyntaxParser};
 
@@ -21,7 +22,7 @@ where
 {
     let factory = factory.clone();
     let allocator = allocator.clone();
-    move |input: &str| match reflex::parser::sexpr::parse(input, &factory, &allocator) {
+    move |input: &str| match reflex_lisp::parse(input, &factory, &allocator) {
         Ok(result) => Ok(result),
         Err(error) => Err(format!("{}", error)),
     }
@@ -40,7 +41,7 @@ where
 {
     let input = std::fs::read_to_string(path)
         .with_context(|| format!("Failed to load Lisp graph definition: {}", path.display(),))?;
-    let root = reflex::parser::sexpr::parse(&input, factory, allocator)
+    let root = reflex_lisp::parse(&input, factory, allocator)
         .map_err(|error| anyhow!("{}", error))
         .with_context(|| format!("Failed to parse Lisp graph definition: {}", path.display()))?;
     compile_graph_root(

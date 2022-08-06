@@ -3,7 +3,7 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use reflex::core::{
     uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
-    FunctionArity, HeapAllocator, Uid, Uuid,
+    FloatTermType, FunctionArity, HeapAllocator, Uid, Uuid,
 };
 
 pub struct IsFinite {}
@@ -40,7 +40,7 @@ impl<T: Expression> Applicable<T> for IsFinite {
         let mut args = args.into_iter();
         let value = args.next().unwrap();
         match factory.match_float_term(&value) {
-            Some(term) => Ok(factory.create_boolean_term(term.value.is_finite())),
+            Some(term) => Ok(factory.create_boolean_term(term.value().is_finite())),
             _ => match factory.match_int_term(&value) {
                 Some(_) => Ok(factory.create_boolean_term(true)),
                 _ => Err(format!("Expected Float or Int, received {}", value,)),

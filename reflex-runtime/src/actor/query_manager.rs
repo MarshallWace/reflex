@@ -9,7 +9,7 @@ use std::{
 
 use metrics::{decrement_gauge, describe_gauge, increment_gauge, Unit};
 use reflex::core::{
-    EvaluationResult, Expression, ExpressionFactory, HeapAllocator, Signal, StateToken,
+    ConditionType, EvaluationResult, Expression, ExpressionFactory, HeapAllocator, StateToken,
 };
 use reflex_dispatcher::{
     Action, Actor, ActorTransition, HandlerContext, InboundAction, MessageData, OutboundAction,
@@ -110,7 +110,7 @@ impl<T: Expression> Default for QueryManagerState<T> {
 struct QuerySubscription<T: Expression> {
     subscription_count: usize,
     query: T,
-    effect: Signal<T>,
+    effect: T::Signal,
     result: Option<EvaluationResult<T>>,
 }
 

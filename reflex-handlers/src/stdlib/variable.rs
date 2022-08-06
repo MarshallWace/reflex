@@ -1,13 +1,11 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use reflex::{
-    core::{
-        uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
-        FunctionArity, HeapAllocator, SignalType, Uid, Uuid,
-    },
-    stdlib::Stdlib,
+use reflex::core::{
+    uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
+    FunctionArity, HeapAllocator, SignalType, Uid, Uuid,
 };
+use reflex_stdlib::Stdlib;
 
 pub(crate) const EFFECT_TYPE_VARIABLE_GET: &'static str = "reflex::variable::get";
 pub(crate) const EFFECT_TYPE_VARIABLE_SET: &'static str = "reflex::state::set";

@@ -3,11 +3,8 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use std::path::Path;
 
-use reflex::{
-    core::{Expression, ExpressionFactory, HeapAllocator},
-    lang::create_record,
-    stdlib::Stdlib,
-};
+use reflex::core::{create_record, Expression, ExpressionFactory, HeapAllocator};
+use reflex_stdlib::Stdlib;
 
 use crate::{
     actor::EFFECT_TYPE_GRPC,
@@ -63,7 +60,12 @@ where
         .map(|service| create_service_constructor(service, proto_id, factory, allocator));
     let exports = services;
     create_record(
-        exports.map(|(key, value)| (String::from(key), value)),
+        exports.map(|(key, value)| {
+            (
+                factory.create_string_term(allocator.create_string(key)),
+                value,
+            )
+        }),
         factory,
         allocator,
     )
@@ -85,7 +87,7 @@ where
             create_record(
                 service.method.iter().map(|method| {
                     (
-                        String::from(method.name()),
+                        factory.create_string_term(allocator.create_string(method.name())),
                         factory.create_lambda_term(
                             2,
                             factory.create_application_term(

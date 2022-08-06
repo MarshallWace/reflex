@@ -7,8 +7,8 @@ use std::{
 };
 
 use reflex::core::{
-    DependencyList, EvaluationResult, Expression, ExpressionFactory, ExpressionList, Signal,
-    SignalType, StateToken,
+    ConditionListType, ConditionType, DependencyList, EvaluationResult, Expression,
+    ExpressionFactory, ExpressionListType, SignalTermType, SignalType, StateToken,
 };
 use reflex_dispatcher::{
     Action, Actor, ActorTransition, HandlerContext, InboundAction, MessageData, StateTransition,
@@ -138,7 +138,7 @@ fn is_unresolved_effect_state<T: Expression>(
     }
 }
 
-fn is_unresolved_effect<T: Expression>(effect: &Signal<T>) -> bool {
+fn is_unresolved_effect<T: Expression>(effect: &impl ConditionType<T>) -> bool {
     match effect.signal_type() {
         SignalType::Error => false,
         SignalType::Pending | SignalType::Custom(_) => true,
@@ -164,7 +164,7 @@ fn serialize_value<T: Expression>(value: &T, factory: &impl ExpressionFactory<T>
 }
 
 pub struct QueryInspectorEffectState<T: Expression> {
-    effect: Signal<T>,
+    effect: T::Signal,
     value: Option<T>,
 }
 
@@ -193,7 +193,7 @@ impl<T: Expression> QueryInspectorWorkerState<T> {
     }
 }
 
-fn serialize_effect<T: Expression>(effect: &Signal<T>) -> JsonValue {
+fn serialize_effect<T: Expression>(effect: &impl ConditionType<T>) -> JsonValue {
     json!({
         "id": JsonValue::Number(effect.id().into()),
         "type": match effect.signal_type() {
@@ -205,7 +205,7 @@ fn serialize_effect<T: Expression>(effect: &Signal<T>) -> JsonValue {
     })
 }
 
-fn serialize_json_list<T: Expression>(items: &ExpressionList<T>) -> JsonValue {
+fn serialize_json_list<T: Expression>(items: &impl ExpressionListType<T>) -> JsonValue {
     JsonValue::Array(
         items
             .iter()

@@ -3,16 +3,14 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use std::iter::once;
 
-use reflex::{
-    core::{
-        uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
-        FunctionArity, HeapAllocator, Uid, Uuid,
-    },
-    stdlib::Stdlib,
+use reflex::core::{
+    uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
+    FunctionArity, HeapAllocator, Uid, Uuid,
 };
 use reflex_json::stringify;
+use reflex_stdlib::Stdlib;
 
-use super::Stdlib as JsStdlib;
+use crate::stdlib::Stdlib as JsStdlib;
 
 pub struct Log {}
 impl Log {

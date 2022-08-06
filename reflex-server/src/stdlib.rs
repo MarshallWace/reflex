@@ -5,8 +5,8 @@ use reflex::{
     core::{
         Applicable, Arity, EvaluationCache, Expression, ExpressionFactory, HeapAllocator, Uid, Uuid,
     },
-    stdlib::Stdlib as BuiltinStdlib,
 };
+use reflex_stdlib::Stdlib as BuiltinStdlib;
 use serde::{Deserialize, Serialize};
 use std::convert::TryFrom;
 use strum::IntoEnumIterator;

@@ -3,12 +3,9 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use std::{fs, iter::once, path::Path};
 
-use reflex::{
-    core::{Expression, ExpressionFactory, HeapAllocator},
-    lang::create_record,
-    stdlib::Stdlib,
-};
+use reflex::core::{create_record, Expression, ExpressionFactory, HeapAllocator};
 use reflex_graphql::graphql_parser::{self, schema::Document};
+use reflex_stdlib::Stdlib;
 
 use crate::actor::graphql::EFFECT_TYPE_GRAPHQL;
 
@@ -80,7 +77,7 @@ where
             create_graphql_client_instance(schema, factory, allocator),
             allocator.create_unit_list(get_struct_field(
                 factory.create_variable_term(0),
-                String::from("url"),
+                factory.create_string_term(allocator.create_static_string("url")),
                 factory,
                 allocator,
             )),
@@ -99,8 +96,8 @@ where
     factory.create_lambda_term(
         1,
         create_record(
-            vec![(
-                String::from("execute"),
+            [(
+                factory.create_string_term(allocator.create_static_string("execute")),
                 factory.create_lambda_term(
                     1,
                     factory.create_application_term(
@@ -112,22 +109,26 @@ where
                             factory.create_variable_term(1),
                             get_struct_field(
                                 factory.create_variable_term(0),
-                                String::from("query"),
+                                factory.create_string_term(allocator.create_static_string("query")),
                                 factory,
                                 allocator,
                             ),
-                            get_optional_struct_field(
+                            get_optional_record_field(
                                 factory.create_variable_term(0),
-                                String::from("operationName"),
+                                factory.create_string_term(
+                                    allocator.create_static_string("operationName"),
+                                ),
                                 factory.create_nil_term(),
                                 factory,
                                 allocator,
                             ),
                             factory.create_application_term(
                                 factory.create_builtin_term(Stdlib::ResolveDeep),
-                                allocator.create_unit_list(get_optional_struct_field(
+                                allocator.create_unit_list(get_optional_record_field(
                                     factory.create_variable_term(0),
-                                    String::from("variables"),
+                                    factory.create_string_term(
+                                        allocator.create_static_string("variables"),
+                                    ),
                                     factory.create_nil_term(),
                                     factory,
                                     allocator,
@@ -135,9 +136,11 @@ where
                             ),
                             factory.create_application_term(
                                 factory.create_builtin_term(Stdlib::ResolveDeep),
-                                allocator.create_unit_list(get_optional_struct_field(
+                                allocator.create_unit_list(get_optional_record_field(
                                     factory.create_variable_term(0),
-                                    String::from("extensions"),
+                                    factory.create_string_term(
+                                        allocator.create_static_string("extensions"),
+                                    ),
                                     factory.create_nil_term(),
                                     factory,
                                     allocator,
@@ -145,17 +148,19 @@ where
                             ),
                             factory.create_application_term(
                                 factory.create_builtin_term(Stdlib::ResolveDeep),
-                                allocator.create_unit_list(get_optional_struct_field(
+                                allocator.create_unit_list(get_optional_record_field(
                                     factory.create_variable_term(0),
-                                    String::from("headers"),
+                                    factory.create_string_term(
+                                        allocator.create_static_string("headers"),
+                                    ),
                                     factory.create_nil_term(),
                                     factory,
                                     allocator,
                                 )),
                             ),
-                            get_optional_struct_field(
+                            get_optional_record_field(
                                 factory.create_variable_term(0),
-                                String::from("token"),
+                                factory.create_string_term(allocator.create_static_string("token")),
                                 factory.create_nil_term(),
                                 factory,
                                 allocator,
@@ -175,12 +180,19 @@ fn create_default_export<T: Expression>(
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
 ) -> T {
-    create_record(once((String::from("default"), value)), factory, allocator)
+    create_record(
+        once((
+            factory.create_string_term(allocator.create_static_string("default")),
+            value,
+        )),
+        factory,
+        allocator,
+    )
 }
 
 fn get_struct_field<T: Expression>(
     target: T,
-    field: String,
+    field: T,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
 ) -> T
@@ -189,16 +201,13 @@ where
 {
     factory.create_application_term(
         factory.create_builtin_term(Stdlib::Get),
-        allocator.create_pair(
-            target,
-            factory.create_string_term(allocator.create_string(field)),
-        ),
+        allocator.create_pair(target, field),
     )
 }
 
-fn get_optional_struct_field<T: Expression>(
+fn get_optional_record_field<T: Expression>(
     target: T,
-    field: String,
+    field: T,
     fallback: T,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
@@ -211,17 +220,11 @@ where
         allocator.create_triple(
             factory.create_application_term(
                 factory.create_builtin_term(Stdlib::Contains),
-                allocator.create_pair(
-                    target.clone(),
-                    factory.create_string_term(allocator.create_string(field.clone())),
-                ),
+                allocator.create_pair(target.clone(), field.clone()),
             ),
             factory.create_application_term(
                 factory.create_builtin_term(Stdlib::Get),
-                allocator.create_pair(
-                    target,
-                    factory.create_string_term(allocator.create_string(field)),
-                ),
+                allocator.create_pair(target, field),
             ),
             fallback,
         ),

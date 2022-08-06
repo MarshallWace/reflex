@@ -4,7 +4,8 @@
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use reflex::core::{
     uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
-    FunctionArity, HeapAllocator, StringValue, Uid, Uuid,
+    ExpressionListType, FunctionArity, HeapAllocator, ListTermType, RecordTermType, StringTermType,
+    StringValue, Uid, Uuid,
 };
 
 use super::format_value;
@@ -44,7 +45,7 @@ impl<T: Expression> Applicable<T> for FormatErrorMessage {
     ) -> Result<T, String> {
         let mut args = args.into_iter();
         let operand = args.next().unwrap();
-        let message = parse_error_message(&operand, factory)
+        let message = parse_error_message(&operand, factory, allocator)
             .or_else(|| {
                 if let Some(value) = factory.match_list_term(&operand) {
                     let max_displayed_errors = 10;
@@ -58,7 +59,7 @@ impl<T: Expression> Applicable<T> for FormatErrorMessage {
                             num_errors
                         })
                         .map(|item| {
-                            parse_error_message(item, factory)
+                            parse_error_message(item, factory, allocator)
                                 .unwrap_or_else(|| String::from(UNKNOWN_ERROR_MESSAGE))
                         });
                     Some(
@@ -86,15 +87,18 @@ impl<T: Expression> Applicable<T> for FormatErrorMessage {
 fn parse_error_message<T: Expression>(
     target: &T,
     factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
 ) -> Option<String> {
     if let Some(value) = format_value(target, factory) {
         Some(value)
     } else if let Some(value) = factory.match_record_term(&target) {
-        value.get("message").and_then(|value| {
-            factory
-                .match_string_term(value)
-                .map(|message| String::from(message.value.as_str()))
-        })
+        value
+            .get(&factory.create_string_term(allocator.create_static_string("message")))
+            .and_then(|value| {
+                factory
+                    .match_string_term(value)
+                    .map(|message| String::from(message.value().as_str()))
+            })
     } else {
         None
     }

@@ -10,8 +10,9 @@ use std::{
 use metrics::{describe_counter, increment_counter, Unit};
 use reflex::{
     core::{
-        DependencyList, EvaluationResult, Expression, ExpressionFactory, HeapAllocator, Signal,
-        SignalType, StateToken,
+        ConditionListType, ConditionType, DependencyList, EvaluationResult, Expression,
+        ExpressionFactory, ExpressionListType, HeapAllocator, SignalTermType, SignalType,
+        StateToken,
     },
     hash::HashId,
 };
@@ -144,7 +145,7 @@ where
 
 pub struct TelemetryMiddlewareState<T: Expression> {
     active_queries: HashMap<Uuid, TelemetryMiddlewareQueryState>,
-    active_workers: HashMap<StateToken, Signal<T>>,
+    active_workers: HashMap<StateToken, T::Signal>,
     effect_mappings: HashMap<HashId, TelemetryMiddlewareEffectState<T>>,
 }
 impl<T: Expression> Default for TelemetryMiddlewareState<T> {
@@ -157,7 +158,7 @@ impl<T: Expression> Default for TelemetryMiddlewareState<T> {
     }
 }
 struct TelemetryMiddlewareEffectState<T: Expression> {
-    effect: Signal<T>,
+    effect: T::Signal,
     transaction_id: Option<Traceparent>,
     parent_transactions: HashSet<Traceparent>,
     subscription_count: usize,
@@ -786,7 +787,7 @@ where
 fn get_query_result_effects<'a, T: Expression>(
     result: &'a T,
     factory: &impl ExpressionFactory<T>,
-) -> impl Iterator<Item = &'a Signal<T>> + 'a {
+) -> impl Iterator<Item = &'a T::Signal> + 'a {
     factory
         .match_signal_term(result)
         .map(|term| {
@@ -855,7 +856,7 @@ fn parse_graphql_operation_traceparent_extensions(
     }
 }
 
-fn format_effect_label<T: Expression>(effect: &Signal<T>) -> String {
+fn format_effect_label<V: ConditionType<impl Expression<Signal = V>>>(effect: &V) -> String {
     match effect.signal_type() {
         SignalType::Custom(signal_type) => format!("{}", signal_type),
         signal_type => format!("{}", signal_type),
@@ -870,7 +871,9 @@ fn format_async_update_batch_label(batch_size: usize) -> String {
     }
 }
 
-fn format_effect_attributes<T: Expression>(effect: &Signal<T>) -> Vec<(String, String)> {
+fn format_effect_attributes<V: ConditionType<impl Expression<Signal = V>>>(
+    effect: &V,
+) -> Vec<(String, String)> {
     vec![
         (String::from("effect.id"), format!("{}", effect.id())),
         (String::from("effect.type"), format_effect_label(effect)),

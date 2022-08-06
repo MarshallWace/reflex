@@ -31,17 +31,17 @@ use nom::{
     sequence::tuple,
     IResult,
 };
-use reflex::{
-    compiler::{Compile, CompilerOptions, InstructionPointer, Program},
-    core::{Applicable, Expression, Reducible, Rewritable},
-    interpreter::InterpreterOptions,
-    stdlib::Stdlib,
-};
+use reflex::core::{Applicable, Expression, InstructionPointer, Reducible, Rewritable};
 use reflex_graphql::{stdlib::Stdlib as GraphQlStdlib, GraphQlOperation, GraphQlSchema};
 use reflex_handlers::utils::tls::tokio_native_tls::native_tls;
+use reflex_interpreter::{
+    compiler::{Compile, CompilerOptions, Program},
+    InterpreterOptions,
+};
 use reflex_js::stdlib::Stdlib as JsStdlib;
 use reflex_json::{stdlib::Stdlib as JsonStdlib, JsonValue};
 use reflex_runtime::{AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator};
+use reflex_stdlib::Stdlib;
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -129,7 +129,7 @@ impl OpenTelemetryConfig {
         }
     }
     pub fn into_actor<
-        T: AsyncExpression,
+        T: Expression,
         TAction: TelemetryMiddlewareAction<T> + OpenTelemetryMiddlewareAction + Send,
     >(
         self,
@@ -140,7 +140,13 @@ impl OpenTelemetryConfig {
         metric_names: TelemetryMiddlewareMetricNames,
     ) -> Result<impl Actor<TAction, State = impl Send>>
     where
-        T: Applicable<T>,
+        T: AsyncExpression + Applicable<T>,
+        T::String: Send,
+        T::Builtin: Send,
+        T::Signal: Send,
+        T::SignalList: Send,
+        T::StructPrototype: Send,
+        T::ExpressionList: Send,
     {
         let tracer = match self {
             Self::Http(config) => {
@@ -380,6 +386,12 @@ where
         + Reducible<T>
         + Applicable<T>
         + Compile<T>,
+    T::String: Send,
+    T::Builtin: Send,
+    T::Signal: Send,
+    T::SignalList: Send,
+    T::StructPrototype: Send,
+    T::ExpressionList: Send,
     T::Builtin: From<Stdlib> + From<JsonStdlib> + From<JsStdlib> + From<GraphQlStdlib>,
     TFactory: AsyncExpressionFactory<T>,
     TAllocator: AsyncHeapAllocator<T>,

@@ -4,12 +4,12 @@
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use std::{borrow::Cow, collections::HashMap, iter::once};
 
-use reflex::{
-    core::{Expression, ExpressionFactory, ExpressionList, HeapAllocator, SignalType},
-    lang::{create_record, term::SignalTerm},
-    stdlib::Stdlib,
+use reflex::core::{
+    create_record, ConditionListType, ConditionType, Expression, ExpressionFactory,
+    ExpressionListType, HeapAllocator, SignalTermType, SignalType,
 };
 use reflex_json::{json_object, sanitize, JsonMap, JsonValue};
+use reflex_stdlib::Stdlib;
 use serde::{Deserialize, Serialize};
 
 use crate::ast::{
@@ -23,10 +23,11 @@ pub mod ast;
 mod operation;
 pub use operation::{graphql_variables_are_equal, GraphQlOperation};
 pub mod stdlib;
+pub mod subscriptions;
 pub mod transform;
 pub mod validate;
-use stdlib::Stdlib as GraphQlStdlib;
-pub mod subscriptions;
+
+use crate::stdlib::Stdlib as GraphQlStdlib;
 
 #[allow(type_alias_bounds)]
 type QueryFragments<'a> = HashMap<String, &'a FragmentDefinition>;
@@ -184,7 +185,7 @@ pub struct GraphQlOperationPayload {
 }
 impl GraphQlOperationPayload {
     pub fn into_json(self) -> JsonValue {
-        JsonValue::Object(JsonMap::from_iter(vec![
+        JsonValue::Object(JsonMap::from_iter([
             (String::from("query"), JsonValue::String(self.query)),
             (
                 String::from("operationName"),
@@ -355,7 +356,9 @@ fn normalize_graphql_error_payload(payload: JsonValue) -> Vec<JsonValue> {
     }
 }
 
-pub fn serialize_json_signal_errors<T: Expression>(signal: &SignalTerm<T>) -> Vec<JsonValue> {
+pub fn serialize_json_signal_errors<V: SignalTermType<impl Expression<SignalTerm = V>>>(
+    signal: &V,
+) -> Vec<JsonValue> {
     signal
         .signals()
         .iter()
@@ -564,10 +567,9 @@ where
                     factory.create_builtin_term(Stdlib::CollectRecord),
                     allocator.create_sized_list(
                         values.len() + 1,
-                        once(
-                            factory
-                                .create_constructor_term(allocator.create_struct_prototype(keys)),
-                        )
+                        once(factory.create_constructor_term(
+                            allocator.create_struct_prototype(allocator.create_list(keys)),
+                        ))
                         .chain(values.into_iter().map(|query| {
                             factory.create_application_term(
                                 query,
@@ -596,7 +598,7 @@ fn parse_selection_set_fields<T: Expression>(
     fragments: &QueryFragments<'_>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> Result<Vec<(String, T)>, String>
+) -> Result<Vec<(T, T)>, String>
 where
     T::Builtin: From<Stdlib> + From<GraphQlStdlib>,
 {
@@ -613,7 +615,10 @@ where
                         match parse_field(field, variables, fragments, factory, allocator) {
                             Ok(result) => {
                                 let key = field.alias.as_ref().unwrap_or(&field.name).to_string();
-                                Countable::Single(Ok((key, result)))
+                                Countable::Single(Ok((
+                                    factory.create_string_term(allocator.create_string(key)),
+                                    result,
+                                )))
                             }
                             Err(error) => Countable::Single(Err(error)),
                         }
@@ -755,7 +760,7 @@ fn parse_fragment_fields<T: Expression>(
     fragments: &QueryFragments<'_>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> impl IntoIterator<Item = Result<(String, T), String>>
+) -> impl IntoIterator<Item = Result<(T, T), String>>
 where
     T::Builtin: From<Stdlib> + From<GraphQlStdlib>,
 {
@@ -826,12 +831,15 @@ fn parse_field_arguments<T: Expression>(
     fragments: &QueryFragments<'_>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> Result<ExpressionList<T>, String> {
+) -> Result<T::ExpressionList, String> {
     let arg_fields = args
         .iter()
         .map(
             |(key, value)| match parse_value(value, variables, fragments, factory, allocator) {
-                Ok(value) => Ok((key.to_string(), value)),
+                Ok(value) => Ok((
+                    factory.create_string_term(allocator.create_string(key.to_string())),
+                    value,
+                )),
                 Err(error) => Err(error),
             },
         )
@@ -879,7 +887,10 @@ fn parse_value<T: Expression>(
                 .iter()
                 .map(|(key, value)| {
                     match parse_value(value, variables, fragments, factory, allocator) {
-                        Ok(value) => Ok((key.to_string(), value)),
+                        Ok(value) => Ok((
+                            factory.create_string_term(allocator.create_string(key.to_string())),
+                            value,
+                        )),
                         Err(error) => Err(error),
                     }
                 })
@@ -929,16 +940,15 @@ impl<T, I: IntoIterator<Item = T>> IntoIterator for Countable<T, I> {
 mod tests {
     use reflex::core::Uuid;
     use reflex::{
-        allocator::DefaultAllocator,
         cache::SubstitutionCache,
         core::{
-            evaluate, Applicable, Arity, Builtin, DependencyList, Evaluate, EvaluationCache,
-            EvaluationResult, Expression, ExpressionFactory, HeapAllocator, Reducible, Rewritable,
-            StateCache, Uid,
+            create_record, evaluate, Applicable, Arity, Builtin, DependencyList, Evaluate,
+            EvaluationCache, EvaluationResult, Expression, ExpressionFactory, HeapAllocator,
+            Reducible, Rewritable, StateCache, Uid,
         },
-        lang::{create_record, SharedTermFactory},
-        stdlib::Stdlib,
     };
+    use reflex_lang::{allocator::DefaultAllocator, SharedTermFactory};
+    use reflex_stdlib::Stdlib;
     use std::convert::{TryFrom, TryInto};
 
     use super::{parse, stdlib::Stdlib as GraphQlStdlib};
@@ -1017,21 +1027,37 @@ mod tests {
         let factory = SharedTermFactory::<GraphQlTestBuiltins>::default();
         let allocator = DefaultAllocator::default();
         let root = create_record(
-            vec![
+            [
                 (
-                    String::from("query"),
+                    factory.create_string_term(allocator.create_static_string("query")),
                     create_record(
-                        vec![
-                            (String::from("first"), factory.create_int_term(3)),
-                            (String::from("second"), factory.create_int_term(4)),
-                            (String::from("third"), factory.create_int_term(5)),
+                        [
+                            (
+                                factory.create_string_term(allocator.create_static_string("first")),
+                                factory.create_int_term(3),
+                            ),
+                            (
+                                factory
+                                    .create_string_term(allocator.create_static_string("second")),
+                                factory.create_int_term(4),
+                            ),
+                            (
+                                factory.create_string_term(allocator.create_static_string("third")),
+                                factory.create_int_term(5),
+                            ),
                         ],
                         &factory,
                         &allocator,
                     ),
                 ),
-                (String::from("mutation"), factory.create_nil_term()),
-                (String::from("subscription"), factory.create_nil_term()),
+                (
+                    factory.create_string_term(allocator.create_static_string("mutation")),
+                    factory.create_nil_term(),
+                ),
+                (
+                    factory.create_string_term(allocator.create_static_string("subscription")),
+                    factory.create_nil_term(),
+                ),
             ],
             &factory,
             &allocator,
@@ -1054,9 +1080,15 @@ mod tests {
             result,
             EvaluationResult::new(
                 create_record(
-                    vec![
-                        (String::from("second"), factory.create_int_term(4)),
-                        (String::from("third"), factory.create_int_term(5)),
+                    [
+                        (
+                            factory.create_string_term(allocator.create_static_string("second")),
+                            factory.create_int_term(4)
+                        ),
+                        (
+                            factory.create_string_term(allocator.create_static_string("third")),
+                            factory.create_int_term(5)
+                        ),
                     ],
                     &factory,
                     &allocator
@@ -1071,16 +1103,18 @@ mod tests {
         let factory = SharedTermFactory::<GraphQlTestBuiltins>::default();
         let allocator = DefaultAllocator::default();
         let root = create_record(
-            vec![
+            [
                 (
-                    String::from("query"),
+                    factory.create_string_term(allocator.create_static_string("query")),
                     factory.create_application_term(
                         factory.create_lambda_term(
                             1,
                             create_record(
-                                vec![
+                                [
                                     (
-                                        String::from("first"),
+                                        factory.create_string_term(
+                                            allocator.create_static_string("first"),
+                                        ),
                                         factory.create_application_term(
                                             factory.create_builtin_term(Stdlib::Add),
                                             allocator.create_pair(
@@ -1090,7 +1124,9 @@ mod tests {
                                         ),
                                     ),
                                     (
-                                        String::from("second"),
+                                        factory.create_string_term(
+                                            allocator.create_static_string("second"),
+                                        ),
                                         factory.create_application_term(
                                             factory.create_builtin_term(Stdlib::Add),
                                             allocator.create_pair(
@@ -1100,7 +1136,9 @@ mod tests {
                                         ),
                                     ),
                                     (
-                                        String::from("third"),
+                                        factory.create_string_term(
+                                            allocator.create_static_string("third"),
+                                        ),
                                         factory.create_application_term(
                                             factory.create_builtin_term(Stdlib::Add),
                                             allocator.create_pair(
@@ -1117,8 +1155,14 @@ mod tests {
                         allocator.create_unit_list(factory.create_int_term(10)),
                     ),
                 ),
-                (String::from("mutation"), factory.create_nil_term()),
-                (String::from("subscription"), factory.create_nil_term()),
+                (
+                    factory.create_string_term(allocator.create_static_string("mutation")),
+                    factory.create_nil_term(),
+                ),
+                (
+                    factory.create_string_term(allocator.create_static_string("subscription")),
+                    factory.create_nil_term(),
+                ),
             ],
             &factory,
             &allocator,
@@ -1141,9 +1185,15 @@ mod tests {
             result,
             EvaluationResult::new(
                 create_record(
-                    vec![
-                        (String::from("second"), factory.create_int_term(4 + 10)),
-                        (String::from("third"), factory.create_int_term(5 + 10)),
+                    [
+                        (
+                            factory.create_string_term(allocator.create_static_string("second")),
+                            factory.create_int_term(4 + 10)
+                        ),
+                        (
+                            factory.create_string_term(allocator.create_static_string("third")),
+                            factory.create_int_term(5 + 10)
+                        ),
                     ],
                     &factory,
                     &allocator
@@ -1158,28 +1208,40 @@ mod tests {
         let factory = SharedTermFactory::<GraphQlTestBuiltins>::default();
         let allocator = DefaultAllocator::default();
         let root = create_record(
-            vec![
+            [
                 (
-                    String::from("query"),
+                    factory.create_string_term(allocator.create_static_string("query")),
                     create_record(
-                        vec![
-                            (String::from("foo"), factory.create_nil_term()),
+                        [
                             (
-                                String::from("items"),
-                                factory.create_list_term(allocator.create_list(vec![
+                                factory.create_string_term(allocator.create_static_string("foo")),
+                                factory.create_nil_term(),
+                            ),
+                            (
+                                factory.create_string_term(allocator.create_static_string("items")),
+                                factory.create_list_term(allocator.create_list([
                                     factory.create_int_term(3),
                                     factory.create_int_term(4),
                                     factory.create_int_term(5),
                                 ])),
                             ),
-                            (String::from("bar"), factory.create_nil_term()),
+                            (
+                                factory.create_string_term(allocator.create_static_string("bar")),
+                                factory.create_nil_term(),
+                            ),
                         ],
                         &factory,
                         &allocator,
                     ),
                 ),
-                (String::from("mutation"), factory.create_nil_term()),
-                (String::from("subscription"), factory.create_nil_term()),
+                (
+                    factory.create_string_term(allocator.create_static_string("mutation")),
+                    factory.create_nil_term(),
+                ),
+                (
+                    factory.create_string_term(allocator.create_static_string("subscription")),
+                    factory.create_nil_term(),
+                ),
             ],
             &factory,
             &allocator,
@@ -1201,9 +1263,9 @@ mod tests {
             result,
             EvaluationResult::new(
                 create_record(
-                    vec![(
-                        String::from("items"),
-                        factory.create_list_term(allocator.create_list(vec![
+                    [(
+                        factory.create_string_term(allocator.create_static_string("items")),
+                        factory.create_list_term(allocator.create_list([
                             factory.create_int_term(3),
                             factory.create_int_term(4),
                             factory.create_int_term(5)
@@ -1222,61 +1284,64 @@ mod tests {
         let factory = SharedTermFactory::<GraphQlTestBuiltins>::default();
         let allocator = DefaultAllocator::default();
         let root = create_record(
-            vec![
+            [
                 (
-                    String::from("query"),
+                    factory.create_string_term(allocator.create_static_string("query")),
                     create_record(
-                        vec![
-                            (String::from("foo"), factory.create_nil_term()),
+                        [
                             (
-                                String::from("items"),
-                                factory.create_list_term(allocator.create_list(vec![
-                                    factory.create_list_term(allocator.create_list(vec![
-                                        factory.create_list_term(allocator.create_list(vec![
+                                factory.create_string_term(allocator.create_static_string("foo")),
+                                factory.create_nil_term(),
+                            ),
+                            (
+                                factory.create_string_term(allocator.create_static_string("items")),
+                                factory.create_list_term(allocator.create_list([
+                                    factory.create_list_term(allocator.create_list([
+                                        factory.create_list_term(allocator.create_list([
                                             factory.create_float_term(1.1),
                                             factory.create_float_term(1.2),
                                             factory.create_float_term(1.3),
                                         ])),
-                                        factory.create_list_term(allocator.create_list(vec![
+                                        factory.create_list_term(allocator.create_list([
                                             factory.create_float_term(1.4),
                                             factory.create_float_term(1.5),
                                             factory.create_float_term(1.6),
                                         ])),
-                                        factory.create_list_term(allocator.create_list(vec![
+                                        factory.create_list_term(allocator.create_list([
                                             factory.create_float_term(1.7),
                                             factory.create_float_term(1.8),
                                             factory.create_float_term(1.9),
                                         ])),
                                     ])),
-                                    factory.create_list_term(allocator.create_list(vec![
-                                        factory.create_list_term(allocator.create_list(vec![
+                                    factory.create_list_term(allocator.create_list([
+                                        factory.create_list_term(allocator.create_list([
                                             factory.create_float_term(2.1),
                                             factory.create_float_term(2.2),
                                             factory.create_float_term(2.3),
                                         ])),
-                                        factory.create_list_term(allocator.create_list(vec![
+                                        factory.create_list_term(allocator.create_list([
                                             factory.create_float_term(2.4),
                                             factory.create_float_term(2.5),
                                             factory.create_float_term(2.6),
                                         ])),
-                                        factory.create_list_term(allocator.create_list(vec![
+                                        factory.create_list_term(allocator.create_list([
                                             factory.create_float_term(2.7),
                                             factory.create_float_term(2.8),
                                             factory.create_float_term(2.9),
                                         ])),
                                     ])),
-                                    factory.create_list_term(allocator.create_list(vec![
-                                        factory.create_list_term(allocator.create_list(vec![
+                                    factory.create_list_term(allocator.create_list([
+                                        factory.create_list_term(allocator.create_list([
                                             factory.create_float_term(3.1),
                                             factory.create_float_term(3.2),
                                             factory.create_float_term(3.3),
                                         ])),
-                                        factory.create_list_term(allocator.create_list(vec![
+                                        factory.create_list_term(allocator.create_list([
                                             factory.create_float_term(3.4),
                                             factory.create_float_term(3.5),
                                             factory.create_float_term(3.6),
                                         ])),
-                                        factory.create_list_term(allocator.create_list(vec![
+                                        factory.create_list_term(allocator.create_list([
                                             factory.create_float_term(3.7),
                                             factory.create_float_term(3.8),
                                             factory.create_float_term(3.9),
@@ -1284,14 +1349,23 @@ mod tests {
                                     ])),
                                 ])),
                             ),
-                            (String::from("bar"), factory.create_nil_term()),
+                            (
+                                factory.create_string_term(allocator.create_static_string("bar")),
+                                factory.create_nil_term(),
+                            ),
                         ],
                         &factory,
                         &allocator,
                     ),
                 ),
-                (String::from("mutation"), factory.create_nil_term()),
-                (String::from("subscription"), factory.create_nil_term()),
+                (
+                    factory.create_string_term(allocator.create_static_string("mutation")),
+                    factory.create_nil_term(),
+                ),
+                (
+                    factory.create_string_term(allocator.create_static_string("subscription")),
+                    factory.create_nil_term(),
+                ),
             ],
             &factory,
             &allocator,
@@ -1313,55 +1387,55 @@ mod tests {
             result,
             EvaluationResult::new(
                 create_record(
-                    vec![(
-                        String::from("items"),
-                        factory.create_list_term(allocator.create_list(vec![
-                            factory.create_list_term(allocator.create_list(vec![
-                                factory.create_list_term(allocator.create_list(vec![
+                    [(
+                        factory.create_string_term(allocator.create_static_string("items")),
+                        factory.create_list_term(allocator.create_list([
+                            factory.create_list_term(allocator.create_list([
+                                factory.create_list_term(allocator.create_list([
                                     factory.create_float_term(1.1),
                                     factory.create_float_term(1.2),
                                     factory.create_float_term(1.3),
                                 ])),
-                                factory.create_list_term(allocator.create_list(vec![
+                                factory.create_list_term(allocator.create_list([
                                     factory.create_float_term(1.4),
                                     factory.create_float_term(1.5),
                                     factory.create_float_term(1.6),
                                 ])),
-                                factory.create_list_term(allocator.create_list(vec![
+                                factory.create_list_term(allocator.create_list([
                                     factory.create_float_term(1.7),
                                     factory.create_float_term(1.8),
                                     factory.create_float_term(1.9),
                                 ])),
                             ])),
-                            factory.create_list_term(allocator.create_list(vec![
-                                factory.create_list_term(allocator.create_list(vec![
+                            factory.create_list_term(allocator.create_list([
+                                factory.create_list_term(allocator.create_list([
                                     factory.create_float_term(2.1),
                                     factory.create_float_term(2.2),
                                     factory.create_float_term(2.3),
                                 ])),
-                                factory.create_list_term(allocator.create_list(vec![
+                                factory.create_list_term(allocator.create_list([
                                     factory.create_float_term(2.4),
                                     factory.create_float_term(2.5),
                                     factory.create_float_term(2.6),
                                 ])),
-                                factory.create_list_term(allocator.create_list(vec![
+                                factory.create_list_term(allocator.create_list([
                                     factory.create_float_term(2.7),
                                     factory.create_float_term(2.8),
                                     factory.create_float_term(2.9),
                                 ])),
                             ])),
-                            factory.create_list_term(allocator.create_list(vec![
-                                factory.create_list_term(allocator.create_list(vec![
+                            factory.create_list_term(allocator.create_list([
+                                factory.create_list_term(allocator.create_list([
                                     factory.create_float_term(3.1),
                                     factory.create_float_term(3.2),
                                     factory.create_float_term(3.3),
                                 ])),
-                                factory.create_list_term(allocator.create_list(vec![
+                                factory.create_list_term(allocator.create_list([
                                     factory.create_float_term(3.4),
                                     factory.create_float_term(3.5),
                                     factory.create_float_term(3.6),
                                 ])),
-                                factory.create_list_term(allocator.create_list(vec![
+                                factory.create_list_term(allocator.create_list([
                                     factory.create_float_term(3.7),
                                     factory.create_float_term(3.8),
                                     factory.create_float_term(3.9),

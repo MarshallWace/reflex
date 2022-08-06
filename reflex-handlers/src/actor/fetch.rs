@@ -17,7 +17,8 @@ use metrics::{
     decrement_gauge, describe_counter, describe_gauge, increment_counter, increment_gauge, Unit,
 };
 use reflex::core::{
-    Expression, ExpressionFactory, HeapAllocator, Signal, SignalType, StateToken, StringValue,
+    ConditionType, Expression, ExpressionFactory, ExpressionListType, HeapAllocator,
+    RecordTermType, SignalType, StateToken, StringTermType, StringValue, StructPrototypeType,
 };
 use reflex_dispatcher::{
     Action, Actor, ActorTransition, HandlerContext, InboundAction, MessageData, OperationStream,
@@ -383,16 +384,17 @@ fn create_fetch_error_expression<T: Expression>(
 }
 
 fn parse_fetch_effect_args<T: Expression>(
-    effect: &Signal<T>,
+    effect: &T::Signal,
     factory: &impl ExpressionFactory<T>,
 ) -> Result<FetchRequest, String> {
-    let mut args = effect.args().into_iter();
+    let args = effect.args();
     if args.len() != 4 {
         return Err(format!(
             "Invalid fetch signal: Expected 4 arguments, received {}",
             args.len()
         ));
     }
+    let mut args = args.iter();
     let url = parse_string_arg(args.next().unwrap(), factory);
     let method = parse_string_arg(args.next().unwrap(), factory);
     let headers = parse_key_values_arg(args.next().unwrap(), factory);
@@ -441,7 +443,7 @@ fn parse_string_arg<T: Expression>(
     factory: &impl ExpressionFactory<T>,
 ) -> Option<String> {
     match factory.match_string_term(value) {
-        Some(term) => Some(String::from(term.value.as_str())),
+        Some(term) => Some(String::from(term.value().as_str())),
         _ => None,
     }
 }
@@ -451,7 +453,7 @@ fn parse_optional_string_arg<T: Expression>(
     factory: &impl ExpressionFactory<T>,
 ) -> Option<Option<String>> {
     match factory.match_string_term(value) {
-        Some(term) => Some(Some(String::from(term.value.as_str()))),
+        Some(term) => Some(Some(String::from(term.value().as_str()))),
         _ => match factory.match_nil_term(value) {
             Some(_) => Some(None),
             _ => None,
@@ -465,14 +467,21 @@ fn parse_key_values_arg<T: Expression>(
 ) -> Option<Vec<(String, String)>> {
     if let Some(value) = factory.match_record_term(value) {
         value
-            .entries()
-            .into_iter()
-            .map(|(key, value)| match factory.match_string_term(value) {
-                Some(term) => Some((
-                    String::from(key.as_str()),
-                    String::from(term.value.as_str()),
-                )),
-                _ => None,
+            .prototype()
+            .keys()
+            .iter()
+            .zip(value.values().iter())
+            .map(|(key, value)| {
+                match (
+                    factory.match_string_term(key),
+                    factory.match_string_term(value),
+                ) {
+                    (Some(key), Some(value)) => Some((
+                        String::from(key.value().as_str()),
+                        String::from(value.value().as_str()),
+                    )),
+                    _ => None,
+                }
             })
             .collect::<Option<Vec<_>>>()
     } else {

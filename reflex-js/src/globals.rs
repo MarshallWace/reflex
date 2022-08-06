@@ -4,9 +4,9 @@
 use crate::stdlib::Stdlib as JsStdlib;
 use reflex::{
     core::{Expression, ExpressionFactory, HeapAllocator},
-    stdlib::Stdlib,
 };
 use reflex_json::stdlib::Stdlib as JsonStdlib;
+use reflex_stdlib::Stdlib;
 
 pub(crate) mod boolean;
 pub(crate) mod date;

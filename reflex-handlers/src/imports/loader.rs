@@ -3,11 +3,8 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use std::iter::once;
 
-use reflex::{
-    core::{Expression, ExpressionFactory, HeapAllocator},
-    lang::create_record,
-    stdlib::Stdlib,
-};
+use reflex::core::{create_record, Expression, ExpressionFactory, HeapAllocator};
+use reflex_stdlib::Stdlib;
 
 use crate::actor::loader::EFFECT_TYPE_LOADER;
 
@@ -20,13 +17,13 @@ where
 {
     create_record(
         once((
-            String::from("default"),
+            factory.create_string_term(allocator.create_static_string("default")),
             factory.create_lambda_term(
                 2,
                 create_record(
                     [
                         (
-                            String::from("load"),
+                            factory.create_string_term(allocator.create_static_string("load")),
                             factory.create_lambda_term(
                                 1,
                                 factory.create_application_term(
@@ -43,7 +40,7 @@ where
                             ),
                         ),
                         (
-                            String::from("loadMany"),
+                            factory.create_string_term(allocator.create_static_string("loadMany")),
                             factory.create_lambda_term(
                                 1,
                                 factory.create_application_term(

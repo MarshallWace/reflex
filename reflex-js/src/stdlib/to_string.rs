@@ -3,8 +3,9 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use reflex::core::{
-    uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
-    FunctionArity, HeapAllocator, StringValue, Uid, Uuid,
+    uuid, Applicable, ArgType, Arity, BooleanTermType, EvaluationCache, Expression,
+    ExpressionFactory, FloatTermType, FunctionArity, HeapAllocator, IntTermType, StringTermType,
+    StringValue, SymbolTermType, Uid, Uuid,
 };
 
 pub struct ToString {}
@@ -57,15 +58,15 @@ pub fn format_value<T: Expression>(
     if let Some(_) = factory.match_nil_term(value) {
         Some(String::from("null"))
     } else if let Some(term) = factory.match_boolean_term(value) {
-        Some(format!("{}", term.value))
+        Some(format!("{}", term.value()))
     } else if let Some(term) = factory.match_int_term(value) {
-        Some(format!("{}", term.value))
+        Some(format!("{}", term.value()))
     } else if let Some(term) = factory.match_float_term(value) {
-        Some(format!("{}", term.value))
+        Some(format!("{}", term.value()))
     } else if let Some(term) = factory.match_string_term(value) {
-        Some(String::from(term.value.as_str()))
+        Some(String::from(term.value().as_str()))
     } else if let Some(term) = factory.match_symbol_term(value) {
-        Some(format!("{}", term.id))
+        Some(format!("{}", term.id()))
     } else {
         None
     }

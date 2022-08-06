@@ -10,10 +10,14 @@ edition = "2021"
 [dependencies]
 reflex = { path = "../reflex" }
 reflex-dispatcher = { path = "../reflex-dispatcher" }
+reflex-interpreter = { path = "../reflex-interpreter" }
 reflex-js = { path = "../reflex-js" }
 reflex-json = { path = "../reflex-json" }
+reflex-lang = { path = "../reflex-lang" }
+reflex-lisp = { path = "../reflex-lisp" }
 reflex-handlers = { path = "../reflex-handlers" }
 reflex-runtime = { path = "../reflex-runtime" }
+reflex-stdlib = { path = "../reflex-stdlib" }
 reflex-utils = { path = "../reflex-utils" }
 anyhow = "1.0"
 clap = { version = "3.0", features = ["derive"] }

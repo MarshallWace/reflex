@@ -7,12 +7,10 @@ use prost_reflect::{
     DynamicMessage, EnumDescriptor, FieldDescriptor, Kind, MapKey, MessageDescriptor,
     OneofDescriptor, Value,
 };
-use reflex::{
-    core::{Expression, ExpressionFactory, StringValue},
-    lang::{
-        as_integer,
-        term::{FloatValue, IntValue, RecordTerm},
-    },
+use reflex::core::{
+    as_integer, BooleanTermType, Expression, ExpressionFactory, ExpressionListType, FloatTermType,
+    FloatValue, HashmapTermType, HeapAllocator, IntTermType, IntValue, ListTermType,
+    RecordTermType, StringTermType, StringValue, StructPrototypeType,
 };
 
 use crate::{
@@ -25,6 +23,7 @@ pub(crate) fn serialize_generic_message<T: Expression>(
     message_type: &MessageDescriptor,
     transcoder: &impl ProtoTranscoder,
     factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
 ) -> Result<DynamicMessage, TranscodeError> {
     let term = factory
         .match_record_term(value)
@@ -36,21 +35,32 @@ pub(crate) fn serialize_generic_message<T: Expression>(
     let simple_fields = message_type
         .fields()
         .filter_map(|field_type| {
-            term.get(field_type.json_name())
+            // TODO: cache protobuf schema field name strings
+            term.get(&factory.create_string_term(allocator.create_string(field_type.json_name())))
                 .filter(|value| factory.match_nil_term(value).is_none())
                 .map(|value| (field_type, value))
         })
         .map(|(field_type, value)| {
-            let field_value = serialize_field_value(value, &field_type, transcoder, factory)
-                .map_err(|err| TranscodeError {
-                    error: err.error,
-                    message_type: err.message_type.or_else(|| Some(message_type.clone())),
-                    path: err.path.with_prefix(field_type.name().into()),
-                })?;
+            let field_value =
+                serialize_field_value(value, &field_type, transcoder, factory, allocator).map_err(
+                    |err| TranscodeError {
+                        error: err.error,
+                        message_type: err.message_type.or_else(|| Some(message_type.clone())),
+                        path: err.path.with_prefix(field_type.name().into()),
+                    },
+                )?;
             Ok((field_type, field_value))
         });
     let oneof_fields = message_type.oneofs().filter_map(|oneof_type| {
-        serialize_oneof_field(term, &oneof_type, message_type, transcoder, factory).transpose()
+        serialize_oneof_field(
+            term,
+            &oneof_type,
+            message_type,
+            transcoder,
+            factory,
+            allocator,
+        )
+        .transpose()
     });
     simple_fields.chain(oneof_fields).fold(
         Ok(DynamicMessage::new(message_type.clone())),
@@ -64,21 +74,30 @@ pub(crate) fn serialize_generic_message<T: Expression>(
 }
 
 fn serialize_oneof_field<T: Expression>(
-    term: &RecordTerm<T>,
+    term: &T::RecordTerm,
     oneof_type: &OneofDescriptor,
     message_type: &MessageDescriptor,
     transcoder: &impl ProtoTranscoder,
     factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
 ) -> Result<Option<(FieldDescriptor, Value)>, TranscodeError> {
     let fields = oneof_type
         .fields()
         .filter_map(|field_type| {
-            term.get(field_type.json_name()).and_then(|field_value| {
-                if let Some(_) = factory.match_nil_term(field_value) {
-                    None
-                } else {
-                    Some(
-                        serialize_field_value(field_value, &field_type, transcoder, factory)
+            // TODO: cache protobuf schema field name strings
+            term.get(&factory.create_string_term(allocator.create_string(field_type.json_name())))
+                .and_then(|field_value| {
+                    if let Some(_) = factory.match_nil_term(field_value) {
+                        None
+                    } else {
+                        Some(
+                            serialize_field_value(
+                                field_value,
+                                &field_type,
+                                transcoder,
+                                factory,
+                                allocator,
+                            )
                             .map_err(|err| TranscodeError {
                                 error: err.error,
                                 message_type: err
@@ -87,9 +106,9 @@ fn serialize_oneof_field<T: Expression>(
                                 path: err.path.with_prefix(field_type.name().into()),
                             })
                             .map(|value| (field_type, value)),
-                    )
-                }
-            })
+                        )
+                    }
+                })
         })
         .collect::<Result<Vec<_>, _>>()?;
     match count_iterator_items(fields) {
@@ -110,13 +129,14 @@ fn serialize_field_value<T: Expression>(
     field_type: &FieldDescriptor,
     transcoder: &impl ProtoTranscoder,
     factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
 ) -> Result<Value, TranscodeError> {
     if field_type.is_list() {
-        serialize_list_field_value(value, field_type, transcoder, factory)
+        serialize_list_field_value(value, field_type, transcoder, factory, allocator)
     } else if field_type.is_map() {
-        serialize_map_field_value(value, field_type, transcoder, factory)
+        serialize_map_field_value(value, field_type, transcoder, factory, allocator)
     } else {
-        serialize_simple_field_value(value, field_type, transcoder, factory)
+        serialize_simple_field_value(value, field_type, transcoder, factory, allocator)
     }
 }
 
@@ -125,6 +145,7 @@ fn serialize_list_field_value<T: Expression>(
     field_type: &FieldDescriptor,
     transcoder: &impl ProtoTranscoder,
     factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
 ) -> Result<Value, TranscodeError> {
     if let Some(_) = factory.match_nil_term(value) {
         Ok(Value::List(Default::default()))
@@ -134,7 +155,7 @@ fn serialize_list_field_value<T: Expression>(
                 .iter()
                 .enumerate()
                 .map(|(index, value)| {
-                    serialize_simple_field_value(value, field_type, transcoder, factory)
+                    serialize_simple_field_value(value, field_type, transcoder, factory, allocator)
                         .map_err(|err| err.with_path_prefix(index.into()))
                 })
                 .collect::<Result<Vec<_>, _>>()?,
@@ -152,29 +173,37 @@ fn serialize_map_field_value<T: Expression>(
     field_type: &FieldDescriptor,
     transcoder: &impl ProtoTranscoder,
     factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
 ) -> Result<Value, TranscodeError> {
     if let Some(_) = factory.match_nil_term(value) {
         Ok(Value::Map(Default::default()))
     } else if let Some(term) = factory.match_record_term(value) {
         Ok(Value::Map(
-            term.entries()
-                .into_iter()
+            term.prototype()
+                .keys()
+                .iter()
+                .zip(term.values().iter())
                 .map(|(key, value)| {
-                    let field_value =
-                        serialize_simple_field_value(value, field_type, transcoder, factory)
-                            .map_err(|err| err.with_path_prefix(key.as_str().into()))?;
-                    Ok((MapKey::String(String::from(key)), field_value))
+                    serialize_map_key(key, factory).and_then(|key| {
+                        match serialize_simple_field_value(
+                            value, field_type, transcoder, factory, allocator,
+                        ) {
+                            Ok(value) => Ok((key, value)),
+                            Err(err) => Err(err.with_path_prefix(key.into())),
+                        }
+                    })
                 })
                 .collect::<Result<HashMap<_, _>, TranscodeError>>()?,
         ))
     } else if let Some(term) = factory.match_hashmap_term(value) {
         Ok(Value::Map(
             term.keys()
-                .iter()
-                .zip(term.values().iter())
+                .zip(term.values())
                 .map(|(key, value)| {
                     serialize_map_key(key, factory).and_then(|key| {
-                        match serialize_simple_field_value(value, field_type, transcoder, factory) {
+                        match serialize_simple_field_value(
+                            value, field_type, transcoder, factory, allocator,
+                        ) {
                             Ok(value) => Ok((key, value)),
                             Err(err) => Err(err.with_path_prefix(key.into())),
                         }
@@ -195,11 +224,11 @@ fn serialize_map_key<T: Expression>(
     factory: &impl ExpressionFactory<T>,
 ) -> Result<MapKey, TranscodeError> {
     if let Some(term) = factory.match_string_term(value) {
-        Ok(MapKey::String(String::from(term.value.as_str())))
+        Ok(MapKey::String(String::from(term.value().as_str())))
     } else if let Some(term) = factory.match_int_term(value) {
-        Ok(MapKey::I32(term.value))
+        Ok(MapKey::I32(term.value()))
     } else if let Some(term) = factory.match_boolean_term(value) {
-        Ok(MapKey::Bool(term.value))
+        Ok(MapKey::Bool(term.value()))
     } else {
         Err(TranscodeError::from(format!("Invalid map key: {}", value)))
     }
@@ -210,6 +239,7 @@ fn serialize_simple_field_value<T: Expression>(
     field_type: &FieldDescriptor,
     transcoder: &impl ProtoTranscoder,
     factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
 ) -> Result<Value, TranscodeError> {
     match field_type.kind() {
         Kind::Int32 | Kind::Sint32 | Kind::Sfixed32 => {
@@ -236,7 +266,7 @@ fn serialize_simple_field_value<T: Expression>(
                 Ok(Value::Message(DynamicMessage::new(message_type)))
             } else {
                 transcoder
-                    .serialize_message(value, &message_type, transcoder, factory)
+                    .serialize_message(value, &message_type, transcoder, factory, allocator)
                     .map(Value::Message)
             }
         }
@@ -256,7 +286,7 @@ fn serialize_enum_field_value<T: Expression>(
         Ok(Value::EnumNumber(enum_type.default_value().number()))
     } else if let Some(term) = factory.match_string_term(value) {
         enum_type
-            .get_value_by_name(term.value.as_str())
+            .get_value_by_name(term.value().as_str())
             .map(|value| Value::EnumNumber(value.number()))
             .ok_or_else(|| {
                 TranscodeError::from(format!("Invalid {} variant: {}", enum_type.name(), value))
@@ -276,8 +306,8 @@ fn parse_boolean_value<T: Expression>(
 ) -> Result<bool, TranscodeError> {
     if let Some(_) = factory.match_nil_term(value) {
         Ok(Default::default())
-    } else if let Some(value) = factory.match_boolean_term(value) {
-        Ok(value.value)
+    } else if let Some(term) = factory.match_boolean_term(value) {
+        Ok(term.value())
     } else {
         Err(TranscodeError::from(format!(
             "Expected Boolean, received {}",
@@ -292,11 +322,11 @@ fn parse_integer_value<T: Expression>(
 ) -> Result<IntValue, TranscodeError> {
     if let Some(_) = factory.match_nil_term(value) {
         Ok(Default::default())
-    } else if let Some(value) = factory.match_float_term(value) {
-        as_integer(value.value)
+    } else if let Some(term) = factory.match_float_term(value) {
+        as_integer(term.value())
             .ok_or_else(|| TranscodeError::from(format!("Expected Int, received {}", value)))
-    } else if let Some(value) = factory.match_int_term(value) {
-        Ok(value.value)
+    } else if let Some(term) = factory.match_int_term(value) {
+        Ok(term.value())
     } else {
         Err(TranscodeError::from(format!(
             "Expected Int, received {}",
@@ -311,10 +341,10 @@ fn parse_float_value<T: Expression>(
 ) -> Result<FloatValue, TranscodeError> {
     if let Some(_) = factory.match_nil_term(value) {
         Ok(Default::default())
-    } else if let Some(value) = factory.match_float_term(value) {
-        Ok(value.value)
-    } else if let Some(value) = factory.match_int_term(value) {
-        Ok(value.value as f64)
+    } else if let Some(term) = factory.match_float_term(value) {
+        Ok(term.value())
+    } else if let Some(term) = factory.match_int_term(value) {
+        Ok(term.value() as f64)
     } else {
         Err(TranscodeError::from(format!(
             "Expected Float, received {}",
@@ -329,8 +359,8 @@ fn parse_string_value<T: Expression>(
 ) -> Result<String, TranscodeError> {
     if let Some(_) = factory.match_nil_term(value) {
         Ok(Default::default())
-    } else if let Some(value) = factory.match_string_term(value) {
-        Ok(String::from(value.value.as_str()))
+    } else if let Some(term) = factory.match_string_term(value) {
+        Ok(String::from(term.value().as_str()))
     } else {
         Err(TranscodeError::from(format!(
             "Expected String, received {}",

@@ -3,10 +3,7 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use std::iter::once;
 
-use reflex::{
-    core::{Expression, ExpressionFactory, HeapAllocator, SignalType},
-    lang::create_record,
-};
+use reflex::core::{create_record, Expression, ExpressionFactory, HeapAllocator, SignalType};
 use types::import_types;
 
 use crate::stdlib::Stdlib as JsStdlib;
@@ -23,22 +20,22 @@ where
     create_record(
         vec![
             (
-                String::from("graph"),
+                factory.create_string_term(allocator.create_static_string("graph")),
                 factory.create_lambda_term(
                     1,
                     factory.create_recursive_term(factory.create_variable_term(0)),
                 ),
             ),
             (
-                String::from("hash"),
+                factory.create_string_term(allocator.create_static_string("hash")),
                 factory.create_builtin_term(JsStdlib::Hash),
             ),
             (
-                String::from("log"),
+                factory.create_string_term(allocator.create_static_string("log")),
                 factory.create_builtin_term(JsStdlib::Log),
             ),
             (
-                String::from("pending"),
+                factory.create_string_term(allocator.create_static_string("pending")),
                 factory.create_lambda_term(
                     0,
                     factory.create_signal_term(allocator.create_signal_list(once(
@@ -46,7 +43,10 @@ where
                     ))),
                 ),
             ),
-            (String::from("Types"), import_types(factory, allocator)),
+            (
+                factory.create_string_term(allocator.create_static_string("Types")),
+                import_types(factory, allocator),
+            ),
         ],
         factory,
         allocator,

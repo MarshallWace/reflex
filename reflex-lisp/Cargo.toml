@@ -1,0 +1,13 @@
+[package]
+name = "reflex-lisp"
+version = "0.1.0"
+license = "Apache-2.0"
+authors = ["Marshall Wace LLP <opensource@mwam.com>", "Tim Kendrick <t.kendrick@mwam.com>"]
+edition = "2021"
+
+[dependencies]
+reflex = { path = "../reflex" }
+reflex-stdlib = { path = "../reflex-stdlib" }
+
+[dev-dependencies]
+reflex-lang = { path = "../reflex-lang" }

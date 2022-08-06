@@ -4,10 +4,7 @@
 use std::iter::empty;
 
 use prost_reflect::{DynamicMessage, MessageDescriptor};
-use reflex::{
-    core::{Expression, ExpressionFactory, HeapAllocator},
-    lang::create_record,
-};
+use reflex::core::{create_record, Expression, ExpressionFactory, HeapAllocator};
 
 use crate::CustomType;
 
@@ -43,13 +40,9 @@ impl CustomType for EmptyMessage {
 
 #[cfg(test)]
 mod tests {
-    use reflex::{
-        allocator::DefaultAllocator,
-        lang::{CachedSharedTerm, SharedTermFactory},
-        stdlib::Stdlib,
-    };
-
     use prost_reflect::ReflectMessage;
+    use reflex_lang::{allocator::DefaultAllocator, CachedSharedTerm, SharedTermFactory};
+    use reflex_stdlib::Stdlib;
 
     use super::*;
 

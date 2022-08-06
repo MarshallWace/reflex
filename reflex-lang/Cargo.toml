@@ -1,0 +1,15 @@
+[package]
+name = "reflex-lang"
+version = "0.1.0"
+license = "Apache-2.0"
+authors = ["Marshall Wace LLP <opensource@mwam.com>", "Tim Kendrick <t.kendrick@mwam.com>"]
+edition = "2021"
+
+[dependencies]
+reflex = { path = "../reflex" }
+serde = { version = "1.0", features = ["derive", "rc"] }
+serde_json = "1.0"
+
+[dev-dependencies]
+reflex-stdlib = { path = "../reflex-stdlib" }
+rmp-serde = "0.15"

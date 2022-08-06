@@ -11,12 +11,7 @@ use hyper::{
     Body,
 };
 use hyper_tungstenite::{tungstenite::Message, HyperWebsocket, WebSocketStream};
-use reflex::{
-    compiler::{Compile, CompilerOptions, InstructionPointer, Program},
-    core::{Applicable, Expression, Reducible, Rewritable},
-    interpreter::InterpreterOptions,
-    stdlib::Stdlib,
-};
+use reflex::core::{Applicable, Expression, InstructionPointer, Reducible, Rewritable};
 use reflex_dispatcher::{
     scheduler::tokio::{TokioScheduler, TokioSchedulerMetricNames},
     utils::take_until_final_item::TakeUntilFinalItem,
@@ -33,12 +28,17 @@ use reflex_graphql::{
     },
     GraphQlOperation, GraphQlSchema,
 };
+use reflex_interpreter::{
+    compiler::{Compile, CompilerOptions, Program},
+    InterpreterOptions,
+};
 use reflex_json::JsonValue;
 use reflex_runtime::{
     actor::bytecode_interpreter::{BytecodeInterpreter, BytecodeInterpreterAction},
     worker::bytecode_worker::BytecodeWorkerMetricNames,
     AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator,
 };
+use reflex_stdlib::Stdlib;
 use uuid::Uuid;
 
 use crate::{
@@ -142,6 +142,12 @@ impl<TAction: Action + Send + 'static> GraphQlWebServer<TAction> {
     ) -> Result<Self, String>
     where
         T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
+        T::String: Send,
+        T::Builtin: Send,
+        T::Signal: Send,
+        T::SignalList: Send,
+        T::StructPrototype: Send,
+        T::ExpressionList: Send,
         T::Builtin: From<Stdlib> + From<GraphQlStdlib> + 'static,
         TFactory: AsyncExpressionFactory<T>,
         TAction: GraphQlWebServerAction<T> + Clone + Send + 'static,

@@ -9,14 +9,16 @@ use std::{
 };
 
 use reflex::{
-    compiler::{Compile, CompilerOptions, InstructionPointer, Program},
-    core::{Applicable, Expression, Reducible, Rewritable},
+    core::{Applicable, Expression, InstructionPointer, Reducible, Rewritable},
     hash::HashId,
-    interpreter::InterpreterOptions,
 };
 use reflex_dispatcher::{
     Action, Actor, ActorTransition, HandlerContext, InboundAction, MessageData, OutboundAction,
     ProcessId, StateOperation, StateTransition,
+};
+use reflex_interpreter::{
+    compiler::{Compile, CompilerOptions, Program},
+    InterpreterOptions,
 };
 
 use crate::{

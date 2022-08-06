@@ -3,7 +3,7 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use reflex::core::{
     uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
-    FunctionArity, HeapAllocator, Uid, Uuid,
+    FunctionArity, HeapAllocator, IntTermType, Uid, Uuid,
 };
 
 pub struct ParseFloat {}
@@ -42,7 +42,7 @@ impl<T: Expression> Applicable<T> for ParseFloat {
         match factory.match_float_term(&value) {
             Some(_) => Ok(value),
             _ => match factory.match_int_term(&value) {
-                Some(term) => Ok(factory.create_float_term(term.value as f64)),
+                Some(term) => Ok(factory.create_float_term(term.value() as f64)),
                 _ => Err(format!(
                     "Invalid float conversion: Expected Int or Float, received {}",
                     value,

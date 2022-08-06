@@ -36,11 +36,8 @@ impl CustomType for AnyMessage {
 mod tests {
     use bytes::Bytes;
     use prost_reflect::{prost_types::Any, ReflectMessage, Value};
-    use reflex::{
-        allocator::DefaultAllocator,
-        lang::{CachedSharedTerm, SharedTermFactory},
-        stdlib::Stdlib,
-    };
+    use reflex_lang::{allocator::DefaultAllocator, CachedSharedTerm, SharedTermFactory};
+    use reflex_stdlib::Stdlib;
 
     use super::*;
 

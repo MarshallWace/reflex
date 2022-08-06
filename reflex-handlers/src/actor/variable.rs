@@ -7,7 +7,10 @@ use std::{
     marker::PhantomData,
 };
 
-use reflex::core::{Expression, ExpressionFactory, HeapAllocator, Signal, SignalType, StateToken};
+use reflex::core::{
+    ConditionType, Expression, ExpressionFactory, ExpressionListType, FloatTermType, HeapAllocator,
+    IntTermType, SignalType, StateToken,
+};
 use reflex_dispatcher::{
     Action, Actor, ActorTransition, HandlerContext, InboundAction, MessageData, OutboundAction,
     StateOperation, StateTransition,
@@ -467,9 +470,9 @@ fn add_integer_value<T: Expression>(
         None => factory.create_int_term(delta),
         Some(existing) => {
             let result = if let Some(term) = factory.match_int_term(existing) {
-                Some(factory.create_int_term(term.value + delta))
+                Some(factory.create_int_term(term.value() + delta))
             } else if let Some(term) = factory.match_float_term(existing) {
-                Some(factory.create_float_term(term.value + (delta as f64)))
+                Some(factory.create_float_term(term.value() + (delta as f64)))
             } else if let Some(_) = factory.match_signal_term(existing) {
                 Some(existing.clone())
             } else {
@@ -491,34 +494,36 @@ fn add_integer_value<T: Expression>(
 }
 
 fn parse_get_effect_args<'a, T: Expression>(
-    effect: &'a Signal<T>,
+    effect: &'a T::Signal,
     _factory: &'a impl ExpressionFactory<T>,
     _allocator: &impl HeapAllocator<T>,
 ) -> Result<(&'a T, &'a T), String> {
-    let mut args = effect.args().into_iter();
+    let args = effect.args();
     if args.len() != 2 {
         return Err(format!(
             "Invalid variable get signal: Expected 2 argument, received {}",
             args.len()
         ));
     }
+    let mut args = args.iter();
     let state_token = args.next().unwrap();
     let initial_value = args.next().unwrap();
     Ok((state_token, initial_value))
 }
 
 fn parse_set_effect_args<'a, T: Expression>(
-    effect: &'a Signal<T>,
+    effect: &'a T::Signal,
     _factory: &'a impl ExpressionFactory<T>,
     _allocator: &impl HeapAllocator<T>,
 ) -> Result<(&'a T, &'a T), String> {
-    let mut args = effect.args().into_iter();
+    let args = effect.args();
     if args.len() != 3 {
         return Err(format!(
             "Invalid variable set signal: Expected 3 arguments, received {}",
             args.len()
         ));
     }
+    let mut args = args.iter();
     let state_token = args.next().unwrap();
     let value = args.next().unwrap();
     let _token = args.next().unwrap();
@@ -526,34 +531,36 @@ fn parse_set_effect_args<'a, T: Expression>(
 }
 
 fn parse_increment_effect_args<'a, T: Expression>(
-    effect: &'a Signal<T>,
+    effect: &'a T::Signal,
     _factory: &'a impl ExpressionFactory<T>,
     _allocator: &impl HeapAllocator<T>,
 ) -> Result<&'a T, String> {
-    let mut args = effect.args().into_iter();
+    let args = effect.args();
     if args.len() != 2 {
         return Err(format!(
             "Invalid variable increment signal: Expected 2 arguments, received {}",
             args.len()
         ));
     }
+    let mut args = args.iter();
     let state_token = args.next().unwrap();
     let _token = args.next().unwrap();
     Ok(state_token)
 }
 
 fn parse_decrement_effect_args<'a, T: Expression>(
-    effect: &'a Signal<T>,
+    effect: &'a T::Signal,
     _factory: &'a impl ExpressionFactory<T>,
     _allocator: &impl HeapAllocator<T>,
 ) -> Result<&'a T, String> {
-    let mut args = effect.args().into_iter();
+    let args = effect.args();
     if args.len() != 2 {
         return Err(format!(
             "Invalid variable decrement signal: Expected 2 arguments, received {}",
             args.len()
         ));
     }
+    let mut args = args.iter();
     let state_token = args.next().unwrap();
     let _token = args.next().unwrap();
     Ok(state_token)

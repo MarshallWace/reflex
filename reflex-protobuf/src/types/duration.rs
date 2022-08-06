@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use prost_reflect::{DynamicMessage, MessageDescriptor, Value};
-use reflex::core::{Expression, ExpressionFactory, HeapAllocator, StringValue};
+use reflex::core::{Expression, ExpressionFactory, HeapAllocator, StringTermType, StringValue};
 
 use crate::{utils::get_message_field, CustomType};
 
@@ -21,7 +21,7 @@ impl CustomType for DurationMessage {
         factory: &impl ExpressionFactory<T>,
     ) -> Result<DynamicMessage, String> {
         if let Some(term) = factory.match_string_term(value) {
-            match parse_duration(term.value.as_str()) {
+            match parse_duration(term.value().as_str()) {
                 None => Err(format!("Invalid duration: {}", value)),
                 Some((seconds, nanos)) => {
                     let mut message = DynamicMessage::new(message_type.clone());
@@ -161,11 +161,8 @@ mod parser {
 #[cfg(test)]
 mod tests {
     use prost_reflect::{prost_types::Duration, ReflectMessage, Value};
-    use reflex::{
-        allocator::DefaultAllocator,
-        lang::{CachedSharedTerm, SharedTermFactory},
-        stdlib::Stdlib,
-    };
+    use reflex_lang::{allocator::DefaultAllocator, CachedSharedTerm, SharedTermFactory};
+    use reflex_stdlib::Stdlib;
 
     use super::*;
 

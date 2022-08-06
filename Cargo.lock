@@ -1492,18 +1492,18 @@ dependencies = [
 
 [[package]]
 name = "pin-project"
-version = "1.0.10"
+version = "1.0.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "58ad3879ad3baf4e44784bc6a718a8698867bb991f8ce24d1bcbe2cfb4c3a75e"
+checksum = "78203e83c48cffbe01e4a2d35d566ca4de445d79a85372fc64e378bfc812a260"
 dependencies = [
  "pin-project-internal",
 ]
 
 [[package]]
 name = "pin-project-internal"
-version = "1.0.10"
+version = "1.0.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "744b6f092ba29c3650faf274db506afd39944f48420f6c86b17cfe0ee1cb36bb"
+checksum = "710faf75e1b33345361201d36d04e98ac1ed8909151a017ed384700836104c74"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1779,9 +1779,9 @@ dependencies = [
 
 [[package]]
 name = "rayon"
-version = "1.5.2"
+version = "1.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fd249e82c21598a9a426a4e00dd7adc1d640b22445ec8545feef801d1a74c221"
+checksum = "bd99e5772ead8baa5215278c9b15bf92087709e9c1b2d1f97cdb5a183c933a7d"
 dependencies = [
  "autocfg",
  "crossbeam-deque",
@@ -1791,9 +1791,9 @@ dependencies = [
 
 [[package]]
 name = "rayon-core"
-version = "1.9.2"
+version = "1.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9f51245e1e62e1f1629cbfec37b5793bbabcaeb90f30e94d2ba03564687353e4"
+checksum = "258bcdb5ac6dad48491bb2992db6b7cf74878b0384908af124823d118c99683f"
 dependencies = [
  "crossbeam-channel",
  "crossbeam-deque",
@@ -1816,13 +1816,21 @@ version = "0.1.0"
 dependencies = [
  "fnv",
  "im",
- "rayon",
  "serde",
  "serde_json",
- "strum",
- "strum_macros",
- "tracing",
  "uuid",
+]
+
+[[package]]
+name = "reflex-benches"
+version = "0.1.0"
+dependencies = [
+ "reflex",
+ "reflex-interpreter",
+ "reflex-js",
+ "reflex-lang",
+ "reflex-lisp",
+ "reflex-stdlib",
 ]
 
 [[package]]
@@ -1835,9 +1843,13 @@ dependencies = [
  "reflex",
  "reflex-dispatcher",
  "reflex-handlers",
+ "reflex-interpreter",
  "reflex-js",
  "reflex-json",
+ "reflex-lang",
+ "reflex-lisp",
  "reflex-runtime",
+ "reflex-stdlib",
  "reflex-utils",
  "serde_json",
  "tokio",
@@ -1865,6 +1877,8 @@ dependencies = [
  "graphql-parser",
  "reflex",
  "reflex-json",
+ "reflex-lang",
+ "reflex-stdlib",
  "serde",
  "strum",
  "strum_macros",
@@ -1884,6 +1898,7 @@ dependencies = [
  "reflex-json",
  "reflex-protobuf",
  "reflex-runtime",
+ "reflex-stdlib",
  "reflex-utils",
  "serde",
  "serde_json",
@@ -1908,6 +1923,7 @@ dependencies = [
  "reflex-graphql",
  "reflex-json",
  "reflex-runtime",
+ "reflex-stdlib",
  "reflex-utils",
  "serde",
  "strum",
@@ -1920,12 +1936,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "reflex-interpreter"
+version = "0.1.0"
+dependencies = [
+ "fnv",
+ "rayon",
+ "reflex",
+ "reflex-lang",
+ "reflex-lisp",
+ "reflex-stdlib",
+ "serde",
+ "tracing",
+]
+
+[[package]]
 name = "reflex-js"
 version = "0.1.0"
 dependencies = [
  "chrono",
  "reflex",
+ "reflex-interpreter",
  "reflex-json",
+ "reflex-lang",
+ "reflex-stdlib",
  "serde",
  "serde_json",
  "strum",
@@ -1941,10 +1974,32 @@ name = "reflex-json"
 version = "0.1.0"
 dependencies = [
  "reflex",
+ "reflex-lang",
+ "reflex-stdlib",
  "serde",
  "serde_json",
  "strum",
  "strum_macros",
+]
+
+[[package]]
+name = "reflex-lang"
+version = "0.1.0"
+dependencies = [
+ "reflex",
+ "reflex-stdlib",
+ "rmp-serde 0.15.5",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "reflex-lisp"
+version = "0.1.0"
+dependencies = [
+ "reflex",
+ "reflex-lang",
+ "reflex-stdlib",
 ]
 
 [[package]]
@@ -1958,6 +2013,8 @@ dependencies = [
  "prost-build 0.10.4",
  "prost-reflect",
  "reflex",
+ "reflex-lang",
+ "reflex-stdlib",
 ]
 
 [[package]]
@@ -1967,6 +2024,7 @@ dependencies = [
  "metrics",
  "reflex",
  "reflex-dispatcher",
+ "reflex-interpreter",
  "reflex-json",
  "reflex-utils",
  "serde",
@@ -1998,11 +2056,15 @@ dependencies = [
  "reflex-graphql",
  "reflex-grpc",
  "reflex-handlers",
+ "reflex-interpreter",
  "reflex-js",
  "reflex-json",
+ "reflex-lang",
+ "reflex-lisp",
  "reflex-runtime",
+ "reflex-stdlib",
  "reflex-utils",
- "rmp-serde",
+ "rmp-serde 1.1.0",
  "serde",
  "serde_json",
  "strum",
@@ -2013,6 +2075,16 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
+]
+
+[[package]]
+name = "reflex-stdlib"
+version = "0.1.0"
+dependencies = [
+ "reflex",
+ "serde",
+ "strum",
+ "strum_macros",
 ]
 
 [[package]]
@@ -2069,6 +2141,17 @@ dependencies = [
  "byteorder",
  "num-traits",
  "paste",
+]
+
+[[package]]
+name = "rmp-serde"
+version = "0.15.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "723ecff9ad04f4ad92fe1c8ca6c20d2196d9286e9c60727c4cb5511629260e9d"
+dependencies = [
+ "byteorder",
+ "rmp",
+ "serde",
 ]
 
 [[package]]

@@ -1,12 +1,9 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use reflex::{
-    core::{Expression, ExpressionFactory, HeapAllocator},
-    lang::create_record,
-    stdlib::Stdlib,
-};
+use reflex::core::{create_record, Expression, ExpressionFactory, HeapAllocator};
 use reflex_json::stdlib::Stdlib as JsonStdlib;
+use reflex_stdlib::Stdlib;
 
 use crate::{
     actor::fetch::EFFECT_TYPE_FETCH,
@@ -22,9 +19,12 @@ where
 {
     create_record(
         vec![
-            (String::from("fetch"), import_http_fetch(factory, allocator)),
             (
-                String::from("Request"),
+                factory.create_string_term(allocator.create_static_string("fetch")),
+                import_http_fetch(factory, allocator),
+            ),
+            (
+                factory.create_string_term(allocator.create_static_string("Request")),
                 import_http_request(factory, allocator),
             ),
         ],
@@ -37,7 +37,7 @@ fn import_http_request<T: Expression>(
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
 ) -> T {
-    factory.create_constructor_term(request_prototype(allocator))
+    factory.create_constructor_term(request_prototype(factory, allocator))
 }
 
 fn import_http_fetch<T: Expression>(
@@ -97,12 +97,12 @@ where
                     ]),
                 ),
                 factory.create_record_term(
-                    allocator.create_struct_prototype(vec![
-                        String::from("status"),
-                        String::from("ok"),
-                        String::from("text"),
-                        String::from("json"),
-                    ]),
+                    allocator.create_struct_prototype(allocator.create_list([
+                        factory.create_string_term(allocator.create_static_string("status")),
+                        factory.create_string_term(allocator.create_static_string("ok")),
+                        factory.create_string_term(allocator.create_static_string("text")),
+                        factory.create_string_term(allocator.create_static_string("json")),
+                    ])),
                     allocator.create_list(vec![
                         factory.create_application_term(
                             factory.create_builtin_term(Stdlib::Get),
