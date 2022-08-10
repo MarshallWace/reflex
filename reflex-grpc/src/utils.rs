@@ -3,17 +3,20 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use std::{
     collections::{hash_map::DefaultHasher, HashMap},
+    error::Error,
     hash::Hasher,
-    time::Duration,
 };
 
-use futures::{future, FutureExt, Stream, StreamExt};
 use prost::{DecodeError, Message};
 use reflex_protobuf::{load_proto_library, reflection::MethodDescriptor, ProtoLibraryError};
-use reflex_utils::reconnect::ReconnectTimeout;
-use tonic::{Code, Status};
+use tonic::Status;
 
 use crate::proto::google::protobuf::FileDescriptorSet;
+
+pub(crate) type TransportError = hyper::Error;
+pub fn get_transport_error(status: &Status) -> Option<&TransportError> {
+    status.source()?.downcast_ref()
+}
 
 #[derive(PartialEq, Eq, Clone, Copy, Debug, Hash)]
 pub(crate) struct ProtoId(u64);
@@ -135,43 +138,4 @@ impl GrpcServiceLibrary {
                 .collect::<Result<HashMap<_, _>, _>>()?,
         })
     }
-}
-
-pub fn ignore_repeated_grpc_errors<V: Send>(
-    stream: impl Stream<Item = Result<V, Status>>,
-    retry: impl ReconnectTimeout,
-) -> impl Stream<Item = Result<V, Status>> {
-    stream
-        .scan(
-            None,
-            move |existing_err: &mut Option<(Code, String, usize)>, result: Result<V, Status>| {
-                let repeated_error =
-                    existing_err
-                        .take()
-                        .and_then(|(code, message, repeat_count)| match &result {
-                            Err(err) if err.code() == code && err.message() == message.as_str() => {
-                                Some((code, message, repeat_count))
-                            }
-                            _ => None,
-                        });
-                if let Some((code, message, repeat_count)) = repeated_error {
-                    *existing_err = Some((code, message, repeat_count + 1));
-                    tokio::time::sleep(
-                        retry
-                            .duration(repeat_count)
-                            .unwrap_or(Duration::from_millis(1)),
-                    )
-                    .map(|_| Some(None))
-                    .left_future()
-                } else {
-                    let (err, result) = match result {
-                        Ok(payload) => (None, Ok(payload)),
-                        Err(err) => (Some((err.code(), String::from(err.message()), 0)), Err(err)),
-                    };
-                    *existing_err = err;
-                    future::ready(Some(Some(result))).right_future()
-                }
-            },
-        )
-        .filter_map(|result| future::ready(result))
 }

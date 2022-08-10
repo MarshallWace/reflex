@@ -10,6 +10,7 @@ edition = "2021"
 [dependencies]
 reflex = { path = "../reflex" }
 reflex-dispatcher = { path = "../reflex-dispatcher" }
+reflex-json = { path = "../reflex-json" }
 reflex-protobuf = { path = "../reflex-protobuf" }
 reflex-runtime = { path = "../reflex-runtime" }
 reflex-utils = { path = "../reflex-utils" }
@@ -20,6 +21,8 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tokio = { version = "1", features = ["full", "tracing"] }
 tonic = "0.7.2"
+  # tonic dependencies
+  hyper = { version = "0.14.14", features = ["full"] }
 uuid = { version = "1.0.0-alpha.1", features = ["v4", "fast-rng"] }
 
 [build-dependencies]

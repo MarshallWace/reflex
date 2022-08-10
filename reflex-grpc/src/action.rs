@@ -10,6 +10,7 @@ use uuid::Uuid;
 pub enum GrpcHandlerActions {
     ConnectSuccess(GrpcHandlerConnectSuccessAction),
     ConnectError(GrpcHandlerConnectErrorAction),
+    TransportError(GrpcHandlerTransportErrorAction),
 }
 impl Action for GrpcHandlerActions {}
 impl NamedAction for GrpcHandlerActions {
@@ -17,6 +18,7 @@ impl NamedAction for GrpcHandlerActions {
         match self {
             Self::ConnectSuccess(action) => action.name(),
             Self::ConnectError(action) => action.name(),
+            Self::TransportError(action) => action.name(),
         }
     }
 }
@@ -25,6 +27,7 @@ impl SerializableAction for GrpcHandlerActions {
         match self {
             Self::ConnectSuccess(action) => action.to_json(),
             Self::ConnectError(action) => action.to_json(),
+            Self::TransportError(action) => action.to_json(),
         }
     }
 }
@@ -73,6 +76,28 @@ impl<'a> From<&'a GrpcHandlerActions> for Option<&'a GrpcHandlerConnectErrorActi
     }
 }
 
+impl From<GrpcHandlerTransportErrorAction> for GrpcHandlerActions {
+    fn from(value: GrpcHandlerTransportErrorAction) -> Self {
+        Self::TransportError(value)
+    }
+}
+impl From<GrpcHandlerActions> for Option<GrpcHandlerTransportErrorAction> {
+    fn from(value: GrpcHandlerActions) -> Self {
+        match value {
+            GrpcHandlerActions::TransportError(value) => Some(value),
+            _ => None,
+        }
+    }
+}
+impl<'a> From<&'a GrpcHandlerActions> for Option<&'a GrpcHandlerTransportErrorAction> {
+    fn from(value: &'a GrpcHandlerActions) -> Self {
+        match value {
+            GrpcHandlerActions::TransportError(value) => Some(value),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct GrpcHandlerConnectSuccessAction {
     pub connection_id: Uuid,
@@ -116,6 +141,35 @@ impl SerializableAction for GrpcHandlerConnectErrorAction {
                 JsonValue::String(self.connection_id.to_string()),
             ),
             ("url", JsonValue::String(self.url.clone())),
+            ("error", JsonValue::String(self.error.clone())),
+        ])
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct GrpcHandlerTransportErrorAction {
+    pub connection_id: Uuid,
+    pub url: String,
+    pub method: String,
+    pub input: JsonValue,
+    pub error: String,
+}
+impl Action for GrpcHandlerTransportErrorAction {}
+impl NamedAction for GrpcHandlerTransportErrorAction {
+    fn name(&self) -> &'static str {
+        "GrpcMiddlewareTransportErrorAction"
+    }
+}
+impl SerializableAction for GrpcHandlerTransportErrorAction {
+    fn to_json(&self) -> SerializedAction {
+        SerializedAction::from_iter([
+            (
+                "connection_id",
+                JsonValue::String(self.connection_id.to_string()),
+            ),
+            ("url", JsonValue::String(self.url.clone())),
+            ("method", JsonValue::String(self.method.clone())),
+            ("input", self.input.clone()),
             ("error", JsonValue::String(self.error.clone())),
         ])
     }

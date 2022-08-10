@@ -1876,11 +1876,13 @@ name = "reflex-grpc"
 version = "0.1.0"
 dependencies = [
  "futures",
+ "hyper",
  "metrics",
  "prost 0.10.4",
  "prost-build 0.10.4",
  "reflex",
  "reflex-dispatcher",
+ "reflex-json",
  "reflex-protobuf",
  "reflex-runtime",
  "reflex-utils",
