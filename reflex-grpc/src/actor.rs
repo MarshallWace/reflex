@@ -20,7 +20,7 @@ use reflex::{
         Expression, ExpressionFactory, HeapAllocator, Reducible, Rewritable, Signal, SignalType,
         StateToken, StringValue,
     },
-    lang::term::SymbolId,
+    lang::{create_record, term::SymbolId},
 };
 use reflex_dispatcher::{
     Action, Actor, ActorTransition, HandlerContext, InboundAction, MessageData, OperationStream,
@@ -56,6 +56,10 @@ use crate::{
 };
 
 pub const EFFECT_TYPE_GRPC: &'static str = "reflex::grpc";
+
+// https://developer.mozilla.org/en-US/docs/Web/API/DOMException#error_names
+pub const ERROR_TYPE_NETWORK_ERROR: &'static str = "NetworkError";
+pub const ERROR_TYPE_SYNTAX_ERROR: &'static str = "SyntaxError";
 
 #[derive(Clone, Copy, Debug)]
 pub struct GrpcHandlerMetricNames {
@@ -492,7 +496,12 @@ where
                         Ok(actions)
                     })
                     .map_err(|message| {
-                        create_error_message_expression(message, &self.factory, &self.allocator)
+                        create_error_message_expression(
+                            message,
+                            Some(ERROR_TYPE_NETWORK_ERROR),
+                            &self.factory,
+                            &self.allocator,
+                        )
                     }) {
                     Ok(actions) => (
                         (
@@ -686,6 +695,7 @@ where
                             .map({
                                 let error = create_error_message_expression(
                                     message,
+                                    Some(ERROR_TYPE_NETWORK_ERROR),
                                     &self.factory,
                                     &self.allocator,
                                 );
@@ -859,6 +869,7 @@ where
                     Err(message) => {
                         let error = create_error_message_expression(
                             message.clone(),
+                            Some(ERROR_TYPE_NETWORK_ERROR),
                             &self.factory,
                             &self.allocator,
                         );
@@ -1118,7 +1129,13 @@ where
     match client.execute(&method, message) {
         Err(status) => {
             let error = create_grpc_operation_error_message_expression(
-                &status, &url, &method, &input, factory, allocator,
+                &status,
+                Some(ERROR_TYPE_NETWORK_ERROR),
+                &url,
+                &method,
+                &input,
+                factory,
+                allocator,
             );
             Err((effect_id, error))
         }
@@ -1145,13 +1162,29 @@ where
                                 ) {
                                     Ok(payload) => Ok(payload),
                                     Err(err) => Ok(create_grpc_operation_error_message_expression(
-                                        &err, &url, &method, &input, &factory, &allocator,
+                                        &err,
+                                        Some(ERROR_TYPE_SYNTAX_ERROR),
+                                        &url,
+                                        &method,
+                                        &input,
+                                        &factory,
+                                        &allocator,
                                     )),
                                 },
                                 Err(status) => {
                                     let is_transport_error = get_transport_error(&status).is_some();
                                     let error = create_grpc_operation_error_message_expression(
-                                        &status, &url, &method, &input, &factory, &allocator,
+                                        &status,
+                                        if is_transport_error {
+                                            Some(ERROR_TYPE_NETWORK_ERROR)
+                                        } else {
+                                            None
+                                        },
+                                        &url,
+                                        &method,
+                                        &input,
+                                        &factory,
+                                        &allocator,
                                     );
                                     if is_transport_error {
                                         Err((status, error))
@@ -1375,6 +1408,7 @@ fn get_grpc_method_path(
 
 fn create_grpc_operation_error_message_expression<T: AsyncExpression>(
     message: impl std::fmt::Display,
+    error_type: Option<&'static str>,
     url: &GrpcServiceUrl,
     method: &GrpcMethod,
     input: &T,
@@ -1383,6 +1417,7 @@ fn create_grpc_operation_error_message_expression<T: AsyncExpression>(
 ) -> T {
     create_error_message_expression(
         format_grpc_error_message(message, url, method.descriptor.full_name(), input),
+        error_type,
         factory,
         allocator,
     )
@@ -1490,12 +1525,39 @@ fn format_grpc_error_message(
 }
 
 fn create_error_message_expression<T: Expression>(
-    message: String,
+    message: impl Into<String>,
+    error_type: Option<&'static str>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
 ) -> T {
     create_error_expression(
-        factory.create_string_term(message.into()),
+        create_error_payload(message, error_type, factory, allocator),
+        factory,
+        allocator,
+    )
+}
+
+fn create_error_payload<T: Expression>(
+    message: impl Into<String>,
+    error_type: Option<&'static str>,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> T {
+    create_record(
+        [
+            Some((
+                String::from("message"),
+                factory.create_string_term(allocator.create_string(message.into())),
+            )),
+            error_type.map(|error_type| {
+                (
+                    String::from("name"),
+                    factory.create_string_term(allocator.create_static_string(error_type)),
+                )
+            }),
+        ]
+        .into_iter()
+        .filter_map(|field| field),
         factory,
         allocator,
     )
