@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use crate::{GraphQlExtensions, GraphQlQuery, GraphQlQueryTransform};
+use crate::{GraphQlExtensions, GraphQlQuery, GraphQlQueryTransform, GraphQlVariables};
 
 pub struct WithExtensionsGraphQlTransform {
     extensions: GraphQlExtensions,
@@ -14,9 +14,10 @@ impl WithExtensionsGraphQlTransform {
 impl GraphQlQueryTransform for WithExtensionsGraphQlTransform {
     fn transform(
         &self,
-        document: GraphQlQuery,
+        query: GraphQlQuery,
+        variables: GraphQlVariables,
         extensions: GraphQlExtensions,
-    ) -> Result<(GraphQlQuery, GraphQlExtensions), String> {
+    ) -> Result<(GraphQlQuery, GraphQlVariables, GraphQlExtensions), String> {
         let extensions = {
             let mut combined_extensions = extensions;
             combined_extensions.extend(
@@ -26,6 +27,6 @@ impl GraphQlQueryTransform for WithExtensionsGraphQlTransform {
             );
             combined_extensions
         };
-        Ok((document, extensions))
+        Ok((query, variables, extensions))
     }
 }

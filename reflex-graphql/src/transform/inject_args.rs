@@ -14,6 +14,7 @@ use crate::{
         },
     },
     get_query_root_operation, GraphQlExtensions, GraphQlQuery, GraphQlQueryTransform,
+    GraphQlVariables,
 };
 
 #[derive(Clone, PartialEq, Debug)]
@@ -261,15 +262,16 @@ impl InjectQueryArgumentsGraphQlTransform {
 impl GraphQlQueryTransform for InjectQueryArgumentsGraphQlTransform {
     fn transform(
         &self,
-        document: GraphQlQuery,
+        query: GraphQlQuery,
+        variables: GraphQlVariables,
         extensions: GraphQlExtensions,
-    ) -> Result<(GraphQlQuery, GraphQlExtensions), String> {
-        inject_document_arguments(&document, &self.arguments)
+    ) -> Result<(GraphQlQuery, GraphQlVariables, GraphQlExtensions), String> {
+        inject_document_arguments(&query, &self.arguments)
             .map(|transformed| match transformed {
-                Some(document) => document,
-                None => document,
+                Some(query) => query,
+                None => query,
             })
-            .map(|document| (document, extensions))
+            .map(|query| (query, variables, extensions))
     }
 }
 
@@ -538,9 +540,13 @@ mod tests {
     ) {
         let input = parse_query::<String>(input).unwrap().into_static();
         let expected = parse_query::<String>(expected).unwrap().into_static();
-        let result = transform.transform(GraphQlQuery::from(&input).into(), Default::default());
+        let result = transform.transform(
+            GraphQlQuery::from(&input).into(),
+            Default::default(),
+            Default::default(),
+        );
         assert_eq!(
-            result.map(|(result, _)| format!("{}", result)),
+            result.map(|(query, _variables, _extensions)| format!("{}", query)),
             Ok(format!("{}", expected))
         );
     }

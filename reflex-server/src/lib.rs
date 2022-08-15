@@ -93,12 +93,14 @@ pub fn apply_graphql_query_transform(
     transform: &impl GraphQlQueryTransform,
 ) -> Result<GraphQlOperation, (StatusCode, String)> {
     let (query, operation_name, variables, extensions) = operation.into_parts();
-    let (query, extensions) = transform.transform(query, extensions).map_err(|err| {
-        (
-            StatusCode::BAD_REQUEST,
-            format!("GraphQL query transformation failed: {}", err),
-        )
-    })?;
+    let (query, variables, extensions) = transform
+        .transform(query, variables, extensions)
+        .map_err(|err| {
+            (
+                StatusCode::BAD_REQUEST,
+                format!("GraphQL query transformation failed: {}", err),
+            )
+        })?;
     Ok(GraphQlOperation::new(
         query,
         operation_name,

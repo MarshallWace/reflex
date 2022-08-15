@@ -1,11 +1,11 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use std::{collections::HashMap, marker::PhantomData};
+use std::marker::PhantomData;
 
 use reflex::core::{Expression, Uuid};
 use reflex_dispatcher::{Action, NamedAction, SerializableAction, SerializedAction};
-use reflex_graphql::GraphQlOperation;
+use reflex_graphql::{GraphQlOperation, GraphQlVariables};
 use reflex_json::JsonValue;
 use serde::{Deserialize, Serialize};
 
@@ -220,19 +220,11 @@ impl<T: Expression> SerializableAction for GraphQlServerSubscribeAction<T> {
             ),
             (
                 "variables",
-                JsonValue::from_iter(
-                    self.operation
-                        .variables()
-                        .map(|(key, value)| (key.clone(), value.clone())),
-                ),
+                JsonValue::Object(self.operation.variables().clone()),
             ),
             (
                 "extensions",
-                JsonValue::from_iter(
-                    self.operation
-                        .extensions()
-                        .map(|(key, value)| (key.clone(), value.clone())),
-                ),
+                JsonValue::Object(self.operation.extensions().clone()),
             ),
         ])
     }
@@ -261,7 +253,7 @@ impl<T: Expression> SerializableAction for GraphQlServerUnsubscribeAction<T> {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct GraphQlServerModifyAction<T: Expression> {
     pub subscription_id: Uuid,
-    pub variables: HashMap<String, JsonValue>,
+    pub variables: GraphQlVariables,
     pub _expression: PhantomData<T>,
 }
 impl<T: Expression> Action for GraphQlServerModifyAction<T> {}
@@ -277,14 +269,7 @@ impl<T: Expression> SerializableAction for GraphQlServerModifyAction<T> {
                 "subscription_id",
                 JsonValue::from(format!("{}", self.subscription_id.as_hyphenated())),
             ),
-            (
-                "variables",
-                JsonValue::from_iter(
-                    self.variables
-                        .iter()
-                        .map(|(key, value)| (key.clone(), value.clone())),
-                ),
-            ),
+            ("variables", JsonValue::Object(self.variables.clone())),
         ])
     }
 }
@@ -346,19 +331,11 @@ impl<T: Expression> SerializableAction for GraphQlServerParseErrorAction<T> {
             ),
             (
                 "variables",
-                JsonValue::from_iter(
-                    self.operation
-                        .variables()
-                        .map(|(key, value)| (key.clone(), value.clone())),
-                ),
+                JsonValue::Object(self.operation.variables().clone()),
             ),
             (
                 "extensions",
-                JsonValue::from_iter(
-                    self.operation
-                        .extensions()
-                        .map(|(key, value)| (key.clone(), value.clone())),
-                ),
+                JsonValue::Object(self.operation.extensions().clone()),
             ),
         ])
     }

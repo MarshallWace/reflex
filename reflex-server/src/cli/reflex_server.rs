@@ -40,7 +40,7 @@ use reflex::{
 use reflex_graphql::{stdlib::Stdlib as GraphQlStdlib, GraphQlOperation, GraphQlSchema};
 use reflex_handlers::utils::tls::tokio_native_tls::native_tls;
 use reflex_js::stdlib::Stdlib as JsStdlib;
-use reflex_json::{stdlib::Stdlib as JsonStdlib, JsonMap, JsonValue};
+use reflex_json::{stdlib::Stdlib as JsonStdlib, JsonValue};
 use reflex_runtime::{AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator};
 use serde::{Deserialize, Serialize};
 
@@ -437,19 +437,11 @@ pub fn get_operation_transaction_labels(
         flatten_json_fields([
             (
                 String::from("graphql.variables"),
-                JsonValue::Object(JsonMap::from_iter(
-                    operation
-                        .variables()
-                        .map(|(key, value)| (String::from(key), value.clone())),
-                )),
+                JsonValue::Object(operation.variables().clone()),
             ),
             (
                 String::from("graphql.extensions"),
-                JsonValue::Object(JsonMap::from_iter(
-                    operation
-                        .extensions()
-                        .map(|(key, value)| (String::from(key), value.clone())),
-                )),
+                JsonValue::Object(operation.extensions().clone()),
             ),
         ])
         .into_iter()

@@ -10,7 +10,10 @@ use std::{
 use graphql_parser::schema;
 use reflex_json::{JsonMap, JsonValue};
 
-use crate::ast::{common::Value, query};
+use crate::{
+    ast::{common::Value, query},
+    get_field_is_ignored, GraphQlVariables,
+};
 
 use crate::{
     create_json_error_object, get_query_root_operation, GraphQlExtensions, GraphQlQuery,
@@ -51,15 +54,16 @@ impl<'schema, TSchema: GraphQlText<'schema>> GraphQlQueryTransform
 {
     fn transform(
         &self,
-        document: GraphQlQuery,
+        query: GraphQlQuery,
+        variables: GraphQlVariables,
         extensions: GraphQlExtensions,
-    ) -> Result<(GraphQlQuery, GraphQlExtensions), String> {
-        validate_graphql_query(&document, &self.schema_types)
+    ) -> Result<(GraphQlQuery, GraphQlVariables, GraphQlExtensions), String> {
+        validate_graphql_query(&query, &self.schema_types, &variables)
             .map(|transformed| match transformed {
-                Some(document) => document,
-                None => document,
+                Some(query) => query,
+                None => query,
             })
-            .map(|document| (document, extensions))
+            .map(|query| (query, variables, extensions))
     }
 }
 
@@ -271,10 +275,11 @@ fn extend_schema_type<'schema, TSchema: GraphQlText<'schema>>(
 pub fn validate_graphql_query<'schema, TSchema: GraphQlText<'schema>>(
     document: &query::Document,
     schema_types: &GraphQlSchemaTypes<'schema, TSchema>,
+    variables: &GraphQlVariables,
 ) -> Result<Option<query::Document>, String> {
     let fragments = parse_query_fragments(document);
     get_query_root_operation(document).and_then(|operation| {
-        validate_operation(operation, schema_types, &fragments).map(|result| {
+        validate_operation(operation, schema_types, &fragments, variables).map(|result| {
             result.and_then(|operation| {
                 let updated_root_operation = query::Definition::Operation(operation);
                 let updated_document = find_replace_list_item(
@@ -926,6 +931,7 @@ fn validate_operation<'schema, TSchema: GraphQlText<'schema>>(
     operation: &query::OperationDefinition,
     schema_types: &GraphQlSchemaTypes<'schema, TSchema>,
     fragments: &GraphQlQueryFragments<'_>,
+    variables: &GraphQlVariables,
 ) -> Result<Option<query::OperationDefinition>, String> {
     let operation_root_type = get_operation_root_type(operation, schema_types)?;
     match operation {
@@ -934,6 +940,7 @@ fn validate_operation<'schema, TSchema: GraphQlText<'schema>>(
             operation_root_type,
             schema_types,
             fragments,
+            variables,
         )
         .map(|result| {
             result.map(|selection_set| {
@@ -948,6 +955,7 @@ fn validate_operation<'schema, TSchema: GraphQlText<'schema>>(
             operation_root_type,
             schema_types,
             fragments,
+            variables,
         )
         .map(|result| {
             result.map(|selection_set| {
@@ -962,6 +970,7 @@ fn validate_operation<'schema, TSchema: GraphQlText<'schema>>(
             operation_root_type,
             schema_types,
             fragments,
+            variables,
         )
         .map(|result| {
             result.map(|selection_set| {
@@ -971,10 +980,14 @@ fn validate_operation<'schema, TSchema: GraphQlText<'schema>>(
                 })
             })
         }),
-        query::OperationDefinition::SelectionSet(root) => {
-            validate_selection_set(root, operation_root_type, schema_types, fragments)
-                .map(|result| result.map(query::OperationDefinition::SelectionSet))
-        }
+        query::OperationDefinition::SelectionSet(root) => validate_selection_set(
+            root,
+            operation_root_type,
+            schema_types,
+            fragments,
+            variables,
+        )
+        .map(|result| result.map(query::OperationDefinition::SelectionSet)),
     }
 }
 
@@ -983,14 +996,19 @@ fn validate_selection_set<'schema, TSchema: GraphQlText<'schema>>(
     schema_type: &schema::TypeDefinition<'schema, TSchema>,
     schema_types: &GraphQlSchemaTypes<'schema, TSchema>,
     fragments: &GraphQlQueryFragments<'_>,
+    variables: &GraphQlVariables,
 ) -> Result<Option<query::SelectionSet>, String> {
     match schema_type {
         schema::TypeDefinition::Scalar(schema_type) => {
             validate_scalar_selection_set(selection_set, schema_type)
         }
-        schema::TypeDefinition::Object(schema_type) => {
-            validate_object_selection_set(selection_set, schema_type, schema_types, fragments)
-        }
+        schema::TypeDefinition::Object(schema_type) => validate_object_selection_set(
+            selection_set,
+            schema_type,
+            schema_types,
+            fragments,
+            variables,
+        ),
         schema::TypeDefinition::Interface(_) => Err(String::from(
             "Interface field types not currently supported",
         )),
@@ -1039,22 +1057,28 @@ fn validate_object_selection_set<'schema, TSchema: GraphQlText<'schema>>(
     schema_type: &schema::ObjectType<'schema, TSchema>,
     schema_types: &GraphQlSchemaTypes<'schema, TSchema>,
     fragments: &GraphQlQueryFragments<'_>,
+    variables: &GraphQlVariables,
 ) -> Result<Option<query::SelectionSet>, String> {
-    if selection_set.items.is_empty() {
-        Err(String::from("No fields selected"))
-    } else {
-        collect_optionally_transformed_items(
-            &selection_set.items,
-            |item| validate_object_selection(item, schema_type, schema_types, fragments),
-            |item| vec![item.clone()],
-        )
-        .map(|result| {
-            result.map(|items| query::SelectionSet {
-                items: items.into_iter().flatten().collect::<Vec<_>>(),
+    collect_optionally_transformed_items(
+        &selection_set.items,
+        |item| validate_object_selection(item, schema_type, schema_types, fragments, variables),
+        |item| vec![item.clone()],
+    )
+    .and_then(|result| {
+        let fields = result.map(|selections| selections.into_iter().flatten().collect::<Vec<_>>());
+        let is_empty_selection = match fields.as_ref() {
+            Some(fields) => fields.is_empty(),
+            None => selection_set.items.is_empty(),
+        };
+        if is_empty_selection {
+            Err(String::from("No fields selected"))
+        } else {
+            Ok(fields.map(|fields| query::SelectionSet {
+                items: fields,
                 ..selection_set.clone()
-            })
-        })
-    }
+            }))
+        }
+    })
 }
 
 fn validate_object_selection<'schema, TSchema: GraphQlText<'schema>>(
@@ -1062,17 +1086,30 @@ fn validate_object_selection<'schema, TSchema: GraphQlText<'schema>>(
     schema_type: &schema::ObjectType<'schema, TSchema>,
     schema_types: &GraphQlSchemaTypes<'schema, TSchema>,
     fragments: &GraphQlQueryFragments<'_>,
+    variables: &GraphQlVariables,
 ) -> Result<Option<Vec<query::Selection>>, String> {
     match selection {
         query::Selection::Field(field) => {
-            validate_object_field_selection(field, schema_type, schema_types, fragments)
+            let is_ignored_field = get_field_is_ignored(field, variables)?;
+            if is_ignored_field {
+                Ok(Some(Vec::new()))
+            } else {
+                validate_object_field_selection(
+                    field,
+                    schema_type,
+                    schema_types,
+                    fragments,
+                    variables,
+                )
                 .map(|result| result.map(|field| vec![query::Selection::Field(field)]))
+            }
         }
         query::Selection::FragmentSpread(fragment) => validate_object_fragment_spread_selection(
             fragment,
             schema_type,
             schema_types,
             fragments,
+            variables,
         ),
         query::Selection::InlineFragment(_) => {
             Err(String::from("Inline fragments not currently supported"))
@@ -1085,6 +1122,7 @@ fn validate_object_fragment_spread_selection<'schema, TSchema: GraphQlText<'sche
     schema_type: &schema::ObjectType<'schema, TSchema>,
     schema_types: &GraphQlSchemaTypes<'schema, TSchema>,
     fragments: &GraphQlQueryFragments<'_>,
+    variables: &GraphQlVariables,
 ) -> Result<Option<Vec<query::Selection>>, String> {
     get_named_fragment(&fragment.fragment_name, fragments).and_then(|fragment| {
         validate_object_selection_set(
@@ -1092,6 +1130,7 @@ fn validate_object_fragment_spread_selection<'schema, TSchema: GraphQlText<'sche
             schema_type,
             schema_types,
             fragments,
+            variables,
         )
         .map(|result| result.map(|selection_set| selection_set.items))
     })
@@ -1111,6 +1150,7 @@ fn validate_object_field_selection<'schema, TSchema: GraphQlText<'schema>>(
     schema_type: &schema::ObjectType<'schema, TSchema>,
     schema_types: &GraphQlSchemaTypes<'schema, TSchema>,
     fragments: &GraphQlQueryFragments<'_>,
+    variables: &GraphQlVariables,
 ) -> Result<Option<query::Field>, String> {
     let schema_field = schema_type
         .fields
@@ -1140,6 +1180,7 @@ fn validate_object_field_selection<'schema, TSchema: GraphQlText<'schema>>(
         field_type,
         schema_types,
         fragments,
+        variables,
     )
     .map_err(|err| {
         format!(
@@ -1346,9 +1387,13 @@ mod tests {
     ) {
         let input = parse_query::<String>(input).unwrap().into_static();
         let expected = parse_query::<String>(expected).unwrap().into_static();
-        let result = transform.transform(GraphQlQuery::from(&input), Default::default());
+        let result = transform.transform(
+            GraphQlQuery::from(&input),
+            Default::default(),
+            Default::default(),
+        );
         assert_eq!(
-            result.map(|(result, _)| format!("{}", result)),
+            result.map(|(query, _variables, _extensions)| format!("{}", query)),
             Ok(format!("{}", expected))
         );
     }

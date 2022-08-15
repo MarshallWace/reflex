@@ -1,26 +1,24 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use std::{collections::HashMap, iter::FromIterator};
-
 use reflex_json::{JsonMap, JsonValue};
 use serde::{Deserialize, Serialize};
 
-use crate::{GraphQlExtensions, GraphQlQuery};
+use crate::{GraphQlExtensions, GraphQlQuery, GraphQlVariables};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct GraphQlOperation {
     query: GraphQlQuery,
     operation_name: Option<String>,
-    variables: JsonMap<String, JsonValue>,
+    variables: GraphQlVariables,
     extensions: GraphQlExtensions,
 }
 impl GraphQlOperation {
     pub fn new(
         query: GraphQlQuery,
         operation_name: Option<String>,
-        variables: impl IntoIterator<Item = (String, JsonValue)>,
-        extensions: impl IntoIterator<Item = (String, JsonValue)>,
+        variables: GraphQlVariables,
+        extensions: GraphQlExtensions,
     ) -> Self {
         Self {
             query,
@@ -43,10 +41,8 @@ impl GraphQlOperation {
     pub fn set_variable(&mut self, name: impl Into<String>, value: JsonValue) -> Option<JsonValue> {
         self.variables.insert(name.into(), value)
     }
-    pub fn variables(&self) -> impl Iterator<Item = (&str, &JsonValue)> {
-        self.variables
-            .iter()
-            .map(|(key, value)| (key.as_str(), value))
+    pub fn variables(&self) -> &GraphQlVariables {
+        &self.variables
     }
     pub fn extension(&self, name: &str) -> Option<&JsonValue> {
         self.extensions.get(name)
@@ -58,17 +54,15 @@ impl GraphQlOperation {
     ) -> Option<JsonValue> {
         self.extensions.insert(name.into(), value)
     }
-    pub fn extensions(&self) -> impl Iterator<Item = (&str, &JsonValue)> {
-        self.extensions
-            .iter()
-            .map(|(key, value)| (key.as_str(), value))
+    pub fn extensions(&self) -> &GraphQlExtensions {
+        &self.extensions
     }
     pub fn into_parts(
         self,
     ) -> (
         GraphQlQuery,
         Option<String>,
-        impl IntoIterator<Item = (String, JsonValue)>,
+        GraphQlVariables,
         GraphQlExtensions,
     ) {
         (
@@ -101,21 +95,13 @@ impl GraphQlOperation {
 }
 
 pub fn graphql_variables_are_equal<'a>(
-    value1: impl IntoIterator<Item = (impl Into<&'a str>, &'a JsonValue)>,
-    value2: impl IntoIterator<Item = (impl Into<&'a str>, &'a JsonValue)>,
+    value1: &GraphQlVariables,
+    value2: &GraphQlVariables,
 ) -> bool {
-    let variables1 = value1
-        .into_iter()
-        .map(|(key, value)| (key.into(), value))
-        .collect::<HashMap<&'a str, _>>();
-    let variables2 = value2
-        .into_iter()
-        .map(|(key, value)| (key.into(), value))
-        .collect::<HashMap<&'a str, _>>();
-    if variables1.len() != variables2.len() {
+    if value1.len() != value2.len() {
         return false;
     }
-    variables1
+    value1
         .iter()
-        .all(|(key, value)| variables2.get(key) == Some(value))
+        .all(|(key, value)| value2.get(key) == Some(value))
 }

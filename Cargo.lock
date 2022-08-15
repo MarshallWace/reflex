@@ -1862,7 +1862,6 @@ dependencies = [
 name = "reflex-graphql"
 version = "0.1.0"
 dependencies = [
- "either",
  "graphql-parser",
  "reflex",
  "reflex-json",

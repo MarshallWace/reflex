@@ -4,7 +4,6 @@
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use std::{borrow::Cow, collections::HashMap, iter::once};
 
-use either::Either;
 use reflex::{
     core::{Expression, ExpressionFactory, ExpressionList, HeapAllocator, SignalType},
     lang::{create_record, term::SignalTerm},
@@ -30,16 +29,15 @@ use stdlib::Stdlib as GraphQlStdlib;
 pub mod subscriptions;
 
 #[allow(type_alias_bounds)]
-type QueryVariables<T: Expression> = HashMap<String, T>;
-#[allow(type_alias_bounds)]
 type QueryFragments<'a> = HashMap<String, &'a FragmentDefinition>;
 
 pub trait GraphQlQueryTransform {
     fn transform(
         &self,
-        document: GraphQlQuery,
+        query: GraphQlQuery,
+        variables: GraphQlVariables,
         extensions: GraphQlExtensions,
-    ) -> Result<(GraphQlQuery, GraphQlExtensions), String>;
+    ) -> Result<(GraphQlQuery, GraphQlVariables, GraphQlExtensions), String>;
 }
 
 #[derive(Clone, Copy)]
@@ -47,22 +45,24 @@ pub struct NoopGraphQlQueryTransform;
 impl GraphQlQueryTransform for NoopGraphQlQueryTransform {
     fn transform(
         &self,
-        document: GraphQlQuery,
+        query: GraphQlQuery,
+        variables: GraphQlVariables,
         extensions: GraphQlExtensions,
-    ) -> Result<(GraphQlQuery, GraphQlExtensions), String> {
-        Ok((document, extensions))
+    ) -> Result<(GraphQlQuery, GraphQlVariables, GraphQlExtensions), String> {
+        Ok((query, variables, extensions))
     }
 }
 
 impl<TInner: GraphQlQueryTransform> GraphQlQueryTransform for Option<TInner> {
     fn transform(
         &self,
-        document: GraphQlQuery,
+        query: GraphQlQuery,
+        variables: GraphQlVariables,
         extensions: GraphQlExtensions,
-    ) -> Result<(GraphQlQuery, GraphQlExtensions), String> {
+    ) -> Result<(GraphQlQuery, GraphQlVariables, GraphQlExtensions), String> {
         match self {
-            Some(inner) => inner.transform(document, extensions),
-            None => Ok((document, extensions)),
+            Some(inner) => inner.transform(query, variables, extensions),
+            None => Ok((query, variables, extensions)),
         }
     }
 }
@@ -88,12 +88,13 @@ impl<T1: GraphQlQueryTransform, T2: GraphQlQueryTransform> GraphQlQueryTransform
 {
     fn transform(
         &self,
-        document: GraphQlQuery,
+        query: GraphQlQuery,
+        variables: GraphQlVariables,
         extensions: GraphQlExtensions,
-    ) -> Result<(GraphQlQuery, GraphQlExtensions), String> {
+    ) -> Result<(GraphQlQuery, GraphQlVariables, GraphQlExtensions), String> {
         match self {
-            Self::Left(inner) => inner.transform(document, extensions),
-            Self::Right(inner) => inner.transform(document, extensions),
+            Self::Left(inner) => inner.transform(query, variables, extensions),
+            Self::Right(inner) => inner.transform(query, variables, extensions),
         }
     }
 }
@@ -119,11 +120,12 @@ impl<T1: GraphQlQueryTransform, T2: GraphQlQueryTransform> GraphQlQueryTransform
 {
     fn transform(
         &self,
-        document: GraphQlQuery,
+        query: GraphQlQuery,
+        variables: GraphQlVariables,
         extensions: GraphQlExtensions,
-    ) -> Result<(GraphQlQuery, GraphQlExtensions), String> {
-        let (document, extensions) = self.left.transform(document, extensions)?;
-        self.right.transform(document, extensions)
+    ) -> Result<(GraphQlQuery, GraphQlVariables, GraphQlExtensions), String> {
+        let (query, variables, extensions) = self.left.transform(query, variables, extensions)?;
+        self.right.transform(query, variables, extensions)
     }
 }
 
@@ -384,19 +386,12 @@ pub fn parse_graphql_operation<T: Expression>(
 where
     T::Builtin: From<Stdlib> + From<GraphQlStdlib>,
 {
-    let variables = operation
-        .variables()
-        .map(|(key, value)| {
-            reflex_json::hydrate(value.clone(), factory, allocator)
-                .map(|value| (String::from(key), value))
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    parse_ast_query(operation.query(), variables, factory, allocator)
+    parse_ast_query(operation.query(), operation.variables(), factory, allocator)
 }
 
-pub fn parse<'vars, 'a, T: Expression>(
+pub fn parse<'a, T: Expression>(
     query: &'a str,
-    variables: impl IntoIterator<Item = (&'vars str, T)>,
+    variables: &GraphQlVariables,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
 ) -> Result<T, String>
@@ -406,9 +401,7 @@ where
     match graphql_parser::parse_query::<String>(query) {
         Ok(query) => parse_ast_query(
             &GraphQlQuery::from(&query.into_static()),
-            variables
-                .into_iter()
-                .map(|(key, value)| (String::from(key), value)),
+            variables,
             factory,
             allocator,
         ),
@@ -418,14 +411,13 @@ where
 
 fn parse_ast_query<'vars, T: Expression>(
     query: &Document,
-    variables: impl IntoIterator<Item = (String, T)> + 'vars,
+    variables: &GraphQlVariables,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
 ) -> Result<T, String>
 where
     T::Builtin: From<Stdlib> + From<GraphQlStdlib>,
 {
-    let variables = variables.into_iter().collect::<QueryVariables<T>>();
     let fragments = query
         .definitions
         .iter()
@@ -460,7 +452,7 @@ fn get_query_root_operation<'a>(document: &'a Document) -> Result<&'a OperationD
 
 fn parse_operation<T: Expression>(
     operation_root: &OperationDefinition,
-    variables: &QueryVariables<T>,
+    variables: &GraphQlVariables,
     fragments: &QueryFragments<'_>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
@@ -483,12 +475,8 @@ where
         ),
         OperationDefinition::SelectionSet(selection) => (selection, None),
     };
-    let variables = parse_operation_variables(
-        variable_definitions.unwrap_or(&Vec::new()),
-        variables,
-        factory,
-        allocator,
-    )?;
+    let variables =
+        parse_operation_variables(variable_definitions.unwrap_or(&Vec::new()), variables)?;
     let shape = parse_selection_set(selection_set, &variables, fragments, factory, allocator)?;
     let operation_type = match operation_root {
         OperationDefinition::Query(_) | OperationDefinition::SelectionSet(_) => "query",
@@ -522,56 +510,40 @@ where
     )
 }
 
-fn parse_operation_variables<T: Expression>(
+fn parse_operation_variables(
     variable_definitions: &[VariableDefinition],
-    variables: &QueryVariables<T>,
-    factory: &impl ExpressionFactory<T>,
-    allocator: &impl HeapAllocator<T>,
-) -> Result<QueryVariables<T>, String> {
+    variables: &GraphQlVariables,
+) -> Result<GraphQlVariables, String> {
     variable_definitions
         .iter()
         .map(|definition| {
             let value = variables.get(&definition.name).cloned();
-            let value = match value {
-                Some(value) => Some(value),
-                None => match &definition.default_value {
-                    Some(value) => Some(parse_value(
-                        value,
-                        &QueryVariables::<T>::new(),
-                        &QueryFragments::new(),
-                        factory,
-                        allocator,
-                    )?),
-                    None => None,
-                },
-            };
             Ok((
                 definition.name.clone(),
-                validate_variable(value, &definition.name, &definition.var_type, factory)?,
+                validate_variable(value, &definition.name, &definition.var_type)?,
             ))
         })
-        .collect::<Result<QueryVariables<T>, _>>()
+        .collect::<Result<GraphQlVariables, _>>()
 }
 
-fn validate_variable<T: Expression>(
-    value: Option<T>,
+fn validate_variable(
+    value: Option<JsonValue>,
     name: &str,
     var_type: &Type,
-    factory: &impl ExpressionFactory<T>,
-) -> Result<T, String> {
+) -> Result<JsonValue, String> {
     match var_type {
         Type::NonNullType(_) => {
             value.ok_or_else(|| format!("Missing required query variable: {}", name.to_string()))
         }
         // TODO: Validate query variable types
         // TODO: Differentiate between missing optional variables and null values
-        _ => Ok(value.unwrap_or_else(|| factory.create_nil_term())),
+        _ => Ok(value.unwrap_or_else(|| JsonValue::Null)),
     }
 }
 
 fn parse_selection_set<T: Expression>(
     selection_set: &SelectionSet,
-    variables: &QueryVariables<T>,
+    variables: &GraphQlVariables,
     fragments: &QueryFragments<'_>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
@@ -620,7 +592,7 @@ where
 
 fn parse_selection_set_fields<T: Expression>(
     selection_set: &SelectionSet,
-    variables: &QueryVariables<T>,
+    variables: &GraphQlVariables,
     fragments: &QueryFragments<'_>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
@@ -632,37 +604,154 @@ where
         .items
         .iter()
         .flat_map(|field| match field {
-            // TODO: Support GraphQL @skip and @include directives
-            Selection::Field(field) => {
-                match parse_field(field, variables, fragments, factory, allocator) {
-                    Ok(result) => {
-                        let key = field.alias.as_ref().unwrap_or(&field.name).to_string();
-                        Either::Left(once(Ok((key, result))))
+            Selection::Field(field) => match get_field_is_ignored(field, variables) {
+                Err(err) => Countable::Single(Err(err)),
+                Ok(is_ignored_field) => {
+                    if is_ignored_field {
+                        Countable::Empty
+                    } else {
+                        match parse_field(field, variables, fragments, factory, allocator) {
+                            Ok(result) => {
+                                let key = field.alias.as_ref().unwrap_or(&field.name).to_string();
+                                Countable::Single(Ok((key, result)))
+                            }
+                            Err(error) => Countable::Single(Err(error)),
+                        }
                     }
-                    Err(error) => Either::Left(once(Err(error))),
                 }
-            }
+            },
             Selection::FragmentSpread(fragment) => match fragments.get(&fragment.fragment_name) {
                 Some(fragment) => {
                     let fields =
                         parse_fragment_fields(fragment, variables, fragments, factory, allocator);
-                    Either::Right(fields.into_iter())
+                    Countable::Multiple(fields)
                 }
-                None => Either::Left(once(Err(format!(
+                None => Countable::Single(Err(format!(
                     "Invalid fragment name: {}",
                     fragment.fragment_name.to_string()
-                )))),
+                ))),
             },
-            Selection::InlineFragment(_) => Either::Left(once(Err(String::from(
-                "Inline fragments not yet implemented",
-            )))),
+            Selection::InlineFragment(_) => {
+                Countable::Single(Err(String::from("Inline fragments not yet implemented")))
+            }
         })
         .collect::<Result<Vec<_>, _>>()
 }
 
+fn get_field_is_ignored(field: &Field, variables: &GraphQlVariables) -> Result<bool, String> {
+    // https://spec.graphql.org/June2018/#sec--skip
+    // https://spec.graphql.org/June2018/#sec--include
+    let skip_value = parse_field_skip_directive(field, variables)?;
+    let include_value = parse_field_include_directive(field, variables)?;
+    Ok(match (skip_value, include_value) {
+        (None, None) => false,
+        (Some(skip), None) => skip,
+        (None, Some(include)) => !include,
+        (Some(skip), Some(include)) => skip || !include,
+    })
+}
+
+fn parse_field_skip_directive(
+    field: &Field,
+    variables: &GraphQlVariables,
+) -> Result<Option<bool>, String> {
+    parse_boolean_field_directive("skip", field, variables)
+}
+
+fn parse_field_include_directive(
+    field: &Field,
+    variables: &GraphQlVariables,
+) -> Result<Option<bool>, String> {
+    parse_boolean_field_directive("include", field, variables)
+}
+
+fn parse_boolean_field_directive(
+    directive_name: &'static str,
+    field: &Field,
+    variables: &GraphQlVariables,
+) -> Result<Option<bool>, String> {
+    let directive = field
+        .directives
+        .iter()
+        .find(|directive| directive.name.as_str() == directive_name);
+    match directive {
+        None => Ok(None),
+        Some(directive) => {
+            match directive
+                .arguments
+                .iter()
+                .find(|(key, _value)| key.as_str() == "if")
+            {
+                None => Err(format!(
+                    "Missing \"if\" argument for @{} directive",
+                    directive_name
+                )),
+                Some((_key, value)) => match value {
+                    Value::Boolean(value) => Ok(Some(*value)),
+                    Value::Variable(variable_name) => match variables.get(variable_name) {
+                        None => Err(format!(
+                            "Undefined variable for \"if\" argument of @{} directive: \"{}\"",
+                            directive_name, variable_name
+                        )),
+                        Some(value) => match value {
+                            JsonValue::Bool(value) => Ok(Some(*value)),
+                            _ => Err(format!(
+                                "Invalid value for \"if\" argument of @{} directive: \"{}\"",
+                                directive_name, value
+                            )),
+                        },
+                    },
+                    _ => Err(format!(
+                        "Invalid value for \"if\" argument of @{} directive: \"{}\"",
+                        directive_name,
+                        format_graphql_value(value)
+                    )),
+                },
+            }
+        }
+    }
+}
+
+fn format_graphql_value(value: &Value) -> String {
+    match value {
+        Value::Variable(variable_name) => format!("${}", variable_name),
+        Value::Int(value) => match value.as_i64() {
+            Some(value) => format!("{}", value),
+            None => format!("{:?}", value),
+        },
+        Value::Float(value) => format!("{}", value),
+        Value::String(value) => format!("{}", value),
+        Value::Boolean(value) => format!("{}", value),
+        Value::Null => format!("null"),
+        Value::Enum(value) => format!("{}", value),
+        Value::List(value) => format!(
+            "[{}]",
+            value
+                .iter()
+                .map(format_graphql_value)
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        Value::Object(value) => {
+            if value.is_empty() {
+                String::from("")
+            } else {
+                format!(
+                    "{{ {} }}",
+                    value
+                        .iter()
+                        .map(|(key, value)| format!("{}: {}", key, format_graphql_value(value)))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            }
+        }
+    }
+}
+
 fn parse_fragment_fields<T: Expression>(
     fragment: &FragmentDefinition,
-    variables: &QueryVariables<T>,
+    variables: &GraphQlVariables,
     fragments: &QueryFragments<'_>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
@@ -677,14 +766,14 @@ where
         factory,
         allocator,
     ) {
-        Err(error) => Either::Left(once(Err(error))),
-        Ok(fields) => Either::Right(fields.into_iter().map(Ok)),
+        Ok(fields) => Countable::Multiple(fields.into_iter().map(Ok)),
+        Err(error) => Countable::Single(Err(error)),
     }
 }
 
 fn parse_field<T: Expression>(
     field: &Field,
-    variables: &QueryVariables<T>,
+    variables: &GraphQlVariables,
     fragments: &QueryFragments<'_>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
@@ -733,7 +822,7 @@ where
 
 fn parse_field_arguments<T: Expression>(
     args: &Vec<(String, Value)>,
-    variables: &QueryVariables<T>,
+    variables: &GraphQlVariables,
     fragments: &QueryFragments<'_>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
@@ -753,14 +842,14 @@ fn parse_field_arguments<T: Expression>(
 
 fn parse_value<T: Expression>(
     value: &Value,
-    variables: &QueryVariables<T>,
+    variables: &GraphQlVariables,
     fragments: &QueryFragments<'_>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
 ) -> Result<T, String> {
     match value {
         Value::Variable(name) => match variables.get(name) {
-            Some(value) => Ok(value.clone()),
+            Some(value) => reflex_json::hydrate(value.clone(), factory, allocator),
             None => Err(format!("Undeclared query variable: {}", name.to_string())),
         },
         Value::Int(value) => Ok(factory.create_int_term(
@@ -815,6 +904,25 @@ where
             allocator.create_pair(factory.create_variable_term(0), shape),
         ),
     )
+}
+
+enum Countable<T, I: IntoIterator<Item = T>> {
+    Empty,
+    Single(T),
+    Multiple(I),
+}
+impl<T, I: IntoIterator<Item = T>> IntoIterator for Countable<T, I> {
+    type Item = T;
+    type IntoIter =
+        std::iter::Chain<std::option::IntoIter<T>, std::iter::Flatten<std::option::IntoIter<I>>>;
+    fn into_iter(self) -> Self::IntoIter {
+        let (left, right) = match self {
+            Self::Empty => (None, None),
+            Self::Single(value) => (Some(value), None),
+            Self::Multiple(value) => (None, Some(value)),
+        };
+        left.into_iter().chain(right.into_iter().flatten())
+    }
 }
 
 #[cfg(test)]
@@ -928,7 +1036,7 @@ mod tests {
             &factory,
             &allocator,
         );
-        let variables = Vec::new();
+        let variables = Default::default();
         let query = parse(
             "
                 query {
@@ -936,7 +1044,7 @@ mod tests {
                     third
                 }
             ",
-            variables,
+            &variables,
             &factory,
             &allocator,
         )
@@ -1015,7 +1123,7 @@ mod tests {
             &factory,
             &allocator,
         );
-        let variables = Vec::new();
+        let variables = Default::default();
         let query = parse(
             "
                 query {
@@ -1023,7 +1131,7 @@ mod tests {
                     third
                 }
             ",
-            variables,
+            &variables,
             &factory,
             &allocator,
         )
@@ -1076,14 +1184,14 @@ mod tests {
             &factory,
             &allocator,
         );
-        let variables = Vec::new();
+        let variables = Default::default();
         let query = parse(
             "
                 query {
                     items
                 }
             ",
-            variables,
+            &variables,
             &factory,
             &allocator,
         )
@@ -1188,14 +1296,14 @@ mod tests {
             &factory,
             &allocator,
         );
-        let variables = Vec::new();
+        let variables = Default::default();
         let query = parse(
             "
                 query {
                     items
                 }
             ",
-            variables,
+            &variables,
             &factory,
             &allocator,
         )

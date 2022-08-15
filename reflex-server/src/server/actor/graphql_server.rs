@@ -421,26 +421,17 @@ where
                     .map(|subscription_index| (entry, entry_index, subscription_index))
             })
             .and_then(|(entry, entry_index, subscription_index)| {
-                if graphql_variables_are_equal(
-                    variables.iter().map(|(key, value)| (key.as_str(), value)),
-                    entry.operation.variables(),
-                ) {
+                if graphql_variables_are_equal(variables, entry.operation.variables()) {
                     None
                 } else {
-                    let updated_variables = variables
-                        .iter()
-                        .map(|(key, value)| (key.clone(), value.clone()));
                     Some((
                         entry_index,
                         subscription_index,
                         GraphQlOperation::new(
                             entry.operation.query().clone(),
                             entry.operation.operation_name().map(String::from),
-                            updated_variables,
-                            entry
-                                .operation
-                                .extensions()
-                                .map(|(key, value)| (String::from(key), value.clone())),
+                            variables.clone(),
+                            entry.operation.extensions().clone(),
                         ),
                     ))
                 }

@@ -688,7 +688,11 @@ where
                 context.pid(),
                 GraphQlServerModifyAction {
                     subscription_id: operation.subscription_id,
-                    variables: message.payload().clone(),
+                    variables: message
+                        .payload()
+                        .iter()
+                        .map(|(key, value)| (key.clone(), value.clone()))
+                        .collect(),
                     _expression: Default::default(),
                 }
                 .into(),
