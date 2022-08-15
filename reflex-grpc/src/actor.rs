@@ -35,7 +35,10 @@ use reflex_runtime::{
     action::effect::{EffectEmitAction, EffectSubscribeAction, EffectUnsubscribeAction},
     AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator,
 };
-use reflex_utils::{partition_results, reconnect::ReconnectTimeout};
+use reflex_utils::{
+    partition_results,
+    reconnect::{FibonacciReconnectTimeout, ReconnectTimeout},
+};
 use tokio::time::sleep;
 use tonic::{
     codec::{Codec, DecodeBuf, Decoder, EncodeBuf, Encoder},
@@ -49,8 +52,8 @@ use crate::{
         GrpcHandlerTransportErrorAction,
     },
     utils::{
-        get_transport_error, GrpcMethod, GrpcMethodName, GrpcServiceLibrary, GrpcServiceName,
-        ProtoId,
+        get_transport_error, ignore_repeated_grpc_errors, GrpcMethod, GrpcMethodName,
+        GrpcServiceLibrary, GrpcServiceName, ProtoId,
     },
     GrpcConfig,
 };
@@ -142,6 +145,16 @@ impl GrpcClient {
                         Err(err) => stream::iter(once(Err(err))).left_stream(),
                         Ok(response) => {
                             let results = response.into_inner();
+                            // It appears that when the underlying HTTP connection is broken, the tonic response stream
+                            // will emit a deluge of errors (maybe one for every time the underlying stream is polled?),
+                            // so we need to filter out duplicate errors to prevent them from overloading the event bus
+                            let results = ignore_repeated_grpc_errors(
+                                results,
+                                FibonacciReconnectTimeout {
+                                    units: Duration::from_secs(1),
+                                    max_timeout: Duration::from_secs(30),
+                                },
+                            );
                             return take_while_inclusive(results, |result| match &result {
                                 Err(status) if get_transport_error(status).is_some() => false,
                                 _ => true,
