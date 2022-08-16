@@ -8,8 +8,7 @@ use reflex::{
 };
 
 use crate::{
-    utils::{create_invalid_field_type_error_message, get_message_field},
-    CustomType,
+    get_optional_message_field, utils::create_invalid_field_type_error_message, CustomType,
 };
 
 pub struct DoubleValueMessage;
@@ -46,9 +45,10 @@ impl CustomType for DoubleValueMessage {
         factory: &impl ExpressionFactory<T>,
         _allocator: &impl HeapAllocator<T>,
     ) -> Result<T, String> {
-        let value = get_message_field(message, "value")?;
+        let value = get_optional_message_field(message, "value")?;
         match value {
-            Value::F64(value) => {
+            None => Ok(factory.create_float_term(Default::default())),
+            Some(Value::F64(value)) => {
                 Ok(factory.create_float_term(*value as reflex::lang::term::FloatValue))
             }
             _ => Err(format!("Expected f64, received {:?}", value)),
@@ -90,9 +90,10 @@ impl CustomType for FloatValueMessage {
         factory: &impl ExpressionFactory<T>,
         _allocator: &impl HeapAllocator<T>,
     ) -> Result<T, String> {
-        let value = get_message_field(message, "value")?;
+        let value = get_optional_message_field(message, "value")?;
         match value {
-            Value::F32(value) => {
+            None => Ok(factory.create_float_term(Default::default())),
+            Some(Value::F32(value)) => {
                 Ok(factory.create_float_term(*value as reflex::lang::term::FloatValue))
             }
             _ => Err(format!("Expected f32, received {:?}", value)),
@@ -137,9 +138,10 @@ impl CustomType for Int64ValueMessage {
         factory: &impl ExpressionFactory<T>,
         _allocator: &impl HeapAllocator<T>,
     ) -> Result<T, String> {
-        let value = get_message_field(message, "value")?;
+        let value = get_optional_message_field(message, "value")?;
         match value {
-            Value::I64(value) => {
+            None => Ok(factory.create_int_term(Default::default())),
+            Some(Value::I64(value)) => {
                 let value = *value;
                 if value < IntValue::MIN as i64 || value > IntValue::MAX as i64 {
                     Err(format!("Invalid Int value: {}", value))
@@ -198,9 +200,10 @@ impl CustomType for UInt64ValueMessage {
         factory: &impl ExpressionFactory<T>,
         _allocator: &impl HeapAllocator<T>,
     ) -> Result<T, String> {
-        let value = get_message_field(message, "value")?;
+        let value = get_optional_message_field(message, "value")?;
         match value {
-            Value::U64(value) => {
+            None => Ok(factory.create_int_term(Default::default())),
+            Some(Value::U64(value)) => {
                 let value = *value;
                 if value > IntValue::MAX as u64 {
                     Err(format!("Invalid Int value: {}", value))
@@ -250,9 +253,10 @@ impl CustomType for Int32ValueMessage {
         factory: &impl ExpressionFactory<T>,
         _allocator: &impl HeapAllocator<T>,
     ) -> Result<T, String> {
-        let value = get_message_field(message, "value")?;
+        let value = get_optional_message_field(message, "value")?;
         match value {
-            Value::I32(value) => Ok(factory.create_int_term(*value)),
+            None => Ok(factory.create_int_term(Default::default())),
+            Some(Value::I32(value)) => Ok(factory.create_int_term(*value)),
             _ => Err(format!("Expected i32, received {:?}", value)),
         }
     }
@@ -304,9 +308,10 @@ impl CustomType for UInt32ValueMessage {
         factory: &impl ExpressionFactory<T>,
         _allocator: &impl HeapAllocator<T>,
     ) -> Result<T, String> {
-        let value = get_message_field(message, "value")?;
+        let value = get_optional_message_field(message, "value")?;
         match value {
-            Value::U32(value) => {
+            None => Ok(factory.create_int_term(Default::default())),
+            Some(Value::U32(value)) => {
                 let value = *value;
                 if value > IntValue::MAX as u32 {
                     Err(format!("Invalid Int value: {}", value))
@@ -348,9 +353,10 @@ impl CustomType for BoolValueMessage {
         factory: &impl ExpressionFactory<T>,
         _allocator: &impl HeapAllocator<T>,
     ) -> Result<T, String> {
-        let value = get_message_field(message, "value")?;
+        let value = get_optional_message_field(message, "value")?;
         match value {
-            Value::Bool(value) => Ok(factory.create_boolean_term(*value)),
+            None => Ok(factory.create_boolean_term(Default::default())),
+            Some(Value::Bool(value)) => Ok(factory.create_boolean_term(*value)),
             _ => Err(format!("Expected bool, received {:?}", value)),
         }
     }
@@ -387,9 +393,10 @@ impl CustomType for StringValueMessage {
         factory: &impl ExpressionFactory<T>,
         allocator: &impl HeapAllocator<T>,
     ) -> Result<T, String> {
-        let value = get_message_field(message, "value")?;
+        let value = get_optional_message_field(message, "value")?;
         match value {
-            Value::String(value) => {
+            None => Ok(factory.create_string_term(allocator.create_static_string(""))),
+            Some(Value::String(value)) => {
                 Ok(factory.create_string_term(allocator.create_string(value.as_str())))
             }
             _ => Err(format!("Expected bool, received {:?}", value)),
