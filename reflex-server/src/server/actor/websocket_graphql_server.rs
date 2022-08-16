@@ -1050,7 +1050,12 @@ fn diff_arrays(previous: &Vec<JsonValue>, current: &Vec<JsonValue>) -> Option<Js
         updates
             .into_iter()
             .enumerate()
-            .filter_map(|(index, item)| item.map(|value| (index.to_string(), value))),
+            .filter_map(|(index, item)| item.map(|value| (index.to_string(), value)))
+            .chain(if current.len() != previous.len() {
+                Some((String::from("length"), JsonValue::from(current.len())))
+            } else {
+                None
+            }),
     );
     if is_empty_json_object(&updates) {
         None
