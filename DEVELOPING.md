@@ -43,6 +43,8 @@ The primary advantage of reflex is its ability to handle real-time streaming dat
 
 If an expression depends on dynamic run-time state, evaluating that expression will result in a type of value called a 'signal'. This is one of the core language data types, and acts as a marker that indicates to the runtime that the expression depends on run-time state which must be loaded (and dependency-tracked) in order to evaluate the expression.
 
+Signals are handled as follows:
+
 - a signal is essentially a list one or more 'effects' (another core language data type)
 - effects are simple data objects that describe a task that must be fulfilled with a concrete value before evaluation can proceed (e.g. 'fetch this URL')
 - this means that signals block evaluation: when an expression evaluates to a signal, it's the responsibility of the runtime to go off and do whatever real-world (potentially-async) side-effects necessary to 'handle' that effect and yield the correponding value
@@ -58,3 +60,15 @@ If an expression depends on dynamic run-time state, evaluating that expression w
 - effect handlers can emit multiple values over time to reflect streaming data; subsequent values yielded by the handler will retrigger evaluation of anything that has a dependency on that effect
 - effect results are automatically deduplicated and shared between any identical effects (this can be cache-busted using invalidation 'tokens')
 - the pure functional approach means that this evaluation model ought to be very amenable to being parallelised (the tricky part is in determining which code paths are worth forking into a parallel thread)
+
+Some notes on the runtime implementation:
+
+- the runtime/server application is implemented as a composable state machine (an 'actor'), whose transitions are coordinated by a central 'scheduler'
+- everything that happens in the application is triggered via state machine 'transitions', which are dispatched through the scheduler's event bus
+- a transition typically contains a list of 'actions', which are serializable data messages, or alternatively a 'task', which is an asynchronous stream of actions over time
+- the overall app actor is composed from a collection of smaller actors that handle separate areas of concern (transport, effect-handling, etc). All actors share the same event bus.
+- actors have a single synchronous `handle(state, action) -> transition` method that allows them to change their private state in response to an incoming action and return a state transition containing any spawned actions that happen as a consequence of the received action
+- outside of their `handle()` methods, actors are immutable (so in other words, nothing can happen outside a state transition)
+- this means that actors must communicate entirely via message-passing
+- all the composed actors are currently bolted together in the same process, but the shared-nothing design means they could alternatively be arbitrarily distributed across multiple threads or machines
+- the standard scheduler is asynchronous (with a tokio mpsc channel for the main event bus), but this can easily be swapped out for an alternative scheduler implementation (e.g. a synchronous in-memory-queue-based scheduler for unit tests)
