@@ -1,12 +1,14 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Jordan Hall <j.hall@mwam.com> https://github.com/j-hall-mwam
 use std::collections::HashSet;
 
 use serde::{Deserialize, Serialize};
 
 use reflex::core::{
-    DependencyList, GraphNode, SerializeJson, StackOffset, StringTermType, StringValue, TermHash,
+    DependencyList, Eagerness, GraphNode, Internable, SerializeJson, StackOffset, StringTermType,
+    StringValue, TermHash,
 };
 
 #[derive(PartialEq, Eq, Clone, Copy, Serialize, Deserialize, Hash)]
@@ -50,6 +52,13 @@ impl<TString: StringValue> GraphNode for StringTerm<TString> {
         false
     }
 }
+
+impl<TString: StringValue> Internable for StringTerm<TString> {
+    fn should_intern(&self, _eager: Eagerness) -> bool {
+        true
+    }
+}
+
 impl<TString: StringValue> std::fmt::Display for StringTerm<TString> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:?}", self.value)

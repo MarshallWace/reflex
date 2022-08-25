@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
+// SPDX-FileContributor: Jordan Hall <j.hall@mwam.com> https://github.com/j-hall-mwam
 use std::convert::TryInto;
 use std::{collections::hash_map::DefaultHasher, hash::Hasher, iter::once};
 
@@ -17,11 +18,10 @@ pub use interpreter::cache::{
 };
 pub use interpreter::stack::{CallStack, VariableStack};
 
-use crate::compiler::{Instruction, Program};
 use reflex::core::{
     ApplicationTermType, CompiledFunctionTermType, ConditionListType, ConditionType,
-    EffectTermType, InstructionPointer, ListTermType, PartialApplicationTermType,
-    RecursiveTermType, SignalTermType, VariableTermType,
+    EffectTermType, InstructionPointer, PartialApplicationTermType, RecursiveTermType,
+    SignalTermType, StateCache, VariableTermType,
 };
 use reflex::hash::hash_object;
 use reflex::{
@@ -34,6 +34,8 @@ use reflex::{
     },
     hash::HashId,
 };
+
+use crate::compiler::{CompiledProgram, Instruction, Program};
 
 pub mod compiler;
 mod interpreter {
@@ -94,9 +96,59 @@ impl InterpreterOptions {
     }
 }
 
+fn evaluate_data_section<'a, T: Expression + Rewritable<T> + Reducible<T> + Applicable<T>>(
+    value_factories: impl IntoIterator<Item = (HashId, &'a Program)>,
+    function_lookup: &Program,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+    options: &InterpreterOptions,
+) -> Result<Vec<T>, String> {
+    value_factories
+        .into_iter()
+        .try_fold(vec![], |mut static_data, (_, value_factory)| {
+            let value = evaluate_static_program(
+                value_factory,
+                Default::default(),
+                &static_data,
+                Some(function_lookup),
+                factory,
+                allocator,
+                options,
+            )?;
+            static_data.push(value);
+            Ok(static_data)
+        })
+}
+
+fn evaluate_static_program<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T>>(
+    program: &Program,
+    entry_point: InstructionPointer,
+    static_data: &[T],
+    function_lookup: Option<&Program>,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+    options: &InterpreterOptions,
+) -> Result<T, String> {
+    let mut stack = VariableStack::new(options.variable_stack_size);
+    let mut call_stack = CallStack::new(program, entry_point, options.call_stack_size);
+    evaluate_program_loop(
+        Default::default(),
+        &StateCache::default(),
+        &mut stack,
+        &mut call_stack,
+        static_data,
+        function_lookup,
+        factory,
+        allocator,
+        &mut DefaultInterpreterCache::default(),
+        &mut MultithreadedCacheEntries::default(),
+        options,
+    )
+}
+
 pub fn execute<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T>>(
     cache_key: HashId,
-    program: &Program,
+    program: &CompiledProgram,
     entry_point: InstructionPointer,
     state_id: usize,
     state: &impl DynamicState<T>,
@@ -105,7 +157,27 @@ pub fn execute<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T>>(
     options: &InterpreterOptions,
     cache: &impl InterpreterCache<T>,
 ) -> Result<(EvaluationResult<T>, LocalCacheEntries<T>), String> {
-    match program.get(entry_point) {
+    let CompiledProgram {
+        instructions,
+        data_section,
+    } = program;
+
+    let execution_span = info_span!("interpreter::data");
+    let execution_span = execution_span.enter();
+
+    let static_data = evaluate_data_section(
+        data_section
+            .iter()
+            .map(|(hash_id, instructions)| (*hash_id, instructions)),
+        instructions,
+        factory,
+        allocator,
+        options,
+    )?;
+
+    std::mem::drop(execution_span);
+
+    match instructions.get(entry_point) {
         Some(&Instruction::Function { required_args, .. }) if required_args == 0 => Ok(()),
         Some(instruction) => Err(format!(
             "Invalid entry point function: {:x} {:?}",
@@ -115,22 +187,23 @@ pub fn execute<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T>>(
     }?;
     let execution_span = info_span!("interpreter::execute");
     let execution_span = execution_span.enter();
-    trace!("Starting execution");
     let mut stack = VariableStack::new(options.variable_stack_size);
-    let mut call_stack = CallStack::new(program, entry_point, options.call_stack_size);
+    let mut call_stack = CallStack::new(instructions, entry_point, options.call_stack_size);
     let mut evaluation_cache_entries = MultithreadedCacheEntries::new(state);
     let result = evaluate_program_loop(
         state_id,
         state,
         &mut stack,
         &mut call_stack,
+        &static_data,
+        None,
         factory,
         allocator,
         cache,
         &mut evaluation_cache_entries,
-        options.debug_instructions,
-        options.debug_stack,
+        options,
     );
+
     std::mem::drop(execution_span);
     let mut cache_entries = evaluation_cache_entries.into_entries();
     match result {
@@ -166,12 +239,13 @@ fn evaluate_program_loop<'a, T: Expression + Rewritable<T> + Reducible<T> + Appl
     state: &impl DynamicState<T>,
     stack: &mut VariableStack<T>,
     call_stack: &mut CallStack<T>,
+    static_data: &[T],
+    function_lookup: Option<&Program>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
     cache: &impl InterpreterCache<T>,
     cache_entries: &mut MultithreadedCacheEntries<'a, T>,
-    debug_instructions: bool,
-    debug_stack: bool,
+    options: &InterpreterOptions,
 ) -> Result<T, String> {
     loop {
         let result = match call_stack.lookup_instruction(call_stack.program_counter()) {
@@ -180,10 +254,10 @@ fn evaluate_program_loop<'a, T: Expression + Rewritable<T> + Reducible<T> + Appl
                 call_stack.program_counter(),
             )),
             Some(instruction) => {
-                if debug_instructions {
+                if options.debug_instructions {
                     eprintln!("{}", format_current_instruction(call_stack));
                 }
-                if debug_stack {
+                if options.debug_stack {
                     eprintln!("{}", format_current_stack(stack))
                 }
                 evaluate_instruction(
@@ -191,6 +265,8 @@ fn evaluate_program_loop<'a, T: Expression + Rewritable<T> + Reducible<T> + Appl
                     state,
                     stack,
                     call_stack,
+                    static_data,
+                    function_lookup,
                     factory,
                     allocator,
                     cache,
@@ -474,12 +550,25 @@ fn evaluate_instruction<'a, T: Expression + Rewritable<T> + Reducible<T> + Appli
     state: &impl DynamicState<T>,
     stack: &mut VariableStack<T>,
     call_stack: &CallStack<T>,
+    static_data: &[T],
+    function_lookup: Option<&Program>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
     cache: &impl InterpreterCache<T>,
     cache_entries: &mut MultithreadedCacheEntries<'a, T>,
 ) -> Result<(ExecutionResult<T>, DependencyList), String> {
     match instruction {
+        Instruction::LoadStaticData { offset } => {
+            trace!(instruction = "Instruction::LoadStaticData");
+            let value = static_data.get(*offset).cloned();
+            match value {
+                None => Err(format!("Invalid stack offset: {}", offset)),
+                Some(value) => {
+                    stack.push(value);
+                    Ok((ExecutionResult::Advance, DependencyList::empty()))
+                }
+            }
+        }
         Instruction::PushLocal { offset } => {
             trace!(instruction = "Instruction::PushStatic");
             let value = stack.get(*offset).cloned();
@@ -508,7 +597,7 @@ fn evaluate_instruction<'a, T: Expression + Rewritable<T> + Reducible<T> + Appli
         }
         Instruction::PushFloat { value } => {
             trace!(instruction = "Instruction::PushFloat");
-            stack.push(factory.create_float_term(*value));
+            stack.push(factory.create_float_term(f64::from(*value)));
             Ok((ExecutionResult::Advance, DependencyList::empty()))
         }
         Instruction::PushString { value } => {
@@ -521,25 +610,29 @@ fn evaluate_instruction<'a, T: Expression + Rewritable<T> + Reducible<T> + Appli
             stack.push(factory.create_symbol_term(*value));
             Ok((ExecutionResult::Advance, DependencyList::empty()))
         }
-        Instruction::PushFunction { target, .. } => {
+        Instruction::PushFunction { target, hash } => {
             trace!(instruction = "Instruction::PushFunction");
             let target_address = *target;
-            match call_stack.lookup_instruction(target_address) {
-                Some(&Instruction::Function {
-                    hash,
+            let hash = *hash;
+            match function_lookup
+                .unwrap_or(call_stack.program())
+                .get(target_address)
+            {
+                Some(Instruction::Function {
                     required_args,
                     optional_args,
+                    ..
                 }) => {
                     stack.push(factory.create_compiled_function_term(
                         target_address,
                         hash,
-                        required_args,
-                        optional_args,
+                        *required_args,
+                        *optional_args,
                     ));
                     Ok((ExecutionResult::Advance, DependencyList::empty()))
                 }
                 _ => Err(format!(
-                    "Target address {:x} is not a function",
+                    "Invalid compiled function address: {:x}",
                     target_address
                 )),
             }
@@ -791,26 +884,18 @@ fn evaluate_instruction<'a, T: Expression + Rewritable<T> + Reducible<T> + Appli
                 Ok((ExecutionResult::Advance, DependencyList::empty()))
             }
         }
-        Instruction::PushConstructor => {
-            trace!(instruction = "Instruction::PushConstructor");
-            if stack.len() < 1 {
+        Instruction::ConstructConstructor { num_fields } => {
+            trace!(instruction = "Instruction::ConstructConstructor");
+            let num_fields = *num_fields;
+            if stack.len() < num_fields {
                 Err(String::from(
                     "Unable to create constructor: insufficient arguments on stack",
                 ))
             } else {
-                let keys = stack.pop().unwrap();
-                match factory.match_list_term(&keys) {
-                    None => Err(format!(
-                        "Unable to create constructor: expected list, received {}",
-                        keys
-                    )),
-                    Some(keys) => {
-                        stack.push(factory.create_constructor_term(
-                            allocator.create_struct_prototype(allocator.clone_list(keys.items())),
-                        ));
-                        Ok((ExecutionResult::Advance, DependencyList::empty()))
-                    }
-                }
+                let keys = allocator.create_list(stack.pop_multiple(num_fields));
+                stack
+                    .push(factory.create_constructor_term(allocator.create_struct_prototype(keys)));
+                Ok((ExecutionResult::Advance, DependencyList::empty()))
             }
         }
         Instruction::ConstructList { size } => {
@@ -996,7 +1081,8 @@ fn evaluate_expression<T: Expression + Applicable<T>>(
                             WithExactSizeIterator::new(num_combined_args, combined_args),
                             factory,
                             allocator,
-                        )?;
+                        );
+                        let result = result?;
                         stack.push(result);
                         Ok((ExecutionResult::ResolveExpression, DependencyList::empty()))
                     }
@@ -1337,12 +1423,13 @@ fn resolve_parallel_args<
     arity: Arity,
     args: Vec<T>,
     stack: &mut VariableStack<T>,
+    static_data: &[T],
+    function_lookup: Option<&Program>,
     factory: &(impl ExpressionFactory<T> + Sync),
     allocator: &(impl HeapAllocator<T> + Sync),
-    debug_instructions: bool,
-    debug_stack: bool,
     cache: &(impl InterpreterCache<T> + Sync),
     cache_entries: &mut MultithreadedCacheEntries<'a, T>,
+    options: &InterpreterOptions,
 ) -> Result<Vec<T>, String>
 where
     T::ExpressionList: Sync,
@@ -1364,12 +1451,13 @@ where
                 state,
                 call_stack,
                 stack,
+                static_data,
+                function_lookup,
                 factory,
                 allocator,
-                debug_instructions,
-                debug_stack,
                 cache,
                 cache_entries,
+                options,
             );
         } else {
             return Ok(args);
@@ -1416,12 +1504,13 @@ where
                             state,
                             call_stack,
                             stack,
+                            static_data,
+                            function_lookup,
                             factory,
                             allocator,
-                            debug_instructions,
-                            debug_stack,
                             cache,
                             &mut local_cache_entries,
+                            options,
                         );
                         (
                             result,
@@ -1486,12 +1575,13 @@ fn resolve_arg_within_new_stack<
     state: &impl DynamicState<T>,
     call_stack: &CallStack<T>,
     stack: &VariableStack<T>,
+    static_data: &[T],
+    function_lookup: Option<&Program>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-    debug_instructions: bool,
-    debug_stack: bool,
     cache: &impl InterpreterCache<T>,
     cache_entries: &mut MultithreadedCacheEntries<'a, T>,
+    options: &InterpreterOptions,
 ) -> (Result<T, String>, DependencyList, Vec<HashId>) {
     let capture_depth = arg.capture_depth();
     let mut new_stack = stack.clone_shallow(capture_depth);
@@ -1508,12 +1598,13 @@ fn resolve_arg_within_new_stack<
         state,
         &mut new_stack,
         &mut new_call_stack,
+        static_data,
+        function_lookup,
         factory,
         allocator,
         cache,
         cache_entries,
-        debug_instructions,
-        debug_stack,
+        options,
     );
     // FIXME: Unwind call frame / variable stack on short-circuit signals
     // debug_assert_eq!(
@@ -1539,7 +1630,7 @@ mod tests {
     use reflex_lisp::parse;
     use reflex_stdlib::Stdlib;
 
-    use crate::compiler::{hash_program_root, Compiler, CompilerMode, CompilerOptions};
+    use crate::compiler::{hash_compiled_program, Compiler, CompilerMode, CompilerOptions};
 
     use super::*;
 
@@ -1593,14 +1684,21 @@ mod tests {
                 factory.create_effect_term(condition.clone()),
             ),
         );
-        let compiler = Compiler::new(CompilerOptions::unoptimized(), None);
+        let compiler = Compiler::new(
+            CompilerOptions {
+                debug: true,
+                ..CompilerOptions::unoptimized()
+            },
+            None,
+        );
         let program = compiler
             .compile(&expression, CompilerMode::Function, &factory, &allocator)
             .unwrap();
+
         let mut state = StateCache::default();
         let state_id = 0;
         let entry_point = InstructionPointer::default();
-        let cache_key = hash_program_root(&program, &entry_point);
+        let cache_key = hash_compiled_program(&program, &entry_point);
         let (result, _) = execute(
             cache_key,
             &program,
@@ -1609,7 +1707,7 @@ mod tests {
             &state,
             &factory,
             &allocator,
-            &InterpreterOptions::default(),
+            &InterpreterOptions::debug(),
             &mut cache,
         )
         .unwrap();
@@ -1659,8 +1757,9 @@ mod tests {
         let program = compiler
             .compile(&expression, CompilerMode::Function, &factory, &allocator)
             .unwrap();
+
         let entry_point = InstructionPointer::default();
-        let cache_key = hash_program_root(&program, &entry_point);
+        let cache_key = hash_compiled_program(&program, &entry_point);
         let state_id = 0;
         let (result, _) = execute(
             cache_key,
@@ -1696,7 +1795,7 @@ mod tests {
             .compile(&expression, CompilerMode::Function, &factory, &allocator)
             .unwrap();
         let entry_point = InstructionPointer::default();
-        let cache_key = hash_program_root(&program, &entry_point);
+        let cache_key = hash_compiled_program(&program, &entry_point);
         let state_id = 0;
         let (result, _) = execute(
             cache_key,
@@ -1731,9 +1830,13 @@ mod tests {
             Instruction::Evaluate,
             Instruction::Return,
         ]);
+        let program = CompiledProgram {
+            instructions: program,
+            data_section: Default::default(),
+        };
         let state = StateCache::default();
         let entry_point = InstructionPointer::default();
-        let cache_key = hash_program_root(&program, &entry_point);
+        let cache_key = hash_compiled_program(&program, &entry_point);
         let state_id = 0;
         let (result, _) = execute(
             cache_key,
@@ -1784,9 +1887,14 @@ mod tests {
             Instruction::Evaluate,
             Instruction::Return,
         ]);
+
+        let program = CompiledProgram {
+            instructions: program,
+            data_section: Default::default(),
+        };
         let state = StateCache::default();
         let entry_point = InstructionPointer::default();
-        let cache_key = hash_program_root(&program, &entry_point);
+        let cache_key = hash_compiled_program(&program, &entry_point);
         let state_id = 0;
         let (result, _) = execute(
             cache_key,
@@ -1820,7 +1928,7 @@ mod tests {
             .unwrap();
         let state = StateCache::default();
         let entry_point = InstructionPointer::default();
-        let cache_key = hash_program_root(&program, &entry_point);
+        let cache_key = hash_compiled_program(&program, &entry_point);
         let state_id = 0;
         let (result, _) = execute(
             cache_key,
@@ -1887,7 +1995,7 @@ mod tests {
             .compile(&expression, CompilerMode::Function, &factory, &allocator)
             .unwrap();
         let entry_point = InstructionPointer::default();
-        let cache_key = hash_program_root(&program, &entry_point);
+        let cache_key = hash_compiled_program(&program, &entry_point);
         let state = StateCache::default();
         let state_id = 0;
         let (result, _) = execute(
@@ -1928,7 +2036,7 @@ mod tests {
             .compile(&expression, CompilerMode::Function, &factory, &allocator)
             .unwrap();
         let entry_point = InstructionPointer::default();
-        let cache_key = hash_program_root(&program, &entry_point);
+        let cache_key = hash_compiled_program(&program, &entry_point);
         let state = StateCache::default();
         let state_id = 0;
         let (result, _) = execute(
@@ -1969,7 +2077,7 @@ mod tests {
             .compile(&expression, CompilerMode::Function, &factory, &allocator)
             .unwrap();
         let entry_point = InstructionPointer::default();
-        let cache_key = hash_program_root(&program, &entry_point);
+        let cache_key = hash_compiled_program(&program, &entry_point);
         let state = StateCache::default();
         let state_id = 0;
         let (result, _) = execute(
@@ -2009,7 +2117,7 @@ mod tests {
             .compile(&expression, CompilerMode::Function, &factory, &allocator)
             .unwrap();
         let entry_point = InstructionPointer::default();
-        let cache_key = hash_program_root(&program, &entry_point);
+        let cache_key = hash_compiled_program(&program, &entry_point);
         let state = StateCache::default();
         let state_id = 0;
         let (result, _) = execute(
@@ -2050,7 +2158,7 @@ mod tests {
             .compile(&expression, CompilerMode::Function, &factory, &allocator)
             .unwrap();
         let entry_point = InstructionPointer::default();
-        let cache_key = hash_program_root(&program, &entry_point);
+        let cache_key = hash_compiled_program(&program, &entry_point);
         let state = StateCache::default();
         let state_id = 0;
         let (result, _) = execute(
@@ -2100,7 +2208,7 @@ mod tests {
             .compile(&expression, CompilerMode::Function, &factory, &allocator)
             .unwrap();
         let entry_point = InstructionPointer::default();
-        let cache_key = hash_program_root(&program, &entry_point);
+        let cache_key = hash_compiled_program(&program, &entry_point);
         let state = StateCache::default();
         let state_id = 0;
         let (result, _) = execute(
@@ -2178,7 +2286,7 @@ mod tests {
             .compile(&expression, CompilerMode::Function, &factory, &allocator)
             .unwrap();
         let entry_point = InstructionPointer::default();
-        let cache_key = hash_program_root(&program, &entry_point);
+        let cache_key = hash_compiled_program(&program, &entry_point);
         let state = StateCache::default();
         let state_id = 0;
         let (result, _) = execute(
@@ -2209,6 +2317,39 @@ mod tests {
                 ])),
                 DependencyList::empty(),
             ),
+        );
+    }
+
+    #[test]
+    fn intern_static_test() {
+        let factory = SharedTermFactory::<Stdlib>::default();
+        let allocator = DefaultAllocator::default();
+        let expression = factory.create_int_term(3);
+        let program = Compiler::new(CompilerOptions::debug(), None)
+            .compile(&expression, CompilerMode::Function, &factory, &allocator)
+            .unwrap();
+
+        let entry_point = InstructionPointer::default();
+        let cache_key = hash_compiled_program(&program, &entry_point);
+        let state = StateCache::default();
+        let state_id = 0;
+        let mut cache = DefaultInterpreterCache::default();
+
+        let (result, _) = execute(
+            cache_key,
+            &program,
+            InstructionPointer::default(),
+            state_id,
+            &state,
+            &factory,
+            &allocator,
+            &InterpreterOptions::default(),
+            &mut cache,
+        )
+        .unwrap();
+        assert_eq!(
+            result,
+            EvaluationResult::new(factory.create_int_term(3), DependencyList::empty(),),
         );
     }
 }

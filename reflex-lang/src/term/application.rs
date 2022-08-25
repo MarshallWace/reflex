@@ -1,20 +1,19 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
+// SPDX-FileContributor: Jordan Hall <j.hall@mwam.com> https://github.com/j-hall-mwam
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use std::{
-    collections::HashSet,
-    iter::once,
-};
+use std::{collections::HashSet, iter::once};
 
 use serde::{Deserialize, Serialize};
 
 use reflex::core::{
     apply_function, create_error_expression, get_combined_short_circuit_signal,
-    transform_expression_list, validate_function_application_arity, Applicable, ApplicationTermType, ArgType, Arity,
-    CompoundNode, DependencyList, DynamicState, Evaluate, EvaluationCache, EvaluationResult,
-    Expression, ExpressionFactory, ExpressionListSlice, ExpressionListType, GraphNode,
-    HeapAllocator, LambdaTermType, PartialApplicationTermType, Reducible, Rewritable, ScopeOffset,
-    SerializeJson, ShortCircuitCount, StackOffset, StateCache, Substitutions, TermHash
+    transform_expression_list, validate_function_application_arity, Applicable,
+    ApplicationTermType, ArgType, Arity, CompoundNode, DependencyList, DynamicState, Eagerness,
+    Evaluate, EvaluationCache, EvaluationResult, Expression, ExpressionFactory,
+    ExpressionListSlice, ExpressionListType, GraphNode, HeapAllocator, Internable, LambdaTermType,
+    PartialApplicationTermType, Reducible, Rewritable, ScopeOffset, SerializeJson,
+    ShortCircuitCount, StackOffset, StateCache, Substitutions, TermHash,
 };
 
 #[derive(Hash, Eq, PartialEq, Clone, Debug, Serialize, Deserialize)]
@@ -242,6 +241,15 @@ impl<T: Expression + Reducible<T> + Applicable<T> + Evaluate<T>> Evaluate<T>
         evaluate_function_application(self, Some(state), factory, allocator, cache)
     }
 }
+
+impl<T: Expression> Internable for ApplicationTerm<T> {
+    fn should_intern(&self, eager: Eagerness) -> bool {
+        eager == Eagerness::Lazy
+            && self.target().capture_depth() == 0
+            && self.args().capture_depth() == 0
+    }
+}
+
 impl<T: Expression> std::fmt::Display for ApplicationTerm<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
@@ -256,6 +264,7 @@ impl<T: Expression> std::fmt::Display for ApplicationTerm<T> {
         )
     }
 }
+
 impl<T: Expression> SerializeJson for ApplicationTerm<T> {
     fn to_json(&self) -> Result<serde_json::Value, String> {
         Err(format!("Unable to serialize term: {}", self))

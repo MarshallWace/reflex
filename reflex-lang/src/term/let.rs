@@ -1,14 +1,15 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Jordan Hall <j.hall@mwam.com> https://github.com/j-hall-mwam
 use std::{collections::HashSet, iter::once};
 
 use serde::{Deserialize, Serialize};
 
 use reflex::core::{
-    CompoundNode, DependencyList, DynamicState, EvaluationCache, Expression, ExpressionFactory,
-    GraphNode, HeapAllocator, LetTermType, Reducible, Rewritable, ScopeOffset, SerializeJson, StackOffset,
-    Substitutions, TermHash
+    CompoundNode, DependencyList, DynamicState, Eagerness, EvaluationCache, Expression,
+    ExpressionFactory, GraphNode, HeapAllocator, Internable, LetTermType, Reducible, Rewritable,
+    ScopeOffset, SerializeJson, StackOffset, Substitutions, TermHash,
 };
 
 #[derive(Hash, Eq, PartialEq, Clone, Debug, Serialize, Deserialize)]
@@ -197,6 +198,13 @@ impl<T: Expression + Rewritable<T>> Reducible<T> for LetTerm<T> {
         }
     }
 }
+
+impl<T: Expression> Internable for LetTerm<T> {
+    fn should_intern(&self, _eager: Eagerness) -> bool {
+        self.capture_depth() == 0
+    }
+}
+
 impl<T: Expression> std::fmt::Display for LetTerm<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "<let:{}:{}>", self.initializer, self.body)

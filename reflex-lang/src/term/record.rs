@@ -1,15 +1,16 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Jordan Hall <j.hall@mwam.com> https://github.com/j-hall-mwam
 use std::collections::HashSet;
 
 use serde::{Deserialize, Serialize};
 
 use reflex::core::{
-    transform_expression_list, CompoundNode, DependencyList, DynamicState, EvaluationCache,
-    Expression, ExpressionFactory, ExpressionListSlice, ExpressionListType, GraphNode,
-    HeapAllocator, RecordTermType, Rewritable, SerializeJson, StackOffset, StructPrototypeType,
-    Substitutions, TermHash,
+    transform_expression_list, CompoundNode, DependencyList, DynamicState, Eagerness,
+    EvaluationCache, Expression, ExpressionFactory, ExpressionListSlice, ExpressionListType,
+    GraphNode, HeapAllocator, Internable, RecordTermType, Rewritable, SerializeJson, StackOffset,
+    StructPrototypeType, Substitutions, TermHash,
 };
 
 #[derive(Hash, Eq, PartialEq, Clone, Debug, Serialize, Deserialize)]
@@ -136,6 +137,13 @@ impl<T: Expression + Rewritable<T>> Rewritable<T> for RecordTerm<T> {
         })
     }
 }
+
+impl<T: Expression> Internable for RecordTerm<T> {
+    fn should_intern(&self, _eager: Eagerness) -> bool {
+        self.capture_depth() == 0
+    }
+}
+
 impl<T: Expression> std::fmt::Display for RecordTerm<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.prototype.keys().len() {

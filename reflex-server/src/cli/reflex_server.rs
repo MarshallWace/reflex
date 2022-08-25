@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Jordan Hall <j.hall@mwam.com> https://github.com/j-hall-mwam
 use std::{
     collections::{HashMap, VecDeque},
     convert::Infallible,
@@ -35,7 +36,7 @@ use reflex::core::{Applicable, Expression, InstructionPointer, Reducible, Rewrit
 use reflex_graphql::{stdlib::Stdlib as GraphQlStdlib, GraphQlOperation, GraphQlSchema};
 use reflex_handlers::utils::tls::tokio_native_tls::native_tls;
 use reflex_interpreter::{
-    compiler::{Compile, CompilerOptions, Program},
+    compiler::{Compile, CompiledProgram, CompilerOptions},
     InterpreterOptions,
 };
 use reflex_js::stdlib::Stdlib as JsStdlib;
@@ -353,7 +354,7 @@ impl From<SerializedOpenTelemetryGrpcConfig> for OpenTelemetryGrpcConfig {
 
 pub fn cli<T, TFactory, TAllocator, TAction>(
     args: ReflexServerCliOptions,
-    graph_root: (Program, InstructionPointer),
+    graph_root: (CompiledProgram, InstructionPointer),
     schema: Option<GraphQlSchema>,
     actor: impl Actor<TAction, State = impl Send + 'static> + Send + 'static,
     middleware: SchedulerMiddleware<

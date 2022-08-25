@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Jordan Hall <j.hall@mwam.com> https://github.com/j-hall-mwam
 use std::{
     fs,
     iter::once,
@@ -32,7 +33,7 @@ use reflex_handlers::{
     DefaultHandlersMetricNames,
 };
 use reflex_interpreter::{
-    compiler::{hash_program_root, Compiler, CompilerMode, CompilerOptions, Program},
+    compiler::{hash_compiled_program, CompiledProgram, Compiler, CompilerMode, CompilerOptions},
     execute, DefaultInterpreterCache, InterpreterOptions,
 };
 use reflex_json::{JsonMap, JsonValue};
@@ -148,7 +149,7 @@ pub async fn main() -> Result<()> {
             let state = StateCache::default();
             let state_id = 0;
             let mut interpreter_cache = DefaultInterpreterCache::default();
-            let cache_key = hash_program_root(&program, &entry_point);
+            let cache_key = hash_compiled_program(&program, &entry_point);
 
             let (result, _cache_entries) = execute(
                 cache_key,
@@ -190,7 +191,7 @@ pub async fn main() -> Result<()> {
                             RuntimeMetricNames::default(),
                         ),
                         BytecodeInterpreter::new(
-                            (Program::new([]), InstructionPointer::default()),
+                            (CompiledProgram::default(), InstructionPointer::default()),
                             compiler_options,
                             interpreter_options,
                             factory.clone(),

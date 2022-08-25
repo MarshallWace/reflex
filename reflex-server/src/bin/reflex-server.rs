@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Jordan Hall <j.hall@mwam.com> https://github.com/j-hall-mwam
 use std::{
     fs,
     net::SocketAddr,
@@ -232,7 +233,7 @@ pub async fn main() -> Result<()> {
             &mut logger,
             InitGraphRootAction {
                 compiler_duration: compiler_elapsed_time,
-                instruction_count: program.len(),
+                instruction_count: program.instructions.len(),
             },
         );
         graph_root

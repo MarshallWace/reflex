@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
+// SPDX-FileContributor: Jordan Hall <j.hall@mwam.com> https://github.com/j-hall-mwam
 use std::{iter::once, path::Path};
 
 use reflex::{
@@ -1990,7 +1991,7 @@ mod tests {
         env::inject_env_vars,
     };
     use reflex_interpreter::{
-        compiler::{hash_program_root, Compiler, CompilerMode, CompilerOptions},
+        compiler::{hash_compiled_program, Compiler, CompilerMode, CompilerOptions},
         execute, DefaultInterpreterCache, InterpreterOptions,
     };
     use reflex_lang::{allocator::DefaultAllocator, SharedTermFactory};
@@ -5108,7 +5109,7 @@ mod tests {
             .unwrap();
         let mut cache = DefaultInterpreterCache::default();
         let entry_point = InstructionPointer::default();
-        let cache_key = hash_program_root(&program, &entry_point);
+        let cache_key = hash_compiled_program(&program, &entry_point);
         let state = StateCache::default();
         let state_id = 0;
         let (result, _) = execute(

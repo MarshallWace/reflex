@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
+// SPDX-FileContributor: Jordan Hall <j.hall@mwam.com> https://github.com/j-hall-mwam
 use std::{
     collections::{hash_map::DefaultHasher, BTreeSet, HashMap, HashSet},
     convert::TryFrom,
@@ -379,6 +380,10 @@ pub trait Evaluate<T: Expression> {
         allocator: &impl HeapAllocator<T>,
         cache: &mut impl EvaluationCache<T>,
     ) -> Option<EvaluationResult<T>>;
+}
+
+pub trait Internable {
+    fn should_intern(&self, eager: Eagerness) -> bool;
 }
 
 pub trait SerializeJson {
@@ -936,7 +941,7 @@ pub trait HeapAllocator<T: Expression> {
 }
 
 #[derive(Hash, Eq, PartialEq, Clone, Copy, Debug, Serialize)]
-pub enum VarArgs {
+pub enum Eagerness {
     Eager,
     Lazy,
 }

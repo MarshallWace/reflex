@@ -1,18 +1,19 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
+// SPDX-FileContributor: Jordan Hall <j.hall@mwam.com> https://github.com/j-hall-mwam
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use std::{collections::HashSet, hash::Hash, sync::Arc};
+use std::{collections::HashSet, sync::Arc};
 
 use reflex::{
     core::{
-        Applicable, Arity, CompoundNode, DependencyList, DynamicState, Evaluate, EvaluationCache,
-        EvaluationResult, Expression, ExpressionFactory, GraphNode, HeapAllocator, Reducible,
-        Rewritable, SerializeJson, StackOffset, Substitutions,
+        Applicable, Arity, CompoundNode, DependencyList, DynamicState, Eagerness, Evaluate,
+        EvaluationCache, EvaluationResult, Expression, ExpressionFactory, GraphNode, HeapAllocator,
+        Internable, Reducible, Rewritable, SerializeJson, StackOffset, Substitutions,
     },
     hash::HashId,
 };
 
-use crate::{ExpressionList, Signal, SignalList, StructPrototype, term::*};
+use crate::{term::*, ExpressionList, Signal, SignalList, StructPrototype};
 
 #[derive(Eq, Clone, Copy)]
 pub struct CachedExpression<T: Expression> {
@@ -247,6 +248,13 @@ where
         self.value.should_parallelize(args)
     }
 }
+
+impl<T: Expression + Internable> Internable for CachedExpression<T> {
+    fn should_intern(&self, eager: Eagerness) -> bool {
+        self.value().should_intern(eager)
+    }
+}
+
 impl<TWrapper: Expression, T: Expression> Evaluate<TWrapper> for CachedExpression<T>
 where
     TWrapper: Evaluate<TWrapper>,
@@ -481,6 +489,13 @@ where
         self.value.evaluate(state, factory, allocator, cache)
     }
 }
+
+impl<T: Expression + Internable> Internable for SharedExpression<T> {
+    fn should_intern(&self, eager: Eagerness) -> bool {
+        self.value().should_intern(eager)
+    }
+}
+
 impl<T: Expression + serde::Serialize> serde::Serialize for SharedExpression<T> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where

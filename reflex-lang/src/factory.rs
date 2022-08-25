@@ -2,14 +2,15 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
+// SPDX-FileContributor: Jordan Hall <j.hall@mwam.com> https://github.com/j-hall-mwam
 use std::{collections::HashSet, marker::PhantomData};
 
 use reflex::{
     core::{
-        Applicable, Arity, Builtin, CompoundNode, DependencyList, DynamicState, Evaluate,
-        EvaluationCache, EvaluationResult, Expression, ExpressionFactory, FloatValue, GraphNode,
-        HeapAllocator, InstructionPointer, IntValue, Reducible, Rewritable, SerializeJson,
-        StackOffset, Substitutions, SymbolId,
+        Applicable, Arity, Builtin, CompoundNode, DependencyList, DynamicState, Eagerness,
+        Evaluate, EvaluationCache, EvaluationResult, Expression, ExpressionFactory, FloatValue,
+        GraphNode, HeapAllocator, InstructionPointer, IntValue, Internable, Reducible, Rewritable,
+        SerializeJson, StackOffset, Substitutions, SymbolId,
     },
     hash::HashId,
 };
@@ -506,6 +507,13 @@ impl<TBuiltin: Builtin> Applicable<Self> for CachedSharedTerm<TBuiltin> {
         self.value.apply(args, factory, allocator, cache)
     }
 }
+
+impl<TBuiltin: Builtin> Internable for CachedSharedTerm<TBuiltin> {
+    fn should_intern(&self, eager: Eagerness) -> bool {
+        self.value.should_intern(eager)
+    }
+}
+
 impl<TBuiltin: Builtin> Evaluate<Self> for CachedSharedTerm<TBuiltin> {
     fn evaluate(
         &self,

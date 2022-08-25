@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Jordan Hall <j.hall@mwam.com> https://github.com/j-hall-mwam
 use std::{hash::Hash, iter::once, sync::Arc, time::Instant};
 
 use metrics::{describe_histogram, histogram, Unit};
@@ -19,8 +20,8 @@ use reflex_dispatcher::{
 };
 use reflex_interpreter::{
     compiler::{
-        create_main_function, Compile, Compiler, CompilerMode, CompilerOptions, Instruction,
-        Program,
+        create_main_function, Compile, CompiledProgram, Compiler, CompilerMode, CompilerOptions,
+        Instruction, Program,
     },
     execute, DefaultInterpreterCache, InterpreterOptions, MutableInterpreterCache,
 };
@@ -100,7 +101,7 @@ where
     pub invalidation_strategy: QueryInvalidationStrategy,
     pub compiler_options: CompilerOptions,
     pub interpreter_options: InterpreterOptions,
-    pub graph_root: Arc<(Program, InstructionPointer)>,
+    pub graph_root: Arc<(CompiledProgram, InstructionPointer)>,
     pub factory: TFactory,
     pub allocator: TAllocator,
     pub metric_names: BytecodeWorkerMetricNames,
@@ -151,7 +152,7 @@ where
     TAllocator: AsyncHeapAllocator<T>,
 {
     pub cache_id: HashId,
-    pub graph_root: (Program, InstructionPointer),
+    pub graph_root: (CompiledProgram, InstructionPointer),
     pub interpreter_options: InterpreterOptions,
     pub invalidation_strategy: QueryInvalidationStrategy,
     pub factory: TFactory,
@@ -261,6 +262,7 @@ where
                 .map(|(state_token, value)| (*state_token, value.clone())),
         );
         let (program, entry_point) = &self.graph_root;
+
         let state_id = state_index.map(|value| value.into()).unwrap_or(0);
         let start_time = Instant::now();
         let result = execute(
@@ -504,14 +506,21 @@ fn compile_graphql_query<
 >(
     query: &T,
     operation_id: &impl Hash,
-    graph_root: &(Program, InstructionPointer),
+    graph_root: &(CompiledProgram, InstructionPointer),
     evaluation_mode: QueryEvaluationMode,
     compiler_options: &CompilerOptions,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> Result<(Program, InstructionPointer), String> {
+) -> Result<(CompiledProgram, InstructionPointer), String> {
+    // Here 'graph root' refers to the previously-compiled graph root factory bytecode
+    // The address will be the instruction offset of a a zero-argument 'factory' function that returns the graph root
+    // The incoming graphql query will be compiled into a one-argument function that takes the graph root as its argument
+    // and performs a nested traversal of that object to build up the result of the query.
     let (graph_factory, graph_factory_address) = graph_root;
-    let mut program = Compiler::new(*compiler_options, Some(graph_factory.clone())).compile(
+    let CompiledProgram {
+        mut instructions,
+        data_section,
+    } = Compiler::new(*compiler_options, Some(graph_factory.clone())).compile(
         query,
         CompilerMode::Function,
         factory,
@@ -519,21 +528,33 @@ fn compile_graphql_query<
     )?;
     match evaluation_mode {
         QueryEvaluationMode::Query => {
-            let entry_point = InstructionPointer::new(program.len());
-            let query_factory_address = InstructionPointer::new(graph_factory.len());
+            let entry_point = InstructionPointer::new(instructions.len());
+            let query_factory_address = InstructionPointer::new(graph_factory.instructions.len());
             let graph_factory_address = *graph_factory_address;
-            let graph_factory_hash = get_compiled_function_hash(graph_factory_address, &program)?;
-            let query_factory_hash = get_compiled_function_hash(query_factory_address, &program)?;
-            program.extend(create_query_entry_point_function(
+            let graph_factory_hash =
+                get_compiled_function_hash(graph_factory_address, &instructions)?;
+            let query_factory_hash =
+                get_compiled_function_hash(query_factory_address, &instructions)?;
+            instructions.extend(create_query_entry_point_function(
                 (graph_factory_address, graph_factory_hash),
                 (query_factory_address, query_factory_hash),
                 operation_id,
             ));
-            Ok((program, entry_point))
+            Ok((
+                CompiledProgram {
+                    instructions,
+                    data_section,
+                },
+                entry_point,
+            ))
         }
-        QueryEvaluationMode::Standalone => {
-            Ok((program, InstructionPointer::new(graph_factory.len())))
-        }
+        QueryEvaluationMode::Standalone => Ok((
+            CompiledProgram {
+                instructions,
+                data_section,
+            },
+            InstructionPointer::new(graph_factory.instructions.len()),
+        )),
     }
 }
 
@@ -566,8 +587,8 @@ fn create_query_entry_point_function(
     ])
 }
 
-fn create_compiler_error_program(message: String) -> (Program, InstructionPointer) {
-    let program = create_main_function([
+fn create_compiler_error_program(message: String) -> (CompiledProgram, InstructionPointer) {
+    let instructions = create_main_function([
         Instruction::PushString { value: message },
         Instruction::ConstructCondition {
             signal_type: SignalType::Error,
@@ -576,7 +597,13 @@ fn create_compiler_error_program(message: String) -> (Program, InstructionPointe
         Instruction::Return,
     ]);
     let entry_point = InstructionPointer::default();
-    (program, entry_point)
+    (
+        CompiledProgram {
+            instructions,
+            data_section: Default::default(),
+        },
+        entry_point,
+    )
 }
 
 fn get_compiled_function_hash(

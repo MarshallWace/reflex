@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Jordan Hall <j.hall@mwam.com> https://github.com/j-hall-mwam
 use std::{convert::Infallible, iter::once, sync::Arc};
 
 use futures::{future, stream, Future, FutureExt, Sink, SinkExt, Stream, StreamExt};
@@ -29,7 +30,7 @@ use reflex_graphql::{
     GraphQlOperation, GraphQlSchema,
 };
 use reflex_interpreter::{
-    compiler::{Compile, CompilerOptions, Program},
+    compiler::{Compile, CompiledProgram, CompilerOptions},
     InterpreterOptions,
 };
 use reflex_json::JsonValue;
@@ -114,7 +115,7 @@ pub struct GraphQlWebServer<TAction: Action + Send + 'static> {
 }
 impl<TAction: Action + Send + 'static> GraphQlWebServer<TAction> {
     pub fn new<T, TFactory>(
-        graph_root: (Program, InstructionPointer),
+        graph_root: (CompiledProgram, InstructionPointer),
         schema: Option<GraphQlSchema>,
         actor: impl Actor<TAction, State = impl Send + 'static> + Send + 'static,
         middleware: SchedulerMiddleware<

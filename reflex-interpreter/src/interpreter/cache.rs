@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
+// SPDX-FileContributor: Jordan Hall <j.hall@mwam.com> https://github.com/j-hall-mwam
 use std::{
     collections::{hash_map::Entry, HashMap, VecDeque},
     iter::{once, FromIterator},
@@ -279,6 +280,14 @@ pub struct LocalCacheEntries<T: Expression> {
     state_hash: HashId,
     entries: HashMap<HashId, InterpreterCacheEntry<T>>,
 }
+impl<T: Expression> Default for LocalCacheEntries<T> {
+    fn default() -> Self {
+        Self {
+            state_hash: Default::default(),
+            entries: Default::default(),
+        }
+    }
+}
 impl<T: Expression> LocalCacheEntries<T> {
     pub fn new(state: &impl DynamicState<T>) -> Self {
         Self {
@@ -346,6 +355,14 @@ impl<T: Expression> MutableInterpreterCache<T> for LocalCacheEntries<T> {
 pub(crate) struct MultithreadedCacheEntries<'a, T: Expression> {
     parent: Option<&'a MultithreadedCacheEntries<'a, T>>,
     entries: LocalCacheEntries<T>,
+}
+impl<'a, T: Expression> Default for MultithreadedCacheEntries<'a, T> {
+    fn default() -> Self {
+        Self {
+            parent: Default::default(),
+            entries: Default::default(),
+        }
+    }
 }
 impl<'a, T: Expression> MultithreadedCacheEntries<'a, T> {
     pub(crate) fn new(state: &impl DynamicState<T>) -> Self {

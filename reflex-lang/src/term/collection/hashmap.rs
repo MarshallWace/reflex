@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Jordan Hall <j.hall@mwam.com> https://github.com/j-hall-mwam
 use std::{
     collections::{HashMap, HashSet},
     hash::Hash,
@@ -12,9 +13,9 @@ use serde::{Deserialize, Serialize};
 use reflex::{
     core::{
         build_hashmap_lookup_table, transform_expression_list, CompoundNode, DependencyList,
-        DynamicState, EvaluationCache, Expression, ExpressionFactory, ExpressionListSlice,
-        ExpressionListType, GraphNode, HashmapTermType, HeapAllocator, Rewritable, SerializeJson,
-        StackOffset, Substitutions, TermHash,
+        DynamicState, Eagerness, EvaluationCache, Expression, ExpressionFactory,
+        ExpressionListSlice, ExpressionListType, GraphNode, HashmapTermType, HeapAllocator,
+        Internable, Rewritable, SerializeJson, StackOffset, Substitutions, TermHash,
     },
     hash::HashId,
 };
@@ -261,6 +262,13 @@ impl<T: Expression + Rewritable<T>> Rewritable<T> for HashMapTerm<T> {
         ))
     }
 }
+
+impl<T: Expression> Internable for HashMapTerm<T> {
+    fn should_intern(&self, _eager: Eagerness) -> bool {
+        self.capture_depth() == 0
+    }
+}
+
 impl<T: Expression> std::fmt::Display for HashMapTerm<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let max_displayed_entries = 10;

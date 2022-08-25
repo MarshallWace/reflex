@@ -1,14 +1,15 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Jordan Hall <j.hall@mwam.com> https://github.com/j-hall-mwam
 use std::{collections::HashSet, iter::once};
 
 use serde::{Deserialize, Serialize};
 
 use reflex::core::{
-    ConditionType, DependencyList, DynamicState, EffectTermType, Evaluate, EvaluationCache, EvaluationResult,
-    Expression, ExpressionFactory, GraphNode, HeapAllocator, Rewritable, SerializeJson,
-    StackOffset, Substitutions, TermHash,
+    ConditionType, DependencyList, DynamicState, Eagerness, EffectTermType, Evaluate,
+    EvaluationCache, EvaluationResult, Expression, ExpressionFactory, GraphNode, HeapAllocator,
+    Internable, Rewritable, SerializeJson, StackOffset, Substitutions, TermHash,
 };
 
 #[derive(Hash, Eq, PartialEq, Clone, Debug, Serialize, Deserialize)]
@@ -106,6 +107,13 @@ impl<T: Expression + Rewritable<T>> Rewritable<T> for EffectTerm<T> {
         None
     }
 }
+
+impl<T: Expression> Internable for EffectTerm<T> {
+    fn should_intern(&self, _eager: Eagerness) -> bool {
+        false
+    }
+}
+
 impl<T: Expression> std::fmt::Display for EffectTerm<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "<effect:{}>", self.condition)

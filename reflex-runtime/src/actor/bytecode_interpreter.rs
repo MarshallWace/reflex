@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Jordan Hall <j.hall@mwam.com> https://github.com/j-hall-mwam
 use std::{
     collections::{hash_map::Entry, HashMap},
     iter::once,
@@ -17,7 +18,7 @@ use reflex_dispatcher::{
     ProcessId, StateOperation, StateTransition,
 };
 use reflex_interpreter::{
-    compiler::{Compile, CompilerOptions, Program},
+    compiler::{Compile, CompiledProgram, CompilerOptions},
     InterpreterOptions,
 };
 
@@ -60,7 +61,7 @@ where
     TFactory: AsyncExpressionFactory<T>,
     TAllocator: AsyncHeapAllocator<T>,
 {
-    graph_root: Arc<(Program, InstructionPointer)>,
+    graph_root: Arc<(CompiledProgram, InstructionPointer)>,
     compiler_options: CompilerOptions,
     interpreter_options: InterpreterOptions,
     factory: TFactory,
@@ -75,7 +76,7 @@ where
     TAllocator: AsyncHeapAllocator<T>,
 {
     pub fn new(
-        graph_root: (Program, InstructionPointer),
+        graph_root: (CompiledProgram, InstructionPointer),
         compiler_options: CompilerOptions,
         interpreter_options: InterpreterOptions,
         factory: TFactory,

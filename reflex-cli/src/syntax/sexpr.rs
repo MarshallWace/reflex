@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Jordan Hall <j.hall@mwam.com> https://github.com/j-hall-mwam
 use std::path::Path;
 
 use anyhow::{anyhow, Context, Result};
@@ -8,7 +9,7 @@ use reflex::core::{
     Applicable, Expression, ExpressionFactory, HeapAllocator, InstructionPointer, Reducible,
     Rewritable,
 };
-use reflex_interpreter::compiler::{Compile, CompilerMode, CompilerOptions, Program};
+use reflex_interpreter::compiler::{Compile, CompiledProgram, CompilerMode, CompilerOptions};
 use reflex_stdlib::Stdlib;
 
 use crate::{compile_graph_root, SyntaxParser};
@@ -35,7 +36,7 @@ pub fn compile_sexpr_entry_point<
     compiler_options: &CompilerOptions,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> Result<(Program, InstructionPointer)>
+) -> Result<(CompiledProgram, InstructionPointer)>
 where
     T::Builtin: From<Stdlib>,
 {

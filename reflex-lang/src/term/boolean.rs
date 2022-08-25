@@ -1,12 +1,14 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Jordan Hall <j.hall@mwam.com> https://github.com/j-hall-mwam
 use std::collections::HashSet;
 
 use serde::{Deserialize, Serialize};
 
 use reflex::core::{
-    BooleanTermType, DependencyList, GraphNode, SerializeJson, StackOffset, TermHash,
+    BooleanTermType, DependencyList, Eagerness, GraphNode, Internable, SerializeJson, StackOffset,
+    TermHash,
 };
 
 #[derive(PartialEq, Eq, Clone, Copy, Serialize, Deserialize, Hash)]
@@ -50,6 +52,13 @@ impl GraphNode for BooleanTerm {
         false
     }
 }
+
+impl Internable for BooleanTerm {
+    fn should_intern(&self, _eager: Eagerness) -> bool {
+        true
+    }
+}
+
 impl std::fmt::Display for BooleanTerm {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.value)

@@ -1,14 +1,15 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Jordan Hall <j.hall@mwam.com> https://github.com/j-hall-mwam
 use std::collections::HashSet;
 
 use serde::{Deserialize, Serialize};
 
 use reflex::core::{
-    Applicable, Arity, ConstructorTermType, DependencyList, EvaluationCache, Expression,
-    ExpressionFactory, ExpressionListType, GraphNode, HeapAllocator, SerializeJson, StackOffset,
-    StructPrototypeType, TermHash,
+    Applicable, Arity, ConstructorTermType, DependencyList, Eagerness, EvaluationCache, Expression,
+    ExpressionFactory, ExpressionListType, GraphNode, HeapAllocator, Internable, SerializeJson,
+    StackOffset, StructPrototypeType, TermHash,
 };
 
 #[derive(Hash, Eq, PartialEq, Clone, Debug, Serialize, Deserialize)]
@@ -72,6 +73,13 @@ impl<T: Expression> Applicable<T> for ConstructorTerm<T> {
         false
     }
 }
+
+impl<T: Expression> Internable for ConstructorTerm<T> {
+    fn should_intern(&self, _eager: Eagerness) -> bool {
+        true
+    }
+}
+
 impl<T: Expression> std::fmt::Display for ConstructorTerm<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(

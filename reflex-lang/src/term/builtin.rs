@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Jordan Hall <j.hall@mwam.com> https://github.com/j-hall-mwam
 use std::{collections::HashSet, convert::TryInto, fmt::Formatter, marker::PhantomData};
 
 use serde::{
@@ -8,10 +9,10 @@ use serde::{
     Deserializer, Serializer,
 };
 
-use reflex::core::Uuid;
 use reflex::core::{
-    Applicable, Arity, Builtin, BuiltinTermType, DependencyList, EvaluationCache, Expression,
-    ExpressionFactory, GraphNode, HeapAllocator, SerializeJson, StackOffset, TermHash, Uid,
+    Applicable, Arity, Builtin, BuiltinTermType, DependencyList, Eagerness, EvaluationCache,
+    Expression, ExpressionFactory, GraphNode, HeapAllocator, Internable, SerializeJson,
+    StackOffset, TermHash, Uid, Uuid,
 };
 
 #[derive(Hash, Eq, PartialEq, Clone, Copy, Debug)]
@@ -79,6 +80,13 @@ impl<T: Expression + Applicable<T>> Applicable<T> for BuiltinTerm<T::Builtin> {
         self.target.should_parallelize(args)
     }
 }
+
+impl<TBuiltin: Builtin> Internable for BuiltinTerm<TBuiltin> {
+    fn should_intern(&self, _eager: Eagerness) -> bool {
+        true
+    }
+}
+
 impl<TBuiltin: Builtin> std::fmt::Display for BuiltinTerm<TBuiltin> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         std::fmt::Display::fmt(&self.target, f)

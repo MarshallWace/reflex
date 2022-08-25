@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Jordan Hall <j.hall@mwam.com> https://github.com/j-hall-mwam
 use std::{iter::empty, path::Path};
 
 use anyhow::{anyhow, Context, Result};
@@ -14,7 +15,7 @@ use reflex::{
 use reflex_handlers::{
     imports::handler_imports, loader::graphql_loader, stdlib::Stdlib as HandlersStdlib,
 };
-use reflex_interpreter::compiler::{Compile, CompilerMode, CompilerOptions, Program};
+use reflex_interpreter::compiler::{Compile, CompiledProgram, CompilerMode, CompilerOptions};
 use reflex_js::{
     builtin_imports, compose_module_loaders, create_js_env, create_module_loader, parse_module,
     static_module_loader, stdlib::Stdlib as JsStdlib,
@@ -89,7 +90,7 @@ pub fn compile_js_entry_point<T: Expression + Rewritable<T> + Reducible<T> + 'st
     compiler_options: &CompilerOptions,
     factory: &(impl ExpressionFactory<T> + Clone + 'static),
     allocator: &(impl HeapAllocator<T> + Clone + 'static),
-) -> Result<(Program, InstructionPointer)>
+) -> Result<(CompiledProgram, InstructionPointer)>
 where
     T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
     T::Builtin: From<Stdlib> + From<JsonStdlib> + From<JsStdlib>,

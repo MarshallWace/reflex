@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Jordan Hall <j.hall@mwam.com> https://github.com/j-hall-mwam
 #![feature(test)]
 extern crate test;
 
@@ -11,7 +12,10 @@ use reflex::{
     core::{evaluate, ExpressionFactory, HeapAllocator, InstructionPointer, StateCache, Uid},
 };
 use reflex_interpreter::{
-    compiler::{hash_program_root, Compiler, CompilerMode, CompilerOptions, Instruction, Program},
+    compiler::{
+        hash_compiled_program, CompiledProgram, Compiler, CompilerMode, CompilerOptions,
+        Instruction, Program,
+    },
     execute, DefaultInterpreterCache, InterpreterOptions,
 };
 use reflex_lang::{allocator::DefaultAllocator, SharedTermFactory};
@@ -62,9 +66,13 @@ fn nested_expressions_bytecode(b: &mut Bencher) {
         Instruction::Squash { depth: 1 },
         Instruction::Return,
     ]);
+    let program = CompiledProgram {
+        instructions: program,
+        data_section: Default::default(),
+    };
     let entry_point = InstructionPointer::default();
     let options = InterpreterOptions::default();
-    let cache_key = hash_program_root(&program, &entry_point);
+    let cache_key = hash_compiled_program(&program, &entry_point);
     let state = StateCache::default();
     let state_id = 0;
     let mut cache = DefaultInterpreterCache::default();
@@ -94,7 +102,7 @@ fn nested_expressions_compiled(b: &mut Bencher) {
     let entry_point = InstructionPointer::default();
     let mut cache = DefaultInterpreterCache::default();
     let options = InterpreterOptions::default();
-    let cache_key = hash_program_root(&program, &entry_point);
+    let cache_key = hash_compiled_program(&program, &entry_point);
     let state = StateCache::default();
     let state_id = 0;
     b.iter(|| {

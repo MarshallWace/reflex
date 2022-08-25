@@ -1,13 +1,14 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Jordan Hall <j.hall@mwam.com> https://github.com/j-hall-mwam
 use std::collections::HashSet;
 
 use serde::{Deserialize, Serialize};
 
 use reflex::core::{
-    ConditionListType, DependencyList, Expression, GraphNode, SerializeJson, SignalTermType,
-    StackOffset, TermHash,
+    ConditionListType, DependencyList, Eagerness, Expression, GraphNode, Internable, SerializeJson,
+    SignalTermType, StackOffset, TermHash,
 };
 
 #[derive(Hash, Eq, PartialEq, Clone, Debug, Serialize, Deserialize)]
@@ -51,6 +52,13 @@ impl<T: Expression> GraphNode for SignalTerm<T> {
         false
     }
 }
+
+impl<T: Expression> Internable for SignalTerm<T> {
+    fn should_intern(&self, _eager: Eagerness) -> bool {
+        true
+    }
+}
+
 impl<T: Expression> std::fmt::Display for SignalTerm<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(

@@ -1,19 +1,19 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Jordan Hall <j.hall@mwam.com> https://github.com/j-hall-mwam
 use std::iter::{empty, once};
 
 use reflex::{
     cache::NoopCache,
     core::{
         Applicable, ApplicationTermType, ArgType, Arity, BooleanTermType, Builtin, BuiltinTermType,
-        CompiledFunctionTermType, ConditionListType, ConditionType, ConstructorTermType,
+        CompiledFunctionTermType, ConditionListType, ConditionType, ConstructorTermType, Eagerness,
         EffectTermType, Expression, ExpressionFactory, ExpressionListType, FloatTermType,
         HashmapTermType, HashsetTermType, HeapAllocator, InstructionPointer, IntTermType,
         LambdaTermType, LetTermType, ListTermType, PartialApplicationTermType, RecordTermType,
         RecursiveTermType, Reducible, Rewritable, SignalTermType, StackOffset, StringTermType,
-        StringValue, StructPrototypeType, Substitutions, SymbolTermType, Uid, VarArgs,
-        VariableTermType,
+        StringValue, StructPrototypeType, Substitutions, SymbolTermType, Uid, VariableTermType,
     },
     hash::{hash_object, HashId},
 };
@@ -37,7 +37,7 @@ where
 {
     fn compile(
         &self,
-        eager: VarArgs,
+        eager: Eagerness,
         stack_offset: StackOffset,
         factory: &impl ExpressionFactory<TWrapper>,
         allocator: &impl HeapAllocator<TWrapper>,
@@ -55,7 +55,7 @@ where
 {
     fn compile(
         &self,
-        eager: VarArgs,
+        eager: Eagerness,
         stack_offset: StackOffset,
         factory: &impl ExpressionFactory<TWrapper>,
         allocator: &impl HeapAllocator<TWrapper>,
@@ -69,7 +69,7 @@ where
 impl<TBuiltin: Builtin> Compile<Self> for CachedSharedTerm<TBuiltin> {
     fn compile(
         &self,
-        eager: VarArgs,
+        eager: Eagerness,
         stack_offset: StackOffset,
         factory: &impl ExpressionFactory<Self>,
         allocator: &impl HeapAllocator<Self>,
@@ -85,7 +85,7 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>> 
 {
     fn compile(
         &self,
-        eager: VarArgs,
+        eager: Eagerness,
         stack_offset: StackOffset,
         factory: &impl ExpressionFactory<T>,
         allocator: &impl HeapAllocator<T>,
@@ -130,7 +130,7 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>> 
 impl<T: Expression + Applicable<T> + Compile<T>> Compile<T> for ApplicationTerm<T> {
     fn compile(
         &self,
-        eager: VarArgs,
+        eager: Eagerness,
         stack_offset: StackOffset,
         factory: &impl ExpressionFactory<T>,
         allocator: &impl HeapAllocator<T>,
@@ -139,28 +139,26 @@ impl<T: Expression + Applicable<T> + Compile<T>> Compile<T> for ApplicationTerm<
         let target = self.target();
         let args = self.args();
         let num_args = args.len();
-        let arity = match eager {
-            VarArgs::Eager => target.arity(),
-            VarArgs::Lazy => None,
-        }
-        .unwrap_or_else(|| Arity::lazy(num_args, 0, false));
         let compiled_target =
-            target.compile(eager, stack_offset + num_args, factory, allocator, compiler)?;
-        let compiled_args = compile_args(
-            args.iter().map(|arg| (arg, ArgType::Lazy)),
-            stack_offset,
-            factory,
-            allocator,
-            compiler,
-        )?;
+            compiler.compile_term(target, eager, stack_offset + num_args, factory, allocator)?;
         match eager {
-            VarArgs::Lazy => {
+            Eagerness::Lazy => {
+                let compiled_args = compile_args(
+                    args.iter().map(|arg| (arg, ArgType::Lazy)),
+                    stack_offset,
+                    factory,
+                    allocator,
+                    compiler,
+                )?;
                 let mut result = compiled_args;
                 result.extend(compiled_target);
                 result.push(Instruction::ConstructApplication { num_args });
                 Ok(result)
             }
-            VarArgs::Eager => {
+            Eagerness::Eager => {
+                let arity = target
+                    .arity()
+                    .unwrap_or_else(|| Arity::lazy(num_args, 0, false));
                 if num_args < arity.required().len() {
                     Err(format!(
                         "{}: expected {} {}, received {}",
@@ -176,8 +174,15 @@ impl<T: Expression + Applicable<T> + Compile<T>> Compile<T> for ApplicationTerm<
                         num_args,
                     ))
                 } else {
+                    let compiled_args = compile_args(
+                        args.iter().zip(arity.iter()),
+                        stack_offset,
+                        factory,
+                        allocator,
+                        compiler,
+                    )?;
                     if let Some((target_address, target_hash)) =
-                        match_compiled_function_result(&compiled_target)
+                        match_compiled_function_result(&compiled_target, compiler)
                     {
                         let mut result = compiled_args;
                         // TODO: jump to target if in tail position
@@ -205,7 +210,7 @@ impl<T: Expression + Applicable<T> + Compile<T>> Compile<T> for ApplicationTerm<
 impl<T: Expression + Compile<T>> Compile<T> for BooleanTerm {
     fn compile(
         &self,
-        _eager: VarArgs,
+        _eager: Eagerness,
         _stack_offset: StackOffset,
         _factory: &impl ExpressionFactory<T>,
         _allocator: &impl HeapAllocator<T>,
@@ -220,7 +225,7 @@ impl<T: Expression + Compile<T>> Compile<T> for BooleanTerm {
 impl<T: Expression> Compile<T> for BuiltinTerm<T::Builtin> {
     fn compile(
         &self,
-        _eager: VarArgs,
+        _eager: Eagerness,
         _stack_offset: StackOffset,
         _factory: &impl ExpressionFactory<T>,
         _allocator: &impl HeapAllocator<T>,
@@ -235,7 +240,7 @@ impl<T: Expression> Compile<T> for BuiltinTerm<T::Builtin> {
 impl<T: Expression + Compile<T>> Compile<T> for CompiledFunctionTerm {
     fn compile(
         &self,
-        _eager: VarArgs,
+        _eager: Eagerness,
         _stack_offset: StackOffset,
         _factory: &impl ExpressionFactory<T>,
         _allocator: &impl HeapAllocator<T>,
@@ -251,33 +256,33 @@ impl<T: Expression + Compile<T>> Compile<T> for CompiledFunctionTerm {
 impl<T: Expression + Compile<T>> Compile<T> for ConstructorTerm<T> {
     fn compile(
         &self,
-        _eager: VarArgs,
+        _eager: Eagerness,
         stack_offset: StackOffset,
         factory: &impl ExpressionFactory<T>,
         allocator: &impl HeapAllocator<T>,
         compiler: &mut Compiler,
     ) -> Result<Program, String> {
         let keys = self.prototype().keys();
-        compile_expressions(
+        let compiled_keys = compile_expressions(
             keys.iter(),
-            VarArgs::Lazy,
+            Eagerness::Eager,
             stack_offset,
             factory,
             allocator,
             compiler,
-        )
-        .map(|mut program| {
-            program.push(Instruction::ConstructList { size: keys.len() });
-            program.push(Instruction::PushConstructor);
-            program
-        })
+        )?;
+        let mut result = compiled_keys;
+        result.push(Instruction::ConstructConstructor {
+            num_fields: keys.len(),
+        });
+        Ok(result)
     }
 }
 
 impl<T: Expression + Compile<T>> Compile<T> for EffectTerm<T> {
     fn compile(
         &self,
-        _eager: VarArgs,
+        _eager: Eagerness,
         stack_offset: StackOffset,
         factory: &impl ExpressionFactory<T>,
         allocator: &impl HeapAllocator<T>,
@@ -294,14 +299,14 @@ impl<T: Expression + Compile<T>> Compile<T> for EffectTerm<T> {
 impl<T: Expression + Compile<T>> Compile<T> for FloatTerm {
     fn compile(
         &self,
-        _eager: VarArgs,
+        _eager: Eagerness,
         _stack_offset: StackOffset,
         _factory: &impl ExpressionFactory<T>,
         _allocator: &impl HeapAllocator<T>,
         _compiler: &mut Compiler,
     ) -> Result<Program, String> {
         Ok(Program::new(once(Instruction::PushFloat {
-            value: self.value(),
+            value: self.value().into(),
         })))
     }
 }
@@ -309,7 +314,7 @@ impl<T: Expression + Compile<T>> Compile<T> for FloatTerm {
 impl<T: Expression + Compile<T>> Compile<T> for HashMapTerm<T> {
     fn compile(
         &self,
-        _eager: VarArgs,
+        _eager: Eagerness,
         stack_offset: StackOffset,
         factory: &impl ExpressionFactory<T>,
         allocator: &impl HeapAllocator<T>,
@@ -320,7 +325,7 @@ impl<T: Expression + Compile<T>> Compile<T> for HashMapTerm<T> {
         let num_entries = keys.len();
         let keys_chunk = compile_expressions(
             keys,
-            VarArgs::Eager,
+            Eagerness::Eager,
             stack_offset,
             factory,
             allocator,
@@ -328,7 +333,7 @@ impl<T: Expression + Compile<T>> Compile<T> for HashMapTerm<T> {
         )?;
         let values_chunk = compile_expressions(
             values,
-            VarArgs::Lazy,
+            Eagerness::Lazy,
             stack_offset,
             factory,
             allocator,
@@ -344,7 +349,7 @@ impl<T: Expression + Compile<T>> Compile<T> for HashMapTerm<T> {
 impl<T: Expression + Compile<T>> Compile<T> for HashSetTerm<T> {
     fn compile(
         &self,
-        _eager: VarArgs,
+        _eager: Eagerness,
         stack_offset: StackOffset,
         factory: &impl ExpressionFactory<T>,
         allocator: &impl HeapAllocator<T>,
@@ -354,7 +359,7 @@ impl<T: Expression + Compile<T>> Compile<T> for HashSetTerm<T> {
         let num_values = values.len();
         compile_expressions(
             values,
-            VarArgs::Lazy,
+            Eagerness::Lazy,
             stack_offset,
             factory,
             allocator,
@@ -370,7 +375,7 @@ impl<T: Expression + Compile<T>> Compile<T> for HashSetTerm<T> {
 impl<T: Expression + Compile<T>> Compile<T> for IntTerm {
     fn compile(
         &self,
-        _eager: VarArgs,
+        _eager: Eagerness,
         _stack_offset: StackOffset,
         _factory: &impl ExpressionFactory<T>,
         _allocator: &impl HeapAllocator<T>,
@@ -385,7 +390,7 @@ impl<T: Expression + Compile<T>> Compile<T> for IntTerm {
 impl<T: Expression + Compile<T>> Compile<T> for LambdaTerm<T> {
     fn compile(
         &self,
-        _eager: VarArgs,
+        _eager: Eagerness,
         _stack_offset: StackOffset,
         factory: &impl ExpressionFactory<T>,
         allocator: &impl HeapAllocator<T>,
@@ -397,8 +402,7 @@ impl<T: Expression + Compile<T>> Compile<T> for LambdaTerm<T> {
             Some(address) => address,
             None => {
                 let compiled_body =
-                    self.body()
-                        .compile(VarArgs::Eager, 0, factory, allocator, compiler)?;
+                    compiler.compile_term(self.body(), Eagerness::Eager, 0, factory, allocator)?;
                 compiler.store_compiled_chunk(
                     hash,
                     Program::new(
@@ -428,15 +432,14 @@ impl<T: Expression + Compile<T>> Compile<T> for LambdaTerm<T> {
 impl<T: Expression + Rewritable<T> + Reducible<T> + Compile<T>> Compile<T> for LetTerm<T> {
     fn compile(
         &self,
-        eager: VarArgs,
+        eager: Eagerness,
         stack_offset: StackOffset,
         factory: &impl ExpressionFactory<T>,
         allocator: &impl HeapAllocator<T>,
         compiler: &mut Compiler,
     ) -> Result<Program, String> {
         let compiled_initializer =
-            self.initializer()
-                .compile(eager, stack_offset, factory, allocator, compiler)?;
+            compiler.compile_term(self.initializer(), eager, stack_offset, factory, allocator)?;
         let compiled_body = {
             // Expressions encountered as the (non-first) argument of a function application will have a stack_offset
             // greater than 0, indicating that any stack offsets within the expression will need to be shifted to
@@ -464,12 +467,12 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Compile<T>> Compile<T> for L
             } else {
                 None
             };
-            shifted_body.as_ref().unwrap_or(self.body()).compile(
+            compiler.compile_term(
+                shifted_body.as_ref().unwrap_or(self.body()),
                 eager,
                 inner_stack_offset,
                 factory,
                 allocator,
-                compiler,
             )
         }?;
         let mut program = compiled_initializer;
@@ -482,7 +485,7 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Compile<T>> Compile<T> for L
 impl<T: Expression + Compile<T>> Compile<T> for ListTerm<T> {
     fn compile(
         &self,
-        _eager: VarArgs,
+        _eager: Eagerness,
         stack_offset: StackOffset,
         factory: &impl ExpressionFactory<T>,
         allocator: &impl HeapAllocator<T>,
@@ -491,7 +494,7 @@ impl<T: Expression + Compile<T>> Compile<T> for ListTerm<T> {
         let items = self.items();
         compile_expressions(
             items.iter(),
-            VarArgs::Lazy,
+            Eagerness::Lazy,
             stack_offset,
             factory,
             allocator,
@@ -507,7 +510,7 @@ impl<T: Expression + Compile<T>> Compile<T> for ListTerm<T> {
 impl<T: Expression + Compile<T>> Compile<T> for NilTerm {
     fn compile(
         &self,
-        _eager: VarArgs,
+        _eager: Eagerness,
         _stack_offset: StackOffset,
         _factory: &impl ExpressionFactory<T>,
         _allocator: &impl HeapAllocator<T>,
@@ -520,7 +523,7 @@ impl<T: Expression + Compile<T>> Compile<T> for NilTerm {
 impl<T: Expression + Applicable<T> + Compile<T>> Compile<T> for PartialApplicationTerm<T> {
     fn compile(
         &self,
-        eager: VarArgs,
+        eager: Eagerness,
         stack_offset: StackOffset,
         factory: &impl ExpressionFactory<T>,
         allocator: &impl HeapAllocator<T>,
@@ -530,12 +533,12 @@ impl<T: Expression + Applicable<T> + Compile<T>> Compile<T> for PartialApplicati
         let args = self.args();
         let num_args = args.len();
         let arity = match eager {
-            VarArgs::Eager => target.arity(),
-            VarArgs::Lazy => None,
+            Eagerness::Eager => target.arity(),
+            Eagerness::Lazy => None,
         }
         .unwrap_or_else(|| Arity::lazy(num_args, 0, false));
         let compiled_target =
-            target.compile(eager, stack_offset + num_args, factory, allocator, compiler)?;
+            compiler.compile_term(target, eager, stack_offset + num_args, factory, allocator)?;
         let compiled_args = compile_args(
             args.iter().zip(arity.iter()),
             stack_offset,
@@ -553,15 +556,14 @@ impl<T: Expression + Applicable<T> + Compile<T>> Compile<T> for PartialApplicati
 impl<T: Expression + Compile<T>> Compile<T> for RecursiveTerm<T> {
     fn compile(
         &self,
-        eager: VarArgs,
+        eager: Eagerness,
         stack_offset: StackOffset,
         factory: &impl ExpressionFactory<T>,
         allocator: &impl HeapAllocator<T>,
         compiler: &mut Compiler,
     ) -> Result<Program, String> {
         let compiled_factory =
-            self.factory()
-                .compile(eager, stack_offset, factory, allocator, compiler)?;
+            compiler.compile_term(self.factory(), eager, stack_offset, factory, allocator)?;
         let mut result = compiled_factory;
         result.push(Instruction::PushLocal { offset: 0 });
         result.push(Instruction::Apply { num_args: 1 });
@@ -572,7 +574,7 @@ impl<T: Expression + Compile<T>> Compile<T> for RecursiveTerm<T> {
 impl<T: Expression + Rewritable<T> + Reducible<T> + Compile<T>> Compile<T> for SignalTerm<T> {
     fn compile(
         &self,
-        _eager: VarArgs,
+        _eager: Eagerness,
         stack_offset: StackOffset,
         factory: &impl ExpressionFactory<T>,
         allocator: &impl HeapAllocator<T>,
@@ -596,37 +598,40 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Compile<T>> Compile<T> for S
 impl<T: Expression + Rewritable<T> + Reducible<T> + Compile<T>> Compile<T> for RecordTerm<T> {
     fn compile(
         &self,
-        _eager: VarArgs,
+        _eager: Eagerness,
         stack_offset: StackOffset,
         factory: &impl ExpressionFactory<T>,
         allocator: &impl HeapAllocator<T>,
         compiler: &mut Compiler,
     ) -> Result<Program, String> {
-        let keys = self.prototype().keys();
-        let values = self.values();
-        compile_expressions(
-            values.iter().chain(keys.iter()),
-            VarArgs::Lazy,
+        let compiled_values = compile_expressions(
+            self.values().iter(),
+            Eagerness::Lazy,
             stack_offset,
             factory,
             allocator,
             compiler,
-        )
-        .map(|mut program| {
-            program.push(Instruction::ConstructList { size: keys.len() });
-            program.push(Instruction::PushConstructor);
-            program.push(Instruction::Apply {
-                num_args: values.len(),
-            });
-            program
-        })
+        )?;
+        let compiled_constructor = compiler.compile_term(
+            &factory.create_constructor_term(allocator.clone_struct_prototype(self.prototype())),
+            Eagerness::Eager,
+            self.values().len(),
+            factory,
+            allocator,
+        )?;
+        let mut result = compiled_values;
+        result.extend(compiled_constructor);
+        result.push(Instruction::Apply {
+            num_args: self.values().len(),
+        });
+        Ok(result)
     }
 }
 
 impl<T: Expression + Compile<T>> Compile<T> for StringTerm<T::String> {
     fn compile(
         &self,
-        _eager: VarArgs,
+        _eager: Eagerness,
         _stack_offset: StackOffset,
         _factory: &impl ExpressionFactory<T>,
         _allocator: &impl HeapAllocator<T>,
@@ -641,7 +646,7 @@ impl<T: Expression + Compile<T>> Compile<T> for StringTerm<T::String> {
 impl<T: Expression + Compile<T>> Compile<T> for SymbolTerm {
     fn compile(
         &self,
-        _eager: VarArgs,
+        _eager: Eagerness,
         _stack_offset: StackOffset,
         _factory: &impl ExpressionFactory<T>,
         _allocator: &impl HeapAllocator<T>,
@@ -656,7 +661,7 @@ impl<T: Expression + Compile<T>> Compile<T> for SymbolTerm {
 impl<T: Expression + Compile<T>> Compile<T> for VariableTerm {
     fn compile(
         &self,
-        _eager: VarArgs,
+        _eager: Eagerness,
         stack_offset: StackOffset,
         _factory: &impl ExpressionFactory<T>,
         _allocator: &impl HeapAllocator<T>,
@@ -679,15 +684,15 @@ fn compile_args<'a, T: Expression + Compile<T> + 'a>(
         Ok(Program::new(empty())),
         |program, (index, (arg, arg_type))| {
             let mut program = program?;
-            match arg.compile(
+            match compiler.compile_term(
+                arg,
                 match arg_type {
-                    ArgType::Eager | ArgType::Strict => VarArgs::Eager,
-                    ArgType::Lazy => VarArgs::Lazy,
+                    ArgType::Eager | ArgType::Strict => Eagerness::Eager,
+                    ArgType::Lazy => Eagerness::Lazy,
                 },
                 stack_offset + index,
                 factory,
                 allocator,
-                compiler,
             ) {
                 Err(error) => Err(error),
                 Ok(compiled_arg) => {
@@ -708,7 +713,7 @@ fn compile_signal<T: Expression + Compile<T>>(
 ) -> Result<Program, String> {
     let compiled_args = compile_expressions(
         signal.args().iter(),
-        VarArgs::Lazy,
+        Eagerness::Lazy,
         stack_offset,
         factory,
         allocator,
@@ -722,11 +727,17 @@ fn compile_signal<T: Expression + Compile<T>>(
     Ok(result)
 }
 
-fn match_compiled_function_result(program: &Program) -> Option<(InstructionPointer, HashId)> {
+fn match_compiled_function_result(
+    program: &Program,
+    compiler: &Compiler,
+) -> Option<(InstructionPointer, HashId)> {
     match program.instructions().first() {
         Some(&Instruction::PushFunction { target, hash }) if program.len() == 1 => {
             Some((target, hash))
         }
+        Some(&Instruction::LoadStaticData { offset }) => compiler
+            .get_data_section_item(offset)
+            .and_then(|instructions| match_compiled_function_result(instructions, compiler)),
         _ => None,
     }
 }
@@ -738,11 +749,112 @@ mod tests {
     use reflex_stdlib::Stdlib;
 
     use crate::{
-        compiler::{hash_program_root, Compiler, CompilerMode, CompilerOptions},
+        compiler::{
+            hash_compiled_program, CompiledProgram, Compiler, CompilerMode, CompilerOptions,
+        },
         execute, DefaultInterpreterCache, InterpreterOptions,
     };
 
     use super::*;
+
+    #[test]
+    fn constructor_interning() {
+        let factory = SharedTermFactory::<Stdlib>::default();
+        let allocator = DefaultAllocator::default();
+        let constructor = factory.create_constructor_term(allocator.create_struct_prototype(
+            allocator.create_triple(
+                factory.create_string_term(allocator.create_static_string("foo")),
+                factory.create_string_term(allocator.create_static_string("bar")),
+                factory.create_string_term(allocator.create_static_string("baz")),
+            ),
+        ));
+        let expression = factory.create_application_term(
+            constructor.clone(),
+            allocator.create_triple(
+                factory.create_int_term(3),
+                factory.create_int_term(4),
+                factory.create_int_term(5),
+            ),
+        );
+        let program = Compiler::new(
+            CompilerOptions {
+                inline_static_data: true,
+                ..CompilerOptions::unoptimized()
+            },
+            None,
+        )
+        .compile(&expression, CompilerMode::Expression, &factory, &allocator)
+        .unwrap();
+        assert_eq!(
+            program,
+            CompiledProgram {
+                instructions: Program::new([
+                    Instruction::LoadStaticData { offset: 4 },
+                    Instruction::LoadStaticData { offset: 5 },
+                    Instruction::LoadStaticData { offset: 6 },
+                    Instruction::LoadStaticData { offset: 3 },
+                    Instruction::Apply { num_args: 3 }
+                ]),
+                data_section: vec![
+                    (
+                        factory
+                            .create_string_term(allocator.create_static_string("foo"))
+                            .id(),
+                        Program::new([
+                            Instruction::PushString {
+                                value: String::from("foo")
+                            },
+                            Instruction::Return
+                        ])
+                    ),
+                    (
+                        factory
+                            .create_string_term(allocator.create_static_string("bar"))
+                            .id(),
+                        Program::new([
+                            Instruction::PushString {
+                                value: String::from("bar")
+                            },
+                            Instruction::Return
+                        ])
+                    ),
+                    (
+                        factory
+                            .create_string_term(allocator.create_static_string("baz"))
+                            .id(),
+                        Program::new([
+                            Instruction::PushString {
+                                value: String::from("baz")
+                            },
+                            Instruction::Return
+                        ])
+                    ),
+                    (
+                        constructor.id(),
+                        Program::new([
+                            Instruction::LoadStaticData { offset: 0 },
+                            Instruction::LoadStaticData { offset: 1 },
+                            Instruction::LoadStaticData { offset: 2 },
+                            Instruction::ConstructConstructor { num_fields: 3 },
+                            Instruction::Return
+                        ])
+                    ),
+                    (
+                        factory.create_int_term(3).id(),
+                        Program::new([Instruction::PushInt { value: 3 }, Instruction::Return])
+                    ),
+                    (
+                        factory.create_int_term(4).id(),
+                        Program::new([Instruction::PushInt { value: 4 }, Instruction::Return])
+                    ),
+                    (
+                        factory.create_int_term(5).id(),
+                        Program::new([Instruction::PushInt { value: 5 }, Instruction::Return])
+                    ),
+                ],
+            }
+        );
+    }
 
     #[test]
     fn compiled_let_expression_scoping() {
@@ -765,7 +877,7 @@ mod tests {
             .compile(&expression, CompilerMode::Function, &factory, &allocator)
             .unwrap();
         let entry_point = InstructionPointer::default();
-        let cache_key = hash_program_root(&program, &entry_point);
+        let cache_key = hash_compiled_program(&program, &entry_point);
         let state = StateCache::default();
         let state_id = 0;
         let (result, _) = execute(
@@ -802,7 +914,7 @@ mod tests {
             .compile(&expression, CompilerMode::Function, &factory, &allocator)
             .unwrap();
         let entry_point = InstructionPointer::default();
-        let cache_key = hash_program_root(&program, &entry_point);
+        let cache_key = hash_compiled_program(&program, &entry_point);
         let state = StateCache::default();
         let state_id = 0;
         let (result, _) = execute(
@@ -846,7 +958,7 @@ mod tests {
             .compile(&expression, CompilerMode::Function, &factory, &allocator)
             .unwrap();
         let entry_point = InstructionPointer::default();
-        let cache_key = hash_program_root(&program, &entry_point);
+        let cache_key = hash_compiled_program(&program, &entry_point);
         let state = StateCache::default();
         let state_id = 0;
         let (result, _) = execute(
@@ -886,7 +998,7 @@ mod tests {
             .compile(&expression, CompilerMode::Function, &factory, &allocator)
             .unwrap();
         let entry_point = InstructionPointer::default();
-        let cache_key = hash_program_root(&program, &entry_point);
+        let cache_key = hash_compiled_program(&program, &entry_point);
         let state = StateCache::default();
         let state_id = 0;
         let (result, _) = execute(

@@ -1,11 +1,15 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Jordan Hall <j.hall@mwam.com> https://github.com/j-hall-mwam
 use std::collections::HashSet;
 
 use serde::{Deserialize, Serialize};
 
-use reflex::core::{DependencyList, GraphNode, NilTermType, SerializeJson, StackOffset, TermHash};
+use reflex::core::{
+    DependencyList, Eagerness, GraphNode, Internable, NilTermType, SerializeJson, StackOffset,
+    TermHash,
+};
 
 #[derive(PartialEq, Eq, Clone, Copy, Serialize, Deserialize, Hash)]
 pub struct NilTerm;
@@ -37,6 +41,13 @@ impl GraphNode for NilTerm {
         false
     }
 }
+
+impl Internable for NilTerm {
+    fn should_intern(&self, _eager: Eagerness) -> bool {
+        true
+    }
+}
+
 impl std::fmt::Display for NilTerm {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "null")

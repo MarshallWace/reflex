@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Jordan Hall <j.hall@mwam.com> https://github.com/j-hall-mwam
 #![feature(test)]
 extern crate test;
 
@@ -9,7 +10,7 @@ use reflex::{
     core::{evaluate, InstructionPointer, StateCache},
 };
 use reflex_interpreter::{
-    compiler::{hash_program_root, Compiler, CompilerMode, CompilerOptions},
+    compiler::{hash_compiled_program, Compiler, CompilerMode, CompilerOptions},
     execute, DefaultInterpreterCache, InterpreterOptions,
 };
 use reflex_js::{builtins::JsBuiltins, parse, Env};
@@ -47,6 +48,7 @@ fn js_compiled(b: &mut Bencher) {
         CompilerOptions {
             debug: false,
             hoist_free_variables: true,
+            inline_static_data: true,
             normalize: false,
         },
         None,
@@ -59,7 +61,7 @@ fn js_compiled(b: &mut Bencher) {
     b.iter(|| {
         let mut cache = DefaultInterpreterCache::default();
         let entry_point = InstructionPointer::default();
-        let cache_key = hash_program_root(&program, &entry_point);
+        let cache_key = hash_compiled_program(&program, &entry_point);
         execute(
             cache_key,
             &program,

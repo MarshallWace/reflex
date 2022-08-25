@@ -1,13 +1,14 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Jordan Hall <j.hall@mwam.com> https://github.com/j-hall-mwam
 use std::collections::HashSet;
 
 use serde::{Deserialize, Serialize};
 
 use reflex::core::{
-    as_integer, DependencyList, FloatTermType, FloatValue, GraphNode, SerializeJson, StackOffset,
-    TermHash,
+    as_integer, DependencyList, Eagerness, FloatTermType, FloatValue, GraphNode, Internable,
+    SerializeJson, StackOffset, TermHash,
 };
 
 #[derive(PartialEq, Clone, Copy, Serialize, Deserialize)]
@@ -57,6 +58,13 @@ impl GraphNode for FloatTerm {
         false
     }
 }
+
+impl Internable for FloatTerm {
+    fn should_intern(&self, _eager: Eagerness) -> bool {
+        true
+    }
+}
+
 impl std::fmt::Display for FloatTerm {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match as_integer(self.value) {

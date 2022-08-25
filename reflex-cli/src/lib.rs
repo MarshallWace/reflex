@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
+// SPDX-FileContributor: Jordan Hall <j.hall@mwam.com> https://github.com/j-hall-mwam
 use std::{path::Path, str::FromStr};
 
 use anyhow::{anyhow, Result};
@@ -11,7 +12,9 @@ use reflex::core::{
     SignalType, StringTermType, StringValue,
 };
 use reflex_handlers::stdlib::Stdlib as HandlersStdlib;
-use reflex_interpreter::compiler::{Compile, Compiler, CompilerMode, CompilerOptions, Program};
+use reflex_interpreter::compiler::{
+    Compile, CompiledProgram, Compiler, CompilerMode, CompilerOptions,
+};
 use reflex_js::stdlib::Stdlib as JsStdlib;
 use reflex_json::stdlib::Stdlib as JsonStdlib;
 use reflex_stdlib::Stdlib;
@@ -112,7 +115,7 @@ pub fn compile_entry_point<T, TLoader>(
     compiler_options: &CompilerOptions,
     factory: &(impl ExpressionFactory<T> + Clone + 'static),
     allocator: &(impl HeapAllocator<T> + Clone + 'static),
-) -> Result<(Program, InstructionPointer)>
+) -> Result<(CompiledProgram, InstructionPointer)>
 where
     T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T> + 'static,
     T::Builtin: From<Stdlib> + From<JsonStdlib> + From<JsStdlib>,
@@ -138,7 +141,7 @@ fn compile_graph_root<T: Expression + Rewritable<T> + Reducible<T> + Applicable<
     allocator: &impl HeapAllocator<T>,
     compiler_options: &CompilerOptions,
     compiler_mode: CompilerMode,
-) -> Result<(Program, InstructionPointer)> {
+) -> Result<(CompiledProgram, InstructionPointer)> {
     let program = Compiler::new(*compiler_options, None)
         .compile(&expression, compiler_mode, factory, allocator)
         .map_err(|err| anyhow!("{}", err))?;
