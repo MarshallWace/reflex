@@ -110,7 +110,7 @@ pub fn apply_graphql_query_transform(
 }
 
 pub fn register_opentelemetry_error_logger<TAction>(
-    logger: impl ActionLogger<Action = TAction> + Send + Sync + 'static,
+    logger: impl ActionLogger<Action = TAction> + Send + 'static,
 ) -> Result<(), OpenTelemetryMiddlewareErrorAction>
 where
     TAction: Action + OutboundAction<OpenTelemetryMiddlewareErrorAction>,

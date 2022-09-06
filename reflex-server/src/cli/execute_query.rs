@@ -71,8 +71,8 @@ where
         + serde::Serialize
         + serde::Deserialize<'de>,
     T::Builtin: From<Stdlib> + From<JsonStdlib> + From<JsStdlib> + From<GraphQlStdlib>,
-    TFactory: AsyncExpressionFactory<T> + Sync,
-    TAllocator: AsyncHeapAllocator<T> + Sync,
+    TFactory: AsyncExpressionFactory<T>,
+    TAllocator: AsyncHeapAllocator<T>,
     THttpMiddleware: HttpMiddleware<THttpPre, THttpPost>,
     THttpPre: Future<Output = Request<Body>>,
     THttpPost: Future<Output = Response<Body>>,
