@@ -9,7 +9,7 @@ use metrics::{
 };
 use reflex::core::{
     ConditionListType, ConditionType, EvaluationResult, Expression, ExpressionFactory,
-    HeapAllocator, SignalTermType, SignalType, Uuid,
+    HeapAllocator, RefType, SignalTermType, SignalType, Uuid,
 };
 use reflex_dispatcher::{
     Action, Actor, ActorTransition, HandlerContext, InboundAction, MessageData, OutboundAction,
@@ -655,7 +655,9 @@ fn is_error_result_payload<T: Expression>(
         .match_signal_term(expression)
         .map(|term| {
             term.signals()
+                .as_deref()
                 .iter()
+                .map(|item| item.as_deref())
                 .any(|effect| matches!(effect.signal_type(), SignalType::Error))
         })
         .unwrap_or(false)

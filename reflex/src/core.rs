@@ -8,6 +8,7 @@ use std::{
     convert::TryFrom,
     hash::{Hash, Hasher},
     iter::{once, repeat, FromIterator},
+    marker::PhantomData,
     rc::Rc,
     sync::Arc,
 };
@@ -71,126 +72,173 @@ impl std::fmt::Debug for InstructionPointer {
 
 pub trait TermHash: std::hash::Hash {}
 
-pub trait NilTermType: TermHash {}
-pub trait BooleanTermType: TermHash {
+pub trait NilTermType {}
+pub trait BooleanTermType {
     fn value(&self) -> bool;
 }
-pub trait IntTermType: TermHash {
+pub trait IntTermType {
     fn value(&self) -> IntValue;
 }
-pub trait FloatTermType: TermHash {
+pub trait FloatTermType {
     fn value(&self) -> FloatValue;
 }
-pub trait StringTermType<TString: StringValue>: TermHash {
-    fn value(&self) -> &TString;
+pub trait StringTermType<T: Expression> {
+    fn value<'a>(&'a self) -> T::Ref<'a, T::String>
+    where
+        T::String: 'a,
+        T: 'a;
 }
-pub trait SymbolTermType: TermHash {
+pub trait SymbolTermType {
     fn id(&self) -> SymbolId;
 }
-pub trait VariableTermType: TermHash {
+pub trait VariableTermType {
     fn offset(&self) -> StackOffset;
 }
-pub trait EffectTermType<T: Expression>: TermHash {
-    fn condition(&self) -> &T::Signal;
+pub trait EffectTermType<T: Expression> {
+    fn condition<'a>(&'a self) -> T::Ref<'a, T::Signal<T>>
+    where
+        T::Signal<T>: 'a,
+        T: 'a;
 }
-pub trait LetTermType<T: Expression>: TermHash {
-    fn initializer(&self) -> &T;
-    fn body(&self) -> &T;
+pub trait LetTermType<T: Expression> {
+    fn initializer<'a>(&'a self) -> T::Ref<'a, T>
+    where
+        T: 'a;
+    fn body<'a>(&'a self) -> T::Ref<'a, T>
+    where
+        T: 'a;
 }
-pub trait LambdaTermType<T: Expression>: TermHash {
+pub trait LambdaTermType<T: Expression> {
     fn num_args(&self) -> StackOffset;
-    fn body(&self) -> &T;
+    fn body<'a>(&'a self) -> T::Ref<'a, T>
+    where
+        T: 'a;
 }
-pub trait ApplicationTermType<T: Expression>: TermHash {
-    fn target(&self) -> &T;
-    fn args(&self) -> &T::ExpressionList;
+pub trait ApplicationTermType<T: Expression> {
+    fn target<'a>(&'a self) -> T::Ref<'a, T>
+    where
+        T: 'a;
+    fn args<'a>(&'a self) -> T::Ref<'a, T::ExpressionList<T>>
+    where
+        T: 'a,
+        T::ExpressionList<T>: 'a;
 }
-pub trait PartialApplicationTermType<T: Expression>: TermHash {
-    fn target(&self) -> &T;
-    fn args(&self) -> &T::ExpressionList;
+pub trait PartialApplicationTermType<T: Expression> {
+    fn target<'a>(&'a self) -> T::Ref<'a, T>
+    where
+        T: 'a;
+    fn args<'a>(&'a self) -> T::Ref<'a, T::ExpressionList<T>>
+    where
+        T: 'a,
+        T::ExpressionList<T>: 'a;
 }
-pub trait RecursiveTermType<T: Expression>: TermHash {
-    fn factory(&self) -> &T;
+pub trait RecursiveTermType<T: Expression> {
+    fn factory<'a>(&'a self) -> T::Ref<'a, T>
+    where
+        T: 'a;
 }
-pub trait BuiltinTermType<TBuiltin: Builtin>: TermHash {
-    fn target(&self) -> &TBuiltin;
+pub trait BuiltinTermType<T: Expression> {
+    fn target<'a>(&'a self) -> T::Ref<'a, T::Builtin>
+    where
+        T: 'a,
+        T::Builtin: 'a;
 }
-pub trait CompiledFunctionTermType: TermHash {
+pub trait CompiledFunctionTermType {
     fn address(&self) -> InstructionPointer;
     fn hash(&self) -> HashId;
     fn required_args(&self) -> StackOffset;
     fn optional_args(&self) -> StackOffset;
 }
-pub trait RecordTermType<T: Expression>: TermHash {
-    fn prototype(&self) -> &T::StructPrototype;
-    fn values(&self) -> &T::ExpressionList;
-    fn get(&self, key: &T) -> Option<&T> {
-        let keys = self.prototype().keys();
-        let values = self.values();
-        let index = keys.iter().position(|field_name| field_name == key)?;
-        values.get(index)
-    }
+pub trait RecordTermType<T: Expression> {
+    fn prototype<'a>(&'a self) -> T::Ref<'a, T::StructPrototype<T>>
+    where
+        T::StructPrototype<T>: 'a,
+        T: 'a;
+    fn values<'a>(&'a self) -> T::Ref<'a, T::ExpressionList<T>>
+    where
+        T::ExpressionList<T>: 'a,
+        T: 'a;
+    fn get<'a>(&'a self, key: &T) -> Option<T::Ref<'a, T>>
+    where
+        T: 'a;
 }
-pub trait ConstructorTermType<T: Expression>: TermHash {
-    fn prototype(&self) -> &T::StructPrototype;
+pub trait ConstructorTermType<T: Expression> {
+    fn prototype<'a>(&'a self) -> T::Ref<'a, T::StructPrototype<T>>
+    where
+        T::StructPrototype<T>: 'a,
+        T: 'a;
 }
-pub trait ListTermType<T: Expression>: TermHash {
-    fn items(&self) -> &T::ExpressionList;
+pub trait ListTermType<T: Expression> {
+    fn items<'a>(&'a self) -> T::Ref<'a, T::ExpressionList<T>>
+    where
+        T::ExpressionList<T>: 'a,
+        T: 'a;
 }
-pub trait HashmapTermType<T: Expression>: TermHash {
-    type KeysIterator<'a>: ExactSizeIterator<Item = &'a T>
+pub trait HashmapTermType<T: Expression> {
+    type KeysIterator<'a>: ExactSizeIterator<Item = T::Ref<'a, T>>
     where
         T: 'a,
         Self: 'a;
-    type ValuesIterator<'a>: ExactSizeIterator<Item = &'a T>
+    type ValuesIterator<'a>: ExactSizeIterator<Item = T::Ref<'a, T>>
     where
         T: 'a,
         Self: 'a;
-    fn get(&self, value: &T) -> Option<&T>;
+    fn get<'a>(&'a self, value: &T) -> Option<T::Ref<'a, T>>
+    where
+        T: 'a;
     fn keys<'a>(&'a self) -> Self::KeysIterator<'a>;
     fn values<'a>(&'a self) -> Self::ValuesIterator<'a>;
 }
-pub trait HashsetTermType<T: Expression>: TermHash {
-    type ValuesIterator<'a>: ExactSizeIterator<Item = &'a T>
+pub trait HashsetTermType<T: Expression> {
+    type ValuesIterator<'a>: ExactSizeIterator<Item = T::Ref<'a, T>>
     where
         T: 'a,
         Self: 'a;
     fn contains(&self, value: &T) -> bool;
     fn values<'a>(&'a self) -> Self::ValuesIterator<'a>;
 }
-pub trait SignalTermType<T: Expression>: TermHash {
-    fn signals(&self) -> &T::SignalList;
+pub trait SignalTermType<T: Expression> {
+    fn signals<'a>(&'a self) -> T::Ref<'a, T::SignalList<T>>
+    where
+        T::SignalList<T>: 'a,
+        T: 'a;
 }
 
 pub trait ConditionType<T: Expression>:
     Clone + PartialEq + Eq + std::fmt::Display + std::fmt::Debug + TermHash
 {
     fn id(&self) -> StateToken;
-    fn signal_type(&self) -> &SignalType;
-    fn args(&self) -> &T::ExpressionList;
+    fn signal_type(&self) -> SignalType;
+    fn args<'a>(&'a self) -> T::Ref<'a, T::ExpressionList<T>>
+    where
+        T::ExpressionList<T>: 'a,
+        T: 'a;
 }
 
-pub type ExpressionListSlice<'a, T> =
-    <<T as Expression>::ExpressionList as ExpressionListType<T>>::Iterator<'a>;
+pub type ExpressionListIter<'a, T> =
+    <<T as Expression>::ExpressionList<T> as ExpressionListType<T>>::Iterator<'a>;
 
 pub trait ExpressionListType<T: Expression>:
     Sized + PartialEq + Eq + Clone + std::fmt::Display + std::fmt::Debug + TermHash + GraphNode
 {
-    type Iterator<'a>: ExactSizeIterator<Item = &'a T>
+    type Iterator<'a>: ExactSizeIterator<Item = T::Ref<'a, T>>
     where
         T: 'a,
         Self: 'a;
     fn len(&self) -> usize;
-    fn get(&self, index: usize) -> Option<&T>;
+    fn get<'a>(&'a self, index: usize) -> Option<T::Ref<'a, T>>
+    where
+        T: 'a;
     fn iter<'a>(&'a self) -> Self::Iterator<'a>;
 }
 
 pub trait ConditionListType<T: Expression>:
     Sized + PartialEq + Eq + Clone + std::fmt::Display + std::fmt::Debug + TermHash
 {
-    type Iterator<'a>: ExactSizeIterator<Item = &'a T::Signal>
+    type Iterator<'a>: ExactSizeIterator<Item = T::Ref<'a, T::Signal<T>>>
     where
-        T::Signal: 'a,
+        T::Signal<T>: 'a,
+        T: 'a,
         Self: 'a;
     fn len(&self) -> usize;
     fn iter<'a>(&'a self) -> Self::Iterator<'a>;
@@ -198,30 +246,35 @@ pub trait ConditionListType<T: Expression>:
 pub trait StructPrototypeType<T: Expression>:
     PartialEq + Eq + Clone + std::fmt::Display + std::fmt::Debug + TermHash
 {
-    fn keys(&self) -> &T::ExpressionList;
+    fn keys<'a>(&'a self) -> T::Ref<'a, T::ExpressionList<T>>
+    where
+        T::ExpressionList<T>: 'a,
+        T: 'a;
 }
 
-pub fn parse_record<T: Expression>(
-    prototype: &T::StructPrototype,
+pub fn parse_record_values<'a, T: Expression>(
+    prototype: &T::StructPrototype<T>,
     values: &T,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> Option<T> {
+) -> Option<Option<T::ExpressionList<T>>> {
     if let Some(input_values) = factory.match_record_term(values) {
-        let input_prototype = input_values.prototype();
+        let input_prototype = input_values.prototype().as_deref();
         if hash_object(input_prototype) == hash_object(prototype) {
-            Some(values.clone())
-        } else if input_prototype.keys().len() >= prototype.keys().len() {
+            Some(None)
+        } else if input_prototype.keys().as_deref().len()
+            >= prototype.as_deref().keys().as_deref().len()
+        {
             let values = prototype
+                .as_deref()
                 .keys()
+                .as_deref()
                 .iter()
-                .map(|key| input_values.get(key).cloned())
+                .map(|item| item.as_deref())
+                .map(|key| input_values.get(key).map(|item| item.as_deref()).cloned())
                 .collect::<Option<Vec<_>>>();
             match values {
-                Some(field_values) => Some(factory.create_record_term(
-                    allocator.clone_struct_prototype(prototype),
-                    allocator.create_list(field_values),
-                )),
+                Some(field_values) => Some(Some(allocator.create_list(field_values))),
                 None => None,
             }
         } else {
@@ -229,6 +282,56 @@ pub fn parse_record<T: Expression>(
         }
     } else {
         None
+    }
+}
+
+pub trait RefType<'a, T> {
+    fn as_deref(&self) -> &'a T;
+}
+
+impl<'a, T> RefType<'a, T> for &'a T {
+    fn as_deref(&self) -> &'a T {
+        *self
+    }
+}
+
+pub struct IntoRefTypeIterator<T, TRef, TIter> {
+    inner: TIter,
+    _ref: PhantomData<TRef>,
+    _type: PhantomData<T>,
+}
+impl<'iter, T: 'iter, TRef, TIter> IntoRefTypeIterator<T, TRef, TIter>
+where
+    TIter: Iterator<Item = &'iter T>,
+    TRef: RefType<'iter, T> + From<&'iter T>,
+{
+    pub fn new(inner: TIter) -> Self {
+        Self {
+            inner,
+            _ref: Default::default(),
+            _type: Default::default(),
+        }
+    }
+}
+impl<'iter, T: 'iter, TRef, TIter> Iterator for IntoRefTypeIterator<T, TRef, TIter>
+where
+    TIter: Iterator<Item = &'iter T>,
+    TRef: RefType<'iter, T> + From<&'iter T>,
+{
+    type Item = TRef;
+    fn next(&mut self) -> Option<Self::Item> {
+        let Self { inner, .. } = self;
+        inner.next().map(|item| item.into())
+    }
+}
+impl<'iter, T: 'iter, TRef, TIter> ExactSizeIterator for IntoRefTypeIterator<T, TRef, TIter>
+where
+    TIter: Iterator<Item = &'iter T> + ExactSizeIterator,
+    TRef: RefType<'iter, T> + From<&'iter T>,
+{
+    fn len(&self) -> usize {
+        let Self { inner, .. } = self;
+        inner.len()
     }
 }
 
@@ -246,32 +349,36 @@ where
 {
     type String: StringValue;
     type Builtin: Builtin;
-    type Signal: ConditionType<Self>;
-    type SignalList: ConditionListType<Self>;
-    type StructPrototype: StructPrototypeType<Self>;
-    type ExpressionList: ExpressionListType<Self>;
-
+    type Signal<T: Expression>: ConditionType<T>;
+    type SignalList<T: Expression>: ConditionListType<T>;
+    type StructPrototype<T: Expression>: StructPrototypeType<T>;
+    type ExpressionList<T: Expression>: ExpressionListType<T>;
     type NilTerm: NilTermType;
     type BooleanTerm: BooleanTermType;
     type IntTerm: IntTermType;
     type FloatTerm: FloatTermType;
-    type StringTerm: StringTermType<Self::String>;
+    type StringTerm<T: Expression>: StringTermType<T>;
     type SymbolTerm: SymbolTermType;
     type VariableTerm: VariableTermType;
-    type EffectTerm: EffectTermType<Self>;
-    type LetTerm: LetTermType<Self>;
-    type LambdaTerm: LambdaTermType<Self>;
-    type ApplicationTerm: ApplicationTermType<Self>;
-    type PartialApplicationTerm: PartialApplicationTermType<Self>;
-    type RecursiveTerm: RecursiveTermType<Self>;
-    type BuiltinTerm: BuiltinTermType<Self::Builtin>;
+    type EffectTerm<T: Expression>: EffectTermType<T>;
+    type LetTerm<T: Expression>: LetTermType<T>;
+    type LambdaTerm<T: Expression>: LambdaTermType<T>;
+    type ApplicationTerm<T: Expression>: ApplicationTermType<T>;
+    type PartialApplicationTerm<T: Expression>: PartialApplicationTermType<T>;
+    type RecursiveTerm<T: Expression>: RecursiveTermType<T>;
+    type BuiltinTerm<T: Expression>: BuiltinTermType<T>;
     type CompiledFunctionTerm: CompiledFunctionTermType;
-    type RecordTerm: RecordTermType<Self>;
-    type ConstructorTerm: ConstructorTermType<Self>;
-    type ListTerm: ListTermType<Self>;
-    type HashmapTerm: HashmapTermType<Self>;
-    type HashsetTerm: HashsetTermType<Self>;
-    type SignalTerm: SignalTermType<Self>;
+    type RecordTerm<T: Expression>: RecordTermType<T>;
+    type ConstructorTerm<T: Expression>: ConstructorTermType<T>;
+    type ListTerm<T: Expression>: ListTermType<T>;
+    type HashmapTerm<T: Expression>: HashmapTermType<T>;
+    type HashsetTerm<T: Expression>: HashsetTermType<T>;
+    type SignalTerm<T: Expression>: SignalTermType<T>;
+
+    type Ref<'a, TTarget>: RefType<'a, TTarget> + From<&'a TTarget>
+    where
+        TTarget: 'a,
+        Self: 'a;
 
     fn id(&self) -> HashId;
 }
@@ -316,9 +423,12 @@ pub trait GraphNode {
     fn is_complex(&self) -> bool;
 }
 
-pub trait CompoundNode<'a, T: Expression + 'a> {
-    type Children: Iterator<Item = &'a T>;
-    fn children(&'a self) -> Self::Children;
+pub trait CompoundNode<T: Expression> {
+    type Children<'a>: Iterator<Item = T::Ref<'a, T>>
+    where
+        T: 'a,
+        Self: 'a;
+    fn children<'a>(&'a self) -> Self::Children<'a>;
 }
 
 pub trait Rewritable<T: Expression> {
@@ -864,11 +974,11 @@ pub trait ExpressionFactory<T: Expression> {
     fn create_string_term(&self, value: T::String) -> T;
     fn create_symbol_term(&self, value: SymbolId) -> T;
     fn create_variable_term(&self, offset: StackOffset) -> T;
-    fn create_effect_term(&self, condition: T::Signal) -> T;
+    fn create_effect_term(&self, condition: T::Signal<T>) -> T;
     fn create_let_term(&self, initializer: T, body: T) -> T;
     fn create_lambda_term(&self, num_args: StackOffset, body: T) -> T;
-    fn create_application_term(&self, target: T, args: T::ExpressionList) -> T;
-    fn create_partial_application_term(&self, target: T, args: T::ExpressionList) -> T;
+    fn create_application_term(&self, target: T, args: T::ExpressionList<T>) -> T;
+    fn create_partial_application_term(&self, target: T, args: T::ExpressionList<T>) -> T;
     fn create_recursive_term(&self, factory: T) -> T;
     fn create_builtin_term(&self, target: impl Into<T::Builtin>) -> T;
     fn create_compiled_function_term(
@@ -878,66 +988,78 @@ pub trait ExpressionFactory<T: Expression> {
         required_args: StackOffset,
         optional_args: StackOffset,
     ) -> T;
-    fn create_record_term(&self, prototype: T::StructPrototype, fields: T::ExpressionList) -> T;
-    fn create_constructor_term(&self, prototype: T::StructPrototype) -> T;
-    fn create_list_term(&self, items: T::ExpressionList) -> T;
-    fn create_hashmap_term(&self, keys: T::ExpressionList, values: T::ExpressionList) -> T;
-    fn create_hashset_term(&self, values: T::ExpressionList) -> T;
-    fn create_signal_term(&self, signals: T::SignalList) -> T;
+    fn create_record_term(
+        &self,
+        prototype: T::StructPrototype<T>,
+        fields: T::ExpressionList<T>,
+    ) -> T;
+    fn create_constructor_term(&self, prototype: T::StructPrototype<T>) -> T;
+    fn create_list_term(&self, items: T::ExpressionList<T>) -> T;
+    fn create_hashmap_term(&self, keys: T::ExpressionList<T>, values: T::ExpressionList<T>) -> T;
+    fn create_hashset_term(&self, values: T::ExpressionList<T>) -> T;
+    fn create_signal_term(&self, signals: T::SignalList<T>) -> T;
 
     fn match_nil_term<'a>(&self, expression: &'a T) -> Option<&'a T::NilTerm>;
     fn match_boolean_term<'a>(&self, expression: &'a T) -> Option<&'a T::BooleanTerm>;
     fn match_int_term<'a>(&self, expression: &'a T) -> Option<&'a T::IntTerm>;
     fn match_float_term<'a>(&self, expression: &'a T) -> Option<&'a T::FloatTerm>;
-    fn match_string_term<'a>(&self, expression: &'a T) -> Option<&'a T::StringTerm>;
+    fn match_string_term<'a>(&self, expression: &'a T) -> Option<&'a T::StringTerm<T>>;
     fn match_symbol_term<'a>(&self, expression: &'a T) -> Option<&'a T::SymbolTerm>;
     fn match_variable_term<'a>(&self, expression: &'a T) -> Option<&'a T::VariableTerm>;
-    fn match_effect_term<'a>(&self, expression: &'a T) -> Option<&'a T::EffectTerm>;
-    fn match_let_term<'a>(&self, expression: &'a T) -> Option<&'a T::LetTerm>;
-    fn match_lambda_term<'a>(&self, expression: &'a T) -> Option<&'a T::LambdaTerm>;
-    fn match_application_term<'a>(&self, expression: &'a T) -> Option<&'a T::ApplicationTerm>;
+    fn match_effect_term<'a>(&self, expression: &'a T) -> Option<&'a T::EffectTerm<T>>;
+    fn match_let_term<'a>(&self, expression: &'a T) -> Option<&'a T::LetTerm<T>>;
+    fn match_lambda_term<'a>(&self, expression: &'a T) -> Option<&'a T::LambdaTerm<T>>;
+    fn match_application_term<'a>(&self, expression: &'a T) -> Option<&'a T::ApplicationTerm<T>>;
     fn match_partial_application_term<'a>(
         &self,
         expression: &'a T,
-    ) -> Option<&'a T::PartialApplicationTerm>;
-    fn match_recursive_term<'a>(&self, expression: &'a T) -> Option<&'a T::RecursiveTerm>;
-    fn match_builtin_term<'a>(&self, expression: &'a T) -> Option<&'a T::BuiltinTerm>;
+    ) -> Option<&'a T::PartialApplicationTerm<T>>;
+    fn match_recursive_term<'a>(&self, expression: &'a T) -> Option<&'a T::RecursiveTerm<T>>;
+    fn match_builtin_term<'a>(&self, expression: &'a T) -> Option<&'a T::BuiltinTerm<T>>;
     fn match_compiled_function_term<'a>(
         &self,
         target: &'a T,
     ) -> Option<&'a T::CompiledFunctionTerm>;
-    fn match_record_term<'a>(&self, expression: &'a T) -> Option<&'a T::RecordTerm>;
-    fn match_constructor_term<'a>(&self, expression: &'a T) -> Option<&'a T::ConstructorTerm>;
-    fn match_list_term<'a>(&self, expression: &'a T) -> Option<&'a T::ListTerm>;
-    fn match_hashmap_term<'a>(&self, expression: &'a T) -> Option<&'a T::HashmapTerm>;
-    fn match_hashset_term<'a>(&self, expression: &'a T) -> Option<&'a T::HashsetTerm>;
-    fn match_signal_term<'a>(&self, expression: &'a T) -> Option<&'a T::SignalTerm>;
+    fn match_record_term<'a>(&self, expression: &'a T) -> Option<&'a T::RecordTerm<T>>;
+    fn match_constructor_term<'a>(&self, expression: &'a T) -> Option<&'a T::ConstructorTerm<T>>;
+    fn match_list_term<'a>(&self, expression: &'a T) -> Option<&'a T::ListTerm<T>>;
+    fn match_hashmap_term<'a>(&self, expression: &'a T) -> Option<&'a T::HashmapTerm<T>>;
+    fn match_hashset_term<'a>(&self, expression: &'a T) -> Option<&'a T::HashsetTerm<T>>;
+    fn match_signal_term<'a>(&self, expression: &'a T) -> Option<&'a T::SignalTerm<T>>;
 }
 
 pub trait HeapAllocator<T: Expression> {
     fn create_list(
         &self,
         expressions: impl IntoIterator<Item = T, IntoIter = impl ExactSizeIterator<Item = T>>,
-    ) -> T::ExpressionList;
-    fn create_unsized_list(&self, expressions: impl IntoIterator<Item = T>) -> T::ExpressionList;
+    ) -> T::ExpressionList<T>;
+    fn create_unsized_list(&self, expressions: impl IntoIterator<Item = T>)
+        -> T::ExpressionList<T>;
     fn create_sized_list(
         &self,
         size: usize,
         expressions: impl IntoIterator<Item = T>,
-    ) -> T::ExpressionList;
-    fn create_empty_list(&self) -> T::ExpressionList;
-    fn create_unit_list(&self, value: T) -> T::ExpressionList;
-    fn create_pair(&self, left: T, right: T) -> T::ExpressionList;
-    fn create_triple(&self, first: T, second: T, third: T) -> T::ExpressionList;
-    fn clone_list(&self, expressions: &T::ExpressionList) -> T::ExpressionList;
-    fn create_signal_list(&self, signals: impl IntoIterator<Item = T::Signal>) -> T::SignalList;
-    fn create_struct_prototype(&self, keys: T::ExpressionList) -> T::StructPrototype;
-    fn clone_struct_prototype(&self, prototype: &T::StructPrototype) -> T::StructPrototype;
-    fn create_signal(&self, signal_type: SignalType, args: T::ExpressionList) -> T::Signal;
-    fn clone_signal(&self, signal: &T::Signal) -> T::Signal;
+    ) -> T::ExpressionList<T>;
+    fn create_empty_list(&self) -> T::ExpressionList<T>;
+    fn create_unit_list(&self, value: T) -> T::ExpressionList<T>;
+    fn create_pair(&self, left: T, right: T) -> T::ExpressionList<T>;
+    fn create_triple(&self, first: T, second: T, third: T) -> T::ExpressionList<T>;
+    fn clone_list<'a>(&self, expressions: T::Ref<'a, T::ExpressionList<T>>)
+        -> T::ExpressionList<T>;
+    fn create_signal_list(
+        &self,
+        signals: impl IntoIterator<Item = T::Signal<T>>,
+    ) -> T::SignalList<T>;
+    fn create_struct_prototype(&self, keys: T::ExpressionList<T>) -> T::StructPrototype<T>;
+    fn clone_struct_prototype<'a>(
+        &self,
+        prototype: T::Ref<'a, T::StructPrototype<T>>,
+    ) -> T::StructPrototype<T>;
+    fn create_signal(&self, signal_type: SignalType, args: T::ExpressionList<T>) -> T::Signal<T>;
+    fn clone_signal<'a>(&self, signal: T::Ref<'a, T::Signal<T>>) -> T::Signal<T>;
     fn create_string(&self, value: impl Into<T::String>) -> T::String;
     fn create_static_string(&self, value: &'static str) -> T::String;
-    fn clone_string(&self, value: &T::String) -> T::String;
+    fn clone_string<'a>(&self, value: T::Ref<'a, T::String>) -> T::String;
 }
 
 #[derive(Hash, Eq, PartialEq, Clone, Copy, Debug, Serialize)]
@@ -1206,12 +1328,12 @@ pub fn match_typed_expression_list<'a, T: Expression + 'a, V, E>(
 }
 
 pub fn transform_expression_list<T: Expression>(
-    expressions: &T::ExpressionList,
+    expressions: &T::ExpressionList<T>,
     allocator: &impl HeapAllocator<T>,
     mut transform: impl FnMut(&T) -> Option<T>,
-) -> Option<T::ExpressionList> {
+) -> Option<T::ExpressionList<T>> {
     let mut result: Option<Vec<T>> = None;
-    for (index, expression) in expressions.iter().enumerate() {
+    for (index, expression) in expressions.iter().map(|item| item.as_deref()).enumerate() {
         let replaced = transform(expression);
         match replaced {
             None => {}
@@ -1223,10 +1345,17 @@ pub fn transform_expression_list<T: Expression>(
                     result = Some(
                         expressions
                             .iter()
+                            .map(|item| item.as_deref())
                             .take(index)
                             .cloned()
                             .chain(once(replaced))
-                            .chain(expressions.iter().skip(index + 1).cloned())
+                            .chain(
+                                expressions
+                                    .iter()
+                                    .map(|item| item.as_deref())
+                                    .skip(index + 1)
+                                    .cloned(),
+                            )
                             .collect::<Vec<_>>(),
                     );
                 }
@@ -1438,6 +1567,7 @@ pub fn get_combined_short_circuit_signal<'a, T: Expression + 'a>(
                         .flat_map(|(_, signal)| {
                             signal
                                 .signals()
+                                .as_deref()
                                 .iter()
                                 .map(|signal| allocator.clone_signal(signal))
                         }),
@@ -1452,25 +1582,35 @@ fn filter_short_circuit_args<'a, T: Expression + 'a>(
     args: impl IntoIterator<Item = &'a T>,
     arity: &Arity,
     matcher: &'a impl ExpressionFactory<T>,
-) -> impl IntoIterator<Item = (&'a T, &'a T::SignalTerm)> {
+) -> impl IntoIterator<Item = (&'a T, &'a T::SignalTerm<T>)> {
     args.into_iter()
         .zip(arity.iter())
         .filter_map(move |(arg, arg_type)| match arg_type {
-            ArgType::Strict => matcher.match_signal_term(&arg).map(|signal| (arg, signal)),
+            ArgType::Strict => matcher
+                .match_signal_term(arg)
+                .map(|value| value.as_deref())
+                .map(move |signal| (arg, signal)),
             ArgType::Eager | ArgType::Lazy => None,
         })
 }
 
 pub fn get_hashmap_entries<'a, T: Expression + 'a>(
-    target: &'a T::HashmapTerm,
+    target: &'a T::HashmapTerm<T>,
     factory: &'a impl ExpressionFactory<T>,
     allocator: &'a impl HeapAllocator<T>,
 ) -> impl IntoIterator<Item = T, IntoIter = impl ExactSizeIterator<Item = T> + 'a> + 'a {
     target
         .keys()
         .into_iter()
+        .map(|expression| expression.as_deref())
         .cloned()
-        .zip(target.values().into_iter().cloned())
+        .zip(
+            target
+                .values()
+                .into_iter()
+                .map(|expression| expression.as_deref())
+                .cloned(),
+        )
         .map(move |(key, value)| factory.create_list_term(allocator.create_pair(key, value)))
 }
 

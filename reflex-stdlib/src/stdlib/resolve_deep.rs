@@ -7,7 +7,7 @@ use std::iter::once;
 use reflex::core::{
     uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
     ExpressionListType, FunctionArity, GraphNode, HashmapTermType, HashsetTermType, HeapAllocator,
-    ListTermType, RecordTermType, Uid, Uuid,
+    ListTermType, RecordTermType, RefType, Uid, Uuid,
 };
 
 use crate::Stdlib;
@@ -51,68 +51,94 @@ where
         }
         let target = args.next().unwrap();
         if let Some(value) = factory.match_record_term(&target) {
-            if value.values().is_atomic() {
+            if value.values().as_deref().is_atomic() {
                 Ok(target)
             } else {
                 Ok(factory.create_application_term(
                     factory.create_builtin_term(Stdlib::CollectRecord),
                     allocator.create_sized_list(
-                        value.values().len() + 1,
+                        value.values().as_deref().len() + 1,
                         once(factory.create_constructor_term(
                             allocator.clone_struct_prototype(value.prototype()),
                         ))
-                        .chain(value.values().iter().map(|field| {
-                            if field.is_atomic() {
-                                field.clone()
-                            } else {
-                                factory.create_application_term(
-                                    factory.create_builtin_term(Stdlib::ResolveDeep),
-                                    allocator.create_list(once(field.clone())),
-                                )
-                            }
-                        })),
+                        .chain(
+                            value
+                                .values()
+                                .as_deref()
+                                .iter()
+                                .map(|item| item.as_deref())
+                                .map(|field| {
+                                    if field.is_atomic() {
+                                        field.clone()
+                                    } else {
+                                        factory.create_application_term(
+                                            factory.create_builtin_term(Stdlib::ResolveDeep),
+                                            allocator.create_list(once(field.clone())),
+                                        )
+                                    }
+                                }),
+                        ),
                     ),
                 ))
             }
         } else if let Some(value) = factory.match_list_term(&target) {
-            if value.items().is_atomic() {
+            if value.items().as_deref().is_atomic() {
                 Ok(target)
             } else {
                 Ok(factory.create_application_term(
                     factory.create_builtin_term(Stdlib::CollectList),
-                    allocator.create_list(value.items().iter().map(|item| {
-                        if item.is_atomic() {
-                            item.clone()
-                        } else {
-                            factory.create_application_term(
-                                factory.create_builtin_term(Stdlib::ResolveDeep),
-                                allocator.create_list(once(item.clone())),
-                            )
-                        }
-                    })),
+                    allocator.create_list(
+                        value
+                            .items()
+                            .as_deref()
+                            .iter()
+                            .map(|item| item.as_deref())
+                            .map(|item| {
+                                if item.is_atomic() {
+                                    item.clone()
+                                } else {
+                                    factory.create_application_term(
+                                        factory.create_builtin_term(Stdlib::ResolveDeep),
+                                        allocator.create_list(once(item.clone())),
+                                    )
+                                }
+                            }),
+                    ),
                 ))
             }
         } else if let Some(value) = factory.match_hashset_term(&target) {
-            if value.values().all(|item| item.is_atomic()) {
+            if value
+                .values()
+                .map(|item| item.as_deref())
+                .all(|item| item.is_atomic())
+            {
                 Ok(target)
             } else {
                 Ok(factory.create_application_term(
                     factory.create_builtin_term(Stdlib::CollectHashSet),
-                    allocator.create_list(value.values().cloned().map(|item| {
-                        if item.is_atomic() {
-                            item
-                        } else {
-                            factory.create_application_term(
-                                factory.create_builtin_term(Stdlib::ResolveDeep),
-                                allocator.create_list(once(item)),
-                            )
-                        }
-                    })),
+                    allocator.create_list(value.values().map(|item| item.as_deref()).cloned().map(
+                        |item| {
+                            if item.is_atomic() {
+                                item
+                            } else {
+                                factory.create_application_term(
+                                    factory.create_builtin_term(Stdlib::ResolveDeep),
+                                    allocator.create_list(once(item)),
+                                )
+                            }
+                        },
+                    )),
                 ))
             }
         } else if let Some(value) = factory.match_hashmap_term(&target) {
-            let keys_are_atomic = value.keys().all(|key| key.is_atomic());
-            let values_are_atomic = value.values().all(|value| value.is_atomic());
+            let keys_are_atomic = value
+                .keys()
+                .map(|item| item.as_deref())
+                .all(|key| key.is_atomic());
+            let values_are_atomic = value
+                .values()
+                .map(|item| item.as_deref())
+                .all(|value| value.is_atomic());
             if keys_are_atomic && values_are_atomic {
                 Ok(target)
             } else {
@@ -120,37 +146,56 @@ where
                     factory.create_builtin_term(Stdlib::ConstructHashMap),
                     allocator.create_pair(
                         if keys_are_atomic {
-                            factory.create_list_term(allocator.create_list(value.keys().cloned()))
+                            factory.create_list_term(
+                                allocator
+                                    .create_list(value.keys().map(|item| item.as_deref()).cloned()),
+                            )
                         } else {
                             factory.create_application_term(
                                 factory.create_builtin_term(Stdlib::CollectList),
-                                allocator.create_list(value.keys().cloned().map(|item| {
-                                    if item.is_atomic() {
-                                        item
-                                    } else {
-                                        factory.create_application_term(
-                                            factory.create_builtin_term(Stdlib::ResolveDeep),
-                                            allocator.create_list(once(item)),
-                                        )
-                                    }
-                                })),
+                                allocator.create_list(
+                                    value
+                                        .keys()
+                                        .map(|item| item.as_deref())
+                                        .cloned()
+                                        .map(|item| {
+                                            if item.is_atomic() {
+                                                item
+                                            } else {
+                                                factory.create_application_term(
+                                                    factory
+                                                        .create_builtin_term(Stdlib::ResolveDeep),
+                                                    allocator.create_list(once(item)),
+                                                )
+                                            }
+                                        }),
+                                ),
                             )
                         },
                         if values_are_atomic {
-                            factory.create_list_term(allocator.create_list(value.values().cloned()))
+                            factory.create_list_term(
+                                allocator.create_list(
+                                    value.values().map(|item| item.as_deref()).cloned(),
+                                ),
+                            )
                         } else {
                             factory.create_application_term(
                                 factory.create_builtin_term(Stdlib::CollectList),
-                                allocator.create_list(value.values().cloned().map(|item| {
-                                    if item.is_atomic() {
-                                        item
-                                    } else {
-                                        factory.create_application_term(
-                                            factory.create_builtin_term(Stdlib::ResolveDeep),
-                                            allocator.create_list(once(item)),
-                                        )
-                                    }
-                                })),
+                                allocator.create_list(
+                                    value.values().map(|item| item.as_deref()).cloned().map(
+                                        |item| {
+                                            if item.is_atomic() {
+                                                item
+                                            } else {
+                                                factory.create_application_term(
+                                                    factory
+                                                        .create_builtin_term(Stdlib::ResolveDeep),
+                                                    allocator.create_list(once(item)),
+                                                )
+                                            }
+                                        },
+                                    ),
+                                ),
                             )
                         },
                     ),

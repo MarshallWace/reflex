@@ -3,7 +3,7 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use reflex::core::{
     uuid, Applicable, ArgType, Arity, ConditionListType, ConditionType, EvaluationCache,
-    Expression, ExpressionFactory, ExpressionListType, FunctionArity, HeapAllocator,
+    Expression, ExpressionFactory, ExpressionListType, FunctionArity, HeapAllocator, RefType,
     SignalTermType, SignalType, Uid, Uuid,
 };
 
@@ -41,11 +41,11 @@ impl<T: Expression> Applicable<T> for IfError {
         let target = args.next().unwrap();
         let handler = args.next().unwrap();
         if let Some(signal) = factory.match_signal_term(&target) {
-            let (error_signals, other_signals) = signal.signals().iter().fold(
+            let (error_signals, other_signals) = signal.signals().as_deref().iter().fold(
                 (Vec::new(), Vec::new()),
                 |(mut error_signals, mut other_signals), signal| {
-                    if signal.signal_type() == &SignalType::Error {
-                        error_signals.push(signal);
+                    if signal.as_deref().signal_type() == SignalType::Error {
+                        error_signals.push(signal.as_deref());
                     } else {
                         other_signals.push(signal);
                     }
@@ -53,7 +53,7 @@ impl<T: Expression> Applicable<T> for IfError {
                 },
             );
             if error_signals.is_empty() {
-                Ok(target)
+                Ok(target.clone())
             } else if !other_signals.is_empty() {
                 Ok(factory.create_signal_term(
                     allocator.create_signal_list(
@@ -69,7 +69,9 @@ impl<T: Expression> Applicable<T> for IfError {
                         error_signals.into_iter().map(|signal| {
                             signal
                                 .args()
+                                .as_deref()
                                 .iter()
+                                .map(|item| item.as_deref())
                                 .next()
                                 .cloned()
                                 .unwrap_or_else(|| factory.create_nil_term())

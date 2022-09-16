@@ -7,23 +7,28 @@ use std::collections::HashSet;
 use serde::{Deserialize, Serialize};
 
 use reflex::core::{
-    ConditionListType, DependencyList, Eagerness, Expression, GraphNode, Internable, SerializeJson,
-    SignalTermType, StackOffset, TermHash,
+    ConditionListType, DependencyList, Eagerness, Expression, GraphNode, Internable, RefType,
+    SerializeJson, SignalTermType, StackOffset, TermHash,
 };
 
 #[derive(Hash, Eq, PartialEq, Clone, Debug, Serialize, Deserialize)]
 pub struct SignalTerm<T: Expression> {
-    signals: T::SignalList,
+    signals: T::SignalList<T>,
 }
 impl<T: Expression> TermHash for SignalTerm<T> {}
 impl<T: Expression> SignalTerm<T> {
-    pub fn new(signals: T::SignalList) -> Self {
+    pub fn new(signals: T::SignalList<T>) -> Self {
         Self { signals }
     }
 }
 impl<T: Expression> SignalTermType<T> for SignalTerm<T> {
-    fn signals(&self) -> &T::SignalList {
-        &self.signals
+    fn signals<'a>(&'a self) -> T::Ref<'a, T::SignalList<T>>
+    where
+        T::SignalList<T>: 'a,
+        T: 'a,
+        Self: 'a,
+    {
+        (&self.signals).into()
     }
 }
 impl<T: Expression> GraphNode for SignalTerm<T> {
@@ -66,6 +71,7 @@ impl<T: Expression> std::fmt::Display for SignalTerm<T> {
             "[{}]",
             self.signals
                 .iter()
+                .map(|item| item.as_deref())
                 .map(|signal| format!("{}", signal))
                 .collect::<Vec<_>>()
                 .join(",")

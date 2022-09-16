@@ -6,7 +6,8 @@ use std::iter::once;
 
 use reflex::core::{
     uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
-    ExpressionListType, FunctionArity, HashmapTermType, HeapAllocator, ListTermType, Uid, Uuid,
+    ExpressionListType, FunctionArity, HashmapTermType, HeapAllocator, ListTermType, RefType, Uid,
+    Uuid,
 };
 
 pub struct Map {}
@@ -44,24 +45,33 @@ impl<T: Expression> Applicable<T> for Map {
         let iteratee = args.next().unwrap();
         let result = if let Some(target) = factory.match_list_term(&target) {
             Some(
-                factory.create_list_term(allocator.create_list(target.items().iter().map(
-                    |item| {
-                        factory.create_application_term(
-                            iteratee.clone(),
-                            allocator.create_list(once(item.clone())),
-                        )
-                    },
-                ))),
+                factory.create_list_term(
+                    allocator.create_list(
+                        target
+                            .items()
+                            .as_deref()
+                            .iter()
+                            .map(|item| item.as_deref())
+                            .map(|item| {
+                                factory.create_application_term(
+                                    iteratee.clone(),
+                                    allocator.create_list(once(item.clone())),
+                                )
+                            }),
+                    ),
+                ),
             )
         } else if let Some(target) = factory.match_hashmap_term(&target) {
             Some(factory.create_hashmap_term(
-                allocator.create_list(target.keys().into_iter().cloned()),
-                allocator.create_list(target.values().into_iter().cloned().map(|value| {
-                    factory.create_application_term(
-                        iteratee.clone(),
-                        allocator.create_unit_list(value),
-                    )
-                })),
+                allocator.create_list(target.keys().map(|item| item.as_deref()).cloned()),
+                allocator.create_list(target.values().map(|item| item.as_deref()).cloned().map(
+                    |value| {
+                        factory.create_application_term(
+                            iteratee.clone(),
+                            allocator.create_unit_list(value),
+                        )
+                    },
+                )),
             ))
         } else {
             None

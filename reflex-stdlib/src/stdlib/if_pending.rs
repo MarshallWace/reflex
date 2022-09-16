@@ -3,8 +3,8 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use reflex::core::{
     uuid, Applicable, ArgType, Arity, ConditionListType, ConditionType, EvaluationCache,
-    Expression, ExpressionFactory, FunctionArity, HeapAllocator, SignalTermType, SignalType, Uid,
-    Uuid,
+    Expression, ExpressionFactory, FunctionArity, HeapAllocator, RefType, SignalTermType,
+    SignalType, Uid, Uuid,
 };
 
 pub struct IfPending {}
@@ -43,11 +43,12 @@ impl<T: Expression> Applicable<T> for IfPending {
         if let Some(signal) = factory.match_signal_term(&target) {
             let non_pending_signals = signal
                 .signals()
+                .as_deref()
                 .iter()
-                .filter(|signal| signal.signal_type() != &SignalType::Pending)
+                .filter(|signal| signal.as_deref().signal_type() != SignalType::Pending)
                 .collect::<Vec<_>>();
-            if non_pending_signals.len() == signal.signals().len() {
-                Ok(target)
+            if non_pending_signals.len() == signal.signals().as_deref().len() {
+                Ok(target.clone())
             } else if !non_pending_signals.is_empty() {
                 Ok(factory.create_signal_term(
                     allocator.create_signal_list(

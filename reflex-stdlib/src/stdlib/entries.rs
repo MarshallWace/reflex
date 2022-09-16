@@ -4,7 +4,7 @@
 use reflex::core::{
     get_hashmap_entries, uuid, Applicable, ArgType, Arity, EvaluationCache, Expression,
     ExpressionFactory, ExpressionListType, FunctionArity, HashsetTermType, HeapAllocator,
-    ListTermType, RecordTermType, StructPrototypeType, Uid, Uuid,
+    ListTermType, RecordTermType, RefType, StructPrototypeType, Uid, Uuid,
 };
 
 pub struct Entries {}
@@ -45,10 +45,20 @@ impl<T: Expression> Applicable<T> for Entries {
                     allocator.create_list(
                         target
                             .prototype()
+                            .as_deref()
                             .keys()
+                            .as_deref()
                             .iter()
+                            .map(|item| item.as_deref())
                             .cloned()
-                            .zip(target.values().iter().cloned())
+                            .zip(
+                                target
+                                    .values()
+                                    .as_deref()
+                                    .iter()
+                                    .map(|item| item.as_deref())
+                                    .cloned(),
+                            )
                             .map(|(key, value)| {
                                 factory.create_list_term(allocator.create_pair(key, value))
                             }),
@@ -56,23 +66,34 @@ impl<T: Expression> Applicable<T> for Entries {
                 ),
             )
         } else if let Some(target) = factory.match_list_term(&target) {
-            Some(factory.create_list_term(allocator.create_list(
-                target.items().iter().enumerate().map(|(index, item)| {
-                    factory.create_list_term(
-                        allocator.create_pair(factory.create_int_term(index as i32), item.clone()),
-                    )
-                }),
-            )))
+            Some(
+                factory.create_list_term(
+                    allocator.create_list(
+                        target
+                            .items()
+                            .as_deref()
+                            .iter()
+                            .map(|item| item.as_deref())
+                            .enumerate()
+                            .map(|(index, item)| {
+                                factory.create_list_term(allocator.create_pair(
+                                    factory.create_int_term(index as i32),
+                                    item.clone(),
+                                ))
+                            }),
+                    ),
+                ),
+            )
         } else if let Some(target) = factory.match_hashmap_term(&target) {
             Some(factory.create_list_term(
                 allocator.create_list(get_hashmap_entries(target, factory, allocator)),
             ))
         } else if let Some(target) = factory.match_hashset_term(&target) {
-            Some(factory.create_list_term(allocator.create_list(
-                target.values().into_iter().cloned().map(|value| {
-                    factory.create_list_term(allocator.create_pair(value.clone(), value))
-                }),
-            )))
+            Some(factory.create_list_term(
+                allocator.create_list(target.values().map(|item| item.as_deref()).cloned().map(
+                    |value| factory.create_list_term(allocator.create_pair(value.clone(), value)),
+                )),
+            ))
         } else {
             None
         };

@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use reflex::core::{
-    parse_record, uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
-    FunctionArity, HeapAllocator, Uid, Uuid,
+    parse_record_values, uuid, Applicable, ArgType, Arity, EvaluationCache, Expression,
+    ExpressionFactory, FunctionArity, HeapAllocator, Uid, Uuid,
 };
 
 pub struct ToRequest {}
@@ -37,8 +37,8 @@ impl<T: Expression> Applicable<T> for ToRequest {
         allocator: &impl HeapAllocator<T>,
         _cache: &mut impl EvaluationCache<T>,
     ) -> Result<T, String> {
-        let mut args = args.into_iter();
-        let target = args.next().unwrap();
+        let mut remaining_args = args.into_iter();
+        let target = remaining_args.next().unwrap();
         let result = match factory.match_string_term(&target) {
             Some(_) => {
                 let url = target.clone();
@@ -53,12 +53,15 @@ impl<T: Expression> Applicable<T> for ToRequest {
                     allocator.create_list(vec![url, method, headers, body]),
                 ))
             }
-            _ => parse_record(
-                &request_prototype(factory, allocator),
-                &target,
-                factory,
-                allocator,
-            ),
+            _ => {
+                let prototype = request_prototype(factory, allocator);
+                parse_record_values(&prototype, &target, factory, allocator).map(
+                    |reordered_values| match reordered_values {
+                        Some(values) => factory.create_record_term(prototype, values),
+                        None => target.clone(),
+                    },
+                )
+            }
         };
         match result {
             Some(result) => Ok(result),
@@ -73,7 +76,7 @@ impl<T: Expression> Applicable<T> for ToRequest {
 pub(crate) fn request_prototype<T: Expression>(
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> T::StructPrototype {
+) -> T::StructPrototype<T> {
     allocator.create_struct_prototype(allocator.create_list([
         factory.create_string_term(allocator.create_static_string("url")),
         factory.create_string_term(allocator.create_static_string("method")),

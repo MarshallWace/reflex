@@ -16,7 +16,7 @@ use reflex::{
     cache::SubstitutionCache,
     core::{
         ConditionListType, ConditionType, Expression, ExpressionFactory, ExpressionListType,
-        InstructionPointer, SignalTermType, StateCache,
+        InstructionPointer, LetTermType, RefType, SignalTermType, StateCache,
     },
     env::inject_env_vars,
 };
@@ -92,6 +92,14 @@ pub async fn main() -> Result<()> {
     let debug_interpreter = args.debug_interpreter;
     let debug_stack = args.debug_stack;
     let factory = SharedTermFactory::<CliBuiltins>::default();
+    let term = factory.create_let_term(factory.create_int_term(3), factory.create_int_term(4));
+    if let Some(term) = factory.match_let_term(&term) {
+        println!(
+            "INTITIALIZER: {}, BODY: {}",
+            term.initializer().as_deref(),
+            term.body().as_deref()
+        );
+    }
     let allocator = DefaultAllocator::default();
     let input_path = args.entry_point;
     let syntax = args.syntax;
@@ -255,7 +263,7 @@ fn create_query<
     query: T,
     factory: &TFactory,
     allocator: &TAllocator,
-) -> (T::Signal, EffectSubscribeAction<T>) {
+) -> (T::Signal<T>, EffectSubscribeAction<T>) {
     let evaluate_effect = create_evaluate_effect(
         String::from("<anonymous>"),
         query,
@@ -345,10 +353,20 @@ fn format_signal_errors<'a, T: Expression>(
 ) -> impl IntoIterator<Item = String> + 'a {
     signal
         .signals()
+        .as_deref()
         .iter()
-        .map(|signal| match signal.args().iter().next() {
-            Some(payload) => format!("{}", payload),
-            None => format!("{}", factory.create_nil_term()),
+        .map(|item| item.as_deref())
+        .map(|signal| {
+            match signal
+                .args()
+                .as_deref()
+                .iter()
+                .map(|item| item.as_deref())
+                .next()
+            {
+                Some(payload) => format!("{}", payload),
+                None => format!("{}", factory.create_nil_term()),
+            }
         })
 }
 

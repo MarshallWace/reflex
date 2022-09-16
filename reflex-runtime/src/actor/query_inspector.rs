@@ -8,7 +8,7 @@ use std::{
 
 use reflex::core::{
     ConditionListType, ConditionType, DependencyList, EvaluationResult, Expression,
-    ExpressionFactory, ExpressionListType, SignalTermType, SignalType, StateToken,
+    ExpressionFactory, ExpressionListType, RefType, SignalTermType, SignalType, StateToken,
 };
 use reflex_dispatcher::{
     Action, Actor, ActorTransition, HandlerContext, InboundAction, MessageData, StateTransition,
@@ -133,7 +133,13 @@ fn is_unresolved_effect_state<T: Expression>(
         None => true,
         Some(value) => factory
             .match_signal_term(value)
-            .map(|term| term.signals().iter().any(is_unresolved_effect))
+            .map(|term| {
+                term.signals()
+                    .as_deref()
+                    .iter()
+                    .map(|item| item.as_deref())
+                    .any(is_unresolved_effect)
+            })
             .unwrap_or(false),
     }
 }
@@ -157,14 +163,22 @@ fn serialize_effect_result<T: Expression>(
 
 fn serialize_value<T: Expression>(value: &T, factory: &impl ExpressionFactory<T>) -> JsonValue {
     if let Some(value) = factory.match_signal_term(value) {
-        JsonValue::Array(value.signals().iter().map(serialize_effect).collect())
+        JsonValue::Array(
+            value
+                .signals()
+                .as_deref()
+                .iter()
+                .map(|item| item.as_deref())
+                .map(serialize_effect)
+                .collect(),
+        )
     } else {
         JsonValue::Number(value.id().into())
     }
 }
 
 pub struct QueryInspectorEffectState<T: Expression> {
-    effect: T::Signal,
+    effect: T::Signal<T>,
     value: Option<T>,
 }
 
@@ -201,7 +215,7 @@ fn serialize_effect<T: Expression>(effect: &impl ConditionType<T>) -> JsonValue 
             SignalType::Error => JsonValue::String(String::from("error")),
             SignalType::Pending => JsonValue::String(String::from("pending")),
         },
-        "args": serialize_json_list(effect.args())
+        "args": serialize_json_list(effect.args().as_deref())
     })
 }
 
@@ -209,6 +223,7 @@ fn serialize_json_list<T: Expression>(items: &impl ExpressionListType<T>) -> Jso
     JsonValue::Array(
         items
             .iter()
+            .map(|item| item.as_deref())
             .map(|value| match reflex_json::sanitize(value) {
                 Ok(value) => value,
                 Err(_) => json!({}),

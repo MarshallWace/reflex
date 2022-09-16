@@ -4,7 +4,7 @@
 use reflex::core::{
     deduplicate_hashmap_entries, deduplicate_hashset_entries, uuid, Applicable, ArgType, Arity,
     EvaluationCache, Expression, ExpressionFactory, ExpressionListType, FunctionArity,
-    HeapAllocator, ListTermType, Uid, Uuid,
+    HeapAllocator, ListTermType, RefType, Uid, Uuid,
 };
 
 pub struct ConstructRecord {}
@@ -42,21 +42,27 @@ impl<T: Expression> Applicable<T> for ConstructRecord {
         let values = args.next().unwrap();
         let (num_keys, keys) = match factory.match_list_term(&keys) {
             Some(keys) => {
-                let num_keys = keys.items().len();
+                let num_keys = keys.items().as_deref().len();
                 Ok((
                     num_keys,
-                    allocator.create_list(keys.items().iter().cloned()),
+                    allocator.create_list(
+                        keys.items()
+                            .as_deref()
+                            .iter()
+                            .map(|item| item.as_deref())
+                            .cloned(),
+                    ),
                 ))
             }
             None => Err(format!("Invalid property keys: {}", keys)),
         }?;
         match factory.match_list_term(&values) {
             Some(values) => {
-                if values.items().len() != num_keys {
+                if values.items().as_deref().len() != num_keys {
                     Err(format!(
                         "Invalid property entries: received {} keys and {} values",
                         num_keys,
-                        values.items().len(),
+                        values.items().as_deref().len(),
                     ))
                 } else {
                     Ok(factory.create_record_term(
@@ -105,7 +111,13 @@ impl<T: Expression> Applicable<T> for ConstructHashMap {
         let values = args.next().unwrap();
         let keys = match factory.match_list_term(&keys) {
             Some(keys) => {
-                if let Some(dynamic_key) = keys.items().iter().find(|key| !key.is_static()) {
+                if let Some(dynamic_key) = keys
+                    .items()
+                    .as_deref()
+                    .iter()
+                    .map(|item| item.as_deref())
+                    .find(|key| !key.is_static())
+                {
                     Err(format!("Invalid HashMap key: {}", dynamic_key))
                 } else {
                     Ok(keys)
@@ -115,25 +127,34 @@ impl<T: Expression> Applicable<T> for ConstructHashMap {
         }?;
         match factory.match_list_term(&values) {
             Some(values) => {
-                if values.items().len() != keys.items().len() {
+                if values.items().as_deref().len() != keys.items().as_deref().len() {
                     Err(format!(
                         "Invalid HashMap entries: received {} keys and {} values",
-                        keys.items().len(),
-                        values.items().len(),
+                        keys.items().as_deref().len(),
+                        values.items().as_deref().len(),
                     ))
                 } else {
+                    let keys = keys.items();
+                    let values = values.items();
                     // FIXME: prevent unnecessary vector allocations
                     let (keys, values) = match deduplicate_hashmap_entries(
-                        &keys.items().iter().cloned().collect::<Vec<_>>(),
-                        &values.items().iter().cloned().collect::<Vec<_>>(),
+                        &keys
+                            .as_deref()
+                            .iter()
+                            .map(|item| item.as_deref())
+                            .cloned()
+                            .collect::<Vec<_>>(),
+                        &values
+                            .as_deref()
+                            .iter()
+                            .map(|item| item.as_deref())
+                            .cloned()
+                            .collect::<Vec<_>>(),
                     ) {
                         Some((keys, values)) => {
                             (allocator.create_list(keys), allocator.create_list(values))
                         }
-                        None => (
-                            allocator.clone_list(keys.items()),
-                            allocator.clone_list(values.items()),
-                        ),
+                        None => (allocator.clone_list(keys), allocator.clone_list(values)),
                     };
                     Ok(factory.create_hashmap_term(keys, values))
                 }

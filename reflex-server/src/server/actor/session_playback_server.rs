@@ -9,7 +9,8 @@ use std::{
 use bytes::Bytes;
 use http::{Method, Request, StatusCode};
 use reflex::core::{
-    ConditionListType, ConditionType, Expression, ExpressionFactory, SignalTermType, SignalType,
+    ConditionListType, ConditionType, Expression, ExpressionFactory, RefType, SignalTermType,
+    SignalType,
 };
 use reflex_dispatcher::{
     session_playback::{SessionPlayback, SessionPlaybackState},
@@ -620,7 +621,9 @@ fn is_error_expression<T: Expression>(value: &T, factory: &impl ExpressionFactor
         .match_signal_term(value)
         .map(|term| {
             term.signals()
+                .as_deref()
                 .iter()
+                .map(|item| item.as_deref())
                 .any(|effect| matches!(effect.signal_type(), SignalType::Error))
         })
         .unwrap_or(false)

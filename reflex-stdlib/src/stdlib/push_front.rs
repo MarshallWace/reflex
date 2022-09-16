@@ -6,7 +6,8 @@ use std::iter::once;
 
 use reflex::core::{
     uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
-    ExpressionListType, FunctionArity, HashsetTermType, HeapAllocator, ListTermType, Uid, Uuid,
+    ExpressionListType, FunctionArity, HashsetTermType, HeapAllocator, ListTermType, RefType, Uid,
+    Uuid,
 };
 
 pub struct PushFront {}
@@ -43,19 +44,33 @@ impl<T: Expression> Applicable<T> for PushFront {
         let target = args.next().unwrap();
         let value = args.next().unwrap();
         if let Some(collection) = factory.match_list_term(&target) {
-            Ok(factory.create_list_term(allocator.create_sized_list(
-                collection.items().len() + 1,
-                once(value).chain(collection.items().iter().cloned()),
-            )))
+            Ok(factory.create_list_term(
+                allocator.create_sized_list(
+                    collection.items().as_deref().len() + 1,
+                    once(value).chain(
+                        collection
+                            .items()
+                            .as_deref()
+                            .iter()
+                            .map(|item| item.as_deref())
+                            .cloned(),
+                    ),
+                ),
+            ))
         } else if let Some(collection) = factory.match_hashset_term(&target) {
             Ok(if collection.contains(&value) {
                 target
             } else {
                 let values = collection.values();
-                factory.create_hashset_term(allocator.create_sized_list(
-                    values.len() + 1,
-                    values.into_iter().cloned().chain(once(value)),
-                ))
+                factory.create_hashset_term(
+                    allocator.create_sized_list(
+                        values.len() + 1,
+                        values
+                            .map(|item| item.as_deref())
+                            .cloned()
+                            .chain(once(value)),
+                    ),
+                )
             })
         } else {
             Err(format!(

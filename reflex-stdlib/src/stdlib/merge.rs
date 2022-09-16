@@ -9,8 +9,8 @@ use std::{
 
 use reflex::core::{
     uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
-    ExpressionListType, FunctionArity, HeapAllocator, RecordTermType, StructPrototypeType, Uid,
-    Uuid,
+    ExpressionListType, FunctionArity, HeapAllocator, RecordTermType, RefType, StructPrototypeType,
+    Uid, Uuid,
 };
 
 pub struct Merge {}
@@ -55,7 +55,10 @@ impl<T: Expression> Applicable<T> for Merge {
                     let records = args
                         .iter()
                         .map(|arg| match factory.match_record_term(arg) {
-                            Some(term) => Some(Some((term.prototype(), term.values()))),
+                            Some(term) => Some(Some((
+                                term.prototype().as_deref(),
+                                term.values().as_deref(),
+                            ))),
                             None => match factory.match_nil_term(arg) {
                                 Some(_) => Some(None),
                                 _ => None,
@@ -66,7 +69,7 @@ impl<T: Expression> Applicable<T> for Merge {
                         None => Err((target, args)),
                         Some(records) => {
                             let (keys, values): (Vec<_>, Vec<_>) =
-                                once((base.prototype(), base.values()))
+                                once((base.prototype().as_deref(), base.values().as_deref()))
                                     .chain(records.into_iter().filter_map(|record| record))
                                     .fold(
                                         Vec::new(),
@@ -74,9 +77,16 @@ impl<T: Expression> Applicable<T> for Merge {
                                             combined_properties.extend(
                                                 prototype
                                                     .keys()
+                                                    .as_deref()
                                                     .iter()
+                                                    .map(|item| item.as_deref())
                                                     .cloned()
-                                                    .zip(values.iter().cloned()),
+                                                    .zip(
+                                                        values
+                                                            .iter()
+                                                            .map(|item| item.as_deref())
+                                                            .cloned(),
+                                                    ),
                                             );
                                             combined_properties
                                         },
@@ -99,17 +109,27 @@ impl<T: Expression> Applicable<T> for Merge {
                             );
                             let base_prototype = base.prototype();
                             let (prototype, values) = if deduplicated_keys.len()
-                                == base_prototype.keys().len()
+                                == base_prototype.as_deref().keys().as_deref().len()
                             {
                                 let values = if keys.len() == deduplicated_keys.len() {
                                     allocator.create_list(values)
                                 } else {
-                                    allocator.create_list(base_prototype.keys().iter().map(|key| {
-                                        deduplicated_keys
-                                            .remove(key)
-                                            .map(|index| values.get(index).cloned().unwrap())
-                                            .unwrap()
-                                    }))
+                                    allocator.create_list(
+                                        base_prototype
+                                            .as_deref()
+                                            .keys()
+                                            .as_deref()
+                                            .iter()
+                                            .map(|item| item.as_deref())
+                                            .map(|key| {
+                                                deduplicated_keys
+                                                    .remove(key)
+                                                    .map(|index| {
+                                                        values.get(index).cloned().unwrap()
+                                                    })
+                                                    .unwrap()
+                                            }),
+                                    )
                                 };
                                 (allocator.clone_struct_prototype(base_prototype), values)
                             } else if deduplicated_keys.len() == keys.len() {
@@ -122,7 +142,7 @@ impl<T: Expression> Applicable<T> for Merge {
                                     .iter()
                                     .fold(
                                         Vec::with_capacity(deduplicated_keys.len()),
-                                        |mut results, key| match deduplicated_keys.remove(key) {
+                                        |mut results, key| match deduplicated_keys.remove(&key) {
                                             Some(index) => {
                                                 let value = values.get(index).unwrap();
                                                 results.push((key.clone(), value.clone()));

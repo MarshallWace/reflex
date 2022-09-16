@@ -8,24 +8,28 @@ use serde::{Deserialize, Serialize};
 
 use reflex::core::{
     transform_expression_list, CompoundNode, DependencyList, DynamicState, Eagerness,
-    EvaluationCache, Expression, ExpressionFactory, ExpressionListSlice, ExpressionListType,
-    GraphNode, HeapAllocator, Internable, ListTermType, Rewritable, SerializeJson, StackOffset,
-    Substitutions, TermHash,
+    EvaluationCache, Expression, ExpressionFactory, ExpressionListIter, ExpressionListType,
+    GraphNode, HeapAllocator, Internable, ListTermType, RefType, Rewritable, SerializeJson,
+    StackOffset, Substitutions, TermHash,
 };
 
 #[derive(Hash, Eq, PartialEq, Clone, Debug, Serialize, Deserialize)]
 pub struct ListTerm<T: Expression> {
-    items: T::ExpressionList,
+    items: T::ExpressionList<T>,
 }
 impl<T: Expression> TermHash for ListTerm<T> {}
 impl<T: Expression> ListTerm<T> {
-    pub fn new(items: T::ExpressionList) -> Self {
+    pub fn new(items: T::ExpressionList<T>) -> Self {
         Self { items }
     }
 }
 impl<T: Expression> ListTermType<T> for ListTerm<T> {
-    fn items(&self) -> &T::ExpressionList {
-        &self.items
+    fn items<'a>(&'a self) -> T::Ref<'a, T::ExpressionList<T>>
+    where
+        T::ExpressionList<T>: 'a,
+        T: 'a,
+    {
+        (&self.items).into()
     }
 }
 impl<T: Expression> GraphNode for ListTerm<T> {
@@ -62,10 +66,12 @@ impl<T: Expression> GraphNode for ListTerm<T> {
         true
     }
 }
-pub type ListTermChildren<'a, T> = ExpressionListSlice<'a, T>;
-impl<'a, T: Expression + 'a> CompoundNode<'a, T> for ListTerm<T> {
-    type Children = ListTermChildren<'a, T>;
-    fn children(&'a self) -> Self::Children {
+impl<T: Expression> CompoundNode<T> for ListTerm<T> {
+    type Children<'a> = ExpressionListIter<'a, T>
+        where
+            T: 'a,
+            Self: 'a;
+    fn children<'a>(&'a self) -> Self::Children<'a> {
         self.items.iter()
     }
 }
@@ -139,12 +145,14 @@ impl<T: Expression> std::fmt::Display for ListTerm<T> {
             if num_items <= max_displayed_items {
                 items
                     .iter()
+                    .map(|item| item.as_deref())
                     .map(|item| format!("{}", item))
                     .collect::<Vec<_>>()
                     .join(", ")
             } else {
                 items
                     .iter()
+                    .map(|item| item.as_deref())
                     .take(max_displayed_items - 1)
                     .map(|item| format!("{}", item))
                     .chain(once(format!(
@@ -160,8 +168,9 @@ impl<T: Expression> std::fmt::Display for ListTerm<T> {
 
 impl<T: Expression> SerializeJson for ListTerm<T> {
     fn to_json(&self) -> Result<serde_json::Value, String> {
-        self.items()
+        self.items
             .iter()
+            .map(|item| item.as_deref())
             .map(|key| key.to_json())
             .collect::<Result<Vec<_>, String>>()
             .map(|values| serde_json::Value::Array(values))

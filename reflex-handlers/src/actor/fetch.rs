@@ -18,7 +18,8 @@ use metrics::{
 };
 use reflex::core::{
     ConditionType, Expression, ExpressionFactory, ExpressionListType, HeapAllocator,
-    RecordTermType, SignalType, StateToken, StringTermType, StringValue, StructPrototypeType,
+    RecordTermType, RefType, SignalType, StateToken, StringTermType, StringValue,
+    StructPrototypeType,
 };
 use reflex_dispatcher::{
     Action, Actor, ActorTransition, HandlerContext, InboundAction, MessageData, OperationStream,
@@ -384,21 +385,33 @@ fn create_fetch_error_expression<T: Expression>(
 }
 
 fn parse_fetch_effect_args<T: Expression>(
-    effect: &T::Signal,
+    effect: &T::Signal<T>,
     factory: &impl ExpressionFactory<T>,
 ) -> Result<FetchRequest, String> {
-    let args = effect.args();
+    let args = effect.args().as_deref();
     if args.len() != 4 {
         return Err(format!(
             "Invalid fetch signal: Expected 4 arguments, received {}",
             args.len()
         ));
     }
-    let mut args = args.iter();
-    let url = parse_string_arg(args.next().unwrap(), factory);
-    let method = parse_string_arg(args.next().unwrap(), factory);
-    let headers = parse_key_values_arg(args.next().unwrap(), factory);
-    let body = parse_optional_string_arg(args.next().unwrap(), factory);
+    let mut remaining_args = args.iter();
+    let url = parse_string_arg(
+        remaining_args.next().map(|iter| iter.as_deref()).unwrap(),
+        factory,
+    );
+    let method = parse_string_arg(
+        remaining_args.next().map(|iter| iter.as_deref()).unwrap(),
+        factory,
+    );
+    let headers = parse_key_values_arg(
+        remaining_args.next().map(|iter| iter.as_deref()).unwrap(),
+        factory,
+    );
+    let body = parse_optional_string_arg(
+        remaining_args.next().map(|iter| iter.as_deref()).unwrap(),
+        factory,
+    );
     match (method, url, headers, body) {
         (Some(method), Some(url), Some(headers), Some(body)) => {
             let headers = format_request_headers(headers)?;
@@ -413,7 +426,9 @@ fn parse_fetch_effect_args<T: Expression>(
             "Invalid fetch signal arguments: {}",
             effect
                 .args()
+                .as_deref()
                 .iter()
+                .map(|item| item.as_deref())
                 .map(|arg| format!("{}", arg))
                 .collect::<Vec<_>>()
                 .join(", "),
@@ -443,7 +458,7 @@ fn parse_string_arg<T: Expression>(
     factory: &impl ExpressionFactory<T>,
 ) -> Option<String> {
     match factory.match_string_term(value) {
-        Some(term) => Some(String::from(term.value().as_str())),
+        Some(term) => Some(String::from(term.value().as_deref().as_str())),
         _ => None,
     }
 }
@@ -453,7 +468,7 @@ fn parse_optional_string_arg<T: Expression>(
     factory: &impl ExpressionFactory<T>,
 ) -> Option<Option<String>> {
     match factory.match_string_term(value) {
-        Some(term) => Some(Some(String::from(term.value().as_str()))),
+        Some(term) => Some(Some(String::from(term.value().as_deref().as_str()))),
         _ => match factory.match_nil_term(value) {
             Some(_) => Some(None),
             _ => None,
@@ -468,17 +483,20 @@ fn parse_key_values_arg<T: Expression>(
     if let Some(value) = factory.match_record_term(value) {
         value
             .prototype()
+            .as_deref()
             .keys()
+            .as_deref()
             .iter()
-            .zip(value.values().iter())
+            .map(|item| item.as_deref())
+            .zip(value.values().as_deref().iter().map(|item| item.as_deref()))
             .map(|(key, value)| {
                 match (
                     factory.match_string_term(key),
                     factory.match_string_term(value),
                 ) {
                     (Some(key), Some(value)) => Some((
-                        String::from(key.value().as_str()),
-                        String::from(value.value().as_str()),
+                        String::from(key.value().as_deref().as_str()),
+                        String::from(value.value().as_deref().as_str()),
                     )),
                     _ => None,
                 }

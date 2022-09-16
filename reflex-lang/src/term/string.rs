@@ -7,26 +7,31 @@ use std::collections::HashSet;
 use serde::{Deserialize, Serialize};
 
 use reflex::core::{
-    DependencyList, Eagerness, GraphNode, Internable, SerializeJson, StackOffset, StringTermType,
-    StringValue, TermHash,
+    DependencyList, Eagerness, Expression, GraphNode, Internable, SerializeJson, StackOffset,
+    StringTermType, StringValue, TermHash,
 };
 
 #[derive(PartialEq, Eq, Clone, Copy, Serialize, Deserialize, Hash)]
-pub struct StringTerm<TString: StringValue> {
-    value: TString,
+pub struct StringTerm<T: Expression> {
+    value: T::String,
 }
-impl<TString: StringValue> StringTerm<TString> {
-    pub fn new(value: TString) -> Self {
+impl<T: Expression> StringTerm<T> {
+    pub fn new(value: T::String) -> Self {
         Self { value }
     }
 }
-impl<TString: StringValue> TermHash for StringTerm<TString> {}
-impl<TString: StringValue> StringTermType<TString> for StringTerm<TString> {
-    fn value(&self) -> &TString {
-        &self.value
+impl<T: Expression> TermHash for StringTerm<T> {}
+impl<T: Expression> StringTermType<T> for StringTerm<T> {
+    fn value<'a>(&'a self) -> T::Ref<'a, T::String>
+    where
+        T::String: 'a,
+        T: 'a,
+        Self: 'a,
+    {
+        (&self.value).into()
     }
 }
-impl<TString: StringValue> GraphNode for StringTerm<TString> {
+impl<T: Expression> GraphNode for StringTerm<T> {
     fn capture_depth(&self) -> StackOffset {
         0
     }
@@ -53,23 +58,23 @@ impl<TString: StringValue> GraphNode for StringTerm<TString> {
     }
 }
 
-impl<TString: StringValue> Internable for StringTerm<TString> {
+impl<T: Expression> Internable for StringTerm<T> {
     fn should_intern(&self, _eager: Eagerness) -> bool {
         true
     }
 }
 
-impl<TString: StringValue> std::fmt::Display for StringTerm<TString> {
+impl<T: Expression> std::fmt::Display for StringTerm<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:?}", self.value)
     }
 }
-impl<TString: StringValue> std::fmt::Debug for StringTerm<TString> {
+impl<T: Expression> std::fmt::Debug for StringTerm<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         std::fmt::Display::fmt(self, f)
     }
 }
-impl<TString: StringValue> SerializeJson for StringTerm<TString> {
+impl<T: Expression> SerializeJson for StringTerm<T> {
     fn to_json(&self) -> Result<serde_json::Value, String> {
         Ok(serde_json::Value::String(String::from(self.value.as_str())))
     }

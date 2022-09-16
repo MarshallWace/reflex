@@ -11,7 +11,7 @@ use metrics::{describe_counter, increment_counter, Unit};
 use reflex::{
     core::{
         ConditionListType, ConditionType, DependencyList, EvaluationResult, Expression,
-        ExpressionFactory, ExpressionListType, HeapAllocator, SignalTermType, SignalType,
+        ExpressionFactory, ExpressionListType, HeapAllocator, RefType, SignalTermType, SignalType,
         StateToken,
     },
     hash::HashId,
@@ -145,7 +145,7 @@ where
 
 pub struct TelemetryMiddlewareState<T: Expression> {
     active_queries: HashMap<Uuid, TelemetryMiddlewareQueryState>,
-    active_workers: HashMap<StateToken, T::Signal>,
+    active_workers: HashMap<StateToken, T::Signal<T>>,
     effect_mappings: HashMap<HashId, TelemetryMiddlewareEffectState<T>>,
 }
 impl<T: Expression> Default for TelemetryMiddlewareState<T> {
@@ -158,7 +158,7 @@ impl<T: Expression> Default for TelemetryMiddlewareState<T> {
     }
 }
 struct TelemetryMiddlewareEffectState<T: Expression> {
-    effect: T::Signal,
+    effect: T::Signal<T>,
     transaction_id: Option<Traceparent>,
     parent_transactions: HashSet<Traceparent>,
     subscription_count: usize,
@@ -787,12 +787,14 @@ where
 fn get_query_result_effects<'a, T: Expression>(
     result: &'a T,
     factory: &impl ExpressionFactory<T>,
-) -> impl Iterator<Item = &'a T::Signal> + 'a {
+) -> impl Iterator<Item = &'a T::Signal<T>> + 'a {
     factory
         .match_signal_term(result)
         .map(|term| {
             term.signals()
+                .as_deref()
                 .iter()
+                .map(|item| item.as_deref())
                 .filter(|signal| matches!(signal.signal_type(), SignalType::Custom(_)))
         })
         .into_iter()
@@ -856,7 +858,7 @@ fn parse_graphql_operation_traceparent_extensions(
     }
 }
 
-fn format_effect_label<V: ConditionType<impl Expression<Signal = V>>>(effect: &V) -> String {
+fn format_effect_label<T: Expression<Signal<T> = V>, V: ConditionType<T>>(effect: &V) -> String {
     match effect.signal_type() {
         SignalType::Custom(signal_type) => format!("{}", signal_type),
         signal_type => format!("{}", signal_type),
@@ -871,7 +873,7 @@ fn format_async_update_batch_label(batch_size: usize) -> String {
     }
 }
 
-fn format_effect_attributes<V: ConditionType<impl Expression<Signal = V>>>(
+fn format_effect_attributes<T: Expression<Signal<T> = V>, V: ConditionType<T>>(
     effect: &V,
 ) -> Vec<(String, String)> {
     vec![
@@ -882,7 +884,9 @@ fn format_effect_attributes<V: ConditionType<impl Expression<Signal = V>>>(
             sanitize_json_value(JsonValue::Array(
                 effect
                     .args()
+                    .as_deref()
                     .iter()
+                    .map(|item| item.as_deref())
                     .map(|arg| {
                         reflex_json::sanitize(arg).unwrap_or_else(|_| {
                             JsonValue::String(format!("<expression:{}>", arg.id()))

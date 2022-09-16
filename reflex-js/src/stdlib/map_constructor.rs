@@ -4,7 +4,8 @@
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use reflex::core::{
     deduplicate_hashmap_entries, uuid, Applicable, ArgType, Arity, EvaluationCache, Expression,
-    ExpressionFactory, ExpressionListType, FunctionArity, HeapAllocator, ListTermType, Uid, Uuid,
+    ExpressionFactory, ExpressionListType, FunctionArity, HeapAllocator, ListTermType, RefType,
+    Uid, Uuid,
 };
 use reflex_stdlib::Stdlib;
 
@@ -50,7 +51,9 @@ where
         } else if let Some(entries) = factory.match_list_term(&entries) {
             let entries = entries
                 .items()
+                .as_deref()
                 .iter()
+                .map(|item| item.as_deref())
                 .map(|entry| {
                     match get_indexed_field(entry, 0, factory, allocator).and_then(|key| {
                         get_indexed_field(entry, 1, factory, allocator).map(|value| (key, value))
@@ -122,7 +125,12 @@ where
     T::Builtin: From<Stdlib>,
 {
     if let Some(target) = factory.match_list_term(target) {
-        target.items().get(index).cloned()
+        target
+            .items()
+            .as_deref()
+            .get(index)
+            .map(|value| value.as_deref())
+            .cloned()
     } else if target.is_static() {
         None
     } else {

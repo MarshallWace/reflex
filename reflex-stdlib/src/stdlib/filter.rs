@@ -7,7 +7,7 @@ use std::iter::once;
 use reflex::core::{
     get_hashmap_entries, uuid, Applicable, ArgType, Arity, EvaluationCache, Expression,
     ExpressionFactory, ExpressionListType, FunctionArity, HashsetTermType, HeapAllocator,
-    ListTermType, Uid, Uuid,
+    ListTermType, RefType, Uid, Uuid,
 };
 
 use super::{is_truthy, Stdlib};
@@ -50,7 +50,12 @@ where
         let predicate = args.next().unwrap();
         let result = if let Some(target) = factory.match_list_term(&target) {
             Some(collect_filter_results(
-                target.items().iter().cloned(),
+                target
+                    .items()
+                    .as_deref()
+                    .iter()
+                    .map(|item| item.as_deref())
+                    .cloned(),
                 &predicate,
                 Stdlib::CollectList,
                 factory,
@@ -66,7 +71,7 @@ where
             ))
         } else if let Some(target) = factory.match_hashset_term(&target) {
             Some(collect_filter_results(
-                target.values().into_iter().cloned(),
+                target.values().map(|item| item.as_deref()).cloned(),
                 &predicate,
                 Stdlib::CollectHashSet,
                 factory,
@@ -160,7 +165,7 @@ impl<T: Expression> Applicable<T> for CollectFilterResults {
                 Ok(factory.create_application_term(
                     combine,
                     allocator.create_unsized_list(
-                    items.items().iter().zip(results.items().iter()).filter_map(|(item, result)| if is_truthy(result, factory) {
+                    items.items().as_deref().iter().map(|item| item.as_deref()).zip(results.items().as_deref().iter().map(|item| item.as_deref())).filter_map(|(item, result)| if is_truthy(result, factory) {
                         Some(item.clone())
                     } else {
                         None

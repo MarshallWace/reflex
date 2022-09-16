@@ -3,7 +3,7 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use reflex::core::{
     uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
-    FunctionArity, HeapAllocator, StringTermType, StringValue, Uid, Uuid,
+    FunctionArity, HeapAllocator, RefType, StringTermType, StringValue, Uid, Uuid,
 };
 
 pub struct JsonDeserialize {}
@@ -40,7 +40,7 @@ impl<T: Expression> Applicable<T> for JsonDeserialize {
         let mut args = args.into_iter();
         let source = args.next().unwrap();
         match factory.match_string_term(&source) {
-            Some(source) => crate::parse(source.value().as_str(), factory, allocator)
+            Some(source) => crate::parse(source.value().as_deref().as_str(), factory, allocator)
                 .map_err(|error| format!("JSON deserialization failed: {}", error)),
             _ => Err(format!(
                 "JSON deserialization failed: expected string argument, received {}",

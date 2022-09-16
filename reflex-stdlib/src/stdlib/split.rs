@@ -3,7 +3,7 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use reflex::core::{
     uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
-    FunctionArity, HeapAllocator, StringTermType, StringValue, Uid, Uuid,
+    FunctionArity, HeapAllocator, RefType, StringTermType, StringValue, Uid, Uuid,
 };
 
 pub struct Split {}
@@ -47,8 +47,9 @@ impl<T: Expression> Applicable<T> for Split {
                 allocator.create_unsized_list(
                     target
                         .value()
+                        .as_deref()
                         .as_str()
-                        .split(separator.value().as_str())
+                        .split(separator.value().as_deref().as_str())
                         .map(|value| factory.create_string_term(allocator.create_string(value))),
                 ),
             )),

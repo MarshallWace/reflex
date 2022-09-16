@@ -20,7 +20,7 @@ pub use interpreter::stack::{CallStack, VariableStack};
 
 use reflex::core::{
     ApplicationTermType, CompiledFunctionTermType, ConditionListType, ConditionType,
-    EffectTermType, InstructionPointer, PartialApplicationTermType, RecursiveTermType,
+    EffectTermType, InstructionPointer, PartialApplicationTermType, RecursiveTermType, RefType,
     SignalTermType, StateCache, VariableTermType,
 };
 use reflex::hash::hash_object;
@@ -59,7 +59,7 @@ enum ExecutionResult<T: Expression> {
     ResolveExpression,
     ResolveApplicationTarget {
         target: T,
-        args: T::ExpressionList,
+        args: T::ExpressionList<T>,
     },
     ResolveApplicationArgs {
         target: T,
@@ -657,8 +657,15 @@ fn evaluate_instruction<'a, T: Expression + Rewritable<T> + Reducible<T> + Appli
                 Some(effect) => {
                     let condition = factory
                         .match_signal_term(&effect)
-                        .filter(|effect| effect.signals().len() == 1)
-                        .and_then(|effect| effect.signals().iter().next());
+                        .filter(|effect| effect.signals().as_deref().len() == 1)
+                        .and_then(|effect| {
+                            effect
+                                .signals()
+                                .as_deref()
+                                .iter()
+                                .map(|item| item.as_deref())
+                                .next()
+                        });
                     match condition {
                         None => Err(format!("Invalid effect condition: {}", effect)),
                         Some(condition) => {
@@ -976,6 +983,7 @@ fn evaluate_instruction<'a, T: Expression + Rewritable<T> + Reducible<T> + Appli
                     .map(|arg| match factory.match_signal_term(&arg) {
                         Some(signal) => Ok(signal
                             .signals()
+                            .as_deref()
                             .iter()
                             .map(|signal| allocator.clone_signal(signal))
                             .collect::<Vec<_>>()),
@@ -1014,11 +1022,14 @@ fn evaluate_expression<T: Expression + Applicable<T>>(
             stack.push(result);
             Ok((ExecutionResult::Advance, dependencies))
         } else if let Some(application) = factory.match_application_term(expression) {
-            let target = application.target();
+            let target = application.target().as_deref();
             let args = application.args();
             let (target, partial_args) = extract_partial_args(target, factory);
-            let num_combined_args = partial_args.len() + args.len();
-            let combined_args = partial_args.iter().chain(args.iter()).cloned();
+            let num_combined_args = partial_args.len() + args.as_deref().len();
+            let combined_args = partial_args
+                .iter()
+                .chain(args.as_deref().iter().map(|item| item.as_deref()))
+                .cloned();
             if !target.is_static() {
                 Ok((
                     ExecutionResult::ResolveApplicationTarget {
@@ -1051,7 +1062,12 @@ fn evaluate_expression<T: Expression + Applicable<T>>(
                 ))
             } else {
                 let arity = get_function_arity(target)?;
-                if has_unresolved_args(&arity, partial_args.iter().chain(args.iter())) {
+                if has_unresolved_args(
+                    &arity,
+                    partial_args
+                        .iter()
+                        .chain(args.as_deref().iter().map(|item| item.as_deref())),
+                ) {
                     Ok((
                         ExecutionResult::ResolveApplicationArgs {
                             target: target.clone(),
@@ -1064,11 +1080,15 @@ fn evaluate_expression<T: Expression + Applicable<T>>(
                 } else {
                     if let Some(signal) = get_combined_short_circuit_signal(
                         get_num_short_circuit_signals(
-                            partial_args.iter().chain(args.iter()),
+                            partial_args
+                                .iter()
+                                .chain(args.as_deref().iter().map(|item| item.as_deref())),
                             &arity,
                             factory,
                         ),
-                        partial_args.iter().chain(args.iter()),
+                        partial_args
+                            .iter()
+                            .chain(args.as_deref().iter().map(|item| item.as_deref())),
                         &arity,
                         factory,
                         allocator,
@@ -1097,7 +1117,7 @@ fn evaluate_expression<T: Expression + Applicable<T>>(
                 }
             }
         } else if let Some(expression) = factory.match_effect_term(expression) {
-            let condition = expression.condition();
+            let condition = expression.condition().as_deref();
             let value = match state.get(&condition.id()) {
                 Some(value) => value.clone(),
                 None => factory
@@ -1110,7 +1130,7 @@ fn evaluate_expression<T: Expression + Applicable<T>>(
             ))
         } else if let Some(term) = factory.match_recursive_term(expression) {
             stack.push(factory.create_application_term(
-                term.factory().clone(),
+                term.factory().as_deref().clone(),
                 allocator.create_unit_list(expression.clone()),
             ));
             Ok((ExecutionResult::ResolveExpression, DependencyList::empty()))
@@ -1277,8 +1297,15 @@ fn extract_partial_args<'a, T: Expression>(
     let mut partial_args = Vec::new();
     let mut current = target;
     while let Some(partial) = factory.match_partial_application_term(current) {
-        partial_args.extend(partial.args().iter().cloned());
-        current = partial.target();
+        partial_args.extend(
+            partial
+                .args()
+                .as_deref()
+                .iter()
+                .map(|item| item.as_deref())
+                .cloned(),
+        );
+        current = partial.target().as_deref();
     }
     (current, partial_args)
 }
@@ -1432,7 +1459,7 @@ fn resolve_parallel_args<
     options: &InterpreterOptions,
 ) -> Result<Vec<T>, String>
 where
-    T::ExpressionList: Sync,
+    T::ExpressionList<T>: Sync,
 {
     {
         // this inner block does the calculation for a single entry which warms up the cache

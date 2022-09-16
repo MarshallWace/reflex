@@ -10,33 +10,36 @@ use reflex::{
     core::{
         build_hashset_lookup_table, transform_expression_list, CompoundNode, DependencyList,
         DynamicState, Eagerness, EvaluationCache, Expression, ExpressionFactory,
-        ExpressionListSlice, ExpressionListType, GraphNode, HashsetTermType, HeapAllocator,
-        Internable, Rewritable, SerializeJson, StackOffset, Substitutions, TermHash,
+        ExpressionListIter, ExpressionListType, GraphNode, HashsetTermType, HeapAllocator,
+        Internable, RefType, Rewritable, SerializeJson, StackOffset, Substitutions, TermHash,
     },
     hash::HashId,
 };
 
 #[derive(Eq, PartialEq, Clone, Debug)]
 pub struct HashSetTerm<T: Expression> {
-    values: T::ExpressionList,
+    values: T::ExpressionList<T>,
     lookup: HashSet<HashId>,
+}
+impl<T: Expression> HashSetTerm<T> {
+    pub fn new(values: T::ExpressionList<T>) -> Self {
+        let lookup = build_hashset_lookup_table(values.iter().map(|item| item.as_deref()));
+        Self { values, lookup }
+    }
 }
 impl<T: Expression> Hash for HashSetTerm<T> {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        for key in self.values.iter() {
+        for key in self.values.iter().map(|item| item.as_deref()) {
             key.hash(state);
         }
     }
 }
 impl<T: Expression> TermHash for HashSetTerm<T> {}
-impl<T: Expression> HashSetTerm<T> {
-    pub fn new(values: T::ExpressionList) -> Self {
-        let lookup = build_hashset_lookup_table(values.iter());
-        Self { values, lookup }
-    }
-}
 impl<T: Expression> HashsetTermType<T> for HashSetTerm<T> {
-    type ValuesIterator<'a> = <T::ExpressionList as ExpressionListType<T>>::Iterator<'a> where T: 'a, Self: 'a;
+    type ValuesIterator<'a> = ExpressionListIter<'a, T>
+        where
+            T: 'a,
+            Self: 'a;
     fn contains(&self, value: &T) -> bool {
         self.lookup.contains(&value.id())
     }
@@ -78,10 +81,12 @@ impl<T: Expression> GraphNode for HashSetTerm<T> {
         true
     }
 }
-pub type HashSetTermChildren<'a, T> = ExpressionListSlice<'a, T>;
-impl<'a, T: Expression + 'a> CompoundNode<'a, T> for HashSetTerm<T> {
-    type Children = HashSetTermChildren<'a, T>;
-    fn children(&'a self) -> Self::Children {
+impl<T: Expression> CompoundNode<T> for HashSetTerm<T> {
+    type Children<'a> = ExpressionListIter<'a, T>
+        where
+            T: 'a,
+            Self: 'a;
+    fn children<'a>(&'a self) -> Self::Children<'a> {
         self.values.iter()
     }
 }
@@ -155,12 +160,14 @@ impl<T: Expression> std::fmt::Display for HashSetTerm<T> {
             if num_values <= max_displayed_values {
                 values
                     .iter()
+                    .map(|item| item.as_deref())
                     .map(|value| format!("{}", value))
                     .collect::<Vec<_>>()
                     .join(", ")
             } else {
                 values
                     .iter()
+                    .map(|item| item.as_deref())
                     .take(max_displayed_values - 1)
                     .map(|value| format!("{}", value))
                     .chain(once(format!(
@@ -181,7 +188,7 @@ impl<T: Expression> SerializeJson for HashSetTerm<T> {
 impl<T: Expression> serde::Serialize for HashSetTerm<T>
 where
     T: serde::Serialize,
-    T::ExpressionList: serde::Serialize,
+    T::ExpressionList<T>: serde::Serialize,
 {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -193,7 +200,7 @@ where
 impl<'de, T: Expression> serde::Deserialize<'de> for HashSetTerm<T>
 where
     T: serde::Deserialize<'de>,
-    T::ExpressionList: serde::Deserialize<'de>,
+    T::ExpressionList<T>: serde::Deserialize<'de>,
 {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -204,7 +211,7 @@ where
 }
 #[derive(Debug, Serialize, Deserialize)]
 struct SerializedHashSetTerm<T: Expression> {
-    values: T::ExpressionList,
+    values: T::ExpressionList<T>,
 }
 impl<'a, T: Expression> Into<SerializedHashSetTerm<T>> for &'a HashSetTerm<T> {
     fn into(self) -> SerializedHashSetTerm<T> {

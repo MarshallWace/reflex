@@ -11,7 +11,7 @@ use std::{
 use futures::{stream, FutureExt, StreamExt};
 use reflex::core::{
     ConditionType, Expression, ExpressionFactory, ExpressionListType, FloatTermType, HeapAllocator,
-    IntTermType, SignalType, StateToken,
+    IntTermType, RefType, SignalType, StateToken,
 };
 use reflex_dispatcher::{
     Action, Actor, ActorTransition, HandlerContext, InboundAction, MessageData, OperationStream,
@@ -239,19 +239,19 @@ where
 }
 
 fn parse_timeout_effect_args<T: Expression>(
-    effect: &T::Signal,
+    effect: &T::Signal<T>,
     factory: &impl ExpressionFactory<T>,
 ) -> Result<Option<f64>, String> {
-    let args = effect.args();
+    let args = effect.args().as_deref();
     if args.len() != 2 {
         return Err(format!(
             "Invalid timeout signal: Expected 2 arguments, received {}",
             args.len()
         ));
     }
-    let mut args = args.iter();
-    let duration = parse_number_arg(args.next().unwrap(), factory);
-    let _token = args.next().unwrap();
+    let mut remaining_args = args.iter().map(|item| item.as_deref());
+    let duration = parse_number_arg(remaining_args.next().unwrap(), factory);
+    let _token = remaining_args.next().unwrap();
     match duration {
         Some(duration) if duration == 0.0 => Ok(None),
         Some(duration) => Ok(Some(duration.max(1.0))),
@@ -259,7 +259,9 @@ fn parse_timeout_effect_args<T: Expression>(
             "Invalid timeout signal arguments: {}",
             effect
                 .args()
+                .as_deref()
                 .iter()
+                .map(|item| item.as_deref())
                 .map(|arg| format!("{}", arg))
                 .collect::<Vec<_>>()
                 .join(", "),

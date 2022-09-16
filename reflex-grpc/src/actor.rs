@@ -17,8 +17,9 @@ use metrics::{
 use reflex::{
     cache::SubstitutionCache,
     core::{
-        create_record, ConditionType, Expression, ExpressionFactory, ExpressionListType, HeapAllocator, Reducible,
-        Rewritable, SignalType, StateToken, StringTermType, StringValue, SymbolId, SymbolTermType,
+        create_record, ConditionType, Expression, ExpressionFactory, ExpressionListType,
+        HeapAllocator, Reducible, RefType, Rewritable, SignalType, StateToken, StringTermType,
+        StringValue, SymbolId, SymbolTermType,
     },
 };
 use reflex_dispatcher::{
@@ -961,7 +962,7 @@ where
     fn unsubscribe_grpc_operation<TAction>(
         &self,
         state: &mut GrpcHandlerState<T>,
-        effect: &T::Signal,
+        effect: &T::Signal<T>,
     ) -> Option<impl Iterator<Item = StateOperation<TAction>> + '_>
     where
         TAction: Action + 'static,
@@ -1446,17 +1447,17 @@ struct GrpcEffectArgs<T: AsyncExpression> {
 }
 
 fn parse_grpc_effect_args<T: AsyncExpression>(
-    effect: &T::Signal,
+    effect: &T::Signal<T>,
     factory: &impl ExpressionFactory<T>,
 ) -> Result<GrpcEffectArgs<T>, String> {
-    let args = effect.args();
+    let args = effect.args().as_deref();
     if args.len() != 7 {
         return Err(format!(
             "Invalid grpc signal: Expected 7 arguments, received {}",
             args.len()
         ));
     }
-    let mut args = args.iter();
+    let mut args = args.iter().map(|item| item.as_deref());
     let proto_id = parse_symbol_arg(args.next().unwrap(), factory);
     let url = parse_string_arg(args.next().unwrap(), factory);
     let service = parse_string_arg(args.next().unwrap(), factory);
@@ -1482,7 +1483,9 @@ fn parse_grpc_effect_args<T: AsyncExpression>(
             "Invalid grpc signal arguments: {}",
             effect
                 .args()
+                .as_deref()
                 .iter()
+                .map(|item| item.as_deref())
                 .map(|arg| format!("{}", arg))
                 .collect::<Vec<_>>()
                 .join(", "),
@@ -1505,7 +1508,7 @@ fn parse_string_arg<T: Expression>(
     factory: &impl ExpressionFactory<T>,
 ) -> Option<String> {
     match factory.match_string_term(value) {
-        Some(term) => Some(String::from(term.value().as_str())),
+        Some(term) => Some(String::from(term.value().as_deref().as_str())),
         _ => None,
     }
 }

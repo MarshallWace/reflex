@@ -3,7 +3,7 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use reflex::core::{
     uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
-    ExpressionListType, FunctionArity, HeapAllocator, ListTermType, Uid, Uuid,
+    ExpressionListType, FunctionArity, HeapAllocator, ListTermType, RefType, Uid, Uuid,
 };
 
 pub struct Flatten {}
@@ -39,22 +39,42 @@ impl<T: Expression> Applicable<T> for Flatten {
     ) -> Result<T, String> {
         let target = args.next().unwrap();
         let result = if let Some(target) = factory.match_list_term(&target) {
-            let items = target.items().iter().flat_map(|item| {
-                let (list_items, standalone_item) =
+            let items = target
+                .items()
+                .as_deref()
+                .iter()
+                .map(|item| item.as_deref())
+                .flat_map(|item| {
+                    let (list_items, standalone_item) =
+                        if let Some(inner) = factory.match_list_term(item) {
+                            (
+                                Some(
+                                    inner
+                                        .items()
+                                        .as_deref()
+                                        .iter()
+                                        .map(|item| item.as_deref())
+                                        .cloned(),
+                                ),
+                                None,
+                            )
+                        } else {
+                            (None, Some(item.clone()))
+                        };
+                    list_items.into_iter().flatten().chain(standalone_item)
+                });
+            let num_items = target
+                .items()
+                .as_deref()
+                .iter()
+                .map(|item| item.as_deref())
+                .fold(0, |num_items, item| {
                     if let Some(inner) = factory.match_list_term(item) {
-                        (Some(inner.items().iter().cloned()), None)
+                        num_items + inner.items().as_deref().len()
                     } else {
-                        (None, Some(item.clone()))
-                    };
-                list_items.into_iter().flatten().chain(standalone_item)
-            });
-            let num_items = target.items().iter().fold(0, |num_items, item| {
-                if let Some(inner) = factory.match_list_term(item) {
-                    num_items + inner.items().len()
-                } else {
-                    num_items + 1
-                }
-            });
+                        num_items + 1
+                    }
+                });
             Some(factory.create_list_term(allocator.create_sized_list(num_items, items)))
         } else {
             None

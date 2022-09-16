@@ -10,40 +10,47 @@ use reflex::core::{
     apply_function, create_error_expression, get_combined_short_circuit_signal,
     transform_expression_list, validate_function_application_arity, Applicable,
     ApplicationTermType, ArgType, Arity, CompoundNode, DependencyList, DynamicState, Eagerness,
-    Evaluate, EvaluationCache, EvaluationResult, Expression, ExpressionFactory,
-    ExpressionListSlice, ExpressionListType, GraphNode, HeapAllocator, Internable, LambdaTermType,
-    PartialApplicationTermType, Reducible, Rewritable, ScopeOffset, SerializeJson,
+    Evaluate, EvaluationCache, EvaluationResult, Expression, ExpressionFactory, ExpressionListIter,
+    ExpressionListType, GraphNode, HeapAllocator, Internable, LambdaTermType,
+    PartialApplicationTermType, Reducible, RefType, Rewritable, ScopeOffset, SerializeJson,
     ShortCircuitCount, StackOffset, StateCache, Substitutions, TermHash,
 };
 
 #[derive(Hash, Eq, PartialEq, Clone, Debug, Serialize, Deserialize)]
 pub struct ApplicationTerm<T: Expression> {
-    target: T,
-    args: T::ExpressionList,
+    pub target: T,
+    pub args: T::ExpressionList<T>,
 }
 impl<T: Expression> TermHash for ApplicationTerm<T> {}
 impl<T: Expression> ApplicationTerm<T> {
-    pub fn new(target: T, args: T::ExpressionList) -> Self {
+    pub fn new(target: T, args: T::ExpressionList<T>) -> Self {
         Self { target, args }
     }
 }
 impl<T: Expression> ApplicationTermType<T> for ApplicationTerm<T> {
-    fn target(&self) -> &T {
-        &self.target
+    fn target<'a>(&'a self) -> T::Ref<'a, T>
+    where
+        T: 'a,
+    {
+        (&self.target).into()
     }
-    fn args(&self) -> &T::ExpressionList {
-        &self.args
+    fn args<'a>(&'a self) -> T::Ref<'a, T::ExpressionList<T>>
+    where
+        T::ExpressionList<T>: 'a,
+        T: 'a,
+    {
+        (&self.args).into()
     }
 }
 impl<T: Expression + Applicable<T>> GraphNode for ApplicationTerm<T> {
     fn capture_depth(&self) -> StackOffset {
-        let target_depth = self.target.capture_depth();
-        let arg_depth = self.args.capture_depth();
+        let target_depth = self.target().as_deref().capture_depth();
+        let arg_depth = self.args().as_deref().capture_depth();
         target_depth.max(arg_depth)
     }
     fn free_variables(&self) -> HashSet<StackOffset> {
-        let target_free_variables = self.target.free_variables();
-        let args_free_variables = self.args.free_variables();
+        let target_free_variables = self.target().as_deref().free_variables();
+        let args_free_variables = self.args().as_deref().free_variables();
         if target_free_variables.is_empty() {
             args_free_variables
         } else if args_free_variables.is_empty() {
@@ -55,17 +62,18 @@ impl<T: Expression + Applicable<T>> GraphNode for ApplicationTerm<T> {
         }
     }
     fn count_variable_usages(&self, offset: StackOffset) -> usize {
-        self.target.count_variable_usages(offset) + self.args.count_variable_usages(offset)
+        self.target().as_deref().count_variable_usages(offset)
+            + self.args().as_deref().count_variable_usages(offset)
     }
     fn dynamic_dependencies(&self, deep: bool) -> DependencyList {
-        let target_dependencies = self.target.dynamic_dependencies(deep);
+        let target_dependencies = self.target().as_deref().dynamic_dependencies(deep);
         if deep {
-            target_dependencies.union(self.args.dynamic_dependencies(deep))
+            target_dependencies.union(self.args().as_deref().dynamic_dependencies(deep))
         } else {
             let eager_args = self
                 .target
                 .arity()
-                .map(|arity| get_eager_args(self.args.iter(), &arity));
+                .map(|arity| get_eager_args(self.args.iter().map(|item| item.as_deref()), &arity));
             match eager_args {
                 None => target_dependencies,
                 Some(args) => args.into_iter().fold(target_dependencies, |acc, arg| {
@@ -75,21 +83,22 @@ impl<T: Expression + Applicable<T>> GraphNode for ApplicationTerm<T> {
         }
     }
     fn has_dynamic_dependencies(&self, deep: bool) -> bool {
-        self.target.has_dynamic_dependencies(deep)
+        self.target().as_deref().has_dynamic_dependencies(deep)
             || (if deep {
-                self.args.has_dynamic_dependencies(deep)
+                self.args().as_deref().has_dynamic_dependencies(deep)
             } else {
-                let eager_args = self.target.arity().map(|arity| {
-                    self.args.iter().zip(arity.iter()).filter_map(
-                        |(arg, arg_type)| match arg_type {
-                            ArgType::Strict | ArgType::Eager => Some(arg),
-                            _ => None,
-                        },
-                    )
-                });
+                let eager_args =
+                    self.target().as_deref().arity().map(|arity| {
+                        self.args().as_deref().iter().zip(arity.iter()).filter_map(
+                            |(arg, arg_type)| match arg_type {
+                                ArgType::Strict | ArgType::Eager => Some(arg),
+                                _ => None,
+                            },
+                        )
+                    });
                 match eager_args {
                     None => false,
-                    Some(mut args) => args.any(|arg| arg.has_dynamic_dependencies(deep)),
+                    Some(mut args) => args.any(|arg| arg.as_deref().has_dynamic_dependencies(deep)),
                 }
             })
     }
@@ -103,12 +112,13 @@ impl<T: Expression + Applicable<T>> GraphNode for ApplicationTerm<T> {
         true
     }
 }
-pub type ApplicationTermChildren<'a, T> =
-    std::iter::Chain<std::iter::Once<&'a T>, ExpressionListSlice<'a, T>>;
-impl<'a, T: Expression + 'a> CompoundNode<'a, T> for ApplicationTerm<T> {
-    type Children = ApplicationTermChildren<'a, T>;
-    fn children(&'a self) -> Self::Children {
-        once(&self.target).chain(self.args.iter())
+impl<T: Expression> CompoundNode<T> for ApplicationTerm<T> {
+    type Children<'a> = std::iter::Chain<std::iter::Once<T::Ref<'a, T>>, ExpressionListIter<'a, T>>
+        where
+            T: 'a,
+            Self: 'a;
+    fn children<'a>(&'a self) -> Self::Children<'a> {
+        once((&self.target).into()).chain(self.args.iter())
     }
 }
 impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Evaluate<T>> Rewritable<T>
@@ -131,7 +141,7 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Evaluate<T>>
             return None;
         }
         let target = target.unwrap_or_else(|| self.target.clone());
-        let args = args.unwrap_or_else(|| allocator.clone_list(&self.args));
+        let args = args.unwrap_or_else(|| allocator.clone_list((&self.args).into()));
         Some(factory.create_application_term(target, args))
     }
     fn substitute_dynamic(
@@ -152,7 +162,7 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Evaluate<T>>
             return None;
         }
         let target = target.unwrap_or_else(|| self.target.clone());
-        let args = args.unwrap_or_else(|| allocator.clone_list(&self.args));
+        let args = args.unwrap_or_else(|| allocator.clone_list((&self.args).into()));
         Some(factory.create_application_term(target, args))
     }
     fn hoist_free_variables(
@@ -160,7 +170,10 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Evaluate<T>>
         factory: &impl ExpressionFactory<T>,
         allocator: &impl HeapAllocator<T>,
     ) -> Option<T> {
-        let hoisted_target = self.target.hoist_free_variables(factory, allocator);
+        let hoisted_target = self
+            .target()
+            .as_deref()
+            .hoist_free_variables(factory, allocator);
         let hoisted_args = transform_expression_list(&self.args, allocator, |arg| {
             arg.hoist_free_variables(factory, allocator)
         });
@@ -169,7 +182,7 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Evaluate<T>>
         } else {
             Some(factory.create_application_term(
                 hoisted_target.unwrap_or_else(|| self.target.clone()),
-                hoisted_args.unwrap_or_else(|| allocator.clone_list(&self.args)),
+                hoisted_args.unwrap_or_else(|| allocator.clone_list((&self.args).into())),
             ))
         }
     }
@@ -179,19 +192,30 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Evaluate<T>>
         allocator: &impl HeapAllocator<T>,
         cache: &mut impl EvaluationCache<T>,
     ) -> Option<T> {
-        let normalized_target = self.target.normalize(factory, allocator, cache);
+        let normalized_target = self
+            .target()
+            .as_deref()
+            .normalize(factory, allocator, cache);
         let normalized_args = transform_expression_list(&self.args, allocator, |arg| {
             arg.normalize(factory, allocator, cache)
         });
-        let target = normalized_target.as_ref().unwrap_or(&self.target);
-        let args = normalized_args.as_ref().unwrap_or(&self.args);
+        let target = normalized_target
+            .as_ref()
+            .unwrap_or(&self.target().as_deref());
+        let args = normalized_args.as_ref().unwrap_or(&self.args().as_deref());
         if let Some(partial) = factory.match_partial_application_term(target) {
             factory
                 .create_application_term(
-                    partial.target().clone(),
+                    partial.target().as_deref().clone(),
                     allocator.create_sized_list(
-                        partial.args().len() + args.len(),
-                        partial.args().iter().chain(args.iter()).cloned(),
+                        partial.args().as_deref().len() + args.len(),
+                        partial
+                            .args()
+                            .as_deref()
+                            .iter()
+                            .map(|item| item.as_deref())
+                            .chain(args.iter().map(|item| item.as_deref()))
+                            .cloned(),
                     ),
                 )
                 .normalize(factory, allocator, cache)
@@ -199,8 +223,8 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Evaluate<T>>
             normalize_function_application(target, args, factory, allocator, cache).or_else(|| {
                 if normalized_target.is_some() || normalized_args.is_some() {
                     Some(factory.create_application_term(
-                        normalized_target.unwrap_or_else(|| self.target.clone()),
-                        normalized_args.unwrap_or_else(|| self.args.clone()),
+                        normalized_target.unwrap_or_else(|| self.target().as_deref().clone()),
+                        normalized_args.unwrap_or_else(|| self.args().as_deref().clone()),
                     ))
                 } else {
                     None
@@ -245,8 +269,8 @@ impl<T: Expression + Reducible<T> + Applicable<T> + Evaluate<T>> Evaluate<T>
 impl<T: Expression> Internable for ApplicationTerm<T> {
     fn should_intern(&self, eager: Eagerness) -> bool {
         eager == Eagerness::Lazy
-            && self.target().capture_depth() == 0
-            && self.args().capture_depth() == 0
+            && self.target.capture_depth() == 0
+            && self.args.capture_depth() == 0
     }
 }
 
@@ -255,9 +279,11 @@ impl<T: Expression> std::fmt::Display for ApplicationTerm<T> {
         write!(
             f,
             "<apply:{}:{}>",
-            self.target,
-            self.args
+            self.target().as_deref(),
+            self.args()
+                .as_deref()
                 .iter()
+                .map(|item| item.as_deref())
                 .map(|arg| format!("{}", arg))
                 .collect::<Vec<_>>()
                 .join(",")
@@ -275,7 +301,7 @@ fn normalize_function_application<
     T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Evaluate<T>,
 >(
     target: &T,
-    args: &T::ExpressionList,
+    args: &T::ExpressionList<T>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
     cache: &mut impl EvaluationCache<T>,
@@ -292,28 +318,30 @@ fn normalize_function_application<
 }
 
 fn normalize_lambda_application<T: Expression + Rewritable<T>>(
-    target: &T::LambdaTerm,
-    args: &T::ExpressionList,
+    target: &T::LambdaTerm<T>,
+    args: &T::ExpressionList<T>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
     cache: &mut impl EvaluationCache<T>,
 ) -> Option<T> {
     if args.len() == 0 {
-        Some(target.body().clone())
+        Some(target.body().as_deref().clone())
     } else {
         let num_args = target.num_args();
         let (inlined_args, remaining_args): (Vec<_>, Vec<_>) = args
             .iter()
+            .map(|arg| arg.as_deref())
             .take(num_args)
             .enumerate()
             .map(|(index, arg)| (num_args - index - 1, arg.clone()))
             .partition(|(offset, arg)| {
-                !arg.is_complex() || target.body().count_variable_usages(*offset) <= 1
+                !arg.is_complex() || target.body().as_deref().count_variable_usages(*offset) <= 1
             });
         if remaining_args.is_empty() {
             Some(
                 target
                     .body()
+                    .as_deref()
                     .substitute_static(
                         &Substitutions::named(&inlined_args, Some(ScopeOffset::Unwrap(num_args))),
                         factory,
@@ -325,43 +353,38 @@ fn normalize_lambda_application<T: Expression + Rewritable<T>>(
                             .normalize(factory, allocator, cache)
                             .unwrap_or(result)
                     })
-                    .unwrap_or_else(|| target.body().clone()),
+                    .unwrap_or_else(|| target.body().as_deref().clone()),
             )
         } else if !inlined_args.is_empty() {
-            Some(
-                factory.create_application_term(
-                    factory.create_lambda_term(
-                        remaining_args.len(),
-                        inlined_args.into_iter().fold(
-                            target.body().clone(),
-                            |body, (offset, arg)| {
-                                let arg = arg
-                                    .substitute_static(
-                                        &Substitutions::increase_scope_offset(
-                                            remaining_args.len(),
-                                            0,
-                                        ),
-                                        factory,
-                                        allocator,
-                                        cache,
-                                    )
-                                    .unwrap_or(arg);
-                                body.substitute_static(
-                                    &Substitutions::named(
-                                        &vec![(offset, arg)],
-                                        Some(ScopeOffset::Unwrap(1)),
-                                    ),
+            Some(factory.create_application_term(
+                factory.create_lambda_term(
+                    remaining_args.len(),
+                    inlined_args.into_iter().fold(
+                        target.body().as_deref().clone(),
+                        |body, (offset, arg)| {
+                            let arg = arg
+                                .substitute_static(
+                                    &Substitutions::increase_scope_offset(remaining_args.len(), 0),
                                     factory,
                                     allocator,
                                     cache,
                                 )
-                                .unwrap_or(body)
-                            },
-                        ),
+                                .unwrap_or(arg);
+                            body.substitute_static(
+                                &Substitutions::named(
+                                    &vec![(offset, arg)],
+                                    Some(ScopeOffset::Unwrap(1)),
+                                ),
+                                factory,
+                                allocator,
+                                cache,
+                            )
+                            .unwrap_or(body)
+                        },
                     ),
-                    allocator.create_list(remaining_args.into_iter().map(|(_, arg)| arg)),
                 ),
-            )
+                allocator.create_list(remaining_args.into_iter().map(|(_, arg)| arg)),
+            ))
         } else {
             None
         }
@@ -373,7 +396,7 @@ fn normalize_builtin_application<
 >(
     target: &T,
     arity: &Arity,
-    args: &T::ExpressionList,
+    args: &T::ExpressionList<T>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
     cache: &mut impl EvaluationCache<T>,
@@ -471,7 +494,8 @@ fn evaluate_function_application<
                         && expression
                             .args
                             .iter()
-                            .zip(reduced_args.iter())
+                            .map(|item| item.as_deref())
+                            .zip(reduced_args.iter().map(|item| item.as_deref()))
                             .all(|(arg, evaluated_arg)| arg.id() == evaluated_arg.id())
                     {
                         None
@@ -515,7 +539,7 @@ enum FunctionArgs<T: Expression> {
 fn evaluate_function_args<T: Expression + Reducible<T> + Evaluate<T>, TState: DynamicState<T>>(
     target: &T,
     arity: &Arity,
-    args: &T::ExpressionList,
+    args: &T::ExpressionList<T>,
     state: Option<&TState>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
@@ -535,6 +559,7 @@ fn evaluate_function_args<T: Expression + Reducible<T> + Evaluate<T>, TState: Dy
             let mut num_short_circuit_signals = ShortCircuitCount::None;
             let (mut resolved_args, dependencies) = args
                 .iter()
+                .map(|item| item.as_deref())
                 .take(num_args)
                 .zip(arity.iter())
                 .map(|(arg, arg_type)| match arg_type {
@@ -604,7 +629,7 @@ fn is_compiled_application_target<T: Expression>(
     if let Some(_) = factory.match_compiled_function_term(target) {
         true
     } else if let Some(target) = factory.match_partial_application_term(target) {
-        is_compiled_application_target(target.target(), factory)
+        is_compiled_application_target(target.target().as_deref(), factory)
     } else {
         false
     }

@@ -14,8 +14,8 @@ use metrics::{
 };
 use reflex::core::{
     ConditionListType, ConditionType, DependencyList, DynamicState, EvaluationResult, Expression,
-    ExpressionFactory, ExpressionListType, HeapAllocator, ListTermType, SignalTermType, SignalType,
-    StateCache, StateToken, StringTermType, StringValue, SymbolTermType,
+    ExpressionFactory, ExpressionListType, HeapAllocator, ListTermType, RefType, SignalTermType,
+    SignalType, StateCache, StateToken, StringTermType, StringValue, SymbolTermType,
 };
 use reflex_dispatcher::{
     Action, Actor, ActorTransition, HandlerContext, InboundAction, MessageData, MessageOffset,
@@ -119,7 +119,7 @@ pub fn create_evaluate_effect<T: Expression>(
     invalidation_strategy: QueryInvalidationStrategy,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> T::Signal {
+) -> T::Signal<T> {
     allocator.create_signal(
         SignalType::Custom(String::from(EFFECT_TYPE_EVALUATE)),
         allocator.create_list([
@@ -132,24 +132,25 @@ pub fn create_evaluate_effect<T: Expression>(
 }
 
 pub fn parse_evaluate_effect_query<T: Expression>(
-    effect: &T::Signal,
+    effect: &T::Signal<T>,
     factory: &impl ExpressionFactory<T>,
 ) -> Option<(String, T, QueryEvaluationMode, QueryInvalidationStrategy)> {
-    if effect.args().len() != 4 {
+    let args = effect.args().as_deref();
+    if args.len() != 4 {
         return None;
     }
-    let mut args = effect.args().iter();
-    let label = args.next().unwrap();
-    let query = args.next().unwrap();
-    let evaluation_mode = args.next().unwrap();
-    let invalidation_strategy = args.next().unwrap();
+    let mut remaining_args = args.iter();
+    let label = remaining_args.next().map(|value| value.as_deref()).unwrap();
+    let query = remaining_args.next().map(|value| value.as_deref()).unwrap();
+    let evaluation_mode = remaining_args.next().map(|value| value.as_deref()).unwrap();
+    let invalidation_strategy = remaining_args.next().map(|value| value.as_deref()).unwrap();
     match (
         factory.match_string_term(label),
         QueryEvaluationMode::deserialize(evaluation_mode, factory),
         QueryInvalidationStrategy::deserialize(invalidation_strategy, factory),
     ) {
         (Some(label), Some(evaluation_mode), Some(invalidation_strategy)) => Some((
-            String::from(label.value().as_str()),
+            String::from(label.value().as_deref().as_str()),
             query.clone(),
             evaluation_mode,
             invalidation_strategy,
@@ -183,14 +184,22 @@ pub fn parse_evaluate_effect_result<T: Expression>(
     factory: &impl ExpressionFactory<T>,
 ) -> Option<EvaluationResult<T>> {
     let evalution_result = factory.match_list_term(value)?;
-    let value = evalution_result.items().get(0)?;
+    let value = evalution_result.items().as_deref().get(0)?;
     let dependencies = factory
-        .match_list_term(evalution_result.items().get(1)?)?
+        .match_list_term(
+            evalution_result
+                .items()
+                .as_deref()
+                .get(1)
+                .map(|item| item.as_deref())?,
+        )?
         .items()
+        .as_deref()
         .iter()
+        .map(|item| item.as_deref())
         .filter_map(|dependency| factory.match_symbol_term(dependency).map(|term| term.id()));
     Some(EvaluationResult::new(
-        value.clone(),
+        value.as_deref().clone(),
         DependencyList::from_iter(dependencies),
     ))
 }
@@ -258,7 +267,7 @@ where
 pub struct EvaluateHandlerState<T: Expression> {
     workers: HashMap<StateToken, WorkerState<T>>,
     // TODO: Use expressions as state tokens, removing need to map state tokens back to originating effects
-    effects: HashMap<StateToken, T::Signal>,
+    effects: HashMap<StateToken, T::Signal<T>>,
     state_cache: GlobalStateCache<T>,
 }
 impl<T: Expression> Default for EvaluateHandlerState<T> {
@@ -272,7 +281,7 @@ impl<T: Expression> Default for EvaluateHandlerState<T> {
 }
 struct WorkerState<T: Expression> {
     subscription_count: usize,
-    effect: T::Signal,
+    effect: T::Signal<T>,
     status: WorkerStatus<T>,
     state_index: Option<MessageOffset>,
     state_values: HashMap<StateToken, T>,
@@ -307,7 +316,7 @@ enum WorkerResultStatus {
     Blocked,
 }
 impl<T: Expression> EvaluateHandlerState<T> {
-    fn combined_effects<'a>(&'a self) -> impl Iterator<Item = &'a T::Signal> + 'a {
+    fn combined_effects<'a>(&'a self) -> impl Iterator<Item = &'a T::Signal<T>> + 'a {
         self.workers.values().flat_map(|worker| {
             once(&worker.effect).into_iter().chain(
                 worker
@@ -376,13 +385,17 @@ impl<T: Expression> WorkerState<T> {
                 Some(signal) => {
                     if signal
                         .signals()
+                        .as_deref()
                         .iter()
+                        .map(|item| item.as_deref())
                         .any(|signal| matches!(&signal.signal_type(), SignalType::Error))
                     {
                         WorkerResultStatus::Error
                     } else if signal
                         .signals()
+                        .as_deref()
                         .iter()
+                        .map(|item| item.as_deref())
                         .any(|signal| matches!(&signal.signal_type(), SignalType::Pending))
                     {
                         WorkerResultStatus::Pending
@@ -1045,15 +1058,15 @@ where
     ))
 }
 
-fn group_effects_by_type<V: ConditionType<impl Expression<Signal = V>>>(
+fn group_effects_by_type<T: Expression<Signal<T> = V>, V: ConditionType<T>>(
     effects: impl IntoIterator<Item = V>,
 ) -> impl Iterator<Item = (String, Vec<V>)> {
     effects
         .into_iter()
         .filter(|signal| matches!(signal.signal_type(), SignalType::Custom(_)))
         .fold(HashMap::<String, Vec<V>>::new(), |mut result, signal| {
-            let existing_signals =
-                get_custom_signal_type(&signal).and_then(|signal_type| result.get_mut(signal_type));
+            let existing_signals = get_custom_signal_type(&signal)
+                .and_then(|signal_type| result.get_mut(&signal_type));
             if let Some(existing_signals) = existing_signals {
                 existing_signals.push(signal);
             } else if let Some(signal_type) = get_custom_signal_type(&signal) {
@@ -1064,9 +1077,9 @@ fn group_effects_by_type<V: ConditionType<impl Expression<Signal = V>>>(
         .into_iter()
 }
 
-fn get_custom_signal_type<V: ConditionType<impl Expression<Signal = V>>>(
+fn get_custom_signal_type<T: Expression<Signal<T> = V>, V: ConditionType<T>>(
     effect: &V,
-) -> Option<&String> {
+) -> Option<String> {
     match effect.signal_type() {
         SignalType::Custom(signal_type) => Some(signal_type),
         _ => None,
@@ -1079,11 +1092,17 @@ fn is_unresolved_result<T: Expression>(
 ) -> bool {
     factory
         .match_signal_term(result.result())
-        .map(|term| term.signals().iter().any(is_unresolved_effect))
+        .map(|term| {
+            term.signals()
+                .as_deref()
+                .iter()
+                .map(|item| item.as_deref())
+                .any(is_unresolved_effect)
+        })
         .unwrap_or(false)
 }
 
-fn is_unresolved_effect<V: ConditionType<impl Expression<Signal = V>>>(effect: &V) -> bool {
+fn is_unresolved_effect<T: Expression<Signal<T> = V>, V: ConditionType<T>>(effect: &V) -> bool {
     match effect.signal_type() {
         SignalType::Error => false,
         SignalType::Pending | SignalType::Custom(_) => true,
@@ -1093,12 +1112,14 @@ fn is_unresolved_effect<V: ConditionType<impl Expression<Signal = V>>>(effect: &
 fn parse_expression_effects<'a, T: Expression>(
     value: &'a T,
     factory: &'a impl ExpressionFactory<T>,
-) -> impl Iterator<Item = &'a T::Signal> + 'a {
+) -> impl Iterator<Item = &'a T::Signal<T>> + 'a {
     factory
         .match_signal_term(value)
         .map(|term| {
             term.signals()
+                .as_deref()
                 .iter()
+                .map(|item| item.as_deref())
                 .filter(|effect| matches!(effect.signal_type(), SignalType::Custom(_)))
         })
         .into_iter()

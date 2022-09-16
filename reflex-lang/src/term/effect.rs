@@ -14,16 +14,20 @@ use reflex::core::{
 
 #[derive(Hash, Eq, PartialEq, Clone, Debug, Serialize, Deserialize)]
 pub struct EffectTerm<T: Expression> {
-    condition: T::Signal,
+    condition: T::Signal<T>,
 }
 impl<T: Expression> TermHash for EffectTerm<T> {}
 impl<T: Expression> EffectTermType<T> for EffectTerm<T> {
-    fn condition(&self) -> &T::Signal {
-        &self.condition
+    fn condition<'a>(&'a self) -> T::Ref<'a, T::Signal<T>>
+    where
+        T::Signal<T>: 'a,
+        T: 'a,
+    {
+        (&self.condition).into()
     }
 }
 impl<T: Expression> EffectTerm<T> {
-    pub fn new(condition: T::Signal) -> Self {
+    pub fn new(condition: T::Signal<T>) -> Self {
         Self { condition }
     }
 }

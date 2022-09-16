@@ -4,8 +4,8 @@
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use reflex::core::{
     uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
-    ExpressionListType, FunctionArity, HeapAllocator, ListTermType, RecordTermType, StringTermType,
-    StringValue, Uid, Uuid,
+    ExpressionListType, FunctionArity, HeapAllocator, ListTermType, RecordTermType, RefType,
+    StringTermType, StringValue, Uid, Uuid,
 };
 
 use super::format_value;
@@ -49,10 +49,12 @@ impl<T: Expression> Applicable<T> for FormatErrorMessage {
             .or_else(|| {
                 if let Some(value) = factory.match_list_term(&operand) {
                     let max_displayed_errors = 10;
-                    let num_errors = value.items().len();
+                    let num_errors = value.items().as_deref().len();
                     let messages = value
                         .items()
+                        .as_deref()
                         .iter()
+                        .map(|item| item.as_deref())
                         .take(if num_errors > max_displayed_errors {
                             max_displayed_errors - 1
                         } else {
@@ -93,11 +95,13 @@ fn parse_error_message<T: Expression>(
         Some(value)
     } else if let Some(value) = factory.match_record_term(&target) {
         value
+            .as_deref()
             .get(&factory.create_string_term(allocator.create_static_string("message")))
+            .map(|value| value.as_deref())
             .and_then(|value| {
                 factory
                     .match_string_term(value)
-                    .map(|message| String::from(message.value().as_str()))
+                    .map(|message| String::from(message.value().as_deref().as_str()))
             })
     } else {
         None

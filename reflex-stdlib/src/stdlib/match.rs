@@ -3,7 +3,8 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use reflex::core::{
     uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
-    ExpressionListType, FunctionArity, HeapAllocator, IntTermType, ListTermType, Uid, Uuid,
+    ExpressionListType, FunctionArity, HeapAllocator, IntTermType, ListTermType, RefType, Uid,
+    Uuid,
 };
 
 pub struct Match {}
@@ -44,7 +45,12 @@ impl<T: Expression> Applicable<T> for Match {
             factory.match_list_term(&matcher),
         ) {
             (Some((discriminant, enum_args)), Some(matcher_term)) => Some({
-                match matcher_term.items().get(discriminant) {
+                match matcher_term
+                    .items()
+                    .as_deref()
+                    .get(discriminant)
+                    .map(|item| item.as_deref())
+                {
                     Some(handler) => Ok(factory.create_application_term(
                         handler.clone(),
                         allocator.create_list(enum_args.into_iter().cloned()),
@@ -75,14 +81,23 @@ pub(crate) fn match_enum<'a, T: Expression>(
     impl IntoIterator<Item = &'a T, IntoIter = impl ExactSizeIterator<Item = &'a T>>,
 )> {
     match factory.match_list_term(target) {
-        Some(target) => target.items().get(0).and_then(|discriminant| {
-            match factory.match_int_term(discriminant) {
-                Some(term) if term.value() >= 0 => {
-                    Some((term.value() as usize, target.items().iter().skip(1)))
-                }
+        Some(target) => target
+            .items()
+            .as_deref()
+            .get(0)
+            .map(|item| item.as_deref())
+            .and_then(|discriminant| match factory.match_int_term(discriminant) {
+                Some(term) if term.value() >= 0 => Some((
+                    term.value() as usize,
+                    target
+                        .items()
+                        .as_deref()
+                        .iter()
+                        .map(|item| item.as_deref())
+                        .skip(1),
+                )),
                 _ => None,
-            }
-        }),
+            }),
         _ => None,
     }
 }

@@ -8,7 +8,7 @@ use reflex::core::{
     deduplicate_hashmap_entries, deduplicate_hashset_entries, get_hashmap_entries, uuid,
     Applicable, ArgType, Arity, ConstructorTermType, EvaluationCache, Expression,
     ExpressionFactory, ExpressionListType, FunctionArity, HashmapTermType, HashsetTermType,
-    HeapAllocator, ListTermType, SignalType, StructPrototypeType, Uid, Uuid,
+    HeapAllocator, ListTermType, RefType, SignalType, StructPrototypeType, Uid, Uuid,
 };
 
 use crate::Stdlib;
@@ -48,7 +48,12 @@ where
     ) -> Result<T, String> {
         let target = args.next().unwrap();
         if let Some(collection) = factory.match_list_term(&target) {
-            let has_dynamic_values = collection.items().iter().any(|item| !item.is_static());
+            let has_dynamic_values = collection
+                .items()
+                .as_deref()
+                .iter()
+                .map(|item| item.as_deref())
+                .any(|item| !item.is_static());
             Ok(if !has_dynamic_values {
                 target.clone()
             } else {
@@ -58,17 +63,23 @@ where
                 )
             })
         } else if let Some(collection) = factory.match_hashset_term(&target) {
-            let has_dynamic_values = collection.values().any(|item| !item.is_static());
+            let has_dynamic_values = collection
+                .values()
+                .map(|item| item.as_deref())
+                .any(|item| !item.is_static());
             Ok(if !has_dynamic_values {
                 target.clone()
             } else {
                 factory.create_application_term(
                     factory.create_builtin_term(Stdlib::CollectHashSet),
-                    allocator.create_list(collection.values().into_iter().cloned()),
+                    allocator.create_list(collection.values().map(|item| item.as_deref()).cloned()),
                 )
             })
         } else if let Some(collection) = factory.match_hashmap_term(&target) {
-            let has_dynamic_keys = collection.keys().any(|item| !item.is_static());
+            let has_dynamic_keys = collection
+                .keys()
+                .map(|item| item.as_deref())
+                .any(|item| !item.is_static());
             Ok(if !has_dynamic_keys {
                 target.clone()
             } else {
@@ -119,11 +130,14 @@ impl<T: Expression> Applicable<T> for CollectRecord {
     ) -> Result<T, String> {
         let prototype = args.next().unwrap();
         match factory.match_constructor_term(&prototype) {
-            Some(constructor) if constructor.prototype().keys().len() == args.len() => Ok(factory
-                .create_record_term(
+            Some(constructor)
+                if constructor.prototype().as_deref().keys().as_deref().len() == args.len() =>
+            {
+                Ok(factory.create_record_term(
                     allocator.clone_struct_prototype(constructor.prototype()),
                     allocator.create_list(args),
-                )),
+                ))
+            }
             _ => Err(format!(
                 "Expected <constructor:{}>, received {}",
                 args.len(),
@@ -245,7 +259,10 @@ where
         let (keys, values): (Vec<_>, Vec<_>) = {
             args.map(|arg| {
                 let static_entry = if let Some(entry) = factory.match_list_term(&arg) {
-                    match (entry.items().get(0), entry.items().get(1)) {
+                    match (
+                        entry.items().as_deref().get(0).map(|item| item.as_deref()),
+                        entry.items().as_deref().get(1).map(|item| item.as_deref()),
+                    ) {
                         (Some(key), Some(value)) => Ok(Some((key.clone(), value.clone()))),
                         _ => Err(format!("Invalid HashMap entry: {}", arg)),
                     }

@@ -6,7 +6,7 @@ use crate::Stdlib;
 use reflex::core::{
     uuid, Applicable, ArgType, Arity, Builtin, BuiltinTermType, CompiledFunctionTermType,
     EvaluationCache, Expression, ExpressionFactory, ExpressionListType, FunctionArity,
-    HeapAllocator, LambdaTermType, PartialApplicationTermType, Uid, Uuid,
+    HeapAllocator, LambdaTermType, PartialApplicationTermType, RefType, Uid, Uuid,
 };
 
 pub struct ResolveArgs {}
@@ -50,7 +50,7 @@ where
             let num_args = arity.required().len();
             let is_atomic_lambda = factory
                 .match_lambda_term(&target)
-                .map(|target| target.body().is_atomic())
+                .map(|target| target.body().as_deref().is_atomic())
                 .unwrap_or(false);
             if num_args == 0 || is_atomic_lambda {
                 Ok(target)
@@ -98,10 +98,10 @@ fn get_expression_arity<T: Expression>(
     if let Some(target) = factory.match_lambda_term(target) {
         Some(Arity::lazy(target.num_args(), 0, false))
     } else if let Some(target) = factory.match_builtin_term(target) {
-        Some(target.target().arity())
+        Some(target.target().as_deref().arity())
     } else if let Some(target) = factory.match_partial_application_term(target) {
-        get_expression_arity(target.target(), factory)
-            .map(|arity| arity.partial(target.args().len()))
+        get_expression_arity(target.target().as_deref(), factory)
+            .map(|arity| arity.partial(target.args().as_deref().len()))
     } else if let Some(target) = factory.match_compiled_function_term(target) {
         Some(Arity::lazy(
             target.required_args(),

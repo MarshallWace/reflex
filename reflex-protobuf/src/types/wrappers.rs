@@ -4,7 +4,7 @@
 use prost_reflect::{DynamicMessage, MessageDescriptor, Value};
 use reflex::core::{
     as_integer, BooleanTermType, Expression, ExpressionFactory, FloatTermType, FloatValue,
-    HeapAllocator, IntTermType, IntValue, StringTermType, StringValue,
+    HeapAllocator, IntTermType, IntValue, RefType, StringTermType, StringValue,
 };
 
 use crate::{
@@ -375,7 +375,7 @@ impl CustomType for StringValueMessage {
         if let Some(value) = factory.match_string_term(value) {
             Ok(create_value_message_wrapper(
                 message_type,
-                Value::String(String::from(value.value().as_str())),
+                Value::String(String::from(value.value().as_deref().as_str())),
             ))
         } else {
             Err(format!("Expected String, received {}", value))

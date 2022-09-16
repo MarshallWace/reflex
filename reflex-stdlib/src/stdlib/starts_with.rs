@@ -3,7 +3,7 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use reflex::core::{
     uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
-    FunctionArity, HeapAllocator, StringTermType, StringValue, Uid, Uuid,
+    FunctionArity, HeapAllocator, RefType, StringTermType, StringValue, Uid, Uuid,
 };
 
 pub struct StartsWith {}
@@ -43,8 +43,12 @@ impl<T: Expression> Applicable<T> for StartsWith {
             factory.match_string_term(&left),
             factory.match_string_term(&right),
         ) {
-            (Some(left), Some(right)) => Ok(factory
-                .create_boolean_term(left.value().as_str().ends_with(right.value().as_str()))),
+            (Some(left), Some(right)) => Ok(factory.create_boolean_term(
+                left.value()
+                    .as_deref()
+                    .as_str()
+                    .ends_with(right.value().as_deref().as_str()),
+            )),
             _ => Err(format!(
                 "Expected (String, String), received ({}, {})",
                 left, right,

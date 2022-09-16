@@ -204,7 +204,7 @@ impl<TBuiltin: Builtin> ExpressionFactory<CachedSharedTerm<TBuiltin>>
     fn match_string_term<'a>(
         &self,
         expression: &'a CachedSharedTerm<TBuiltin>,
-    ) -> Option<&'a StringTerm<<CachedSharedTerm<TBuiltin> as Expression>::String>> {
+    ) -> Option<&'a StringTerm<CachedSharedTerm<TBuiltin>>> {
         match expression.inner_term() {
             Term::String(term) => Some(term),
             _ => None,
@@ -258,7 +258,9 @@ impl<TBuiltin: Builtin> ExpressionFactory<CachedSharedTerm<TBuiltin>>
     fn match_application_term<'a>(
         &self,
         expression: &'a CachedSharedTerm<TBuiltin>,
-    ) -> Option<&'a ApplicationTerm<CachedSharedTerm<TBuiltin>>> {
+    ) -> Option<
+        &'a <CachedSharedTerm<TBuiltin> as Expression>::ApplicationTerm<CachedSharedTerm<TBuiltin>>,
+    > {
         match expression.inner_term() {
             Term::Application(term) => Some(term),
             _ => None,
@@ -285,7 +287,7 @@ impl<TBuiltin: Builtin> ExpressionFactory<CachedSharedTerm<TBuiltin>>
     fn match_builtin_term<'a>(
         &self,
         expression: &'a CachedSharedTerm<TBuiltin>,
-    ) -> Option<&'a BuiltinTerm<TBuiltin>> {
+    ) -> Option<&'a BuiltinTerm<CachedSharedTerm<TBuiltin>>> {
         match expression.inner_term() {
             Term::Builtin(term) => Some(term),
             _ => None,
@@ -378,31 +380,37 @@ impl<TBuiltin: Builtin> CachedSharedTerm<TBuiltin> {
 impl<TBuiltin: Builtin> Expression for CachedSharedTerm<TBuiltin> {
     type String = String;
     type Builtin = TBuiltin;
-    type Signal = Signal<Self>;
-    type SignalList = SignalList<Self>;
-    type StructPrototype = StructPrototype<Self>;
-    type ExpressionList = ExpressionList<Self>;
+    type Signal<T: Expression> = Signal<T>;
+    type SignalList<T: Expression> = SignalList<T>;
+    type StructPrototype<T: Expression> = StructPrototype<T>;
+    type ExpressionList<T: Expression> = ExpressionList<T>;
     type NilTerm = NilTerm;
     type BooleanTerm = BooleanTerm;
     type IntTerm = IntTerm;
     type FloatTerm = FloatTerm;
-    type StringTerm = StringTerm<Self::String>;
+    type StringTerm<T: Expression> = StringTerm<T>;
     type SymbolTerm = SymbolTerm;
     type VariableTerm = VariableTerm;
-    type EffectTerm = EffectTerm<Self>;
-    type LetTerm = LetTerm<Self>;
-    type LambdaTerm = LambdaTerm<Self>;
-    type ApplicationTerm = ApplicationTerm<Self>;
-    type PartialApplicationTerm = PartialApplicationTerm<Self>;
-    type RecursiveTerm = RecursiveTerm<Self>;
-    type BuiltinTerm = BuiltinTerm<Self::Builtin>;
+    type EffectTerm<T: Expression> = EffectTerm<T>;
+    type LetTerm<T: Expression> = LetTerm<T>;
+    type LambdaTerm<T: Expression> = LambdaTerm<T>;
+    type ApplicationTerm<T: Expression> = ApplicationTerm<T>;
+    type PartialApplicationTerm<T: Expression> = PartialApplicationTerm<T>;
+    type RecursiveTerm<T: Expression> = RecursiveTerm<T>;
+    type BuiltinTerm<T: Expression> = BuiltinTerm<T>;
     type CompiledFunctionTerm = CompiledFunctionTerm;
-    type RecordTerm = RecordTerm<Self>;
-    type ConstructorTerm = ConstructorTerm<Self>;
-    type ListTerm = ListTerm<Self>;
-    type HashmapTerm = HashMapTerm<Self>;
-    type HashsetTerm = HashSetTerm<Self>;
-    type SignalTerm = SignalTerm<Self>;
+    type RecordTerm<T: Expression> = RecordTerm<T>;
+    type ConstructorTerm<T: Expression> = ConstructorTerm<T>;
+    type ListTerm<T: Expression> = ListTerm<T>;
+    type HashmapTerm<T: Expression> = HashMapTerm<T>;
+    type HashsetTerm<T: Expression> = HashSetTerm<T>;
+    type SignalTerm<T: Expression> = SignalTerm<T>;
+
+    type Ref<'a, TTarget> = &'a TTarget
+    where
+        TTarget: 'a,
+        Self: 'a;
+
     fn id(&self) -> HashId {
         self.value.id()
     }
@@ -433,9 +441,11 @@ impl<TBuiltin: Builtin> GraphNode for CachedSharedTerm<TBuiltin> {
         self.value.is_complex()
     }
 }
-impl<'a, TStdlib: Builtin + 'a> CompoundNode<'a, Self> for CachedSharedTerm<TStdlib> {
-    type Children = TermChildren<'a, Self>;
-    fn children(&'a self) -> Self::Children {
+impl<TStdlib: Builtin> CompoundNode<Self> for CachedSharedTerm<TStdlib> {
+    type Children<'a> = TermChildren<'a, Self>
+    where
+        Self: 'a;
+    fn children<'a>(&'a self) -> Self::Children<'a> {
         self.value.children()
     }
 }

@@ -8,8 +8,8 @@ use std::{
 };
 
 use reflex::core::{
-    ConditionType, Expression, ExpressionFactory, ExpressionListType, HeapAllocator, SignalType,
-    StateToken, StringTermType, StringValue,
+    ConditionType, Expression, ExpressionFactory, ExpressionListType, HeapAllocator, RefType,
+    SignalType, StateToken, StringTermType, StringValue,
 };
 use reflex_dispatcher::{
     Action, Actor, ActorTransition, HandlerContext, InboundAction, MessageData, OutboundAction,
@@ -91,12 +91,12 @@ impl<T: Expression> Default for ScanHandlerState<T> {
 }
 
 struct ScanHandlerReducerState<T: Expression> {
-    source_effect: T::Signal,
-    source_value_effect: T::Signal,
+    source_effect: T::Signal<T>,
+    source_value_effect: T::Signal<T>,
     source_value: Option<T>,
-    state_value_effect: T::Signal,
+    state_value_effect: T::Signal<T>,
     state_value: T,
-    result_effect: T::Signal,
+    result_effect: T::Signal<T>,
 }
 
 impl<T, TFactory, TAllocator, TAction> Actor<TAction> for ScanHandler<T, TFactory, TAllocator>
@@ -297,7 +297,7 @@ where
     fn subscribe_scan_effect<TAction>(
         &self,
         state: &mut ScanHandlerState<T>,
-        effect: &T::Signal,
+        effect: &T::Signal<T>,
         args: ScanEffectArgs<T>,
     ) -> Option<TAction>
     where
@@ -374,7 +374,7 @@ where
     fn unsubscribe_scan_effect<TAction>(
         &self,
         state: &mut ScanHandlerState<T>,
-        effect: &T::Signal,
+        effect: &T::Signal<T>,
     ) -> Option<TAction>
     where
         TAction: Action + OutboundAction<EffectUnsubscribeAction<T>>,
@@ -411,24 +411,24 @@ struct ScanEffectArgs<T: Expression> {
 }
 
 fn parse_scan_effect_args<T: Expression>(
-    effect: &T::Signal,
+    effect: &T::Signal<T>,
     factory: &impl ExpressionFactory<T>,
 ) -> Result<ScanEffectArgs<T>, String> {
-    let args = effect.args();
+    let args = effect.args().as_deref();
     if args.len() != 4 {
         return Err(format!(
             "Invalid scan signal: Expected 4 arguments, received {}",
             args.len()
         ));
     }
-    let mut args = args.iter();
-    let name = args.next().unwrap();
-    let target = args.next().unwrap();
-    let seed = args.next().unwrap();
-    let iteratee = args.next().unwrap();
+    let mut remaining_args = args.iter().map(|item| item.as_deref());
+    let name = remaining_args.next().unwrap();
+    let target = remaining_args.next().unwrap();
+    let seed = remaining_args.next().unwrap();
+    let iteratee = remaining_args.next().unwrap();
     if let Some(name) = factory.match_string_term(name) {
         Ok(ScanEffectArgs {
-            name: String::from(name.value().as_str()),
+            name: String::from(name.value().as_deref().as_str()),
             target: target.clone(),
             seed: seed.clone(),
             iteratee: iteratee.clone(),

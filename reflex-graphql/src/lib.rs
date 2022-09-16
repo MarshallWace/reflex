@@ -6,7 +6,7 @@ use std::{borrow::Cow, collections::HashMap, iter::once};
 
 use reflex::core::{
     create_record, ConditionListType, ConditionType, Expression, ExpressionFactory,
-    ExpressionListType, HeapAllocator, SignalTermType, SignalType,
+    ExpressionListType, HeapAllocator, RefType, SignalTermType, SignalType,
 };
 use reflex_json::{json_object, sanitize, JsonMap, JsonValue};
 use reflex_stdlib::Stdlib;
@@ -356,12 +356,14 @@ fn normalize_graphql_error_payload(payload: JsonValue) -> Vec<JsonValue> {
     }
 }
 
-pub fn serialize_json_signal_errors<V: SignalTermType<impl Expression<SignalTerm = V>>>(
-    signal: &V,
+pub fn serialize_json_signal_errors<TTerm: SignalTermType<T>, T: Expression>(
+    signal: &TTerm,
 ) -> Vec<JsonValue> {
     signal
         .signals()
+        .as_deref()
         .iter()
+        .map(|item| item.as_deref())
         .filter(|signal| match signal.signal_type() {
             SignalType::Error => true,
             _ => false,
@@ -369,7 +371,9 @@ pub fn serialize_json_signal_errors<V: SignalTermType<impl Expression<SignalTerm
         .map(|signal| {
             signal
                 .args()
+                .as_deref()
                 .iter()
+                .map(|item| item.as_deref())
                 .next()
                 .and_then(|arg| sanitize(arg).ok())
                 .map(|value| match value {
@@ -606,13 +610,13 @@ where
         .items
         .iter()
         .flat_map(|field| match field {
-            Selection::Field(field) => match get_field_is_ignored(field, variables) {
+            Selection::Field(field) => match get_field_is_ignored(&field, variables) {
                 Err(err) => Countable::Single(Err(err)),
                 Ok(is_ignored_field) => {
                     if is_ignored_field {
                         Countable::Empty
                     } else {
-                        match parse_field(field, variables, fragments, factory, allocator) {
+                        match parse_field(&field, variables, fragments, factory, allocator) {
                             Ok(result) => {
                                 let key = field.alias.as_ref().unwrap_or(&field.name).to_string();
                                 Countable::Single(Ok((
@@ -831,7 +835,7 @@ fn parse_field_arguments<T: Expression>(
     fragments: &QueryFragments<'_>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> Result<T::ExpressionList, String> {
+) -> Result<T::ExpressionList<T>, String> {
     let arg_fields = args
         .iter()
         .map(

@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use reflex::core::{ConditionType, Expression, ExpressionListType, StateToken};
+use reflex::core::{ConditionType, Expression, ExpressionListType, RefType, StateToken};
 use reflex_dispatcher::{Action, NamedAction, SerializableAction, SerializedAction};
 use reflex_json::{JsonMap, JsonValue};
 use serde::{Deserialize, Serialize};
@@ -9,8 +9,8 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum EffectActions<T: Expression> {
     #[serde(bound(
-        serialize = "<T as Expression>::Signal: Serialize",
-        deserialize = "<T as Expression>::Signal: Deserialize<'de>"
+        serialize = "<T as Expression>::Signal<T>: Serialize",
+        deserialize = "<T as Expression>::Signal<T>: Deserialize<'de>"
     ))]
     Subscribe(EffectSubscribeAction<T>),
     Unsubscribe(EffectUnsubscribeAction<T>),
@@ -106,10 +106,10 @@ impl<'a, T: Expression> From<&'a EffectActions<T>> for Option<&'a EffectEmitActi
 pub struct EffectSubscribeAction<T: Expression> {
     pub effect_type: String,
     #[serde(bound(
-        serialize = "<T as Expression>::Signal: Serialize",
-        deserialize = "<T as Expression>::Signal: Deserialize<'de>"
+        serialize = "<T as Expression>::Signal<T>: Serialize",
+        deserialize = "<T as Expression>::Signal<T>: Deserialize<'de>"
     ))]
-    pub effects: Vec<T::Signal>,
+    pub effects: Vec<T::Signal<T>>,
 }
 impl<T: Expression> Action for EffectSubscribeAction<T> {}
 impl<T: Expression> NamedAction for EffectSubscribeAction<T> {
@@ -132,7 +132,13 @@ impl<T: Expression> SerializableAction for EffectSubscribeAction<T> {
                                 (
                                     String::from("args"),
                                     JsonValue::Array(
-                                        signal.args().iter().map(sanitize_expression).collect(),
+                                        signal
+                                            .args()
+                                            .as_deref()
+                                            .iter()
+                                            .map(|item| item.as_deref())
+                                            .map(sanitize_expression)
+                                            .collect(),
                                     ),
                                 ),
                             ]))
@@ -148,10 +154,10 @@ impl<T: Expression> SerializableAction for EffectSubscribeAction<T> {
 pub struct EffectUnsubscribeAction<T: Expression> {
     pub effect_type: String,
     #[serde(bound(
-        serialize = "<T as Expression>::Signal: Serialize",
-        deserialize = "<T as Expression>::Signal: Deserialize<'de>"
+        serialize = "<T as Expression>::Signal<T>: Serialize",
+        deserialize = "<T as Expression>::Signal<T>: Deserialize<'de>"
     ))]
-    pub effects: Vec<T::Signal>,
+    pub effects: Vec<T::Signal<T>>,
 }
 impl<T: Expression> Action for EffectUnsubscribeAction<T> {}
 impl<T: Expression> NamedAction for EffectUnsubscribeAction<T> {
@@ -174,7 +180,13 @@ impl<T: Expression> SerializableAction for EffectUnsubscribeAction<T> {
                                 (
                                     String::from("args"),
                                     JsonValue::Array(
-                                        signal.args().iter().map(sanitize_expression).collect(),
+                                        signal
+                                            .args()
+                                            .as_deref()
+                                            .iter()
+                                            .map(|item| item.as_deref())
+                                            .map(sanitize_expression)
+                                            .collect(),
                                     ),
                                 ),
                             ]))

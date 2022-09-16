@@ -4,8 +4,8 @@
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use reflex::core::{
     uuid, Applicable, ArgType, Arity, BooleanTermType, EvaluationCache, Expression,
-    ExpressionFactory, FloatTermType, FunctionArity, HeapAllocator, IntTermType, StringTermType,
-    StringValue, SymbolTermType, Uid, Uuid,
+    ExpressionFactory, FloatTermType, FunctionArity, HeapAllocator, IntTermType, RefType,
+    StringTermType, StringValue, SymbolTermType, Uid, Uuid,
 };
 
 pub struct ToString {}
@@ -64,7 +64,7 @@ pub fn format_value<T: Expression>(
     } else if let Some(term) = factory.match_float_term(value) {
         Some(format!("{}", term.value()))
     } else if let Some(term) = factory.match_string_term(value) {
-        Some(String::from(term.value().as_str()))
+        Some(String::from(term.value().as_deref().as_str()))
     } else if let Some(term) = factory.match_symbol_term(value) {
         Some(format!("{}", term.id()))
     } else {

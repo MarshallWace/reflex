@@ -11,7 +11,8 @@ use std::{
 use reflex::{
     core::{
         ConditionListType, ConditionType, DependencyList, Expression, ExpressionListType,
-        GraphNode, SignalType, StackOffset, StateToken, StructPrototypeType, TermHash,
+        GraphNode, IntoRefTypeIterator, RefType, SignalType, StackOffset, StateToken,
+        StructPrototypeType, TermHash,
     },
     hash::{hash_object, HashId},
 };
@@ -54,9 +55,6 @@ impl<T: Expression> ExpressionList<T> {
     pub fn is_empty(&self) -> bool {
         self.items.is_empty()
     }
-    pub fn iter<'a>(&'a self) -> ExpressionListSlice<'a, T> {
-        self.items.iter()
-    }
     pub fn as_slice(&self) -> &[T] {
         self.items.as_slice()
     }
@@ -65,16 +63,20 @@ impl<T: Expression> ExpressionList<T> {
     }
 }
 impl<T: Expression> TermHash for ExpressionList<T> {}
+
 impl<T: Expression> ExpressionListType<T> for ExpressionList<T> {
-    type Iterator<'a> = std::slice::Iter<'a, T> where T: 'a, Self: 'a;
+    type Iterator<'a> = IntoRefTypeIterator<T, T::Ref<'a, T>, std::slice::Iter<'a, T>> where T: 'a, Self: 'a;
     fn len(&self) -> usize {
         self.items.len()
     }
-    fn get(&self, index: usize) -> Option<&T> {
-        self.items.get(index)
+    fn get<'a>(&'a self, index: usize) -> Option<T::Ref<'a, T>>
+    where
+        T: 'a,
+    {
+        self.items.get(index).map(|item| item.into())
     }
     fn iter<'a>(&'a self) -> Self::Iterator<'a> {
-        self.items.iter()
+        IntoRefTypeIterator::new(self.items.iter())
     }
 }
 impl<T: Expression> GraphNode for ExpressionList<T> {
@@ -82,7 +84,8 @@ impl<T: Expression> GraphNode for ExpressionList<T> {
         self.items
             .iter()
             .map(|term| term.capture_depth())
-            .fold(0, |acc, depth| acc.max(depth))
+            .max()
+            .unwrap_or_default()
     }
     fn free_variables(&self) -> HashSet<StackOffset> {
         self.items.iter().fold(HashSet::new(), |mut results, term| {
@@ -167,17 +170,15 @@ impl<T: Expression> Into<ExpressionList<T>> for SerializedExpressionList<T> {
     }
 }
 
-pub type ExpressionListSlice<'a, T> = std::slice::Iter<'a, T>;
-
 #[derive(Hash, Eq, PartialEq, Clone, Debug)]
 pub struct SignalList<T: Expression> {
-    signals: BTreeSet<T::Signal>,
+    signals: BTreeSet<T::Signal<T>>,
 }
 impl<T: Expression> SignalList<T>
 where
-    T::Signal: Ord,
+    T::Signal<T>: Ord,
 {
-    pub fn new(signals: impl IntoIterator<Item = T::Signal>) -> Self {
+    pub fn new(signals: impl IntoIterator<Item = T::Signal<T>>) -> Self {
         Self {
             signals: signals.into_iter().collect(),
         }
@@ -185,12 +186,15 @@ where
 }
 impl<T: Expression> TermHash for SignalList<T> {}
 impl<T: Expression> ConditionListType<T> for SignalList<T> {
-    type Iterator<'a> = std::collections::btree_set::Iter<'a, T::Signal> where T::Signal: 'a, Self: 'a;
+    type Iterator<'a> = IntoRefTypeIterator<T::Signal<T>, T::Ref<'a, T::Signal<T>>, std::collections::btree_set::Iter<'a, T::Signal<T>>>
+        where
+            T::Signal<T>: 'a,
+            Self: 'a;
     fn len(&self) -> usize {
         self.signals.len()
     }
     fn iter<'a>(&'a self) -> Self::Iterator<'a> {
-        self.signals.iter()
+        IntoRefTypeIterator::new(self.signals.iter())
     }
 }
 impl<T: Expression> std::fmt::Display for SignalList<T> {
@@ -209,9 +213,9 @@ impl<T: Expression> std::fmt::Display for SignalList<T> {
 impl<T: Expression> serde::Serialize for SignalList<T>
 where
     T: serde::Serialize,
-    T::Signal: Ord,
-    T::Signal: Serialize,
-    for<'de> T::Signal: Deserialize<'de>,
+    T::Signal<T>: Ord,
+    T::Signal<T>: Serialize,
+    for<'de> T::Signal<T>: Deserialize<'de>,
 {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -223,9 +227,9 @@ where
 impl<'de, T: Expression> serde::Deserialize<'de> for SignalList<T>
 where
     T: serde::Deserialize<'de>,
-    T::Signal: Ord,
-    T::Signal: Serialize,
-    for<'a> T::Signal: Deserialize<'a>,
+    T::Signal<T>: Ord,
+    T::Signal<T>: Serialize,
+    for<'a> T::Signal<T>: Deserialize<'a>,
 {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -235,16 +239,16 @@ where
     }
 }
 #[derive(Debug, Serialize, Deserialize)]
-struct SerializedSignalList<T: Expression>(Vec<T::Signal>)
+struct SerializedSignalList<T: Expression>(Vec<T::Signal<T>>)
 where
-    T::Signal: Ord,
-    T::Signal: Serialize,
-    for<'a> T::Signal: Deserialize<'a>;
+    T::Signal<T>: Ord,
+    T::Signal<T>: Serialize,
+    for<'a> T::Signal<T>: Deserialize<'a>;
 impl<'a, T: Expression> Into<SerializedSignalList<T>> for &'a SignalList<T>
 where
-    T::Signal: Ord,
-    T::Signal: Serialize,
-    for<'de> T::Signal: Deserialize<'de>,
+    T::Signal<T>: Ord,
+    T::Signal<T>: Serialize,
+    for<'de> T::Signal<T>: Deserialize<'de>,
 {
     fn into(self) -> SerializedSignalList<T> {
         SerializedSignalList(self.signals.iter().cloned().collect())
@@ -252,9 +256,9 @@ where
 }
 impl<T: Expression> Into<SignalList<T>> for SerializedSignalList<T>
 where
-    T::Signal: Ord,
-    T::Signal: Serialize,
-    for<'de> T::Signal: Deserialize<'de>,
+    T::Signal<T>: Ord,
+    T::Signal<T>: Serialize,
+    for<'de> T::Signal<T>: Deserialize<'de>,
 {
     fn into(self) -> SignalList<T> {
         let SerializedSignalList(signals) = self;
@@ -266,14 +270,14 @@ where
 pub struct Signal<T: Expression> {
     hash: HashId,
     signal_type: SignalType,
-    args: T::ExpressionList,
+    args: T::ExpressionList<T>,
 }
 impl<T: Expression> Signal<T> {
-    pub fn new(signal_type: SignalType, args: T::ExpressionList) -> Self {
+    pub fn new(signal_type: SignalType, args: T::ExpressionList<T>) -> Self {
         let hash = {
             let mut hasher = DefaultHasher::new();
             signal_type.hash(&mut hasher);
-            for arg in args.iter() {
+            for arg in args.iter().map(|item| item.as_deref()) {
                 arg.hash(&mut hasher);
             }
             hasher.finish()
@@ -308,11 +312,16 @@ impl<T: Expression> ConditionType<T> for Signal<T> {
     fn id(&self) -> StateToken {
         self.hash
     }
-    fn signal_type(&self) -> &SignalType {
-        &self.signal_type
+    fn signal_type(&self) -> SignalType {
+        // FIXME: Prevent unnecessary cloning of signal type
+        self.signal_type.clone()
     }
-    fn args(&self) -> &T::ExpressionList {
-        &self.args
+    fn args<'a>(&'a self) -> T::Ref<'a, T::ExpressionList<T>>
+    where
+        T::ExpressionList<T>: 'a,
+        T: 'a,
+    {
+        (&self.args).into()
     }
 }
 impl<T: Expression> std::fmt::Display for Signal<T> {
@@ -323,6 +332,7 @@ impl<T: Expression> std::fmt::Display for Signal<T> {
             self.signal_type,
             self.args
                 .iter()
+                .map(|item| item.as_deref())
                 .map(|arg| format!("{}", arg))
                 .collect::<Vec<_>>()
                 .join(",")
@@ -332,7 +342,7 @@ impl<T: Expression> std::fmt::Display for Signal<T> {
 impl<T: Expression> serde::Serialize for Signal<T>
 where
     T: serde::Serialize,
-    T::ExpressionList: serde::Serialize,
+    T::ExpressionList<T>: serde::Serialize,
 {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -344,7 +354,7 @@ where
 impl<'de, T: Expression> serde::Deserialize<'de> for Signal<T>
 where
     T: serde::Deserialize<'de>,
-    T::ExpressionList: serde::Deserialize<'de>,
+    T::ExpressionList<T>: serde::Deserialize<'de>,
 {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -358,7 +368,7 @@ where
 struct SerializedSignal<T: Expression> {
     signal_type: SerializedSignalType,
     custom_type: Option<String>,
-    args: T::ExpressionList,
+    args: T::ExpressionList<T>,
 }
 impl<'a, T: Expression> Into<SerializedSignal<T>> for &'a Signal<T> {
     fn into(self) -> SerializedSignal<T> {
@@ -412,15 +422,16 @@ pub type StructFieldOffset = usize;
 
 #[derive(Hash, Eq, PartialEq, Clone, Debug, Serialize, Deserialize)]
 pub struct StructPrototype<T: Expression> {
-    keys: T::ExpressionList,
+    keys: T::ExpressionList<T>,
 }
 impl<T: Expression> StructPrototype<T> {
-    pub fn new(keys: T::ExpressionList) -> Self {
+    pub fn new(keys: T::ExpressionList<T>) -> Self {
         Self { keys }
     }
     pub fn field(&self, key: &T) -> Option<StructFieldOffset> {
         self.keys
             .iter()
+            .map(|item| item.as_deref())
             .enumerate()
             .find_map(|(offset, existing_key)| {
                 if existing_key == key {
@@ -433,8 +444,12 @@ impl<T: Expression> StructPrototype<T> {
 }
 impl<T: Expression> TermHash for StructPrototype<T> {}
 impl<T: Expression> StructPrototypeType<T> for StructPrototype<T> {
-    fn keys(&self) -> &T::ExpressionList {
-        &self.keys
+    fn keys<'a>(&'a self) -> T::Ref<'a, T::ExpressionList<T>>
+    where
+        T::ExpressionList<T>: 'a,
+        T: 'a,
+    {
+        (&self.keys).into()
     }
 }
 impl<T: Expression> std::fmt::Display for StructPrototype<T> {
@@ -444,6 +459,7 @@ impl<T: Expression> std::fmt::Display for StructPrototype<T> {
             "{{{}}}",
             self.keys
                 .iter()
+                .map(|item| item.as_deref())
                 .map(|key| format!("{}", key))
                 .collect::<Vec<_>>()
                 .join(",")

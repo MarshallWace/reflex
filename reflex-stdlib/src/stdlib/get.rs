@@ -4,7 +4,7 @@
 use reflex::core::{
     as_integer, uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
     ExpressionListType, FloatTermType, FunctionArity, HashmapTermType, HeapAllocator, IntTermType,
-    ListTermType, RecordTermType, Uid, Uuid,
+    ListTermType, RecordTermType, RefType, Uid, Uuid,
 };
 
 pub struct Get {}
@@ -42,6 +42,7 @@ impl<T: Expression> Applicable<T> for Get {
         let key = args.next().unwrap();
         if let Some(term) = factory.match_record_term(&target) {
             term.get(&key)
+                .map(|item| item.as_deref())
                 .cloned()
                 .ok_or_else(|| format!("Invalid field access: {} on struct {}", key, target))
         } else if let Some(term) = factory.match_list_term(&target) {
@@ -62,13 +63,16 @@ impl<T: Expression> Applicable<T> for Get {
                 )),
                 Some(index) => Ok(term
                     .items()
+                    .as_deref()
                     .get(index)
+                    .map(|item| item.as_deref())
                     .cloned()
                     .unwrap_or_else(|| factory.create_nil_term())),
             }
         } else if let Some(term) = factory.match_hashmap_term(&target) {
             Ok(term
                 .get(&key)
+                .map(|item| item.as_deref())
                 .cloned()
                 .unwrap_or_else(|| factory.create_nil_term()))
         } else {

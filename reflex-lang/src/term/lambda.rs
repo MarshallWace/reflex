@@ -11,7 +11,7 @@ use reflex::{
     core::{
         Applicable, ApplicationTermType, Arity, CompoundNode, DependencyList, DynamicState,
         Eagerness, EvaluationCache, Expression, ExpressionFactory, ExpressionListType, GraphNode,
-        HeapAllocator, Internable, LambdaTermType, Rewritable, ScopeOffset, SerializeJson,
+        HeapAllocator, Internable, LambdaTermType, RefType, Rewritable, ScopeOffset, SerializeJson,
         StackOffset, Substitutions, TermHash, VariableTermType,
     },
 };
@@ -31,8 +31,11 @@ impl<T: Expression> LambdaTermType<T> for LambdaTerm<T> {
     fn num_args(&self) -> StackOffset {
         self.num_args
     }
-    fn body(&self) -> &T {
-        &self.body
+    fn body<'a>(&'a self) -> T::Ref<'a, T>
+    where
+        T: 'a,
+    {
+        (&self.body).into()
     }
 }
 impl<T: Expression> GraphNode for LambdaTerm<T> {
@@ -76,11 +79,13 @@ impl<T: Expression> GraphNode for LambdaTerm<T> {
         true
     }
 }
-pub type LambdaTermChildren<'a, T> = std::iter::Once<&'a T>;
-impl<'a, T: Expression + 'a> CompoundNode<'a, T> for LambdaTerm<T> {
-    type Children = LambdaTermChildren<'a, T>;
-    fn children(&'a self) -> Self::Children {
-        once(&self.body)
+impl<T: Expression> CompoundNode<T> for LambdaTerm<T> {
+    type Children<'a> = std::iter::Once<T::Ref<'a, T>>
+        where
+            T: 'a,
+            Self: 'a;
+    fn children<'a>(&'a self) -> Self::Children<'a> {
+        once((&self.body).into())
     }
 }
 impl<T: Expression + Rewritable<T>> Rewritable<T> for LambdaTerm<T> {
@@ -227,16 +232,20 @@ fn apply_eta_reduction<'a, T: Expression>(
 ) -> Option<&'a T> {
     match factory.match_application_term(body) {
         Some(term)
-            if term.target().capture_depth() == 0
-                && term.args().len() <= num_args
-                && term.args().iter().enumerate().all(|(index, arg)| {
-                    match factory.match_variable_term(arg) {
+            if term.target().as_deref().capture_depth() == 0
+                && term.args().as_deref().len() <= num_args
+                && term
+                    .args()
+                    .as_deref()
+                    .iter()
+                    .map(|arg| arg.as_deref())
+                    .enumerate()
+                    .all(|(index, arg)| match factory.match_variable_term(arg) {
                         Some(term) => term.offset() == num_args - index - 1,
                         _ => false,
-                    }
-                }) =>
+                    }) =>
         {
-            Some(term.target())
+            Some(term.target().as_deref())
         }
         _ => None,
     }

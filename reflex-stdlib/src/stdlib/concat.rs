@@ -3,7 +3,8 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use reflex::core::{
     match_typed_expression_list, uuid, Applicable, ArgType, Arity, EvaluationCache, Expression,
-    ExpressionFactory, FunctionArity, HeapAllocator, StringTermType, StringValue, Uid, Uuid,
+    ExpressionFactory, FunctionArity, HeapAllocator, RefType, StringTermType, StringValue, Uid,
+    Uuid,
 };
 
 pub struct Concat {}
@@ -42,7 +43,7 @@ impl<T: Expression> Applicable<T> for Concat {
             args.iter(),
             |arg| {
                 if let Some(term) = factory.match_string_term(arg) {
-                    Some(term.value().as_str())
+                    Some(term.value().as_deref().as_str())
                 } else {
                     None
                 }

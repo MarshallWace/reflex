@@ -3,7 +3,7 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use reflex::core::{
     uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
-    FloatTermType, FunctionArity, HeapAllocator, IntTermType, Uid, Uuid,
+    FloatTermType, FunctionArity, HeapAllocator, IntTermType, LetTermType, RefType, Uid, Uuid,
 };
 
 pub struct Add {}
@@ -39,6 +39,9 @@ impl<T: Expression> Applicable<T> for Add {
     ) -> Result<T, String> {
         let left = args.next().unwrap();
         let right = args.next().unwrap();
+        if let Some(term) = factory.match_let_term(&left) {
+            println!("{}", term.initializer().as_deref())
+        }
         let result = if let (Some(left), Some(right)) = (
             factory.match_int_term(&left),
             factory.match_int_term(&right),

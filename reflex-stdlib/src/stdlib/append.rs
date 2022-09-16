@@ -7,7 +7,7 @@ use std::iter::once;
 use reflex::core::{
     deduplicate_hashset_entries, match_typed_expression_list, uuid, Applicable, ArgType, Arity,
     EvaluationCache, Expression, ExpressionFactory, ExpressionListType, FunctionArity,
-    HashsetTermType, HeapAllocator, ListTermType, Uid, Uuid,
+    HashsetTermType, HeapAllocator, ListTermType, RefType, Uid, Uuid,
 };
 
 pub struct Append {}
@@ -50,17 +50,24 @@ impl<T: Expression> Applicable<T> for Append {
                 |arg| format!("Expected List, received {}", arg),
             )?;
             let combined_collections = once(collection).chain(additional_collections);
-            let combined_items = combined_collections.flat_map(|arg| arg.items().iter().cloned());
+            let combined_items = combined_collections.flat_map(|arg| {
+                arg.items()
+                    .as_deref()
+                    .iter()
+                    .map(|item| item.as_deref())
+                    .cloned()
+            });
             Ok(factory.create_list_term(allocator.create_unsized_list(combined_items)))
         } else if let Some(collection) = factory.match_hashset_term(&target) {
             let args = args.collect::<Vec<_>>();
             let additional_collections = match_typed_expression_list(
-                args.iter(),
+                args.iter().map(|item| item.as_deref()),
                 |term| factory.match_hashset_term(term),
                 |arg| format!("Expected HashSet, received {}", arg),
             )?;
             let combined_collections = once(collection).chain(additional_collections);
-            let combined_values = combined_collections.flat_map(|arg| arg.values().into_iter().cloned());
+            let combined_values = combined_collections
+                .flat_map(|arg| arg.values().map(|item| item.as_deref()).cloned());
             let values = combined_values.collect::<Vec<_>>();
             let deduplicated_values = match deduplicate_hashset_entries(&values) {
                 Some(values) => values,

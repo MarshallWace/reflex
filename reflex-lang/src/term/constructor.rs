@@ -8,23 +8,27 @@ use serde::{Deserialize, Serialize};
 
 use reflex::core::{
     Applicable, Arity, ConstructorTermType, DependencyList, Eagerness, EvaluationCache, Expression,
-    ExpressionFactory, ExpressionListType, GraphNode, HeapAllocator, Internable, SerializeJson,
-    StackOffset, StructPrototypeType, TermHash,
+    ExpressionFactory, ExpressionListType, GraphNode, HeapAllocator, Internable, RefType,
+    SerializeJson, StackOffset, StructPrototypeType, TermHash,
 };
 
 #[derive(Hash, Eq, PartialEq, Clone, Debug, Serialize, Deserialize)]
 pub struct ConstructorTerm<T: Expression> {
-    prototype: T::StructPrototype,
+    prototype: T::StructPrototype<T>,
 }
 impl<T: Expression> ConstructorTerm<T> {
-    pub fn new(prototype: T::StructPrototype) -> Self {
+    pub fn new(prototype: T::StructPrototype<T>) -> Self {
         Self { prototype }
     }
 }
 impl<T: Expression> TermHash for ConstructorTerm<T> {}
 impl<T: Expression> ConstructorTermType<T> for ConstructorTerm<T> {
-    fn prototype(&self) -> &T::StructPrototype {
-        &self.prototype
+    fn prototype<'a>(&'a self) -> T::Ref<'a, T::StructPrototype<T>>
+    where
+        T::StructPrototype<T>: 'a,
+        T: 'a,
+    {
+        (&self.prototype).into()
     }
 }
 impl<T: Expression> GraphNode for ConstructorTerm<T> {
@@ -55,7 +59,11 @@ impl<T: Expression> GraphNode for ConstructorTerm<T> {
 }
 impl<T: Expression> Applicable<T> for ConstructorTerm<T> {
     fn arity(&self) -> Option<Arity> {
-        Some(Arity::lazy(0, self.prototype().keys().len(), false))
+        Some(Arity::lazy(
+            0,
+            self.prototype().as_deref().keys().as_deref().len(),
+            false,
+        ))
     }
     fn apply(
         &self,
@@ -65,7 +73,7 @@ impl<T: Expression> Applicable<T> for ConstructorTerm<T> {
         _cache: &mut impl EvaluationCache<T>,
     ) -> Result<T, String> {
         Ok(factory.create_record_term(
-            allocator.clone_struct_prototype(&self.prototype),
+            allocator.clone_struct_prototype((&self.prototype).into()),
             allocator.create_list(args),
         ))
     }
@@ -87,7 +95,9 @@ impl<T: Expression> std::fmt::Display for ConstructorTerm<T> {
             "<constructor:{{{}}}>",
             self.prototype
                 .keys()
+                .as_deref()
                 .iter()
+                .map(|item| item.as_deref())
                 .map(|key| format!("{}", key))
                 .collect::<Vec<_>>()
                 .join(","),

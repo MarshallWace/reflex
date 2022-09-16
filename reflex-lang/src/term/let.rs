@@ -23,12 +23,18 @@ impl<T: Expression> LetTerm<T> {
     }
 }
 impl<T: Expression> TermHash for LetTerm<T> {}
-impl<T: Expression> LetTermType<T> for LetTerm<T> {
-    fn initializer(&self) -> &T {
-        &self.initializer
+impl<'term, T: Expression + 'term> LetTermType<T> for LetTerm<T> {
+    fn initializer<'a>(&'a self) -> T::Ref<'a, T>
+    where
+        T: 'a,
+    {
+        (&self.initializer).into()
     }
-    fn body(&self) -> &T {
-        &self.body
+    fn body<'a>(&'a self) -> T::Ref<'a, T>
+    where
+        T: 'a,
+    {
+        (&self.body).into()
     }
 }
 impl<T: Expression> GraphNode for LetTerm<T> {
@@ -71,11 +77,13 @@ impl<T: Expression> GraphNode for LetTerm<T> {
         true
     }
 }
-pub type LetTermChildren<'a, T> = std::iter::Chain<std::iter::Once<&'a T>, std::iter::Once<&'a T>>;
-impl<'a, T: Expression + 'a> CompoundNode<'a, T> for LetTerm<T> {
-    type Children = LetTermChildren<'a, T>;
-    fn children(&'a self) -> Self::Children {
-        once(&self.initializer).chain(once(&self.body))
+impl<T: Expression> CompoundNode<T> for LetTerm<T> {
+    type Children<'a> = std::iter::Chain<std::iter::Once<T::Ref<'a, T>>, std::iter::Once<T::Ref<'a, T>>>
+        where
+            T: 'a,
+            Self: 'a;
+    fn children<'a>(&'a self) -> Self::Children<'a> {
+        once((&self.initializer).into()).chain(once((&self.body).into()))
     }
 }
 impl<T: Expression + Rewritable<T> + Reducible<T>> Rewritable<T> for LetTerm<T> {

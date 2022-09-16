@@ -5,7 +5,7 @@ use std::iter::once;
 
 use reflex::core::{
     uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
-    FunctionArity, HashmapTermType, HeapAllocator, Uid, Uuid,
+    FunctionArity, HashmapTermType, HeapAllocator, RefType, Uid, Uuid,
 };
 
 pub struct Insert {}
@@ -45,7 +45,8 @@ impl<T: Expression> Applicable<T> for Insert {
         if let Some(existing) = factory.match_hashmap_term(&target) {
             let (has_value, is_unchanged) = existing
                 .get(&key)
-                .map(|existing_value| (true, existing_value == &value))
+                .map(|item| item.as_deref())
+                .map(|existing_value| (true, existing_value.id() == value.id()))
                 .unwrap_or((false, false));
             Ok(if is_unchanged {
                 target
@@ -53,16 +54,18 @@ impl<T: Expression> Applicable<T> for Insert {
                 let existing_index = if has_value {
                     existing
                         .keys()
-                        .position(|existing_key| existing_key == &key)
+                        .map(|item| item.as_deref())
+                        .position(|existing_key| existing_key.id() == key.id())
                 } else {
                     None
                 };
                 let (keys, values) = if let Some(existing_index) = existing_index {
                     (
-                        allocator.create_list(existing.keys().cloned()),
+                        allocator.create_list(existing.keys().map(|item| item.as_deref()).cloned()),
                         allocator.create_list(
                             existing
                                 .values()
+                                .map(|item| item.as_deref())
                                 .enumerate()
                                 .map(|(index, existing_value)| {
                                     if index == existing_index {
@@ -75,8 +78,8 @@ impl<T: Expression> Applicable<T> for Insert {
                         ),
                     )
                 } else {
-                    let existing_keys = existing.keys();
-                    let existing_values = existing.values();
+                    let existing_keys = existing.keys().map(|item| item.as_deref());
+                    let existing_values = existing.values().map(|item| item.as_deref());
                     (
                         allocator.create_sized_list(
                             existing_keys.len() + 1,

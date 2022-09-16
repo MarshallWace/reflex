@@ -13,8 +13,6 @@ use reflex::{
     hash::HashId,
 };
 
-use crate::{term::*, ExpressionList, Signal, SignalList, StructPrototype};
-
 #[derive(Eq, Clone, Copy)]
 pub struct CachedExpression<T: Expression> {
     value: T,
@@ -40,31 +38,37 @@ impl<T: Expression> CachedExpression<T> {
 impl<T: Expression> Expression for CachedExpression<T> {
     type String = T::String;
     type Builtin = T::Builtin;
-    type Signal = Signal<Self>;
-    type SignalList = SignalList<Self>;
-    type StructPrototype = StructPrototype<Self>;
-    type ExpressionList = ExpressionList<Self>;
+    type Signal<TWrapper: Expression> = T::Signal<TWrapper>;
+    type SignalList<TWrapper: Expression> = T::SignalList<TWrapper>;
+    type StructPrototype<TWrapper: Expression> = T::StructPrototype<TWrapper>;
+    type ExpressionList<TWrapper: Expression> = T::ExpressionList<TWrapper>;
     type NilTerm = T::NilTerm;
     type BooleanTerm = T::BooleanTerm;
     type IntTerm = T::IntTerm;
     type FloatTerm = T::FloatTerm;
-    type StringTerm = T::StringTerm;
+    type StringTerm<TWrapper: Expression> = T::StringTerm<TWrapper>;
     type SymbolTerm = T::SymbolTerm;
     type VariableTerm = T::VariableTerm;
-    type EffectTerm = EffectTerm<Self>;
-    type LetTerm = LetTerm<Self>;
-    type LambdaTerm = LambdaTerm<Self>;
-    type ApplicationTerm = ApplicationTerm<Self>;
-    type PartialApplicationTerm = PartialApplicationTerm<Self>;
-    type RecursiveTerm = RecursiveTerm<Self>;
-    type BuiltinTerm = T::BuiltinTerm;
+    type EffectTerm<TWrapper: Expression> = T::EffectTerm<TWrapper>;
+    type LetTerm<TWrapper: Expression> = T::LetTerm<TWrapper>;
+    type LambdaTerm<TWrapper: Expression> = T::LambdaTerm<TWrapper>;
+    type ApplicationTerm<TWrapper: Expression> = T::ApplicationTerm<TWrapper>;
+    type PartialApplicationTerm<TWrapper: Expression> = T::PartialApplicationTerm<TWrapper>;
+    type RecursiveTerm<TWrapper: Expression> = T::RecursiveTerm<TWrapper>;
+    type BuiltinTerm<TWrapper: Expression> = T::BuiltinTerm<TWrapper>;
     type CompiledFunctionTerm = T::CompiledFunctionTerm;
-    type RecordTerm = RecordTerm<Self>;
-    type ConstructorTerm = ConstructorTerm<Self>;
-    type ListTerm = ListTerm<Self>;
-    type HashmapTerm = HashMapTerm<Self>;
-    type HashsetTerm = HashSetTerm<Self>;
-    type SignalTerm = SignalTerm<Self>;
+    type RecordTerm<TWrapper: Expression> = T::RecordTerm<TWrapper>;
+    type ConstructorTerm<TWrapper: Expression> = T::ConstructorTerm<TWrapper>;
+    type ListTerm<TWrapper: Expression> = T::ListTerm<TWrapper>;
+    type HashmapTerm<TWrapper: Expression> = T::HashmapTerm<TWrapper>;
+    type HashsetTerm<TWrapper: Expression> = T::HashsetTerm<TWrapper>;
+    type SignalTerm<TWrapper: Expression> = T::SignalTerm<TWrapper>;
+
+    type Ref<'a, TTarget> = T::Ref<'a, TTarget>
+    where
+        TTarget: 'a,
+        Self: 'a;
+
     fn id(&self) -> HashId {
         self.hash
     }
@@ -113,13 +117,14 @@ impl<T: Expression> GraphNode for CachedExpression<T> {
         self.value.is_complex()
     }
 }
-impl<'a, TWrapper: Expression, T: Expression> CompoundNode<'a, TWrapper> for CachedExpression<T>
-where
-    T: CompoundNode<'a, TWrapper> + 'a,
-    TWrapper: 'a,
+impl<T: Expression + CompoundNode<TWrapper>, TWrapper: Expression> CompoundNode<TWrapper>
+    for CachedExpression<T>
 {
-    type Children = T::Children;
-    fn children(&'a self) -> Self::Children {
+    type Children<'a> = T::Children<'a>
+        where
+            TWrapper: 'a,
+            Self: 'a;
+    fn children<'a>(&'a self) -> Self::Children<'a> {
         self.value.children()
     }
 }
@@ -329,31 +334,37 @@ impl<T: Expression> SharedExpression<T> {
 impl<T: Expression> Expression for SharedExpression<T> {
     type String = T::String;
     type Builtin = T::Builtin;
-    type Signal = Signal<Self>;
-    type SignalList = SignalList<Self>;
-    type StructPrototype = StructPrototype<Self>;
-    type ExpressionList = ExpressionList<Self>;
+    type Signal<TWrapper: Expression> = T::Signal<TWrapper>;
+    type SignalList<TWrapper: Expression> = T::SignalList<TWrapper>;
+    type StructPrototype<TWrapper: Expression> = T::StructPrototype<TWrapper>;
+    type ExpressionList<TWrapper: Expression> = T::ExpressionList<TWrapper>;
     type NilTerm = T::NilTerm;
     type BooleanTerm = T::BooleanTerm;
     type IntTerm = T::IntTerm;
     type FloatTerm = T::FloatTerm;
-    type StringTerm = T::StringTerm;
+    type StringTerm<TWrapper: Expression> = T::StringTerm<TWrapper>;
     type SymbolTerm = T::SymbolTerm;
     type VariableTerm = T::VariableTerm;
-    type EffectTerm = EffectTerm<Self>;
-    type LetTerm = LetTerm<Self>;
-    type LambdaTerm = LambdaTerm<Self>;
-    type ApplicationTerm = ApplicationTerm<Self>;
-    type PartialApplicationTerm = PartialApplicationTerm<Self>;
-    type RecursiveTerm = RecursiveTerm<Self>;
-    type BuiltinTerm = T::BuiltinTerm;
+    type EffectTerm<TWrapper: Expression> = T::EffectTerm<TWrapper>;
+    type LetTerm<TWrapper: Expression> = T::LetTerm<TWrapper>;
+    type LambdaTerm<TWrapper: Expression> = T::LambdaTerm<TWrapper>;
+    type ApplicationTerm<TWrapper: Expression> = T::ApplicationTerm<TWrapper>;
+    type PartialApplicationTerm<TWrapper: Expression> = T::PartialApplicationTerm<TWrapper>;
+    type RecursiveTerm<TWrapper: Expression> = T::RecursiveTerm<TWrapper>;
+    type BuiltinTerm<TWrapper: Expression> = T::BuiltinTerm<TWrapper>;
     type CompiledFunctionTerm = T::CompiledFunctionTerm;
-    type RecordTerm = RecordTerm<Self>;
-    type ConstructorTerm = ConstructorTerm<Self>;
-    type ListTerm = ListTerm<Self>;
-    type HashmapTerm = HashMapTerm<Self>;
-    type HashsetTerm = HashSetTerm<Self>;
-    type SignalTerm = SignalTerm<Self>;
+    type RecordTerm<TWrapper: Expression> = T::RecordTerm<TWrapper>;
+    type ConstructorTerm<TWrapper: Expression> = T::ConstructorTerm<TWrapper>;
+    type ListTerm<TWrapper: Expression> = T::ListTerm<TWrapper>;
+    type HashmapTerm<TWrapper: Expression> = T::HashmapTerm<TWrapper>;
+    type HashsetTerm<TWrapper: Expression> = T::HashsetTerm<TWrapper>;
+    type SignalTerm<TWrapper: Expression> = T::SignalTerm<TWrapper>;
+
+    type Ref<'a, TTarget> = T::Ref<'a, TTarget>
+    where
+        TTarget: 'a,
+        Self: 'a;
+
     fn id(&self) -> HashId {
         self.value.id()
     }
@@ -384,13 +395,14 @@ impl<T: Expression> GraphNode for SharedExpression<T> {
         self.value.is_complex()
     }
 }
-impl<'a, TWrapper: Expression, T: Expression> CompoundNode<'a, TWrapper> for SharedExpression<T>
-where
-    T: CompoundNode<'a, TWrapper> + 'a,
-    TWrapper: 'a,
+impl<T: Expression + CompoundNode<TWrapper>, TWrapper: Expression> CompoundNode<TWrapper>
+    for SharedExpression<T>
 {
-    type Children = T::Children;
-    fn children(&'a self) -> Self::Children {
+    type Children<'a> = T::Children<'a>
+        where
+            TWrapper: 'a,
+            Self: 'a;
+    fn children<'a>(&'a self) -> Self::Children<'a> {
         self.value.children()
     }
 }

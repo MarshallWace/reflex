@@ -4,7 +4,8 @@
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use reflex::core::{
     deduplicate_hashset_entries, uuid, Applicable, ArgType, Arity, EvaluationCache, Expression,
-    ExpressionFactory, ExpressionListType, FunctionArity, HeapAllocator, ListTermType, Uid, Uuid,
+    ExpressionFactory, ExpressionListType, FunctionArity, HeapAllocator, ListTermType, RefType,
+    Uid, Uuid,
 };
 use reflex_stdlib::Stdlib;
 
@@ -47,7 +48,13 @@ where
         if is_nil_term(&values, factory) {
             Ok(factory.create_hashset_term(allocator.create_empty_list()))
         } else if let Some(values) = factory.match_list_term(&values) {
-            let values = values.items().iter().cloned().collect::<Vec<_>>();
+            let values = values
+                .items()
+                .as_deref()
+                .iter()
+                .map(|item| item.as_deref())
+                .cloned()
+                .collect::<Vec<_>>();
             let has_dynamic_values = values.iter().any(|item| !item.is_static());
             if has_dynamic_values {
                 Ok(factory.create_application_term(

@@ -9,7 +9,7 @@ use reflex::{
     cache::NoopCache,
     core::{
         as_integer, create_record, Expression, ExpressionFactory, FloatTermType, HeapAllocator,
-        IntTermType, Rewritable, StringTermType, StringValue, Substitutions,
+        IntTermType, RefType, Rewritable, StringTermType, StringValue, Substitutions,
     },
 };
 use reflex_stdlib::Stdlib;
@@ -721,7 +721,7 @@ where
         PropName::Computed(key) => {
             let dynamic_key = parse_expression(&key.expr, scope, env, factory, allocator)?;
             if let Some(term) = factory.match_string_term(&dynamic_key) {
-                Ok(String::from(term.value().as_str()))
+                Ok(String::from(term.value().as_deref().as_str()))
             } else if let Some(_) = factory.match_nil_term(&dynamic_key) {
                 Ok(format!("{}", dynamic_key))
             } else if let Some(_) = factory.match_boolean_term(&dynamic_key) {
@@ -2023,18 +2023,38 @@ mod tests {
                 )
             }),
         ));
-        factory
+        let signals = factory
             .match_signal_term(&combined_signal)
             .unwrap()
             .signals()
+            .as_deref();
+        signals
             .iter()
+            .map(|item| item.as_deref())
             .map(|signal| {
                 let message = factory
-                    .match_record_term(signal.args().iter().next().unwrap())
+                    .match_record_term(
+                        signal
+                            .as_deref()
+                            .args()
+                            .as_deref()
+                            .iter()
+                            .map(|item| item.as_deref())
+                            .next()
+                            .unwrap(),
+                    )
                     .unwrap()
                     .get(&factory.create_string_term(allocator.create_static_string("message")))
+                    .map(|item| item.as_deref())
                     .unwrap();
-                String::from(factory.match_string_term(message).unwrap().value().as_str())
+                String::from(
+                    factory
+                        .match_string_term(message)
+                        .unwrap()
+                        .value()
+                        .as_deref()
+                        .as_str(),
+                )
             })
             .collect()
     }

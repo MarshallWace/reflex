@@ -8,7 +8,7 @@ use metrics::{describe_histogram, histogram, Unit};
 use reflex::{
     core::{
         Applicable, ConditionListType, ConditionType, DependencyList, EvaluationResult, Expression,
-        ExpressionFactory, HeapAllocator, InstructionPointer, Reducible, Rewritable,
+        ExpressionFactory, HeapAllocator, InstructionPointer, Reducible, RefType, Rewritable,
         SignalTermType, SignalType, StateCache,
     },
     hash::{hash_object, HashId},
@@ -352,11 +352,17 @@ fn is_unresolved_result<T: Expression>(
 ) -> bool {
     factory
         .match_signal_term(result.result())
-        .map(|term| term.signals().iter().any(is_unresolved_effect))
+        .map(|term| {
+            term.signals()
+                .as_deref()
+                .iter()
+                .map(|item| item.as_deref())
+                .any(is_unresolved_effect)
+        })
         .unwrap_or(false)
 }
 
-fn is_unresolved_effect<V: ConditionType<impl Expression<Signal = V>>>(effect: &V) -> bool {
+fn is_unresolved_effect<T: Expression<Signal<T> = V>, V: ConditionType<T>>(effect: &V) -> bool {
     match effect.signal_type() {
         SignalType::Error => false,
         SignalType::Pending | SignalType::Custom(_) => true,

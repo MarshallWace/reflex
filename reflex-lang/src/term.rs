@@ -10,50 +10,48 @@ use serde::{Deserialize, Serialize};
 use crate::{ExpressionList, Signal, SignalList, StructPrototype};
 
 mod application;
-pub use application::*;
 mod boolean;
-pub use boolean::*;
 mod builtin;
-pub use builtin::*;
-mod constructor;
-pub use constructor::*;
 mod compiled;
-pub use compiled::*;
+mod constructor;
 mod effect;
-pub use effect::*;
 mod float;
-pub use float::*;
+mod hashmap;
+mod hashset;
 mod int;
-pub use int::*;
 mod lambda;
-pub use lambda::*;
 mod r#let;
-pub use r#let::*;
+mod list;
 mod nil;
-pub use nil::*;
 mod partial;
-pub use partial::*;
-mod recursive;
-pub use recursive::*;
-mod signal;
-pub use signal::*;
-mod string;
-pub use string::*;
-mod symbol;
-pub use symbol::*;
 mod record;
-pub use record::*;
+mod recursive;
+mod signal;
+mod string;
+mod symbol;
 mod variable;
-pub use variable::*;
 
-mod collection {
-    pub mod hashmap;
-    pub mod hashset;
-    pub mod list;
-}
-pub use collection::hashmap::*;
-pub use collection::hashset::*;
-pub use collection::list::*;
+pub use application::*;
+pub use boolean::*;
+pub use builtin::*;
+pub use compiled::*;
+pub use constructor::*;
+pub use effect::*;
+pub use float::*;
+pub use hashmap::*;
+pub use hashset::*;
+pub use int::*;
+pub use lambda::*;
+pub use list::*;
+pub use nil::*;
+pub use partial::*;
+pub use r#let::*;
+pub use record::*;
+pub use recursive::*;
+pub use signal::*;
+pub use string::*;
+pub use symbol::*;
+pub use variable::*;
 
 use reflex::{
     core::{
@@ -68,14 +66,14 @@ use reflex::{
 #[serde(tag = "type", content = "value")]
 pub enum Term<T: Expression> {
     #[serde(bound(
-        serialize = "<T as Expression>::String: Serialize, <T as Expression>::ExpressionList: Serialize, <T as Expression>::SignalList: Serialize, <T as Expression>::Signal: Serialize, <T as Expression>::StructPrototype: Serialize",
-        deserialize = "<T as Expression>::String: Deserialize<'de>, <T as Expression>::ExpressionList: Deserialize<'de>, <T as Expression>::SignalList: Deserialize<'de>, <T as Expression>::Signal: Deserialize<'de>, <T as Expression>::StructPrototype: Deserialize<'de>"
+        serialize = "<T as Expression>::String: Serialize, <T as Expression>::ExpressionList<T>: Serialize, <T as Expression>::SignalList<T>: Serialize, <T as Expression>::Signal<T>: Serialize, <T as Expression>::StructPrototype<T>: Serialize",
+        deserialize = "<T as Expression>::String: Deserialize<'de>, <T as Expression>::ExpressionList<T>: Deserialize<'de>, <T as Expression>::SignalList<T>: Deserialize<'de>, <T as Expression>::Signal<T>: Deserialize<'de>, <T as Expression>::StructPrototype<T>: Deserialize<'de>"
     ))]
     Nil(NilTerm),
     Boolean(BooleanTerm),
     Int(IntTerm),
     Float(FloatTerm),
-    String(StringTerm<T::String>),
+    String(StringTerm<T>),
     Symbol(SymbolTerm),
     Variable(VariableTerm),
     Effect(EffectTerm<T>),
@@ -84,7 +82,7 @@ pub enum Term<T: Expression> {
     Application(ApplicationTerm<T>),
     PartialApplication(PartialApplicationTerm<T>),
     Recursive(RecursiveTerm<T>),
-    Builtin(BuiltinTerm<T::Builtin>),
+    Builtin(BuiltinTerm<T>),
     CompiledFunction(CompiledFunctionTerm),
     Record(RecordTerm<T>),
     Constructor(ConstructorTerm<T>),
@@ -96,31 +94,34 @@ pub enum Term<T: Expression> {
 impl<T: Expression + Applicable<T>> Expression for Term<T> {
     type String = T::String;
     type Builtin = T::Builtin;
-    type Signal = Signal<Term<T>>;
-    type SignalList = SignalList<Term<T>>;
-    type StructPrototype = StructPrototype<Term<T>>;
-    type ExpressionList = ExpressionList<Term<T>>;
+    type Signal<TWrapper: Expression> = Signal<TWrapper>;
+    type SignalList<TWrapper: Expression> = SignalList<TWrapper>;
+    type StructPrototype<TWrapper: Expression> = StructPrototype<TWrapper>;
+    type ExpressionList<TWrapper: Expression> = ExpressionList<TWrapper>;
     type NilTerm = NilTerm;
     type BooleanTerm = BooleanTerm;
     type IntTerm = IntTerm;
     type FloatTerm = FloatTerm;
-    type StringTerm = StringTerm<T::String>;
+    type StringTerm<TWrapper: Expression> = StringTerm<TWrapper>;
     type SymbolTerm = SymbolTerm;
     type VariableTerm = VariableTerm;
-    type EffectTerm = EffectTerm<Term<T>>;
-    type LetTerm = LetTerm<Term<T>>;
-    type LambdaTerm = LambdaTerm<Term<T>>;
-    type ApplicationTerm = ApplicationTerm<Term<T>>;
-    type PartialApplicationTerm = PartialApplicationTerm<Term<T>>;
-    type RecursiveTerm = RecursiveTerm<Term<T>>;
-    type BuiltinTerm = BuiltinTerm<T::Builtin>;
+    type EffectTerm<TWrapper: Expression> = EffectTerm<TWrapper>;
+    type LetTerm<TWrapper: Expression> = LetTerm<TWrapper>;
+    type LambdaTerm<TWrapper: Expression> = LambdaTerm<TWrapper>;
+    type ApplicationTerm<TWrapper: Expression> = ApplicationTerm<TWrapper>;
+    type PartialApplicationTerm<TWrapper: Expression> = PartialApplicationTerm<TWrapper>;
+    type RecursiveTerm<TWrapper: Expression> = RecursiveTerm<TWrapper>;
+    type BuiltinTerm<TWrapper: Expression> = BuiltinTerm<TWrapper>;
     type CompiledFunctionTerm = CompiledFunctionTerm;
-    type RecordTerm = RecordTerm<Term<T>>;
-    type ConstructorTerm = ConstructorTerm<Term<T>>;
-    type ListTerm = ListTerm<Term<T>>;
-    type HashmapTerm = HashMapTerm<Term<T>>;
-    type HashsetTerm = HashSetTerm<Term<T>>;
-    type SignalTerm = SignalTerm<Term<T>>;
+    type RecordTerm<TWrapper: Expression> = RecordTerm<TWrapper>;
+    type ConstructorTerm<TWrapper: Expression> = ConstructorTerm<TWrapper>;
+    type ListTerm<TWrapper: Expression> = ListTerm<TWrapper>;
+    type HashmapTerm<TWrapper: Expression> = HashMapTerm<TWrapper>;
+    type HashsetTerm<TWrapper: Expression> = HashSetTerm<TWrapper>;
+    type SignalTerm<TWrapper: Expression> = SignalTerm<TWrapper>;
+
+    type Ref<'a, TTarget> = T::Ref<'a, TTarget> where TTarget: 'a, Self: 'a;
+
     fn id(&self) -> HashId {
         hash_object(self)
     }
@@ -327,20 +328,20 @@ impl<T: Expression + Applicable<T>> GraphNode for Term<T> {
         }
     }
 }
-pub enum TermChildren<'a, T: Expression> {
-    Let(LetTermChildren<'a, T>),
-    Lambda(LambdaTermChildren<'a, T>),
-    Application(ApplicationTermChildren<'a, T>),
-    PartialApplication(PartialApplicationTermChildren<'a, T>),
-    Recursive(RecursiveTermChildren<'a, T>),
-    Record(RecordTermChildren<'a, T>),
-    List(ListTermChildren<'a, T>),
-    HashMap(HashMapTermChildren<'a, T>),
-    HashSet(HashSetTermChildren<'a, T>),
+pub enum TermChildren<'a, T: Expression + 'a> {
+    Let(<LetTerm<T> as CompoundNode<T>>::Children<'a>),
+    Lambda(<LambdaTerm<T> as CompoundNode<T>>::Children<'a>),
+    Application(<ApplicationTerm<T> as CompoundNode<T>>::Children<'a>),
+    PartialApplication(<PartialApplicationTerm<T> as CompoundNode<T>>::Children<'a>),
+    Recursive(<RecursiveTerm<T> as CompoundNode<T>>::Children<'a>),
+    Record(<RecordTerm<T> as CompoundNode<T>>::Children<'a>),
+    List(<ListTerm<T> as CompoundNode<T>>::Children<'a>),
+    HashMap(<HashMapTerm<T> as CompoundNode<T>>::Children<'a>),
+    HashSet(<HashSetTerm<T> as CompoundNode<T>>::Children<'a>),
     Empty,
 }
-impl<'a, T: Expression> Iterator for TermChildren<'a, T> {
-    type Item = &'a T;
+impl<'a, T: Expression + 'a> Iterator for TermChildren<'a, T> {
+    type Item = T::Ref<'a, T>;
     fn next(&mut self) -> Option<Self::Item> {
         match self {
             Self::Let(iter) => iter.next(),
@@ -356,9 +357,12 @@ impl<'a, T: Expression> Iterator for TermChildren<'a, T> {
         }
     }
 }
-impl<'a, T: Expression + 'a> CompoundNode<'a, T> for Term<T> {
-    type Children = TermChildren<'a, T>;
-    fn children(&'a self) -> Self::Children {
+impl<T: Expression> CompoundNode<T> for Term<T> {
+    type Children<'a> = TermChildren<'a, T>
+        where
+            T: 'a,
+            Self: 'a;
+    fn children<'a>(&'a self) -> Self::Children<'a> {
         match self {
             Self::Let(term) => TermChildren::Let(term.children()),
             Self::Lambda(term) => TermChildren::Lambda(term.children()),

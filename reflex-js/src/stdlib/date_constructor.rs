@@ -4,8 +4,8 @@
 use chrono::{DateTime, NaiveDateTime};
 use reflex::core::{
     create_record, uuid, Applicable, ArgType, Arity, EvaluationCache, Expression,
-    ExpressionFactory, FloatTermType, FunctionArity, HeapAllocator, IntTermType, StringTermType,
-    StringValue, Uid, Uuid,
+    ExpressionFactory, FloatTermType, FunctionArity, HeapAllocator, IntTermType, RefType,
+    StringTermType, StringValue, Uid, Uuid,
 };
 use reflex_stdlib::Stdlib;
 
@@ -50,7 +50,7 @@ where
         } else if let Some(term) = factory.match_float_term(&value) {
             Some(term.value().trunc() as i64)
         } else if let Some(term) = factory.match_string_term(&value) {
-            parse_string_timestamp(term.value().as_str())
+            parse_string_timestamp(term.value().as_deref().as_str())
         } else {
             None
         };

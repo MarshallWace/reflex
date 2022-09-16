@@ -11,7 +11,7 @@ use std::{
 use futures::StreamExt;
 use reflex::core::{
     ConditionType, Expression, ExpressionFactory, ExpressionListType, FloatTermType, HeapAllocator,
-    IntTermType, SignalType, StateToken,
+    IntTermType, RefType, SignalType, StateToken,
 };
 use reflex_dispatcher::{
     Action, Actor, ActorTransition, HandlerContext, InboundAction, MessageData, OperationStream,
@@ -245,25 +245,27 @@ fn get_current_time() -> f64 {
 }
 
 fn parse_timestamp_effect_args<T: Expression>(
-    effect: &T::Signal,
+    effect: &T::Signal<T>,
     factory: &impl ExpressionFactory<T>,
 ) -> Result<f64, String> {
-    let args = effect.args();
+    let args = effect.args().as_deref();
     if args.len() != 1 {
         return Err(format!(
             "Invalid timestamp signal: Expected 1 argument, received {}",
             args.len()
         ));
     }
-    let mut args = args.iter();
-    let interval = parse_number_arg(args.next().unwrap(), factory);
+    let mut remaining_args = args.iter().map(|item| item.as_deref());
+    let interval = parse_number_arg(remaining_args.next().unwrap(), factory);
     match interval {
         Some(interval) if interval >= 1.0 => Ok(interval),
         _ => Err(format!(
             "Invalid timestamp signal arguments: {}",
             effect
                 .args()
+                .as_deref()
                 .iter()
+                .map(|item| item.as_deref())
                 .map(|arg| format!("{}", arg))
                 .collect::<Vec<_>>()
                 .join(", "),

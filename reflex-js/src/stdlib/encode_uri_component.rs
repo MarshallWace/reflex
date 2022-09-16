@@ -4,7 +4,7 @@
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use reflex::core::{
     uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
-    FunctionArity, HeapAllocator, StringTermType, StringValue, Uid, Uuid,
+    FunctionArity, HeapAllocator, RefType, StringTermType, StringValue, Uid, Uuid,
 };
 
 pub struct EncodeUriComponent {}
@@ -42,7 +42,7 @@ impl<T: Expression> Applicable<T> for EncodeUriComponent {
         let input = args.next().unwrap();
         match factory.match_string_term(&input) {
             Some(term) => {
-                let value = urlencoding::encode(term.value().as_str());
+                let value = urlencoding::encode(term.value().as_deref().as_str());
                 Ok(factory.create_string_term(allocator.create_string(value)))
             }
             _ => Err(format!("Expected String, received {}", input)),

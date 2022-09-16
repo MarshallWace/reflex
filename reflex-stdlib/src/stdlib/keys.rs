@@ -4,7 +4,7 @@
 use reflex::core::{
     uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
     ExpressionListType, FunctionArity, HashmapTermType, HeapAllocator, ListTermType,
-    RecordTermType, StructPrototypeType, Uid, Uuid,
+    RecordTermType, RefType, StructPrototypeType, Uid, Uuid,
 };
 
 pub struct Keys {}
@@ -42,7 +42,16 @@ impl<T: Expression> Applicable<T> for Keys {
         let result = if let Some(target) = factory.match_record_term(&target) {
             Some(
                 factory.create_list_term(
-                    allocator.create_list(target.prototype().keys().iter().cloned()),
+                    allocator.create_list(
+                        target
+                            .prototype()
+                            .as_deref()
+                            .keys()
+                            .as_deref()
+                            .iter()
+                            .map(|item| item.as_deref())
+                            .cloned(),
+                    ),
                 ),
             )
         } else if let Some(target) = factory.match_list_term(&target) {
@@ -51,16 +60,18 @@ impl<T: Expression> Applicable<T> for Keys {
                     allocator.create_list(
                         target
                             .items()
+                            .as_deref()
                             .iter()
+                            .map(|item| item.as_deref())
                             .enumerate()
                             .map(|(index, _)| factory.create_int_term(index as i32)),
                     ),
                 ),
             )
         } else if let Some(target) = factory.match_hashmap_term(&target) {
-            Some(
-                factory.create_list_term(allocator.create_list(target.keys().into_iter().cloned())),
-            )
+            Some(factory.create_list_term(
+                allocator.create_list(target.keys().map(|item| item.as_deref()).cloned()),
+            ))
         } else {
             None
         };

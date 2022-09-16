@@ -110,7 +110,7 @@ impl<T: Expression> Default for QueryManagerState<T> {
 struct QuerySubscription<T: Expression> {
     subscription_count: usize,
     query: T,
-    effect: T::Signal,
+    effect: T::Signal<T>,
     result: Option<EvaluationResult<T>>,
 }
 

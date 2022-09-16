@@ -4,7 +4,7 @@
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use reflex::core::{
     uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
-    ExpressionListType, FunctionArity, HeapAllocator, ListTermType, Uid, Uuid,
+    ExpressionListType, FunctionArity, HeapAllocator, ListTermType, RefType, Uid, Uuid,
 };
 use reflex_stdlib::Stdlib;
 
@@ -51,12 +51,18 @@ where
         } else if let Some(list) = factory.match_list_term(&target) {
             Ok(factory.create_application_term(
                 factory.create_builtin_term(GraphQlStdlib::CollectQueryListItems),
-                allocator.create_list(list.items().iter().map(|item| {
-                    factory.create_application_term(
-                        factory.create_builtin_term(GraphQlStdlib::DynamicQueryBranch),
-                        allocator.create_pair(item.clone(), shape.clone()),
-                    )
-                })),
+                allocator.create_list(
+                    list.items()
+                        .as_deref()
+                        .iter()
+                        .map(|item| item.as_deref())
+                        .map(|item| {
+                            factory.create_application_term(
+                                factory.create_builtin_term(GraphQlStdlib::DynamicQueryBranch),
+                                allocator.create_pair(item.clone(), shape.clone()),
+                            )
+                        }),
+                ),
             ))
         } else {
             Ok(factory.create_application_term(shape, allocator.create_unit_list(target)))

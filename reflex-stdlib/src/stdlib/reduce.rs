@@ -4,7 +4,7 @@
 use reflex::core::{
     uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
     ExpressionListType, FunctionArity, HashmapTermType, HashsetTermType, HeapAllocator,
-    ListTermType, Uid, Uuid,
+    ListTermType, RefType, Uid, Uuid,
 };
 
 pub struct Reduce {}
@@ -42,18 +42,22 @@ impl<T: Expression> Applicable<T> for Reduce {
         let iteratee = args.next().unwrap();
         let seed = args.next().unwrap();
         if let Some(target) = factory.match_list_term(&target) {
-            Ok(target.items().iter().fold(seed, |result, item| {
-                factory.create_application_term(
-                    iteratee.clone(),
-                    allocator.create_pair(result, item.clone()),
-                )
-            }))
+            Ok(target
+                .items()
+                .as_deref()
+                .iter()
+                .map(|item| item.as_deref())
+                .fold(seed, |result, item| {
+                    factory.create_application_term(
+                        iteratee.clone(),
+                        allocator.create_pair(result, item.clone()),
+                    )
+                }))
         } else if let Some(target) = factory.match_hashmap_term(&target) {
             Ok(target
                 .keys()
-                .into_iter()
-                .zip(target.values().into_iter())
-                .into_iter()
+                .map(|item| item.as_deref())
+                .zip(target.values().map(|item| item.as_deref()))
                 .fold(seed, |result, (key, value)| {
                     factory.create_application_term(
                         iteratee.clone(),
@@ -66,12 +70,15 @@ impl<T: Expression> Applicable<T> for Reduce {
                     )
                 }))
         } else if let Some(target) = factory.match_hashset_term(&target) {
-            Ok(target.values().into_iter().fold(seed, |result, value| {
-                factory.create_application_term(
-                    iteratee.clone(),
-                    allocator.create_pair(result, value.clone()),
-                )
-            }))
+            Ok(target
+                .values()
+                .map(|item| item.as_deref())
+                .fold(seed, |result, value| {
+                    factory.create_application_term(
+                        iteratee.clone(),
+                        allocator.create_pair(result, value.clone()),
+                    )
+                }))
         } else {
             Err(format!(
                 "Expected (<collection>, <function:2>, <any>), received ({}, {}, {})",

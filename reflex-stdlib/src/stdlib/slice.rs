@@ -4,7 +4,7 @@
 use reflex::core::{
     as_integer, uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
     ExpressionListType, FloatTermType, FunctionArity, HeapAllocator, IntTermType, ListTermType,
-    Uid, Uuid,
+    RefType, Uid, Uuid,
 };
 
 pub struct Slice {}
@@ -58,7 +58,9 @@ impl<T: Expression> Applicable<T> for Slice {
                 allocator.create_list(
                     target
                         .items()
+                        .as_deref()
                         .iter()
+                        .map(|item| item.as_deref())
                         .skip(start_index)
                         .take(end_index - start_index)
                         .cloned(),

@@ -6,7 +6,7 @@ use std::iter::once;
 
 use reflex::core::{
     uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
-    FunctionArity, HeapAllocator, StringTermType, StringValue, Uid, Uuid,
+    FunctionArity, HeapAllocator, RefType, StringTermType, StringValue, Uid, Uuid,
 };
 use reflex_stdlib::Stdlib;
 
@@ -51,7 +51,7 @@ where
         let builtin_method = match factory.match_string_term(&method_name) {
             Some(method_name) => get_builtin_field(
                 Some(&target),
-                method_name.value().as_str(),
+                method_name.value().as_deref().as_str(),
                 factory,
                 allocator,
             ),

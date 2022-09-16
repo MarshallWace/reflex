@@ -12,7 +12,7 @@ use reflex::{
     cache::SubstitutionCache,
     core::{
         EvaluationCache, Expression, ExpressionFactory, ExpressionListType, HeapAllocator,
-        Reducible, Rewritable, Substitutions, SymbolId,
+        Reducible, RefType, Rewritable, Substitutions, SymbolId,
     },
 };
 use reflex_stdlib::Stdlib;
@@ -388,7 +388,7 @@ fn parse_function_arguments<'src, T: Expression + Rewritable<T> + Reducible<T>>(
     evaluation_cache: &mut impl EvaluationCache<T>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> ParserResult<'src, T::ExpressionList>
+) -> ParserResult<'src, T::ExpressionList<T>>
 where
     T::Builtin: From<Stdlib>,
 {
@@ -514,7 +514,7 @@ where
         )),
     }?;
     let arg_names = match arg_list {
-        SyntaxDatum::List(items) => parse_lambda_argument_names(items),
+        SyntaxDatum::List(items) => parse_lambda_argument_names(&items),
         _ => Err(ParserError::new(
             String::from("Invalid lambda expression argument definition"),
             input,
@@ -640,7 +640,7 @@ where
         )),
     }?;
     let binding_definitions = match binding_definitions {
-        SyntaxDatum::List(items) => parse_binding_definitions(items),
+        SyntaxDatum::List(items) => parse_binding_definitions(&items),
         _ => Err(ParserError::new(
             format!(
                 "Invalid {} expression bindings",
@@ -695,10 +695,17 @@ where
                     1 => factory.create_application_term(
                         factory.create_lambda_term(1, body),
                         allocator.create_list(once(
-                            factory.create_recursive_term(factory.create_lambda_term(
-                                1,
-                                initializers.iter().next().unwrap().clone(),
-                            )),
+                            factory.create_recursive_term(
+                                factory.create_lambda_term(
+                                    1,
+                                    initializers
+                                        .iter()
+                                        .map(|item| item.as_deref())
+                                        .next()
+                                        .unwrap()
+                                        .clone(),
+                                ),
+                            ),
                         )),
                     ),
                     _ => {
@@ -721,16 +728,18 @@ where
                         let bindings = factory.create_recursive_term(factory.create_lambda_term(
                             1,
                             factory.create_list_term(allocator.create_list(
-                                initializers.iter().map(|initializer| {
-                                    initializer
-                                        .substitute_static(
-                                            &initializer_substitutions,
-                                            factory,
-                                            allocator,
-                                            evaluation_cache,
-                                        )
-                                        .unwrap_or_else(|| initializer.clone())
-                                }),
+                                initializers.iter().map(|item| item.as_deref()).map(
+                                    |initializer| {
+                                        initializer
+                                            .substitute_static(
+                                                &initializer_substitutions,
+                                                factory,
+                                                allocator,
+                                                evaluation_cache,
+                                            )
+                                            .unwrap_or_else(|| initializer.clone())
+                                    },
+                                ),
                             )),
                         ));
                         factory.create_application_term(
@@ -760,7 +769,7 @@ fn parse_binding_initializers<'src, T: Expression + Rewritable<T> + Reducible<T>
     evaluation_cache: &mut impl EvaluationCache<T>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> ParserResult<'src, T::ExpressionList>
+) -> ParserResult<'src, T::ExpressionList<T>>
 where
     T::Builtin: From<Stdlib>,
 {
@@ -2101,7 +2110,7 @@ mod tests {
         message: impl Into<T::String>,
         factory: &impl ExpressionFactory<T>,
         allocator: &impl HeapAllocator<T>,
-    ) -> T::Signal {
+    ) -> T::Signal<T> {
         allocator.create_signal(
             SignalType::Error,
             allocator

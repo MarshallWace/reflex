@@ -10,7 +10,7 @@ use prost_reflect::{
 use reflex::core::{
     as_integer, BooleanTermType, Expression, ExpressionFactory, ExpressionListType, FloatTermType,
     FloatValue, HashmapTermType, HeapAllocator, IntTermType, IntValue, ListTermType,
-    RecordTermType, StringTermType, StringValue, StructPrototypeType,
+    RecordTermType, RefType, StringTermType, StringValue, StructPrototypeType,
 };
 
 use crate::{
@@ -37,6 +37,7 @@ pub(crate) fn serialize_generic_message<T: Expression>(
         .filter_map(|field_type| {
             // TODO: cache protobuf schema field name strings
             term.get(&factory.create_string_term(allocator.create_string(field_type.json_name())))
+                .map(|item| item.as_deref())
                 .filter(|value| factory.match_nil_term(value).is_none())
                 .map(|value| (field_type, value))
         })
@@ -74,7 +75,7 @@ pub(crate) fn serialize_generic_message<T: Expression>(
 }
 
 fn serialize_oneof_field<T: Expression>(
-    term: &T::RecordTerm,
+    term: &T::RecordTerm<T>,
     oneof_type: &OneofDescriptor,
     message_type: &MessageDescriptor,
     transcoder: &impl ProtoTranscoder,
@@ -86,6 +87,7 @@ fn serialize_oneof_field<T: Expression>(
         .filter_map(|field_type| {
             // TODO: cache protobuf schema field name strings
             term.get(&factory.create_string_term(allocator.create_string(field_type.json_name())))
+                .map(|item| item.as_deref())
                 .and_then(|field_value| {
                     if let Some(_) = factory.match_nil_term(field_value) {
                         None
@@ -152,7 +154,9 @@ fn serialize_list_field_value<T: Expression>(
     } else if let Some(term) = factory.match_list_term(value) {
         Ok(Value::List(
             term.items()
+                .as_deref()
                 .iter()
+                .map(|item| item.as_deref())
                 .enumerate()
                 .map(|(index, value)| {
                     serialize_simple_field_value(value, field_type, transcoder, factory, allocator)
@@ -180,9 +184,12 @@ fn serialize_map_field_value<T: Expression>(
     } else if let Some(term) = factory.match_record_term(value) {
         Ok(Value::Map(
             term.prototype()
+                .as_deref()
                 .keys()
+                .as_deref()
                 .iter()
-                .zip(term.values().iter())
+                .map(|item| item.as_deref())
+                .zip(term.values().as_deref().iter().map(|item| item.as_deref()))
                 .map(|(key, value)| {
                     serialize_map_key(key, factory).and_then(|key| {
                         match serialize_simple_field_value(
@@ -198,7 +205,8 @@ fn serialize_map_field_value<T: Expression>(
     } else if let Some(term) = factory.match_hashmap_term(value) {
         Ok(Value::Map(
             term.keys()
-                .zip(term.values())
+                .map(|item| item.as_deref())
+                .zip(term.values().map(|item| item.as_deref()))
                 .map(|(key, value)| {
                     serialize_map_key(key, factory).and_then(|key| {
                         match serialize_simple_field_value(
@@ -224,7 +232,9 @@ fn serialize_map_key<T: Expression>(
     factory: &impl ExpressionFactory<T>,
 ) -> Result<MapKey, TranscodeError> {
     if let Some(term) = factory.match_string_term(value) {
-        Ok(MapKey::String(String::from(term.value().as_str())))
+        Ok(MapKey::String(String::from(
+            term.value().as_deref().as_str(),
+        )))
     } else if let Some(term) = factory.match_int_term(value) {
         Ok(MapKey::I32(term.value()))
     } else if let Some(term) = factory.match_boolean_term(value) {
@@ -286,7 +296,7 @@ fn serialize_enum_field_value<T: Expression>(
         Ok(Value::EnumNumber(enum_type.default_value().number()))
     } else if let Some(term) = factory.match_string_term(value) {
         enum_type
-            .get_value_by_name(term.value().as_str())
+            .get_value_by_name(term.value().as_deref().as_str())
             .map(|value| Value::EnumNumber(value.number()))
             .ok_or_else(|| {
                 TranscodeError::from(format!("Invalid {} variant: {}", enum_type.name(), value))
@@ -360,7 +370,7 @@ fn parse_string_value<T: Expression>(
     if let Some(_) = factory.match_nil_term(value) {
         Ok(Default::default())
     } else if let Some(term) = factory.match_string_term(value) {
-        Ok(String::from(term.value().as_str()))
+        Ok(String::from(term.value().as_deref().as_str()))
     } else {
         Err(TranscodeError::from(format!(
             "Expected String, received {}",

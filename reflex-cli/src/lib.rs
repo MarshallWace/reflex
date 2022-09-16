@@ -8,8 +8,8 @@ use std::{path::Path, str::FromStr};
 use anyhow::{anyhow, Result};
 use reflex::core::{
     Applicable, ConditionListType, ConditionType, Expression, ExpressionFactory,
-    ExpressionListType, HeapAllocator, InstructionPointer, Reducible, Rewritable, SignalTermType,
-    SignalType, StringTermType, StringValue,
+    ExpressionListType, HeapAllocator, InstructionPointer, Reducible, RefType, Rewritable,
+    SignalTermType, SignalType, StringTermType, StringValue,
 };
 use reflex_handlers::stdlib::Stdlib as HandlersStdlib;
 use reflex_interpreter::compiler::{
@@ -149,31 +149,40 @@ fn compile_graph_root<T: Expression + Rewritable<T> + Reducible<T> + Applicable<
 }
 
 pub fn format_signal_result<T: Expression>(
-    result: &T::SignalTerm,
+    result: &T::SignalTerm<T>,
     factory: &impl ExpressionFactory<T>,
 ) -> String {
     result
         .signals()
+        .as_deref()
         .iter()
+        .map(|item| item.as_deref())
         .map(|signal| format_signal(signal, factory))
         .collect::<Vec<_>>()
         .join("\n")
 }
 
-fn format_signal<T: Expression>(signal: &T::Signal, factory: &impl ExpressionFactory<T>) -> String {
+fn format_signal<T: Expression>(
+    signal: &T::Signal<T>,
+    factory: &impl ExpressionFactory<T>,
+) -> String {
     match signal.signal_type() {
         SignalType::Error => {
             let (message, args) = {
-                let args = signal.args();
+                let args = signal.args().as_deref();
                 let (message, remaining_args) =
-                    match args.get(0).map(|arg| match factory.match_string_term(arg) {
-                        Some(message) => Some(String::from(message.value().as_str())),
-                        _ => None,
+                    match args.get(0).map(|value| value.as_deref()).map(|arg| {
+                        match factory.match_string_term(arg) {
+                            Some(message) => {
+                                Some(String::from(message.value().as_deref().as_str()))
+                            }
+                            _ => None,
+                        }
                     }) {
                         Some(message) => (
                             message,
                             if args.len() > 1 {
-                                Some((Some(args.iter().skip(1)), None))
+                                Some((Some(args.iter().map(|item| item.as_deref()).skip(1)), None))
                             } else {
                                 None
                             },
@@ -181,7 +190,7 @@ fn format_signal<T: Expression>(signal: &T::Signal, factory: &impl ExpressionFac
                         _ => (
                             None,
                             if args.len() > 0 {
-                                Some((None, Some(args.iter())))
+                                Some((None, Some(args.iter().map(|item| item.as_deref()))))
                             } else {
                                 None
                             },
@@ -221,7 +230,9 @@ fn format_signal<T: Expression>(signal: &T::Signal, factory: &impl ExpressionFac
                 " {}",
                 signal
                     .args()
+                    .as_deref()
                     .iter()
+                    .map(|item| item.as_deref())
                     .map(|arg| format!("{}", arg))
                     .collect::<Vec<_>>()
                     .join(" ")

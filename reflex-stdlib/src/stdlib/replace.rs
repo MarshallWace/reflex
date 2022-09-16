@@ -3,7 +3,7 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use reflex::core::{
     uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
-    FunctionArity, HeapAllocator, StringTermType, StringValue, Uid, Uuid,
+    FunctionArity, HeapAllocator, RefType, StringTermType, StringValue, Uid, Uuid,
 };
 
 pub struct Replace {}
@@ -46,9 +46,9 @@ impl<T: Expression> Applicable<T> for Replace {
             factory.match_string_term(&replacement),
         ) {
             (Some(target), Some(pattern), Some(replacement)) => Ok(factory.create_string_term(
-                allocator.create_string(target.value().as_str().replacen(
-                    pattern.value().as_str(),
-                    replacement.value().as_str(),
+                allocator.create_string(target.value().as_deref().as_str().replacen(
+                    pattern.value().as_deref().as_str(),
+                    replacement.value().as_deref().as_str(),
                     1,
                 )),
             )),

@@ -3,8 +3,8 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use reflex::core::{
-    parse_record, uuid, Applicable, ArgType, Arity, ConstructorTermType, EvaluationCache,
-    Expression, ExpressionFactory, FunctionArity, HeapAllocator, Uid, Uuid,
+    parse_record_values, uuid, Applicable, ArgType, Arity, ConstructorTermType, EvaluationCache,
+    Expression, ExpressionFactory, FunctionArity, HeapAllocator, RefType, Uid, Uuid,
 };
 
 pub struct Construct {}
@@ -40,13 +40,23 @@ impl<T: Expression> Applicable<T> for Construct {
     ) -> Result<T, String> {
         let mut args = args.into_iter();
         let target = args.next().unwrap();
-        if let Some(constructor) = factory.match_constructor_term(&target) {
+        let result = if let Some(constructor) = factory.match_constructor_term(&target) {
             let prototype = constructor.prototype();
             let properties = args.next().unwrap();
-            parse_record(prototype, &properties, factory, allocator)
-                .ok_or_else(|| format!("Invalid constructor call: {} {}", target, properties))
+            let reordered_values =
+                parse_record_values(prototype.as_deref(), &properties, factory, allocator)
+                    .ok_or_else(|| {
+                        format!("Invalid constructor call: {} {}", target, properties)
+                    })?;
+            match reordered_values {
+                None => properties,
+                Some(values) => {
+                    factory.create_record_term(allocator.clone_struct_prototype(prototype), values)
+                }
+            }
         } else {
-            Ok(factory.create_application_term(target, allocator.create_list(args)))
-        }
+            factory.create_application_term(target, allocator.create_list(args))
+        };
+        Ok(result)
     }
 }

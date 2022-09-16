@@ -20,7 +20,8 @@ use metrics::{
 };
 use reflex::core::{
     ConditionType, Expression, ExpressionFactory, ExpressionListType, HeapAllocator,
-    RecordTermType, SignalType, StateToken, StringTermType, StringValue, StructPrototypeType,
+    RecordTermType, RefType, SignalType, StateToken, StringTermType, StringValue,
+    StructPrototypeType,
 };
 use reflex_dispatcher::{
     Action, Actor, ActorTransition, HandlerContext, InboundAction, MessageData, OperationStream,
@@ -753,7 +754,7 @@ where
     fn subscribe_http_operation<TAction>(
         &self,
         state: &mut GraphQlHandlerState,
-        effect: &T::Signal,
+        effect: &T::Signal<T>,
         operation: GraphQlEffectArgs,
         context: &mut impl HandlerContext,
     ) -> Result<StateOperation<TAction>, T>
@@ -844,7 +845,7 @@ where
     fn unsubscribe_http_operation<TAction>(
         &self,
         state: &mut GraphQlHandlerState,
-        effect: &T::Signal,
+        effect: &T::Signal<T>,
     ) -> Option<StateOperation<TAction>>
     where
         TAction: Action,
@@ -869,7 +870,7 @@ where
     fn subscribe_websocket_operation<TAction>(
         &self,
         state: &mut GraphQlHandlerState,
-        effect: &T::Signal,
+        effect: &T::Signal<T>,
         operation: GraphQlEffectArgs,
         context: &mut impl HandlerContext,
     ) -> (
@@ -978,7 +979,7 @@ where
     fn unsubscribe_websocket_operation<TAction>(
         &self,
         state: &mut GraphQlHandlerState,
-        effect: &T::Signal,
+        effect: &T::Signal<T>,
         context: &mut impl HandlerContext,
     ) -> Option<(
         Option<StateOperation<TAction>>,
@@ -1331,24 +1332,24 @@ struct GraphQlEffectArgs {
 }
 
 fn parse_graphql_effect_args<T: Expression>(
-    effect: &T::Signal,
+    effect: &T::Signal<T>,
     factory: &impl ExpressionFactory<T>,
 ) -> Result<GraphQlEffectArgs, String> {
-    let args = effect.args();
+    let args = effect.args().as_deref();
     if args.len() != 7 {
         return Err(format!(
             "Invalid graphql signal: Expected 7 arguments, received {}",
             args.len()
         ));
     }
-    let mut args = args.iter();
-    let url = parse_string_arg(args.next().unwrap(), factory);
-    let query = parse_string_arg(args.next().unwrap(), factory);
-    let operation_name = parse_optional_string_arg(args.next().unwrap(), factory);
-    let variables = parse_optional_object_arg(args.next().unwrap(), factory)?;
-    let extensions = parse_optional_object_arg(args.next().unwrap(), factory)?;
-    let headers = parse_optional_headers_arg(args.next().unwrap(), factory);
-    let _token = args.next().unwrap();
+    let mut remaining_args = args.iter().map(|item| item.as_deref());
+    let url = parse_string_arg(remaining_args.next().unwrap(), factory);
+    let query = parse_string_arg(remaining_args.next().unwrap(), factory);
+    let operation_name = parse_optional_string_arg(remaining_args.next().unwrap(), factory);
+    let variables = parse_optional_object_arg(remaining_args.next().unwrap(), factory)?;
+    let extensions = parse_optional_object_arg(remaining_args.next().unwrap(), factory)?;
+    let headers = parse_optional_headers_arg(remaining_args.next().unwrap(), factory);
+    let _token = remaining_args.next().unwrap();
     match (url, query, operation_name, variables, extensions, headers) {
         (
             Some(url),
@@ -1371,7 +1372,9 @@ fn parse_graphql_effect_args<T: Expression>(
             "Invalid graphql signal arguments: {}",
             effect
                 .args()
+                .as_deref()
                 .iter()
+                .map(|item| item.as_deref())
                 .map(|arg| format!("{}", arg))
                 .collect::<Vec<_>>()
                 .join(", "),
@@ -1384,7 +1387,7 @@ fn parse_string_arg<T: Expression>(
     factory: &impl ExpressionFactory<T>,
 ) -> Option<String> {
     match factory.match_string_term(value) {
-        Some(term) => Some(String::from(term.value().as_str())),
+        Some(term) => Some(String::from(term.value().as_deref().as_str())),
         _ => None,
     }
 }
@@ -1394,7 +1397,7 @@ fn parse_optional_string_arg<T: Expression>(
     factory: &impl ExpressionFactory<T>,
 ) -> Option<Option<String>> {
     match factory.match_string_term(value) {
-        Some(term) => Some(Some(String::from(term.value().as_str()))),
+        Some(term) => Some(Some(String::from(term.value().as_deref().as_str()))),
         _ => match factory.match_nil_term(value) {
             Some(_) => Some(None),
             _ => None,
@@ -1409,9 +1412,12 @@ fn parse_headers_arg<T: Expression>(
     match factory.match_record_term(value) {
         Some(term) => term
             .prototype()
+            .as_deref()
             .keys()
+            .as_deref()
             .iter()
-            .zip(term.values().iter())
+            .map(|item| item.as_deref())
+            .zip(term.values().as_deref().iter().map(|item| item.as_deref()))
             .map(|(key, value)| {
                 Some((
                     HeaderName::try_from(parse_string_arg(key, factory)?).ok()?,
@@ -1444,13 +1450,16 @@ fn parse_object_arg<T: Expression>(
         Some(value) => {
             let properties = value
                 .prototype()
+                .as_deref()
                 .keys()
+                .as_deref()
                 .iter()
-                .zip(value.values().iter())
+                .map(|item| item.as_deref())
+                .zip(value.values().as_deref().iter().map(|item| item.as_deref()))
                 .filter_map(|(key, value)| {
                     factory.match_string_term(key).map(|key| {
                         reflex_json::sanitize(value)
-                            .map(|value| (String::from(key.value().as_str()), value))
+                            .map(|value| (String::from(key.value().as_deref().as_str()), value))
                     })
                 })
                 .collect::<Result<Vec<_>, _>>()?;

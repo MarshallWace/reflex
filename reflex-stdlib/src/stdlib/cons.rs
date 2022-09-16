@@ -3,7 +3,8 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use reflex::core::{
     uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
-    ExpressionListType, FunctionArity, HeapAllocator, IntTermType, ListTermType, Uid, Uuid,
+    ExpressionListType, FunctionArity, HeapAllocator, IntTermType, ListTermType, RefType, Uid,
+    Uuid,
 };
 
 pub struct Cons {}
@@ -64,8 +65,8 @@ fn match_triple<'a, T: Expression>(
     factory: &'a impl ExpressionFactory<T>,
 ) -> Option<(&'a T, &'a T, &'a T)> {
     match factory.match_list_term(target) {
-        Some(term) if term.items().len() == 3 => {
-            let mut values = term.items().iter();
+        Some(term) if term.items().as_deref().len() == 3 => {
+            let mut values = term.items().as_deref().iter().map(|item| item.as_deref());
             let first = values.next().unwrap();
             let second = values.next().unwrap();
             let third = values.next().unwrap();

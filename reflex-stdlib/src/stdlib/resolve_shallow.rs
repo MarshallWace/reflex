@@ -4,7 +4,7 @@
 use reflex::core::{
     uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
     FunctionArity, GraphNode, HashmapTermType, HashsetTermType, HeapAllocator, ListTermType,
-    RecordTermType, Uid, Uuid,
+    RecordTermType, RefType, Uid, Uuid,
 };
 
 use crate::Stdlib;
@@ -45,7 +45,7 @@ where
     ) -> Result<T, String> {
         let target = args.next().unwrap();
         if let Some(value) = factory.match_record_term(&target) {
-            if value.values().is_atomic() {
+            if value.values().as_deref().is_atomic() {
                 Ok(target)
             } else {
                 Ok(factory.create_application_term(
@@ -54,7 +54,7 @@ where
                 ))
             }
         } else if let Some(value) = factory.match_list_term(&target) {
-            if value.items().is_atomic() {
+            if value.items().as_deref().is_atomic() {
                 Ok(target)
             } else {
                 Ok(factory.create_application_term(
@@ -63,17 +63,27 @@ where
                 ))
             }
         } else if let Some(value) = factory.match_hashset_term(&target) {
-            if value.values().all(|value| value.is_atomic()) {
+            if value
+                .values()
+                .map(|item| item.as_deref())
+                .all(|value| value.is_atomic())
+            {
                 Ok(target)
             } else {
                 Ok(factory.create_application_term(
                     factory.create_builtin_term(Stdlib::CollectHashSet),
-                    allocator.create_list(value.values().cloned()),
+                    allocator.create_list(value.values().map(|item| item.as_deref()).cloned()),
                 ))
             }
         } else if let Some(value) = factory.match_hashmap_term(&target) {
-            let keys_are_atomic = value.keys().all(|key| key.is_atomic());
-            let values_are_atomic = value.values().all(|value| value.is_atomic());
+            let keys_are_atomic = value
+                .keys()
+                .map(|item| item.as_deref())
+                .all(|key| key.is_atomic());
+            let values_are_atomic = value
+                .values()
+                .map(|item| item.as_deref())
+                .all(|value| value.is_atomic());
             if keys_are_atomic && values_are_atomic {
                 Ok(target)
             } else {
@@ -81,19 +91,29 @@ where
                     factory.create_builtin_term(Stdlib::ConstructHashMap),
                     allocator.create_pair(
                         if keys_are_atomic {
-                            factory.create_list_term(allocator.create_list(value.keys().cloned()))
+                            factory.create_list_term(
+                                allocator
+                                    .create_list(value.keys().map(|item| item.as_deref()).cloned()),
+                            )
                         } else {
                             factory.create_application_term(
                                 factory.create_builtin_term(Stdlib::CollectList),
-                                allocator.create_list(value.keys().cloned()),
+                                allocator
+                                    .create_list(value.keys().map(|item| item.as_deref()).cloned()),
                             )
                         },
                         if values_are_atomic {
-                            factory.create_list_term(allocator.create_list(value.values().cloned()))
+                            factory.create_list_term(
+                                allocator.create_list(
+                                    value.values().map(|item| item.as_deref()).cloned(),
+                                ),
+                            )
                         } else {
                             factory.create_application_term(
                                 factory.create_builtin_term(Stdlib::CollectList),
-                                allocator.create_list(value.values().cloned()),
+                                allocator.create_list(
+                                    value.values().map(|item| item.as_deref()).cloned(),
+                                ),
                             )
                         },
                     ),

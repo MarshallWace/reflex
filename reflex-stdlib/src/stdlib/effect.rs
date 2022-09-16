@@ -6,7 +6,7 @@ use std::iter::once;
 
 use reflex::core::{
     uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
-    FunctionArity, HeapAllocator, SignalType, StringTermType, StringValue, Uid, Uuid,
+    FunctionArity, HeapAllocator, RefType, SignalType, StringTermType, StringValue, Uid, Uuid,
 };
 
 pub struct Effect {}
@@ -43,7 +43,7 @@ impl<T: Expression> Applicable<T> for Effect {
         let signal_type = args.next().unwrap();
         if let Some(signal_type) = factory.match_string_term(&signal_type) {
             Ok(factory.create_effect_term(allocator.create_signal(
-                SignalType::Custom(String::from(signal_type.value().as_str())),
+                SignalType::Custom(String::from(signal_type.value().as_deref().as_str())),
                 allocator.create_list(args),
             )))
         } else {

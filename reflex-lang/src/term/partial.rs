@@ -8,28 +8,35 @@ use serde::{Deserialize, Serialize};
 
 use reflex::core::{
     transform_expression_list, Applicable, ArgType, Arity, CompoundNode, DependencyList,
-    DynamicState, Eagerness, EvaluationCache, Expression, ExpressionFactory, ExpressionListSlice,
-    ExpressionListType, GraphNode, HeapAllocator, Internable, PartialApplicationTermType,
+    DynamicState, Eagerness, EvaluationCache, Expression, ExpressionFactory, ExpressionListIter,
+    ExpressionListType, GraphNode, HeapAllocator, Internable, PartialApplicationTermType, RefType,
     Rewritable, SerializeJson, StackOffset, Substitutions, TermHash,
 };
 
 #[derive(Hash, Eq, PartialEq, Clone, Debug, Serialize, Deserialize)]
 pub struct PartialApplicationTerm<T: Expression> {
     target: T,
-    args: T::ExpressionList,
+    args: T::ExpressionList<T>,
 }
 impl<T: Expression> TermHash for PartialApplicationTerm<T> {}
 impl<T: Expression> PartialApplicationTerm<T> {
-    pub fn new(target: T, args: T::ExpressionList) -> Self {
+    pub fn new(target: T, args: T::ExpressionList<T>) -> Self {
         Self { target, args }
     }
 }
 impl<T: Expression> PartialApplicationTermType<T> for PartialApplicationTerm<T> {
-    fn target(&self) -> &T {
-        &self.target
+    fn target<'a>(&'a self) -> T::Ref<'a, T>
+    where
+        T: 'a,
+    {
+        (&self.target).into()
     }
-    fn args(&self) -> &T::ExpressionList {
-        &self.args
+    fn args<'a>(&'a self) -> T::Ref<'a, T::ExpressionList<T>>
+    where
+        T::ExpressionList<T>: 'a,
+        T: 'a,
+    {
+        (&self.args).into()
     }
 }
 impl<T: Expression + Applicable<T>> GraphNode for PartialApplicationTerm<T> {
@@ -61,6 +68,7 @@ impl<T: Expression + Applicable<T>> GraphNode for PartialApplicationTerm<T> {
             let eager_args = self.target.arity().map(|arity| {
                 self.args
                     .iter()
+                    .map(|arg| arg.as_deref())
                     .zip(arity.iter())
                     .filter_map(|(arg, arg_type)| match arg_type {
                         ArgType::Strict | ArgType::Eager => Some(arg),
@@ -81,12 +89,14 @@ impl<T: Expression + Applicable<T>> GraphNode for PartialApplicationTerm<T> {
                 self.args.has_dynamic_dependencies(deep)
             } else {
                 let eager_args = self.target.arity().map(|arity| {
-                    self.args.iter().zip(arity.iter()).filter_map(
-                        |(arg, arg_type)| match arg_type {
+                    self.args
+                        .iter()
+                        .map(|item| item.as_deref())
+                        .zip(arity.iter())
+                        .filter_map(|(arg, arg_type)| match arg_type {
                             ArgType::Strict | ArgType::Eager => Some(arg),
                             _ => None,
-                        },
-                    )
+                        })
                 });
                 match eager_args {
                     None => false,
@@ -104,12 +114,13 @@ impl<T: Expression + Applicable<T>> GraphNode for PartialApplicationTerm<T> {
         true
     }
 }
-pub type PartialApplicationTermChildren<'a, T> =
-    std::iter::Chain<std::iter::Once<&'a T>, ExpressionListSlice<'a, T>>;
-impl<'a, T: Expression + 'a> CompoundNode<'a, T> for PartialApplicationTerm<T> {
-    type Children = PartialApplicationTermChildren<'a, T>;
-    fn children(&'a self) -> Self::Children {
-        once(&self.target).chain(self.args.iter())
+impl<T: Expression> CompoundNode<T> for PartialApplicationTerm<T> {
+    type Children<'a> = std::iter::Chain<std::iter::Once<T::Ref<'a, T>>, ExpressionListIter<'a, T>>
+        where
+            T: 'a,
+            Self: 'a;
+    fn children<'a>(&'a self) -> Self::Children<'a> {
+        once((&self.target).into()).chain(self.args.iter())
     }
 }
 impl<T: Expression + Rewritable<T>> Rewritable<T> for PartialApplicationTerm<T> {
@@ -130,7 +141,7 @@ impl<T: Expression + Rewritable<T>> Rewritable<T> for PartialApplicationTerm<T> 
             return None;
         }
         let target = target.unwrap_or_else(|| self.target.clone());
-        let args = args.unwrap_or_else(|| allocator.clone_list(&self.args));
+        let args = args.unwrap_or_else(|| allocator.clone_list((&self.args).into()));
         Some(factory.create_partial_application_term(target, args))
     }
     fn substitute_dynamic(
@@ -151,7 +162,7 @@ impl<T: Expression + Rewritable<T>> Rewritable<T> for PartialApplicationTerm<T> 
             return None;
         }
         let target = target.unwrap_or_else(|| self.target.clone());
-        let args = args.unwrap_or_else(|| allocator.clone_list(&self.args));
+        let args = args.unwrap_or_else(|| allocator.clone_list((&self.args).into()));
         Some(factory.create_partial_application_term(target, args))
     }
     fn hoist_free_variables(
@@ -168,7 +179,7 @@ impl<T: Expression + Rewritable<T>> Rewritable<T> for PartialApplicationTerm<T> 
         } else {
             Some(factory.create_partial_application_term(
                 hoisted_target.unwrap_or_else(|| self.target.clone()),
-                hoisted_args.unwrap_or_else(|| allocator.clone_list(&self.args)),
+                hoisted_args.unwrap_or_else(|| allocator.clone_list((&self.args).into())),
             ))
         }
     }
@@ -190,7 +201,7 @@ impl<T: Expression + Rewritable<T>> Rewritable<T> for PartialApplicationTerm<T> 
         } else {
             Some(factory.create_partial_application_term(
                 normalized_target.unwrap_or_else(|| self.target.clone()),
-                normalized_args.unwrap_or_else(|| allocator.clone_list(&self.args)),
+                normalized_args.unwrap_or_else(|| allocator.clone_list((&self.args).into())),
             ))
         }
     }
@@ -212,6 +223,7 @@ impl<T: Expression + Applicable<T>> Applicable<T> for PartialApplicationTerm<T> 
         self.target.apply(
             self.args
                 .iter()
+                .map(|item| item.as_deref())
                 .cloned()
                 .chain(args.into_iter())
                 .collect::<Vec<_>>() // Required to prevent infinite type recursion
@@ -228,7 +240,7 @@ impl<T: Expression + Applicable<T>> Applicable<T> for PartialApplicationTerm<T> 
 
 impl<T: Expression> Internable for PartialApplicationTerm<T> {
     fn should_intern(&self, _eager: Eagerness) -> bool {
-        self.args().capture_depth() == 0 && self.target().capture_depth() == 0
+        self.args.capture_depth() == 0 && self.target.capture_depth() == 0
     }
 }
 
