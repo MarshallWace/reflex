@@ -2,14 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
-use std::collections::{hash_map::Entry, HashMap};
+use std::collections::hash_map::Entry;
 
 use crate::{
     core::{
         hash_state_values, DynamicState, EvaluationResult, Expression, Reducible, Rewritable,
         StateToken, Substitutions,
     },
-    hash::{hash_object, HashId},
+    hash::{hash_object, HashId, IntMap},
 };
 
 pub trait EvaluationCache<T: Expression> {
@@ -159,13 +159,13 @@ impl<T: Expression> EvaluationCache<T> for NoopCache {
 }
 
 pub struct SubstitutionCache<T: Expression> {
-    entries: HashMap<HashId, SubstitutionCacheEntry<T>>,
+    entries: IntMap<HashId, SubstitutionCacheEntry<T>>,
     metrics: EvaluationCacheMetrics,
 }
 impl<T: Expression> SubstitutionCache<T> {
     pub fn new() -> Self {
         Self {
-            entries: HashMap::new(),
+            entries: IntMap::default(),
             metrics: EvaluationCacheMetrics::default(),
         }
     }
@@ -343,9 +343,9 @@ struct SubstitutionCacheEntry<T: Expression> {
     state_dependencies: Vec<StateToken>,
     reduce: Option<T>,
     normalize: Option<T>,
-    evaluate: HashMap<HashId, Option<EvaluationResult<T>>>,
-    substitute_static: HashMap<HashId, Option<T>>,
-    substitute_dynamic: HashMap<HashId, Option<T>>,
+    evaluate: IntMap<HashId, Option<EvaluationResult<T>>>,
+    substitute_static: IntMap<HashId, Option<T>>,
+    substitute_dynamic: IntMap<HashId, Option<T>>,
 }
 impl<T: Expression> SubstitutionCacheEntry<T> {
     fn new(target: &impl Expression) -> Self {
@@ -353,9 +353,9 @@ impl<T: Expression> SubstitutionCacheEntry<T> {
             state_dependencies: target.dynamic_dependencies(false).iter().collect(),
             reduce: None,
             normalize: None,
-            evaluate: HashMap::new(),
-            substitute_static: HashMap::new(),
-            substitute_dynamic: HashMap::new(),
+            evaluate: IntMap::default(),
+            substitute_static: IntMap::default(),
+            substitute_dynamic: IntMap::default(),
         }
     }
     fn from_reduce(target: &impl Expression, value: Option<T>) -> Self {

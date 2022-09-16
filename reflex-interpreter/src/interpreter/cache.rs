@@ -8,13 +8,11 @@ use std::{
     iter::{once, FromIterator},
 };
 
-use fnv::FnvHashMap;
-use tracing::trace;
-
 use reflex::{
     core::{hash_state_values, DynamicState, EvaluationResult, Expression},
-    hash::HashId,
+    hash::{HashId, IntMap},
 };
+use tracing::trace;
 
 pub struct GcMetrics {
     pub purged: usize,
@@ -125,7 +123,7 @@ struct GcWrapper<T> {
     marked: bool,
 }
 fn gc<'a, T: Expression>(
-    cache_entries: &mut FnvHashMap<HashId, GcWrapper<InterpreterCacheEntry<T>>>,
+    cache_entries: &mut IntMap<HashId, GcWrapper<InterpreterCacheEntry<T>>>,
     roots: impl IntoIterator<Item = HashId>,
 ) -> GcMetrics {
     let existing_size = cache_entries.len();
@@ -151,7 +149,7 @@ fn gc<'a, T: Expression>(
     }
 }
 fn mark_gc_nodes<T: Expression>(
-    cache_entries: &mut FnvHashMap<HashId, GcWrapper<InterpreterCacheEntry<T>>>,
+    cache_entries: &mut IntMap<HashId, GcWrapper<InterpreterCacheEntry<T>>>,
     mut keys: VecDeque<HashId>,
 ) {
     while let Some(key) = keys.pop_front() {
@@ -167,12 +165,12 @@ fn mark_gc_nodes<T: Expression>(
 }
 
 pub struct DefaultInterpreterCache<T: Expression> {
-    cache: FnvHashMap<HashId, GcWrapper<InterpreterCacheEntry<T>>>,
+    cache: IntMap<HashId, GcWrapper<InterpreterCacheEntry<T>>>,
 }
 impl<T: Expression> Default for DefaultInterpreterCache<T> {
     fn default() -> Self {
         Self {
-            cache: FnvHashMap::default(),
+            cache: IntMap::default(),
         }
     }
 }
@@ -278,13 +276,13 @@ impl<T: Expression> MutableInterpreterCache<T> for DefaultInterpreterCache<T> {
 
 pub struct LocalCacheEntries<T: Expression> {
     state_hash: HashId,
-    entries: HashMap<HashId, InterpreterCacheEntry<T>>,
+    entries: IntMap<HashId, InterpreterCacheEntry<T>>,
 }
 impl<T: Expression> Default for LocalCacheEntries<T> {
     fn default() -> Self {
         Self {
             state_hash: Default::default(),
-            entries: Default::default(),
+            entries: IntMap::default(),
         }
     }
 }

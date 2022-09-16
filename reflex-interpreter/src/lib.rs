@@ -4,9 +4,8 @@
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 // SPDX-FileContributor: Jordan Hall <j.hall@mwam.com> https://github.com/j-hall-mwam
 use std::convert::TryInto;
-use std::{collections::hash_map::DefaultHasher, hash::Hasher, iter::once};
+use std::{hash::Hasher, iter::once};
 
-use fnv::FnvHashSet;
 use rayon::prelude::*;
 use tracing::info_span;
 use tracing::trace;
@@ -23,7 +22,7 @@ use reflex::core::{
     EffectTermType, InstructionPointer, PartialApplicationTermType, RecursiveTermType, RefType,
     SignalTermType, StateCache, VariableTermType,
 };
-use reflex::hash::hash_object;
+use reflex::hash::{hash_object, FnvHasher, IntSet};
 use reflex::{
     cache::NoopCache,
     core::{
@@ -1268,7 +1267,6 @@ fn retrieve_cached_result<T: Expression>(
 ) -> Option<EvaluationResult<T>> {
     cache_entries
         .retrieve_result(hash, state)
-        .map(|entry| entry.clone())
         .or_else(|| cache.retrieve_result(hash, state))
 }
 
@@ -1314,7 +1312,7 @@ fn generate_function_call_hash<'a, T: Expression + 'a>(
     target: &impl std::hash::Hash,
     args: impl IntoIterator<Item = &'a T>,
 ) -> HashId {
-    let mut hasher = DefaultHasher::default();
+    let mut hasher = FnvHasher::default();
     target.hash(&mut hasher);
     for arg in args {
         arg.hash(&mut hasher);
@@ -1502,7 +1500,7 @@ where
                 (
                     Vec::new(),
                     DependencyList::empty(),
-                    FnvHashSet::default(),
+                    IntSet::default(),
                     LocalCacheEntries::new(state),
                 )
             },
@@ -1563,7 +1561,7 @@ where
                 (
                     Vec::new(),
                     DependencyList::empty(),
-                    FnvHashSet::default(),
+                    IntSet::default(),
                     LocalCacheEntries::new(state),
                 )
             },

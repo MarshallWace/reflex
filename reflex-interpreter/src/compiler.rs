@@ -6,7 +6,7 @@
 use std::{
     collections::{
         hash_map::{DefaultHasher, Entry},
-        BTreeMap, HashMap,
+        BTreeMap,
     },
     hash::{Hash, Hasher},
     iter::{empty, once, FromIterator},
@@ -18,7 +18,7 @@ use reflex::{
         Applicable, Eagerness, Expression, ExpressionFactory, HeapAllocator, InstructionPointer,
         IntValue, Internable, Reducible, Rewritable, SignalType, StackOffset, SymbolId, Uuid,
     },
-    hash::{hash_object, HashId},
+    hash::{hash_object, FnvHashMap, FnvHasher, HashId, IntMap},
 };
 use serde::{Deserialize, Serialize};
 
@@ -269,8 +269,8 @@ pub struct Compiler {
     next_chunk_address: InstructionPointer,
     prelude: Program,
     data_section: Vec<Program>,
-    data_section_offsets: HashMap<HashId, usize>,
-    compiled_chunks: HashMap<HashId, (InstructionPointer, Program)>,
+    data_section_offsets: IntMap<HashId, usize>,
+    compiled_chunks: IntMap<HashId, (InstructionPointer, Program)>,
 }
 impl Compiler {
     pub fn new(options: CompilerOptions, prelude: Option<CompiledProgram>) -> Self {
@@ -278,7 +278,7 @@ impl Compiler {
             instructions: prelude_instructions,
             data_section: prelude_data_section,
         } = prelude.unwrap_or_default();
-        let (data_section, data_section_offsets): (Vec<_>, HashMap<_, _>) = prelude_data_section
+        let (data_section, data_section_offsets): (Vec<_>, IntMap<_, _>) = prelude_data_section
             .into_iter()
             .enumerate()
             .map(|(index, (key, instructions))| (instructions, (key, index)))
@@ -289,7 +289,7 @@ impl Compiler {
             prelude: prelude_instructions,
             data_section: data_section,
             data_section_offsets: data_section_offsets,
-            compiled_chunks: Default::default(),
+            compiled_chunks: IntMap::default(),
         }
     }
     pub fn options(&self) -> &CompilerOptions {
@@ -354,7 +354,7 @@ impl Compiler {
                 .chain(once(Instruction::Return)),
             ),
         };
-        let compiled_chunks = std::mem::replace(&mut self.compiled_chunks, HashMap::new());
+        let compiled_chunks = std::mem::replace(&mut self.compiled_chunks, IntMap::default());
 
         // At this point all the instructions have been compiled, however any compiled function offsets are zero-indexed
         // rather than being the actual offsets in the output code.
@@ -425,7 +425,7 @@ impl Compiler {
 fn link_compiled_chunks(
     program: CompiledProgram,
     prelude: Program,
-    compiled_chunks: HashMap<HashId, (InstructionPointer, Program)>,
+    compiled_chunks: IntMap<HashId, (InstructionPointer, Program)>,
 ) -> Result<CompiledProgram, String> {
     let CompiledProgram {
         instructions: entry_chunk,
@@ -444,7 +444,7 @@ fn link_compiled_chunks(
             *offset += chunk.len();
             Some(result)
         })
-        .collect::<HashMap<_, _>>();
+        .collect::<FnvHashMap<_, _>>();
     let compiled_instructions = ordered_chunks
         .into_iter()
         .map(|(_index, chunk)| chunk)
@@ -474,7 +474,7 @@ const UNLINKED_FUNCTION_OFFSET: InstructionPointer = InstructionPointer(0xFFFFFF
 fn remap_function_addresses(
     compiled_instructions: Program,
     prelude_length: usize,
-    address_mappings: &HashMap<InstructionPointer, InstructionPointer>,
+    address_mappings: &FnvHashMap<InstructionPointer, InstructionPointer>,
 ) -> Result<Program, String> {
     compiled_instructions
         .into_iter()
@@ -544,7 +544,7 @@ pub fn hash_compiled_program(
 }
 
 pub fn hash_program_root(program: &Program, entry_point: &InstructionPointer) -> HashId {
-    let mut hasher = DefaultHasher::new();
+    let mut hasher = FnvHasher::default();
     program.hash(&mut hasher);
     entry_point.hash(&mut hasher);
     hasher.finish()

@@ -1,16 +1,15 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
-use std::{
-    collections::{hash_map::Entry, HashMap},
-    iter::once,
-};
+use std::{collections::hash_map::Entry, iter::once};
 
-use reflex::core::{
-    uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
-    ExpressionListType, FunctionArity, HeapAllocator, RecordTermType, RefType, StructPrototypeType,
-    Uid, Uuid,
+use reflex::{
+    core::{
+        uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
+        ExpressionListType, FunctionArity, HeapAllocator, RecordTermType, RefType,
+        StructPrototypeType, Uid, Uuid,
+    },
+    hash::FnvHashMap,
 };
 
 pub struct Merge {}
@@ -94,7 +93,11 @@ impl<T: Expression> Applicable<T> for Merge {
                                     .into_iter()
                                     .unzip();
                             let mut deduplicated_keys = keys.iter().enumerate().fold(
-                                HashMap::with_capacity(keys.len()),
+                                {
+                                    let mut map = FnvHashMap::default();
+                                    map.reserve(keys.len());
+                                    map
+                                },
                                 |mut result, (index, key)| {
                                     match result.entry(key) {
                                         Entry::Vacant(entry) => {

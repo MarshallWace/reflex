@@ -4,7 +4,7 @@
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 // SPDX-FileContributor: Jordan Hall <j.hall@mwam.com> https://github.com/j-hall-mwam
 use std::{
-    collections::{hash_map::DefaultHasher, BTreeSet, HashMap, HashSet},
+    collections::HashSet,
     convert::TryFrom,
     hash::{Hash, Hasher},
     iter::{once, repeat, FromIterator},
@@ -13,13 +13,11 @@ use std::{
     sync::Arc,
 };
 
-use fnv::FnvHashMap;
-use im::OrdSet;
 use serde::{Deserialize, Serialize};
 pub use uuid::{uuid, Uuid};
 
 pub use crate::cache::EvaluationCache;
-use crate::hash::{hash_object, HashId};
+use crate::hash::{hash_object, FnvHasher, HashId, IntMap, IntSet};
 
 pub type IntValue = i32;
 pub type FloatValue = f64;
@@ -828,13 +826,13 @@ pub trait DynamicState<T: Hash> {
 
 pub struct StateCache<T: Hash> {
     hash: HashId,
-    values: FnvHashMap<StateToken, T>,
+    values: IntMap<StateToken, T>,
 }
 impl<T: Hash> Default for StateCache<T> {
     fn default() -> Self {
         Self {
-            hash: DefaultHasher::new().finish(),
-            values: FnvHashMap::default(),
+            hash: FnvHasher::default().finish(),
+            values: IntMap::default(),
         }
     }
 }
@@ -864,7 +862,7 @@ impl<T: Hash> StateCache<T> {
         };
         if has_changes {
             self.hash = {
-                let mut hasher = DefaultHasher::new();
+                let mut hasher = FnvHasher::default();
                 hasher.write_u64(self.hash);
                 hasher.write_u64(key);
                 hasher.write_u64(value_hash);
@@ -875,7 +873,7 @@ impl<T: Hash> StateCache<T> {
     pub fn remove(&mut self, key: &StateToken) -> Option<T> {
         let result = self.values.remove(key);
         if result.is_some() {
-            let mut hasher = DefaultHasher::new();
+            let mut hasher = FnvHasher::default();
             hasher.write_u64(self.hash);
             hasher.write_u64(*key);
             hasher.write_u8(0);
@@ -884,7 +882,7 @@ impl<T: Hash> StateCache<T> {
         result
     }
     pub fn extend(&mut self, entries: impl IntoIterator<Item = (StateToken, T)>) {
-        let mut hasher = DefaultHasher::new();
+        let mut hasher = FnvHasher::default();
         hasher.write_u64(self.hash);
         for (key, value) in entries {
             hasher.write_u64(key);
@@ -894,7 +892,7 @@ impl<T: Hash> StateCache<T> {
         self.hash = hasher.finish();
     }
     pub fn gc(&mut self, retained_keys: &DependencyList) {
-        let mut hasher = DefaultHasher::new();
+        let mut hasher = FnvHasher::default();
         hasher.write_u64(self.hash);
         self.values.retain(|key, _| {
             if retained_keys.contains(*key) {
@@ -914,8 +912,8 @@ impl<T: Hash> StateCache<T> {
 }
 impl<T: Hash> FromIterator<(StateToken, T)> for StateCache<T> {
     fn from_iter<I: IntoIterator<Item = (StateToken, T)>>(iter: I) -> Self {
-        let mut hasher = DefaultHasher::new();
-        let mut values = FnvHashMap::default();
+        let mut hasher = FnvHasher::default();
+        let mut values = IntMap::default();
         for (key, value) in iter {
             hasher.write_u64(key);
             std::hash::Hash::hash(&value, &mut hasher);
@@ -954,7 +952,7 @@ pub fn hash_state_values<T: Expression>(
     state: &impl DynamicState<T>,
     state_tokens: impl IntoIterator<Item = StateToken>,
 ) -> HashId {
-    let mut hasher = DefaultHasher::new();
+    let mut hasher = FnvHasher::default();
     for state_token in state_tokens {
         match state.get(&state_token) {
             None => hasher.write_u8(0),
@@ -1196,26 +1194,18 @@ impl<'a, T: Expression + Rewritable<T>> Substitutions<'a, T> {
     }
 }
 
-#[derive(Default, Hash, Eq, PartialEq, Clone, Debug)]
+#[derive(Default, Eq, PartialEq, Clone, Debug)]
 pub struct DependencyList {
-    state_tokens: OrdSet<StateToken>,
+    state_tokens: IntSet<StateToken>,
 }
 impl Extend<StateToken> for DependencyList {
     fn extend<T: IntoIterator<Item = StateToken>>(&mut self, state_tokens: T) {
-        if self.state_tokens.is_empty() {
-            self.state_tokens = OrdSet::from_iter(state_tokens);
-        } else {
-            for state_token in state_tokens {
-                self.state_tokens.insert(state_token);
-            }
-        }
+        self.state_tokens.extend(state_tokens);
     }
 }
 impl Extend<DependencyList> for DependencyList {
     fn extend<T: IntoIterator<Item = DependencyList>>(&mut self, values: T) {
-        for values in values {
-            self.extend(values)
-        }
+        self.extend(values.into_iter().flatten())
     }
 }
 impl DependencyList {
@@ -1224,7 +1214,7 @@ impl DependencyList {
     }
     pub fn of(state_token: StateToken) -> Self {
         Self {
-            state_tokens: OrdSet::unit(state_token),
+            state_tokens: IntSet::from_iter(once(state_token)),
         }
     }
     pub fn len(&self) -> usize {
@@ -1236,27 +1226,15 @@ impl DependencyList {
     pub fn contains(&self, state_token: StateToken) -> bool {
         self.state_tokens.contains(&state_token)
     }
-    pub fn intersects(&self, entries: &BTreeSet<StateToken>) -> bool {
-        if self.state_tokens.is_empty() {
-            false
-        } else {
-            self.state_tokens
-                .iter()
-                .any(|dependency| entries.contains(dependency))
-        }
-    }
     pub fn insert(&mut self, state_token: StateToken) {
         self.state_tokens.insert(state_token);
     }
-    pub fn union(self, other: Self) -> Self {
+    pub fn union(mut self, other: Self) -> Self {
         if self.is_empty() {
             other
-        } else if other.is_empty() {
-            self
         } else {
-            Self {
-                state_tokens: self.state_tokens.union(other.state_tokens),
-            }
+            self.extend(other);
+            self
         }
     }
     pub fn iter(&self) -> impl Iterator<Item = StateToken> + ExactSizeIterator + '_ {
@@ -1266,20 +1244,20 @@ impl DependencyList {
 impl FromIterator<StateToken> for DependencyList {
     fn from_iter<T: IntoIterator<Item = StateToken>>(iter: T) -> Self {
         Self {
-            state_tokens: iter.into_iter().collect::<OrdSet<_>>(),
+            state_tokens: iter.into_iter().collect(),
         }
     }
 }
 impl IntoIterator for DependencyList {
     type Item = StateToken;
-    type IntoIter = im::ordset::ConsumingIter<StateToken>;
+    type IntoIter = std::collections::hash_set::IntoIter<StateToken>;
     fn into_iter(self) -> Self::IntoIter {
         self.state_tokens.into_iter()
     }
 }
 impl<'a> IntoIterator for &'a DependencyList {
     type Item = StateToken;
-    type IntoIter = std::iter::Copied<im::ordset::Iter<'a, StateToken>>;
+    type IntoIter = std::iter::Copied<std::collections::hash_set::Iter<'a, StateToken>>;
     fn into_iter(self) -> Self::IntoIter {
         self.state_tokens.iter().copied()
     }
@@ -1330,42 +1308,30 @@ pub fn match_typed_expression_list<'a, T: Expression + 'a, V, E>(
 pub fn transform_expression_list<T: Expression>(
     expressions: &T::ExpressionList<T>,
     allocator: &impl HeapAllocator<T>,
-    mut transform: impl FnMut(&T) -> Option<T>,
+    transform: impl FnMut(&T) -> Option<T>,
 ) -> Option<T::ExpressionList<T>> {
-    let mut result: Option<Vec<T>> = None;
-    for (index, expression) in expressions.iter().map(|item| item.as_deref()).enumerate() {
-        let replaced = transform(expression);
-        match replaced {
-            None => {}
-            Some(replaced) => match result {
-                Some(ref mut results) => {
-                    results[index] = replaced;
-                }
-                None => {
-                    result = Some(
-                        expressions
-                            .iter()
-                            .map(|item| item.as_deref())
-                            .take(index)
-                            .cloned()
-                            .chain(once(replaced))
-                            .chain(
-                                expressions
-                                    .iter()
-                                    .map(|item| item.as_deref())
-                                    .skip(index + 1)
-                                    .cloned(),
-                            )
-                            .collect::<Vec<_>>(),
-                    );
-                }
-            },
-        }
+    // Create a lazy iterator that collects transformed values along with their indices
+    // Note that we don't pre-emptively collect the iterator because there might be no transformed expressions,
+    // in which case we don't need to allocate a vector
+    let mut iter = expressions
+        .iter()
+        .map(|item| item.as_deref())
+        .map(transform)
+        .enumerate()
+        .filter_map(|(index, result)| result.map(|result| (index, result)));
+    // Pull the first value from the iterator, returning if there were no transformed expressions
+    let (index, replaced) = iter.next()?;
+    let mut results = expressions
+        .iter()
+        .map(|item| item.as_deref())
+        .cloned()
+        .collect::<Vec<_>>();
+    results[index] = replaced.clone();
+    // Post-fill with the remaining transformed expressions
+    for (index, replaced) in iter {
+        results[index] = replaced;
     }
-    match result {
-        None => None,
-        Some(result) => Some(allocator.create_list(result)),
-    }
+    Some(allocator.create_list(results))
 }
 
 pub fn evaluate<T: Expression + Rewritable<T> + Reducible<T> + Evaluate<T>>(
@@ -1647,7 +1613,7 @@ pub fn deduplicate_hashmap_entries<T: Expression>(
 
 pub fn build_hashmap_lookup_table<'a, T: Expression + 'a>(
     keys: impl IntoIterator<Item = &'a T, IntoIter = impl ExactSizeIterator<Item = &'a T>>,
-) -> HashMap<HashId, usize> {
+) -> IntMap<HashId, usize> {
     keys.into_iter()
         .enumerate()
         .map(|(index, key)| (key.id(), index))

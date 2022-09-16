@@ -1,12 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-// SPDX-FileContributor: Jordan Hall <j.hall@mwam.com> https://github.com/j-hall-mwam
-use std::{
-    collections::{HashMap, HashSet},
-    hash::Hash,
-    iter::once,
-};
+use std::{collections::HashSet, hash::Hash, iter::once};
 
 use serde::{Deserialize, Serialize};
 
@@ -17,14 +12,14 @@ use reflex::{
         ExpressionListIter, ExpressionListType, GraphNode, HashmapTermType, HeapAllocator,
         Internable, RefType, Rewritable, SerializeJson, StackOffset, Substitutions, TermHash,
     },
-    hash::HashId,
+    hash::{HashId, IntMap},
 };
 
 #[derive(Eq, PartialEq, Clone, Debug)]
 pub struct HashMapTerm<T: Expression> {
     keys: T::ExpressionList<T>,
     values: T::ExpressionList<T>,
-    lookup: HashMap<HashId, usize>,
+    lookup: IntMap<HashId, usize>,
 }
 impl<T: Expression> HashMapTerm<T> {
     pub fn set(

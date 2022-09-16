@@ -4,7 +4,7 @@
 #![feature(generic_associated_types)]
 
 use std::{
-    collections::{hash_map::DefaultHasher, BTreeSet, HashSet},
+    collections::{BTreeSet, HashSet},
     hash::{Hash, Hasher},
 };
 
@@ -14,7 +14,7 @@ use reflex::{
         GraphNode, IntoRefTypeIterator, RefType, SignalType, StackOffset, StateToken,
         StructPrototypeType, TermHash,
     },
-    hash::{hash_object, HashId},
+    hash::{hash_object, FnvHasher, HashId},
 };
 use serde::{Deserialize, Serialize};
 
@@ -275,7 +275,7 @@ pub struct Signal<T: Expression> {
 impl<T: Expression> Signal<T> {
     pub fn new(signal_type: SignalType, args: T::ExpressionList<T>) -> Self {
         let hash = {
-            let mut hasher = DefaultHasher::new();
+            let mut hasher = FnvHasher::default();
             signal_type.hash(&mut hasher);
             for arg in args.iter().map(|item| item.as_deref()) {
                 arg.hash(&mut hasher);
