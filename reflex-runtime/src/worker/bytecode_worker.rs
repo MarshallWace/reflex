@@ -632,6 +632,6 @@ fn create_error_expression<T: Expression>(
 ) -> T {
     factory.create_signal_term(allocator.create_signal_list(once(allocator.create_signal(
         SignalType::Error,
-        allocator.create_unit_list(factory.create_string_term(message.into())),
+        allocator.create_unit_list(factory.create_string_term(allocator.create_string(message))),
     ))))
 }

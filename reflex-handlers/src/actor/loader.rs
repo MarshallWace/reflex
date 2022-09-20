@@ -722,9 +722,9 @@ fn prefix_error_message_effects<T: Expression>(
                                     .enumerate()
                                     .map(|(index, arg)| {
                                         if index == 0 {
-                                            factory.create_string_term(
-                                                format!("{}{}", prefix, message.as_str()).into(),
-                                            )
+                                            factory.create_string_term(allocator.create_string(
+                                                format!("{}{}", prefix, message.as_str()),
+                                            ))
                                         } else {
                                             arg.clone()
                                         }
@@ -822,6 +822,6 @@ fn create_error_expression<T: Expression>(
 ) -> T {
     factory.create_signal_term(allocator.create_signal_list(once(allocator.create_signal(
         SignalType::Error,
-        allocator.create_unit_list(factory.create_string_term(message.into())),
+        allocator.create_unit_list(factory.create_string_term(allocator.create_string(message))),
     ))))
 }

@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Jordan Hall <j.hall@mwam.com> https://github.com/j-hall-mwam
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet, VecDeque},
     iter::once,
@@ -123,7 +124,7 @@ pub fn create_evaluate_effect<T: Expression>(
     allocator.create_signal(
         SignalType::Custom(String::from(EFFECT_TYPE_EVALUATE)),
         allocator.create_list([
-            factory.create_string_term(label.into()),
+            factory.create_string_term(allocator.create_string(label)),
             query,
             evaluation_mode.serialize(factory),
             invalidation_strategy.serialize(factory),

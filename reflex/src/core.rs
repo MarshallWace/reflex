@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 pub use uuid::{uuid, Uuid};
 
 pub use crate::cache::EvaluationCache;
-use crate::hash::{FnvHasher, HashId, IntMap, IntSet};
+use crate::hash::{hash_object, FnvHasher, HashId, IntMap, IntSet};
 
 pub type IntValue = i32;
 pub type FloatValue = f64;
@@ -792,26 +792,23 @@ impl ExactSizeIterator for HeterogeneousArityIterator {
 }
 
 pub trait StringValue:
-    From<String>
-    + for<'a> From<&'a str>
-    + std::hash::Hash
-    + std::cmp::Eq
-    + std::cmp::PartialEq
-    + std::clone::Clone
-    + std::fmt::Debug
-    + std::fmt::Display
+    std::cmp::Eq + std::cmp::PartialEq + std::clone::Clone + std::fmt::Debug + std::fmt::Display
 where
     Self: std::marker::Sized,
 {
+    fn id(&self) -> HashId;
     fn as_str(&self) -> &str;
-    fn from_static(_self: Option<Self>, value: &'static str) -> Self;
+    fn from_static(_self: Option<Self>, value: &'static str) -> Option<Self>;
 }
 impl StringValue for String {
+    fn id(&self) -> HashId {
+        hash_object(self)
+    }
     fn as_str(&self) -> &str {
         self.as_str()
     }
-    fn from_static(_self: Option<Self>, value: &'static str) -> Self {
-        Self::from(value)
+    fn from_static(_self: Option<Self>, value: &'static str) -> Option<Self> {
+        Some(Self::from(value))
     }
 }
 
@@ -1054,7 +1051,7 @@ pub trait HeapAllocator<T: Expression> {
     ) -> T::StructPrototype<T>;
     fn create_signal(&self, signal_type: SignalType, args: T::ExpressionList<T>) -> T::Signal<T>;
     fn clone_signal<'a>(&self, signal: T::Ref<'a, T::Signal<T>>) -> T::Signal<T>;
-    fn create_string(&self, value: impl Into<T::String>) -> T::String;
+    fn create_string(&self, value: impl Into<String>) -> T::String;
     fn create_static_string(&self, value: &'static str) -> T::String;
     fn clone_string<'a>(&self, value: T::Ref<'a, T::String>) -> T::String;
 }

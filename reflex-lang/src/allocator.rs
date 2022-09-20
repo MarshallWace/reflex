@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Jordan Hall <j.hall@mwam.com> https://github.com/j-hall-mwam
 use std::{
     iter::{empty, once},
     marker::PhantomData,
@@ -108,11 +109,12 @@ impl<
     fn clone_signal<'a>(&self, signal: T::Ref<'a, T::Signal<T>>) -> T::Signal<T> {
         signal.as_deref().clone()
     }
-    fn create_string(&self, value: impl Into<T::String>) -> T::String {
+    fn create_string(&self, value: impl Into<String>) -> T::String {
         value.into()
     }
     fn create_static_string(&self, value: &'static str) -> T::String {
         T::String::from_static(Option::<T::String>::None, value)
+            .unwrap_or_else(|| self.create_string(value))
     }
     fn clone_string<'a>(&self, value: T::Ref<'a, T::String>) -> T::String {
         value.as_deref().clone()

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
+// SPDX-FileContributor: Jordan Hall <j.hall@mwam.com> https://github.com/j-hall-mwam
 use std::{
     collections::HashMap,
     fmt,
@@ -2097,7 +2098,7 @@ mod tests {
     //     }
 
     fn create_error_signal_term<T: Expression>(
-        message: impl Into<T::String>,
+        message: impl Into<String>,
         factory: &impl ExpressionFactory<T>,
         allocator: &impl HeapAllocator<T>,
     ) -> T {
@@ -2107,7 +2108,7 @@ mod tests {
     }
 
     fn create_error_signal<T: Expression>(
-        message: impl Into<T::String>,
+        message: impl Into<String>,
         factory: &impl ExpressionFactory<T>,
         allocator: &impl HeapAllocator<T>,
     ) -> T::Signal<T> {
