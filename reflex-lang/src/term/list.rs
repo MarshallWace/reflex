@@ -10,19 +10,25 @@ use reflex::core::{
     transform_expression_list, CompoundNode, DependencyList, DynamicState, Eagerness,
     EvaluationCache, Expression, ExpressionFactory, ExpressionListIter, ExpressionListType,
     GraphNode, HeapAllocator, Internable, ListTermType, RefType, Rewritable, SerializeJson,
-    StackOffset, Substitutions, TermHash,
+    StackOffset, Substitutions,
 };
 
-#[derive(Hash, Eq, PartialEq, Clone, Debug, Serialize, Deserialize)]
+#[derive(Eq, PartialEq, Clone, Debug, Serialize, Deserialize)]
 pub struct ListTerm<T: Expression> {
     items: T::ExpressionList<T>,
 }
-impl<T: Expression> TermHash for ListTerm<T> {}
 impl<T: Expression> ListTerm<T> {
     pub fn new(items: T::ExpressionList<T>) -> Self {
         Self { items }
     }
 }
+
+impl<T: Expression> std::hash::Hash for ListTerm<T> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.items.id().hash(state);
+    }
+}
+
 impl<T: Expression> ListTermType<T> for ListTerm<T> {
     fn items<'a>(&'a self) -> T::Ref<'a, T::ExpressionList<T>>
     where

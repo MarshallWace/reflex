@@ -9,19 +9,25 @@ use serde::{Deserialize, Serialize};
 use reflex::core::{
     Applicable, Arity, ConstructorTermType, DependencyList, Eagerness, EvaluationCache, Expression,
     ExpressionFactory, ExpressionListType, GraphNode, HeapAllocator, Internable, RefType,
-    SerializeJson, StackOffset, StructPrototypeType, TermHash,
+    SerializeJson, StackOffset, StructPrototypeType,
 };
 
-#[derive(Hash, Eq, PartialEq, Clone, Debug, Serialize, Deserialize)]
+#[derive(Eq, PartialEq, Clone, Debug, Serialize, Deserialize)]
 pub struct ConstructorTerm<T: Expression> {
     prototype: T::StructPrototype<T>,
 }
+
+impl<T: Expression> std::hash::Hash for ConstructorTerm<T> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.prototype.keys().as_deref().id().hash(state);
+    }
+}
+
 impl<T: Expression> ConstructorTerm<T> {
     pub fn new(prototype: T::StructPrototype<T>) -> Self {
         Self { prototype }
     }
 }
-impl<T: Expression> TermHash for ConstructorTerm<T> {}
 impl<T: Expression> ConstructorTermType<T> for ConstructorTerm<T> {
     fn prototype<'a>(&'a self) -> T::Ref<'a, T::StructPrototype<T>>
     where

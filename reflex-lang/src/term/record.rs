@@ -10,15 +10,22 @@ use reflex::core::{
     transform_expression_list, CompoundNode, DependencyList, DynamicState, Eagerness,
     EvaluationCache, Expression, ExpressionFactory, ExpressionListIter, ExpressionListType,
     GraphNode, HeapAllocator, Internable, RecordTermType, RefType, Rewritable, SerializeJson,
-    StackOffset, StructPrototypeType, Substitutions, TermHash,
+    StackOffset, StructPrototypeType, Substitutions,
 };
 
-#[derive(Hash, Eq, PartialEq, Clone, Debug, Serialize, Deserialize)]
+#[derive(Eq, PartialEq, Clone, Debug, Serialize, Deserialize)]
 pub struct RecordTerm<T: Expression> {
     prototype: T::StructPrototype<T>,
     values: T::ExpressionList<T>,
 }
-impl<T: Expression> TermHash for RecordTerm<T> {}
+
+impl<T: Expression> std::hash::Hash for RecordTerm<T> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.prototype.keys().as_deref().id().hash(state);
+        self.values.id().hash(state);
+    }
+}
+
 impl<T: Expression> RecordTerm<T> {
     pub fn new(prototype: T::StructPrototype<T>, values: T::ExpressionList<T>) -> Self {
         Self { prototype, values }

@@ -8,7 +8,6 @@ use serde::{Deserialize, Serialize};
 
 use reflex::core::{
     BooleanTermType, DependencyList, Eagerness, GraphNode, Internable, SerializeJson, StackOffset,
-    TermHash,
 };
 
 #[derive(PartialEq, Eq, Clone, Copy, Serialize, Deserialize, Hash)]
@@ -20,7 +19,6 @@ impl BooleanTerm {
         Self { value }
     }
 }
-impl TermHash for BooleanTerm {}
 impl BooleanTermType for BooleanTerm {
     fn value(&self) -> bool {
         self.value

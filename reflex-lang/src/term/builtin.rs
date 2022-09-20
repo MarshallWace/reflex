@@ -12,14 +12,20 @@ use serde::{
 use reflex::core::{
     Applicable, Arity, Builtin, BuiltinTermType, DependencyList, Eagerness, EvaluationCache,
     Expression, ExpressionFactory, GraphNode, HeapAllocator, Internable, SerializeJson,
-    StackOffset, TermHash, Uid, Uuid,
+    StackOffset, Uid, Uuid,
 };
 
-#[derive(Hash, Eq, PartialEq, Clone, Copy, Debug)]
+#[derive(Eq, PartialEq, Clone, Copy, Debug)]
 pub struct BuiltinTerm<T: Expression> {
     target: T::Builtin,
 }
-impl<T: Expression> TermHash for BuiltinTerm<T> {}
+
+impl<T: Expression> std::hash::Hash for BuiltinTerm<T> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.target.uid().hash(state);
+    }
+}
+
 impl<T: Expression> BuiltinTerm<T> {
     pub fn new(target: T::Builtin) -> Self {
         Self { target }

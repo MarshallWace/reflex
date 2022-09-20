@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Jordan Hall <j.hall@mwam.com> https://github.com/j-hall-mwam
 use std::{collections::HashSet, hash::Hash, iter::once};
 
 use serde::{Deserialize, Serialize};
@@ -10,7 +11,7 @@ use reflex::{
         build_hashmap_lookup_table, transform_expression_list, CompoundNode, DependencyList,
         DynamicState, Eagerness, EvaluationCache, Expression, ExpressionFactory,
         ExpressionListIter, ExpressionListType, GraphNode, HashmapTermType, HeapAllocator,
-        Internable, RefType, Rewritable, SerializeJson, StackOffset, Substitutions, TermHash,
+        Internable, RefType, Rewritable, SerializeJson, StackOffset, Substitutions,
     },
     hash::{HashId, IntMap},
 };
@@ -90,18 +91,10 @@ impl<T: Expression> HashMapTerm<T> {
 }
 impl<T: Expression> Hash for HashMapTerm<T> {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        for (key, value) in self
-            .keys
-            .iter()
-            .map(|item| item.as_deref())
-            .zip(self.values.iter().map(|item| item.as_deref()))
-        {
-            key.hash(state);
-            value.hash(state)
-        }
+        self.keys.id().hash(state);
+        self.values.id().hash(state);
     }
 }
-impl<T: Expression> TermHash for HashMapTerm<T> {}
 impl<T: Expression> HashMapTerm<T> {
     pub fn new(keys: T::ExpressionList<T>, values: T::ExpressionList<T>) -> Self {
         let lookup = build_hashmap_lookup_table(keys.iter().map(|item| item.as_deref()));

@@ -9,14 +9,19 @@ use serde::{Deserialize, Serialize};
 use reflex::core::{
     ConditionType, DependencyList, DynamicState, Eagerness, EffectTermType, Evaluate,
     EvaluationCache, EvaluationResult, Expression, ExpressionFactory, GraphNode, HeapAllocator,
-    Internable, Rewritable, SerializeJson, StackOffset, Substitutions, TermHash,
+    Internable, Rewritable, SerializeJson, StackOffset, Substitutions,
 };
 
-#[derive(Hash, Eq, PartialEq, Clone, Debug, Serialize, Deserialize)]
+#[derive(Eq, PartialEq, Clone, Debug, Serialize, Deserialize)]
 pub struct EffectTerm<T: Expression> {
     condition: T::Signal<T>,
 }
-impl<T: Expression> TermHash for EffectTerm<T> {}
+
+impl<T: Expression> std::hash::Hash for EffectTerm<T> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.condition.id().hash(state);
+    }
+}
 impl<T: Expression> EffectTermType<T> for EffectTerm<T> {
     fn condition<'a>(&'a self) -> T::Ref<'a, T::Signal<T>>
     where
@@ -26,6 +31,7 @@ impl<T: Expression> EffectTermType<T> for EffectTerm<T> {
         (&self.condition).into()
     }
 }
+
 impl<T: Expression> EffectTerm<T> {
     pub fn new(condition: T::Signal<T>) -> Self {
         Self { condition }

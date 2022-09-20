@@ -8,14 +8,13 @@ use serde::{Deserialize, Serialize};
 
 use reflex::core::{
     DependencyList, Eagerness, GraphNode, IntTermType, IntValue, Internable, SerializeJson,
-    StackOffset, TermHash,
+    StackOffset,
 };
 
 #[derive(PartialEq, Eq, Clone, Copy, Serialize, Deserialize, Hash)]
 pub struct IntTerm {
     value: IntValue,
 }
-impl TermHash for IntTerm {}
 impl IntTerm {
     pub fn new(value: IntValue) -> Self {
         Self { value }

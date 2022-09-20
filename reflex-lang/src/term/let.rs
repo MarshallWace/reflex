@@ -9,20 +9,27 @@ use serde::{Deserialize, Serialize};
 use reflex::core::{
     CompoundNode, DependencyList, DynamicState, Eagerness, EvaluationCache, Expression,
     ExpressionFactory, GraphNode, HeapAllocator, Internable, LetTermType, Reducible, Rewritable,
-    ScopeOffset, SerializeJson, StackOffset, Substitutions, TermHash,
+    ScopeOffset, SerializeJson, StackOffset, Substitutions,
 };
 
-#[derive(Hash, Eq, PartialEq, Clone, Debug, Serialize, Deserialize)]
+#[derive(Eq, PartialEq, Clone, Debug, Serialize, Deserialize)]
 pub struct LetTerm<T: Expression> {
     initializer: T,
     body: T,
 }
+
+impl<T: Expression> std::hash::Hash for LetTerm<T> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.initializer.id().hash(state);
+        self.body.id().hash(state);
+    }
+}
+
 impl<T: Expression> LetTerm<T> {
     pub fn new(initializer: T, body: T) -> Self {
         Self { initializer, body }
     }
 }
-impl<T: Expression> TermHash for LetTerm<T> {}
 impl<'term, T: Expression + 'term> LetTermType<T> for LetTerm<T> {
     fn initializer<'a>(&'a self) -> T::Ref<'a, T>
     where

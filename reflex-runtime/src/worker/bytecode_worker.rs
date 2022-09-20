@@ -119,7 +119,7 @@ where
         let start_time = Instant::now();
         let graph_root = compile_graphql_query(
             &self.query,
-            &self.query,
+            &self.query.id(),
             &self.graph_root,
             self.evaluation_mode,
             &self.compiler_options,

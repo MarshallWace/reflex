@@ -8,12 +8,10 @@ use serde::{Deserialize, Serialize};
 
 use reflex::core::{
     DependencyList, Eagerness, GraphNode, Internable, NilTermType, SerializeJson, StackOffset,
-    TermHash,
 };
 
 #[derive(PartialEq, Eq, Clone, Copy, Serialize, Deserialize, Hash)]
 pub struct NilTerm;
-impl TermHash for NilTerm {}
 impl NilTermType for NilTerm {}
 impl GraphNode for NilTerm {
     fn capture_depth(&self) -> StackOffset {

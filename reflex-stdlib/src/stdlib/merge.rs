@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Jordan Hall <j.hall@mwam.com> https://github.com/j-hall-mwam
 use std::{collections::hash_map::Entry, iter::once};
 
 use reflex::{
@@ -99,7 +100,7 @@ impl<T: Expression> Applicable<T> for Merge {
                                     map
                                 },
                                 |mut result, (index, key)| {
-                                    match result.entry(key) {
+                                    match result.entry(key.id()) {
                                         Entry::Vacant(entry) => {
                                             entry.insert(index);
                                         }
@@ -126,7 +127,7 @@ impl<T: Expression> Applicable<T> for Merge {
                                             .map(|item| item.as_deref())
                                             .map(|key| {
                                                 deduplicated_keys
-                                                    .remove(key)
+                                                    .remove(&key.id())
                                                     .map(|index| {
                                                         values.get(index).cloned().unwrap()
                                                     })
@@ -145,7 +146,8 @@ impl<T: Expression> Applicable<T> for Merge {
                                     .iter()
                                     .fold(
                                         Vec::with_capacity(deduplicated_keys.len()),
-                                        |mut results, key| match deduplicated_keys.remove(&key) {
+                                        |mut results, key| match deduplicated_keys.remove(&key.id())
+                                        {
                                             Some(index) => {
                                                 let value = values.get(index).unwrap();
                                                 results.push((key.clone(), value.clone()));

@@ -8,14 +8,20 @@ use serde::{Deserialize, Serialize};
 
 use reflex::core::{
     ConditionListType, DependencyList, Eagerness, Expression, GraphNode, Internable, RefType,
-    SerializeJson, SignalTermType, StackOffset, TermHash,
+    SerializeJson, SignalTermType, StackOffset,
 };
 
-#[derive(Hash, Eq, PartialEq, Clone, Debug, Serialize, Deserialize)]
+#[derive(Eq, PartialEq, Clone, Debug, Serialize, Deserialize)]
 pub struct SignalTerm<T: Expression> {
     signals: T::SignalList<T>,
 }
-impl<T: Expression> TermHash for SignalTerm<T> {}
+
+impl<T: Expression> std::hash::Hash for SignalTerm<T> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.signals.id().hash(state);
+    }
+}
+
 impl<T: Expression> SignalTerm<T> {
     pub fn new(signals: T::SignalList<T>) -> Self {
         Self { signals }

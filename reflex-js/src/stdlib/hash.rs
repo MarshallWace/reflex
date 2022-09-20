@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Jordan Hall <j.hall@mwam.com> https://github.com/j-hall-mwam
 use std::{collections::hash_map::DefaultHasher, hash::Hasher};
 
 use reflex::core::{
@@ -42,7 +43,7 @@ impl<T: Expression> Applicable<T> for Hash {
         let args = args.into_iter();
         let mut hasher = DefaultHasher::new();
         for arg in args {
-            arg.hash(&mut hasher);
+            std::hash::Hash::hash(&arg.id(), &mut hasher);
         }
         let hash = hasher.finish();
         Ok(factory.create_symbol_term(hash))

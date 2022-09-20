@@ -1,26 +1,35 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
-// SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Jordan Hall <j.hall@mwam.com> https://github.com/j-hall-mwam
-use std::collections::HashSet;
+// SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+use std::{collections::HashSet, hash::Hash};
 
 use serde::{Deserialize, Serialize};
 
 use reflex::core::{
     DependencyList, Eagerness, Expression, GraphNode, Internable, SerializeJson, StackOffset,
-    StringTermType, StringValue, TermHash,
+    StringTermType, StringValue,
 };
 
-#[derive(PartialEq, Eq, Clone, Copy, Serialize, Deserialize, Hash)]
+#[derive(PartialEq, Eq, Clone, Copy, Serialize, Deserialize)]
 pub struct StringTerm<T: Expression> {
     value: T::String,
 }
+
+impl<T: Expression> Hash for StringTerm<T>
+where
+    T::String: Hash,
+{
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.value.hash(state);
+    }
+}
+
 impl<T: Expression> StringTerm<T> {
     pub fn new(value: T::String) -> Self {
         Self { value }
     }
 }
-impl<T: Expression> TermHash for StringTerm<T> {}
 impl<T: Expression> StringTermType<T> for StringTerm<T> {
     fn value<'a>(&'a self) -> T::Ref<'a, T::String>
     where

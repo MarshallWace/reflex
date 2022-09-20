@@ -12,16 +12,23 @@ use reflex::{
         Applicable, ApplicationTermType, Arity, CompoundNode, DependencyList, DynamicState,
         Eagerness, EvaluationCache, Expression, ExpressionFactory, ExpressionListType, GraphNode,
         HeapAllocator, Internable, LambdaTermType, RefType, Rewritable, ScopeOffset, SerializeJson,
-        StackOffset, Substitutions, TermHash, VariableTermType,
+        StackOffset, Substitutions, VariableTermType,
     },
 };
 
-#[derive(Hash, Eq, PartialEq, Clone, Debug, Serialize, Deserialize)]
+#[derive(Eq, PartialEq, Clone, Debug, Serialize, Deserialize)]
 pub struct LambdaTerm<T: Expression> {
     num_args: StackOffset,
     body: T,
 }
-impl<T: Expression> TermHash for LambdaTerm<T> {}
+
+impl<T: Expression> std::hash::Hash for LambdaTerm<T> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.num_args.hash(state);
+        self.body.id().hash(state);
+    }
+}
+
 impl<T: Expression> LambdaTerm<T> {
     pub fn new(num_args: StackOffset, body: T) -> Self {
         Self { num_args, body }

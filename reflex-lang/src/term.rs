@@ -1,10 +1,10 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
-// SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 // SPDX-FileContributor: Jordan Hall <j.hall@mwam.com> https://github.com/j-hall-mwam
-use std::collections::HashSet;
+// SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+use std::{collections::HashSet, hash::Hash};
 
+use reflex::hash::hash_object;
 use serde::{Deserialize, Serialize};
 
 use crate::{ExpressionList, Signal, SignalList, StructPrototype};
@@ -59,12 +59,15 @@ use reflex::{
         EvaluationCache, EvaluationResult, Expression, ExpressionFactory, GraphNode, HeapAllocator,
         Internable, Reducible, Rewritable, SerializeJson, StackOffset, Substitutions,
     },
-    hash::{hash_object, HashId},
+    hash::HashId,
 };
 
 #[derive(Hash, Eq, PartialEq, Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "type", content = "value")]
-pub enum Term<T: Expression> {
+pub enum Term<T: Expression>
+where
+    T::String: Hash,
+{
     #[serde(bound(
         serialize = "<T as Expression>::String: Serialize, <T as Expression>::ExpressionList<T>: Serialize, <T as Expression>::SignalList<T>: Serialize, <T as Expression>::Signal<T>: Serialize, <T as Expression>::StructPrototype<T>: Serialize",
         deserialize = "<T as Expression>::String: Deserialize<'de>, <T as Expression>::ExpressionList<T>: Deserialize<'de>, <T as Expression>::SignalList<T>: Deserialize<'de>, <T as Expression>::Signal<T>: Deserialize<'de>, <T as Expression>::StructPrototype<T>: Deserialize<'de>"
@@ -91,7 +94,12 @@ pub enum Term<T: Expression> {
     HashSet(HashSetTerm<T>),
     Signal(SignalTerm<T>),
 }
-impl<T: Expression + Applicable<T>> Expression for Term<T> {
+
+impl<T: Expression + Applicable<T>> Expression for Term<T>
+where
+    T: Hash,
+    T::String: Hash,
+{
     type String = T::String;
     type Builtin = T::Builtin;
     type Signal<TWrapper: Expression> = Signal<TWrapper>;
@@ -126,7 +134,10 @@ impl<T: Expression + Applicable<T>> Expression for Term<T> {
         hash_object(self)
     }
 }
-impl<T: Expression + Applicable<T>> GraphNode for Term<T> {
+impl<T: Expression + Applicable<T>> GraphNode for Term<T>
+where
+    T::String: Hash,
+{
     fn capture_depth(&self) -> StackOffset {
         match self {
             Self::Nil(term) => term.capture_depth(),
@@ -357,7 +368,10 @@ impl<'a, T: Expression + 'a> Iterator for TermChildren<'a, T> {
         }
     }
 }
-impl<T: Expression> CompoundNode<T> for Term<T> {
+impl<T: Expression> CompoundNode<T> for Term<T>
+where
+    T::String: Hash,
+{
     type Children<'a> = TermChildren<'a, T>
         where
             T: 'a,
@@ -379,6 +393,8 @@ impl<T: Expression> CompoundNode<T> for Term<T> {
 }
 impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Evaluate<T>> Rewritable<T>
     for Term<T>
+where
+    T::String: Hash,
 {
     fn substitute_static(
         &self,
@@ -484,6 +500,8 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Evaluate<T>>
 
 impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Evaluate<T>> Reducible<T>
     for Term<T>
+where
+    T::String: Hash,
 {
     fn is_reducible(&self) -> bool {
         match self {
@@ -507,7 +525,10 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Evaluate<T>>
         }
     }
 }
-impl<T: Expression + Rewritable<T> + Applicable<T>> Applicable<T> for Term<T> {
+impl<T: Expression + Rewritable<T> + Applicable<T>> Applicable<T> for Term<T>
+where
+    T::String: Hash,
+{
     fn arity(&self) -> Option<Arity> {
         match self {
             Self::Lambda(term) => Applicable::<T>::arity(term),
@@ -547,6 +568,8 @@ impl<T: Expression + Rewritable<T> + Applicable<T>> Applicable<T> for Term<T> {
 }
 impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Evaluate<T>> Evaluate<T>
     for Term<T>
+where
+    T::String: Hash,
 {
     fn evaluate(
         &self,
@@ -575,7 +598,10 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Evaluate<T>>
     }
 }
 
-impl<T: Expression> Internable for Term<T> {
+impl<T: Expression> Internable for Term<T>
+where
+    T::String: Hash,
+{
     fn should_intern(&self, eager: Eagerness) -> bool {
         match self {
             Self::Nil(term) => term.should_intern(eager),
@@ -602,7 +628,10 @@ impl<T: Expression> Internable for Term<T> {
         }
     }
 }
-impl<T: Expression> std::fmt::Display for Term<T> {
+impl<T: Expression> std::fmt::Display for Term<T>
+where
+    T::String: Hash,
+{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Nil(term) => std::fmt::Display::fmt(term, f),
@@ -629,7 +658,10 @@ impl<T: Expression> std::fmt::Display for Term<T> {
         }
     }
 }
-impl<T: Expression> SerializeJson for Term<T> {
+impl<T: Expression> SerializeJson for Term<T>
+where
+    T::String: Hash,
+{
     fn to_json(&self) -> Result<serde_json::Value, String> {
         match self {
             Self::Nil(term) => term.to_json(),

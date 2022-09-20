@@ -11,7 +11,7 @@ use reflex::{
         build_hashset_lookup_table, transform_expression_list, CompoundNode, DependencyList,
         DynamicState, Eagerness, EvaluationCache, Expression, ExpressionFactory,
         ExpressionListIter, ExpressionListType, GraphNode, HashsetTermType, HeapAllocator,
-        Internable, RefType, Rewritable, SerializeJson, StackOffset, Substitutions, TermHash,
+        Internable, RefType, Rewritable, SerializeJson, StackOffset, Substitutions,
     },
     hash::HashId,
 };
@@ -29,12 +29,9 @@ impl<T: Expression> HashSetTerm<T> {
 }
 impl<T: Expression> Hash for HashSetTerm<T> {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        for key in self.values.iter().map(|item| item.as_deref()) {
-            key.hash(state);
-        }
+        self.values.id().hash(state)
     }
 }
-impl<T: Expression> TermHash for HashSetTerm<T> {}
 impl<T: Expression> HashsetTermType<T> for HashSetTerm<T> {
     type ValuesIterator<'a> = ExpressionListIter<'a, T>
         where

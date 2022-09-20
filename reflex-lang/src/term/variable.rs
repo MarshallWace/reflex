@@ -12,14 +12,13 @@ use serde::{Deserialize, Serialize};
 use reflex::core::{
     DependencyList, DynamicState, Eagerness, EvaluationCache, Expression, ExpressionFactory,
     GraphNode, HeapAllocator, Internable, Rewritable, SerializeJson, StackOffset, Substitutions,
-    TermHash, VariableTermType,
+    VariableTermType,
 };
 
 #[derive(Hash, Eq, PartialEq, Clone, Debug, Serialize, Deserialize)]
 pub struct VariableTerm {
     offset: StackOffset,
 }
-impl TermHash for VariableTerm {}
 impl VariableTerm {
     pub fn new(offset: StackOffset) -> Self {
         Self { offset }

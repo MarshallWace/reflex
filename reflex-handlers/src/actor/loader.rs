@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Jordan Hall <j.hall@mwam.com> https://github.com/j-hall-mwam
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet},
     iter::once,
@@ -8,10 +9,13 @@ use std::{
 };
 
 use metrics::{decrement_gauge, describe_gauge, increment_gauge, Unit};
-use reflex::core::{
-    Applicable, Arity, ConditionListType, ConditionType, Expression, ExpressionFactory,
-    ExpressionListType, HashmapTermType, HeapAllocator, ListTermType, RefType, SignalTermType,
-    SignalType, StateToken, StringTermType, StringValue,
+use reflex::{
+    core::{
+        Applicable, Arity, ConditionListType, ConditionType, Expression, ExpressionFactory,
+        ExpressionListType, HashmapTermType, HeapAllocator, ListTermType, RefType, SignalTermType,
+        SignalType, StateToken, StringTermType, StringValue,
+    },
+    hash::HashId,
 };
 use reflex_dispatcher::{
     Action, Actor, ActorTransition, HandlerContext, InboundAction, MessageData, OutboundAction,
@@ -72,6 +76,32 @@ impl<T: Expression, TAction> LoaderHandlerAction<T> for TAction where
 {
 }
 
+#[derive(PartialEq, Eq, Clone, Copy, Hash)]
+struct LoaderFactoryHash(HashId);
+impl LoaderFactoryHash {
+    fn new<T: Expression>(keys: &T) -> Self {
+        Self(keys.id())
+    }
+}
+
+#[derive(PartialEq, Eq, Clone, Copy, Hash)]
+struct LoaderKeyHash(HashId);
+impl LoaderKeyHash {
+    fn new<T: Expression>(key: &T) -> Self {
+        Self(key.id())
+    }
+}
+
+#[derive(PartialEq, Eq, Clone, Copy, Hash)]
+struct LoaderBatchHash(HashId);
+impl LoaderBatchHash {
+    fn new<T: Expression<ExpressionList<T> = TList>, TList: ExpressionListType<T>>(
+        keys: &TList,
+    ) -> Self {
+        Self(keys.id())
+    }
+}
+
 #[derive(Clone)]
 pub struct LoaderHandler<T, TFactory, TAllocator>
 where
@@ -105,16 +135,16 @@ where
 }
 
 pub struct LoaderHandlerState<T: Expression> {
-    loaders: HashMap<T, LoaderState<T>>,
+    loaders: HashMap<LoaderFactoryHash, LoaderState<T>>,
     /// Maps the combined loader batch evaluate effect ID to the loader expression (used as the key to the loaders hashmap)
     loader_effect_mappings: HashMap<StateToken, T>,
 }
 
 struct LoaderState<T: Expression> {
     name: String,
-    active_keys: HashSet<T>,
+    active_keys: HashSet<LoaderKeyHash>,
     /// Maps keylists to the corresponding loader batch
-    active_batches: HashMap<T::ExpressionList<T>, LoaderBatch<T>>,
+    active_batches: HashMap<LoaderBatchHash, LoaderBatch<T>>,
     /// Maps the individual entity load effect IDs to the keylist of the subscribed batch
     entity_effect_mappings: HashMap<StateToken, T::ExpressionList<T>>,
     /// Maps the combined loader batch evaluate effect ID to the keylist of the subscribed batch
@@ -127,7 +157,7 @@ struct LoaderBatch<T: Expression> {
     /// List of entries for all the individual entities contained within this batch
     subscriptions: Vec<LoaderEntitySubscription<T>>,
     /// Maintain a list of which keys are actively subscribed - when this becomes empty the batch is unsubscribed
-    active_keys: HashSet<T>,
+    active_keys: HashSet<LoaderKeyHash>,
     latest_result: Option<T>,
 }
 
@@ -166,7 +196,7 @@ impl<T: Expression> LoaderHandlerState<T> {
         allocator: &impl HeapAllocator<T>,
         metric_names: LoaderHandlerMetricNames,
     ) -> impl IntoIterator<Item = T::Signal<T>> {
-        let loader_state = match self.loaders.entry(loader.clone()) {
+        let loader_state = match self.loaders.entry(LoaderFactoryHash::new(&loader)) {
             Entry::Occupied(entry) => entry.into_mut(),
             Entry::Vacant(entry) => entry.insert(LoaderState::new(name.clone())),
         };
@@ -174,7 +204,7 @@ impl<T: Expression> LoaderHandlerState<T> {
             .into_iter()
             .filter_map(|subscription| {
                 let LoaderEntitySubscription { key, effect } = subscription;
-                if loader_state.active_keys.contains(&key) {
+                if loader_state.active_keys.contains(&LoaderKeyHash::new(&key)) {
                     None
                 } else {
                     Some((key, effect))
@@ -202,13 +232,19 @@ impl<T: Expression> LoaderHandlerState<T> {
                 })
                 .map(|(key, effect)| LoaderEntitySubscription { key, effect })
                 .collect(),
-            active_keys: keys.iter().map(|item| item.as_deref()).cloned().collect(),
+            active_keys: keys
+                .iter()
+                .map(|item| item.as_deref())
+                .map(LoaderKeyHash::new)
+                .collect(),
             latest_result: None,
         };
         let num_previous_keys = loader_state.active_keys.len();
-        loader_state
-            .active_keys
-            .extend(keys.iter().map(|item| item.as_deref()).cloned());
+        loader_state.active_keys.extend(
+            keys.iter()
+                .map(|item| item.as_deref())
+                .map(LoaderKeyHash::new),
+        );
         let num_added_keys = loader_state.active_keys.len() - num_previous_keys;
         let metric_labels = [("loader_name", name)];
         increment_gauge!(
@@ -217,14 +253,16 @@ impl<T: Expression> LoaderHandlerState<T> {
             &metric_labels
         );
         loader_state
+            .active_batches
+            .insert(LoaderBatchHash::new(&keys), loader_batch);
+        loader_state
             .entity_effect_mappings
             .extend(effects.iter().map(|effect| (effect.id(), keys.clone())));
         self.loader_effect_mappings
             .insert(combined_effect.id(), loader);
         loader_state
             .batch_effect_mappings
-            .insert(combined_effect.id(), keys.clone());
-        loader_state.active_batches.insert(keys, loader_batch);
+            .insert(combined_effect.id(), keys);
         Some(combined_effect)
     }
     fn unsubscribe<'a>(
@@ -237,40 +275,45 @@ impl<T: Expression> LoaderHandlerState<T> {
         >,
         metric_names: LoaderHandlerMetricNames,
     ) -> impl IntoIterator<Item = T::Signal<T>> {
-        let (num_previous_keys, unsubscribed_effects) = match self.loaders.get_mut(&loader) {
-            None => (None, None),
-            Some(loader_state) => {
-                let num_previous_keys = loader_state.active_keys.len();
-                let unsubscribed_effects = subscriptions.into_iter().filter_map(|subscription| {
-                    let LoaderEntitySubscription { key, effect } = subscription;
-                    let loader_batch_keys =
-                        loader_state.entity_effect_mappings.remove(&effect.id())?;
-                    loader_state.active_keys.remove(&key);
-                    let loader_batch = loader_state.active_batches.get_mut(&loader_batch_keys)?;
-                    loader_batch.active_keys.remove(&key);
-                    if loader_batch.active_keys.is_empty() {
-                        let loader_batch =
-                            loader_state.active_batches.remove(&loader_batch_keys)?;
-                        let combined_effect = loader_batch.effect;
-                        loader_state
-                            .batch_effect_mappings
-                            .remove(&combined_effect.id());
-                        self.loader_effect_mappings.remove(&combined_effect.id());
-                        Some(combined_effect)
-                    } else {
-                        None
-                    }
-                });
-                (Some(num_previous_keys), Some(unsubscribed_effects))
-            }
-        };
+        let (num_previous_keys, unsubscribed_effects) =
+            match self.loaders.get_mut(&LoaderFactoryHash::new(&loader)) {
+                None => (None, None),
+                Some(loader_state) => {
+                    let num_previous_keys = loader_state.active_keys.len();
+                    let unsubscribed_effects =
+                        subscriptions.into_iter().filter_map(|subscription| {
+                            let LoaderEntitySubscription { key, effect } = subscription;
+                            let loader_batch_keys =
+                                loader_state.entity_effect_mappings.remove(&effect.id())?;
+                            loader_state.active_keys.remove(&LoaderKeyHash::new(&key));
+                            let loader_batch = loader_state
+                                .active_batches
+                                .get_mut(&LoaderBatchHash::new(&loader_batch_keys))?;
+                            loader_batch.active_keys.remove(&LoaderKeyHash::new(&key));
+                            if loader_batch.active_keys.is_empty() {
+                                let loader_batch = loader_state
+                                    .active_batches
+                                    .remove(&LoaderBatchHash::new(&loader_batch_keys))?;
+                                let combined_effect = loader_batch.effect;
+                                loader_state
+                                    .batch_effect_mappings
+                                    .remove(&combined_effect.id());
+                                self.loader_effect_mappings.remove(&combined_effect.id());
+                                Some(combined_effect)
+                            } else {
+                                None
+                            }
+                        });
+                    (Some(num_previous_keys), Some(unsubscribed_effects))
+                }
+            };
         let unsubscribed_effects = unsubscribed_effects
             .into_iter()
             .flatten()
             .collect::<Vec<_>>();
         let num_removed_keys = num_previous_keys.and_then(|num_previous_keys| {
             self.loaders
-                .get(&loader)
+                .get(&LoaderFactoryHash::new(&loader))
                 .map(|loader_state| num_previous_keys - loader_state.active_keys.len())
         });
         if let Some(num_removed_keys) = num_removed_keys {
@@ -362,7 +405,7 @@ where
         let (initial_values, effects_by_loader) = effects.iter().fold(
             (
                 Vec::<(StateToken, T)>::with_capacity(effects.len()),
-                HashMap::<T, (String, Vec<LoaderEntitySubscription<T>>)>::default(),
+                HashMap::<LoaderFactoryHash, (T, String, Vec<LoaderEntitySubscription<T>>)>::default(),
             ),
             |(mut initial_values, mut results), effect| {
                 match parse_loader_effect_args(effect, &self.factory) {
@@ -372,14 +415,14 @@ where
                             key,
                             effect: effect.clone(),
                         };
-                        match results.entry(loader) {
+                        match results.entry(LoaderFactoryHash::new(&loader)) {
                             Entry::Occupied(mut entry) => {
                                 let loader_subscriptions = entry.get_mut();
-                                let (_loader_name, subscriptions) = loader_subscriptions;
+                                let (_loader, _loader_name, subscriptions) = loader_subscriptions;
                                 subscriptions.push(subscription);
                             }
                             Entry::Vacant(entry) => {
-                                entry.insert((name, vec![subscription]));
+                                entry.insert((loader, name, vec![subscription]));
                             }
                         }
                         initial_values.push((
@@ -398,8 +441,8 @@ where
             },
         );
         let load_effects = effects_by_loader
-            .into_iter()
-            .flat_map(|(loader, (name, subscriptions))| {
+            .into_values()
+            .flat_map(|(loader, name, subscriptions)| {
                 state.subscribe(
                     name,
                     loader,
@@ -456,7 +499,7 @@ where
         }
         let current_pid = context.pid();
         let effects_by_loader = effects.iter().fold(
-            HashMap::<T, (String, Vec<LoaderEntitySubscription<T>>)>::default(),
+            HashMap::<LoaderFactoryHash, (T, String, Vec<LoaderEntitySubscription<T>>)>::default(),
             |mut results, effect| {
                 if let Ok(args) = parse_loader_effect_args(effect, &self.factory) {
                     let LoaderEffectArgs { name, loader, key } = args;
@@ -464,12 +507,13 @@ where
                         key,
                         effect: effect.clone(),
                     };
-                    match results.entry(loader) {
+                    match results.entry(LoaderFactoryHash::new(&loader)) {
                         Entry::Occupied(mut entry) => {
-                            entry.get_mut().1.push(subscription);
+                            let (_loader, _name, subscriptions) = entry.get_mut();
+                            subscriptions.push(subscription);
                         }
                         Entry::Vacant(entry) => {
-                            entry.insert((name, vec![subscription]));
+                            entry.insert((loader, name, vec![subscription]));
                         }
                     }
                 }
@@ -477,8 +521,8 @@ where
             },
         );
         let unsubscribe_effects = effects_by_loader
-            .into_iter()
-            .flat_map(|(loader, (name, subscriptions))| {
+            .into_values()
+            .flat_map(|(loader, name, subscriptions)| {
                 state.unsubscribe(name, loader, subscriptions, self.metric_names)
             })
             .collect::<Vec<_>>();
@@ -514,11 +558,13 @@ where
             .iter()
             .filter_map(|(updated_state_token, update)| {
                 let loader = state.loader_effect_mappings.get(updated_state_token)?;
-                let loader_state = state.loaders.get_mut(loader)?;
+                let loader_state = state.loaders.get_mut(&LoaderFactoryHash::new(loader))?;
                 let batch_keys = loader_state
                     .batch_effect_mappings
                     .get(updated_state_token)?;
-                let batch = loader_state.active_batches.get_mut(batch_keys)?;
+                let batch = loader_state
+                    .active_batches
+                    .get_mut(&LoaderBatchHash::new(batch_keys))?;
                 let (value, _) = parse_evaluate_effect_result(update, &self.factory)?.into_parts();
                 batch.latest_result.replace(value.clone());
                 let mut results = if let Some(value) = self.factory.match_list_term(&value) {
@@ -544,7 +590,7 @@ where
                                     .get(index)
                                     .map(|value| value.as_deref())
                                     .cloned()
-                                    .map(|value| (subscription.key.clone(), value))
+                                    .map(|value| (LoaderKeyHash::new(&subscription.key), value))
                             })
                             .collect::<HashMap<_, _>>())
                     }
@@ -557,7 +603,7 @@ where
                                 .get(&subscription.key)
                                 .map(|item| item.as_deref())
                                 .cloned()
-                                .map(|value| (subscription.key.clone(), value))
+                                .map(|value| (LoaderKeyHash::new(&subscription.key), value))
                         })
                         .collect::<HashMap<_, _>>();
                     if results.len() < batch.subscriptions.len() {
@@ -606,11 +652,17 @@ where
                     batch
                         .subscriptions
                         .iter()
-                        .filter(|subscription| batch.active_keys.contains(&subscription.key))
+                        .filter(|subscription| {
+                            batch
+                                .active_keys
+                                .contains(&LoaderKeyHash::new(&subscription.key))
+                        })
                         .filter_map(|subscription| {
                             let result = match &mut results {
                                 Err(err) => Some(err.clone()),
-                                Ok(results) => results.remove(&subscription.key),
+                                Ok(results) => {
+                                    results.remove(&LoaderKeyHash::new(&subscription.key))
+                                }
                             };
                             match result {
                                 Some(result) => Some((subscription.effect.id(), result)),

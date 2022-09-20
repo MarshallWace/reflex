@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Jordan Hall <j.hall@mwam.com> https://github.com/j-hall-mwam
 #![feature(generic_associated_types)]
 
 use std::{
@@ -12,9 +13,9 @@ use reflex::{
     core::{
         ConditionListType, ConditionType, DependencyList, Expression, ExpressionListType,
         GraphNode, IntoRefTypeIterator, RefType, SignalType, StackOffset, StateToken,
-        StructPrototypeType, TermHash,
+        StructPrototypeType,
     },
-    hash::{hash_object, FnvHasher, HashId},
+    hash::{hash_iter, hash_object, FnvHasher, HashId},
 };
 use serde::{Deserialize, Serialize};
 
@@ -27,24 +28,21 @@ pub use self::factory::*;
 
 #[derive(Eq, PartialEq, Clone, Debug)]
 pub struct ExpressionList<T: Expression> {
-    hash: HashId,
+    id: HashId,
     items: Vec<T>,
 }
 impl<T: Expression> std::hash::Hash for ExpressionList<T> {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        state.write_u64(self.hash);
+        self.id.hash(state);
     }
 }
 impl<T: Expression> ExpressionList<T> {
     pub fn new(items: impl IntoIterator<Item = T>) -> Self {
         let items = items.into_iter().collect::<Vec<_>>();
         Self {
-            hash: hash_object(&items),
+            id: hash_object(&items.iter().map(|val| val.id()).collect::<Vec<_>>()),
             items,
         }
-    }
-    pub fn id(&self) -> HashId {
-        self.hash
     }
     pub fn get(&self, index: usize) -> Option<&T> {
         self.items.get(index)
@@ -62,10 +60,12 @@ impl<T: Expression> ExpressionList<T> {
         self.items
     }
 }
-impl<T: Expression> TermHash for ExpressionList<T> {}
 
 impl<T: Expression> ExpressionListType<T> for ExpressionList<T> {
     type Iterator<'a> = IntoRefTypeIterator<T, T::Ref<'a, T>, std::slice::Iter<'a, T>> where T: 'a, Self: 'a;
+    fn id(&self) -> HashId {
+        self.id
+    }
     fn len(&self) -> usize {
         self.items.len()
     }
@@ -170,21 +170,29 @@ impl<T: Expression> Into<ExpressionList<T>> for SerializedExpressionList<T> {
     }
 }
 
-#[derive(Hash, Eq, PartialEq, Clone, Debug)]
+#[derive(Eq, PartialEq, Clone, Debug)]
 pub struct SignalList<T: Expression> {
+    id: HashId,
     signals: BTreeSet<T::Signal<T>>,
+}
+
+impl<T: Expression> Hash for SignalList<T> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.id.hash(state);
+    }
 }
 impl<T: Expression> SignalList<T>
 where
     T::Signal<T>: Ord,
 {
     pub fn new(signals: impl IntoIterator<Item = T::Signal<T>>) -> Self {
+        let signals = signals.into_iter().collect::<BTreeSet<_>>();
         Self {
-            signals: signals.into_iter().collect(),
+            id: hash_iter(signals.iter().map(|signal| signal.id())),
+            signals,
         }
     }
 }
-impl<T: Expression> TermHash for SignalList<T> {}
 impl<T: Expression> ConditionListType<T> for SignalList<T> {
     type Iterator<'a> = IntoRefTypeIterator<T::Signal<T>, T::Ref<'a, T::Signal<T>>, std::collections::btree_set::Iter<'a, T::Signal<T>>>
         where
@@ -195,6 +203,9 @@ impl<T: Expression> ConditionListType<T> for SignalList<T> {
     }
     fn iter<'a>(&'a self) -> Self::Iterator<'a> {
         IntoRefTypeIterator::new(self.signals.iter())
+    }
+    fn id(&self) -> u64 {
+        self.id
     }
 }
 impl<T: Expression> std::fmt::Display for SignalList<T> {
@@ -268,7 +279,7 @@ where
 
 #[derive(Eq, PartialEq, Clone, Debug)]
 pub struct Signal<T: Expression> {
-    hash: HashId,
+    id: HashId,
     signal_type: SignalType,
     args: T::ExpressionList<T>,
 }
@@ -278,12 +289,12 @@ impl<T: Expression> Signal<T> {
             let mut hasher = FnvHasher::default();
             signal_type.hash(&mut hasher);
             for arg in args.iter().map(|item| item.as_deref()) {
-                arg.hash(&mut hasher);
+                arg.id().hash(&mut hasher)
             }
             hasher.finish()
         };
         Self {
-            hash,
+            id: hash,
             signal_type,
             args,
         }
@@ -292,25 +303,24 @@ impl<T: Expression> Signal<T> {
         &self.signal_type == signal_type
     }
 }
-impl<T: Expression> TermHash for Signal<T> {}
 impl<T: Expression> Hash for Signal<T> {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        state.write_u64(self.hash)
+        self.id.hash(state)
     }
 }
 impl<T: Expression> Ord for Signal<T> {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.hash.cmp(&other.hash)
+        self.id.cmp(&other.id)
     }
 }
 impl<T: Expression> PartialOrd for Signal<T> {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        self.hash.partial_cmp(&other.hash)
+        self.id.partial_cmp(&other.id)
     }
 }
 impl<T: Expression> ConditionType<T> for Signal<T> {
     fn id(&self) -> StateToken {
-        self.hash
+        self.id
     }
     fn signal_type(&self) -> SignalType {
         // FIXME: Prevent unnecessary cloning of signal type
@@ -442,7 +452,6 @@ impl<T: Expression> StructPrototype<T> {
             })
     }
 }
-impl<T: Expression> TermHash for StructPrototype<T> {}
 impl<T: Expression> StructPrototypeType<T> for StructPrototype<T> {
     fn keys<'a>(&'a self) -> T::Ref<'a, T::ExpressionList<T>>
     where

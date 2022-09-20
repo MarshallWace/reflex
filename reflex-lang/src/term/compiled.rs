@@ -10,7 +10,7 @@ use reflex::{
     core::{
         Applicable, Arity, CompiledFunctionTermType, DependencyList, Eagerness, EvaluationCache,
         Expression, ExpressionFactory, GraphNode, HeapAllocator, InstructionPointer, Internable,
-        SerializeJson, StackOffset, TermHash,
+        SerializeJson, StackOffset,
     },
     hash::HashId,
 };
@@ -22,7 +22,6 @@ pub struct CompiledFunctionTerm {
     required_args: StackOffset,
     optional_args: StackOffset,
 }
-impl TermHash for CompiledFunctionTerm {}
 impl CompiledFunctionTerm {
     pub fn new(
         address: InstructionPointer,

@@ -8,14 +8,13 @@ use serde::{Deserialize, Serialize};
 
 use reflex::core::{
     DependencyList, Eagerness, GraphNode, Internable, SerializeJson, StackOffset, SymbolId,
-    SymbolTermType, TermHash,
+    SymbolTermType,
 };
 
 #[derive(PartialEq, Eq, Clone, Copy, Serialize, Deserialize, Hash)]
 pub struct SymbolTerm {
     id: SymbolId,
 }
-impl TermHash for SymbolTerm {}
 impl SymbolTerm {
     pub fn new(id: SymbolId) -> Self {
         Self { id }

@@ -13,15 +13,22 @@ use reflex::core::{
     Evaluate, EvaluationCache, EvaluationResult, Expression, ExpressionFactory, ExpressionListIter,
     ExpressionListType, GraphNode, HeapAllocator, Internable, LambdaTermType,
     PartialApplicationTermType, Reducible, RefType, Rewritable, ScopeOffset, SerializeJson,
-    ShortCircuitCount, StackOffset, StateCache, Substitutions, TermHash,
+    ShortCircuitCount, StackOffset, StateCache, Substitutions,
 };
 
-#[derive(Hash, Eq, PartialEq, Clone, Debug, Serialize, Deserialize)]
+#[derive(Eq, PartialEq, Clone, Debug, Serialize, Deserialize)]
 pub struct ApplicationTerm<T: Expression> {
     pub target: T,
     pub args: T::ExpressionList<T>,
 }
-impl<T: Expression> TermHash for ApplicationTerm<T> {}
+
+impl<T: Expression> std::hash::Hash for ApplicationTerm<T> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.target.id().hash(state);
+        self.args.id().hash(state);
+    }
+}
+
 impl<T: Expression> ApplicationTerm<T> {
     pub fn new(target: T, args: T::ExpressionList<T>) -> Self {
         Self { target, args }

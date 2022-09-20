@@ -9,14 +9,20 @@ use serde::{Deserialize, Serialize};
 use reflex::core::{
     CompoundNode, DependencyList, DynamicState, Eagerness, EvaluationCache, Expression,
     ExpressionFactory, GraphNode, HeapAllocator, Internable, RecursiveTermType, Reducible,
-    Rewritable, SerializeJson, StackOffset, Substitutions, TermHash,
+    Rewritable, SerializeJson, StackOffset, Substitutions,
 };
 
-#[derive(Hash, Eq, PartialEq, Clone, Debug, Serialize, Deserialize)]
+#[derive(Eq, PartialEq, Clone, Debug, Serialize, Deserialize)]
 pub struct RecursiveTerm<T: Expression> {
     factory: T,
 }
-impl<T: Expression> TermHash for RecursiveTerm<T> {}
+
+impl<T: Expression> std::hash::Hash for RecursiveTerm<T> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.factory.id().hash(state);
+    }
+}
+
 impl<T: Expression> RecursiveTerm<T> {
     pub fn new(factory: T) -> Self {
         Self { factory }

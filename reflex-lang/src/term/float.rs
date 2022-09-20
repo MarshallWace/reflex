@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use reflex::core::{
     as_integer, DependencyList, Eagerness, FloatTermType, FloatValue, GraphNode, Internable,
-    SerializeJson, StackOffset, TermHash,
+    SerializeJson, StackOffset,
 };
 
 #[derive(PartialEq, Clone, Copy, Serialize, Deserialize)]
@@ -21,7 +21,6 @@ impl std::hash::Hash for FloatTerm {
         state.write(&self.value.to_le_bytes())
     }
 }
-impl TermHash for FloatTerm {}
 impl FloatTerm {
     pub fn new(value: FloatValue) -> Self {
         Self { value }

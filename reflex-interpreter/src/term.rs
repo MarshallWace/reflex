@@ -83,6 +83,8 @@ impl<TBuiltin: Builtin> Compile<Self> for CachedSharedTerm<TBuiltin> {
 
 impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>> Compile<T>
     for Term<T>
+where
+    T::String: std::hash::Hash,
 {
     fn compile(
         &self,

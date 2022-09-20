@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 pub use uuid::{uuid, Uuid};
 
 pub use crate::cache::EvaluationCache;
-use crate::hash::{hash_object, FnvHasher, HashId, IntMap, IntSet};
+use crate::hash::{FnvHasher, HashId, IntMap, IntSet};
 
 pub type IntValue = i32;
 pub type FloatValue = f64;
@@ -67,8 +67,6 @@ impl std::fmt::Debug for InstructionPointer {
         write!(f, "<address:{:x}>", self)
     }
 }
-
-pub trait TermHash: std::hash::Hash {}
 
 pub trait NilTermType {}
 pub trait BooleanTermType {
@@ -203,7 +201,7 @@ pub trait SignalTermType<T: Expression> {
 }
 
 pub trait ConditionType<T: Expression>:
-    Clone + PartialEq + Eq + std::fmt::Display + std::fmt::Debug + TermHash
+    Clone + PartialEq + Eq + std::fmt::Display + std::fmt::Debug
 {
     fn id(&self) -> StateToken;
     fn signal_type(&self) -> SignalType;
@@ -217,12 +215,13 @@ pub type ExpressionListIter<'a, T> =
     <<T as Expression>::ExpressionList<T> as ExpressionListType<T>>::Iterator<'a>;
 
 pub trait ExpressionListType<T: Expression>:
-    Sized + PartialEq + Eq + Clone + std::fmt::Display + std::fmt::Debug + TermHash + GraphNode
+    Sized + PartialEq + Eq + Clone + std::fmt::Display + std::fmt::Debug + GraphNode
 {
     type Iterator<'a>: ExactSizeIterator<Item = T::Ref<'a, T>>
     where
         T: 'a,
         Self: 'a;
+    fn id(&self) -> HashId;
     fn len(&self) -> usize;
     fn get<'a>(&'a self, index: usize) -> Option<T::Ref<'a, T>>
     where
@@ -231,18 +230,19 @@ pub trait ExpressionListType<T: Expression>:
 }
 
 pub trait ConditionListType<T: Expression>:
-    Sized + PartialEq + Eq + Clone + std::fmt::Display + std::fmt::Debug + TermHash
+    Sized + PartialEq + Eq + Clone + std::fmt::Display + std::fmt::Debug
 {
     type Iterator<'a>: ExactSizeIterator<Item = T::Ref<'a, T::Signal<T>>>
     where
         T::Signal<T>: 'a,
         T: 'a,
         Self: 'a;
+    fn id(&self) -> HashId;
     fn len(&self) -> usize;
     fn iter<'a>(&'a self) -> Self::Iterator<'a>;
 }
 pub trait StructPrototypeType<T: Expression>:
-    PartialEq + Eq + Clone + std::fmt::Display + std::fmt::Debug + TermHash
+    PartialEq + Eq + Clone + std::fmt::Display + std::fmt::Debug
 {
     fn keys<'a>(&'a self) -> T::Ref<'a, T::ExpressionList<T>>
     where
@@ -258,7 +258,7 @@ pub fn parse_record_values<'a, T: Expression>(
 ) -> Option<Option<T::ExpressionList<T>>> {
     if let Some(input_values) = factory.match_record_term(values) {
         let input_prototype = input_values.prototype().as_deref();
-        if hash_object(input_prototype) == hash_object(prototype) {
+        if input_prototype.keys().as_deref().id() == prototype.keys().as_deref().id() {
             Some(None)
         } else if input_prototype.keys().as_deref().len()
             >= prototype.as_deref().keys().as_deref().len()
@@ -336,7 +336,6 @@ where
 pub trait Expression:
     GraphNode
     + SerializeJson
-    + std::hash::Hash
     + std::cmp::Eq
     + std::cmp::PartialEq
     + std::clone::Clone
@@ -818,17 +817,17 @@ impl StringValue for String {
 
 pub type StateToken = HashId;
 
-pub trait DynamicState<T: Hash> {
+pub trait DynamicState<T> {
     fn id(&self) -> HashId;
     fn has(&self, key: &StateToken) -> bool;
     fn get(&self, key: &StateToken) -> Option<&T>;
 }
 
-pub struct StateCache<T: Hash> {
+pub struct StateCache<T: Expression> {
     hash: HashId,
     values: IntMap<StateToken, T>,
 }
-impl<T: Hash> Default for StateCache<T> {
+impl<T: Expression> Default for StateCache<T> {
     fn default() -> Self {
         Self {
             hash: FnvHasher::default().finish(),
@@ -836,12 +835,12 @@ impl<T: Hash> Default for StateCache<T> {
         }
     }
 }
-impl<T: Hash> Hash for StateCache<T> {
+impl<T: Expression> Hash for StateCache<T> {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         state.write_u64(self.hash)
     }
 }
-impl<T: Hash> DynamicState<T> for StateCache<T> {
+impl<T: Expression> DynamicState<T> for StateCache<T> {
     fn id(&self) -> HashId {
         self.hash
     }
@@ -852,12 +851,12 @@ impl<T: Hash> DynamicState<T> for StateCache<T> {
         self.values.get(key)
     }
 }
-impl<T: Hash> StateCache<T> {
+impl<T: Expression> StateCache<T> {
     pub fn set(&mut self, key: StateToken, value: T) {
-        let value_hash = hash_object(&value);
+        let value_hash = value.id();
         let previous = self.values.insert(key, value);
         let has_changes = match &previous {
-            Some(previous_value) => value_hash != hash_object(previous_value),
+            Some(previous_value) => value_hash != previous_value.id(),
             None => true,
         };
         if has_changes {
@@ -886,7 +885,7 @@ impl<T: Hash> StateCache<T> {
         hasher.write_u64(self.hash);
         for (key, value) in entries {
             hasher.write_u64(key);
-            hasher.write_u64(hash_object(&value));
+            hasher.write_u64(value.id());
             self.set(key, value);
         }
         self.hash = hasher.finish();
@@ -910,13 +909,13 @@ impl<T: Hash> StateCache<T> {
         self.values.len()
     }
 }
-impl<T: Hash> FromIterator<(StateToken, T)> for StateCache<T> {
+impl<T: Expression> FromIterator<(StateToken, T)> for StateCache<T> {
     fn from_iter<I: IntoIterator<Item = (StateToken, T)>>(iter: I) -> Self {
         let mut hasher = FnvHasher::default();
         let mut values = IntMap::default();
         for (key, value) in iter {
             hasher.write_u64(key);
-            std::hash::Hash::hash(&value, &mut hasher);
+            hasher.write_u64(value.id());
             values.insert(key, value);
         }
         Self {
@@ -925,7 +924,7 @@ impl<T: Hash> FromIterator<(StateToken, T)> for StateCache<T> {
         }
     }
 }
-impl<T: Hash> DynamicState<T> for Rc<StateCache<T>> {
+impl<T: Expression> DynamicState<T> for Rc<StateCache<T>> {
     fn id(&self) -> HashId {
         (&**self).id()
     }
@@ -936,7 +935,7 @@ impl<T: Hash> DynamicState<T> for Rc<StateCache<T>> {
         (&**self).get(key)
     }
 }
-impl<T: Hash> DynamicState<T> for Arc<StateCache<T>> {
+impl<T: Expression> DynamicState<T> for Arc<StateCache<T>> {
     fn id(&self) -> HashId {
         (&**self).id()
     }
@@ -956,7 +955,7 @@ pub fn hash_state_values<T: Expression>(
     for state_token in state_tokens {
         match state.get(&state_token) {
             None => hasher.write_u8(0),
-            Some(value) => value.hash(&mut hasher),
+            Some(value) => hasher.write_u64(value.id()),
         }
     }
     hasher.finish()
@@ -1080,19 +1079,44 @@ impl std::fmt::Display for SignalType {
     }
 }
 
-#[derive(Hash, Eq, PartialEq, Copy, Clone, Debug)]
+#[derive(Eq, PartialEq, Copy, Clone, Debug)]
 enum SubstitutionPatterns<'a, T: Expression> {
     Variable(&'a Vec<(StackOffset, T)>, Option<ScopeOffset>),
     #[allow(dead_code)]
     Offset(ScopeOffset),
 }
 
-#[derive(Hash, Eq, PartialEq, Debug)]
+impl<'a, T: Expression> Hash for SubstitutionPatterns<'a, T> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        core::mem::discriminant(self).hash(state);
+        match self {
+            SubstitutionPatterns::Variable(vec, offset) => {
+                offset.hash(state);
+                for (i, var) in vec.iter() {
+                    i.hash(state);
+                    state.write_u64(var.id())
+                }
+            }
+            SubstitutionPatterns::Offset(offset) => offset.hash(state),
+        }
+    }
+}
+
+#[derive(Eq, PartialEq, Debug)]
 pub struct Substitutions<'a, T: Expression> {
     entries: SubstitutionPatterns<'a, T>,
     min_depth: StackOffset,
     offset: StackOffset,
 }
+
+impl<'a, T: Expression> Hash for Substitutions<'a, T> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.entries.hash(state);
+        self.min_depth.hash(state);
+        self.offset.hash(state);
+    }
+}
+
 #[derive(Hash, Eq, PartialEq, Debug, Clone, Copy)]
 pub enum ScopeOffset {
     Wrap(usize),

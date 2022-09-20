@@ -22,7 +22,7 @@ use reflex::core::{
     EffectTermType, InstructionPointer, PartialApplicationTermType, RecursiveTermType, RefType,
     SignalTermType, StateCache, VariableTermType,
 };
-use reflex::hash::{hash_object, FnvHasher, IntSet};
+use reflex::hash::{hash_iter, FnvHasher, IntSet};
 use reflex::{
     cache::NoopCache,
     core::{
@@ -773,7 +773,7 @@ fn evaluate_instruction<'a, T: Expression + Rewritable<T> + Reducible<T> + Appli
                         apply_metadata = %(if partial_args.is_empty() {
                             format!("{:x}", compiled_target.address())
                         } else {
-                            format!("<partial:{:x}:[{};{}]>", compiled_target.address(), partial_args.len(), hash_object(&partial_args))
+                            format!("<partial:{:x}:[{};{}]>", compiled_target.address(), partial_args.len(), hash_iter(partial_args.iter().map(|arg| arg.id())))
                         }),
                     );
                     let target_address = compiled_target.address();
@@ -1315,7 +1315,7 @@ fn generate_function_call_hash<'a, T: Expression + 'a>(
     let mut hasher = FnvHasher::default();
     target.hash(&mut hasher);
     for arg in args {
-        arg.hash(&mut hasher);
+        std::hash::Hash::hash(&arg.id(), &mut hasher);
     }
     hasher.finish()
 }

@@ -1,15 +1,19 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Jordan Hall <j.hall@mwam.com> https://github.com/j-hall-mwam
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet},
     iter::once,
     marker::PhantomData,
 };
 
-use reflex::core::{
-    ConditionType, Expression, ExpressionFactory, ExpressionListType, FloatTermType, HeapAllocator,
-    IntTermType, RefType, SignalType, StateToken,
+use reflex::{
+    core::{
+        ConditionType, Expression, ExpressionFactory, ExpressionListType, FloatTermType,
+        HeapAllocator, IntTermType, RefType, SignalType, StateToken,
+    },
+    hash::HashId,
 };
 use reflex_dispatcher::{
     Action, Actor, ActorTransition, HandlerContext, InboundAction, MessageData, OutboundAction,
@@ -40,8 +44,16 @@ impl<T: Expression, TAction> VariableHandlerAction<T> for TAction where
 {
 }
 
+#[derive(PartialEq, Eq, Clone, Copy, Hash)]
+struct VariableKeyHash(HashId);
+impl VariableKeyHash {
+    fn new<T: Expression>(key: &T) -> Self {
+        Self(key.id())
+    }
+}
+
 pub struct VariableHandlerState<T: Expression> {
-    subscriptions: HashMap<T, VariableState<T>>,
+    subscriptions: HashMap<VariableKeyHash, VariableState<T>>,
 }
 impl<T: Expression> Default for VariableHandlerState<T> {
     fn default() -> Self {
@@ -161,7 +173,7 @@ where
         let updates = effects.iter().map(|effect| {
             match parse_get_effect_args(effect, &self.factory, &self.allocator) {
                 Ok((state_token, initial_value)) => {
-                    match state.subscriptions.entry(state_token.clone()) {
+                    match state.subscriptions.entry(VariableKeyHash::new(state_token)) {
                         Entry::Vacant(entry) => {
                             entry.insert(VariableState {
                                 value: None,
@@ -214,32 +226,32 @@ where
                 let entry = parse_set_effect_args(effect, &self.factory, &self.allocator);
                 let (value, updates) = match entry {
                     Ok((state_token, value)) => {
-                        let (value, updates) = match state.subscriptions.entry(state_token.clone())
-                        {
-                            Entry::Vacant(entry) => {
-                                let updated_value = value.clone();
-                                entry.insert(VariableState {
-                                    value: Some(updated_value.clone()),
-                                    effect_ids: Default::default(),
-                                });
-                                (updated_value, None)
-                            }
-                            Entry::Occupied(mut entry) => {
-                                let updated_value = value.clone();
-                                entry.get_mut().value = Some(updated_value.clone());
-                                let updates = entry
-                                    .get()
-                                    .effect_ids
-                                    .iter()
-                                    .cloned()
-                                    .map({
-                                        let updated_value = updated_value.clone();
-                                        move |state_token| (state_token, updated_value.clone())
-                                    })
-                                    .collect::<Vec<_>>();
-                                (updated_value, Some(updates))
-                            }
-                        };
+                        let (value, updates) =
+                            match state.subscriptions.entry(VariableKeyHash::new(state_token)) {
+                                Entry::Vacant(entry) => {
+                                    let updated_value = value.clone();
+                                    entry.insert(VariableState {
+                                        value: Some(updated_value.clone()),
+                                        effect_ids: Default::default(),
+                                    });
+                                    (updated_value, None)
+                                }
+                                Entry::Occupied(mut entry) => {
+                                    let updated_value = value.clone();
+                                    entry.get_mut().value = Some(updated_value.clone());
+                                    let updates = entry
+                                        .get()
+                                        .effect_ids
+                                        .iter()
+                                        .cloned()
+                                        .map({
+                                            let updated_value = updated_value.clone();
+                                            move |state_token| (state_token, updated_value.clone())
+                                        })
+                                        .collect::<Vec<_>>();
+                                    (updated_value, Some(updates))
+                                }
+                            };
                         (value, updates)
                     }
                     Err(err) => (
@@ -279,34 +291,34 @@ where
                 let entry = parse_increment_effect_args(effect, &self.factory, &self.allocator);
                 let (value, actions) = match entry {
                     Ok(state_token) => {
-                        let (value, actions) = match state.subscriptions.entry(state_token.clone())
-                        {
-                            Entry::Vacant(entry) => {
-                                let updated_value =
-                                    increment_variable(None, &self.factory, &self.allocator);
-                                entry.insert(VariableState {
-                                    value: Some(updated_value.clone()),
-                                    effect_ids: Default::default(),
-                                });
-                                (updated_value, None)
-                            }
-                            Entry::Occupied(mut entry) => {
-                                let updated_value = increment_variable(
-                                    entry.get().value.as_ref(),
-                                    &self.factory,
-                                    &self.allocator,
-                                );
-                                entry.get_mut().value = Some(updated_value.clone());
-                                let updates = entry
-                                    .get()
-                                    .effect_ids
-                                    .iter()
-                                    .cloned()
-                                    .map(|state_token| (state_token, updated_value.clone()))
-                                    .collect::<Vec<_>>();
-                                (updated_value, Some(updates))
-                            }
-                        };
+                        let (value, actions) =
+                            match state.subscriptions.entry(VariableKeyHash::new(state_token)) {
+                                Entry::Vacant(entry) => {
+                                    let updated_value =
+                                        increment_variable(None, &self.factory, &self.allocator);
+                                    entry.insert(VariableState {
+                                        value: Some(updated_value.clone()),
+                                        effect_ids: Default::default(),
+                                    });
+                                    (updated_value, None)
+                                }
+                                Entry::Occupied(mut entry) => {
+                                    let updated_value = increment_variable(
+                                        entry.get().value.as_ref(),
+                                        &self.factory,
+                                        &self.allocator,
+                                    );
+                                    entry.get_mut().value = Some(updated_value.clone());
+                                    let updates = entry
+                                        .get()
+                                        .effect_ids
+                                        .iter()
+                                        .cloned()
+                                        .map(|state_token| (state_token, updated_value.clone()))
+                                        .collect::<Vec<_>>();
+                                    (updated_value, Some(updates))
+                                }
+                            };
                         (value, actions)
                     }
                     Err(err) => (
@@ -346,34 +358,34 @@ where
                 let entry = parse_decrement_effect_args(effect, &self.factory, &self.allocator);
                 let (value, updates) = match entry {
                     Ok(state_token) => {
-                        let (value, updates) = match state.subscriptions.entry(state_token.clone())
-                        {
-                            Entry::Vacant(entry) => {
-                                let updated_value =
-                                    decrement_variable(None, &self.factory, &self.allocator);
-                                entry.insert(VariableState {
-                                    value: Some(updated_value.clone()),
-                                    effect_ids: Default::default(),
-                                });
-                                (updated_value, None)
-                            }
-                            Entry::Occupied(mut entry) => {
-                                let updated_value = decrement_variable(
-                                    entry.get().value.as_ref(),
-                                    &self.factory,
-                                    &self.allocator,
-                                );
-                                entry.get_mut().value = Some(updated_value.clone());
-                                let updates = entry
-                                    .get()
-                                    .effect_ids
-                                    .iter()
-                                    .cloned()
-                                    .map(|state_token| (state_token, updated_value.clone()))
-                                    .collect::<Vec<_>>();
-                                (updated_value, Some(updates))
-                            }
-                        };
+                        let (value, updates) =
+                            match state.subscriptions.entry(VariableKeyHash::new(state_token)) {
+                                Entry::Vacant(entry) => {
+                                    let updated_value =
+                                        decrement_variable(None, &self.factory, &self.allocator);
+                                    entry.insert(VariableState {
+                                        value: Some(updated_value.clone()),
+                                        effect_ids: Default::default(),
+                                    });
+                                    (updated_value, None)
+                                }
+                                Entry::Occupied(mut entry) => {
+                                    let updated_value = decrement_variable(
+                                        entry.get().value.as_ref(),
+                                        &self.factory,
+                                        &self.allocator,
+                                    );
+                                    entry.get_mut().value = Some(updated_value.clone());
+                                    let updates = entry
+                                        .get()
+                                        .effect_ids
+                                        .iter()
+                                        .cloned()
+                                        .map(|state_token| (state_token, updated_value.clone()))
+                                        .collect::<Vec<_>>();
+                                    (updated_value, Some(updates))
+                                }
+                            };
                         (value, updates)
                     }
                     Err(err) => (
@@ -431,7 +443,9 @@ where
             if let Ok((state_token, _)) =
                 parse_get_effect_args(effect, &self.factory, &self.allocator)
             {
-                if let Entry::Occupied(mut entry) = state.subscriptions.entry(state_token.clone()) {
+                if let Entry::Occupied(mut entry) =
+                    state.subscriptions.entry(VariableKeyHash::new(state_token))
+                {
                     entry.get_mut().effect_ids.remove(&effect.id());
                     if entry.get().effect_ids.is_empty() {
                         entry.remove();
