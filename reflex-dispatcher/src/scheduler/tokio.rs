@@ -321,7 +321,10 @@ where
                         // Add any spawned child commands to the event queue
                         command_queue.extend(child_commands.into_iter().map(
                             |(operation, parent_offset)| {
-                                TokioCommand::Event(operation, Some((parent_offset, root_pid)))
+                                TokioCommand::Event(
+                                    operation,
+                                    parent_offset.map(|parent_offset| (parent_offset, root_pid)),
+                                )
                             },
                         ));
                         // Collect any spawned worker commands for dispatching once all synchronous commands have been processed
@@ -468,7 +471,10 @@ fn process_command<
                                 async move {
                                     while let Some(operation) = stream.next().await {
                                         let _ = results
-                                            .send(TokioCommand::Event(operation, caller))
+                                            .send(TokioCommand::Event(
+                                                operation,
+                                                Some((metadata.offset, pid)),
+                                            ))
                                             .await;
                                     }
                                 }
