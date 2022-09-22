@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{GraphQlExtensions, GraphQlQuery, GraphQlVariables};
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct GraphQlOperation {
     query: GraphQlQuery,
     operation_name: Option<String>,

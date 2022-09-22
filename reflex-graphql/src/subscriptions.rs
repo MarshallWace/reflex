@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{parse_graphql_operation_payload, GraphQlOperationPayload};
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub enum GraphQlSubscriptionClientMessage {
     ConnectionInit(GraphQlSubscriptionConnectionInitMessage),
     Start(GraphQlSubscriptionStartMessage),
@@ -70,7 +70,7 @@ impl GraphQlSubscriptionClientMessage {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct GraphQlSubscriptionConnectionInitMessage {
     payload: Option<JsonValue>,
 }
@@ -83,7 +83,7 @@ impl GraphQlSubscriptionConnectionInitMessage {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct GraphQlSubscriptionStartMessage {
     id: OperationId,
     payload: GraphQlOperationPayload,
@@ -97,7 +97,7 @@ impl GraphQlSubscriptionStartMessage {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct GraphQlSubscriptionStopMessage {
     id: OperationId,
 }
@@ -107,7 +107,7 @@ impl GraphQlSubscriptionStopMessage {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct GraphQlSubscriptionUpdateMessage {
     id: OperationId,
     payload: HashMap<String, JsonValue>,
@@ -126,7 +126,7 @@ impl GraphQlSubscriptionUpdateMessage {
 
 pub type OperationId = String;
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub enum GraphQlSubscriptionServerMessage {
     ConnectionAck,
     ConnectionError(JsonValue),

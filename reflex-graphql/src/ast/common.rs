@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::ast::position::Pos;
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Directive {
     pub position: Pos,
     pub name: String,
@@ -48,7 +48,7 @@ impl From<Directive> for graphql_parser::schema::Directive<'static, String> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Number(pub(crate) i64);
 impl Number {
     pub fn as_i64(&self) -> Option<i64> {
@@ -85,6 +85,7 @@ pub enum Value {
     List(Vec<Value>),
     Object(BTreeMap<String, Value>),
 }
+impl Eq for Value {}
 impl<'a> From<&'a graphql_parser::query::Value<'static, String>> for Value {
     fn from(value: &'a graphql_parser::query::Value<'static, String>) -> Self {
         match value {
@@ -128,7 +129,7 @@ impl From<Value> for graphql_parser::query::Value<'static, String> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Type {
     NamedType(String),
     ListType(Box<Type>),

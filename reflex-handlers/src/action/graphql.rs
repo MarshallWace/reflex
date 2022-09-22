@@ -7,7 +7,7 @@ use reflex_json::{JsonMap, JsonValue};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub enum GraphQlHandlerActions {
     ConnectSuccess(GraphQlHandlerWebSocketConnectSuccessAction),
     ConnectError(GraphQlHandlerWebSocketConnectErrorAction),
@@ -103,7 +103,7 @@ impl<'a> From<&'a GraphQlHandlerActions>
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct GraphQlHandlerWebSocketConnectSuccessAction {
     pub connection_id: Uuid,
     pub url: String,
@@ -126,7 +126,7 @@ impl SerializableAction for GraphQlHandlerWebSocketConnectSuccessAction {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct GraphQlHandlerWebSocketConnectErrorAction {
     pub connection_id: Uuid,
     pub url: String,
@@ -151,7 +151,7 @@ impl SerializableAction for GraphQlHandlerWebSocketConnectErrorAction {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct GraphQlHandlerWebSocketServerMessageAction {
     pub connection_id: Uuid,
     pub message: GraphQlSubscriptionServerMessage,

@@ -22,7 +22,7 @@ impl<TAction> SessionPlaybackAction for TAction where
 {
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub enum SessionPlaybackActions {
     Begin(SessionPlaybackBeginAction),
     End(SessionPlaybackEndAction),
@@ -89,7 +89,7 @@ impl<'a> From<&'a SessionPlaybackActions> for Option<&'a SessionPlaybackEndActio
     }
 }
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(PartialEq, Eq, Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct SessionPlaybackBeginAction {
     pub num_frames: usize,
 }
@@ -105,7 +105,7 @@ impl SerializableAction for SessionPlaybackBeginAction {
     }
 }
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(PartialEq, Eq, Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct SessionPlaybackEndAction;
 impl Action for SessionPlaybackEndAction {}
 impl NamedAction for SessionPlaybackEndAction {

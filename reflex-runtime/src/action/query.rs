@@ -6,7 +6,7 @@ use reflex_dispatcher::{Action, NamedAction, SerializableAction, SerializedActio
 use reflex_json::JsonValue;
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub enum QueryActions<T: Expression> {
     Subscribe(QuerySubscribeAction<T>),
     Unsubscribe(QueryUnsubscribeAction<T>),
@@ -98,7 +98,7 @@ impl<'a, T: Expression> From<&'a QueryActions<T>> for Option<&'a QueryEmitAction
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct QuerySubscribeAction<T: Expression> {
     pub query: T,
     pub label: String,
@@ -118,7 +118,7 @@ impl<T: Expression> SerializableAction for QuerySubscribeAction<T> {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct QueryUnsubscribeAction<T: Expression> {
     pub query: T,
     pub label: String,
@@ -138,7 +138,7 @@ impl<T: Expression> SerializableAction for QueryUnsubscribeAction<T> {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct QueryEmitAction<T: Expression> {
     pub query: T,
     pub result: EvaluationResult<T>,

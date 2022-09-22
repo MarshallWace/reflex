@@ -14,7 +14,7 @@ use self::effect::*;
 use self::evaluate::*;
 use self::query::*;
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub enum RuntimeActions<T: Expression> {
     #[serde(bound(
         serialize = "<T as Expression>::Signal<T>: Serialize",

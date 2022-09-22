@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use uuid::Uuid;
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub enum GrpcHandlerActions {
     ConnectSuccess(GrpcHandlerConnectSuccessAction),
     ConnectError(GrpcHandlerConnectErrorAction),
@@ -98,7 +98,7 @@ impl<'a> From<&'a GrpcHandlerActions> for Option<&'a GrpcHandlerTransportErrorAc
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct GrpcHandlerConnectSuccessAction {
     pub connection_id: Uuid,
     pub url: String,
@@ -121,7 +121,7 @@ impl SerializableAction for GrpcHandlerConnectSuccessAction {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct GrpcHandlerConnectErrorAction {
     pub connection_id: Uuid,
     pub url: String,
@@ -146,7 +146,7 @@ impl SerializableAction for GrpcHandlerConnectErrorAction {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct GrpcHandlerTransportErrorAction {
     pub connection_id: Uuid,
     pub url: String,

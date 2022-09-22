@@ -6,7 +6,7 @@ use reflex_dispatcher::{Action, NamedAction, SerializableAction, SerializedActio
 use reflex_json::{JsonMap, JsonValue};
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub enum EffectActions<T: Expression> {
     #[serde(bound(
         serialize = "<T as Expression>::Signal<T>: Serialize",
@@ -102,7 +102,7 @@ impl<'a, T: Expression> From<&'a EffectActions<T>> for Option<&'a EffectEmitActi
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct EffectSubscribeAction<T: Expression> {
     pub effect_type: String,
     #[serde(bound(
@@ -150,7 +150,7 @@ impl<T: Expression> SerializableAction for EffectSubscribeAction<T> {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct EffectUnsubscribeAction<T: Expression> {
     pub effect_type: String,
     #[serde(bound(
@@ -198,7 +198,7 @@ impl<T: Expression> SerializableAction for EffectUnsubscribeAction<T> {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct EffectEmitAction<T: Expression> {
     pub updates: Vec<(StateToken, T)>,
 }

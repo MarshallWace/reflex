@@ -8,7 +8,7 @@ use crate::ast::{
     position::Pos,
 };
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Document {
     pub definitions: Vec<Definition>,
 }
@@ -37,7 +37,7 @@ impl std::fmt::Display for Document {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Definition {
     Operation(OperationDefinition),
     Fragment(FragmentDefinition),
@@ -59,7 +59,7 @@ impl From<Definition> for graphql_parser::query::Definition<'static, String> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FragmentDefinition {
     pub position: Pos,
     pub name: String,
@@ -106,7 +106,7 @@ impl From<FragmentDefinition> for graphql_parser::query::FragmentDefinition<'sta
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum OperationDefinition {
     SelectionSet(SelectionSet),
     Query(Query),
@@ -142,7 +142,7 @@ impl From<OperationDefinition> for graphql_parser::query::OperationDefinition<'s
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Query {
     pub position: Pos,
     pub name: Option<String>,
@@ -193,7 +193,7 @@ impl From<Query> for graphql_parser::query::Query<'static, String> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Mutation {
     pub position: Pos,
     pub name: Option<String>,
@@ -244,7 +244,7 @@ impl From<Mutation> for graphql_parser::query::Mutation<'static, String> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Subscription {
     pub position: Pos,
     pub name: Option<String>,
@@ -295,7 +295,7 @@ impl From<Subscription> for graphql_parser::query::Subscription<'static, String>
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SelectionSet {
     pub span: (Pos, Pos),
     pub items: Vec<Selection>,
@@ -322,7 +322,7 @@ impl From<SelectionSet> for graphql_parser::query::SelectionSet<'static, String>
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VariableDefinition {
     pub position: Pos,
     pub name: String,
@@ -364,7 +364,7 @@ impl From<VariableDefinition> for graphql_parser::query::VariableDefinition<'sta
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Selection {
     Field(Field),
     FragmentSpread(FragmentSpread),
@@ -393,7 +393,7 @@ impl From<Selection> for graphql_parser::query::Selection<'static, String> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Field {
     pub position: Pos,
     pub alias: Option<String>,
@@ -455,7 +455,7 @@ impl From<Field> for graphql_parser::query::Field<'static, String> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FragmentSpread {
     pub position: Pos,
     pub fragment_name: String,
@@ -496,7 +496,7 @@ impl From<FragmentSpread> for graphql_parser::query::FragmentSpread<'static, Str
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TypeCondition {
     On(String),
 }
@@ -515,7 +515,7 @@ impl From<TypeCondition> for graphql_parser::query::TypeCondition<'static, Strin
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InlineFragment {
     pub position: Pos,
     pub type_condition: Option<TypeCondition>,

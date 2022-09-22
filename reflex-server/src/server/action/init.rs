@@ -151,7 +151,7 @@ impl<'a> From<&'a InitActions> for Option<&'a InitHttpServerAction> {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(PartialEq, Eq, Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct InitPrometheusMetricsAction {
     pub address: SocketAddr,
 }
@@ -239,7 +239,7 @@ impl<'a> SerializableAction for InitOpenTelemetryAction {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct InitSessionRecordingAction {
     pub output_path: String,
 }
@@ -258,7 +258,7 @@ impl<'a> SerializableAction for InitSessionRecordingAction {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct InitGraphRootAction {
     pub compiler_duration: Duration,
     pub instruction_count: usize,
@@ -281,7 +281,7 @@ impl SerializableAction for InitGraphRootAction {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct InitHttpServerAction {
     pub address: SocketAddr,
 }

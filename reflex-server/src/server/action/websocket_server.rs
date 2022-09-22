@@ -248,7 +248,7 @@ impl SerializableAction for WebSocketServerReceiveAction {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct WebSocketServerSendAction {
     pub connection_id: Uuid,
     pub message: GraphQlSubscriptionServerMessage,
@@ -294,7 +294,7 @@ impl SerializableAction for WebSocketServerSendAction {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct WebSocketServerDisconnectAction {
     pub connection_id: Uuid,
 }
@@ -313,7 +313,7 @@ impl SerializableAction for WebSocketServerDisconnectAction {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct WebSocketServerThrottleTimeoutAction {
     pub subscription_id: Uuid,
 }

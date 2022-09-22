@@ -378,7 +378,7 @@ fn clear_escape_sequence() -> &'static str {
     "\x1b[2J\x1b[H"
 }
 
-#[derive(Clone, Debug)]
+#[derive(PartialEq, Eq, Clone, Debug)]
 enum CliAction<T: Expression> {
     Runtime(RuntimeActions<T>),
     GraphQlHandler(GraphQlHandlerActions),

@@ -176,7 +176,7 @@ pub type GraphQlQuery = crate::ast::query::Document;
 pub type GraphQlVariables = JsonMap<String, JsonValue>;
 pub type GraphQlExtensions = JsonMap<String, JsonValue>;
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct GraphQlOperationPayload {
     pub query: String,
     pub operation_name: Option<String>,

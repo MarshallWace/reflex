@@ -9,7 +9,7 @@ use reflex_graphql::{GraphQlOperation, GraphQlVariables};
 use reflex_json::JsonValue;
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub enum GraphQlServerActions<T: Expression> {
     Subscribe(GraphQlServerSubscribeAction<T>),
     Unsubscribe(GraphQlServerUnsubscribeAction<T>),
@@ -188,7 +188,7 @@ impl<'a, T: Expression> From<&'a GraphQlServerActions<T>>
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct GraphQlServerSubscribeAction<T: Expression> {
     pub subscription_id: Uuid,
     pub operation: GraphQlOperation,
@@ -230,7 +230,7 @@ impl<T: Expression> SerializableAction for GraphQlServerSubscribeAction<T> {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct GraphQlServerUnsubscribeAction<T: Expression> {
     pub subscription_id: Uuid,
     pub _expression: PhantomData<T>,
@@ -250,7 +250,7 @@ impl<T: Expression> SerializableAction for GraphQlServerUnsubscribeAction<T> {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct GraphQlServerModifyAction<T: Expression> {
     pub subscription_id: Uuid,
     pub variables: GraphQlVariables,
@@ -274,7 +274,7 @@ impl<T: Expression> SerializableAction for GraphQlServerModifyAction<T> {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct GraphQlServerParseSuccessAction<T: Expression> {
     pub subscription_id: Uuid,
     pub query: T,
@@ -297,7 +297,7 @@ impl<T: Expression> SerializableAction for GraphQlServerParseSuccessAction<T> {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct GraphQlServerParseErrorAction<T: Expression> {
     pub subscription_id: Uuid,
     pub message: String,
@@ -341,7 +341,7 @@ impl<T: Expression> SerializableAction for GraphQlServerParseErrorAction<T> {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct GraphQlServerEmitAction<T: Expression> {
     pub subscription_id: Uuid,
     pub result: T,

@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{QueryEvaluationMode, QueryInvalidationStrategy};
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub enum EvaluateActions<T: Expression> {
     Start(EvaluateStartAction<T>),
     Update(EvaluateUpdateAction<T>),
@@ -125,7 +125,7 @@ impl<'a, T: Expression> From<&'a EvaluateActions<T>> for Option<&'a EvaluateResu
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct EvaluateStartAction<T: Expression> {
     pub cache_id: StateToken,
     pub label: String,
@@ -163,7 +163,7 @@ impl<T: Expression> SerializableAction for EvaluateStartAction<T> {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct EvaluateUpdateAction<T: Expression> {
     pub cache_id: StateToken,
     pub state_index: Option<MessageOffset>,
@@ -194,7 +194,7 @@ impl<T: Expression> SerializableAction for EvaluateUpdateAction<T> {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct EvaluateStopAction {
     pub cache_id: StateToken,
 }
@@ -210,7 +210,7 @@ impl SerializableAction for EvaluateStopAction {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct EvaluateResultAction<T: Expression> {
     pub cache_id: StateToken,
     pub state_index: Option<MessageOffset>,

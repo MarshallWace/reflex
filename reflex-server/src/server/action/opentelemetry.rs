@@ -5,7 +5,7 @@ use reflex_dispatcher::{Action, NamedAction, SerializableAction, SerializedActio
 use reflex_json::JsonValue;
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub enum OpenTelemetryMiddlewareActions {
     Error(OpenTelemetryMiddlewareErrorAction),
 }
@@ -47,7 +47,7 @@ impl<'a> From<&'a OpenTelemetryMiddlewareActions>
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct OpenTelemetryMiddlewareErrorAction {
     pub error: String,
 }
