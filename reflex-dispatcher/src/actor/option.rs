@@ -70,18 +70,18 @@ where
     fn handle(
         &self,
         state: Self::State,
-        operation: StateOperation<TAction>,
+        operations: Vec<StateOperation<TAction>>,
         metadata: &MessageData,
         context: &MiddlewareContext,
-    ) -> PostMiddlewareTransition<Self::State> {
+    ) -> PostMiddlewareTransition<Self::State, TAction> {
         match (self, state) {
             (Some(inner), Some(state)) => {
-                let state = inner
-                    .handle(state, operation, metadata, context)
-                    .into_inner();
-                PostMiddlewareTransition::new(Some(state))
+                let (state, operations) = inner
+                    .handle(state, operations, metadata, context)
+                    .into_parts();
+                PostMiddlewareTransition::new(Some(state), operations)
             }
-            (_, state) => PostMiddlewareTransition::new(state),
+            (_, state) => PostMiddlewareTransition::new(state, operations),
         }
     }
 }

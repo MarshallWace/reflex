@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use std::{collections::VecDeque, iter::empty, marker::PhantomData, pin::Pin, rc::Rc, sync::Arc};
+use std::{iter::empty, marker::PhantomData, pin::Pin, rc::Rc, sync::Arc};
 
 use futures::{
     future::{self, AbortHandle, Abortable},
@@ -189,10 +189,10 @@ pub trait PostMiddleware<TAction: Action> {
     fn handle(
         &self,
         state: Self::State,
-        operation: StateOperation<TAction>,
+        operations: Vec<StateOperation<TAction>>,
         metadata: &MessageData,
         context: &MiddlewareContext,
-    ) -> PostMiddlewareTransition<Self::State>;
+    ) -> PostMiddlewareTransition<Self::State, TAction>;
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -207,7 +207,9 @@ pub struct MessageData {
     pub timestamp: std::time::Instant,
 }
 
-#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Default, Debug, Serialize, Deserialize)]
+#[derive(
+    PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Default, Debug, Serialize, Deserialize, Hash,
+)]
 pub struct MessageOffset(usize);
 impl MessageOffset {
     pub fn next(&self) -> MessageOffset {
@@ -239,14 +241,18 @@ impl<TAction: Action> Default for StateTransition<TAction> {
     }
 }
 impl<TAction: Action> StateTransition<TAction> {
-    pub fn new(actions: impl IntoIterator<Item = StateOperation<TAction>>) -> Self {
-        Self::from_iter(actions)
+    pub fn new(operations: impl IntoIterator<Item = StateOperation<TAction>>) -> Self {
+        Self::from_iter(operations)
     }
     pub fn append(self, other: StateTransition<TAction>) -> StateTransition<TAction> {
-        let Self(mut actions) = self;
-        let Self(other_actions) = other;
-        actions.extend(other_actions);
-        Self(actions)
+        let Self(mut operations) = self;
+        let Self(other_operations) = other;
+        operations.extend(other_operations);
+        Self(operations)
+    }
+    pub fn into_operations(self) -> Vec<StateOperation<TAction>> {
+        let Self(operations) = self;
+        operations
     }
 }
 impl<TAction: Action> FromIterator<StateOperation<TAction>> for StateTransition<TAction> {
@@ -291,16 +297,17 @@ impl<S, TAction: Action> PreMiddlewareTransition<S, TAction> {
     }
 }
 
-pub struct PostMiddlewareTransition<S> {
+pub struct PostMiddlewareTransition<S, TAction: Action> {
     state: S,
+    operations: Vec<StateOperation<TAction>>,
 }
-impl<S> PostMiddlewareTransition<S> {
-    pub fn new(state: S) -> Self {
-        Self { state }
+impl<S, TAction: Action> PostMiddlewareTransition<S, TAction> {
+    pub fn new(state: S, operations: Vec<StateOperation<TAction>>) -> Self {
+        Self { state, operations }
     }
-    pub fn into_inner(self) -> S {
-        let Self { state } = self;
-        state
+    pub fn into_parts(self) -> (S, Vec<StateOperation<TAction>>) {
+        let Self { state, operations } = self;
+        (state, operations)
     }
 }
 
@@ -592,7 +599,8 @@ pub trait HandlerContext {
 pub trait Worker<TAction: Action>: Send + 'static {
     fn handle(
         &mut self,
-        queue: WorkerMessageQueue<TAction>,
+        action: TAction,
+        metadata: &MessageData,
         context: &mut WorkerContext,
     ) -> WorkerTransition<TAction>;
 }
@@ -619,28 +627,35 @@ impl HandlerContext for WorkerContext {
     }
 }
 
-pub type WorkerMessageQueue<TAction> = VecDeque<(TAction, MessageData)>;
-
 pub struct WorkerTransition<TAction: Action> {
-    operations: Vec<(MessageOffset, StateOperation<TAction>)>,
+    operations: StateTransition<TAction>,
+}
+impl<TAction: Action> Default for WorkerTransition<TAction> {
+    fn default() -> Self {
+        Self {
+            operations: Default::default(),
+        }
+    }
 }
 impl<TAction: Action> WorkerTransition<TAction> {
-    pub fn new(
-        operations: impl IntoIterator<Item = (MessageOffset, StateOperation<TAction>)>,
-    ) -> Self {
+    pub fn new(operations: impl IntoIterator<Item = StateOperation<TAction>>) -> Self {
         Self {
-            operations: operations.into_iter().collect(),
+            operations: StateTransition::new(operations),
         }
     }
     pub fn append(self, other: WorkerTransition<TAction>) -> WorkerTransition<TAction> {
-        let mut combined = self;
-        combined.operations.extend(other.operations);
-        combined
+        let WorkerTransition { operations } = self;
+        let operations = operations.append(other.operations);
+        WorkerTransition { operations }
+    }
+    pub fn into_inner(self) -> StateTransition<TAction> {
+        let Self { operations } = self;
+        operations
     }
 }
 impl<TAction: Action> IntoIterator for WorkerTransition<TAction> {
-    type Item = (MessageOffset, StateOperation<TAction>);
-    type IntoIter = std::vec::IntoIter<(MessageOffset, StateOperation<TAction>)>;
+    type Item = <StateTransition<TAction> as IntoIterator>::Item;
+    type IntoIter = <StateTransition<TAction> as IntoIterator>::IntoIter;
     fn into_iter(self) -> Self::IntoIter {
         self.operations.into_iter()
     }
@@ -661,7 +676,8 @@ pub struct NoopWorker;
 impl<TAction: Action> Worker<TAction> for NoopWorker {
     fn handle(
         &mut self,
-        _queue: WorkerMessageQueue<TAction>,
+        _action: TAction,
+        _metadata: &MessageData,
         _context: &mut WorkerContext,
     ) -> WorkerTransition<TAction> {
         WorkerTransition::new(empty())
@@ -757,44 +773,11 @@ where
 {
     fn handle(
         &mut self,
-        queue: WorkerMessageQueue<TAction>,
+        action: TAction,
+        metadata: &MessageData,
         context: &mut WorkerContext,
     ) -> WorkerTransition<TAction> {
         let inner = &mut **self;
-        inner.handle(queue, context)
+        inner.handle(action, metadata, context)
     }
-}
-
-pub fn find_earliest_typed_message<'a, V, TAction: InboundAction<V>>(
-    queue: &mut WorkerMessageQueue<TAction>,
-) -> (Option<(V, MessageData)>, WorkerMessageQueue<TAction>) {
-    let mut preceding_actions = WorkerMessageQueue::default();
-    while let Some((action, metadata)) = queue.pop_front() {
-        match action.try_into_type() {
-            Ok(action) => {
-                return (Some((action, metadata)), preceding_actions);
-            }
-            Err(action) => {
-                preceding_actions.push_back((action, metadata));
-            }
-        }
-    }
-    (None, preceding_actions)
-}
-
-pub fn find_latest_typed_message<'a, V, TAction: InboundAction<V>>(
-    queue: &mut WorkerMessageQueue<TAction>,
-) -> (Option<(V, MessageData)>, WorkerMessageQueue<TAction>) {
-    let mut trailing_actions = WorkerMessageQueue::default();
-    while let Some((action, metadata)) = queue.pop_back() {
-        match action.try_into_type() {
-            Ok(action) => {
-                return (Some((action, metadata)), trailing_actions);
-            }
-            Err(action) => {
-                trailing_actions.push_front((action, metadata));
-            }
-        }
-    }
-    (None, trailing_actions)
 }

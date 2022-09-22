@@ -5,9 +5,8 @@ use std::collections::{hash_map::Entry, HashMap, VecDeque};
 
 use crate::{
     Action, Actor, BoxedWorkerInstance, HandlerContext, MessageData, MessageOffset,
-    MiddlewareContext, NoopWorkerFactory, OperationStream, PostMiddleware, PreMiddleware,
-    ProcessId, Scheduler, SchedulerMiddleware, StateOperation, WorkerContext, WorkerFactory,
-    WorkerMessageQueue,
+    MiddlewareContext, OperationStream, PostMiddleware, PreMiddleware, ProcessId, Scheduler,
+    SchedulerMiddleware, StateOperation, StateTransition, WorkerContext, WorkerFactory,
 };
 
 pub struct NoopTaskRunner;
@@ -132,15 +131,16 @@ where
                 self.pre_middleware_state.replace(updated_state);
                 operation
             };
-            let operation = match operation {
+            match operation {
                 StateOperation::Send(pid, action) => {
                     let mut context = SyncContext {
                         pid,
                         caller_pid,
                         next_pid: self.next_pid,
                     };
-                    if pid == self.root_pid {
-                        let (updated_state, actions) = self
+                    // Handle incoming action command
+                    let child_commands = if pid == self.root_pid {
+                        let (updated_state, child_commands) = self
                             .actor
                             .handle(
                                 self.actor_state.take().unwrap(),
@@ -150,35 +150,47 @@ where
                             )
                             .into_parts();
                         self.actor_state.replace(updated_state);
-                        queue.extend(
-                            actions
-                                .into_iter()
-                                .map(|operation| (operation, Some((metadata.offset, pid)))),
-                        );
+                        child_commands
                     } else if let Some(SyncProcess::Worker(worker)) = self.processes.get_mut(&pid) {
-                        let mut inbox = WorkerMessageQueue::new();
-                        inbox.push_back((action.clone(), metadata));
-                        let transition = worker.handle(inbox, &mut WorkerContext::new(context));
-                        queue.extend(
-                            transition
-                                .into_iter()
-                                .map(|(offset, operation)| (operation, Some((offset, pid)))),
-                        );
+                        worker
+                            .handle(action, &metadata, &mut WorkerContext::new(context))
+                            .into_inner()
+                    } else {
+                        StateTransition::default()
                     };
+                    // Update the shared task ID counter
                     self.next_pid = context.next_pid;
-                    StateOperation::Send(pid, action)
+                    // Apply post-middleware to transform outgoing commands
+                    let child_commands = {
+                        let (updated_state, child_commands) = self
+                            .middleware
+                            .post
+                            .handle(
+                                self.post_middleware_state.take().unwrap(),
+                                child_commands.into_operations(),
+                                &metadata,
+                                &MiddlewareContext { caller_pid },
+                            )
+                            .into_parts();
+                        self.post_middleware_state.replace(updated_state);
+                        child_commands
+                    };
+                    // Enqueue outgoing commands
+                    queue.extend(
+                        child_commands
+                            .into_iter()
+                            .map(|operation| (operation, Some((metadata.offset, pid)))),
+                    );
                 }
                 StateOperation::Task(pid, task) => {
                     if let Entry::Vacant(entry) = self.processes.entry(pid) {
                         entry.insert(SyncProcess::Task(self.task_runner.run(task)));
                     }
-                    StateOperation::Task(pid, OperationStream::noop())
                 }
                 StateOperation::Spawn(pid, factory) => {
                     if let Entry::Vacant(entry) = self.processes.entry(pid) {
                         entry.insert(SyncProcess::Worker(factory.create()));
                     }
-                    StateOperation::spawn(pid, NoopWorkerFactory)
                 }
                 StateOperation::Kill(pid) => {
                     if let Entry::Occupied(entry) = self.processes.entry(pid) {
@@ -187,22 +199,8 @@ where
                             SyncProcess::Worker(_) => {}
                         }
                     }
-                    StateOperation::Kill(pid)
                 }
             };
-            {
-                let updated_state = self
-                    .middleware
-                    .post
-                    .handle(
-                        self.post_middleware_state.take().unwrap(),
-                        operation,
-                        &metadata,
-                        &MiddlewareContext { caller_pid },
-                    )
-                    .into_inner();
-                self.post_middleware_state.replace(updated_state);
-            }
         }
     }
 }

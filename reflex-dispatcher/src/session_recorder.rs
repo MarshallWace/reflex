@@ -4,8 +4,8 @@
 use std::marker::PhantomData;
 
 use crate::{
-    Action, BoxedWorkerFactory, MessageData, MiddlewareContext, OperationStream, PostMiddleware,
-    PostMiddlewareTransition, PreMiddleware, PreMiddlewareTransition, StateOperation,
+    Action, MessageData, MiddlewareContext, PostMiddleware, PostMiddlewareTransition,
+    PreMiddleware, PreMiddlewareTransition, StateOperation,
 };
 
 pub trait OperationRecorderFactory<TRecorder: OperationRecorder> {
@@ -14,7 +14,12 @@ pub trait OperationRecorderFactory<TRecorder: OperationRecorder> {
 
 pub trait OperationRecorder {
     type Action: Action;
-    fn record(&mut self, operation: StateOperation<Self::Action>);
+    fn record(&mut self, operations: &StateOperation<Self::Action>);
+    fn record_batch(&mut self, operations: &[StateOperation<Self::Action>]) {
+        for operation in operations {
+            self.record(operation)
+        }
+    }
 }
 
 pub struct SessionRecorder<
@@ -71,16 +76,8 @@ where
         _metadata: &MessageData,
         _context: &MiddlewareContext,
     ) -> PreMiddlewareTransition<Self::State, TAction> {
-        let cloned_operation = match &operation {
-            StateOperation::Send(pid, action) => StateOperation::Send(*pid, action.clone()),
-            StateOperation::Task(pid, _) => StateOperation::Task(*pid, OperationStream::noop()),
-            StateOperation::Spawn(pid, _) => {
-                StateOperation::Spawn(*pid, BoxedWorkerFactory::noop())
-            }
-            StateOperation::Kill(pid) => StateOperation::Kill(*pid),
-        };
         let mut state = state;
-        state.recorder.record(cloned_operation);
+        state.recorder.record(&operation);
         PreMiddlewareTransition::new(state, operation)
     }
 }
@@ -99,12 +96,12 @@ where
     fn handle(
         &self,
         state: Self::State,
-        operation: StateOperation<TAction>,
+        operations: Vec<StateOperation<TAction>>,
         _metadata: &MessageData,
         _context: &MiddlewareContext,
-    ) -> PostMiddlewareTransition<Self::State> {
+    ) -> PostMiddlewareTransition<Self::State, TAction> {
         let mut state = state;
-        state.recorder.record(operation);
-        PostMiddlewareTransition::new(state)
+        state.recorder.record_batch(&operations);
+        PostMiddlewareTransition::new(state, operations)
     }
 }

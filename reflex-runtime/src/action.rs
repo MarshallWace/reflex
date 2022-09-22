@@ -6,6 +6,7 @@ use reflex_dispatcher::{Action, NamedAction, SerializableAction, SerializedActio
 use serde::Deserialize;
 use serde::Serialize;
 
+pub mod bytecode_interpreter;
 pub mod effect;
 pub mod evaluate;
 pub mod query;

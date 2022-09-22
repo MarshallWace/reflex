@@ -99,12 +99,14 @@ where
     fn handle(
         &self,
         state: Self::State,
-        operation: StateOperation<TAction>,
+        operations: Vec<StateOperation<TAction>>,
         metadata: &MessageData,
         context: &MiddlewareContext,
-    ) -> PostMiddlewareTransition<Self::State> {
+    ) -> PostMiddlewareTransition<Self::State, TAction> {
         let mut state = state;
-        state.logger.log(&operation, Some(metadata), Some(context));
-        PostMiddlewareTransition::new(state)
+        for operation in operations.iter() {
+            state.logger.log(operation, Some(metadata), Some(context));
+        }
+        PostMiddlewareTransition::new(state, operations)
     }
 }

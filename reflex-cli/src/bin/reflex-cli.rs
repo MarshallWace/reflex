@@ -41,7 +41,7 @@ use reflex_lang::{
     allocator::DefaultAllocator, term::SignalTerm, CachedSharedTerm, SharedTermFactory,
 };
 use reflex_runtime::{
-    action::{effect::*, evaluate::*, query::*, RuntimeActions},
+    action::{bytecode_interpreter::*, effect::*, evaluate::*, query::*, RuntimeActions},
     actor::{
         bytecode_interpreter::BytecodeInterpreter,
         evaluate_handler::{
@@ -381,6 +381,7 @@ fn clear_escape_sequence() -> &'static str {
 #[derive(PartialEq, Eq, Clone, Debug)]
 enum CliAction<T: Expression> {
     Runtime(RuntimeActions<T>),
+    BytecodeInterpreter(BytecodeInterpreterActions<T>),
     GraphQlHandler(GraphQlHandlerActions),
 }
 impl<T: Expression> Action for CliAction<T> {}
@@ -388,6 +389,7 @@ impl<T: Expression> NamedAction for CliAction<T> {
     fn name(&self) -> &'static str {
         match self {
             Self::Runtime(action) => action.name(),
+            Self::BytecodeInterpreter(action) => action.name(),
             Self::GraphQlHandler(action) => action.name(),
         }
     }
@@ -396,6 +398,7 @@ impl<T: Expression> SerializableAction for CliAction<T> {
     fn to_json(&self) -> SerializedAction {
         match self {
             Self::Runtime(action) => action.to_json(),
+            Self::BytecodeInterpreter(action) => action.to_json(),
             Self::GraphQlHandler(action) => action.to_json(),
         }
     }
@@ -418,6 +421,28 @@ impl<'a, T: Expression> From<&'a CliAction<T>> for Option<&'a RuntimeActions<T>>
     fn from(value: &'a CliAction<T>) -> Self {
         match value {
             CliAction::Runtime(value) => Some(value),
+            _ => None,
+        }
+    }
+}
+
+impl<T: Expression> From<BytecodeInterpreterActions<T>> for CliAction<T> {
+    fn from(value: BytecodeInterpreterActions<T>) -> Self {
+        Self::BytecodeInterpreter(value)
+    }
+}
+impl<T: Expression> From<CliAction<T>> for Option<BytecodeInterpreterActions<T>> {
+    fn from(value: CliAction<T>) -> Self {
+        match value {
+            CliAction::BytecodeInterpreter(value) => Some(value),
+            _ => None,
+        }
+    }
+}
+impl<'a, T: Expression> From<&'a CliAction<T>> for Option<&'a BytecodeInterpreterActions<T>> {
+    fn from(value: &'a CliAction<T>) -> Self {
+        match value {
+            CliAction::BytecodeInterpreter(value) => Some(value),
             _ => None,
         }
     }
@@ -650,6 +675,60 @@ impl<T: Expression> From<CliAction<T>> for Option<QueryEmitAction<T>> {
 impl<'a, T: Expression> From<&'a CliAction<T>> for Option<&'a QueryEmitAction<T>> {
     fn from(value: &'a CliAction<T>) -> Self {
         Option::<&'a QueryActions<T>>::from(value).and_then(|value| value.into())
+    }
+}
+
+impl<T: Expression> From<BytecodeInterpreterEvaluateAction<T>> for CliAction<T> {
+    fn from(value: BytecodeInterpreterEvaluateAction<T>) -> Self {
+        BytecodeInterpreterActions::<T>::from(value).into()
+    }
+}
+impl<T: Expression> From<CliAction<T>> for Option<BytecodeInterpreterEvaluateAction<T>> {
+    fn from(value: CliAction<T>) -> Self {
+        Option::<BytecodeInterpreterActions<T>>::from(value).and_then(|value| value.into())
+    }
+}
+impl<'a, T: Expression> From<&'a CliAction<T>>
+    for Option<&'a BytecodeInterpreterEvaluateAction<T>>
+{
+    fn from(value: &'a CliAction<T>) -> Self {
+        Option::<&'a BytecodeInterpreterActions<T>>::from(value).and_then(|value| value.into())
+    }
+}
+
+impl<T: Expression> From<BytecodeInterpreterResultAction<T>> for CliAction<T> {
+    fn from(value: BytecodeInterpreterResultAction<T>) -> Self {
+        BytecodeInterpreterActions::<T>::from(value).into()
+    }
+}
+impl<T: Expression> From<CliAction<T>> for Option<BytecodeInterpreterResultAction<T>> {
+    fn from(value: CliAction<T>) -> Self {
+        Option::<BytecodeInterpreterActions<T>>::from(value).and_then(|value| value.into())
+    }
+}
+impl<'a, T: Expression> From<&'a CliAction<T>>
+    for Option<&'a BytecodeInterpreterResultAction<T>>
+{
+    fn from(value: &'a CliAction<T>) -> Self {
+        Option::<&'a BytecodeInterpreterActions<T>>::from(value).and_then(|value| value.into())
+    }
+}
+
+impl<T: Expression> From<BytecodeInterpreterGcAction> for CliAction<T> {
+    fn from(value: BytecodeInterpreterGcAction) -> Self {
+        BytecodeInterpreterActions::<T>::from(value).into()
+    }
+}
+impl<T: Expression> From<CliAction<T>> for Option<BytecodeInterpreterGcAction> {
+    fn from(value: CliAction<T>) -> Self {
+        Option::<BytecodeInterpreterActions<T>>::from(value).and_then(|value| value.into())
+    }
+}
+impl<'a, T: Expression> From<&'a CliAction<T>>
+    for Option<&'a BytecodeInterpreterGcAction>
+{
+    fn from(value: &'a CliAction<T>) -> Self {
+        Option::<&'a BytecodeInterpreterActions<T>>::from(value).and_then(|value| value.into())
     }
 }
 

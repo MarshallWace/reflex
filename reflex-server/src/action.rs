@@ -5,7 +5,9 @@ use reflex::core::Expression;
 use reflex_dispatcher::{Action, NamedAction, SerializableAction, SerializedAction};
 use reflex_grpc::action::*;
 use reflex_handlers::action::graphql::*;
-use reflex_runtime::action::{effect::*, evaluate::*, query::*, RuntimeActions};
+use reflex_runtime::action::{
+    bytecode_interpreter::*, effect::*, evaluate::*, query::*, RuntimeActions,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::server::action::{
@@ -31,6 +33,7 @@ pub enum ServerCliAction<T: Expression> {
     HttpServer(HttpServerActions),
     WebSocketServer(WebSocketServerActions),
     GraphQlServer(GraphQlServerActions<T>),
+    BytecodeInterpreter(BytecodeInterpreterActions<T>),
     QueryInspectorServer(QueryInspectorServerActions),
     TelemetryMiddleware(TelemetryMiddlewareActions),
     OpenTelemetryMiddleware(OpenTelemetryMiddlewareActions),
@@ -46,6 +49,7 @@ impl<T: Expression> NamedAction for ServerCliAction<T> {
             Self::HttpServer(action) => action.name(),
             Self::WebSocketServer(action) => action.name(),
             Self::GraphQlServer(action) => action.name(),
+            Self::BytecodeInterpreter(action) => action.name(),
             Self::QueryInspectorServer(action) => action.name(),
             Self::TelemetryMiddleware(action) => action.name(),
             Self::OpenTelemetryMiddleware(action) => action.name(),
@@ -62,6 +66,7 @@ impl<T: Expression> SerializableAction for ServerCliAction<T> {
             Self::HttpServer(action) => action.to_json(),
             Self::WebSocketServer(action) => action.to_json(),
             Self::GraphQlServer(action) => action.to_json(),
+            Self::BytecodeInterpreter(action) => action.to_json(),
             Self::QueryInspectorServer(action) => action.to_json(),
             Self::TelemetryMiddleware(action) => action.to_json(),
             Self::OpenTelemetryMiddleware(action) => action.to_json(),
@@ -155,6 +160,28 @@ impl<'a, T: Expression> From<&'a ServerCliAction<T>> for Option<&'a GraphQlServe
     fn from(value: &'a ServerCliAction<T>) -> Self {
         match value {
             ServerCliAction::GraphQlServer(value) => Some(value),
+            _ => None,
+        }
+    }
+}
+
+impl<T: Expression> From<BytecodeInterpreterActions<T>> for ServerCliAction<T> {
+    fn from(value: BytecodeInterpreterActions<T>) -> Self {
+        Self::BytecodeInterpreter(value)
+    }
+}
+impl<T: Expression> From<ServerCliAction<T>> for Option<BytecodeInterpreterActions<T>> {
+    fn from(value: ServerCliAction<T>) -> Self {
+        match value {
+            ServerCliAction::BytecodeInterpreter(value) => Some(value),
+            _ => None,
+        }
+    }
+}
+impl<'a, T: Expression> From<&'a ServerCliAction<T>> for Option<&'a BytecodeInterpreterActions<T>> {
+    fn from(value: &'a ServerCliAction<T>) -> Self {
+        match value {
+            ServerCliAction::BytecodeInterpreter(value) => Some(value),
             _ => None,
         }
     }
@@ -719,6 +746,60 @@ impl<T: Expression> From<ServerCliAction<T>> for Option<GraphQlServerEmitAction<
 impl<'a, T: Expression> From<&'a ServerCliAction<T>> for Option<&'a GraphQlServerEmitAction<T>> {
     fn from(value: &'a ServerCliAction<T>) -> Self {
         Option::<&'a GraphQlServerActions<T>>::from(value).and_then(|value| value.into())
+    }
+}
+
+impl<T: Expression> From<BytecodeInterpreterEvaluateAction<T>> for ServerCliAction<T> {
+    fn from(value: BytecodeInterpreterEvaluateAction<T>) -> Self {
+        BytecodeInterpreterActions::<T>::from(value).into()
+    }
+}
+impl<T: Expression> From<ServerCliAction<T>> for Option<BytecodeInterpreterEvaluateAction<T>> {
+    fn from(value: ServerCliAction<T>) -> Self {
+        Option::<BytecodeInterpreterActions<T>>::from(value).and_then(|value| value.into())
+    }
+}
+impl<'a, T: Expression> From<&'a ServerCliAction<T>>
+    for Option<&'a BytecodeInterpreterEvaluateAction<T>>
+{
+    fn from(value: &'a ServerCliAction<T>) -> Self {
+        Option::<&'a BytecodeInterpreterActions<T>>::from(value).and_then(|value| value.into())
+    }
+}
+
+impl<T: Expression> From<BytecodeInterpreterResultAction<T>> for ServerCliAction<T> {
+    fn from(value: BytecodeInterpreterResultAction<T>) -> Self {
+        BytecodeInterpreterActions::<T>::from(value).into()
+    }
+}
+impl<T: Expression> From<ServerCliAction<T>> for Option<BytecodeInterpreterResultAction<T>> {
+    fn from(value: ServerCliAction<T>) -> Self {
+        Option::<BytecodeInterpreterActions<T>>::from(value).and_then(|value| value.into())
+    }
+}
+impl<'a, T: Expression> From<&'a ServerCliAction<T>>
+    for Option<&'a BytecodeInterpreterResultAction<T>>
+{
+    fn from(value: &'a ServerCliAction<T>) -> Self {
+        Option::<&'a BytecodeInterpreterActions<T>>::from(value).and_then(|value| value.into())
+    }
+}
+
+impl<T: Expression> From<BytecodeInterpreterGcAction> for ServerCliAction<T> {
+    fn from(value: BytecodeInterpreterGcAction) -> Self {
+        BytecodeInterpreterActions::<T>::from(value).into()
+    }
+}
+impl<T: Expression> From<ServerCliAction<T>> for Option<BytecodeInterpreterGcAction> {
+    fn from(value: ServerCliAction<T>) -> Self {
+        Option::<BytecodeInterpreterActions<T>>::from(value).and_then(|value| value.into())
+    }
+}
+impl<'a, T: Expression> From<&'a ServerCliAction<T>>
+    for Option<&'a BytecodeInterpreterGcAction>
+{
+    fn from(value: &'a ServerCliAction<T>) -> Self {
+        Option::<&'a BytecodeInterpreterActions<T>>::from(value).and_then(|value| value.into())
     }
 }
 

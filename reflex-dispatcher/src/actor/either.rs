@@ -112,24 +112,24 @@ where
     fn handle(
         &self,
         state: Self::State,
-        operation: StateOperation<TAction>,
+        operations: Vec<StateOperation<TAction>>,
         metadata: &MessageData,
         context: &MiddlewareContext,
-    ) -> PostMiddlewareTransition<Self::State> {
+    ) -> PostMiddlewareTransition<Self::State, TAction> {
         match (self, state) {
             (Self::Left(actor), Self::State::Left(state)) => {
-                let state = actor
-                    .handle(state, operation, metadata, context)
-                    .into_inner();
-                PostMiddlewareTransition::new(Self::State::Left(state))
+                let (state, operations) = actor
+                    .handle(state, operations, metadata, context)
+                    .into_parts();
+                PostMiddlewareTransition::new(Self::State::Left(state), operations)
             }
             (Self::Right(actor), Self::State::Right(state)) => {
-                let state = actor
-                    .handle(state, operation, metadata, context)
-                    .into_inner();
-                PostMiddlewareTransition::new(Self::State::Right(state))
+                let (state, operations) = actor
+                    .handle(state, operations, metadata, context)
+                    .into_parts();
+                PostMiddlewareTransition::new(Self::State::Right(state), operations)
             }
-            (_, state) => PostMiddlewareTransition::new(state),
+            (_, state) => PostMiddlewareTransition::new(state, operations),
         }
     }
 }

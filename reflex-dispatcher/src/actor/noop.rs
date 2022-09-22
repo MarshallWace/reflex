@@ -46,10 +46,10 @@ impl<TAction: Action> PostMiddleware<TAction> for NoopActor {
     fn handle(
         &self,
         state: Self::State,
-        _action: StateOperation<TAction>,
+        operations: Vec<StateOperation<TAction>>,
         _metadata: &MessageData,
         _context: &MiddlewareContext,
-    ) -> PostMiddlewareTransition<Self::State> {
-        PostMiddlewareTransition::new(state)
+    ) -> PostMiddlewareTransition<Self::State, TAction> {
+        PostMiddlewareTransition::new(state, operations)
     }
 }

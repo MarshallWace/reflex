@@ -8,7 +8,7 @@ use futures::StreamExt;
 use crate::{
     Action, Actor, ActorTransition, HandlerContext, InboundAction, MessageData, OperationStream,
     OutboundAction, StateOperation, StateTransition, Worker, WorkerContext, WorkerFactory,
-    WorkerMessageQueue, WorkerTransition,
+    WorkerTransition,
 };
 
 pub struct FilteredActor<TOuter, TInner, TActor>
@@ -156,33 +156,18 @@ where
 {
     fn handle(
         &mut self,
-        actions: WorkerMessageQueue<TOuter>,
+        action: TOuter,
+        metadata: &MessageData,
         context: &mut WorkerContext,
     ) -> WorkerTransition<TOuter> {
-        let actions = actions
-            .into_iter()
-            .filter_map(|(action, metadata)| action.into_type().map(|action| (action, metadata)))
-            .collect::<WorkerMessageQueue<TInner>>();
-        if actions.is_empty() {
-            WorkerTransition::new(None)
+        let actions = if let Some(action) = action.into_type() {
+            let operations = self.worker.handle(action, metadata, context).into_iter();
+            Some(operations.map(transform_state_operation))
         } else {
-            transform_worker_transition(self.worker.handle(actions, context))
-        }
+            None
+        };
+        WorkerTransition::new(actions.into_iter().flatten())
     }
-}
-
-fn transform_worker_transition<TOuter, TInner>(
-    transition: WorkerTransition<TInner>,
-) -> WorkerTransition<TOuter>
-where
-    TOuter: Action + InboundAction<TInner> + OutboundAction<TInner> + Send + 'static,
-    TInner: Action + Send + 'static,
-{
-    WorkerTransition::new(
-        transition
-            .into_iter()
-            .map(|(offset, operation)| (offset, transform_state_operation(operation))),
-    )
 }
 
 fn transform_state_operation<TOuter, TInner>(

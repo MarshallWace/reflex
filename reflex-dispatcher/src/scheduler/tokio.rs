@@ -20,9 +20,8 @@ use crate::{
     utils::with_unsubscribe_callback::WithUnsubscribeCallback, Action, Actor, AsyncActionFilter,
     AsyncActionStream, AsyncDispatchResult, AsyncScheduler, AsyncSubscriptionStream,
     BoxedDisposeCallback, DisposeCallback, HandlerContext, MessageData, MessageOffset,
-    MiddlewareContext, NoopWorkerFactory, OperationStream, PostMiddleware, PreMiddleware,
-    ProcessId, Scheduler, SchedulerMiddleware, StateOperation, Worker, WorkerContext,
-    WorkerFactory, WorkerMessageQueue,
+    MiddlewareContext, PostMiddleware, PreMiddleware, ProcessId, Scheduler, SchedulerMiddleware,
+    StateOperation, StateTransition, Worker, WorkerContext, WorkerFactory,
 };
 
 #[derive(Clone, Copy, Debug)]
@@ -58,7 +57,14 @@ enum TokioCommand<TAction>
 where
     TAction: Action + Send + 'static,
 {
+    Dispatch(TAction), // Only used when invoked directly via scheduler instance method
     Event(StateOperation<TAction>, Option<(MessageOffset, ProcessId)>),
+    WorkerResult(
+        ProcessId,
+        StateTransition<TAction>,
+        MessageData,
+        Option<ProcessId>,
+    ),
     Subscribe(TokioSubscriberId, TokioSubscriber<TAction>),
     Unsubscribe(TokioSubscriberId),
 }
@@ -162,7 +168,7 @@ where
 }
 impl<TAction> TokioScheduler<TAction>
 where
-    TAction: Action + Clone + Send + 'static,
+    TAction: Action + Send + 'static,
 {
     pub fn new<TActor, TPreMiddleware, TPostMiddleware>(
         actor: TActor,
@@ -191,17 +197,13 @@ where
         &self,
         actions: TActions,
     ) -> AsyncDispatchResult {
-        let root_pid = self.root_pid;
-        let commands = self.commands.clone();
-        Box::pin(async move {
-            let mut actions = actions;
-            while let Some(action) = actions.next().await {
-                let _ = commands
-                    .send(TokioCommand::Event(
-                        StateOperation::Send(root_pid, action),
-                        None,
-                    ))
-                    .await;
+        Box::pin({
+            let commands = self.commands.clone();
+            async move {
+                let mut actions = actions;
+                while let Some(action) = actions.next().await {
+                    let _ = commands.send(TokioCommand::Dispatch(action)).await;
+                }
             }
         })
     }
@@ -377,7 +379,7 @@ fn process_command<
     TActor: Actor<TAction>,
     TPreMiddleware: PreMiddleware<TAction>,
     TPostMiddleware: PostMiddleware<TAction>,
-    TAction: Action + Send + Clone,
+    TAction: Action + Send,
 >(
     command: TokioCommand<TAction>,
     actor: &TActor,
@@ -394,21 +396,42 @@ fn process_command<
 ) -> (
     Option<TAction>,
     impl IntoIterator<
-            Item = (StateOperation<TAction>, MessageOffset),
-            IntoIter = impl Iterator<Item = (StateOperation<TAction>, MessageOffset)> + Send,
+            Item = (StateOperation<TAction>, Option<MessageOffset>),
+            IntoIter = impl Iterator<Item = (StateOperation<TAction>, Option<MessageOffset>)> + Send,
         > + Send,
     impl IntoIterator<
             Item = (ProcessId, (TAction, MessageData, TokioContext)),
             IntoIter = impl Iterator<Item = (ProcessId, (TAction, MessageData, TokioContext))> + Send,
         > + Send,
 ) {
-    let (action, child_commands, worker_commands) = match command {
-        TokioCommand::Event(operation, caller) => {
+    let (emitted_action, child_commands, worker_commands) = match command {
+        TokioCommand::Dispatch(action) => {
+            let offset = {
+                let next_value = next_offset.next();
+                std::mem::replace(next_offset, next_value)
+            };
             let metadata = MessageData {
-                offset: {
-                    let next_value = next_offset.next();
-                    std::mem::replace(next_offset, next_value)
-                },
+                offset,
+                parent: None,
+                timestamp: std::time::Instant::now(),
+            };
+            let emitted_action = None;
+            let child_commands = {
+                let operations = vec![StateOperation::Send(root_pid, action)];
+                let parent_offset = None;
+                let caller_pid = root_pid;
+                Some((operations, metadata, parent_offset, caller_pid))
+            };
+            let worker_commands = None;
+            (emitted_action, child_commands, worker_commands)
+        }
+        TokioCommand::Event(operation, caller) => {
+            let offset = {
+                let next_value = next_offset.next();
+                std::mem::replace(next_offset, next_value)
+            };
+            let metadata = MessageData {
+                offset,
                 parent: caller.map(|(parent_offset, _)| parent_offset),
                 timestamp: std::time::Instant::now(),
             };
@@ -426,41 +449,44 @@ fn process_command<
                 pre_middleware_state.replace(updated_state);
                 operation
             };
-            let (cloned_operation, action, child_commands, worker_commands) = match operation {
+            match operation {
                 StateOperation::Send(pid, action) => {
                     let mut context = TokioContext {
                         pid,
                         caller_pid,
                         next_pid: Arc::clone(&next_pid),
                     };
-                    let cloned_operation = StateOperation::Send(pid, action.clone());
-                    let (emitted_action, child_commands, worker_commands) = if pid == root_pid {
-                        let (updated_state, child_commands) = actor
-                            .handle(
-                                actor_state.take().unwrap(),
-                                &action,
-                                &metadata,
-                                &mut context,
-                            )
-                            .into_parts();
-                        actor_state.replace(updated_state);
-                        (
-                            Some(action),
-                            Some(child_commands.into_iter().map({
-                                let parent_offset = metadata.offset;
-                                move |operation| (operation, parent_offset)
-                            })),
-                            None,
-                        )
+                    if pid == root_pid {
+                        let child_commands = {
+                            let (updated_state, child_commands) = actor
+                                .handle(
+                                    actor_state.take().unwrap(),
+                                    &action,
+                                    &metadata,
+                                    &mut context,
+                                )
+                                .into_parts();
+                            actor_state.replace(updated_state);
+                            child_commands
+                        };
+                        let emitted_action = Some(action);
+                        let child_commands = {
+                            let operations = child_commands.into_operations();
+                            let parent_offset = Some(metadata.offset);
+                            let caller_pid = pid;
+                            Some((operations, metadata, parent_offset, caller_pid))
+                        };
+                        let worker_commands = None;
+                        (emitted_action, child_commands, worker_commands)
                     } else {
-                        (None, None, Some((pid, (action, metadata, context))))
-                    };
-                    (
-                        cloned_operation,
-                        emitted_action,
-                        child_commands,
-                        worker_commands,
-                    )
+                        let emitted_action = None;
+                        let child_commands = None;
+                        let worker_commands = {
+                            let worker_pid = pid;
+                            Some((worker_pid, (action, metadata, context)))
+                        };
+                        (emitted_action, child_commands, worker_commands)
+                    }
                 }
                 StateOperation::Task(pid, task) => {
                     if let Entry::Vacant(entry) = processes.entry(pid) {
@@ -482,12 +508,10 @@ fn process_command<
                             dispose: Some(dispose),
                         }));
                     }
-                    (
-                        StateOperation::Task(pid, OperationStream::noop()),
-                        None,
-                        None,
-                        None,
-                    )
+                    let emitted_action = None;
+                    let child_commands = None;
+                    let worker_commands = None;
+                    (emitted_action, child_commands, worker_commands)
                 }
                 StateOperation::Spawn(pid, factory) => {
                     if let Entry::Vacant(entry) = processes.entry(pid) {
@@ -496,12 +520,10 @@ fn process_command<
                             async_commands.clone(),
                         )));
                     }
-                    (
-                        StateOperation::spawn(pid, NoopWorkerFactory),
-                        None,
-                        None,
-                        None,
-                    )
+                    let emitted_action = None;
+                    let child_commands = None;
+                    let worker_commands = None;
+                    (emitted_action, child_commands, worker_commands)
                 }
                 StateOperation::Kill(pid) => {
                     if let Entry::Occupied(entry) = processes.entry(pid) {
@@ -512,22 +534,23 @@ fn process_command<
                             TokioProcess::Worker(_) => {}
                         }
                     }
-                    (StateOperation::Kill(pid), None, None, None)
+                    let emitted_action = None;
+                    let child_commands = None;
+                    let worker_commands = None;
+                    (emitted_action, child_commands, worker_commands)
                 }
-            };
-            {
-                let updated_state = middleware
-                    .post
-                    .handle(
-                        post_middleware_state.take().unwrap(),
-                        cloned_operation,
-                        &metadata,
-                        &MiddlewareContext { caller_pid },
-                    )
-                    .into_inner();
-                post_middleware_state.replace(updated_state);
             }
-            (action, child_commands, worker_commands)
+        }
+        TokioCommand::WorkerResult(worker_pid, transition, metadata, _caller_pid) => {
+            let emitted_action = None;
+            let child_commands = {
+                let operations = transition.into_operations();
+                let parent_offset = Some(metadata.offset);
+                let caller_pid = worker_pid;
+                Some((operations, metadata, parent_offset, caller_pid))
+            };
+            let worker_commands = None;
+            (emitted_action, child_commands, worker_commands)
         }
         TokioCommand::Subscribe(subscriber_id, subscriber) => {
             if let Entry::Vacant(entry) = subscribers.entry(subscriber_id) {
@@ -540,8 +563,28 @@ fn process_command<
             (None, None, None)
         }
     };
-    let child_commands = child_commands.into_iter().flatten();
-    (action, child_commands, worker_commands)
+    // Apply post-middleware to transform outgoing commands
+    let child_commands = child_commands
+        .map(|(operations, metadata, parent_offset, caller_pid)| {
+            let (updated_state, child_commands) = middleware
+                .post
+                .handle(
+                    post_middleware_state.take().unwrap(),
+                    operations,
+                    &metadata,
+                    &MiddlewareContext {
+                        caller_pid: Some(caller_pid),
+                    },
+                )
+                .into_parts();
+            post_middleware_state.replace(updated_state);
+            child_commands
+                .into_iter()
+                .map(move |operation| (operation, parent_offset))
+        })
+        .into_iter()
+        .flatten();
+    (emitted_action, child_commands, worker_commands)
 }
 
 #[derive(Debug, Clone)]
@@ -608,41 +651,30 @@ where
             task: tokio::spawn({
                 async move {
                     let mut worker = Some(factory.create());
-                    while let Some(message) = inbox_rx.recv().await {
-                        let mut queue = WorkerMessageQueue::default();
-                        let mut latest_context = None;
-                        let mut latest_message = Some(message);
-                        while let Some((action, metadata, context)) = latest_message {
-                            latest_context.replace(context);
-                            queue.push_back((action, metadata));
-                            latest_message = inbox_rx.try_recv().ok();
-                        }
-                        if let Some(context) = latest_context {
-                            let pid = context.pid();
-                            if let Some(mut worker_instance) = worker.take() {
-                                let worker_task = tokio::task::spawn_blocking(move || {
-                                    let actions = worker_instance
-                                        .handle(queue, &mut WorkerContext::new(context));
-                                    (worker_instance, actions)
-                                });
-                                match worker_task.await {
-                                    Ok((worker_instance, actions)) => {
-                                        worker.replace(worker_instance);
-                                        for (offset, operation) in actions {
-                                            let _ = outbox
-                                                .send(TokioCommand::Event(
-                                                    operation,
-                                                    Some((offset, pid)),
-                                                ))
-                                                .await;
-                                        }
-                                    }
-                                    Err(err) => {
-                                        if err.is_cancelled() {
-                                            break;
-                                        } else if err.is_panic() {
-                                            std::panic::resume_unwind(err.into_panic())
-                                        }
+                    while let Some((action, metadata, context)) = inbox_rx.recv().await {
+                        if let Some(mut worker_instance) = worker.take() {
+                            let worker_pid = context.pid();
+                            let caller_pid = context.caller_pid();
+                            let worker_task = tokio::task::spawn_blocking(move || {
+                                let child_commands = worker_instance
+                                    .handle(action, &metadata, &mut WorkerContext::new(context))
+                                    .into_inner();
+                                (worker_instance, child_commands)
+                            });
+                            match worker_task.await {
+                                Ok((worker_instance, transition)) => {
+                                    worker.replace(worker_instance);
+                                    let _ = outbox
+                                        .send(TokioCommand::WorkerResult(
+                                            worker_pid, transition, metadata, caller_pid,
+                                        ))
+                                        .await;
+                                }
+                                Err(err) => {
+                                    if err.is_cancelled() {
+                                        break;
+                                    } else if err.is_panic() {
+                                        std::panic::resume_unwind(err.into_panic())
                                     }
                                 }
                             }
