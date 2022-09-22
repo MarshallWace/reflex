@@ -15,6 +15,7 @@ members = [
   "reflex-protobuf",
   "reflex-runtime",
   "reflex-stdlib",
+  "reflex-tests",
   "reflex-server",
   "reflex-utils",
 ]
