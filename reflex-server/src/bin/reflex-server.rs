@@ -51,7 +51,7 @@ use reflex_server::{
     },
     GraphQlWebServerMetricNames,
 };
-use reflex_utils::reconnect::FibonacciReconnectTimeout;
+use reflex_utils::{reconnect::FibonacciReconnectTimeout, FileWriterFormat};
 
 /// Launch a GraphQL server for the provided graph root
 #[derive(Parser)]
@@ -146,13 +146,19 @@ pub async fn main() -> Result<()> {
             let (recorder, serialized_path) = match output_path {
                 Some(path) => {
                     let serialized_path = format!("{}", path.to_string_lossy());
-                    (FileRecorder::new(path), serialized_path)
+                    (
+                        FileRecorder::new(FileWriterFormat::MessagePack, path),
+                        serialized_path,
+                    )
                 }
                 None => {
                     let output_path = generate_session_recording_filename(None);
                     let serialized_path = output_path.clone();
                     (
-                        FileRecorder::new(PathBuf::from(output_path)),
+                        FileRecorder::new(
+                            FileWriterFormat::MessagePack,
+                            PathBuf::from(output_path),
+                        ),
                         serialized_path,
                     )
                 }

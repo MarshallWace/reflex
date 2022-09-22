@@ -30,7 +30,7 @@ use reflex_server::{
     recorder::FileRecorder,
     GraphQlWebServerMetricNames,
 };
-use reflex_utils::reconnect::NoopReconnectTimeout;
+use reflex_utils::{reconnect::NoopReconnectTimeout, FileWriterFormat};
 
 /// Execute a GraphQL query against the provided graph root
 #[derive(Parser)]
@@ -125,8 +125,11 @@ async fn main() -> Result<()> {
     let recorder_middleware = match args.capture_events.as_ref() {
         Some(output_path) => {
             let recorder = match output_path {
-                Some(path) => FileRecorder::new(path),
-                None => FileRecorder::new(PathBuf::from(generate_session_recording_filename(None))),
+                Some(path) => FileRecorder::new(FileWriterFormat::MessagePack, path),
+                None => FileRecorder::new(
+                    FileWriterFormat::MessagePack,
+                    PathBuf::from(generate_session_recording_filename(None)),
+                ),
             };
             Some(SessionRecorder::new(recorder))
         }

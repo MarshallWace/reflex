@@ -2070,7 +2070,6 @@ dependencies = [
  "reflex-runtime",
  "reflex-stdlib",
  "reflex-utils",
- "rmp-serde 1.1.0",
  "serde",
  "serde_json",
  "strum",
@@ -2096,6 +2095,12 @@ dependencies = [
 [[package]]
 name = "reflex-utils"
 version = "0.1.0"
+dependencies = [
+ "rmp-serde 1.1.0",
+ "serde",
+ "serde_json",
+ "tokio",
+]
 
 [[package]]
 name = "regex"
