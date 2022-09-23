@@ -238,7 +238,8 @@ where
             + OutboundAction<QuerySubscribeAction<T>>
             + OutboundAction<GraphQlServerParseSuccessAction<T>>
             + OutboundAction<GraphQlServerParseErrorAction<T>>
-            + OutboundAction<GraphQlServerUnsubscribeAction<T>>,
+            + OutboundAction<GraphQlServerUnsubscribeAction<T>>
+            + OutboundAction<GraphQlServerEmitAction<T>>,
     {
         let GraphQlServerSubscribeAction {
             subscription_id,
@@ -298,14 +299,28 @@ where
                         start_time: None,
                         metric_labels,
                     });
-                    Some(StateTransition::new(once(StateOperation::Send(
-                        context.pid(),
-                        GraphQlServerParseSuccessAction {
-                            subscription_id,
-                            query: existing_entry.query.clone(),
-                        }
-                        .into(),
-                    ))))
+                    Some(StateTransition::new(
+                        once(StateOperation::Send(
+                            context.pid(),
+                            GraphQlServerParseSuccessAction {
+                                subscription_id,
+                                query: existing_entry.query.clone(),
+                            }
+                            .into(),
+                        ))
+                        .chain(existing_entry.result.as_ref().map(
+                            |result| {
+                                StateOperation::Send(
+                                    context.pid(),
+                                    GraphQlServerEmitAction {
+                                        subscription_id,
+                                        result: result.result().clone(),
+                                    }
+                                    .into(),
+                                )
+                            },
+                        )),
+                    ))
                 } else {
                     let label = (self.get_graphql_query_label)(operation);
                     state.operations.push(GraphQlOperationState {
@@ -396,7 +411,8 @@ where
             + OutboundAction<QuerySubscribeAction<T>>
             + OutboundAction<GraphQlServerParseSuccessAction<T>>
             + OutboundAction<GraphQlServerParseErrorAction<T>>
-            + OutboundAction<GraphQlServerUnsubscribeAction<T>>,
+            + OutboundAction<GraphQlServerUnsubscribeAction<T>>
+            + OutboundAction<GraphQlServerEmitAction<T>>,
     {
         let GraphQlServerModifyAction {
             subscription_id,
@@ -499,14 +515,28 @@ where
                             start_time: None,
                             metric_labels,
                         });
-                        Some(StateTransition::new(Some(StateOperation::Send(
-                            context.pid(),
-                            GraphQlServerParseSuccessAction {
-                                subscription_id,
-                                query: existing_entry.query.clone(),
-                            }
-                            .into(),
-                        ))))
+                        Some(StateTransition::new(
+                            once(StateOperation::Send(
+                                context.pid(),
+                                GraphQlServerParseSuccessAction {
+                                    subscription_id,
+                                    query: existing_entry.query.clone(),
+                                }
+                                .into(),
+                            ))
+                            .chain(
+                                existing_entry.result.as_ref().map(|result| {
+                                    StateOperation::Send(
+                                        context.pid(),
+                                        GraphQlServerEmitAction {
+                                            subscription_id,
+                                            result: result.result().clone(),
+                                        }
+                                        .into(),
+                                    )
+                                }),
+                            ),
+                        ))
                     } else {
                         let label = (self.get_graphql_query_label)(&updated_operation);
                         state.operations.push(GraphQlOperationState {
@@ -552,24 +582,20 @@ where
         let updated_queries = state
             .operations
             .iter_mut()
-            .map(|connection| {
-                let previous_result = connection.result.replace(action.result.clone());
-                (connection, previous_result)
-            })
-            .filter(|(connection, previous_result)| {
-                if connection.query.id() != action.query.id() {
-                    return false;
-                }
+            .filter(|operation_state| operation_state.query.id() == action.query.id())
+            .filter_map(|operation_state| {
+                let previous_result = operation_state.result.replace(action.result.clone());
                 let is_unchanged = previous_result
                     .as_ref()
                     .map(|existing| existing.result().id() == action.result.result().id())
                     .unwrap_or(false);
                 if is_unchanged {
-                    return false;
+                    None
+                } else {
+                    Some(operation_state)
                 }
-                return true;
             })
-            .flat_map(|(connection, _)| {
+            .flat_map(|connection| {
                 connection
                     .subscriptions
                     .iter()
