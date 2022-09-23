@@ -1236,6 +1236,7 @@ where
         BinaryOp::LogicalOr => {
             parse_binary_logical_or_expression(node, scope, env, factory, allocator)
         }
+        BinaryOp::In => parse_binary_in_expression(node, scope, env, factory, allocator),
         _ => Err(err_unimplemented(node)),
     }
 }
@@ -1551,6 +1552,24 @@ where
     Ok(factory.create_application_term(
         factory.create_builtin_term(Stdlib::Or),
         allocator.create_pair(left, right),
+    ))
+}
+
+fn parse_binary_in_expression<T: Expression + Rewritable<T>>(
+    node: &BinExpr,
+    scope: &LexicalScope,
+    env: &Env<T>,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> ParserResult<T>
+where
+    T::Builtin: From<Stdlib> + From<JsStdlib>,
+{
+    let left = parse_expression(&node.left, scope, env, factory, allocator)?;
+    let right = parse_expression(&node.right, scope, env, factory, allocator)?;
+    Ok(factory.create_application_term(
+        factory.create_builtin_term(Stdlib::Contains),
+        allocator.create_pair(right, left),
     ))
 }
 
@@ -4491,6 +4510,30 @@ mod tests {
                 ),
                 DependencyList::empty(),
             ),
+        );
+    }
+
+    #[test]
+    fn in_operator() {
+        let factory = SharedTermFactory::<JsBuiltins>::default();
+        let allocator = DefaultAllocator::default();
+        let env = Env::new().with_globals(builtin_globals(&factory, &allocator));
+        assert_eq!(
+            parse("'foo' in { bar: true }", &env, &factory, &allocator),
+            Ok(factory.create_application_term(
+                factory.create_builtin_term(Stdlib::Contains),
+                allocator.create_pair(
+                    create_record(
+                        once((
+                            factory.create_string_term(allocator.create_static_string("bar")),
+                            factory.create_boolean_term(true)
+                        )),
+                        &factory,
+                        &allocator
+                    ),
+                    factory.create_string_term(allocator.create_static_string("foo")),
+                ),
+            )),
         );
     }
 
