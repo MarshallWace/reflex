@@ -1,9 +1,10 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use reflex::core::{
     is_integer, uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
-    FunctionArity, HeapAllocator, Uid, Uuid, IntTermType, FloatTermType,
+    FloatTermType, FunctionArity, HeapAllocator, IntTermType, Uid, Uuid,
 };
 
 pub struct Pow {}
@@ -82,7 +83,9 @@ impl<T: Expression> Applicable<T> for Pow {
             factory.match_float_term(&left),
             factory.match_int_term(&right),
         ) {
-            Some(Ok(factory.create_float_term(left.value().powi(right.value()))))
+            Some(Ok(
+                factory.create_float_term(left.value().powi(right.value()))
+            ))
         } else {
             None
         };
