@@ -147,6 +147,7 @@ where
 }
 
 pub struct GraphQlServerState<T: Expression> {
+    // TODO: Refactor into HashMap keyed by query
     operations: Vec<GraphQlOperationState<T>>,
 }
 impl<T: Expression> Default for GraphQlServerState<T> {
@@ -161,6 +162,7 @@ struct GraphQlOperationState<T: Expression> {
     query: T,
     label: String,
     result: Option<EvaluationResult<T>>,
+    // TODO: Consider refactoring into HashMap
     subscriptions: Vec<GraphQlSubscriptionState>,
 }
 struct GraphQlSubscriptionState {
@@ -224,22 +226,15 @@ where
     ) -> ActorTransition<Self::State, TAction> {
         let mut state = state;
         let actions = if let Some(action) = action.match_type() {
-            let return_value = self.handle_graphql_subscribe(&mut state, action, metadata, context);
-            self.record_graphql_query_status_metrics(&state);
-            return_value
+            self.handle_graphql_subscribe(&mut state, action, metadata, context)
         } else if let Some(action) = action.match_type() {
-            let return_value =
-                self.handle_graphql_unsubscribe(&mut state, action, metadata, context);
-            self.record_graphql_query_status_metrics(&state);
-            return_value
+            self.handle_graphql_unsubscribe(&mut state, action, metadata, context)
         } else if let Some(action) = action.match_type() {
             self.handle_graphql_modify(&mut state, action, metadata, context)
         } else if let Some(action) = action.match_type() {
             self.handle_graphql_server_emit(&mut state, action, metadata, context)
         } else if let Some(action) = action.match_type() {
-            let return_value = self.handle_query_emit(&mut state, action, metadata, context);
-            self.record_graphql_query_status_metrics(&state);
-            return_value
+            self.handle_query_emit(&mut state, action, metadata, context)
         } else {
             None
         }
@@ -331,7 +326,7 @@ where
                         start_time: None,
                         metric_labels,
                     });
-                    Some(StateTransition::new(
+                    let transition = StateTransition::new(
                         once(StateOperation::Send(
                             context.pid(),
                             GraphQlServerParseSuccessAction {
@@ -352,7 +347,9 @@ where
                                 )
                             },
                         )),
-                    ))
+                    );
+                    self.update_graphql_query_status_metrics(state);
+                    Some(transition)
                 } else {
                     let label = (self.get_graphql_query_label)(operation);
                     state.operations.push(GraphQlOperationState {
@@ -366,7 +363,7 @@ where
                             metric_labels,
                         }],
                     });
-                    Some(StateTransition::new([
+                    let transition = StateTransition::new([
                         StateOperation::Send(
                             context.pid(),
                             GraphQlServerParseSuccessAction {
@@ -379,7 +376,9 @@ where
                             context.pid(),
                             QuerySubscribeAction { query, label }.into(),
                         ),
-                    ]))
+                    ]);
+                    self.update_graphql_query_status_metrics(state);
+                    Some(transition)
                 }
             }
         }
@@ -418,7 +417,7 @@ where
             &removed_subscription.metric_labels
         );
         let has_remaining_subscriptions = !existing_operation_state.subscriptions.is_empty();
-        if has_remaining_subscriptions {
+        let transition = if has_remaining_subscriptions {
             None
         } else {
             let removed_operation_state = state.operations.remove(operation_index);
@@ -430,7 +429,9 @@ where
                 }
                 .into(),
             ))))
-        }
+        };
+        self.update_graphql_query_status_metrics(state);
+        transition
     }
     fn handle_graphql_modify<TAction>(
         &self,
@@ -548,7 +549,7 @@ where
                             start_time: None,
                             metric_labels,
                         });
-                        Some(StateTransition::new(
+                        let transition = StateTransition::new(
                             once(StateOperation::Send(
                                 context.pid(),
                                 GraphQlServerParseSuccessAction {
@@ -569,7 +570,9 @@ where
                                     )
                                 }),
                             ),
-                        ))
+                        );
+                        self.update_graphql_query_status_metrics(state);
+                        Some(transition)
                     } else {
                         let label = (self.get_graphql_query_label)(&updated_operation);
                         state.operations.push(GraphQlOperationState {
@@ -583,7 +586,7 @@ where
                                 metric_labels,
                             }],
                         });
-                        Some(StateTransition::new([
+                        let transition = StateTransition::new([
                             StateOperation::Send(
                                 context.pid(),
                                 GraphQlServerParseSuccessAction {
@@ -596,7 +599,9 @@ where
                                 context.pid(),
                                 QuerySubscribeAction { query, label }.into(),
                             ),
-                        ]))
+                        ]);
+                        self.update_graphql_query_status_metrics(state);
+                        Some(transition)
                     }
                 }
             }
@@ -625,30 +630,50 @@ where
                 if is_unchanged {
                     None
                 } else {
-                    Some(operation_state)
+                    Some((operation_state, previous_result))
                 }
             })
-            .flat_map(|connection| {
-                connection
-                    .subscriptions
-                    .iter()
-                    .map(|subscription| subscription.subscription_id)
+            .flat_map(|(connection, previous_result)| {
+                connection.subscriptions.iter().map(move |subscription| {
+                    (
+                        subscription.subscription_id,
+                        previous_result
+                            .as_ref()
+                            .map(|result| result.result())
+                            .cloned(),
+                    )
+                })
             })
             .collect::<Vec<_>>();
         if updated_queries.is_empty() {
             return None;
         }
-        let actions = updated_queries.into_iter().map(|subscription_id| {
-            StateOperation::Send(
-                context.pid(),
-                GraphQlServerEmitAction {
-                    subscription_id,
-                    result: action.result.result().clone(),
-                }
-                .into(),
-            )
-        });
-        Some(StateTransition::new(actions))
+        let should_recalculate_metrics = {
+            // We only need to recalculate subscription metrics if there exist subscriptions whose status has changed
+            // as a result of this update
+            let updated_query_state =
+                GraphQlQueryStatus::get_state(Some(action.result.result()), &self.factory);
+            updated_queries.iter().any(|(_, previous_value)| {
+                let previous_query_state =
+                    GraphQlQueryStatus::get_state(previous_value.as_ref(), &self.factory);
+                updated_query_state != previous_query_state
+            })
+        };
+        let transition =
+            StateTransition::new(updated_queries.into_iter().map(|(subscription_id, _)| {
+                StateOperation::Send(
+                    context.pid(),
+                    GraphQlServerEmitAction {
+                        subscription_id,
+                        result: action.result.result().clone(),
+                    }
+                    .into(),
+                )
+            }));
+        if should_recalculate_metrics {
+            self.update_graphql_query_status_metrics(state);
+        }
+        Some(transition)
     }
     fn handle_graphql_server_emit<TAction>(
         &self,
@@ -704,13 +729,16 @@ where
         }
         None
     }
-    fn record_graphql_query_status_metrics(&self, state: &GraphQlServerState<T>) {
+    fn update_graphql_query_status_metrics(&self, state: &GraphQlServerState<T>) {
         let mut labels_to_metrics_mapping: HashMap<&Vec<(String, String)>, (f64, f64, f64)> =
             HashMap::new();
 
         for operation in &state.operations {
             for subscription in &operation.subscriptions {
-                let status = GraphQlQueryStatus::get_state(&operation, &self.factory);
+                let status = GraphQlQueryStatus::get_state(
+                    operation.result.as_ref().map(|result| result.result()),
+                    &self.factory,
+                );
                 let (success_count, error_count, pending_count) = labels_to_metrics_mapping
                     .entry(&subscription.metric_labels)
                     .or_insert_with(|| (0.0, 0.0, 0.0));
@@ -791,15 +819,8 @@ enum GraphQlQueryStatus {
 }
 
 impl GraphQlQueryStatus {
-    fn get_state<T: Expression>(
-        operation_state: &GraphQlOperationState<T>,
-        factory: &impl ExpressionFactory<T>,
-    ) -> Self {
-        let evaluation_result = operation_state
-            .result
-            .as_ref()
-            .map(|result| result.result());
-        match evaluation_result {
+    fn get_state<T: Expression>(value: Option<&T>, factory: &impl ExpressionFactory<T>) -> Self {
+        match value {
             Some(expr) if is_error_result_payload(expr, factory) => Self::Error,
             Some(expr) if is_pending_result_payload(expr, factory) => Self::Pending,
             None => Self::Pending,
@@ -832,43 +853,39 @@ mod test {
     fn status_of_operation_state_is_correct() {
         let (_, factory, allocator, _) = harness();
         //       error maps to error
-        let (error, _) = error_state(&allocator, &factory);
+        let error_result = dummy_error_result(&factory, &allocator);
         assert_eq!(
             GraphQlQueryStatus::Error,
-            GraphQlQueryStatus::get_state(&error, &factory)
+            GraphQlQueryStatus::get_state(Some(error_result.result()), &factory)
         );
-
         //       pending maps to pending
-        let (pending, _) = pending_state(&allocator, &factory);
+        let pending_result = dummy_pending_result(&factory, &allocator);
         assert_eq!(
             GraphQlQueryStatus::Pending,
-            GraphQlQueryStatus::get_state(&pending, &factory)
+            GraphQlQueryStatus::get_state(Some(pending_result.result()), &factory)
         );
         //       random other thing maps to success
-        let (success, _) = success_state(&factory);
+        let success_result = dummy_success_result(&factory);
         assert_eq!(
             GraphQlQueryStatus::Success,
-            GraphQlQueryStatus::get_state(&success, &factory)
+            GraphQlQueryStatus::get_state(Some(success_result.result()), &factory)
         );
         //       error and pending maps to error
-        let signals = allocator.create_signal_list(vec![
-            allocator.create_signal(SignalType::Pending, ExpressionList::new(empty())),
-            allocator.create_signal(SignalType::Error, ExpressionList::new(empty())),
-        ]);
-        let result: Option<EvaluationResult<CachedSharedTerm<ServerBuiltins>>> = Some(
-            EvaluationResult::new(factory.create_signal_term(signals), DependencyList::empty()),
+        let mixed_result = EvaluationResult::new(
+            factory.create_signal_term(allocator.create_signal_list(vec![
+                allocator.create_signal(SignalType::Pending, ExpressionList::new(empty())),
+                allocator.create_signal(SignalType::Error, ExpressionList::new(empty())),
+            ])),
+            DependencyList::empty(),
         );
-        let (sub_state, _) = subscription_state();
-        let mixed_state_operation = GraphQlOperationState {
-            operation: graphql_operation(),
-            query: factory.create_nil_term(),
-            label: "".to_string(),
-            result,
-            subscriptions: vec![sub_state],
-        };
         assert_eq!(
             GraphQlQueryStatus::Error,
-            GraphQlQueryStatus::get_state(&mixed_state_operation, &factory)
+            GraphQlQueryStatus::get_state(Some(mixed_result.result()), &factory)
+        );
+        //       missing result maps to pending
+        assert_eq!(
+            GraphQlQueryStatus::Pending,
+            GraphQlQueryStatus::get_state::<CachedSharedTerm<ServerBuiltins>>(None, &factory)
         );
     }
 
@@ -876,12 +893,12 @@ mod test {
     async fn status_metrics_subscribe_action() {
         let (handle, factory, allocator, server) = harness();
         for action in [
-            graphql_subscribe_action(),
-            graphql_unsubscribe_action(),
-            graphql_query_emit_action(),
+            graphql_subscribe_action(None),
+            graphql_unsubscribe_action(None),
+            graphql_query_emit_action(None, dummy_success_result(&factory).result().clone()),
         ] {
             //     one error state -> (0, 1, 0)
-            let (state, label) = error_state(&allocator, &factory);
+            let (state, label) = error_state(&factory, &allocator);
             server.handle(
                 graphql_server_state(vec![state]),
                 &action,
@@ -893,7 +910,7 @@ mod test {
             assert_eq!(metrics[&error_metric_name(&label)], 1.0);
             assert_eq!(metrics[&pending_metric_name(&label)], 0.0);
             //     one pending state -> (0, 0, 1)
-            let (state, label) = pending_state(&allocator, &factory);
+            let (state, label) = pending_state(&factory, &allocator);
             server.handle(
                 graphql_server_state(vec![state]),
                 &action,
@@ -920,7 +937,7 @@ mod test {
             let uuid = Uuid::new_v4();
             let (success, success_label) = success_state_with_uuid(&factory, uuid.clone());
             let (pending, pending_label) =
-                pending_state_with_uuid(&allocator, &factory, uuid.clone());
+                pending_state_with_uuid(&factory, &allocator, uuid.clone());
             server.handle(
                 graphql_server_state(vec![success, pending]),
                 &action,
@@ -1005,31 +1022,56 @@ mod test {
             .collect()
     }
 
-    fn error_state(
-        allocator: &impl HeapAllocator<CachedSharedTerm<ServerBuiltins>>,
+    fn dummy_error_result(
         factory: &impl ExpressionFactory<CachedSharedTerm<ServerBuiltins>>,
+        allocator: &impl HeapAllocator<CachedSharedTerm<ServerBuiltins>>,
+    ) -> EvaluationResult<CachedSharedTerm<ServerBuiltins>> {
+        EvaluationResult::new(
+            factory.create_signal_term(allocator.create_signal_list(vec![
+                allocator.create_signal(SignalType::Error, ExpressionList::new(empty())),
+            ])),
+            DependencyList::empty(),
+        )
+    }
+
+    fn dummy_success_result(
+        factory: &impl ExpressionFactory<CachedSharedTerm<ServerBuiltins>>,
+    ) -> EvaluationResult<CachedSharedTerm<ServerBuiltins>> {
+        EvaluationResult::new(factory.create_nil_term(), DependencyList::empty())
+    }
+
+    fn dummy_pending_result(
+        factory: &impl ExpressionFactory<CachedSharedTerm<ServerBuiltins>>,
+        allocator: &impl HeapAllocator<CachedSharedTerm<ServerBuiltins>>,
+    ) -> EvaluationResult<CachedSharedTerm<ServerBuiltins>> {
+        EvaluationResult::new(
+            factory.create_signal_term(allocator.create_signal_list(vec![
+                allocator.create_signal(SignalType::Pending, ExpressionList::new(empty())),
+            ])),
+            DependencyList::empty(),
+        )
+    }
+
+    fn error_state(
+        factory: &impl ExpressionFactory<CachedSharedTerm<ServerBuiltins>>,
+        allocator: &impl HeapAllocator<CachedSharedTerm<ServerBuiltins>>,
     ) -> (
         GraphQlOperationState<CachedSharedTerm<ServerBuiltins>>,
         String,
     ) {
-        let signals = allocator.create_signal_list(vec![
-            allocator.create_signal(SignalType::Error, ExpressionList::new(empty()))
-        ]);
-        let result: Option<EvaluationResult<CachedSharedTerm<ServerBuiltins>>> = Some(
-            EvaluationResult::new(factory.create_signal_term(signals), DependencyList::empty()),
-        );
         let (sub_state, sub_label) = subscription_state();
         (
             GraphQlOperationState {
                 operation: graphql_operation(),
                 query: factory.create_nil_term(),
                 label: "".to_string(),
-                result,
+                result: Some(dummy_error_result(factory, allocator)),
                 subscriptions: vec![sub_state],
             },
             sub_label,
         )
     }
+
     fn success_state_with_uuid(
         factory: &impl ExpressionFactory<CachedSharedTerm<ServerBuiltins>>,
         uuid: Uuid,
@@ -1037,21 +1079,19 @@ mod test {
         GraphQlOperationState<CachedSharedTerm<ServerBuiltins>>,
         String,
     ) {
-        let result: Option<EvaluationResult<CachedSharedTerm<ServerBuiltins>>> = Some(
-            EvaluationResult::new(factory.create_nil_term(), DependencyList::empty()),
-        );
         let (sub_state, sub_label) = subscription_state_with_uuid(uuid);
         (
             GraphQlOperationState {
                 operation: graphql_operation(),
                 query: factory.create_nil_term(),
                 label: "".to_string(),
-                result,
+                result: Some(dummy_success_result(factory)),
                 subscriptions: vec![sub_state],
             },
             sub_label,
         )
     }
+
     fn success_state(
         factory: &impl ExpressionFactory<CachedSharedTerm<ServerBuiltins>>,
     ) -> (
@@ -1060,45 +1100,43 @@ mod test {
     ) {
         success_state_with_uuid(factory, Uuid::new_v4())
     }
+
     fn pending_state_with_uuid(
-        allocator: &impl HeapAllocator<CachedSharedTerm<ServerBuiltins>>,
         factory: &impl ExpressionFactory<CachedSharedTerm<ServerBuiltins>>,
+        allocator: &impl HeapAllocator<CachedSharedTerm<ServerBuiltins>>,
         uuid: Uuid,
     ) -> (
         GraphQlOperationState<CachedSharedTerm<ServerBuiltins>>,
         String,
     ) {
-        let signals = allocator.create_signal_list(vec![
-            allocator.create_signal(SignalType::Pending, ExpressionList::new(empty()))
-        ]);
-        let result: Option<EvaluationResult<CachedSharedTerm<ServerBuiltins>>> = Some(
-            EvaluationResult::new(factory.create_signal_term(signals), DependencyList::empty()),
-        );
         let (sub_state, sub_label) = subscription_state_with_uuid(uuid);
         (
             GraphQlOperationState {
                 operation: graphql_operation(),
                 query: factory.create_nil_term(),
                 label: "".to_string(),
-                result,
+                result: Some(dummy_pending_result(factory, allocator)),
                 subscriptions: vec![sub_state],
             },
             sub_label,
         )
     }
+
     fn pending_state(
-        allocator: &impl HeapAllocator<CachedSharedTerm<ServerBuiltins>>,
         factory: &impl ExpressionFactory<CachedSharedTerm<ServerBuiltins>>,
+        allocator: &impl HeapAllocator<CachedSharedTerm<ServerBuiltins>>,
     ) -> (
         GraphQlOperationState<CachedSharedTerm<ServerBuiltins>>,
         String,
     ) {
-        pending_state_with_uuid(allocator, factory, Uuid::new_v4())
+        pending_state_with_uuid(factory, allocator, Uuid::new_v4())
     }
+
     fn subscription_state() -> (GraphQlSubscriptionState, String) {
         let subscription_id = Uuid::new_v4();
         subscription_state_with_uuid(subscription_id)
     }
+
     fn subscription_state_with_uuid(subscription_id: Uuid) -> (GraphQlSubscriptionState, String) {
         let label = format!("subscription_id=\"{}\"", subscription_id);
         (
@@ -1113,6 +1151,7 @@ mod test {
             label,
         )
     }
+
     fn graphql_server_state(
         mut op_states: Vec<GraphQlOperationState<CachedSharedTerm<ServerBuiltins>>>,
     ) -> GraphQlServerState<CachedSharedTerm<ServerBuiltins>> {
@@ -1120,6 +1159,7 @@ mod test {
         state.operations.append(&mut op_states);
         state
     }
+
     fn graphql_operation() -> GraphQlOperation {
         GraphQlOperation::new(
             Document {
@@ -1130,30 +1170,39 @@ mod test {
             JsonMap::default(),
         )
     }
-    fn graphql_subscribe_action() -> ServerCliAction<CachedSharedTerm<ServerBuiltins>> {
+
+    fn graphql_subscribe_action(
+        subscription_id: Option<Uuid>,
+    ) -> ServerCliAction<CachedSharedTerm<ServerBuiltins>> {
         GraphQlServerSubscribeAction {
-            subscription_id: Uuid::new_v4(),
+            subscription_id: subscription_id.unwrap_or_else(|| Uuid::new_v4()),
             operation: graphql_operation(),
             _expression: PhantomData::default(),
         }
         .into()
     }
-    fn graphql_unsubscribe_action() -> ServerCliAction<CachedSharedTerm<ServerBuiltins>> {
-        GraphQlServerSubscribeAction {
-            subscription_id: Uuid::new_v4(),
-            operation: graphql_operation(),
+
+    fn graphql_unsubscribe_action(
+        subscription_id: Option<Uuid>,
+    ) -> ServerCliAction<CachedSharedTerm<ServerBuiltins>> {
+        GraphQlServerUnsubscribeAction {
+            subscription_id: subscription_id.unwrap_or_else(|| Uuid::new_v4()),
             _expression: PhantomData::default(),
         }
         .into()
     }
-    fn graphql_query_emit_action() -> ServerCliAction<CachedSharedTerm<ServerBuiltins>> {
-        GraphQlServerSubscribeAction {
-            subscription_id: Uuid::new_v4(),
-            operation: graphql_operation(),
-            _expression: PhantomData::default(),
+
+    fn graphql_query_emit_action(
+        subscription_id: Option<Uuid>,
+        result: CachedSharedTerm<ServerBuiltins>,
+    ) -> ServerCliAction<CachedSharedTerm<ServerBuiltins>> {
+        GraphQlServerEmitAction {
+            subscription_id: subscription_id.unwrap_or_else(|| Uuid::new_v4()),
+            result,
         }
         .into()
     }
+
     fn message_data() -> MessageData {
         MessageData {
             offset: MessageOffset::from(0),
