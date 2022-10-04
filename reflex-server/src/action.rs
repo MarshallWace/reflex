@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use reflex::core::Expression;
 use reflex_dispatcher::{Action, NamedAction, SerializableAction, SerializedAction};
 use reflex_grpc::action::*;
@@ -795,9 +796,7 @@ impl<T: Expression> From<ServerCliAction<T>> for Option<BytecodeInterpreterGcAct
         Option::<BytecodeInterpreterActions<T>>::from(value).and_then(|value| value.into())
     }
 }
-impl<'a, T: Expression> From<&'a ServerCliAction<T>>
-    for Option<&'a BytecodeInterpreterGcAction>
-{
+impl<'a, T: Expression> From<&'a ServerCliAction<T>> for Option<&'a BytecodeInterpreterGcAction> {
     fn from(value: &'a ServerCliAction<T>) -> Self {
         Option::<&'a BytecodeInterpreterActions<T>>::from(value).and_then(|value| value.into())
     }

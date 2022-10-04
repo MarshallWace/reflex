@@ -2069,6 +2069,7 @@ dependencies = [
  "reflex-lisp",
  "reflex-runtime",
  "reflex-stdlib",
+ "reflex-test-utils",
  "reflex-utils",
  "serde",
  "serde_json",
@@ -2090,6 +2091,14 @@ dependencies = [
  "serde",
  "strum",
  "strum_macros",
+]
+
+[[package]]
+name = "reflex-test-utils"
+version = "0.1.0"
+dependencies = [
+ "metrics",
+ "metrics-exporter-prometheus",
 ]
 
 [[package]]

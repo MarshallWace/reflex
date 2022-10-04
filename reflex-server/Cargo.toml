@@ -51,6 +51,7 @@ uuid = { version = "1.0.0-alpha.1", features = ["v4", "fast-rng"] }
 
 [dev-dependencies]
 reflex-lisp = { path = "../reflex-lisp" }
+reflex-test-utils = { path= "../reflex-test-utils" }
 
 [[bin]]
 name = "reflex-server"
