@@ -274,7 +274,6 @@ where
         } = action;
         let subscription_id = *subscription_id;
         let metric_labels = (self.get_operation_metric_labels)(operation);
-        dbg!();
         match reflex_graphql::parse_graphql_operation(operation, &self.factory, &self.allocator) {
             Err(err) => Some(StateTransition::new([
                 StateOperation::Send(
@@ -297,7 +296,6 @@ where
                 ),
             ])),
             Ok(query) => {
-                dbg!();
                 increment_counter!(
                     self.metric_names.graphql_total_operation_count,
                     &metric_labels
@@ -323,7 +321,6 @@ where
                     .iter_mut()
                     .find(|entry| entry.query.id() == query.id())
                 {
-                    dbg!();
                     existing_entry.subscriptions.push(GraphQlSubscriptionState {
                         subscription_id,
                         start_time: None,
@@ -354,7 +351,6 @@ where
                     self.update_graphql_query_status_metrics(state);
                     Some(transition)
                 } else {
-                    dbg!();
                     let label = (self.get_graphql_query_label)(operation);
                     state.operations.push(GraphQlOperationState {
                         label: label.clone(),
@@ -434,7 +430,10 @@ where
                 .into(),
             ))))
         };
-        self.update_graphql_query_status_metrics(state);
+        self.update_graphql_query_status_metrics_after_subscription_removal(
+            state,
+            Some(&removed_subscription.metric_labels),
+        );
         transition
     }
     fn handle_graphql_modify<TAction>(
@@ -575,7 +574,10 @@ where
                                 }),
                             ),
                         );
-                        self.update_graphql_query_status_metrics(state);
+                        self.update_graphql_query_status_metrics_after_subscription_removal(
+                            state,
+                            Some(&previous_metric_labels),
+                        );
                         Some(transition)
                     } else {
                         let label = (self.get_graphql_query_label)(&updated_operation);
@@ -604,7 +606,10 @@ where
                                 QuerySubscribeAction { query, label }.into(),
                             ),
                         ]);
-                        self.update_graphql_query_status_metrics(state);
+                        self.update_graphql_query_status_metrics_after_subscription_removal(
+                            state,
+                            Some(&previous_metric_labels),
+                        );
                         Some(transition)
                     }
                 }
@@ -733,9 +738,18 @@ where
         }
         None
     }
-    fn update_graphql_query_status_metrics(&self, state: &GraphQlServerState<T>) {
+    fn update_graphql_query_status_metrics_after_subscription_removal(
+        &self,
+        state: &GraphQlServerState<T>,
+        removed_subscription_labels: Option<&Vec<(String, String)>>,
+    ) {
         let mut labels_to_metrics_mapping: HashMap<&Vec<(String, String)>, (f64, f64, f64)> =
             HashMap::new();
+
+        // ensure that the metrics corresponding to this subscription are no longer counted
+        if let Some(removed_subscription_labels) = removed_subscription_labels {
+            labels_to_metrics_mapping.insert(&removed_subscription_labels, (0.0, 0.0, 0.0));
+        }
 
         for operation in &state.operations {
             for subscription in &operation.subscriptions {
@@ -760,7 +774,6 @@ where
                 }
             }
         }
-
         for (metric_labels, (success_count, error_count, pending_count)) in
             labels_to_metrics_mapping
         {
@@ -780,6 +793,9 @@ where
                 metric_labels
             );
         }
+    }
+    fn update_graphql_query_status_metrics(&self, state: &GraphQlServerState<T>) {
+        self.update_graphql_query_status_metrics_after_subscription_removal(state, None)
     }
 }
 
@@ -835,18 +851,15 @@ impl GraphQlQueryStatus {
 
 #[cfg(test)]
 mod test {
-    use std::collections::HashMap;
+    use std::collections::{HashMap, HashSet};
     use std::iter::empty;
 
     use metrics_exporter_prometheus::PrometheusHandle;
 
     use reflex::core::DependencyList;
     use reflex_dispatcher::{MessageOffset, ProcessId};
-    use reflex_graphql::ast::position::Pos;
-    use reflex_graphql::ast::query::{
-        Definition, Document, OperationDefinition, SelectionSet, Subscription,
-    };
-    use reflex_json::JsonMap;
+    use reflex_graphql::{parse_graphql_operation, parse_graphql_query, GraphQlVariables};
+    use reflex_json::{JsonMap, JsonValue};
     use reflex_lang::allocator::DefaultAllocator;
     use reflex_lang::{CachedSharedTerm, ExpressionList, SharedTermFactory};
 
@@ -898,42 +911,41 @@ mod test {
 
     #[tokio::test]
     async fn subscription_results_in_pending_state() {
-        reflex_test_utils::run_metrics_test(|handle| {
-            let (_factory, _allocator, server) = harness();
-            let (subscribe_action, subscription_id) = graphql_subscribe_action();
-            let empty_state = GraphQlServerState::default();
+        let (_factory, _allocator, server) = harness();
+        let (subscribe_action, subscription_id) = graphql_subscribe_action();
+        let empty_state = GraphQlServerState::default();
 
-            let (updated_state, _) = server
-                .handle(
-                    empty_state,
-                    &subscribe_action,
-                    &message_data(),
-                    &mut DummyContext,
-                )
-                .into_parts();
+        let (updated_state, _) = server
+            .handle(
+                empty_state,
+                &subscribe_action,
+                &message_data(),
+                &mut DummyContext,
+            )
+            .into_parts();
 
-            assert_eq!(updated_state.operations.len(), 1);
-            assert_eq!(updated_state.operations[0].subscriptions.len(), 1);
-            assert_eq!(
-                updated_state.operations[0].subscriptions[0].subscription_id,
-                subscription_id
-            );
-            assert_eq!(updated_state.operations[0].result, None);
-            let label = metric_label_for_subscription_id(subscription_id);
-            let metrics = get_metrics(&handle);
-            assert_eq!(metrics[&success_metric_name(&label)], 0.0);
-            assert_eq!(metrics[&error_metric_name(&label)], 0.0);
-            assert_eq!(metrics[&pending_metric_name(&label)], 1.0);
-        });
+        assert_eq!(updated_state.operations.len(), 1);
+        assert_eq!(updated_state.operations[0].subscriptions.len(), 1);
+        assert_eq!(
+            updated_state.operations[0].subscriptions[0].subscription_id,
+            subscription_id
+        );
+        assert_eq!(updated_state.operations[0].result, None);
     }
 
     #[tokio::test]
     async fn new_subscription_metrics_are_recorded_alongside_existing_subscription_metrics() {
         reflex_test_utils::run_metrics_test(|handle| {
-            let (factory, _allocator, server) = harness();
+            let (factory, allocator, server) = harness();
             let (subscribe_action, subscription_id) = graphql_subscribe_action();
-            let (other_subscription, other_label) = success_state(&factory);
-            let initial_state = graphql_server_state(vec![other_subscription]);
+            let (other_subscription1, other_label1) = success_state(&factory, &allocator);
+            let (other_subscription2, other_label2) = error_state(&factory, &allocator);
+            let (other_subscription3, other_label3) = pending_state(&factory, &allocator);
+            let initial_state = graphql_server_state(vec![
+                other_subscription1,
+                other_subscription2,
+                other_subscription3,
+            ]);
 
             let (updated_state, _) = server
                 .handle(
@@ -944,138 +956,154 @@ mod test {
                 )
                 .into_parts();
 
-            assert_eq!(updated_state.operations.len(), 2);
-            assert_eq!(updated_state.operations[1].subscriptions.len(), 1);
+            assert_eq!(updated_state.operations.len(), 4);
+            assert_eq!(updated_state.operations[3].subscriptions.len(), 1);
             assert_eq!(
-                updated_state.operations[1].subscriptions[0].subscription_id,
+                updated_state.operations[3].subscriptions[0].subscription_id,
                 subscription_id
             );
-            assert_eq!(updated_state.operations[1].result, None);
+            assert_eq!(updated_state.operations[3].result, None);
             let label = metric_label_for_subscription_id(subscription_id);
             let metrics = get_metrics(&handle);
             assert_eq!(metrics[&success_metric_name(&label)], 0.0);
             assert_eq!(metrics[&error_metric_name(&label)], 0.0);
             assert_eq!(metrics[&pending_metric_name(&label)], 1.0);
 
-            assert_eq!(metrics[&success_metric_name(&other_label)], 1.0);
-            assert_eq!(metrics[&error_metric_name(&other_label)], 0.0);
-            assert_eq!(metrics[&pending_metric_name(&other_label)], 0.0);
+            assert_eq!(metrics[&success_metric_name(&other_label1)], 1.0);
+            assert_eq!(metrics[&error_metric_name(&other_label1)], 0.0);
+            assert_eq!(metrics[&pending_metric_name(&other_label1)], 0.0);
+
+            assert_eq!(metrics[&success_metric_name(&other_label2)], 0.0);
+            assert_eq!(metrics[&error_metric_name(&other_label2)], 1.0);
+            assert_eq!(metrics[&pending_metric_name(&other_label2)], 0.0);
+
+            assert_eq!(metrics[&success_metric_name(&other_label3)], 0.0);
+            assert_eq!(metrics[&error_metric_name(&other_label3)], 0.0);
+            assert_eq!(metrics[&pending_metric_name(&other_label3)], 1.0);
         });
     }
 
-    // #[tokio::test]
-    // async fn unsubscription_results_in_pending_state() {
-    //     reflex_test_utils::run_metrics_test(|handle| {
-    //         let (_factory, _allocator, server) = harness();
-    //         let (subscribe_action, subscription_id) = graphql_subscribe_action();
-    //         let empty_state = GraphQlServerState::default();
-    //
-    //         let (updated_state, _) = server
-    //             .handle(
-    //                 empty_state,
-    //                 &subscribe_action,
-    //                 &message_data(),
-    //                 &mut DummyContext,
-    //             )
-    //             .into_parts();
-    //
-    //         assert_eq!(updated_state.operations.len(), 1);
-    //         assert_eq!(updated_state.operations[0].subscriptions.len(), 1);
-    //         assert_eq!(
-    //             updated_state.operations[0].subscriptions[0].subscription_id,
-    //             subscription_id
-    //         );
-    //         assert_eq!(updated_state.operations[0].result, None);
-    //         let label = metric_label_for_subscription_id(subscription_id);
-    //         let metrics = get_metrics(&handle);
-    //         assert_eq!(metrics[&success_metric_name(&label)], 0.0);
-    //         assert_eq!(metrics[&error_metric_name(&label)], 0.0);
-    //         assert_eq!(metrics[&pending_metric_name(&label)], 1.0);
-    //     });
-    // }
-    //
-    // #[tokio::test]
-    // async fn status_metrics_subscribe_action() {
-    //     reflex_test_utils::run_metrics_test(|handle| {
-    //         let (factory, allocator, server) = harness();
-    //         for action in [
-    //             // graphql_subscribe_action(),
-    //             graphql_unsubscribe_action(None),
-    //             graphql_query_emit_action(None, dummy_success_result(&factory).result().clone()),
-    //         ] {
-    //             //     one error state -> (0, 1, 0)
-    //             let (state, label) = error_state(&factory, &allocator);
-    //             server.handle(
-    //                 graphql_server_state(vec![state]),
-    //                 &action,
-    //                 &message_data(),
-    //                 &mut DummyContext,
-    //             );
-    //             gauge!("hi", 1.0, vec![]);
-    //             let metrics = dbg!(get_metrics(&handle));
-    //             assert_eq!(metrics[&success_metric_name(dbg!(&label))], 0.0);
-    //             assert_eq!(metrics[&error_metric_name(&label)], 1.0);
-    //             assert_eq!(metrics[&pending_metric_name(&label)], 0.0);
-    //             //     one pending state -> (0, 0, 1)
-    //             let (state, label) = pending_state(&factory, &allocator);
-    //             server.handle(
-    //                 graphql_server_state(vec![state]),
-    //                 &action,
-    //                 &message_data(),
-    //                 &mut DummyContext,
-    //             );
-    //             let metrics = get_metrics(&handle);
-    //             assert_eq!(metrics[&success_metric_name(&label)], 0.0);
-    //             assert_eq!(metrics[&error_metric_name(&label)], 0.0);
-    //             assert_eq!(metrics[&pending_metric_name(&label)], 1.0);
-    //             //     one success state -> (1, 0, 0)
-    //             let (state, label) = success_state(&factory);
-    //             server.handle(
-    //                 graphql_server_state(vec![state]),
-    //                 &action,
-    //                 &message_data(),
-    //                 &mut DummyContext,
-    //             );
-    //             let metrics = get_metrics(&handle);
-    //             assert_eq!(metrics[&success_metric_name(&label)], 1.0);
-    //             assert_eq!(metrics[&error_metric_name(&label)], 0.0);
-    //             assert_eq!(metrics[&pending_metric_name(&label)], 0.0);
-    //             //     one success, one pending states with same label -> (0, 1, 1)
-    //             let uuid = Uuid::new_v4();
-    //             let (success, success_label) = success_state_with_uuid(&factory, uuid.clone());
-    //             let (pending, pending_label) =
-    //                 pending_state_with_uuid(&factory, &allocator, uuid.clone());
-    //             server.handle(
-    //                 graphql_server_state(vec![success, pending]),
-    //                 &action,
-    //                 &message_data(),
-    //                 &mut DummyContext,
-    //             );
-    //             let metrics = get_metrics(&handle);
-    //             assert_eq!(pending_label, success_label);
-    //             assert_eq!(metrics[&success_metric_name(&pending_label)], 1.0);
-    //             assert_eq!(metrics[&error_metric_name(&pending_label)], 0.0);
-    //             assert_eq!(metrics[&pending_metric_name(&pending_label)], 1.0);
-    //             //     two states with different label -> (1,0,0) + (1,0,0)
-    //             let (success, success_label) = success_state(&factory);
-    //             let (success2, success_label2) = success_state(&factory);
-    //             server.handle(
-    //                 graphql_server_state(vec![success, success2]),
-    //                 &action,
-    //                 &message_data(),
-    //                 &mut DummyContext,
-    //             );
-    //             let metrics = get_metrics(&handle);
-    //             assert_ne!(success_label, success_label2);
-    //             assert_eq!(metrics[&success_metric_name(&success_label)], 1.0);
-    //             assert_eq!(metrics[&error_metric_name(&success_label)], 0.0);
-    //             assert_eq!(metrics[&pending_metric_name(&success_label)], 0.0);
-    //             assert_eq!(metrics[&success_metric_name(&success_label2)], 1.0);
-    //             assert_eq!(metrics[&error_metric_name(&success_label2)], 0.0);
-    //             assert_eq!(metrics[&pending_metric_name(&success_label2)], 0.0);
-    //         }
-    //     })
-    // }
+    #[tokio::test]
+    async fn unsubscription_removes_subscription_from_state() {
+        // ensure subscription exists
+        let (_factory, _allocator, server) = harness();
+        let (subscribe_action, subscription_id) = graphql_subscribe_action();
+        let empty_state = GraphQlServerState::default();
+        let (updated_state, _) = server
+            .handle(
+                empty_state,
+                &subscribe_action,
+                &message_data(),
+                &mut DummyContext,
+            )
+            .into_parts();
+
+        let unsubscribe_action = graphql_unsubscribe_action(Some(subscription_id));
+        let (final_state, _) = server
+            .handle(
+                updated_state,
+                &unsubscribe_action,
+                &message_data(),
+                &mut DummyContext,
+            )
+            .into_parts();
+        assert_eq!(final_state.operations.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn unsubscription_updates_metrics_for_subscriptions() {
+        reflex_test_utils::run_metrics_test(|handle| {
+            // ensure subscription exists
+            let (_factory, _allocator, server) = harness();
+            let (subscribe_action, subscription_id) = graphql_subscribe_action();
+            let empty_state = GraphQlServerState::default();
+            let (updated_state, _) = server
+                .handle(
+                    empty_state,
+                    &subscribe_action,
+                    &message_data(),
+                    &mut DummyContext,
+                )
+                .into_parts();
+            let label = metric_label_for_subscription_id(subscription_id.clone());
+            let metrics = get_metrics(&handle);
+            assert_eq!(metrics[&success_metric_name(&label)], 0.0);
+            assert_eq!(metrics[&error_metric_name(&label)], 0.0);
+            assert_eq!(metrics[&pending_metric_name(&label)], 1.0);
+
+            let unsubscribe_action = graphql_unsubscribe_action(Some(subscription_id));
+            let (final_state, _) = server
+                .handle(
+                    updated_state,
+                    &unsubscribe_action,
+                    &message_data(),
+                    &mut DummyContext,
+                )
+                .into_parts();
+            assert_eq!(final_state.operations.len(), 0);
+            let label = metric_label_for_subscription_id(subscription_id);
+            let metrics = get_metrics(&handle);
+            assert_eq!(metrics[&success_metric_name(&label)], 0.0);
+            assert_eq!(metrics[&error_metric_name(&label)], 0.0);
+            assert_eq!(metrics[&pending_metric_name(&label)], 0.0);
+        });
+    }
+
+    #[tokio::test]
+    async fn graphql_query_modification_merges_subscriptions_with_shared_queries() {
+        reflex_test_utils::run_metrics_test(|handle| {
+            let (factory, allocator, server) = harness();
+
+            let (subscribe_action, subscription_id) = graphql_subscribe_action();
+            let subscription_label = metric_label_for_subscription_id(subscription_id);
+            let existing_subscription_id = Uuid::new_v4();
+            let (existing_successful_subscription, existing_label) =
+                success_state_with_uuid(&factory, &allocator, existing_subscription_id);
+            let initial_state = graphql_server_state(vec![existing_successful_subscription]);
+            let (updated_state, _) = server
+                .handle(
+                    initial_state,
+                    &subscribe_action,
+                    &message_data(),
+                    &mut DummyContext,
+                )
+                .into_parts();
+            assert_eq!(updated_state.operations.len(), 2);
+            let metrics = get_metrics(&handle);
+            assert_eq!(metrics[&success_metric_name(&subscription_label)], 0.0);
+            assert_eq!(metrics[&error_metric_name(&subscription_label)], 0.0);
+            assert_eq!(metrics[&pending_metric_name(&subscription_label)], 1.0);
+            assert_eq!(metrics[&success_metric_name(&existing_label)], 1.0);
+            assert_eq!(metrics[&error_metric_name(&existing_label)], 0.0);
+            assert_eq!(metrics[&pending_metric_name(&existing_label)], 0.0);
+
+            let modify_action = graphql_query_modify_action(subscription_id);
+            let (final_state, _) = server
+                .handle(
+                    updated_state,
+                    &modify_action,
+                    &message_data(),
+                    &mut DummyContext,
+                )
+                .into_parts();
+            assert_eq!(final_state.operations.len(), 1);
+            assert_eq!(
+                final_state.operations[0]
+                    .subscriptions
+                    .iter()
+                    .map(|sub| sub.subscription_id)
+                    .collect::<HashSet<Uuid>>(),
+                HashSet::from([subscription_id, existing_subscription_id])
+            );
+            let metrics = get_metrics(&handle);
+            assert_eq!(metrics[&success_metric_name(&subscription_label)], 1.0);
+            assert_eq!(metrics[&error_metric_name(&subscription_label)], 0.0);
+            assert_eq!(metrics[&pending_metric_name(&subscription_label)], 0.0);
+            assert_eq!(metrics[&success_metric_name(&existing_label)], 1.0);
+            assert_eq!(metrics[&error_metric_name(&existing_label)], 0.0);
+            assert_eq!(metrics[&pending_metric_name(&existing_label)], 0.0);
+        });
+    }
 
     fn error_metric_name(label: &str) -> String {
         format!("graphql_active_query_error_count{{{}}}", label)
@@ -1181,16 +1209,18 @@ mod test {
 
     fn success_state_with_uuid(
         factory: &impl ExpressionFactory<CachedSharedTerm<ServerBuiltins>>,
+        allocator: &impl HeapAllocator<CachedSharedTerm<ServerBuiltins>>,
         uuid: Uuid,
     ) -> (
         GraphQlOperationState<CachedSharedTerm<ServerBuiltins>>,
         String,
     ) {
         let (sub_state, sub_label) = subscription_state_with_uuid(uuid);
+        let operation = graphql_operation();
         (
             GraphQlOperationState {
-                operation: graphql_operation(),
-                query: factory.create_nil_term(),
+                operation: operation.clone(),
+                query: parse_graphql_operation(&operation, factory, allocator).unwrap(),
                 label: "".to_string(),
                 result: Some(dummy_success_result(factory)),
                 subscriptions: vec![sub_state],
@@ -1201,11 +1231,12 @@ mod test {
 
     fn success_state(
         factory: &impl ExpressionFactory<CachedSharedTerm<ServerBuiltins>>,
+        allocator: &impl HeapAllocator<CachedSharedTerm<ServerBuiltins>>,
     ) -> (
         GraphQlOperationState<CachedSharedTerm<ServerBuiltins>>,
         String,
     ) {
-        success_state_with_uuid(factory, Uuid::new_v4())
+        success_state_with_uuid(factory, allocator, Uuid::new_v4())
     }
 
     fn pending_state_with_uuid(
@@ -1269,38 +1300,34 @@ mod test {
         state
     }
 
-    fn graphql_operation_with_uuid(subscription_id: Uuid) -> GraphQlOperation {
-        let doc = Document {
-            definitions: vec![Definition::Operation(OperationDefinition::Subscription(
-                Subscription {
-                    position: Pos::default(),
-                    name: None,
-                    variable_definitions: vec![],
-                    directives: vec![],
-                    selection_set: SelectionSet {
-                        span: (Pos::default(), Pos::default()),
-                        items: vec![],
-                    },
-                },
-            ))],
-        };
+    fn graphql_operation_with_uuid(
+        subscription_id: Uuid,
+        variables: GraphQlVariables,
+    ) -> GraphQlOperation {
+        let query_with_variables =
+            parse_graphql_query("subscription($id: String) {\n  foo(id: $id)\n}\n").unwrap();
         GraphQlOperation::new(
-            doc,
+            query_with_variables,
             Some(subscription_id.to_string()),
-            JsonMap::default(),
+            variables,
             JsonMap::default(),
         )
     }
     fn graphql_operation() -> GraphQlOperation {
-        graphql_operation_with_uuid(Uuid::new_v4())
+        graphql_operation_with_uuid(Uuid::new_v4(), default_variable())
     }
 
     fn graphql_subscribe_action() -> (ServerCliAction<CachedSharedTerm<ServerBuiltins>>, Uuid) {
         let subscription_id = Uuid::new_v4();
+        let mut variables = JsonMap::new();
+        variables.insert(
+            "id".to_string(),
+            JsonValue::String("non_standard_value".to_string()),
+        );
         (
             GraphQlServerSubscribeAction {
                 subscription_id: subscription_id.clone(),
-                operation: graphql_operation_with_uuid(subscription_id.clone()),
+                operation: graphql_operation_with_uuid(subscription_id.clone(), variables),
                 _expression: PhantomData::default(),
             }
             .into(),
@@ -1318,13 +1345,19 @@ mod test {
         .into()
     }
 
-    fn graphql_query_emit_action(
-        subscription_id: Option<Uuid>,
-        result: CachedSharedTerm<ServerBuiltins>,
+    fn default_variable() -> GraphQlVariables {
+        let mut variables = JsonMap::new();
+        variables.insert("id".to_string(), JsonValue::String("value".to_string()));
+        variables
+    }
+
+    fn graphql_query_modify_action(
+        subscription_id: Uuid,
     ) -> ServerCliAction<CachedSharedTerm<ServerBuiltins>> {
-        GraphQlServerEmitAction {
-            subscription_id: subscription_id.unwrap_or_else(|| Uuid::new_v4()),
-            result,
+        GraphQlServerModifyAction {
+            subscription_id,
+            variables: default_variable(),
+            _expression: Default::default(),
         }
         .into()
     }
