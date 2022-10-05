@@ -11,7 +11,10 @@ use hyper::{
     upgrade::Upgraded,
     Body,
 };
-use hyper_tungstenite::{tungstenite::Message, HyperWebsocket, WebSocketStream};
+use hyper_tungstenite::{
+    tungstenite::{Error as TungsteniteError, Message},
+    HyperWebsocket, WebSocketStream,
+};
 use reflex::core::{Applicable, Expression, InstructionPointer, Reducible, Rewritable};
 use reflex_dispatcher::{
     scheduler::tokio::{TokioScheduler, TokioSchedulerMetricNames},
@@ -497,12 +500,21 @@ where
     let message_actions = subscribe_websocket_responses
         .map(move |response_stream| {
             let (websocket_tx, websocket_rx) = upgraded_socket.split();
-            let request_stream = websocket_rx.filter_map(move |message| {
-                let parsed_message = message
-                    .map_err(|err| format!("{}", err))
-                    .and_then(parse_websocket_message)
-                    .transpose();
-                let result = parsed_message.map(|message| match message {
+            let request_stream = websocket_rx
+                .filter_map(|message| {
+                    let parsed_message = message
+                        .or_else(|err| match err {
+                            TungsteniteError::ConnectionClosed => Ok(Message::Close(None)),
+                            err => Err(format!("{}", err)),
+                        })
+                        .and_then(parse_websocket_message)
+                        .transpose();
+                    future::ready(parsed_message)
+                })
+                .chain(stream::iter(once(Ok(
+                    GraphQlSubscriptionClientMessage::ConnectionTerminate,
+                ))))
+                .map(move |parsed_message| match parsed_message {
                     Err(err) => WebSocketServerSendAction {
                         connection_id,
                         message: GraphQlSubscriptionServerMessage::ConnectionError(
@@ -516,8 +528,6 @@ where
                     }
                     .into(),
                 });
-                future::ready(result)
-            });
             let response_stream =
                 ignore_stream_results(pipe_stream(response_stream, websocket_tx).into_stream());
             let duplex_stream = stream::select(request_stream, response_stream);
