@@ -15,31 +15,39 @@ use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
 static METRICS_RECORDER_LOCK: Mutex<()> = Mutex::new(());
 
 pub fn run_metrics_test(test: (impl FnOnce(&PrometheusHandle) -> () + UnwindSafe)) {
-    let lock = METRICS_RECORDER_LOCK
-        .lock()
-        .unwrap_or_else(|err| err.into_inner());
+    let lock = METRICS_RECORDER_LOCK.lock().unwrap_or_else(|err| {
+        // It's safe to use the poisoned mutex guard because we will have already dealt with the
+        // panic scenario (see below)
+        err.into_inner()
+    });
     match PrometheusBuilder::new().install_recorder() {
         Err(err) => {
             drop(lock);
             panic!("Unable to install Prometheus metrics recorder: {}", err)
         }
         Ok(handle) => {
-            /// This allows us to safely use the lock, whilst also allowing other threads to panic
-            /// whilst holding it. When another thread panics (i.e. a test fails) the drop
-            /// will run, clearing the recorder and cleanly dropping the lock. Other threads can
-            /// continue with their tests regardless.
+            /// This guard allows us to safely use the lock, whilst also allowing the thread to
+            /// panic whilst holding it. When the thread panics (i.e. the test fails) the PanicGuard
+            /// drop() method will run, clearing the recorder and cleanly releasing the lock,
+            /// allowing another thread to pick up the lock and run its own tests.
+            /// This is roughly equivalent to a 'finally' block in languages that use try/catch.
             struct PanicGuard<'a>(Option<MutexGuard<'a, ()>>);
             impl<'a> Drop for PanicGuard<'a> {
                 fn drop(&mut self) {
                     let Self(lock) = self;
                     if let Some(lock) = lock.take() {
+                        // Perform cleanup actions
                         metrics::clear_recorder();
+                        // Release the lock for use in other tests
                         drop(lock);
                     }
                 }
             }
             let guard = PanicGuard(Some(lock));
+            // Run the test (bearing in mind that the PanicGuard drop() cleanup method will always
+            // run even if the test panics e.g. due to an assertion failure)
             test(&handle);
+            // Test completed successfully, explicitly perform cleanup
             drop(guard)
         }
     };
