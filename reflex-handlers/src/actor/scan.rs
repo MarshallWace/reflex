@@ -8,6 +8,7 @@ use std::{
     marker::PhantomData,
 };
 
+use metrics::{describe_counter, describe_gauge, gauge, increment_gauge, Unit};
 use reflex::core::{
     ConditionType, Expression, ExpressionFactory, ExpressionListType, HeapAllocator, RefType,
     SignalType, StateToken, StringTermType, StringValue,
@@ -26,6 +27,42 @@ use reflex_runtime::{
 };
 
 pub const EFFECT_TYPE_SCAN: &'static str = "reflex::scan";
+
+#[derive(Clone, Copy, Debug)]
+pub struct ScanHandlerMetricNames {
+    pub scan_effect_iteration_count: &'static str,
+    pub scan_effect_result_count: &'static str,
+    pub scan_effect_state_size: &'static str,
+}
+impl ScanHandlerMetricNames {
+    fn init(self) -> Self {
+        describe_counter!(
+            self.scan_effect_iteration_count,
+            Unit::Count,
+            "Scan effect iteration count"
+        );
+        describe_counter!(
+            self.scan_effect_result_count,
+            Unit::Count,
+            "Scan effect result count"
+        );
+        describe_gauge!(
+            self.scan_effect_state_size,
+            Unit::Count,
+            "Scan effect accumulated state size"
+        );
+        self
+    }
+}
+impl Default for ScanHandlerMetricNames {
+    fn default() -> Self {
+        Self {
+            scan_effect_iteration_count: "scan_effect_iteration_count",
+            scan_effect_result_count: "scan_effect_result_count",
+            scan_effect_state_size: "scan_effect_state_size",
+        }
+    }
+}
 
 const EVENT_TYPE_SCAN_SOURCE: &'static str = "reflex::scan::source";
 const EVENT_TYPE_SCAN_STATE: &'static str = "reflex::scan::state";
@@ -60,6 +97,7 @@ where
 {
     factory: TFactory,
     allocator: TAllocator,
+    metric_names: ScanHandlerMetricNames,
     _expression: PhantomData<T>,
 }
 impl<T, TFactory, TAllocator> ScanHandler<T, TFactory, TAllocator>
@@ -68,10 +106,15 @@ where
     TFactory: AsyncExpressionFactory<T>,
     TAllocator: AsyncHeapAllocator<T>,
 {
-    pub fn new(factory: TFactory, allocator: TAllocator) -> Self {
+    pub fn new(
+        factory: TFactory,
+        allocator: TAllocator,
+        metric_names: ScanHandlerMetricNames,
+    ) -> Self {
         Self {
             factory,
             allocator,
+            metric_names: metric_names.init(),
             _expression: Default::default(),
         }
     }
@@ -92,6 +135,7 @@ impl<T: Expression> Default for ScanHandlerState<T> {
 }
 
 struct ScanHandlerReducerState<T: Expression> {
+    metric_labels: Vec<(String, String)>,
     source_effect: T::Signal<T>,
     source_value_effect: T::Signal<T>,
     source_value: Option<T>,
@@ -252,6 +296,13 @@ where
                 let updated_state_token = *updated_state_token;
                 if updated_state_token == reducer_state.source_effect.id() {
                     // The source input has emitted, so trigger the next reducer iteration
+                    {
+                        increment_gauge!(
+                            self.metric_names.scan_effect_iteration_count,
+                            1.0,
+                            &reducer_state.metric_labels
+                        );
+                    }
                     let (value, _) =
                         parse_evaluate_effect_result(update, &self.factory)?.into_parts();
                     reducer_state.source_value.replace(value.clone());
@@ -269,6 +320,16 @@ where
                     let (value, _) =
                         parse_evaluate_effect_result(update, &self.factory)?.into_parts();
                     reducer_state.state_value = value.clone();
+                    increment_gauge!(
+                        self.metric_names.scan_effect_result_count,
+                        1.0,
+                        &reducer_state.metric_labels
+                    );
+                    gauge!(
+                        self.metric_names.scan_effect_state_size,
+                        value.size() as f64,
+                        &reducer_state.metric_labels
+                    );
                     // Emit a result for the overall scan effect, resetting the reducer state to a pending value
                     // (this effectively blocks the reducer query from being prematurely re-evaluated with a stale state
                     // when the next source value arrives)
@@ -308,7 +369,7 @@ where
             Entry::Occupied(_) => None,
             Entry::Vacant(entry) => {
                 let ScanEffectArgs {
-                    name,
+                    label,
                     target,
                     seed,
                     iteratee,
@@ -323,10 +384,9 @@ where
                     self.allocator
                         .create_triple(target.clone(), seed.clone(), iteratee.clone()),
                 );
-                let reducer_label = format!("{} [reducer]", name);
-                let source_label = name;
+                let reducer_label = format!("{} [reducer]", label);
                 let source_effect = create_evaluate_effect(
-                    source_label,
+                    label.clone(),
                     target,
                     QueryEvaluationMode::Standalone,
                     QueryInvalidationStrategy::Exact,
@@ -347,14 +407,31 @@ where
                     &self.factory,
                     &self.allocator,
                 );
-                entry.insert(ScanHandlerReducerState {
+                let reducer_state = ScanHandlerReducerState {
+                    metric_labels: vec![(String::from("label"), label)],
                     source_effect: source_effect.clone(),
                     source_value_effect,
                     source_value: None,
                     state_value_effect,
                     state_value: seed,
                     result_effect: result_effect.clone(),
-                });
+                };
+                gauge!(
+                    self.metric_names.scan_effect_iteration_count,
+                    0.0,
+                    &reducer_state.metric_labels
+                );
+                gauge!(
+                    self.metric_names.scan_effect_result_count,
+                    0.0,
+                    &reducer_state.metric_labels
+                );
+                gauge!(
+                    self.metric_names.scan_effect_state_size,
+                    0.0,
+                    &reducer_state.metric_labels
+                );
+                entry.insert(reducer_state);
                 Some((source_effect, result_effect))
             }
         }?;
@@ -381,14 +458,31 @@ where
         TAction: Action + OutboundAction<EffectUnsubscribeAction<T>>,
     {
         if let Entry::Occupied(entry) = state.effect_state.entry(effect.id()) {
+            let reducer_state = entry.remove();
+            gauge!(
+                self.metric_names.scan_effect_iteration_count,
+                0.0,
+                &reducer_state.metric_labels
+            );
+            gauge!(
+                self.metric_names.scan_effect_result_count,
+                0.0,
+                &reducer_state.metric_labels
+            );
+            gauge!(
+                self.metric_names.scan_effect_state_size,
+                0.0,
+                &reducer_state.metric_labels
+            );
             let ScanHandlerReducerState {
+                metric_labels: _,
                 source_effect,
                 source_value_effect: _,
                 source_value: _,
                 state_value_effect: _,
                 state_value: _,
                 result_effect,
-            } = entry.remove();
+            } = reducer_state;
             state.effect_mappings.remove(&source_effect.id());
             state.effect_mappings.remove(&result_effect.id());
             Some(
@@ -405,7 +499,7 @@ where
 }
 
 struct ScanEffectArgs<T: Expression> {
-    name: String,
+    label: String,
     target: T,
     seed: T,
     iteratee: T,
@@ -429,7 +523,7 @@ fn parse_scan_effect_args<T: Expression>(
     let iteratee = remaining_args.next().unwrap();
     if let Some(name) = factory.match_string_term(name) {
         Ok(ScanEffectArgs {
-            name: String::from(name.value().as_deref().as_str()),
+            label: String::from(name.value().as_deref().as_str()),
             target: target.clone(),
             seed: seed.clone(),
             iteratee: iteratee.clone(),

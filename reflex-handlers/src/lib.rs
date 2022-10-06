@@ -6,7 +6,7 @@ use actor::{
     fetch::{FetchHandlerAction, FetchHandlerMetricNames},
     graphql::{GraphQlHandlerAction, GraphQlHandlerMetricNames},
     loader::{LoaderHandlerAction, LoaderHandlerMetricNames},
-    scan::ScanHandlerAction,
+    scan::{ScanHandlerAction, ScanHandlerMetricNames},
     timeout::TimeoutHandlerAction,
     timestamp::TimestampHandlerAction,
     variable::VariableHandlerAction,
@@ -59,6 +59,7 @@ pub struct DefaultHandlersMetricNames {
     pub fetch_handler: FetchHandlerMetricNames,
     pub graphql_handler: GraphQlHandlerMetricNames,
     pub loader_handler: LoaderHandlerMetricNames,
+    pub scan_handler: ScanHandlerMetricNames,
 }
 
 pub fn default_handlers<TAction, T, TFactory, TAllocator, TConnect, TReconnect>(
@@ -104,7 +105,11 @@ where
                     metric_names.loader_handler,
                 ),
                 ChainedActor::new(
-                    ScanHandler::new(factory.clone(), allocator.clone()),
+                    ScanHandler::new(
+                        factory.clone(),
+                        allocator.clone(),
+                        metric_names.scan_handler,
+                    ),
                     ChainedActor::new(
                         TimeoutHandler::new(factory.clone(), allocator.clone()),
                         ChainedActor::new(
