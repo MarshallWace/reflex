@@ -6,6 +6,7 @@
 use anyhow::{anyhow, Context, Result};
 use futures::{future, Future, FutureExt};
 use http::{header, HeaderMap, Request, Response};
+use metrics::SharedString;
 use opentelemetry::trace::{Span, Tracer};
 use reflex::core::{Applicable, InstructionPointer, Reducible, Rewritable};
 use reflex_dispatcher::{
@@ -147,6 +148,7 @@ where
         get_http_query_metric_labels,
         get_websocket_connection_metric_labels,
         get_websocket_operation_metric_labels,
+        get_worker_metric_labels,
         tracer,
     )
     .map_err(|err| anyhow!(err))
@@ -191,6 +193,10 @@ fn get_websocket_connection_metric_labels(
 
 fn get_websocket_operation_metric_labels(_operation: &GraphQlOperation) -> Vec<(String, String)> {
     Vec::new()
+}
+
+fn get_worker_metric_labels(query_name: &str) -> Vec<(SharedString, SharedString)> {
+    vec![("worker".into(), String::from(query_name).into())]
 }
 
 pub trait HttpMiddleware<

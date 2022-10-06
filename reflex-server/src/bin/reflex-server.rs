@@ -14,6 +14,7 @@ use std::{
 use anyhow::{anyhow, Context, Result};
 use clap::Parser;
 use http::HeaderMap;
+use metrics::SharedString;
 use metrics_exporter_prometheus::PrometheusBuilder;
 use opentelemetry::trace::noop::NoopTracer;
 use reflex::core::Expression;
@@ -259,6 +260,7 @@ pub async fn main() -> Result<()> {
         get_http_query_metric_labels,
         get_websocket_connection_metric_labels,
         get_websocket_operation_metric_labels,
+        get_worker_metric_labels,
         match tracer {
             None => EitherTracer::Left(NoopTracer::default()),
             Some(tracer) => EitherTracer::Right(tracer),
@@ -290,6 +292,10 @@ fn get_websocket_operation_metric_labels(operation: &GraphQlOperation) -> Vec<(S
         String::from("operation_name"),
         String::from(operation.operation_name().unwrap_or("<null>")),
     )]
+}
+
+fn get_worker_metric_labels(query_name: &str) -> Vec<(SharedString, SharedString)> {
+    vec![("worker".into(), String::from(query_name).into())]
 }
 
 fn log_server_action<T: Expression>(

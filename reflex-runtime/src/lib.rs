@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 
 pub mod action;
 pub mod actor;
+pub mod utils;
 pub mod worker;
 
 pub trait AsyncExpression: Expression + Send + 'static {}

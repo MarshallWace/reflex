@@ -14,6 +14,7 @@ use std::{
     sync::Arc,
 };
 
+use metrics::SharedString;
 use opentelemetry::{
     sdk::{
         resource::{EnvResourceDetector, ResourceDetector, SdkProvidedResourceDetector},
@@ -388,6 +389,7 @@ pub fn cli<T, TFactory, TAllocator, TAction>(
     get_websocket_operation_metric_labels: impl Fn(&GraphQlOperation) -> Vec<(String, String)>
         + Send
         + 'static,
+    get_worker_metric_labels: impl Fn(&str) -> Vec<(SharedString, SharedString)> + Send + 'static,
     tracer: impl Tracer<Span = impl Span + Send + Sync + 'static> + Send + 'static,
 ) -> Result<impl Future<Output = Result<(), hyper::Error>>>
 where
@@ -425,6 +427,7 @@ where
         get_http_query_metric_labels,
         get_websocket_connection_metric_labels,
         get_websocket_operation_metric_labels,
+        get_worker_metric_labels,
         tracer,
     )
     .map_err(|err| anyhow!(err))

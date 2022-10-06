@@ -2,9 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Jordan Hall <j.hall@mwam.com> https://github.com/j-hall-mwam
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use std::{hash::Hash, iter::once, sync::Arc, time::Instant};
 
-use metrics::{describe_histogram, histogram, Unit};
+use metrics::{describe_gauge, describe_histogram, histogram, Unit};
+
 use reflex::{
     core::{
         Applicable, DependencyList, EvaluationResult, Expression, ExpressionFactory, HeapAllocator,
@@ -24,6 +26,7 @@ use reflex_interpreter::{
     execute, DefaultInterpreterCache, InterpreterOptions, MutableInterpreterCache,
 };
 
+use crate::action::bytecode_interpreter::{BytecodeGcCompleteAction, BytecodeWorkerStatistics};
 use crate::{
     action::bytecode_interpreter::{
         BytecodeInterpreterEvaluateAction, BytecodeInterpreterGcAction,
@@ -37,6 +40,9 @@ pub struct BytecodeWorkerMetricNames {
     pub query_worker_compile_duration: &'static str,
     pub query_worker_evaluate_duration: &'static str,
     pub query_worker_gc_duration: &'static str,
+    pub query_worker_state_dependency_count: &'static str,
+    pub query_worker_evaluation_cache_entry_count: &'static str,
+    pub query_worker_evaluation_cache_deep_size: &'static str,
 }
 impl BytecodeWorkerMetricNames {
     pub(crate) fn init(self) -> Self {
@@ -55,6 +61,21 @@ impl BytecodeWorkerMetricNames {
             Unit::Seconds,
             "Worker garbage collection duration (seconds)"
         );
+        describe_gauge!(
+            self.query_worker_state_dependency_count,
+            Unit::Count,
+            "The number of state dependencies for the most recent worker result"
+        );
+        describe_gauge!(
+            self.query_worker_evaluation_cache_entry_count,
+            Unit::Count,
+            "The number of entries in the query worker evaluation cache"
+        );
+        describe_gauge!(
+            self.query_worker_evaluation_cache_deep_size,
+            Unit::Count,
+            "A full count of the number of graph nodes in all entries in the query worker evaluation cache"
+        );
         self
     }
 }
@@ -64,6 +85,9 @@ impl Default for BytecodeWorkerMetricNames {
             query_worker_compile_duration: "query_worker_compile_duration",
             query_worker_evaluate_duration: "query_worker_evaluate_duration",
             query_worker_gc_duration: "query_worker_gc_duration",
+            query_worker_state_dependency_count: "query_worker_state_dependency_count",
+            query_worker_evaluation_cache_deep_size: "query_worker_evaluation_cache_deep_size",
+            query_worker_evaluation_cache_entry_count: "query_worker_evaluation_cache_entry_count",
         }
     }
 }
@@ -73,6 +97,7 @@ pub trait BytecodeWorkerAction<T: Expression>:
     + InboundAction<BytecodeInterpreterEvaluateAction<T>>
     + InboundAction<BytecodeInterpreterGcAction>
     + OutboundAction<BytecodeInterpreterResultAction<T>>
+    + OutboundAction<BytecodeGcCompleteAction>
 {
 }
 impl<T: Expression, TAction> BytecodeWorkerAction<T> for TAction where
@@ -80,6 +105,7 @@ impl<T: Expression, TAction> BytecodeWorkerAction<T> for TAction where
         + InboundAction<BytecodeInterpreterEvaluateAction<T>>
         + InboundAction<BytecodeInterpreterGcAction>
         + OutboundAction<BytecodeInterpreterResultAction<T>>
+        + OutboundAction<BytecodeGcCompleteAction>
 {
 }
 
@@ -212,7 +238,9 @@ where
         context: &mut impl HandlerContext,
     ) -> Option<WorkerTransition<TAction>>
     where
-        TAction: Action + OutboundAction<BytecodeInterpreterResultAction<T>>,
+        TAction: Action
+            + OutboundAction<BytecodeInterpreterResultAction<T>>
+            + OutboundAction<BytecodeGcCompleteAction>,
     {
         let BytecodeInterpreterEvaluateAction {
             cache_id: _,
@@ -262,6 +290,7 @@ where
                 cache_id: self.cache_id,
                 state_index,
                 result: result.clone(),
+                statistics: self.get_statistics(),
             }
             .into(),
         ))))
@@ -270,13 +299,13 @@ where
         &mut self,
         action: BytecodeInterpreterGcAction,
         _metadata: &MessageData,
-        _context: &mut impl HandlerContext,
+        context: &mut impl HandlerContext,
     ) -> Option<WorkerTransition<TAction>>
     where
-        TAction: Action,
+        TAction: Action + OutboundAction<BytecodeGcCompleteAction>,
     {
         let BytecodeInterpreterGcAction {
-            cache_id: _,
+            cache_id,
             state_index,
         } = action;
         let current_state_index = self.state.state_index;
@@ -300,7 +329,26 @@ where
             self.metric_names.query_worker_gc_duration,
             elapsed_time.as_secs_f64()
         );
-        None
+        Some(WorkerTransition::new(once(StateOperation::Send(
+            context.caller_pid()?,
+            BytecodeGcCompleteAction {
+                cache_id: cache_id,
+                statistics: self.get_statistics(),
+            }
+            .into(),
+        ))))
+    }
+    fn get_statistics(&self) -> BytecodeWorkerStatistics {
+        BytecodeWorkerStatistics {
+            state_dependency_count: self
+                .state
+                .latest_result
+                .as_ref()
+                .map(|result| result.dependencies().len())
+                .unwrap_or(0),
+            evaluation_cache_entry_count: self.state.cache.len(),
+            evaluation_cache_deep_size: self.state.cache.size(),
+        }
     }
 }
 

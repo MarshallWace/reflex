@@ -1,9 +1,10 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use reflex::core::{EvaluationResult, Expression, StateToken};
 use reflex_dispatcher::{Action, MessageOffset, NamedAction, SerializableAction, SerializedAction};
-use reflex_json::JsonValue;
+use reflex_json::{JsonMap, JsonValue};
 use serde::{Deserialize, Serialize};
 
 #[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
@@ -15,6 +16,7 @@ pub enum BytecodeInterpreterActions<T: Expression> {
     Evaluate(BytecodeInterpreterEvaluateAction<T>),
     Result(BytecodeInterpreterResultAction<T>),
     Gc(BytecodeInterpreterGcAction),
+    GcComplete(BytecodeGcCompleteAction),
 }
 impl<T: Expression> Action for BytecodeInterpreterActions<T> {}
 impl<T: Expression> NamedAction for BytecodeInterpreterActions<T> {
@@ -23,6 +25,7 @@ impl<T: Expression> NamedAction for BytecodeInterpreterActions<T> {
             Self::Evaluate(action) => action.name(),
             Self::Result(action) => action.name(),
             Self::Gc(action) => action.name(),
+            Self::GcComplete(action) => action.name(),
         }
     }
 }
@@ -32,6 +35,7 @@ impl<T: Expression> SerializableAction for BytecodeInterpreterActions<T> {
             Self::Evaluate(action) => action.to_json(),
             Self::Result(action) => action.to_json(),
             Self::Gc(action) => action.to_json(),
+            Self::GcComplete(action) => action.to_json(),
         }
     }
 }
@@ -112,6 +116,30 @@ impl<'a, T: Expression> From<&'a BytecodeInterpreterActions<T>>
     }
 }
 
+impl<T: Expression> From<BytecodeGcCompleteAction> for BytecodeInterpreterActions<T> {
+    fn from(value: BytecodeGcCompleteAction) -> Self {
+        Self::GcComplete(value)
+    }
+}
+impl<T: Expression> From<BytecodeInterpreterActions<T>> for Option<BytecodeGcCompleteAction> {
+    fn from(value: BytecodeInterpreterActions<T>) -> Self {
+        match value {
+            BytecodeInterpreterActions::GcComplete(value) => Some(value),
+            _ => None,
+        }
+    }
+}
+impl<'a, T: Expression> From<&'a BytecodeInterpreterActions<T>>
+    for Option<&'a BytecodeGcCompleteAction>
+{
+    fn from(value: &'a BytecodeInterpreterActions<T>) -> Self {
+        match value {
+            BytecodeInterpreterActions::GcComplete(value) => Some(value),
+            _ => None,
+        }
+    }
+}
+
 #[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct BytecodeInterpreterEvaluateAction<T: Expression> {
     pub cache_id: StateToken,
@@ -148,6 +176,7 @@ pub struct BytecodeInterpreterResultAction<T: Expression> {
     pub cache_id: StateToken,
     pub state_index: Option<MessageOffset>,
     pub result: EvaluationResult<T>,
+    pub statistics: BytecodeWorkerStatistics,
 }
 impl<T: Expression> Action for BytecodeInterpreterResultAction<T> {}
 impl<T: Expression> NamedAction for BytecodeInterpreterResultAction<T> {
@@ -167,6 +196,23 @@ impl<T: Expression> SerializableAction for BytecodeInterpreterResultAction<T> {
                 },
             ),
             ("result_id", JsonValue::from(self.result.result().id())),
+            (
+                "statistics",
+                JsonValue::Object(JsonMap::from_iter([
+                    (
+                        String::from("state_dependency_count"),
+                        JsonValue::from(self.statistics.state_dependency_count),
+                    ),
+                    (
+                        String::from("evaluation_cache_entry_count"),
+                        JsonValue::from(self.statistics.evaluation_cache_entry_count),
+                    ),
+                    (
+                        String::from("evaluation_cache_deep_size"),
+                        JsonValue::from(self.statistics.evaluation_cache_deep_size),
+                    ),
+                ])),
+            ),
         ])
     }
 }
@@ -195,4 +241,47 @@ impl SerializableAction for BytecodeInterpreterGcAction {
             ),
         ])
     }
+}
+
+#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
+pub struct BytecodeGcCompleteAction {
+    pub cache_id: StateToken,
+    pub statistics: BytecodeWorkerStatistics,
+}
+impl Action for BytecodeGcCompleteAction {}
+impl NamedAction for BytecodeGcCompleteAction {
+    fn name(&self) -> &'static str {
+        "BytecodeGcCompleteAction "
+    }
+}
+impl SerializableAction for BytecodeGcCompleteAction {
+    fn to_json(&self) -> SerializedAction {
+        SerializedAction::from_iter([
+            ("cache_id", JsonValue::from(self.cache_id)),
+            (
+                "statistics",
+                JsonValue::Object(JsonMap::from_iter([
+                    (
+                        String::from("state_dependency_count"),
+                        JsonValue::from(self.statistics.state_dependency_count),
+                    ),
+                    (
+                        String::from("evaluation_cache_entry_count"),
+                        JsonValue::from(self.statistics.evaluation_cache_entry_count),
+                    ),
+                    (
+                        String::from("evaluation_cache_deep_size"),
+                        JsonValue::from(self.statistics.evaluation_cache_deep_size),
+                    ),
+                ])),
+            ),
+        ])
+    }
+}
+
+#[derive(PartialEq, Eq, Clone, Copy, Default, Debug, Serialize, Deserialize)]
+pub struct BytecodeWorkerStatistics {
+    pub state_dependency_count: usize,
+    pub evaluation_cache_entry_count: usize,
+    pub evaluation_cache_deep_size: usize,
 }

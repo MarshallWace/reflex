@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Jordan Hall <j.hall@mwam.com> https://github.com/j-hall-mwam
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use std::{
     fs,
     iter::once,
@@ -12,6 +13,7 @@ use std::{
 use anyhow::{anyhow, Context, Result};
 use clap::Parser;
 use futures::{stream, StreamExt};
+use metrics::SharedString;
 use reflex::{
     cache::SubstitutionCache,
     core::{
@@ -197,6 +199,7 @@ pub async fn main() -> Result<()> {
                             factory.clone(),
                             allocator,
                             BytecodeWorkerMetricNames::default(),
+                            get_worker_metric_labels,
                         ),
                     ),
                     handlers,
@@ -271,6 +274,10 @@ fn create_query<
         effects: vec![evaluate_effect.clone()],
     };
     (evaluate_effect, subscribe_action)
+}
+
+fn get_worker_metric_labels(query_name: &str) -> Vec<(SharedString, SharedString)> {
+    vec![("worker".into(), String::from(query_name).into())]
 }
 
 struct DebugActorLogger<T: std::io::Write> {
@@ -685,6 +692,22 @@ impl<T: Expression> From<CliAction<T>> for Option<BytecodeInterpreterEvaluateAct
 impl<'a, T: Expression> From<&'a CliAction<T>>
     for Option<&'a BytecodeInterpreterEvaluateAction<T>>
 {
+    fn from(value: &'a CliAction<T>) -> Self {
+        Option::<&'a BytecodeInterpreterActions<T>>::from(value).and_then(|value| value.into())
+    }
+}
+
+impl<T: Expression> From<BytecodeGcCompleteAction> for CliAction<T> {
+    fn from(value: BytecodeGcCompleteAction) -> Self {
+        BytecodeInterpreterActions::<T>::from(value).into()
+    }
+}
+impl<T: Expression> From<CliAction<T>> for Option<BytecodeGcCompleteAction> {
+    fn from(value: CliAction<T>) -> Self {
+        Option::<BytecodeInterpreterActions<T>>::from(value).and_then(|value| value.into())
+    }
+}
+impl<'a, T: Expression> From<&'a CliAction<T>> for Option<&'a BytecodeGcCompleteAction> {
     fn from(value: &'a CliAction<T>) -> Self {
         Option::<&'a BytecodeInterpreterActions<T>>::from(value).and_then(|value| value.into())
     }

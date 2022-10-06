@@ -786,6 +786,22 @@ impl<'a, T: Expression> From<&'a ServerCliAction<T>>
     }
 }
 
+impl<T: Expression> From<BytecodeGcCompleteAction> for ServerCliAction<T> {
+    fn from(value: BytecodeGcCompleteAction) -> Self {
+        BytecodeInterpreterActions::<T>::from(value).into()
+    }
+}
+impl<T: Expression> From<ServerCliAction<T>> for Option<BytecodeGcCompleteAction> {
+    fn from(value: ServerCliAction<T>) -> Self {
+        Option::<BytecodeInterpreterActions<T>>::from(value).and_then(|value| value.into())
+    }
+}
+impl<'a, T: Expression> From<&'a ServerCliAction<T>> for Option<&'a BytecodeGcCompleteAction> {
+    fn from(value: &'a ServerCliAction<T>) -> Self {
+        Option::<&'a BytecodeInterpreterActions<T>>::from(value).and_then(|value| value.into())
+    }
+}
+
 impl<T: Expression> From<BytecodeInterpreterGcAction> for ServerCliAction<T> {
     fn from(value: BytecodeInterpreterGcAction) -> Self {
         BytecodeInterpreterActions::<T>::from(value).into()

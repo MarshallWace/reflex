@@ -202,6 +202,12 @@ impl<T: Expression> DefaultInterpreterCache<T> {
     pub fn len(&self) -> usize {
         self.cache.len()
     }
+    pub fn size(&self) -> usize {
+        self.cache
+            .values()
+            .map(|x| x.value.result.result().size())
+            .sum()
+    }
 }
 impl<T: Expression> InterpreterCache<T> for DefaultInterpreterCache<T> {
     fn retrieve_result(

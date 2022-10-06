@@ -15,7 +15,7 @@ use http::HeaderMap;
 use hyper::server::conn::AddrStream;
 use hyper::service::make_service_fn;
 use hyper::Server;
-use reflex_server::opentelemetry::trace::noop::NoopTracer;
+use reflex_server::{metrics::SharedString, opentelemetry::trace::noop::NoopTracer};
 use tokio::sync::oneshot;
 
 use rand::distributions::Alphanumeric;
@@ -112,6 +112,7 @@ pub fn serve_graphql(input: &str) -> (SocketAddr, oneshot::Sender<()>) {
         get_http_query_metric_labels,
         get_websocket_connection_metric_labels,
         get_websocket_operation_metric_labels,
+        get_worker_metric_labels,
         NoopTracer::default(),
     )
     .unwrap();
@@ -157,4 +158,8 @@ fn get_websocket_operation_metric_labels(operation: &GraphQlOperation) -> Vec<(S
         String::from("operation_name"),
         String::from(operation.operation_name().unwrap_or("<null>")),
     )]
+}
+
+fn get_worker_metric_labels(query_name: &str) -> Vec<(SharedString, SharedString)> {
+    vec![("worker".into(), String::from(query_name).into())]
 }

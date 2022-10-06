@@ -16,11 +16,12 @@ use hyper_tungstenite::{
     tungstenite::{Error as TungsteniteError, Message},
     HyperWebsocket, WebSocketStream,
 };
+use metrics::SharedString;
 use opentelemetry::trace::{Span, Tracer};
 use reflex::core::{Applicable, Expression, InstructionPointer, Reducible, Rewritable};
-use reflex_dispatcher::tokio_task_metrics_export::get_task_monitor;
 use reflex_dispatcher::{
     scheduler::tokio::{TokioScheduler, TokioSchedulerMetricNames},
+    tokio_task_metrics_export::get_task_monitor,
     utils::take_until_final_item::TakeUntilFinalItem,
     Action, Actor, AsyncActionFilter, AsyncActionStream, AsyncDispatchResult, AsyncScheduler,
     AsyncSubscriptionStream, ChainedActor, InboundAction, InstrumentedActor,
@@ -149,6 +150,7 @@ impl<TAction: Action + Send + 'static> GraphQlWebServer<TAction> {
         get_operation_metric_labels: impl Fn(&GraphQlOperation) -> Vec<(String, String)>
             + Send
             + 'static,
+        get_worker_metric_labels: impl Fn(&str) -> Vec<(SharedString, SharedString)> + Send + 'static,
         tracer: impl Tracer<Span = impl Span + Send + Sync + 'static> + Send + 'static,
     ) -> Result<Self, String>
     where
@@ -193,6 +195,7 @@ impl<TAction: Action + Send + 'static> GraphQlWebServer<TAction> {
                                 factory,
                                 allocator,
                                 metric_names.interpreter,
+                                get_worker_metric_labels,
                             ),
                             "BytecodeInterpreter",
                             metric_names.server.actor,
