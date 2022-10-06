@@ -102,6 +102,27 @@ impl Default for GraphQlServerMetricNames {
     }
 }
 
+#[derive(Default)]
+struct QueryStatusMetrics {
+    success: usize,
+    error: usize,
+    pending: usize,
+}
+impl QueryStatusMetrics {
+    fn register_query(&mut self, status: GraphQlQueryStatus) {
+        match status {
+            GraphQlQueryStatus::Pending => {
+                self.pending += 1;
+            }
+            GraphQlQueryStatus::Success => {
+                self.success += 1;
+            }
+            GraphQlQueryStatus::Error => {
+                self.error += 1;
+            }
+        }
+    }
+}
 pub(crate) struct GraphQlServer<T, TFactory, TAllocator, TQueryLabel, TMetricLabels>
 where
     T: Expression,
@@ -348,7 +369,7 @@ where
                             },
                         )),
                     );
-                    self.update_graphql_query_status_metrics(state);
+                    self.update_graphql_query_status_metrics(state, []);
                     Some(transition)
                 } else {
                     let label = (self.get_graphql_query_label)(operation);
@@ -377,7 +398,7 @@ where
                             QuerySubscribeAction { query, label }.into(),
                         ),
                     ]);
-                    self.update_graphql_query_status_metrics(state);
+                    self.update_graphql_query_status_metrics(state, []);
                     Some(transition)
                 }
             }
@@ -430,10 +451,7 @@ where
                 .into(),
             ))))
         };
-        self.update_graphql_query_status_metrics_after_subscription_removal(
-            state,
-            Some(&removed_subscription.metric_labels),
-        );
+        self.update_graphql_query_status_metrics(state, [removed_subscription.metric_labels]);
         transition
     }
     fn handle_graphql_modify<TAction>(
@@ -574,10 +592,7 @@ where
                                 }),
                             ),
                         );
-                        self.update_graphql_query_status_metrics_after_subscription_removal(
-                            state,
-                            Some(&previous_metric_labels),
-                        );
+                        self.update_graphql_query_status_metrics(state, [previous_metric_labels]);
                         Some(transition)
                     } else {
                         let label = (self.get_graphql_query_label)(&updated_operation);
@@ -606,10 +621,7 @@ where
                                 QuerySubscribeAction { query, label }.into(),
                             ),
                         ]);
-                        self.update_graphql_query_status_metrics_after_subscription_removal(
-                            state,
-                            Some(&previous_metric_labels),
-                        );
+                        self.update_graphql_query_status_metrics(state, [previous_metric_labels]);
                         Some(transition)
                     }
                 }
@@ -680,7 +692,7 @@ where
                 )
             }));
         if should_recalculate_metrics {
-            self.update_graphql_query_status_metrics(state);
+            self.update_graphql_query_status_metrics(state, []);
         }
         Some(transition)
     }
@@ -738,64 +750,63 @@ where
         }
         None
     }
-    fn update_graphql_query_status_metrics_after_subscription_removal(
+    fn update_graphql_query_status_metrics<const NUM_DISPOSED: usize>(
         &self,
         state: &GraphQlServerState<T>,
-        removed_subscription_labels: Option<&Vec<(String, String)>>,
+        disposed_metrics: [Vec<(String, String)>; NUM_DISPOSED],
     ) {
-        let mut labels_to_metrics_mapping: HashMap<&Vec<(String, String)>, (f64, f64, f64)> =
-            HashMap::new();
-
-        // ensure that the metrics corresponding to this subscription are no longer counted
-        if let Some(removed_subscription_labels) = removed_subscription_labels {
-            labels_to_metrics_mapping.insert(&removed_subscription_labels, (0.0, 0.0, 0.0));
-        }
-
-        for operation in &state.operations {
-            for subscription in &operation.subscriptions {
-                let status = GraphQlQueryStatus::get_state(
-                    operation.result.as_ref().map(|result| result.result()),
-                    &self.factory,
-                );
-                let (success_count, error_count, pending_count) = labels_to_metrics_mapping
-                    .entry(&subscription.metric_labels)
-                    .or_insert_with(|| (0.0, 0.0, 0.0));
-
-                match status {
-                    GraphQlQueryStatus::Pending => {
-                        *pending_count += 1.0;
-                    }
-                    GraphQlQueryStatus::Success => {
-                        *success_count += 1.0;
-                    }
-                    GraphQlQueryStatus::Error => {
-                        *error_count += 1.0;
-                    }
-                }
-            }
-        }
-        for (metric_labels, (success_count, error_count, pending_count)) in
-            labels_to_metrics_mapping
-        {
-            gauge!(
-                self.metric_names.graphql_active_query_pending_count,
-                pending_count,
-                metric_labels
+        let query_status_metrics = state
+            .operations
+            .iter()
+            .flat_map(|operation| {
+                let result = operation.result.as_ref().map(|result| result.result());
+                let status = GraphQlQueryStatus::get_state(result, &self.factory);
+                operation
+                    .subscriptions
+                    .iter()
+                    .map(move |subscription| (&subscription.metric_labels, status))
+            })
+            .fold(
+                HashMap::<&Vec<(String, String)>, QueryStatusMetrics>::from_iter(
+                    disposed_metrics
+                        .iter()
+                        .map(|metric_labels| (metric_labels, QueryStatusMetrics::default())),
+                ),
+                |mut results, (metric_labels, status)| {
+                    let query_metrics = results.entry(metric_labels).or_default();
+                    query_metrics.register_query(status);
+                    results
+                },
             );
-            gauge!(
-                self.metric_names.graphql_active_query_error_count,
-                error_count,
-                metric_labels
-            );
-            gauge!(
-                self.metric_names.graphql_active_query_success_count,
-                success_count,
-                metric_labels
-            );
+        for (metric_labels, metric_counts) in query_status_metrics {
+            self.update_graphql_query_status_metric(metric_labels, metric_counts);
         }
     }
-    fn update_graphql_query_status_metrics(&self, state: &GraphQlServerState<T>) {
-        self.update_graphql_query_status_metrics_after_subscription_removal(state, None)
+    fn update_graphql_query_status_metric(
+        &self,
+        metric_labels: &Vec<(String, String)>,
+        metric_values: QueryStatusMetrics,
+    ) {
+        let QueryStatusMetrics {
+            pending,
+            error,
+            success,
+        } = metric_values;
+        gauge!(
+            self.metric_names.graphql_active_query_pending_count,
+            pending as f64,
+            metric_labels
+        );
+        gauge!(
+            self.metric_names.graphql_active_query_error_count,
+            error as f64,
+            metric_labels
+        );
+        gauge!(
+            self.metric_names.graphql_active_query_success_count,
+            success as f64,
+            metric_labels
+        );
     }
 }
 
@@ -831,7 +842,7 @@ fn is_pending_result_payload<T: Expression>(
         .unwrap_or(false)
 }
 
-#[derive(Eq, PartialEq, Debug)]
+#[derive(Eq, PartialEq, Clone, Copy, Debug)]
 enum GraphQlQueryStatus {
     Pending,
     Success,
@@ -850,7 +861,7 @@ impl GraphQlQueryStatus {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use std::collections::{HashMap, HashSet};
     use std::iter::empty;
 
