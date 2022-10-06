@@ -26,6 +26,9 @@ impl IntTermType for IntTerm {
     }
 }
 impl GraphNode for IntTerm {
+    fn size(&self) -> usize {
+        1
+    }
     fn capture_depth(&self) -> StackOffset {
         0
     }

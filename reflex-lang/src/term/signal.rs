@@ -38,6 +38,9 @@ impl<T: Expression> SignalTermType<T> for SignalTerm<T> {
     }
 }
 impl<T: Expression> GraphNode for SignalTerm<T> {
+    fn size(&self) -> usize {
+        1 + self.signals.len()
+    }
     fn capture_depth(&self) -> StackOffset {
         0
     }

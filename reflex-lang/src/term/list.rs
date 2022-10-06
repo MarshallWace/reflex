@@ -39,6 +39,9 @@ impl<T: Expression> ListTermType<T> for ListTerm<T> {
     }
 }
 impl<T: Expression> GraphNode for ListTerm<T> {
+    fn size(&self) -> usize {
+        1 + self.items.size()
+    }
     fn capture_depth(&self) -> StackOffset {
         self.items.capture_depth()
     }

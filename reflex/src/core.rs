@@ -407,6 +407,7 @@ pub trait Uid {
 }
 
 pub trait GraphNode {
+    fn size(&self) -> usize;
     fn capture_depth(&self) -> StackOffset;
     fn free_variables(&self) -> HashSet<StackOffset>;
     fn count_variable_usages(&self, offset: StackOffset) -> usize;

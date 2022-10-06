@@ -143,6 +143,9 @@ impl<T: Expression> HashmapTermType<T> for HashMapTerm<T> {
     }
 }
 impl<T: Expression> GraphNode for HashMapTerm<T> {
+    fn size(&self) -> usize {
+        1 + self.keys.size() + self.values.size()
+    }
     fn capture_depth(&self) -> StackOffset {
         self.keys.capture_depth().max(self.values.capture_depth())
     }

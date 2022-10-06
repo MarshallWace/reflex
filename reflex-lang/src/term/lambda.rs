@@ -46,6 +46,9 @@ impl<T: Expression> LambdaTermType<T> for LambdaTerm<T> {
     }
 }
 impl<T: Expression> GraphNode for LambdaTerm<T> {
+    fn size(&self) -> usize {
+        1 + self.body.size()
+    }
     fn capture_depth(&self) -> StackOffset {
         self.body.capture_depth().saturating_sub(self.num_args)
     }

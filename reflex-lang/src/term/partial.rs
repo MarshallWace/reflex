@@ -47,6 +47,9 @@ impl<T: Expression> PartialApplicationTermType<T> for PartialApplicationTerm<T> 
     }
 }
 impl<T: Expression + Applicable<T>> GraphNode for PartialApplicationTerm<T> {
+    fn size(&self) -> usize {
+        1 + self.target.size() + self.args.size()
+    }
     fn capture_depth(&self) -> StackOffset {
         let target_depth = self.target.capture_depth();
         let arg_depth = self.args.capture_depth();

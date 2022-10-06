@@ -46,6 +46,9 @@ impl<T: Expression> Uid for BuiltinTerm<T> {
     }
 }
 impl<T: Expression> GraphNode for BuiltinTerm<T> {
+    fn size(&self) -> usize {
+        1
+    }
     fn capture_depth(&self) -> StackOffset {
         0
     }

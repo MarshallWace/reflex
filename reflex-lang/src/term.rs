@@ -138,6 +138,31 @@ impl<T: Expression + Applicable<T>> GraphNode for Term<T>
 where
     T::String: Hash,
 {
+    fn size(&self) -> usize {
+        match self {
+            Self::Nil(term) => term.size(),
+            Self::Boolean(term) => term.size(),
+            Self::Int(term) => term.size(),
+            Self::Float(term) => term.size(),
+            Self::String(term) => term.size(),
+            Self::Symbol(term) => term.size(),
+            Self::Variable(term) => term.size(),
+            Self::Effect(term) => term.size(),
+            Self::Let(term) => term.size(),
+            Self::Lambda(term) => term.size(),
+            Self::Application(term) => term.size(),
+            Self::PartialApplication(term) => term.size(),
+            Self::Recursive(term) => term.size(),
+            Self::Builtin(term) => term.size(),
+            Self::CompiledFunction(term) => term.size(),
+            Self::Record(term) => term.size(),
+            Self::Constructor(term) => term.size(),
+            Self::List(term) => term.size(),
+            Self::HashMap(term) => term.size(),
+            Self::HashSet(term) => term.size(),
+            Self::Signal(term) => term.size(),
+        }
+    }
     fn capture_depth(&self) -> StackOffset {
         match self {
             Self::Nil(term) => term.capture_depth(),

@@ -17,6 +17,7 @@ use reflex::{
 pub struct CachedExpression<T: Expression> {
     value: T,
     hash: HashId,
+    size: usize,
     capture_depth: StackOffset,
     has_dynamic_dependencies_shallow: bool,
     has_dynamic_dependencies_deep: bool,
@@ -25,6 +26,7 @@ impl<T: Expression> CachedExpression<T> {
     pub fn new(value: T) -> Self {
         Self {
             hash: value.id(),
+            size: value.size(),
             capture_depth: value.capture_depth(),
             has_dynamic_dependencies_shallow: value.has_dynamic_dependencies(false),
             has_dynamic_dependencies_deep: value.has_dynamic_dependencies(true),
@@ -84,6 +86,9 @@ impl<T: Expression> PartialEq for CachedExpression<T> {
     }
 }
 impl<T: Expression> GraphNode for CachedExpression<T> {
+    fn size(&self) -> usize {
+        self.size
+    }
     fn capture_depth(&self) -> StackOffset {
         self.capture_depth
     }
@@ -370,6 +375,9 @@ impl<T: Expression> Expression for SharedExpression<T> {
     }
 }
 impl<T: Expression> GraphNode for SharedExpression<T> {
+    fn size(&self) -> usize {
+        self.value.size()
+    }
     fn capture_depth(&self) -> StackOffset {
         self.value.capture_depth()
     }

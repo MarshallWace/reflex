@@ -52,6 +52,9 @@ impl CompiledFunctionTermType for CompiledFunctionTerm {
     }
 }
 impl GraphNode for CompiledFunctionTerm {
+    fn size(&self) -> usize {
+        1
+    }
     fn capture_depth(&self) -> StackOffset {
         0
     }

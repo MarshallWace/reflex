@@ -78,6 +78,9 @@ impl<T: Expression> ExpressionListType<T> for ExpressionList<T> {
     }
 }
 impl<T: Expression> GraphNode for ExpressionList<T> {
+    fn size(&self) -> usize {
+        self.items.len()
+    }
     fn capture_depth(&self) -> StackOffset {
         self.items
             .iter()

@@ -26,6 +26,9 @@ impl SymbolTermType for SymbolTerm {
     }
 }
 impl GraphNode for SymbolTerm {
+    fn size(&self) -> usize {
+        1
+    }
     fn capture_depth(&self) -> StackOffset {
         0
     }

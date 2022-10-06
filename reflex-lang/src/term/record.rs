@@ -69,6 +69,9 @@ impl<T: Expression> RecordTermType<T> for RecordTerm<T> {
     }
 }
 impl<T: Expression> GraphNode for RecordTerm<T> {
+    fn size(&self) -> usize {
+        1 + self.values.size()
+    }
     fn capture_depth(&self) -> StackOffset {
         self.values.capture_depth()
     }

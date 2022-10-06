@@ -38,6 +38,9 @@ impl<T: Expression> EffectTerm<T> {
     }
 }
 impl<T: Expression> GraphNode for EffectTerm<T> {
+    fn size(&self) -> usize {
+        1
+    }
     fn capture_depth(&self) -> StackOffset {
         0
     }

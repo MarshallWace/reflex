@@ -416,6 +416,9 @@ impl<TBuiltin: Builtin> Expression for CachedSharedTerm<TBuiltin> {
     }
 }
 impl<TBuiltin: Builtin> GraphNode for CachedSharedTerm<TBuiltin> {
+    fn size(&self) -> usize {
+        self.value.size()
+    }
     fn capture_depth(&self) -> StackOffset {
         self.value.capture_depth()
     }

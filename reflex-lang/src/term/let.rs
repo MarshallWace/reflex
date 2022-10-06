@@ -45,6 +45,9 @@ impl<'term, T: Expression + 'term> LetTermType<T> for LetTerm<T> {
     }
 }
 impl<T: Expression> GraphNode for LetTerm<T> {
+    fn size(&self) -> usize {
+        1 + self.initializer.size() + self.body.size()
+    }
     fn capture_depth(&self) -> StackOffset {
         self.initializer
             .capture_depth()

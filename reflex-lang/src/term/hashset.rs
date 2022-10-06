@@ -45,6 +45,9 @@ impl<T: Expression> HashsetTermType<T> for HashSetTerm<T> {
     }
 }
 impl<T: Expression> GraphNode for HashSetTerm<T> {
+    fn size(&self) -> usize {
+        1 + self.values.size()
+    }
     fn capture_depth(&self) -> StackOffset {
         self.values.capture_depth()
     }

@@ -14,6 +14,9 @@ use reflex::core::{
 pub struct NilTerm;
 impl NilTermType for NilTerm {}
 impl GraphNode for NilTerm {
+    fn size(&self) -> usize {
+        1
+    }
     fn capture_depth(&self) -> StackOffset {
         0
     }

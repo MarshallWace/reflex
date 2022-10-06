@@ -38,6 +38,9 @@ impl<T: Expression> ConstructorTermType<T> for ConstructorTerm<T> {
     }
 }
 impl<T: Expression> GraphNode for ConstructorTerm<T> {
+    fn size(&self) -> usize {
+        1
+    }
     fn capture_depth(&self) -> StackOffset {
         0
     }

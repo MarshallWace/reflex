@@ -25,6 +25,9 @@ impl BooleanTermType for BooleanTerm {
     }
 }
 impl GraphNode for BooleanTerm {
+    fn size(&self) -> usize {
+        1
+    }
     fn capture_depth(&self) -> StackOffset {
         0
     }

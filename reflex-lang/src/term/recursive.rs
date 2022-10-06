@@ -37,6 +37,9 @@ impl<T: Expression> RecursiveTermType<T> for RecursiveTerm<T> {
     }
 }
 impl<T: Expression> GraphNode for RecursiveTerm<T> {
+    fn size(&self) -> usize {
+        1 + self.factory.size()
+    }
     fn capture_depth(&self) -> StackOffset {
         self.factory.capture_depth()
     }

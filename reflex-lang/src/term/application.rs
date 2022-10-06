@@ -50,6 +50,9 @@ impl<T: Expression> ApplicationTermType<T> for ApplicationTerm<T> {
     }
 }
 impl<T: Expression + Applicable<T>> GraphNode for ApplicationTerm<T> {
+    fn size(&self) -> usize {
+        1 + self.target.size() + self.args.size()
+    }
     fn capture_depth(&self) -> StackOffset {
         let target_depth = self.target().as_deref().capture_depth();
         let arg_depth = self.args().as_deref().capture_depth();
