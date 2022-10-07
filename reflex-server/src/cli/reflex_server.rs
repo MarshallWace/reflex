@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Jordan Hall <j.hall@mwam.com> https://github.com/j-hall-mwam
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use std::{
     collections::{HashMap, VecDeque},
     convert::Infallible,
@@ -58,6 +59,9 @@ use crate::{
     GraphQlWebServer, GraphQlWebServerAction, GraphQlWebServerMetricNames,
 };
 
+use crate::tokio_runtime_metrics_export::{
+    start_runtime_monitoring, TokioRuntimeMonitorMetricNames,
+};
 pub use reflex;
 pub use reflex_js::{
     compose_module_loaders, create_module_loader, imports::builtin_imports, static_module_loader,
@@ -369,6 +373,7 @@ pub fn cli<T, TFactory, TAllocator, TAction>(
     transform_http: impl HttpGraphQlServerQueryTransform + Send + 'static,
     transform_ws: impl WebSocketGraphQlServerQueryTransform + Send + 'static,
     metric_names: GraphQlWebServerMetricNames,
+    tokio_runtime_metric_names: TokioRuntimeMonitorMetricNames,
     get_graphql_query_label: impl Fn(&GraphQlOperation) -> String + Send + 'static,
     get_http_query_metric_labels: impl Fn(&GraphQlOperation, &HeaderMap) -> Vec<(String, String)>
         + Send
@@ -398,6 +403,7 @@ where
     TAllocator: AsyncHeapAllocator<T>,
     TAction: GraphQlWebServerAction<T> + Clone + Send + 'static,
 {
+    start_runtime_monitoring(tokio_runtime_metric_names);
     let app = GraphQlWebServer::new(
         graph_root,
         schema,

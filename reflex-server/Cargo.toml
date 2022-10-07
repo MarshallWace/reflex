@@ -44,6 +44,7 @@ strum = "0.22"
 strum_macros = "0.22"
 tokio = { version = "1", features = ["full", "tracing"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
+tokio-metrics = "0.1.0"
 tonic = { version = "0.6.2", features = ["tls"] }
 tracing = { version = "0.1.0", features = ["release_max_level_info"] }
 tracing-subscriber = "0.3"

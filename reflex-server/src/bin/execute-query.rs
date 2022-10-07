@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -19,6 +20,7 @@ use reflex_handlers::{
 };
 use reflex_interpreter::compiler::CompilerOptions;
 use reflex_lang::{allocator::DefaultAllocator, SharedTermFactory};
+use reflex_server::tokio_runtime_metrics_export::TokioRuntimeMonitorMetricNames;
 use reflex_server::{
     action::ServerCliAction,
     builtins::ServerBuiltins,
@@ -169,6 +171,7 @@ async fn main() -> Result<()> {
         NoopGraphQlQueryTransform,
         NoopHttpMiddleware,
         GraphQlWebServerMetricNames::default(),
+        TokioRuntimeMonitorMetricNames::default(),
     )
     .await
     .map(|response| println!("{}", response))

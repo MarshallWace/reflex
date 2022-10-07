@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Jordan Hall <j.hall@mwam.com> https://github.com/j-hall-mwam
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use std::{
     fs,
     net::SocketAddr,
@@ -30,6 +31,7 @@ use reflex_handlers::{
 use reflex_interpreter::{compiler::CompilerOptions, InterpreterOptions};
 use reflex_json::JsonValue;
 use reflex_lang::{allocator::DefaultAllocator, CachedSharedTerm, SharedTermFactory};
+use reflex_server::tokio_runtime_metrics_export::TokioRuntimeMonitorMetricNames;
 use reflex_server::{
     action::ServerCliAction,
     builtins::ServerBuiltins,
@@ -264,6 +266,7 @@ pub async fn main() -> Result<()> {
         NoopGraphQlQueryTransform,
         NoopGraphQlQueryTransform,
         GraphQlWebServerMetricNames::default(),
+        TokioRuntimeMonitorMetricNames::default(),
         get_graphql_query_label,
         get_http_query_metric_labels,
         get_websocket_connection_metric_labels,

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Jordan Hall <j.hall@mwam.com> https://github.com/j-hall-mwam
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use anyhow::{anyhow, Context, Result};
 use futures::{future, Future, FutureExt};
 use http::{header, HeaderMap, Request, Response};
@@ -25,6 +26,9 @@ use crate::{
     GraphQlWebServer, GraphQlWebServerAction, GraphQlWebServerMetricNames,
 };
 
+use crate::tokio_runtime_metrics_export::{
+    start_runtime_monitoring, TokioRuntimeMonitorMetricNames,
+};
 pub use hyper::Body;
 
 #[derive(PartialEq, Eq, Clone, Debug)]
@@ -62,6 +66,7 @@ pub async fn cli<
     query_transform: TTransform,
     http_middleware: THttpMiddleware,
     metric_names: GraphQlWebServerMetricNames,
+    tokio_runtime_metric_names: TokioRuntimeMonitorMetricNames,
 ) -> Result<String>
 where
     T: AsyncExpression
@@ -86,6 +91,7 @@ where
     TAction: Action + SerializableAction + GraphQlWebServerAction<T> + Clone + Send + 'static,
     TTransform: HttpGraphQlServerQueryTransform + Send + 'static,
 {
+    start_runtime_monitoring(tokio_runtime_metric_names);
     let compiler_options = if options.debug_compiler {
         CompilerOptions::debug()
     } else {

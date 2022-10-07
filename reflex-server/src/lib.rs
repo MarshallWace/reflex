@@ -25,6 +25,7 @@ pub mod middleware;
 pub mod recorder;
 pub mod server;
 pub mod stdlib;
+pub mod tokio_runtime_metrics_export;
 pub mod utils;
 
 pub(crate) mod service;
