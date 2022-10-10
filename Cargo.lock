@@ -1873,6 +1873,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
+ "tokio-metrics",
  "tokio-stream",
  "tokio-util 0.7.1",
 ]

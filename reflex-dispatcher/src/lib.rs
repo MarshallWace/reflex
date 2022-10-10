@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use std::{iter::empty, marker::PhantomData, pin::Pin, rc::Rc, sync::Arc};
 
 use futures::{
@@ -14,6 +15,7 @@ mod actor;
 pub mod scheduler;
 pub mod session_playback;
 pub mod session_recorder;
+pub mod tokio_task_metrics_export;
 pub mod utils;
 
 pub use actor::*;

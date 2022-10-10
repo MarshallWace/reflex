@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Jordan Hall <j.hall@mwam.com> https://github.com/j-hall-mwam
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use std::{convert::Infallible, iter::once, sync::Arc};
 
 use futures::{future, stream, Future, FutureExt, Sink, SinkExt, Stream, StreamExt};
@@ -16,6 +17,7 @@ use hyper_tungstenite::{
     HyperWebsocket, WebSocketStream,
 };
 use reflex::core::{Applicable, Expression, InstructionPointer, Reducible, Rewritable};
+use reflex_dispatcher::tokio_task_metrics_export::get_task_monitor;
 use reflex_dispatcher::{
     scheduler::tokio::{TokioScheduler, TokioSchedulerMetricNames},
     utils::take_until_final_item::TakeUntilFinalItem,
@@ -115,6 +117,7 @@ pub struct GraphQlWebServerMetricNames {
 
 pub struct GraphQlWebServer<TAction: Action + Send + 'static> {
     runtime: TokioScheduler<TAction>,
+    connection_monitor: tokio_metrics::TaskMonitor,
 }
 impl<TAction: Action + Send + 'static> GraphQlWebServer<TAction> {
     pub fn new<T, TFactory>(
@@ -156,6 +159,10 @@ impl<TAction: Action + Send + 'static> GraphQlWebServer<TAction> {
         TFactory: AsyncExpressionFactory<T>,
         TAction: GraphQlWebServerAction<T> + Clone + Send + 'static,
     {
+        let connection_monitor = get_task_monitor(
+            &metric_names.scheduler.tokio_task_metric_names,
+            "graphql_connection",
+        );
         let server = ServerActor::new(
             schema,
             factory.clone(),
@@ -186,7 +193,10 @@ impl<TAction: Action + Send + 'static> GraphQlWebServer<TAction> {
             middleware,
             metric_names.scheduler,
         );
-        Ok(Self { runtime })
+        Ok(Self {
+            runtime,
+            connection_monitor,
+        })
     }
     pub fn handle_graphql_http_request(
         &self,
@@ -244,9 +254,11 @@ where
         + OutboundAction<WebSocketServerSendAction>
         + OutboundAction<WebSocketServerReceiveAction>,
 {
+    let connection_monitor = server.connection_monitor.clone();
     service_fn({
         move |req: Request<Body>| {
             let server = server.clone();
+            let connection_monitor = connection_monitor.clone();
             async move {
                 let cors_headers = get_cors_headers(&req).into_iter().collect::<Vec<_>>();
                 let mut response = match req.method() {
@@ -256,7 +268,8 @@ where
                             match handle_graphql_websocket_request(&server.runtime, req).await {
                                 Err(response) => response,
                                 Ok((response, listen_task)) => {
-                                    let _ = tokio::spawn(listen_task);
+                                    let _ =
+                                        tokio::spawn(connection_monitor.instrument(listen_task));
                                     response
                                 }
                             }

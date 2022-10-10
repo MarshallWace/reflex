@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use std::{
     collections::{hash_map::Entry, HashMap, VecDeque},
     pin::Pin,
@@ -16,6 +17,7 @@ use tokio::{sync::mpsc, task::JoinHandle};
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::sync::{PollSendError, PollSender};
 
+use crate::tokio_task_metrics_export::{get_task_monitor, TokioTaskMetricNames};
 use crate::{
     utils::with_unsubscribe_callback::WithUnsubscribeCallback, Action, Actor, AsyncActionFilter,
     AsyncActionStream, AsyncDispatchResult, AsyncScheduler, AsyncSubscriptionStream,
@@ -28,6 +30,7 @@ use crate::{
 pub struct TokioSchedulerMetricNames {
     pub event_bus_queued_microtasks: &'static str,
     pub event_bus_microtask_queue_capacity: &'static str,
+    pub tokio_task_metric_names: TokioTaskMetricNames,
 }
 impl TokioSchedulerMetricNames {
     fn init(self) -> Self {
@@ -49,6 +52,7 @@ impl Default for TokioSchedulerMetricNames {
         Self {
             event_bus_queued_microtasks: "event_bus_queued_microtasks",
             event_bus_microtask_queue_capacity: "event_bus_microtask_capacity",
+            tokio_task_metric_names: TokioTaskMetricNames::default(),
         }
     }
 }
@@ -127,6 +131,7 @@ where
     commands: mpsc::Sender<TokioCommand<TAction>>,
     task: JoinHandle<()>,
     next_subscriber_id: AtomicUsize,
+    unsubscribe_monitor: tokio_metrics::TaskMonitor,
 }
 impl<TAction> Drop for TokioScheduler<TAction>
 where
@@ -186,11 +191,17 @@ where
         let metric_names = metric_names.init();
         let root_id = ProcessId::default();
         let (task, commands) = Self::init(actor, middleware, root_id, 1024, metric_names);
+        let root_task_monitor =
+            get_task_monitor(&metric_names.tokio_task_metric_names, "scheduler");
         Self {
             root_pid: root_id,
             commands,
-            task: tokio::spawn(task),
+            task: tokio::spawn(root_task_monitor.instrument(task)),
             next_subscriber_id: Default::default(),
+            unsubscribe_monitor: get_task_monitor(
+                &metric_names.tokio_task_metric_names,
+                "unsubscribe",
+            ),
         }
     }
     pub fn dispatch<TActions: AsyncActionStream<TAction>>(
@@ -237,6 +248,7 @@ where
             }
         };
         let results_stream = ReceiverStream::new(results_rx);
+        let unsubscribe_monitor = self.unsubscribe_monitor.clone();
         Box::pin(async move {
             let _ = subscribe_action.await;
             let results: Pin<Box<dyn Stream<Item = V> + Send + 'static>> =
@@ -244,7 +256,7 @@ where
                     let mut unsubscribe_action = Some(unsubscribe_action);
                     move || {
                         if let Some(unsubscribe) = unsubscribe_action.take() {
-                            let _ = tokio::spawn(unsubscribe);
+                            let _ = tokio::spawn(unsubscribe_monitor.instrument(unsubscribe));
                         }
                     }
                 }));
@@ -290,6 +302,11 @@ where
             0.0,
             &metric_labels
         );
+        let subscription_monitor =
+            get_task_monitor(&metric_names.tokio_task_metric_names, "subscription");
+        let task_monitor = get_task_monitor(&metric_names.tokio_task_metric_names, "task");
+        let abort_monitor = get_task_monitor(&metric_names.tokio_task_metric_names, "abort");
+        let worker_monitor = get_task_monitor(&metric_names.tokio_task_metric_names, "worker");
         let task = {
             let mut actor_state = Some(actor.init());
             let mut pre_middleware_state = Some(middleware.pre.init());
@@ -319,6 +336,9 @@ where
                             &mut pre_middleware_state,
                             &mut post_middleware_state,
                             &async_commands,
+                            &task_monitor,
+                            &abort_monitor,
+                            &worker_monitor,
                         );
                         // Add any spawned child commands to the event queue
                         command_queue.extend(child_commands.into_iter().map(
@@ -335,7 +355,7 @@ where
                         if let Some(action) = action {
                             for subscriber in subscribers.values() {
                                 if let Some(task) = subscriber.emit(&action) {
-                                    let _ = tokio::spawn(task);
+                                    let _ = tokio::spawn(subscription_monitor.instrument(task));
                                 }
                             }
                         }
@@ -393,6 +413,9 @@ fn process_command<
     pre_middleware_state: &mut Option<TPreMiddleware::State>,
     post_middleware_state: &mut Option<TPostMiddleware::State>,
     async_commands: &mpsc::Sender<TokioCommand<TAction>>,
+    task_monitor: &tokio_metrics::TaskMonitor,
+    abort_monitor: &tokio_metrics::TaskMonitor,
+    worker_monitor: &tokio_metrics::TaskMonitor,
 ) -> (
     Option<TAction>,
     impl IntoIterator<
@@ -492,7 +515,7 @@ fn process_command<
                     if let Entry::Vacant(entry) = processes.entry(pid) {
                         let (mut stream, dispose) = task.into_parts();
                         entry.insert(TokioProcess::Task(TokioTask {
-                            handle: tokio::spawn({
+                            handle: tokio::spawn(task_monitor.instrument({
                                 let results = async_commands.clone();
                                 async move {
                                     while let Some(operation) = stream.next().await {
@@ -504,7 +527,7 @@ fn process_command<
                                             .await;
                                     }
                                 }
-                            }),
+                            })),
                             dispose: Some(dispose),
                         }));
                     }
@@ -518,6 +541,7 @@ fn process_command<
                         entry.insert(TokioProcess::Worker(TokioWorker::new(
                             factory,
                             async_commands.clone(),
+                            &worker_monitor,
                         )));
                     }
                     let emitted_action = None;
@@ -529,7 +553,9 @@ fn process_command<
                     if let Entry::Occupied(entry) = processes.entry(pid) {
                         match entry.remove() {
                             TokioProcess::Task(mut task) => {
-                                tokio::spawn(async move { task.abort().await });
+                                tokio::spawn(
+                                    abort_monitor.instrument(async move { task.abort().await }),
+                                );
                             }
                             TokioProcess::Worker(_) => {}
                         }
@@ -644,11 +670,12 @@ where
             + Send
             + 'static,
         outbox: mpsc::Sender<TokioCommand<TAction>>,
+        worker_monitor: &tokio_metrics::TaskMonitor,
     ) -> Self {
         let (inbox_tx, mut inbox_rx) = mpsc::channel(1024);
         Self {
             inbox: inbox_tx,
-            task: tokio::spawn({
+            task: tokio::spawn(worker_monitor.instrument({
                 async move {
                     let mut worker = Some(factory.create());
                     while let Some((action, metadata, context)) = inbox_rx.recv().await {
@@ -681,7 +708,7 @@ where
                         }
                     }
                 }
-            }),
+            })),
         }
     }
 }
