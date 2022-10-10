@@ -5,6 +5,7 @@ use std::time::Duration;
 
 use metrics::{describe_gauge, gauge, Unit};
 
+#[derive(Clone, Copy, Debug)]
 pub struct TokioRuntimeMonitorMetricNames {
     pub tokio_runtime_injection_queue_depth: &'static str,
     pub tokio_runtime_max_busy_duration: &'static str,
