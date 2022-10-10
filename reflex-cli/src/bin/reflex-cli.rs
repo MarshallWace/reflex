@@ -16,7 +16,7 @@ use reflex::{
     cache::SubstitutionCache,
     core::{
         ConditionListType, ConditionType, Expression, ExpressionFactory, ExpressionListType,
-        InstructionPointer, LetTermType, RefType, SignalTermType, StateCache,
+        InstructionPointer, RefType, SignalTermType, StateCache,
     },
     env::inject_env_vars,
 };
@@ -92,14 +92,6 @@ pub async fn main() -> Result<()> {
     let debug_interpreter = args.debug_interpreter;
     let debug_stack = args.debug_stack;
     let factory = SharedTermFactory::<CliBuiltins>::default();
-    let term = factory.create_let_term(factory.create_int_term(3), factory.create_int_term(4));
-    if let Some(term) = factory.match_let_term(&term) {
-        println!(
-            "INTITIALIZER: {}, BODY: {}",
-            term.initializer().as_deref(),
-            term.body().as_deref()
-        );
-    }
     let allocator = DefaultAllocator::default();
     let input_path = args.entry_point;
     let syntax = args.syntax;
@@ -706,9 +698,7 @@ impl<T: Expression> From<CliAction<T>> for Option<BytecodeInterpreterResultActio
         Option::<BytecodeInterpreterActions<T>>::from(value).and_then(|value| value.into())
     }
 }
-impl<'a, T: Expression> From<&'a CliAction<T>>
-    for Option<&'a BytecodeInterpreterResultAction<T>>
-{
+impl<'a, T: Expression> From<&'a CliAction<T>> for Option<&'a BytecodeInterpreterResultAction<T>> {
     fn from(value: &'a CliAction<T>) -> Self {
         Option::<&'a BytecodeInterpreterActions<T>>::from(value).and_then(|value| value.into())
     }
@@ -724,9 +714,7 @@ impl<T: Expression> From<CliAction<T>> for Option<BytecodeInterpreterGcAction> {
         Option::<BytecodeInterpreterActions<T>>::from(value).and_then(|value| value.into())
     }
 }
-impl<'a, T: Expression> From<&'a CliAction<T>>
-    for Option<&'a BytecodeInterpreterGcAction>
-{
+impl<'a, T: Expression> From<&'a CliAction<T>> for Option<&'a BytecodeInterpreterGcAction> {
     fn from(value: &'a CliAction<T>) -> Self {
         Option::<&'a BytecodeInterpreterActions<T>>::from(value).and_then(|value| value.into())
     }
