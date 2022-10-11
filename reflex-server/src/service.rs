@@ -22,8 +22,8 @@ use reflex_dispatcher::{
     scheduler::tokio::{TokioScheduler, TokioSchedulerMetricNames},
     utils::take_until_final_item::TakeUntilFinalItem,
     Action, Actor, AsyncActionFilter, AsyncActionStream, AsyncDispatchResult, AsyncScheduler,
-    AsyncSubscriptionStream, ChainedActor, InboundAction, OutboundAction, PostMiddleware,
-    PreMiddleware, Scheduler, SchedulerMiddleware,
+    AsyncSubscriptionStream, ChainedActor, InboundAction, InstrumentedActor, OutboundAction,
+    PostMiddleware, PreMiddleware, Scheduler, SchedulerMiddleware,
 };
 use reflex_graphql::{
     create_json_error_object,
@@ -179,13 +179,17 @@ impl<TAction: Action + Send + 'static> GraphQlWebServer<TAction> {
             ChainedActor::new(
                 server,
                 ChainedActor::new(
-                    BytecodeInterpreter::new(
-                        graph_root,
-                        compiler_options,
-                        interpreter_options,
-                        factory,
-                        allocator,
-                        metric_names.interpreter,
+                    InstrumentedActor::new(
+                        BytecodeInterpreter::new(
+                            graph_root,
+                            compiler_options,
+                            interpreter_options,
+                            factory,
+                            allocator,
+                            metric_names.interpreter,
+                        ),
+                        "bytecode_interpreter",
+                        metric_names.server.actor,
                     ),
                     actor,
                 ),

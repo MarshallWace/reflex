@@ -1,10 +1,12 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use http::HeaderMap;
 use reflex::core::{Expression, ExpressionFactory, HeapAllocator};
 use reflex_dispatcher::{
-    Action, Actor, ActorTransition, ChainedActor, ChainedActorState, HandlerContext, MessageData,
+    Action, Actor, ActorTransition, ChainedActor, ChainedActorState, HandlerContext,
+    InstrumentedActor, InstrumentedActorNames, MessageData,
 };
 use reflex_graphql::{
     stdlib::Stdlib as GraphQlStdlib,
@@ -39,6 +41,7 @@ pub struct ServerMetricNames {
     pub http_graphql_server: HttpGraphQlServerMetricNames,
     pub websocket_graphql_server: WebSocketGraphQlServerMetricNames,
     pub runtime: RuntimeMetricNames,
+    pub actor: InstrumentedActorNames,
 }
 
 pub trait ServerAction<T: Expression>:
@@ -82,28 +85,34 @@ pub(crate) struct ServerActor<
 {
     inner: ChainedActor<
         ChainedActor<
-            HttpGraphQlServer<
-                T,
-                TFactory,
-                ChainedHttpGraphQlServerQueryTransform<
-                    Option<ValidateQueryGraphQlTransform<'static, String>>,
-                    TTransformHttp,
+            InstrumentedActor<
+                HttpGraphQlServer<
+                    T,
+                    TFactory,
+                    ChainedHttpGraphQlServerQueryTransform<
+                        Option<ValidateQueryGraphQlTransform<'static, String>>,
+                        TTransformHttp,
+                    >,
+                    THttpMetricLabels,
                 >,
-                THttpMetricLabels,
             >,
-            WebSocketGraphQlServer<
-                T,
-                TFactory,
-                ChainedWebSocketGraphQlServerQueryTransform<
-                    Option<ValidateQueryGraphQlTransform<'static, String>>,
-                    TTransformWs,
+            InstrumentedActor<
+                WebSocketGraphQlServer<
+                    T,
+                    TFactory,
+                    ChainedWebSocketGraphQlServerQueryTransform<
+                        Option<ValidateQueryGraphQlTransform<'static, String>>,
+                        TTransformWs,
+                    >,
+                    TConnectionMetricLabels,
                 >,
-                TConnectionMetricLabels,
             >,
         >,
         ChainedActor<
-            GraphQlServer<T, TFactory, TAllocator, TGraphQlQueryLabel, TOperationMetricLabels>,
-            RuntimeActor<T, TFactory, TAllocator>,
+            InstrumentedActor<
+                GraphQlServer<T, TFactory, TAllocator, TGraphQlQueryLabel, TOperationMetricLabels>,
+            >,
+            InstrumentedActor<RuntimeActor<T, TFactory, TAllocator>>,
         >,
     >,
 }
@@ -158,36 +167,52 @@ where
         Ok(Self {
             inner: ChainedActor::new(
                 ChainedActor::new(
-                    HttpGraphQlServer::new(
-                        schema_types.clone(),
-                        factory.clone(),
-                        ChainedHttpGraphQlServerQueryTransform {
-                            left: validate_query_transform.clone(),
-                            right: transform_http,
-                        },
-                        metric_names.http_graphql_server,
-                        get_http_query_metric_labels,
+                    InstrumentedActor::new(
+                        HttpGraphQlServer::new(
+                            schema_types.clone(),
+                            factory.clone(),
+                            ChainedHttpGraphQlServerQueryTransform {
+                                left: validate_query_transform.clone(),
+                                right: transform_http,
+                            },
+                            metric_names.http_graphql_server,
+                            get_http_query_metric_labels,
+                        ),
+                        "http_graphql_server",
+                        metric_names.actor,
                     ),
-                    WebSocketGraphQlServer::new(
-                        schema_types,
-                        factory.clone(),
-                        ChainedWebSocketGraphQlServerQueryTransform {
-                            left: validate_query_transform,
-                            right: transform_ws,
-                        },
-                        metric_names.websocket_graphql_server,
-                        get_websocket_connection_metric_labels,
+                    InstrumentedActor::new(
+                        WebSocketGraphQlServer::new(
+                            schema_types,
+                            factory.clone(),
+                            ChainedWebSocketGraphQlServerQueryTransform {
+                                left: validate_query_transform,
+                                right: transform_ws,
+                            },
+                            metric_names.websocket_graphql_server,
+                            get_websocket_connection_metric_labels,
+                        ),
+                        "websocket_graphql_server",
+                        metric_names.actor,
                     ),
                 ),
                 ChainedActor::new(
-                    GraphQlServer::new(
-                        factory.clone(),
-                        allocator.clone(),
-                        metric_names.graphql_server,
-                        get_graphql_query_label,
-                        get_operation_metric_labels,
+                    InstrumentedActor::new(
+                        GraphQlServer::new(
+                            factory.clone(),
+                            allocator.clone(),
+                            metric_names.graphql_server,
+                            get_graphql_query_label,
+                            get_operation_metric_labels,
+                        ),
+                        "graphql_server",
+                        metric_names.actor,
                     ),
-                    RuntimeActor::new(factory, allocator, metric_names.runtime),
+                    InstrumentedActor::new(
+                        RuntimeActor::new(factory, allocator, metric_names.runtime),
+                        "runtime",
+                        metric_names.actor,
+                    ),
                 ),
             ),
         })
@@ -232,28 +257,34 @@ where
     type State = ChainedActorState<
         TAction,
         ChainedActor<
-            HttpGraphQlServer<
-                T,
-                TFactory,
-                ChainedHttpGraphQlServerQueryTransform<
-                    Option<ValidateQueryGraphQlTransform<'static, String>>,
-                    TTransformHttp,
+            InstrumentedActor<
+                HttpGraphQlServer<
+                    T,
+                    TFactory,
+                    ChainedHttpGraphQlServerQueryTransform<
+                        Option<ValidateQueryGraphQlTransform<'static, String>>,
+                        TTransformHttp,
+                    >,
+                    THttpMetricLabels,
                 >,
-                THttpMetricLabels,
             >,
-            WebSocketGraphQlServer<
-                T,
-                TFactory,
-                ChainedWebSocketGraphQlServerQueryTransform<
-                    Option<ValidateQueryGraphQlTransform<'static, String>>,
-                    TTransformWs,
+            InstrumentedActor<
+                WebSocketGraphQlServer<
+                    T,
+                    TFactory,
+                    ChainedWebSocketGraphQlServerQueryTransform<
+                        Option<ValidateQueryGraphQlTransform<'static, String>>,
+                        TTransformWs,
+                    >,
+                    TConnectionMetricLabels,
                 >,
-                TConnectionMetricLabels,
             >,
         >,
         ChainedActor<
-            GraphQlServer<T, TFactory, TAllocator, TGraphQlQueryLabel, TOperationMetricLabels>,
-            RuntimeActor<T, TFactory, TAllocator>,
+            InstrumentedActor<
+                GraphQlServer<T, TFactory, TAllocator, TGraphQlQueryLabel, TOperationMetricLabels>,
+            >,
+            InstrumentedActor<RuntimeActor<T, TFactory, TAllocator>>,
         >,
     >;
     fn init(&self) -> Self::State {

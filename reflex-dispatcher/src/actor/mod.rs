@@ -5,13 +5,13 @@
 mod chain;
 mod either;
 mod filter;
+mod instrumented;
 mod noop;
 mod option;
-mod instrumented;
 
 pub use chain::*;
 pub use either::*;
 pub use filter::*;
+pub use instrumented::*;
 pub use noop::*;
 pub use option::*;
-pub use instrumented::*;
