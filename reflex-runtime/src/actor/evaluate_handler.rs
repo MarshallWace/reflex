@@ -26,7 +26,9 @@ use reflex_utils::partition_results;
 
 use crate::{
     action::{
-        effect::{EffectEmitAction, EffectSubscribeAction, EffectUnsubscribeAction},
+        effect::{
+            EffectEmitAction, EffectSubscribeAction, EffectUnsubscribeAction, EffectUpdateBatch,
+        },
         evaluate::{
             EvaluateResultAction, EvaluateStartAction, EvaluateStopAction, EvaluateUpdateAction,
         },
@@ -659,7 +661,10 @@ where
             Some(StateOperation::Send(
                 current_pid,
                 EffectEmitAction {
-                    updates: existing_results,
+                    effect_types: vec![EffectUpdateBatch {
+                        effect_type: EFFECT_TYPE_EVALUATE.into(),
+                        updates: existing_results,
+                    }],
                 }
                 .into(),
             ))
@@ -849,10 +854,17 @@ where
                 Some(StateOperation::Send(
                     context.pid(),
                     EffectEmitAction {
-                        updates: vec![(
-                            *cache_key,
-                            create_evaluate_effect_result(result, &self.factory, &self.allocator),
-                        )],
+                        effect_types: vec![EffectUpdateBatch {
+                            effect_type: EFFECT_TYPE_EVALUATE.into(),
+                            updates: vec![(
+                                *cache_key,
+                                create_evaluate_effect_result(
+                                    result,
+                                    &self.factory,
+                                    &self.allocator,
+                                ),
+                            )],
+                        }],
                     }
                     .into(),
                 ))
@@ -907,22 +919,27 @@ where
     where
         TAction: Action + OutboundAction<EvaluateUpdateAction<T>>,
     {
-        let EffectEmitAction { updates } = action;
+        let EffectEmitAction {
+            effect_types: updates,
+        } = action;
         let (updated_state_tokens, updates) = if updates.is_empty() {
             (HashSet::<StateToken>::default(), Vec::default())
         } else {
             let existing_state = &state.state_cache.combined_state;
-            let updates = updates.iter().filter_map(|(state_token, update)| {
-                let is_unchanged = existing_state
-                    .get(state_token)
-                    .map(|existing_value| update.id() == existing_value.id())
-                    .unwrap_or(false);
-                if is_unchanged {
-                    None
-                } else {
-                    Some((*state_token, update.clone()))
-                }
-            });
+            let updates = updates
+                .iter()
+                .flat_map(|batch| batch.updates.iter())
+                .filter_map(|(state_token, update)| {
+                    let is_unchanged = existing_state
+                        .get(state_token)
+                        .map(|existing_value| update.id() == existing_value.id())
+                        .unwrap_or(false);
+                    if is_unchanged {
+                        None
+                    } else {
+                        Some((*state_token, update.clone()))
+                    }
+                });
             let (updated_state_tokens, updates) = updates
                 .map(|(state_token, update)| (state_token, (state_token, update)))
                 .unzip();

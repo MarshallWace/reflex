@@ -20,7 +20,9 @@ use reflex_dispatcher::{
     StateOperation, StateTransition,
 };
 use reflex_runtime::{
-    action::effect::{EffectEmitAction, EffectSubscribeAction, EffectUnsubscribeAction},
+    action::effect::{
+        EffectEmitAction, EffectSubscribeAction, EffectUnsubscribeAction, EffectUpdateBatch,
+    },
     AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator,
 };
 
@@ -200,7 +202,10 @@ where
         Some(StateTransition::new(once(StateOperation::Send(
             context.pid(),
             EffectEmitAction {
-                updates: updates.collect(),
+                effect_types: vec![EffectUpdateBatch {
+                    effect_type: EFFECT_TYPE_VARIABLE_GET.into(),
+                    updates: updates.collect(),
+                }],
             }
             .into(),
         ))))
@@ -267,7 +272,13 @@ where
             .collect();
         Some(StateTransition::new(once(StateOperation::Send(
             current_pid,
-            EffectEmitAction { updates }.into(),
+            EffectEmitAction {
+                effect_types: vec![EffectUpdateBatch {
+                    effect_type: EFFECT_TYPE_VARIABLE_SET.into(),
+                    updates,
+                }],
+            }
+            .into(),
         ))))
     }
     fn handle_increment_effect_subscribe<TAction>(
@@ -334,7 +345,13 @@ where
             .collect();
         Some(StateTransition::new(once(StateOperation::Send(
             current_pid,
-            EffectEmitAction { updates }.into(),
+            EffectEmitAction {
+                effect_types: vec![EffectUpdateBatch {
+                    effect_type: EFFECT_TYPE_VARIABLE_INCREMENT.into(),
+                    updates,
+                }],
+            }
+            .into(),
         ))))
     }
     fn handle_decrement_effect_subscribe<TAction>(
@@ -401,7 +418,13 @@ where
             .collect();
         Some(StateTransition::new(once(StateOperation::Send(
             current_pid,
-            EffectEmitAction { updates }.into(),
+            EffectEmitAction {
+                effect_types: vec![EffectUpdateBatch {
+                    effect_type: EFFECT_TYPE_VARIABLE_DECREMENT.into(),
+                    updates,
+                }],
+            }
+            .into(),
         ))))
     }
     fn handle_effect_unsubscribe<TAction>(

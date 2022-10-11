@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+use std::borrow::Cow;
+
 use reflex::core::{ConditionType, Expression, ExpressionListType, RefType, StateToken};
 use reflex_dispatcher::{Action, NamedAction, SerializableAction, SerializedAction};
 use reflex_json::{JsonMap, JsonValue};
@@ -200,7 +202,7 @@ impl<T: Expression> SerializableAction for EffectUnsubscribeAction<T> {
 
 #[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct EffectEmitAction<T: Expression> {
-    pub updates: Vec<(StateToken, T)>,
+    pub effect_types: Vec<EffectUpdateBatch<T>>,
 }
 impl<T: Expression> Action for EffectEmitAction<T> {}
 impl<T: Expression> NamedAction for EffectEmitAction<T> {
@@ -211,20 +213,46 @@ impl<T: Expression> NamedAction for EffectEmitAction<T> {
 impl<T: Expression> SerializableAction for EffectEmitAction<T> {
     fn to_json(&self) -> SerializedAction {
         SerializedAction::from_iter([(
-            "updates",
+            "effect_types",
             JsonValue::from(
-                self.updates
+                self.effect_types
                     .iter()
-                    .map(|(state_token, value)| {
+                    .map(|batch| {
                         JsonValue::Object(JsonMap::from_iter([
-                            (String::from("id"), JsonValue::from(*state_token)),
-                            (String::from("value"), JsonValue::from(value.id())),
+                            (
+                                String::from("effect_type"),
+                                JsonValue::String(batch.effect_type.to_string()),
+                            ),
+                            (
+                                String::from("updates"),
+                                JsonValue::from(
+                                    batch
+                                        .updates
+                                        .iter()
+                                        .map(|(state_token, value)| {
+                                            JsonValue::Object(JsonMap::from_iter([
+                                                (String::from("id"), JsonValue::from(*state_token)),
+                                                (
+                                                    String::from("value"),
+                                                    JsonValue::from(value.id()),
+                                                ),
+                                            ]))
+                                        })
+                                        .collect::<Vec<_>>(),
+                                ),
+                            ),
                         ]))
                     })
                     .collect::<Vec<_>>(),
             ),
         )])
     }
+}
+
+#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
+pub struct EffectUpdateBatch<T: Expression> {
+    pub effect_type: Cow<'static, str>,
+    pub updates: Vec<(StateToken, T)>,
 }
 
 fn sanitize_expression<T: Expression>(arg: &T) -> JsonValue {

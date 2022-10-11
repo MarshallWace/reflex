@@ -19,7 +19,9 @@ use reflex_dispatcher::{
     OutboundAction, ProcessId, StateOperation, StateTransition,
 };
 use reflex_runtime::{
-    action::effect::{EffectEmitAction, EffectSubscribeAction, EffectUnsubscribeAction},
+    action::effect::{
+        EffectEmitAction, EffectSubscribeAction, EffectUnsubscribeAction, EffectUpdateBatch,
+    },
     AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator,
 };
 use tokio::time::{interval_at, Instant};
@@ -168,7 +170,10 @@ where
             Some(StateOperation::Send(
                 current_pid,
                 EffectEmitAction {
-                    updates: initial_values,
+                    effect_types: vec![EffectUpdateBatch {
+                        effect_type: EFFECT_TYPE_TIMESTAMP.into(),
+                        updates: initial_values,
+                    }],
                 }
                 .into(),
             ))
@@ -228,7 +233,10 @@ where
             StateOperation::Send(
                 main_pid,
                 EffectEmitAction {
-                    updates: vec![(state_token, factory.create_float_term(get_current_time()))],
+                    effect_types: vec![EffectUpdateBatch {
+                        effect_type: EFFECT_TYPE_TIMESTAMP.into(),
+                        updates: vec![(state_token, factory.create_float_term(get_current_time()))],
+                    }],
                 }
                 .into(),
             )

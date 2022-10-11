@@ -260,14 +260,20 @@ where
     where
         TAction: Action + OutboundAction<QueryEmitAction<T>>,
     {
-        let EffectEmitAction { updates } = action;
+        let EffectEmitAction {
+            effect_types: updates,
+        } = action;
         let updated_queries = {
-            updates.iter().filter_map(|(state_token, update)| {
-                let subscription = state.subscriptions.get_mut(state_token)?;
-                let result = parse_evaluate_effect_result(update, &self.factory)?;
-                subscription.result.replace(result.clone());
-                Some((subscription.query.clone(), result))
-            })
+            updates
+                .iter()
+                .filter(|batch| &batch.effect_type == EFFECT_TYPE_EVALUATE)
+                .flat_map(|batch| batch.updates.iter())
+                .filter_map(|(effect_id, update)| {
+                    let subscription = state.subscriptions.get_mut(effect_id)?;
+                    let result = parse_evaluate_effect_result(update, &self.factory)?;
+                    subscription.result.replace(result.clone());
+                    Some((subscription.query.clone(), result))
+                })
         };
         let emit_actions = updated_queries
             .map(|(query, result)| {

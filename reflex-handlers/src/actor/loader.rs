@@ -22,7 +22,9 @@ use reflex_dispatcher::{
     StateOperation, StateTransition,
 };
 use reflex_runtime::{
-    action::effect::{EffectEmitAction, EffectSubscribeAction, EffectUnsubscribeAction},
+    action::effect::{
+        EffectEmitAction, EffectSubscribeAction, EffectUnsubscribeAction, EffectUpdateBatch,
+    },
     actor::evaluate_handler::{
         create_evaluate_effect, parse_evaluate_effect_result, EFFECT_TYPE_EVALUATE,
     },
@@ -459,7 +461,10 @@ where
             Some(StateOperation::Send(
                 current_pid,
                 EffectEmitAction {
-                    updates: initial_values,
+                    effect_types: vec![EffectUpdateBatch {
+                        effect_type: EFFECT_TYPE_LOADER.into(),
+                        updates: initial_values,
+                    }],
                 }
                 .into(),
             ))
@@ -470,7 +475,7 @@ where
             Some(StateOperation::Send(
                 current_pid,
                 EffectSubscribeAction {
-                    effect_type: String::from(EFFECT_TYPE_EVALUATE),
+                    effect_type: EFFECT_TYPE_EVALUATE.into(),
                     effects: load_effects,
                 }
                 .into(),
@@ -532,7 +537,7 @@ where
             Some(StateOperation::Send(
                 current_pid,
                 EffectUnsubscribeAction {
-                    effect_type: String::from(EFFECT_TYPE_EVALUATE),
+                    effect_type: EFFECT_TYPE_EVALUATE.into(),
                     effects: unsubscribe_effects,
                 }
                 .into(),
@@ -550,12 +555,16 @@ where
     where
         TAction: Action + OutboundAction<EffectEmitAction<T>>,
     {
-        let EffectEmitAction { updates } = action;
+        let EffectEmitAction {
+            effect_types: updates,
+        } = action;
         if state.loaders.is_empty() {
             return None;
         }
         let updates = updates
             .iter()
+            .filter(|batch| &batch.effect_type == EFFECT_TYPE_EVALUATE)
+            .flat_map(|batch| batch.updates.iter())
             .filter_map(|(updated_state_token, update)| {
                 let loader = state.loader_effect_mappings.get(updated_state_token)?;
                 let loader_state = state.loaders.get_mut(&LoaderFactoryHash::new(loader))?;
@@ -679,7 +688,13 @@ where
         } else {
             Some(StateOperation::Send(
                 context.pid(),
-                EffectEmitAction { updates }.into(),
+                EffectEmitAction {
+                    effect_types: vec![EffectUpdateBatch {
+                        effect_type: EFFECT_TYPE_LOADER.into(),
+                        updates,
+                    }],
+                }
+                .into(),
             ))
         };
         Some(StateTransition::new(update_action))

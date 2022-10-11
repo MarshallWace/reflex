@@ -214,9 +214,11 @@ pub async fn main() -> Result<()> {
                 let mut results_stream = tokio::spawn(scheduler.subscribe({
                     let factory = factory.clone();
                     move |action: &CliAction<CachedSharedTerm<CliBuiltins>>| {
-                        let EffectEmitAction { updates } = action.match_type()?;
-                        let update = updates
+                        let EffectEmitAction { effect_types } = action.match_type()?;
+                        let update = effect_types
                             .iter()
+                            .filter(|batch| &batch.effect_type == EFFECT_TYPE_EVALUATE)
+                            .flat_map(|batch| batch.updates.iter())
                             .filter(|(key, _)| *key == evaluate_effect.id())
                             .filter_map({
                                 let factory = factory.clone();

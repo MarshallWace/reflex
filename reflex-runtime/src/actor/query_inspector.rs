@@ -391,8 +391,10 @@ impl<T: Expression> QueryInspector<T> {
     where
         TAction: Action,
     {
-        let EffectEmitAction { updates } = action;
-        for (state_token, value) in updates.iter() {
+        let EffectEmitAction {
+            effect_types: updates,
+        } = action;
+        for (state_token, value) in updates.iter().flat_map(|batch| batch.updates.iter()) {
             if let Some(effect_state) = state.active_effects.get_mut(state_token) {
                 effect_state.value.replace(value.clone());
             }

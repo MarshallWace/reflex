@@ -630,41 +630,47 @@ where
             + OutboundAction<TelemetryMiddlewareTransactionStartAction>
             + OutboundAction<TelemetryMiddlewareTransactionEndAction>,
     {
-        let EffectEmitAction { updates } = action;
-        let (completed_transaction_ids, reemitted_effects): (Vec<_>, Vec<_>) =
-            partition_results(updates.iter().filter_map(|(effect_id, update)| {
-                let update = state
-                    .effect_mappings
-                    .get_mut(effect_id)
-                    .map(|effect_state| {
-                        effect_state.latest_value.replace(update.clone());
-                        if effect_state.query_result.is_some() {
-                            let completed_transaction_id = effect_state.end_transaction();
-                            Ok(completed_transaction_id)
-                        } else {
-                            match effect_state.end_transaction() {
-                                Some(completed_transaction_id) => {
-                                    Ok(Some(completed_transaction_id))
+        let EffectEmitAction {
+            effect_types: updates,
+        } = action;
+        let (completed_transaction_ids, reemitted_effects): (Vec<_>, Vec<_>) = partition_results(
+            updates
+                .iter()
+                .flat_map(|batch| batch.updates.iter())
+                .filter_map(|(effect_id, update)| {
+                    let update = state
+                        .effect_mappings
+                        .get_mut(effect_id)
+                        .map(|effect_state| {
+                            effect_state.latest_value.replace(update.clone());
+                            if effect_state.query_result.is_some() {
+                                let completed_transaction_id = effect_state.end_transaction();
+                                Ok(completed_transaction_id)
+                            } else {
+                                match effect_state.end_transaction() {
+                                    Some(completed_transaction_id) => {
+                                        Ok(Some(completed_transaction_id))
+                                    }
+                                    None => Err(effect_state.effect.clone()),
                                 }
-                                None => Err(effect_state.effect.clone()),
                             }
-                        }
-                    })?;
-                match update {
-                    Err(effect) => Some(Err(effect)),
-                    Ok(completed_transaction_id) => match completed_transaction_id {
-                        None => None,
-                        Some(completed_transaction_id) => {
-                            for effect_state in state.effect_mappings.values_mut() {
-                                effect_state
-                                    .parent_transactions
-                                    .remove(&completed_transaction_id);
+                        })?;
+                    match update {
+                        Err(effect) => Some(Err(effect)),
+                        Ok(completed_transaction_id) => match completed_transaction_id {
+                            None => None,
+                            Some(completed_transaction_id) => {
+                                for effect_state in state.effect_mappings.values_mut() {
+                                    effect_state
+                                        .parent_transactions
+                                        .remove(&completed_transaction_id);
+                                }
+                                Some(Ok(completed_transaction_id))
                             }
-                            Some(Ok(completed_transaction_id))
-                        }
-                    },
-                }
-            }));
+                        },
+                    }
+                }),
+        );
         let completed_transactions_end_action = if completed_transaction_ids.is_empty() {
             None
         } else {

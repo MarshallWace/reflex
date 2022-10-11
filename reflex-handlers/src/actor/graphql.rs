@@ -38,7 +38,9 @@ use reflex_graphql::{
 };
 use reflex_json::JsonValue;
 use reflex_runtime::{
-    action::effect::{EffectEmitAction, EffectSubscribeAction, EffectUnsubscribeAction},
+    action::effect::{
+        EffectEmitAction, EffectSubscribeAction, EffectUnsubscribeAction, EffectUpdateBatch,
+    },
     AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator,
 };
 use reflex_utils::reconnect::ReconnectTimeout;
@@ -415,7 +417,10 @@ where
             Some(StateOperation::Send(
                 context.pid(),
                 EffectEmitAction {
-                    updates: initial_values,
+                    effect_types: vec![EffectUpdateBatch {
+                        effect_type: EFFECT_TYPE_GRAPHQL.into(),
+                        updates: initial_values,
+                    }],
                 }
                 .into(),
             ))
@@ -665,11 +670,14 @@ where
             Some(StateTransition::new(once(StateOperation::Send(
                 context.pid(),
                 EffectEmitAction {
-                    updates: connection_state
-                        .effects
-                        .values()
-                        .map(|effect_id| (*effect_id, value.clone()))
-                        .collect(),
+                    effect_types: vec![EffectUpdateBatch {
+                        effect_type: EFFECT_TYPE_GRAPHQL.into(),
+                        updates: connection_state
+                            .effects
+                            .values()
+                            .map(|effect_id| (*effect_id, value.clone()))
+                            .collect(),
+                    }],
                 }
                 .into(),
             ))))
@@ -694,7 +702,10 @@ where
         Some(StateTransition::new(once(StateOperation::Send(
             context.pid(),
             EffectEmitAction {
-                updates: vec![(*effect_id, value)],
+                effect_types: vec![EffectUpdateBatch {
+                    effect_type: EFFECT_TYPE_GRAPHQL.into(),
+                    updates: vec![(*effect_id, value)],
+                }],
             }
             .into(),
         ))))
@@ -723,7 +734,10 @@ where
         Some(StateTransition::new(once(StateOperation::Send(
             context.pid(),
             EffectEmitAction {
-                updates: vec![(*effect_id, value)],
+                effect_types: vec![EffectUpdateBatch {
+                    effect_type: EFFECT_TYPE_GRAPHQL.into(),
+                    updates: vec![(*effect_id, value)],
+                }],
             }
             .into(),
         ))))
@@ -747,7 +761,10 @@ where
         Some(StateTransition::new(once(StateOperation::Send(
             context.pid(),
             EffectEmitAction {
-                updates: vec![(*effect_id, value)],
+                effect_types: vec![EffectUpdateBatch {
+                    effect_type: EFFECT_TYPE_GRAPHQL.into(),
+                    updates: vec![(*effect_id, value)],
+                }],
             }
             .into(),
         ))))
@@ -825,9 +842,12 @@ where
                                 }
                                 StateOperation::Send(
                                     current_pid,
-                                    (EffectEmitAction {
-                                        updates: vec![(effect_id, result)],
-                                    })
+                                    EffectEmitAction {
+                                        effect_types: vec![EffectUpdateBatch {
+                                            effect_type: EFFECT_TYPE_GRAPHQL.into(),
+                                            updates: vec![(effect_id, result)],
+                                        }],
+                                    }
                                     .into(),
                                 )
                             }

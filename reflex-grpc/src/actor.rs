@@ -32,7 +32,9 @@ use reflex_protobuf::{
     Message, ProtoTranscoder,
 };
 use reflex_runtime::{
-    action::effect::{EffectEmitAction, EffectSubscribeAction, EffectUnsubscribeAction},
+    action::effect::{
+        EffectEmitAction, EffectSubscribeAction, EffectUnsubscribeAction, EffectUpdateBatch,
+    },
     AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator,
 };
 use reflex_utils::{
@@ -534,7 +536,10 @@ where
             Some(StateOperation::Send(
                 context.pid(),
                 EffectEmitAction {
-                    updates: initial_values,
+                    effect_types: vec![EffectUpdateBatch {
+                        effect_type: EFFECT_TYPE_GRPC.into(),
+                        updates: initial_values,
+                    }],
                 }
                 .into(),
             ))
@@ -641,7 +646,10 @@ where
             Some(StateOperation::Send(
                 context.pid(),
                 EffectEmitAction {
-                    updates: operation_errors,
+                    effect_types: vec![EffectUpdateBatch {
+                        effect_type: EFFECT_TYPE_GRPC.into(),
+                        updates: operation_errors,
+                    }],
                 }
                 .into(),
             ))
@@ -702,20 +710,23 @@ where
                 Some(StateTransition::new(once(StateOperation::Send(
                     context.pid(),
                     EffectEmitAction {
-                        updates: connection_state
-                            .operations
-                            .keys()
-                            .cloned()
-                            .map({
-                                let error = create_error_message_expression(
-                                    message,
-                                    Some(ERROR_TYPE_NETWORK_ERROR),
-                                    &self.factory,
-                                    &self.allocator,
-                                );
-                                move |effect_id| (effect_id, error.clone())
-                            })
-                            .collect(),
+                        effect_types: vec![EffectUpdateBatch {
+                            effect_type: EFFECT_TYPE_GRPC.into(),
+                            updates: connection_state
+                                .operations
+                                .keys()
+                                .cloned()
+                                .map({
+                                    let error = create_error_message_expression(
+                                        message,
+                                        Some(ERROR_TYPE_NETWORK_ERROR),
+                                        &self.factory,
+                                        &self.allocator,
+                                    );
+                                    move |effect_id| (effect_id, error.clone())
+                                })
+                                .collect(),
+                        }],
                     }
                     .into(),
                 ))))
@@ -890,7 +901,10 @@ where
                         let error_task = StateOperation::Send(
                             context.pid(),
                             EffectEmitAction {
-                                updates: vec![(effect_id, error)],
+                                effect_types: vec![EffectUpdateBatch {
+                                    effect_type: EFFECT_TYPE_GRPC.into(),
+                                    updates: vec![(effect_id, error)],
+                                }],
                             }
                             .into(),
                         );
@@ -940,7 +954,10 @@ where
                             let emit_action = StateOperation::Send(
                                 context.pid(),
                                 EffectEmitAction {
-                                    updates: vec![state_update],
+                                    effect_types: vec![EffectUpdateBatch {
+                                        effect_type: EFFECT_TYPE_GRPC.into(),
+                                        updates: vec![state_update],
+                                    }],
                                 }
                                 .into(),
                             );
@@ -1249,14 +1266,20 @@ where
                                 let (emit_action, error_action) = match result {
                                     Ok(value) => (
                                         EffectEmitAction {
-                                            updates: vec![(effect_id, value)],
+                                            effect_types: vec![EffectUpdateBatch {
+                                                effect_type: EFFECT_TYPE_GRPC.into(),
+                                                updates: vec![(effect_id, value)],
+                                            }],
                                         }
                                         .into(),
                                         None,
                                     ),
                                     Err((status, error)) => (
                                         EffectEmitAction {
-                                            updates: vec![(effect_id, error)],
+                                            effect_types: vec![EffectUpdateBatch {
+                                                effect_type: EFFECT_TYPE_GRPC.into(),
+                                                updates: vec![(effect_id, error)],
+                                            }],
                                         }
                                         .into(),
                                         Some(
