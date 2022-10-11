@@ -12,7 +12,7 @@ use std::{
 };
 
 use futures::{future, Future, Sink, SinkExt, Stream, StreamExt};
-use metrics::{describe_gauge, gauge, Unit};
+use metrics::{describe_gauge, describe_histogram, gauge, histogram, Unit};
 use tokio::{sync::mpsc, task::JoinHandle};
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::sync::{PollSendError, PollSender};
@@ -30,6 +30,8 @@ use crate::{
 pub struct TokioSchedulerMetricNames {
     pub event_bus_queued_microtasks: &'static str,
     pub event_bus_microtask_queue_capacity: &'static str,
+    pub event_processing_duration_micros: &'static str,
+    pub event_batch_processing_duration_micros: &'static str,
     pub tokio_task_metric_names: TokioTaskMetricNames,
 }
 impl TokioSchedulerMetricNames {
@@ -44,6 +46,16 @@ impl TokioSchedulerMetricNames {
             Unit::Count,
             "Event bus async microtask queue capacity"
         );
+        describe_histogram!(
+            self.event_processing_duration_micros,
+            Unit::Microseconds,
+            "Time spent in the synchronous handling of an event from the event bus"
+        );
+        describe_histogram!(
+            self.event_batch_processing_duration_micros,
+            Unit::Microseconds,
+            "Time spent in the synchronous handling loop of events from the event bus (i.e. including subsequent commands spawned during handling an initial event)"
+        );
         self
     }
 }
@@ -52,6 +64,8 @@ impl Default for TokioSchedulerMetricNames {
         Self {
             event_bus_queued_microtasks: "event_bus_queued_microtasks",
             event_bus_microtask_queue_capacity: "event_bus_microtask_capacity",
+            event_processing_duration_micros: "event_processing_duration_micros",
+            event_batch_processing_duration_micros: "event_batch_processing_duration_micros",
             tokio_task_metric_names: TokioTaskMetricNames::default(),
         }
     }
@@ -322,7 +336,16 @@ where
                 // Main runtime event loop
                 loop {
                     // Process any queued synchronous commands
+                    let command_batch_processing_start_time = std::time::Instant::now();
                     while let Some(command) = command_queue.pop_front() {
+                        let command_processing_start_time = std::time::Instant::now();
+                        let command_type = match &command {
+                            TokioCommand::Dispatch(_) => "dispatch",
+                            TokioCommand::Event(_, _) => "event",
+                            TokioCommand::WorkerResult(_, _, _, _) => "worker_result",
+                            TokioCommand::Subscribe(_, _) => "subscribe",
+                            TokioCommand::Unsubscribe(_) => "unsubscribe",
+                        };
                         let (action, child_commands, worker_commands) = process_command(
                             command,
                             &actor,
@@ -359,7 +382,18 @@ where
                                 }
                             }
                         }
+
+                        histogram!(
+                            metric_names.event_processing_duration_micros,
+                            command_processing_start_time.elapsed().as_micros() as f64,
+                            "command_type" => command_type
+                        )
                     }
+
+                    histogram!(
+                        metric_names.event_batch_processing_duration_micros,
+                        command_batch_processing_start_time.elapsed().as_micros() as f64,
+                    );
                     // Dispatch worker messages to the corresponding async workers
                     let worker_tasks = worker_command_queue
                         .drain(..)
