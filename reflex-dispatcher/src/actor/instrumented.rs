@@ -6,7 +6,7 @@ use metrics::{describe_histogram, histogram, Unit};
 
 #[derive(Clone, Copy, Debug)]
 pub struct InstrumentedActorMetricNames {
-    actor_handle_duration_micros: &'static str,
+    pub actor_handle_duration_micros: &'static str,
 }
 impl Default for InstrumentedActorMetricNames {
     fn default() -> Self {
