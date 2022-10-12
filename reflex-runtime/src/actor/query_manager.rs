@@ -66,6 +66,7 @@ impl<T: Expression, TAction> QueryManagerAction<T> for TAction where
 {
 }
 
+// TODO: Remove QueryManager in favour of interacting with EvaluateHandler directly
 pub struct QueryManager<T, TFactory, TAllocator>
 where
     T: Expression,
@@ -98,6 +99,7 @@ where
 }
 
 pub struct QueryManagerState<T: Expression> {
+    // TODO: Use newtypes for state hashmap keys
     subscriptions: HashMap<StateToken, QuerySubscription<T>>,
 }
 impl<T: Expression> Default for QueryManagerState<T> {
@@ -165,11 +167,9 @@ where
             Action + OutboundAction<EffectSubscribeAction<T>> + OutboundAction<QueryEmitAction<T>>,
     {
         let QuerySubscribeAction { query, label } = action;
-        let query_effect = create_evaluate_effect(
+        let query_effect = create_query_evaluate_effect(
             label.clone(),
             query.clone(),
-            QueryEvaluationMode::Query,
-            QueryInvalidationStrategy::default(),
             &self.factory,
             &self.allocator,
         );
@@ -222,11 +222,9 @@ where
         TAction: Action + OutboundAction<EffectUnsubscribeAction<T>>,
     {
         let QueryUnsubscribeAction { query, label } = action;
-        let query_effect = create_evaluate_effect(
+        let query_effect = create_query_evaluate_effect(
             label.clone(),
             query.clone(),
-            QueryEvaluationMode::Query,
-            QueryInvalidationStrategy::default(),
             &self.factory,
             &self.allocator,
         );
@@ -282,4 +280,20 @@ where
             .collect::<Vec<_>>();
         Some(StateTransition::new(emit_actions))
     }
+}
+
+pub fn create_query_evaluate_effect<T: Expression>(
+    label: String,
+    query: T,
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> T::Signal<T> {
+    create_evaluate_effect(
+        label,
+        query,
+        QueryEvaluationMode::Query,
+        QueryInvalidationStrategy::default(),
+        factory,
+        allocator,
+    )
 }

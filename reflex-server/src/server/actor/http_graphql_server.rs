@@ -283,6 +283,7 @@ where
 
 #[derive(Default)]
 pub struct HttpGraphQlServerState {
+    // TODO: Use newtypes for state hashmap keys
     requests: HashMap<Uuid, HttpGraphQlRequest>,
 }
 struct HttpGraphQlRequest {

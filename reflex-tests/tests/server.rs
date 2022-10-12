@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
+// SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use std::convert::Infallible;
 use std::fs::File;
 use std::future;
@@ -14,6 +15,7 @@ use http::HeaderMap;
 use hyper::server::conn::AddrStream;
 use hyper::service::make_service_fn;
 use hyper::Server;
+use reflex_server::opentelemetry::trace::noop::NoopTracer;
 use tokio::sync::oneshot;
 
 use rand::distributions::Alphanumeric;
@@ -110,6 +112,7 @@ pub fn serve_graphql(input: &str) -> (SocketAddr, oneshot::Sender<()>) {
         get_http_query_metric_labels,
         get_websocket_connection_metric_labels,
         get_websocket_operation_metric_labels,
+        NoopTracer::default(),
     )
     .unwrap();
     let socket_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();

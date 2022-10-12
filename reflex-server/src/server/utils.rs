@@ -169,3 +169,173 @@ pub(crate) fn get_cors_headers<T>(
             .unwrap_or_else(|| HeaderValue::from_static("*")),
     )))
 }
+
+pub enum EitherTracer<L, R> {
+    Left(L),
+    Right(R),
+}
+impl<L: opentelemetry::trace::Tracer, R: opentelemetry::trace::Tracer> opentelemetry::trace::Tracer
+    for EitherTracer<L, R>
+where
+    L::Span: Send + Sync + 'static,
+    R::Span: Send + Sync + 'static,
+{
+    type Span = EitherSpan<L::Span, R::Span>;
+    fn start_with_context<T>(&self, name: T, parent_cx: &opentelemetry::Context) -> Self::Span
+    where
+        T: Into<std::borrow::Cow<'static, str>>,
+    {
+        match self {
+            Self::Left(inner) => EitherSpan::Left(inner.start_with_context(name, parent_cx)),
+            Self::Right(inner) => EitherSpan::Right(inner.start_with_context(name, parent_cx)),
+        }
+    }
+    fn span_builder<T>(&self, name: T) -> opentelemetry::trace::SpanBuilder
+    where
+        T: Into<std::borrow::Cow<'static, str>>,
+    {
+        match self {
+            Self::Left(inner) => inner.span_builder(name),
+            Self::Right(inner) => inner.span_builder(name),
+        }
+    }
+    fn build_with_context(
+        &self,
+        builder: opentelemetry::trace::SpanBuilder,
+        parent_cx: &opentelemetry::Context,
+    ) -> Self::Span {
+        match self {
+            Self::Left(inner) => EitherSpan::Left(inner.build_with_context(builder, parent_cx)),
+            Self::Right(inner) => EitherSpan::Right(inner.build_with_context(builder, parent_cx)),
+        }
+    }
+    fn start<T>(&self, name: T) -> Self::Span
+    where
+        T: Into<std::borrow::Cow<'static, str>>,
+    {
+        match self {
+            Self::Left(inner) => EitherSpan::Left(inner.start(name)),
+            Self::Right(inner) => EitherSpan::Right(inner.start(name)),
+        }
+    }
+    fn build(&self, builder: opentelemetry::trace::SpanBuilder) -> Self::Span {
+        match self {
+            Self::Left(inner) => EitherSpan::Left(inner.build(builder)),
+            Self::Right(inner) => EitherSpan::Right(inner.build(builder)),
+        }
+    }
+    fn in_span<T, F>(&self, name: &'static str, f: F) -> T
+    where
+        F: FnOnce(opentelemetry::Context) -> T,
+        Self::Span: Send + Sync + 'static,
+    {
+        match self {
+            Self::Left(inner) => inner.in_span(name, f),
+            Self::Right(inner) => inner.in_span(name, f),
+        }
+    }
+    fn with_span<T, F>(&self, span: Self::Span, f: F) -> T
+    where
+        F: FnOnce(opentelemetry::Context) -> T,
+        Self::Span: Send + Sync + 'static,
+    {
+        match (self, span) {
+            (Self::Left(inner), EitherSpan::Left(span)) => inner.with_span(span, f),
+            (Self::Right(inner), EitherSpan::Right(span)) => inner.with_span(span, f),
+            _ => panic!("Invalid span type"),
+        }
+    }
+}
+
+pub enum EitherSpan<L, R> {
+    Left(L),
+    Right(R),
+}
+impl<L, R> opentelemetry::trace::Span for EitherSpan<L, R>
+where
+    L: opentelemetry::trace::Span,
+    R: opentelemetry::trace::Span,
+{
+    fn add_event_with_timestamp<T>(
+        &mut self,
+        name: T,
+        timestamp: std::time::SystemTime,
+        attributes: Vec<opentelemetry::KeyValue>,
+    ) where
+        T: Into<std::borrow::Cow<'static, str>>,
+    {
+        match self {
+            Self::Left(inner) => inner.add_event_with_timestamp(name, timestamp, attributes),
+            Self::Right(inner) => inner.add_event_with_timestamp(name, timestamp, attributes),
+        }
+    }
+    fn span_context(&self) -> &opentelemetry::trace::SpanContext {
+        match self {
+            Self::Left(inner) => inner.span_context(),
+            Self::Right(inner) => inner.span_context(),
+        }
+    }
+    fn is_recording(&self) -> bool {
+        match self {
+            Self::Left(inner) => inner.is_recording(),
+            Self::Right(inner) => inner.is_recording(),
+        }
+    }
+    fn set_attribute(&mut self, attribute: opentelemetry::KeyValue) {
+        match self {
+            Self::Left(inner) => inner.set_attribute(attribute),
+            Self::Right(inner) => inner.set_attribute(attribute),
+        }
+    }
+    fn set_status(&mut self, code: opentelemetry::trace::StatusCode, message: String) {
+        match self {
+            Self::Left(inner) => inner.set_status(code, message),
+            Self::Right(inner) => inner.set_status(code, message),
+        }
+    }
+    fn update_name<T>(&mut self, new_name: T)
+    where
+        T: Into<std::borrow::Cow<'static, str>>,
+    {
+        match self {
+            Self::Left(inner) => inner.update_name(new_name),
+            Self::Right(inner) => inner.update_name(new_name),
+        }
+    }
+    fn end_with_timestamp(&mut self, timestamp: std::time::SystemTime) {
+        match self {
+            Self::Left(inner) => inner.end_with_timestamp(timestamp),
+            Self::Right(inner) => inner.end_with_timestamp(timestamp),
+        }
+    }
+    fn add_event<T>(&mut self, name: T, attributes: Vec<opentelemetry::KeyValue>)
+    where
+        T: Into<std::borrow::Cow<'static, str>>,
+    {
+        match self {
+            Self::Left(inner) => inner.add_event(name, attributes),
+            Self::Right(inner) => inner.add_event(name, attributes),
+        }
+    }
+    fn record_exception(&mut self, err: &dyn std::error::Error) {
+        match self {
+            Self::Left(inner) => inner.record_exception(err),
+            Self::Right(inner) => inner.record_exception(err),
+        }
+    }
+    fn record_exception_with_stacktrace<T>(&mut self, err: &dyn std::error::Error, stacktrace: T)
+    where
+        T: Into<std::borrow::Cow<'static, str>>,
+    {
+        match self {
+            Self::Left(inner) => inner.record_exception_with_stacktrace(err, stacktrace),
+            Self::Right(inner) => inner.record_exception_with_stacktrace(err, stacktrace),
+        }
+    }
+    fn end(&mut self) {
+        match self {
+            Self::Left(inner) => inner.end(),
+            Self::Right(inner) => inner.end(),
+        }
+    }
+}

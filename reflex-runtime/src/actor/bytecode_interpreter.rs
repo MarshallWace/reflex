@@ -15,7 +15,7 @@ use reflex::{
         ExpressionFactory, InstructionPointer, Reducible, RefType, Rewritable, SignalTermType,
         SignalType, StateToken,
     },
-    hash::{HashId, IntMap},
+    hash::IntMap,
 };
 use reflex_dispatcher::{
     Action, Actor, ActorTransition, HandlerContext, InboundAction, MessageData, MessageOffset,
@@ -111,7 +111,8 @@ where
 }
 
 pub struct BytecodeInterpreterState<T: Expression> {
-    workers: HashMap<HashId, BytecodeInterpreterWorkerState<T>>,
+    // TODO: Use newtypes for state hashmap keys
+    workers: HashMap<StateToken, BytecodeInterpreterWorkerState<T>>,
 }
 impl<T: Expression> Default for BytecodeInterpreterState<T> {
     fn default() -> Self {

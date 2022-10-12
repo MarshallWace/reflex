@@ -258,6 +258,7 @@ where
 }
 
 pub struct WebSocketGraphQlServerState<T: Expression> {
+    // TODO: Use newtypes for state hashmap keys
     connections: HashMap<Uuid, WebSocketGraphQlConnection<T>>,
     _expression: PhantomData<T>,
 }

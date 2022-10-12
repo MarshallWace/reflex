@@ -15,11 +15,10 @@ use anyhow::{anyhow, Context, Result};
 use clap::Parser;
 use http::HeaderMap;
 use metrics_exporter_prometheus::PrometheusBuilder;
+use opentelemetry::trace::noop::NoopTracer;
 use reflex::core::Expression;
 use reflex_cli::{compile_entry_point, syntax::js::default_js_loaders, Syntax};
-use reflex_dispatcher::{
-    ChainedActor, EitherActor, SchedulerMiddleware, SessionRecorder, StateOperation,
-};
+use reflex_dispatcher::{SchedulerMiddleware, SessionRecorder, StateOperation};
 use reflex_graphql::{
     parse_graphql_schema, GraphQlOperation, GraphQlSchema, NoopGraphQlQueryTransform,
 };
@@ -31,27 +30,25 @@ use reflex_handlers::{
 use reflex_interpreter::{compiler::CompilerOptions, InterpreterOptions};
 use reflex_json::JsonValue;
 use reflex_lang::{allocator::DefaultAllocator, CachedSharedTerm, SharedTermFactory};
-use reflex_server::tokio_runtime_metrics_export::TokioRuntimeMonitorMetricNames;
 use reflex_server::{
     action::ServerCliAction,
     builtins::ServerBuiltins,
     cli::reflex_server::{
-        cli, get_graphql_query_label, get_operation_transaction_labels, OpenTelemetryConfig,
-        ReflexServerCliOptions,
+        cli, get_graphql_query_label, OpenTelemetryConfig, ReflexServerCliOptions,
     },
     generate_session_recording_filename,
     imports::server_imports,
     logger::{formatted::FormattedLogger, json::JsonActionLogger, ActionLogger, EitherLogger},
     middleware::LoggerMiddleware,
     recorder::FileRecorder,
-    server::{
-        action::init::{
-            InitGraphRootAction, InitHttpServerAction, InitOpenTelemetryAction,
-            InitPrometheusMetricsAction, InitSessionRecordingAction,
-        },
-        TelemetryMiddlewareMetricNames,
+    server::action::init::{
+        InitGraphRootAction, InitHttpServerAction, InitOpenTelemetryAction,
+        InitPrometheusMetricsAction, InitSessionRecordingAction,
     },
     GraphQlWebServerMetricNames,
+};
+use reflex_server::{
+    server::EitherTracer, tokio_runtime_metrics_export::TokioRuntimeMonitorMetricNames,
 };
 use reflex_utils::{reconnect::FibonacciReconnectTimeout, FileWriterFormat};
 
@@ -188,8 +185,8 @@ pub async fn main() -> Result<()> {
         },
         DefaultHandlersMetricNames::default(),
     );
-    let actor = match OpenTelemetryConfig::parse_env(std::env::vars())? {
-        None => EitherActor::Left(actor),
+    let tracer = match OpenTelemetryConfig::parse_env(std::env::vars())? {
+        None => None,
         Some(config) => {
             log_server_action(
                 &mut logger,
@@ -197,16 +194,7 @@ pub async fn main() -> Result<()> {
                     config: config.clone(),
                 },
             );
-            EitherActor::Right(ChainedActor::new(
-                actor,
-                config.into_actor(
-                    get_graphql_query_label,
-                    get_operation_transaction_labels,
-                    &factory,
-                    &allocator,
-                    TelemetryMiddlewareMetricNames::default(),
-                )?,
-            ))
+            Some(config.into_tracer()?)
         }
     };
     let compiler_options = CompilerOptions {
@@ -271,6 +259,10 @@ pub async fn main() -> Result<()> {
         get_http_query_metric_labels,
         get_websocket_connection_metric_labels,
         get_websocket_operation_metric_labels,
+        match tracer {
+            None => EitherTracer::Left(NoopTracer::default()),
+            Some(tracer) => EitherTracer::Right(tracer),
+        },
     )
     .with_context(|| anyhow!("Server startup failed"))?;
     server.await.with_context(|| anyhow!("Server error"))

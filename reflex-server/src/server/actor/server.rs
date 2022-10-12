@@ -3,6 +3,7 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use http::HeaderMap;
+use opentelemetry::trace::Tracer;
 use reflex::core::{Expression, ExpressionFactory, HeapAllocator};
 use reflex_dispatcher::{
     Actor, ActorTransition, ChainedActor, ChainedActorState, HandlerContext, InstrumentedActor,
@@ -71,6 +72,7 @@ pub(crate) struct ServerActor<
     THttpMetricLabels,
     TConnectionMetricLabels,
     TOperationMetricLabels,
+    TTracer,
 > where
     T: AsyncExpression,
     T::Builtin: From<Stdlib> + From<GraphQlStdlib>,
@@ -82,6 +84,8 @@ pub(crate) struct ServerActor<
     THttpMetricLabels: Fn(&GraphQlOperation, &HeaderMap) -> Vec<(String, String)>,
     TConnectionMetricLabels: Fn(Option<&JsonValue>, &HeaderMap) -> Vec<(String, String)>,
     TOperationMetricLabels: Fn(&GraphQlOperation) -> Vec<(String, String)>,
+    TTracer: Tracer,
+    TTracer::Span: Send + Sync + 'static,
 {
     inner: ChainedActor<
         ChainedActor<
@@ -110,7 +114,14 @@ pub(crate) struct ServerActor<
         >,
         ChainedActor<
             InstrumentedActor<
-                GraphQlServer<T, TFactory, TAllocator, TGraphQlQueryLabel, TOperationMetricLabels>,
+                GraphQlServer<
+                    T,
+                    TFactory,
+                    TAllocator,
+                    TGraphQlQueryLabel,
+                    TOperationMetricLabels,
+                    TTracer,
+                >,
             >,
             InstrumentedActor<RuntimeActor<T, TFactory, TAllocator>>,
         >,
@@ -126,6 +137,7 @@ impl<
         THttpMetricLabels,
         TConnectionMetricLabels,
         TOperationMetricLabels,
+        TTracer,
     >
     ServerActor<
         T,
@@ -137,6 +149,7 @@ impl<
         THttpMetricLabels,
         TConnectionMetricLabels,
         TOperationMetricLabels,
+        TTracer,
     >
 where
     T: AsyncExpression,
@@ -149,6 +162,8 @@ where
     THttpMetricLabels: Fn(&GraphQlOperation, &HeaderMap) -> Vec<(String, String)>,
     TConnectionMetricLabels: Fn(Option<&JsonValue>, &HeaderMap) -> Vec<(String, String)>,
     TOperationMetricLabels: Fn(&GraphQlOperation) -> Vec<(String, String)>,
+    TTracer: Tracer,
+    TTracer::Span: Send + Sync + 'static,
 {
     pub fn new(
         schema: Option<GraphQlSchema>,
@@ -161,6 +176,7 @@ where
         get_http_query_metric_labels: THttpMetricLabels,
         get_websocket_connection_metric_labels: TConnectionMetricLabels,
         get_operation_metric_labels: TOperationMetricLabels,
+        tracer: TTracer,
     ) -> Result<Self, String> {
         let schema_types = schema.map(parse_graphql_schema_types).transpose()?;
         let validate_query_transform = schema_types.clone().map(ValidateQueryGraphQlTransform::new);
@@ -204,6 +220,7 @@ where
                             metric_names.graphql_server,
                             get_graphql_query_label,
                             get_operation_metric_labels,
+                            tracer,
                         ),
                         "graphql_server",
                         metric_names.actor,
@@ -228,6 +245,7 @@ impl<
         THttpMetricLabels,
         TConnectionMetricLabels,
         TOperationMetricLabels,
+        TTracer,
         TAction,
     > Actor<TAction>
     for ServerActor<
@@ -240,6 +258,7 @@ impl<
         THttpMetricLabels,
         TConnectionMetricLabels,
         TOperationMetricLabels,
+        TTracer,
     >
 where
     T: AsyncExpression,
@@ -252,6 +271,8 @@ where
     THttpMetricLabels: Fn(&GraphQlOperation, &HeaderMap) -> Vec<(String, String)>,
     TConnectionMetricLabels: Fn(Option<&JsonValue>, &HeaderMap) -> Vec<(String, String)>,
     TOperationMetricLabels: Fn(&GraphQlOperation) -> Vec<(String, String)>,
+    TTracer: Tracer,
+    TTracer::Span: Send + Sync + 'static,
     TAction: ServerAction<T> + Send + 'static,
 {
     type State = ChainedActorState<
@@ -282,7 +303,14 @@ where
         >,
         ChainedActor<
             InstrumentedActor<
-                GraphQlServer<T, TFactory, TAllocator, TGraphQlQueryLabel, TOperationMetricLabels>,
+                GraphQlServer<
+                    T,
+                    TFactory,
+                    TAllocator,
+                    TGraphQlQueryLabel,
+                    TOperationMetricLabels,
+                    TTracer,
+                >,
             >,
             InstrumentedActor<RuntimeActor<T, TFactory, TAllocator>>,
         >,

@@ -10,6 +10,7 @@ use std::{
 
 use anyhow::{anyhow, Context, Result};
 use clap::Parser;
+use opentelemetry::trace::noop::NoopTracer;
 use reflex_cli::{compile_entry_point, syntax::js::default_js_loaders, Syntax};
 use reflex_dispatcher::{session_recorder::SessionRecorder, SchedulerMiddleware};
 use reflex_graphql::{parse_graphql_schema, GraphQlSchema, NoopGraphQlQueryTransform};
@@ -20,7 +21,6 @@ use reflex_handlers::{
 };
 use reflex_interpreter::compiler::CompilerOptions;
 use reflex_lang::{allocator::DefaultAllocator, SharedTermFactory};
-use reflex_server::tokio_runtime_metrics_export::TokioRuntimeMonitorMetricNames;
 use reflex_server::{
     action::ServerCliAction,
     builtins::ServerBuiltins,
@@ -30,7 +30,12 @@ use reflex_server::{
     logger::{formatted::FormattedLogger, json::JsonActionLogger, EitherLogger},
     middleware::LoggerMiddleware,
     recorder::FileRecorder,
+    server::EitherTracer,
     GraphQlWebServerMetricNames,
+};
+use reflex_server::{
+    cli::reflex_server::OpenTelemetryConfig,
+    tokio_runtime_metrics_export::TokioRuntimeMonitorMetricNames,
 };
 use reflex_utils::{reconnect::NoopReconnectTimeout, FileWriterFormat};
 
@@ -114,6 +119,10 @@ async fn main() -> Result<()> {
     let https_client = create_https_client(tls_cert)?;
     let factory = SharedTermFactory::<ServerBuiltins>::default();
     let allocator = DefaultAllocator::default();
+    let tracer = match OpenTelemetryConfig::parse_env(std::env::vars())? {
+        None => None,
+        Some(config) => Some(config.into_tracer()?),
+    };
     let compiler_options = CompilerOptions {
         debug: args.debug_compiler,
         ..Default::default()
@@ -172,6 +181,10 @@ async fn main() -> Result<()> {
         NoopHttpMiddleware,
         GraphQlWebServerMetricNames::default(),
         TokioRuntimeMonitorMetricNames::default(),
+        match tracer {
+            None => EitherTracer::Left(NoopTracer::default()),
+            Some(tracer) => EitherTracer::Right(tracer),
+        },
     )
     .await
     .map(|response| println!("{}", response))

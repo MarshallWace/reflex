@@ -19,6 +19,7 @@ use opentelemetry::{
         resource::{EnvResourceDetector, ResourceDetector, SdkProvidedResourceDetector},
         Resource,
     },
+    trace::{Span, Tracer},
     KeyValue,
 };
 use reflex_dispatcher::{Actor, ChainedActor, PostMiddleware, PreMiddleware, SchedulerMiddleware};
@@ -133,6 +134,29 @@ impl OpenTelemetryConfig {
             }
         }
     }
+    pub fn into_tracer(self) -> Result<opentelemetry::sdk::trace::Tracer> {
+        match self {
+            Self::Http(config) => {
+                let OpenTelemetryHttpConfig {
+                    endpoint,
+                    http_headers,
+                    resource_attributes,
+                    tls_cert,
+                } = config;
+                create_http_otlp_tracer(endpoint, http_headers, tls_cert, Some(resource_attributes))
+            }
+            Self::Grpc(config) => {
+                let OpenTelemetryGrpcConfig {
+                    endpoint,
+                    resource_attributes,
+                    tls_cert,
+                } = config;
+                create_grpc_otlp_tracer(endpoint, tls_cert, Some(resource_attributes))
+            }
+        }
+        .map_err(|err| anyhow!("{}", err))
+        .with_context(|| anyhow!("Failed to initialize OpenTelemetry agent"))
+    }
     pub fn into_actor<
         T: Expression,
         TAction: TelemetryMiddlewareAction<T> + OpenTelemetryMiddlewareAction + Send,
@@ -153,27 +177,7 @@ impl OpenTelemetryConfig {
         T::StructPrototype<T>: Send,
         T::ExpressionList<T>: Send,
     {
-        let tracer = match self {
-            Self::Http(config) => {
-                let OpenTelemetryHttpConfig {
-                    endpoint,
-                    http_headers,
-                    resource_attributes,
-                    tls_cert,
-                } = config;
-                create_http_otlp_tracer(endpoint, http_headers, tls_cert, Some(resource_attributes))
-            }
-            Self::Grpc(config) => {
-                let OpenTelemetryGrpcConfig {
-                    endpoint,
-                    resource_attributes,
-                    tls_cert,
-                } = config;
-                create_grpc_otlp_tracer(endpoint, tls_cert, Some(resource_attributes))
-            }
-        }
-        .map_err(|err| anyhow!("{}", err))
-        .with_context(|| anyhow!("Failed to initialize OpenTelemetry agent"))?;
+        let tracer = self.into_tracer()?;
         Ok(ChainedActor::new(
             TelemetryMiddleware::new(
                 factory.clone(),
@@ -384,6 +388,7 @@ pub fn cli<T, TFactory, TAllocator, TAction>(
     get_websocket_operation_metric_labels: impl Fn(&GraphQlOperation) -> Vec<(String, String)>
         + Send
         + 'static,
+    tracer: impl Tracer<Span = impl Span + Send + Sync + 'static> + Send + 'static,
 ) -> Result<impl Future<Output = Result<(), hyper::Error>>>
 where
     T: AsyncExpression
@@ -420,6 +425,7 @@ where
         get_http_query_metric_labels,
         get_websocket_connection_metric_labels,
         get_websocket_operation_metric_labels,
+        tracer,
     )
     .map_err(|err| anyhow!(err))
     .context("Failed to initialize server")?;

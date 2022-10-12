@@ -16,6 +16,7 @@ use hyper_tungstenite::{
     tungstenite::{Error as TungsteniteError, Message},
     HyperWebsocket, WebSocketStream,
 };
+use opentelemetry::trace::{Span, Tracer};
 use reflex::core::{Applicable, Expression, InstructionPointer, Reducible, Rewritable};
 use reflex_dispatcher::tokio_task_metrics_export::get_task_monitor;
 use reflex_dispatcher::{
@@ -148,6 +149,7 @@ impl<TAction: Action + Send + 'static> GraphQlWebServer<TAction> {
         get_operation_metric_labels: impl Fn(&GraphQlOperation) -> Vec<(String, String)>
             + Send
             + 'static,
+        tracer: impl Tracer<Span = impl Span + Send + Sync + 'static> + Send + 'static,
     ) -> Result<Self, String>
     where
         T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
@@ -176,6 +178,7 @@ impl<TAction: Action + Send + 'static> GraphQlWebServer<TAction> {
             get_http_query_metric_labels,
             get_websocket_connection_metric_labels,
             get_operation_metric_labels,
+            tracer,
         )?;
         let runtime = TokioScheduler::<TAction>::new(
             InstrumentedActor::new(

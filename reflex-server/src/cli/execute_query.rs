@@ -6,6 +6,7 @@
 use anyhow::{anyhow, Context, Result};
 use futures::{future, Future, FutureExt};
 use http::{header, HeaderMap, Request, Response};
+use opentelemetry::trace::{Span, Tracer};
 use reflex::core::{Applicable, InstructionPointer, Reducible, Rewritable};
 use reflex_dispatcher::{
     Action, Actor, PostMiddleware, PreMiddleware, SchedulerMiddleware, SerializableAction,
@@ -67,6 +68,7 @@ pub async fn cli<
     http_middleware: THttpMiddleware,
     metric_names: GraphQlWebServerMetricNames,
     tokio_runtime_metric_names: TokioRuntimeMonitorMetricNames,
+    tracer: impl Tracer<Span = impl Span + Send + Sync + 'static> + Send + 'static,
 ) -> Result<String>
 where
     T: AsyncExpression
@@ -145,6 +147,7 @@ where
         get_http_query_metric_labels,
         get_websocket_connection_metric_labels,
         get_websocket_operation_metric_labels,
+        tracer,
     )
     .map_err(|err| anyhow!(err))
     .context("Failed to initialize server")?;

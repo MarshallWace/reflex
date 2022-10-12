@@ -13,10 +13,14 @@ use metrics::{
     counter, decrement_gauge, describe_counter, describe_gauge, describe_histogram, gauge,
     histogram, increment_gauge, Unit,
 };
-use reflex::core::{
-    ConditionListType, ConditionType, DependencyList, DynamicState, EvaluationResult, Expression,
-    ExpressionFactory, ExpressionListType, HeapAllocator, ListTermType, RefType, SignalTermType,
-    SignalType, StateCache, StateToken, StringTermType, StringValue, SymbolTermType,
+use reflex::{
+    core::{
+        ConditionListType, ConditionType, DependencyList, DynamicState, EvaluationResult,
+        Expression, ExpressionFactory, ExpressionListType, HeapAllocator, ListTermType, RefType,
+        SignalTermType, SignalType, StateCache, StateToken, StringTermType, StringValue,
+        SymbolTermType,
+    },
+    hash::HashId,
 };
 use reflex_dispatcher::{
     Action, Actor, ActorTransition, HandlerContext, InboundAction, MessageData, MessageOffset,
@@ -132,6 +136,10 @@ pub fn create_evaluate_effect<T: Expression>(
             invalidation_strategy.serialize(factory),
         ]),
     )
+}
+
+pub fn get_evaluate_effect_cache_key<V: ConditionType<T>, T: Expression>(effect: &V) -> HashId {
+    effect.id()
 }
 
 pub fn parse_evaluate_effect_query<T: Expression>(
@@ -268,6 +276,7 @@ where
 }
 
 pub struct EvaluateHandlerState<T: Expression> {
+    // TODO: Use newtypes for state hashmap keys
     workers: HashMap<StateToken, WorkerState<T>>,
     // TODO: Use expressions as state tokens, removing need to map state tokens back to originating effects
     effects: HashMap<StateToken, T::Signal<T>>,
@@ -610,7 +619,7 @@ where
         let (evaluate_start_actions, existing_results): (Vec<_>, Vec<_>) =
             partition_results(queries.filter_map(
                 |(effect, (label, query, evaluation_mode, invalidation_strategy))| {
-                    let cache_key = effect.id();
+                    let cache_key = get_evaluate_effect_cache_key(effect);
                     match state.workers.entry(cache_key) {
                         // For any queries that are already subscribed, re-emit the latest cached value if one exists
                         // (this is necessary because the caller that triggered this action might be expecting a result)
@@ -619,6 +628,7 @@ where
                             worker.subscription_count += 1;
                             worker
                                 .latest_result()
+                                .filter(|result| !is_unresolved_result(result, &self.factory))
                                 .map(|result| Err((cache_key, result.result().clone())))
                         }
                         // For any queries that are not yet subscribed, kick off evaluation of that query
@@ -698,7 +708,7 @@ where
         let unsubscribed_workers = effects
             .iter()
             .flat_map(|effect| {
-                let cache_key = effect.id();
+                let cache_key = get_evaluate_effect_cache_key(effect);
                 let mut existing_entry = match state.workers.entry(cache_key) {
                     Entry::Occupied(entry) => Some(entry),
                     _ => None,
