@@ -5,8 +5,8 @@
 use http::HeaderMap;
 use reflex::core::{Expression, ExpressionFactory, HeapAllocator};
 use reflex_dispatcher::{
-    Action, Actor, ActorTransition, ChainedActor, ChainedActorState, HandlerContext,
-    InstrumentedActor, InstrumentedActorMetricNames, MessageData,
+    Actor, ActorTransition, ChainedActor, ChainedActorState, HandlerContext, InstrumentedActor,
+    InstrumentedActorMetricNames, MessageData, NamedAction,
 };
 use reflex_graphql::{
     stdlib::Stdlib as GraphQlStdlib,
@@ -45,7 +45,7 @@ pub struct ServerMetricNames {
 }
 
 pub trait ServerAction<T: Expression>:
-    Action
+    NamedAction
     + RuntimeAction<T>
     + HttpGraphQlServerAction<T>
     + WebSocketGraphQlServerAction<T>
@@ -53,7 +53,7 @@ pub trait ServerAction<T: Expression>:
 {
 }
 impl<T: Expression, TAction> ServerAction<T> for TAction where
-    Self: Action
+    Self: NamedAction
         + RuntimeAction<T>
         + HttpGraphQlServerAction<T>
         + WebSocketGraphQlServerAction<T>

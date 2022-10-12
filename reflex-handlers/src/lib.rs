@@ -14,7 +14,7 @@ use actor::{
 use hyper::Body;
 use reflex::core::{Applicable, Expression};
 use reflex_dispatcher::{
-    Action, Actor, ChainedActor, InstrumentedActor, InstrumentedActorMetricNames,
+    Actor, ChainedActor, InstrumentedActor, InstrumentedActorMetricNames, NamedAction,
 };
 use reflex_runtime::{AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator};
 use reflex_utils::reconnect::ReconnectTimeout;
@@ -34,7 +34,7 @@ pub mod stdlib;
 pub mod utils;
 
 pub trait DefaultHandlersAction<T: Expression>:
-    Action
+    NamedAction
     + FetchHandlerAction<T>
     + GraphQlHandlerAction<T>
     + LoaderHandlerAction<T>
@@ -45,7 +45,7 @@ pub trait DefaultHandlersAction<T: Expression>:
 {
 }
 impl<T: Expression, TAction> DefaultHandlersAction<T> for TAction where
-    Self: Action
+    Self: NamedAction
         + FetchHandlerAction<T>
         + GraphQlHandlerAction<T>
         + LoaderHandlerAction<T>
@@ -94,7 +94,7 @@ where
                 allocator.clone(),
                 metric_names.fetch_handler,
             ),
-            "FetchHandler",
+            "Fetch",
             metric_names.actor,
         ),
         ChainedActor::new(
@@ -106,7 +106,7 @@ where
                     reconnect_timeout,
                     metric_names.graphql_handler,
                 ),
-                "GraphQlHandler",
+                "GraphQl",
                 metric_names.actor,
             ),
             ChainedActor::new(
@@ -116,7 +116,7 @@ where
                         allocator.clone(),
                         metric_names.loader_handler,
                     ),
-                    "LoaderHandler",
+                    "Loader",
                     metric_names.actor,
                 ),
                 ChainedActor::new(
@@ -126,24 +126,24 @@ where
                             allocator.clone(),
                             metric_names.scan_handler,
                         ),
-                        "ScanHandler",
+                        "Scan",
                         metric_names.actor,
                     ),
                     ChainedActor::new(
                         InstrumentedActor::new(
                             TimeoutHandler::new(factory.clone(), allocator.clone()),
-                            "TimeoutHandler",
+                            "Timeout",
                             metric_names.actor,
                         ),
                         ChainedActor::new(
                             InstrumentedActor::new(
                                 TimestampHandler::new(factory.clone(), allocator.clone()),
-                                "TimestampHandler",
+                                "Timestamp",
                                 metric_names.actor,
                             ),
                             InstrumentedActor::new(
                                 VariableHandler::new(factory.clone(), allocator.clone()),
-                                "VariableHandler",
+                                "Variable",
                                 metric_names.actor,
                             ),
                         ),

@@ -32,7 +32,6 @@ pub struct TokioSchedulerMetricNames {
     pub event_bus_microtask_queue_capacity: &'static str,
     pub event_processing_duration_micros: &'static str,
     pub event_batch_processing_duration_micros: &'static str,
-    pub top_level_actor_handle_duration_micros: &'static str,
     pub tokio_task_metric_names: TokioTaskMetricNames,
 }
 impl TokioSchedulerMetricNames {
@@ -57,11 +56,6 @@ impl TokioSchedulerMetricNames {
             Unit::Microseconds,
             "Time spent in the synchronous handling loop of events from the event bus (i.e. including subsequent commands spawned during handling an initial event)"
         );
-        describe_histogram!(
-            self.top_level_actor_handle_duration_micros,
-            Unit::Microseconds,
-            "Time spent in the call to the top level actor by the tokio scheduler"
-        );
         self
     }
 }
@@ -72,7 +66,6 @@ impl Default for TokioSchedulerMetricNames {
             event_bus_microtask_queue_capacity: "event_bus_microtask_capacity",
             event_processing_duration_micros: "event_processing_duration_micros",
             event_batch_processing_duration_micros: "event_batch_processing_duration_micros",
-            top_level_actor_handle_duration_micros: "top_level_actor_handle_duration_micros",
             tokio_task_metric_names: TokioTaskMetricNames::default(),
         }
     }
@@ -92,6 +85,20 @@ where
     ),
     Subscribe(TokioSubscriberId, TokioSubscriber<TAction>),
     Unsubscribe(TokioSubscriberId),
+}
+impl<TAction> TokioCommand<TAction>
+where
+    TAction: Action + Send + 'static,
+{
+    fn metric_label(&self) -> &'static str {
+        match self {
+            TokioCommand::Dispatch(_) => "dispatch",
+            TokioCommand::Event(_, _) => "event",
+            TokioCommand::WorkerResult(_, _, _, _) => "worker_result",
+            TokioCommand::Subscribe(_, _) => "subscribe",
+            TokioCommand::Unsubscribe(_) => "unsubscribe",
+        }
+    }
 }
 
 pub struct TokioSinkError<T>(Option<T>);
@@ -339,20 +346,14 @@ where
                 let next_pid = Arc::new(AtomicUsize::new(root_pid.next().into()));
                 let mut processes = HashMap::<ProcessId, TokioProcess<TAction>>::default();
                 let mut worker_command_queue = Vec::new();
-                let mut command_queue = VecDeque::new();
+                let mut command_queue: VecDeque<TokioCommand<TAction>> = VecDeque::new();
                 // Main runtime event loop
                 loop {
                     // Process any queued synchronous commands
                     let command_batch_processing_start_time = std::time::Instant::now();
                     while let Some(command) = command_queue.pop_front() {
                         let command_processing_start_time = std::time::Instant::now();
-                        let command_type = match &command {
-                            TokioCommand::Dispatch(_) => "dispatch",
-                            TokioCommand::Event(_, _) => "event",
-                            TokioCommand::WorkerResult(_, _, _, _) => "worker_result",
-                            TokioCommand::Subscribe(_, _) => "subscribe",
-                            TokioCommand::Unsubscribe(_) => "unsubscribe",
-                        };
+                        let command_metric_label = command.metric_label();
                         let (action, child_commands, worker_commands) = process_command(
                             command,
                             &actor,
@@ -369,7 +370,6 @@ where
                             &task_monitor,
                             &abort_monitor,
                             &worker_monitor,
-                            metric_names,
                         );
                         // Add any spawned child commands to the event queue
                         command_queue.extend(child_commands.into_iter().map(
@@ -394,7 +394,7 @@ where
                         histogram!(
                             metric_names.event_processing_duration_micros,
                             command_processing_start_time.elapsed().as_micros() as f64,
-                            "command_type" => command_type
+                            "command_type" => command_metric_label
                         )
                     }
 
@@ -458,7 +458,6 @@ fn process_command<
     task_monitor: &tokio_metrics::TaskMonitor,
     abort_monitor: &tokio_metrics::TaskMonitor,
     worker_monitor: &tokio_metrics::TaskMonitor,
-    metric_names: TokioSchedulerMetricNames,
 ) -> (
     Option<TAction>,
     impl IntoIterator<
@@ -524,7 +523,6 @@ fn process_command<
                     };
                     if pid == root_pid {
                         let child_commands = {
-                            let actor_processing_start_time = std::time::Instant::now();
                             let (updated_state, child_commands) = actor
                                 .handle(
                                     actor_state.take().unwrap(),
@@ -534,10 +532,6 @@ fn process_command<
                                 )
                                 .into_parts();
                             actor_state.replace(updated_state);
-                            histogram!(
-                                metric_names.top_level_actor_handle_duration_micros,
-                                actor_processing_start_time.elapsed().as_micros() as f64
-                            );
                             child_commands
                         };
                         let emitted_action = Some(action);

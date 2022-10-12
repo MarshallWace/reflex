@@ -22,8 +22,9 @@ use reflex_dispatcher::{
     scheduler::tokio::{TokioScheduler, TokioSchedulerMetricNames},
     utils::take_until_final_item::TakeUntilFinalItem,
     Action, Actor, AsyncActionFilter, AsyncActionStream, AsyncDispatchResult, AsyncScheduler,
-    AsyncSubscriptionStream, ChainedActor, InboundAction, InstrumentedActor, OutboundAction,
-    PostMiddleware, PreMiddleware, Scheduler, SchedulerMiddleware,
+    AsyncSubscriptionStream, ChainedActor, InboundAction, InstrumentedActor,
+    InstrumentedActorMetricNames, OutboundAction, PostMiddleware, PreMiddleware, Scheduler,
+    SchedulerMiddleware,
 };
 use reflex_graphql::{
     create_json_error_object,
@@ -113,6 +114,7 @@ pub struct GraphQlWebServerMetricNames {
     pub server: ServerMetricNames,
     pub interpreter: BytecodeWorkerMetricNames,
     pub scheduler: TokioSchedulerMetricNames,
+    pub root_actor: InstrumentedActorMetricNames,
 }
 
 pub struct GraphQlWebServer<TAction: Action + Send + 'static> {
@@ -176,23 +178,27 @@ impl<TAction: Action + Send + 'static> GraphQlWebServer<TAction> {
             get_operation_metric_labels,
         )?;
         let runtime = TokioScheduler::<TAction>::new(
-            ChainedActor::new(
-                server,
+            InstrumentedActor::new(
                 ChainedActor::new(
-                    InstrumentedActor::new(
-                        BytecodeInterpreter::new(
-                            graph_root,
-                            compiler_options,
-                            interpreter_options,
-                            factory,
-                            allocator,
-                            metric_names.interpreter,
+                    server,
+                    ChainedActor::new(
+                        InstrumentedActor::new(
+                            BytecodeInterpreter::new(
+                                graph_root,
+                                compiler_options,
+                                interpreter_options,
+                                factory,
+                                allocator,
+                                metric_names.interpreter,
+                            ),
+                            "BytecodeInterpreter",
+                            metric_names.server.actor,
                         ),
-                        "bytecode_interpreter",
-                        metric_names.server.actor,
+                        actor,
                     ),
-                    actor,
                 ),
+                "root",
+                metric_names.root_actor,
             ),
             middleware,
             metric_names.scheduler,
