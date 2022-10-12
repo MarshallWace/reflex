@@ -13,7 +13,9 @@ use actor::{
 };
 use hyper::Body;
 use reflex::core::{Applicable, Expression};
-use reflex_dispatcher::{Action, Actor, ChainedActor};
+use reflex_dispatcher::{
+    Action, Actor, ChainedActor, InstrumentedActor, InstrumentedActorMetricNames,
+};
 use reflex_runtime::{AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator};
 use reflex_utils::reconnect::ReconnectTimeout;
 
@@ -60,6 +62,7 @@ pub struct DefaultHandlersMetricNames {
     pub graphql_handler: GraphQlHandlerMetricNames,
     pub loader_handler: LoaderHandlerMetricNames,
     pub scan_handler: ScanHandlerMetricNames,
+    pub actor: InstrumentedActorMetricNames,
 }
 
 pub fn default_handlers<TAction, T, TFactory, TAllocator, TConnect, TReconnect>(
@@ -84,37 +87,65 @@ where
     TAction: DefaultHandlersAction<T> + Send + 'static,
 {
     ChainedActor::new(
-        FetchHandler::new(
-            https_client.clone(),
-            factory.clone(),
-            allocator.clone(),
-            metric_names.fetch_handler,
-        ),
-        ChainedActor::new(
-            GraphQlHandler::new(
-                https_client,
+        InstrumentedActor::new(
+            FetchHandler::new(
+                https_client.clone(),
                 factory.clone(),
                 allocator.clone(),
-                reconnect_timeout,
-                metric_names.graphql_handler,
+                metric_names.fetch_handler,
             ),
-            ChainedActor::new(
-                LoaderHandler::new(
+            "FetchHandler",
+            metric_names.actor,
+        ),
+        ChainedActor::new(
+            InstrumentedActor::new(
+                GraphQlHandler::new(
+                    https_client,
                     factory.clone(),
                     allocator.clone(),
-                    metric_names.loader_handler,
+                    reconnect_timeout,
+                    metric_names.graphql_handler,
                 ),
-                ChainedActor::new(
-                    ScanHandler::new(
+                "GraphQlHandler",
+                metric_names.actor,
+            ),
+            ChainedActor::new(
+                InstrumentedActor::new(
+                    LoaderHandler::new(
                         factory.clone(),
                         allocator.clone(),
-                        metric_names.scan_handler,
+                        metric_names.loader_handler,
+                    ),
+                    "LoaderHandler",
+                    metric_names.actor,
+                ),
+                ChainedActor::new(
+                    InstrumentedActor::new(
+                        ScanHandler::new(
+                            factory.clone(),
+                            allocator.clone(),
+                            metric_names.scan_handler,
+                        ),
+                        "ScanHandler",
+                        metric_names.actor,
                     ),
                     ChainedActor::new(
-                        TimeoutHandler::new(factory.clone(), allocator.clone()),
+                        InstrumentedActor::new(
+                            TimeoutHandler::new(factory.clone(), allocator.clone()),
+                            "TimeoutHandler",
+                            metric_names.actor,
+                        ),
                         ChainedActor::new(
-                            TimestampHandler::new(factory.clone(), allocator.clone()),
-                            VariableHandler::new(factory.clone(), allocator.clone()),
+                            InstrumentedActor::new(
+                                TimestampHandler::new(factory.clone(), allocator.clone()),
+                                "TimestampHandler",
+                                metric_names.actor,
+                            ),
+                            InstrumentedActor::new(
+                                VariableHandler::new(factory.clone(), allocator.clone()),
+                                "VariableHandler",
+                                metric_names.actor,
+                            ),
                         ),
                     ),
                 ),
