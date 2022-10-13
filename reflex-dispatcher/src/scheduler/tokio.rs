@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
+use std::iter::repeat;
+use std::time::Instant;
 use std::{
     collections::{hash_map::Entry, HashMap, VecDeque},
     pin::Pin,
@@ -32,6 +34,7 @@ pub struct TokioSchedulerMetricNames {
     pub event_bus_microtask_queue_capacity: &'static str,
     pub event_processing_duration_micros: &'static str,
     pub event_batch_processing_duration_micros: &'static str,
+    pub event_bus_queued_duration_micros: &'static str,
     pub tokio_task_metric_names: TokioTaskMetricNames,
 }
 impl TokioSchedulerMetricNames {
@@ -56,6 +59,11 @@ impl TokioSchedulerMetricNames {
             Unit::Microseconds,
             "Time spent in the synchronous handling loop of events from the event bus (i.e. including subsequent commands spawned during handling an initial event)"
         );
+        describe_histogram!(
+            self.event_bus_queued_duration_micros,
+            Unit::Microseconds,
+            "Time individual actions spend in the event bus"
+        );
         self
     }
 }
@@ -66,6 +74,7 @@ impl Default for TokioSchedulerMetricNames {
             event_bus_microtask_queue_capacity: "event_bus_microtask_capacity",
             event_processing_duration_micros: "event_processing_duration_micros",
             event_batch_processing_duration_micros: "event_batch_processing_duration_micros",
+            event_bus_queued_duration_micros: "event_bus_queued_duration_micros",
             tokio_task_metric_names: TokioTaskMetricNames::default(),
         }
     }
@@ -346,13 +355,14 @@ where
                 let next_pid = Arc::new(AtomicUsize::new(root_pid.next().into()));
                 let mut processes = HashMap::<ProcessId, TokioProcess<TAction>>::default();
                 let mut worker_command_queue = Vec::new();
-                let mut command_queue: VecDeque<TokioCommand<TAction>> = VecDeque::new();
+                let mut command_queue: VecDeque<(TokioCommand<TAction>, Instant)> = VecDeque::new();
                 // Main runtime event loop
                 loop {
                     // Process any queued synchronous commands
-                    let command_batch_processing_start_time = std::time::Instant::now();
-                    while let Some(command) = command_queue.pop_front() {
-                        let command_processing_start_time = std::time::Instant::now();
+                    let command_batch_processing_start_time = Instant::now();
+                    while let Some((command, enqueue_time)) = command_queue.pop_front() {
+                        record_time_spent_in_queue(enqueue_time, &metric_names);
+                        let command_processing_start_time = Instant::now();
                         let command_metric_label = command.metric_label();
                         let (action, child_commands, worker_commands) = process_command(
                             command,
@@ -372,14 +382,20 @@ where
                             &worker_monitor,
                         );
                         // Add any spawned child commands to the event queue
-                        command_queue.extend(child_commands.into_iter().map(
-                            |(operation, parent_offset)| {
-                                TokioCommand::Event(
-                                    operation,
-                                    parent_offset.map(|parent_offset| (parent_offset, root_pid)),
-                                )
-                            },
-                        ));
+                        command_queue.extend(
+                            child_commands.into_iter().zip(repeat(Instant::now())).map(
+                                |((operation, parent_offset), enqueue_time)| {
+                                    (
+                                        TokioCommand::Event(
+                                            operation,
+                                            parent_offset
+                                                .map(|parent_offset| (parent_offset, root_pid)),
+                                        ),
+                                        enqueue_time,
+                                    )
+                                },
+                            ),
+                        );
                         // Collect any spawned worker commands for dispatching once all synchronous commands have been processed
                         worker_command_queue.extend(worker_commands);
                         // If an action was dispatched on the main process, notify any subscribers before processing the next command
@@ -425,7 +441,7 @@ where
                             &metric_labels
                         );
                         // Push the microtask onto the event queue and continue the event loop
-                        command_queue.push_back(operation);
+                        command_queue.push_back((operation, Instant::now()));
                     } else {
                         // The async microtask command stream has ended; break out of the event loop
                         break;
@@ -435,6 +451,12 @@ where
         };
         (task, commands_tx)
     }
+}
+fn record_time_spent_in_queue(enqueue_time: Instant, metric_names: &TokioSchedulerMetricNames) {
+    histogram!(
+        metric_names.event_bus_queued_duration_micros,
+        enqueue_time.elapsed().as_micros() as f64
+    );
 }
 
 fn process_command<
