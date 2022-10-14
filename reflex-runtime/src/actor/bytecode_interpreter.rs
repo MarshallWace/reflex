@@ -512,7 +512,7 @@ where
             None
         } else {
             let should_gc = queued_evaluation.is_none()
-                || worker_state.updates_since_gc > MAX_UPDATES_WITHOUT_GC;
+                || worker_state.updates_since_gc >= MAX_UPDATES_WITHOUT_GC;
             if should_gc {
                 worker_state.updates_since_gc = 0;
                 Some(BytecodeInterpreterGcAction {
