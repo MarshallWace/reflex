@@ -170,6 +170,7 @@ pub(crate) fn get_cors_headers<T>(
     )))
 }
 
+#[derive(Clone, Debug)]
 pub enum EitherTracer<L, R> {
     Left(L),
     Right(R),
