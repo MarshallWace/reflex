@@ -60,7 +60,7 @@ impl<T: Expression> GraphNode for SignalTerm<T> {
         true
     }
     fn is_atomic(&self) -> bool {
-        true
+        false
     }
     fn is_complex(&self) -> bool {
         false
