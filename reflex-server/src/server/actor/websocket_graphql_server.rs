@@ -18,14 +18,15 @@ use reflex_dispatcher::{
 };
 use reflex_graphql::{
     create_graphql_error_response, create_graphql_success_response, create_json_error_object,
-    parse_graphql_query, serialize_graphql_result_payload,
+    parse_graphql_operation_type, parse_graphql_query, serialize_graphql_result_payload,
     subscriptions::{
         GraphQlSubscriptionClientMessage, GraphQlSubscriptionConnectionInitMessage,
         GraphQlSubscriptionServerMessage, GraphQlSubscriptionStartMessage,
         GraphQlSubscriptionStopMessage, GraphQlSubscriptionUpdateMessage, OperationId,
     },
     validate::validate_graphql_result,
-    GraphQlOperation, GraphQlQuery, GraphQlQueryTransform, GraphQlSchemaTypes,
+    GraphQlOperation, GraphQlOperationType, GraphQlQuery, GraphQlQueryTransform,
+    GraphQlSchemaTypes,
 };
 use reflex_json::{json_object, JsonMap, JsonNumber, JsonValue};
 use tokio::time::sleep;
@@ -282,6 +283,8 @@ struct WebSocketGraphQlInitializedConnectionState {
 struct WebSocketGraphQlOperation<T: Expression> {
     operation_id: OperationId,
     subscription_id: Uuid,
+    operation_type: GraphQlOperationType,
+    // Only necessary if validating query results against a schema
     query: Option<GraphQlQuery>,
     /// Previous result payload if this is a diff stream (empty before first result emitted)
     diff_result: Option<Option<(T, JsonValue)>>,
@@ -543,15 +546,23 @@ where
             message: _,
         } = action;
         let connection = state.connections.get_mut(connection_id)?;
-        let operation = if connection.has_operation(message.operation_id()) {
-            Err(create_json_error_object(
-                format!("Subscription ID already exists: {}", message.operation_id()),
-                None,
+        let operation_id = message.operation_id();
+        let operation = if connection.has_operation(operation_id) {
+            Err(GraphQlSubscriptionServerMessage::ConnectionError(
+                create_json_error_object(
+                    format!("Subscription ID already exists: {}", operation_id),
+                    None,
+                ),
             ))
         } else {
             let operation = message.payload();
             parse_graphql_query(&operation.query)
-                .map_err(|err| create_json_error_object(format!("Invalid query: {}", err), None))
+                .map_err(|err| {
+                    GraphQlSubscriptionServerMessage::Error(
+                        operation_id.clone(),
+                        create_json_error_object(format!("Invalid query: {}", err), None),
+                    )
+                })
                 .and_then(|query| {
                     let operation = GraphQlOperation::new(
                         query,
@@ -559,16 +570,72 @@ where
                         operation.variables.clone(),
                         operation.extensions.clone(),
                     );
-                    self.transform.transform(
-                        operation,
-                        &connection.request,
-                        connection
-                            .initialized_state
-                            .as_ref()
-                            .and_then(|initialized_state| {
-                                initialized_state.connection_params.as_ref()
-                            }),
-                    )
+                    self.transform
+                        .transform(
+                            operation,
+                            &connection.request,
+                            connection
+                                .initialized_state
+                                .as_ref()
+                                .and_then(|initialized_state| {
+                                    initialized_state.connection_params.as_ref()
+                                }),
+                        )
+                        .map_err(|err| {
+                            GraphQlSubscriptionServerMessage::Error(operation_id.clone(), err)
+                        })
+                })
+                .and_then(|operation| {
+                    parse_graphql_operation_type(operation.query(), operation.operation_name())
+                        .map_err(|err| {
+                            GraphQlSubscriptionServerMessage::Error(
+                                operation_id.clone(),
+                                create_json_error_object(format!("{}", err), None),
+                            )
+                        })
+                        .map(|operation_type| (operation, operation_type))
+                })
+                .and_then(|(operation, operation_type)| {
+                    let diff_result = is_diff_subscription(&operation);
+                    let throttle_duration = get_subscription_throttle_duration(&operation);
+                    if diff_result && operation_type != GraphQlOperationType::Subscription {
+                        Err(GraphQlSubscriptionServerMessage::Error(
+                            operation_id.clone(),
+                            create_json_error_object(
+                                format!("Result diffing is only valid for subscription operations"),
+                                None,
+                            ),
+                        ))
+                    } else if throttle_duration.is_some()
+                        && operation_type != GraphQlOperationType::Subscription
+                    {
+                        Err(GraphQlSubscriptionServerMessage::Error(
+                            operation_id.clone(),
+                            create_json_error_object(
+                                format!(
+                                    "@throttle directive is only valid for subscription operations"
+                                ),
+                                None,
+                            ),
+                        ))
+                    } else {
+                        let operation_state = {
+                            let subscription_id = Uuid::new_v4();
+                            let validation_query = self
+                                .schema_types
+                                .as_ref()
+                                .map(|_| operation.query().clone());
+                            WebSocketGraphQlOperation {
+                                operation_id: operation_id.clone(),
+                                subscription_id,
+                                operation_type,
+                                query: validation_query,
+                                diff_result: if diff_result { Some(None) } else { None },
+                                throttle: throttle_duration.map(|duration| (duration, None)),
+                            }
+                        };
+                        Ok((operation, operation_state))
+                    }
                 })
         };
         match operation {
@@ -576,28 +643,13 @@ where
                 context.pid(),
                 WebSocketServerSendAction {
                     connection_id: *connection_id,
-                    message: GraphQlSubscriptionServerMessage::ConnectionError(err),
+                    message: err,
                 }
                 .into(),
             )))),
-            Ok(operation) => {
-                let subscription_id = Uuid::new_v4();
-                let validation_query = self
-                    .schema_types
-                    .as_ref()
-                    .map(|_| operation.query().clone());
-                connection.operations.push(WebSocketGraphQlOperation {
-                    operation_id: message.operation_id().clone(),
-                    subscription_id,
-                    query: validation_query,
-                    diff_result: if is_diff_subscription(&operation) {
-                        Some(None)
-                    } else {
-                        None
-                    },
-                    throttle: get_subscription_throttle_duration(&operation)
-                        .map(|duration| (duration, None)),
-                });
+            Ok((operation, operation_state)) => {
+                let subscription_id = operation_state.subscription_id;
+                connection.operations.push(operation_state);
                 Some(StateTransition::new(once(StateOperation::Send(
                     context.pid(),
                     GraphQlServerSubscribeAction {
@@ -627,8 +679,22 @@ where
             connection_id,
             message: _,
         } = action;
+        self.unsubscribe_operation(state, connection_id, message.operation_id(), context)
+    }
+    fn unsubscribe_operation<TAction>(
+        &self,
+        state: &mut WebSocketGraphQlServerState<T>,
+        connection_id: &Uuid,
+        operation_id: &OperationId,
+        context: &mut impl HandlerContext,
+    ) -> Option<StateTransition<TAction>>
+    where
+        TAction: Action
+            + OutboundAction<WebSocketServerSendAction>
+            + OutboundAction<GraphQlServerUnsubscribeAction<T>>,
+    {
         let connection = state.connections.get_mut(connection_id)?;
-        if let Some(operation) = connection.remove_operation(message.operation_id()) {
+        if let Some(operation) = connection.remove_operation(operation_id) {
             Some(StateTransition::new([
                 StateOperation::Send(
                     context.pid(),
@@ -654,10 +720,7 @@ where
                     connection_id: *connection_id,
                     message: GraphQlSubscriptionServerMessage::ConnectionError(
                         create_json_error_object(
-                            format!(
-                                "Subscription ID already unsubscribed: {}",
-                                message.operation_id()
-                            ),
+                            format!("Subscription ID already unsubscribed: {}", operation_id),
                             None,
                         ),
                     ),
@@ -684,10 +747,16 @@ where
             message: _,
         } = action;
         let connection = state.connections.get_mut(connection_id)?;
-        if let Some(operation) = connection.find_operation(message.operation_id()) {
-            Some(StateTransition::new(once(StateOperation::Send(
-                context.pid(),
-                GraphQlServerModifyAction {
+        let operation_id = message.operation_id();
+        let modify_action = match connection.find_operation(operation_id) {
+            None => Err(GraphQlSubscriptionServerMessage::ConnectionError(
+                create_json_error_object(
+                    format!("Subscription ID not found: {}", message.operation_id()),
+                    None,
+                ),
+            )),
+            Some(operation) => match operation.operation_type {
+                GraphQlOperationType::Subscription => Ok(GraphQlServerModifyAction {
                     subscription_id: operation.subscription_id,
                     variables: message
                         .payload()
@@ -696,23 +765,28 @@ where
                         .collect(),
                     _expression: Default::default(),
                 }
-                .into(),
-            ))))
-        } else {
-            Some(StateTransition::new(once(StateOperation::Send(
-                context.pid(),
-                WebSocketServerSendAction {
-                    connection_id: *connection_id,
-                    message: GraphQlSubscriptionServerMessage::ConnectionError(
+                .into()),
+                GraphQlOperationType::Query | GraphQlOperationType::Mutation => {
+                    Err(GraphQlSubscriptionServerMessage::Error(
+                        operation_id.clone(),
                         create_json_error_object(
-                            format!("Subscription ID not found: {}", message.operation_id()),
+                            format!("Unable to update {} variables", operation.operation_type),
                             None,
                         ),
-                    ),
+                    ))
                 }
-                .into(),
-            ))))
-        }
+            },
+        };
+        Some(StateTransition::new(once(StateOperation::Send(
+            context.pid(),
+            modify_action.unwrap_or_else(|err| {
+                WebSocketServerSendAction {
+                    connection_id: *connection_id,
+                    message: err,
+                }
+                .into()
+            }),
+        ))))
     }
     fn handle_websocket_graphql_server_receive_connection_terminate<TAction>(
         &self,
@@ -815,7 +889,8 @@ where
             + Send
             + 'static
             + OutboundAction<WebSocketServerSendAction>
-            + OutboundAction<WebSocketServerThrottleTimeoutAction>,
+            + OutboundAction<WebSocketServerThrottleTimeoutAction>
+            + OutboundAction<GraphQlServerUnsubscribeAction<T>>,
     {
         let GraphQlServerEmitAction {
             subscription_id,
@@ -831,7 +906,11 @@ where
         if is_unchanged {
             return None;
         }
-        match subscription.throttle.as_mut() {
+        let should_unsubscribe = match subscription.operation_type {
+            GraphQlOperationType::Query | GraphQlOperationType::Mutation => true,
+            GraphQlOperationType::Subscription => false,
+        };
+        let emit_actions = match subscription.throttle.as_mut() {
             None => {
                 let update_message = get_subscription_result_payload(
                     result,
@@ -872,6 +951,20 @@ where
                     });
                     Some(StateTransition::new(once(task)))
                 }
+            }
+        };
+        let unsubscribe_actions = if should_unsubscribe {
+            let operation_id = subscription.operation_id.clone();
+            self.unsubscribe_operation(state, &connection_id, &operation_id, context)
+        } else {
+            None
+        };
+        match (emit_actions, unsubscribe_actions) {
+            (None, None) => None,
+            (Some(emit_actions), None) => Some(emit_actions),
+            (None, Some(unsubscribe_actions)) => Some(unsubscribe_actions),
+            (Some(emit_actions), Some(unsubscribe_actions)) => {
+                Some(emit_actions.append(unsubscribe_actions))
             }
         }
     }

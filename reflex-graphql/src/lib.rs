@@ -176,6 +176,22 @@ pub type GraphQlQuery = crate::ast::query::Document;
 pub type GraphQlVariables = JsonMap<String, JsonValue>;
 pub type GraphQlExtensions = JsonMap<String, JsonValue>;
 
+#[derive(PartialEq, Eq, Hash, Clone, Copy, Debug)]
+pub enum GraphQlOperationType {
+    Query,
+    Mutation,
+    Subscription,
+}
+impl std::fmt::Display for GraphQlOperationType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Query => write!(f, "query"),
+            Self::Mutation => write!(f, "mutation"),
+            Self::Subscription => write!(f, "subscription"),
+        }
+    }
+}
+
 #[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct GraphQlOperationPayload {
     pub query: String,
@@ -296,6 +312,82 @@ pub fn parse_graphql_schema(
     schema: &str,
 ) -> Result<GraphQlSchema, graphql_parser::schema::ParseError> {
     graphql_parser::parse_schema::<String>(schema).map(|document| document.into_static())
+}
+
+#[derive(Debug)]
+pub enum GraphQlOperationTypeError {
+    MissingRootOperation,
+    MultipleRootOperations,
+    InvalidOperationName(String),
+    MultipleNamedOperations(String),
+}
+impl std::error::Error for GraphQlOperationTypeError {}
+impl std::fmt::Display for GraphQlOperationTypeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::MissingRootOperation => write!(f, "Missing root operation"),
+            Self::MultipleRootOperations => write!(f, "Multiple root operations"),
+            Self::InvalidOperationName(name) => write!(f, "Invalid root operation name: {}", name),
+            Self::MultipleNamedOperations(name) => {
+                write!(f, "Ambiguous root operation name: {}", name)
+            }
+        }
+    }
+}
+
+pub fn parse_graphql_root_operation<'a>(
+    ast: &'a GraphQlQuery,
+    operation_name: Option<&str>,
+) -> Result<&'a OperationDefinition, GraphQlOperationTypeError> {
+    let root_operations = ast
+        .definitions
+        .iter()
+        .filter_map(|definition| match definition {
+            Definition::Operation(operation) => Some(operation),
+            _ => None,
+        });
+    let named_operations = root_operations.map(|operation| match operation {
+        OperationDefinition::Query(query) => (operation, query.name.as_ref()),
+        OperationDefinition::Mutation(mutation) => (operation, mutation.name.as_ref()),
+        OperationDefinition::Subscription(subscription) => (operation, subscription.name.as_ref()),
+        OperationDefinition::SelectionSet(_) => (operation, None),
+    });
+    let mut matching_operations = named_operations
+        .filter(|(_, name)| match (operation_name, name.as_ref()) {
+            (None, None) => true,
+            (Some(operation_name), Some(name)) => name.as_str() == operation_name,
+            _ => false,
+        })
+        .map(|(operation, _)| operation);
+    match matching_operations.next() {
+        None => Err(match operation_name {
+            None => GraphQlOperationTypeError::MissingRootOperation,
+            Some(operation_name) => {
+                GraphQlOperationTypeError::InvalidOperationName(String::from(operation_name))
+            }
+        }),
+        Some(root_operation) => match matching_operations.next() {
+            Some(_) => Err(match operation_name {
+                None => GraphQlOperationTypeError::MultipleRootOperations,
+                Some(operation_name) => {
+                    GraphQlOperationTypeError::MultipleNamedOperations(String::from(operation_name))
+                }
+            }),
+            None => Ok(root_operation),
+        },
+    }
+}
+
+pub fn parse_graphql_operation_type(
+    ast: &GraphQlQuery,
+    operation_name: Option<&str>,
+) -> Result<GraphQlOperationType, GraphQlOperationTypeError> {
+    parse_graphql_root_operation(ast, operation_name).map(|operation| match operation {
+        OperationDefinition::Query(_) => GraphQlOperationType::Query,
+        OperationDefinition::Mutation(_) => GraphQlOperationType::Mutation,
+        OperationDefinition::Subscription(_) => GraphQlOperationType::Subscription,
+        OperationDefinition::SelectionSet(_) => GraphQlOperationType::Query,
+    })
 }
 
 pub fn serialize_graphql_result_payload<T: Expression>(
