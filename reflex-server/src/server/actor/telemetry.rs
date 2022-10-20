@@ -7,7 +7,6 @@ use std::{
     marker::PhantomData,
 };
 
-use metrics::{describe_counter, increment_counter, Unit};
 use reflex::{
     core::{
         ConditionListType, ConditionType, DependencyList, EvaluationResult, Expression,
@@ -17,11 +16,12 @@ use reflex::{
     hash::HashId,
 };
 use reflex_dispatcher::{
-    Action, Actor, ActorTransition, HandlerContext, InboundAction, MessageData, NamedAction,
-    OutboundAction, StateOperation, StateTransition,
+    Action, ActorInitContext, HandlerContext, MessageData, NoopDisposeCallback, ProcessId,
+    SchedulerCommand, SchedulerMode, SchedulerTransition, TaskFactory, TaskInbox,
 };
 use reflex_graphql::GraphQlOperation;
 use reflex_json::JsonValue;
+use reflex_macros::dispatcher;
 use reflex_runtime::{
     action::{
         effect::{EffectEmitAction, EffectSubscribeAction, EffectUnsubscribeAction},
@@ -50,57 +50,6 @@ use crate::{
     },
 };
 
-#[derive(Clone, Copy, Debug)]
-pub struct TelemetryMiddlewareMetricNames {
-    pub total_action_count: &'static str,
-}
-impl TelemetryMiddlewareMetricNames {
-    fn init(self) -> Self {
-        describe_counter!(self.total_action_count, Unit::Count, "Total action count");
-        self
-    }
-}
-impl Default for TelemetryMiddlewareMetricNames {
-    fn default() -> Self {
-        Self {
-            total_action_count: "total_action_count",
-        }
-    }
-}
-
-pub trait TelemetryMiddlewareAction<T: Expression>:
-    Action
-    + NamedAction
-    + InboundAction<GraphQlServerSubscribeAction<T>>
-    + InboundAction<GraphQlServerUnsubscribeAction<T>>
-    + InboundAction<GraphQlServerParseSuccessAction<T>>
-    + InboundAction<EffectSubscribeAction<T>>
-    + InboundAction<EffectUnsubscribeAction<T>>
-    + InboundAction<EffectEmitAction<T>>
-    + InboundAction<EvaluateStartAction<T>>
-    + InboundAction<EvaluateResultAction<T>>
-    + InboundAction<EvaluateStopAction>
-    + OutboundAction<TelemetryMiddlewareTransactionStartAction>
-    + OutboundAction<TelemetryMiddlewareTransactionEndAction>
-{
-}
-impl<T: Expression, TAction> TelemetryMiddlewareAction<T> for TAction where
-    Self: Action
-        + NamedAction
-        + InboundAction<GraphQlServerSubscribeAction<T>>
-        + InboundAction<GraphQlServerUnsubscribeAction<T>>
-        + InboundAction<GraphQlServerParseSuccessAction<T>>
-        + InboundAction<EffectSubscribeAction<T>>
-        + InboundAction<EffectUnsubscribeAction<T>>
-        + InboundAction<EffectEmitAction<T>>
-        + InboundAction<EvaluateStartAction<T>>
-        + InboundAction<EvaluateResultAction<T>>
-        + InboundAction<EvaluateStopAction>
-        + OutboundAction<TelemetryMiddlewareTransactionStartAction>
-        + OutboundAction<TelemetryMiddlewareTransactionEndAction>
-{
-}
-
 pub struct TelemetryMiddleware<T, TFactory, TAllocator, TQueryLabel, TTransactionLabels>
 where
     T: Expression,
@@ -113,7 +62,7 @@ where
     allocator: TAllocator,
     get_graphql_query_label: TQueryLabel,
     get_operation_transaction_labels: TTransactionLabels,
-    metric_names: TelemetryMiddlewareMetricNames,
+    main_pid: ProcessId,
     _expression: PhantomData<T>,
 }
 impl<T, TFactory, TAllocator, TQueryLabel, TTransactionLabels>
@@ -130,14 +79,14 @@ where
         allocator: TAllocator,
         get_graphql_query_label: TQueryLabel,
         get_operation_transaction_labels: TTransactionLabels,
-        metric_names: TelemetryMiddlewareMetricNames,
+        main_pid: ProcessId,
     ) -> Self {
         Self {
             factory,
             allocator,
             get_graphql_query_label,
             get_operation_transaction_labels,
-            metric_names: metric_names.init(),
+            main_pid,
             _expression: Default::default(),
         }
     }
@@ -189,55 +138,228 @@ impl TelemetryMiddlewareQueryState {
 // TODO: support async update transactions
 const EMIT_ASYNC_ASYNC_TRANSACTIONS: bool = false;
 
-impl<T, TFactory, TAllocator, TQueryLabel, TTransactionLabels, TAction> Actor<TAction>
-    for TelemetryMiddleware<T, TFactory, TAllocator, TQueryLabel, TTransactionLabels>
-where
-    T: Expression,
-    TFactory: ExpressionFactory<T>,
-    TAllocator: HeapAllocator<T>,
-    TQueryLabel: Fn(&GraphQlOperation) -> String,
-    TTransactionLabels: Fn(&GraphQlOperation) -> (String, Vec<(String, String)>),
-    TAction: TelemetryMiddlewareAction<T>,
-{
-    type State = TelemetryMiddlewareState<T>;
-    fn init(&self) -> Self::State {
-        Default::default()
+dispatcher!({
+    pub enum TelemetryMiddlewareAction<T: Expression> {
+        Inbox(GraphQlServerSubscribeAction<T>),
+        Inbox(GraphQlServerUnsubscribeAction<T>),
+        Inbox(GraphQlServerParseSuccessAction<T>),
+        Inbox(EffectSubscribeAction<T>),
+        Inbox(EffectUnsubscribeAction<T>),
+        Inbox(EffectEmitAction<T>),
+        Inbox(EvaluateStartAction<T>),
+        Inbox(EvaluateResultAction<T>),
+        Inbox(EvaluateStopAction),
+
+        Outbox(TelemetryMiddlewareTransactionStartAction),
+        Outbox(TelemetryMiddlewareTransactionEndAction),
     }
-    fn handle(
-        &self,
-        state: Self::State,
-        action: &TAction,
-        metadata: &MessageData,
-        context: &mut impl HandlerContext,
-    ) -> ActorTransition<Self::State, TAction> {
-        let metric_labels = [("type", action.name())];
-        increment_counter!(self.metric_names.total_action_count, &metric_labels);
-        let mut state = state;
-        let actions = if let Some(action) = action.match_type() {
-            self.handle_graphql_subscribe(&mut state, action, metadata, context)
-        } else if let Some(action) = action.match_type() {
-            self.handle_graphql_unsubscribe(&mut state, action, metadata, context)
-        } else if let Some(action) = action.match_type() {
-            self.handle_graphql_parse(&mut state, action, metadata, context)
-        } else if let Some(action) = action.match_type() {
-            self.handle_effect_subscribe(&mut state, action, metadata, context)
-        } else if let Some(action) = action.match_type() {
-            self.handle_effect_unsubscribe(&mut state, action, metadata, context)
-        } else if let Some(action) = action.match_type() {
-            self.handle_evaluate_start(&mut state, action, metadata, context)
-        } else if let Some(action) = action.match_type() {
-            self.handle_evaluate_stop(&mut state, action, metadata, context)
-        } else if let Some(action) = action.match_type() {
-            self.handle_evaluate_result(&mut state, action, metadata, context)
-        } else if let Some(action) = action.match_type() {
-            self.handle_effect_emit(&mut state, action, metadata, context)
-        } else {
-            None
+
+    impl<T, TFactory, TAllocator, TQueryLabel, TTransactionLabels, TAction, TTask>
+        Dispatcher<TAction, TTask>
+        for TelemetryMiddleware<T, TFactory, TAllocator, TQueryLabel, TTransactionLabels>
+    where
+        T: Expression,
+        TFactory: ExpressionFactory<T>,
+        TAllocator: HeapAllocator<T>,
+        TQueryLabel: Fn(&GraphQlOperation) -> String,
+        TTransactionLabels: Fn(&GraphQlOperation) -> (String, Vec<(String, String)>),
+        TAction: Action,
+        TTask: TaskFactory<TAction, TTask>,
+    {
+        type State = TelemetryMiddlewareState<T>;
+        type Events<TInbox: TaskInbox<TAction>> = TInbox;
+        type Dispose = NoopDisposeCallback;
+
+        fn init<TInbox: TaskInbox<TAction>>(
+            &self,
+            inbox: TInbox,
+            context: &impl ActorInitContext,
+        ) -> (Self::State, Self::Events<TInbox>, Self::Dispose) {
+            (Default::default(), inbox, Default::default())
         }
-        .unwrap_or_default();
-        ActorTransition::new(state, actions)
+
+        fn accept(&self, _action: &GraphQlServerSubscribeAction<T>) -> bool {
+            true
+        }
+        fn schedule(
+            &self,
+            _action: &GraphQlServerSubscribeAction<T>,
+            _state: &Self::State,
+        ) -> Option<SchedulerMode> {
+            Some(SchedulerMode::Async)
+        }
+        fn handle(
+            &self,
+            state: &mut Self::State,
+            action: &GraphQlServerSubscribeAction<T>,
+            metadata: &MessageData,
+            context: &mut impl HandlerContext,
+        ) -> Option<SchedulerTransition<TAction, TTask>> {
+            self.handle_graphql_subscribe(state, action, metadata, context)
+        }
+
+        fn accept(&self, _action: &GraphQlServerUnsubscribeAction<T>) -> bool {
+            true
+        }
+        fn schedule(
+            &self,
+            _action: &GraphQlServerUnsubscribeAction<T>,
+            _state: &Self::State,
+        ) -> Option<SchedulerMode> {
+            Some(SchedulerMode::Async)
+        }
+        fn handle(
+            &self,
+            state: &mut Self::State,
+            action: &GraphQlServerUnsubscribeAction<T>,
+            metadata: &MessageData,
+            context: &mut impl HandlerContext,
+        ) -> Option<SchedulerTransition<TAction, TTask>> {
+            self.handle_graphql_unsubscribe(state, action, metadata, context)
+        }
+
+        fn accept(&self, _action: &GraphQlServerParseSuccessAction<T>) -> bool {
+            true
+        }
+        fn schedule(
+            &self,
+            _action: &GraphQlServerParseSuccessAction<T>,
+            _state: &Self::State,
+        ) -> Option<SchedulerMode> {
+            Some(SchedulerMode::Async)
+        }
+        fn handle(
+            &self,
+            state: &mut Self::State,
+            action: &GraphQlServerParseSuccessAction<T>,
+            metadata: &MessageData,
+            context: &mut impl HandlerContext,
+        ) -> Option<SchedulerTransition<TAction, TTask>> {
+            self.handle_graphql_parse(state, action, metadata, context)
+        }
+
+        fn accept(&self, _action: &EffectSubscribeAction<T>) -> bool {
+            true
+        }
+        fn schedule(
+            &self,
+            _action: &EffectSubscribeAction<T>,
+            _state: &Self::State,
+        ) -> Option<SchedulerMode> {
+            Some(SchedulerMode::Async)
+        }
+        fn handle(
+            &self,
+            state: &mut Self::State,
+            action: &EffectSubscribeAction<T>,
+            metadata: &MessageData,
+            context: &mut impl HandlerContext,
+        ) -> Option<SchedulerTransition<TAction, TTask>> {
+            self.handle_effect_subscribe(state, action, metadata, context)
+        }
+
+        fn accept(&self, _action: &EffectUnsubscribeAction<T>) -> bool {
+            true
+        }
+        fn schedule(
+            &self,
+            _action: &EffectUnsubscribeAction<T>,
+            _state: &Self::State,
+        ) -> Option<SchedulerMode> {
+            Some(SchedulerMode::Async)
+        }
+        fn handle(
+            &self,
+            state: &mut Self::State,
+            action: &EffectUnsubscribeAction<T>,
+            metadata: &MessageData,
+            context: &mut impl HandlerContext,
+        ) -> Option<SchedulerTransition<TAction, TTask>> {
+            self.handle_effect_unsubscribe(state, action, metadata, context)
+        }
+
+        fn accept(&self, _action: &EvaluateStartAction<T>) -> bool {
+            true
+        }
+        fn schedule(
+            &self,
+            _action: &EvaluateStartAction<T>,
+            _state: &Self::State,
+        ) -> Option<SchedulerMode> {
+            Some(SchedulerMode::Async)
+        }
+        fn handle(
+            &self,
+            state: &mut Self::State,
+            action: &EvaluateStartAction<T>,
+            metadata: &MessageData,
+            context: &mut impl HandlerContext,
+        ) -> Option<SchedulerTransition<TAction, TTask>> {
+            self.handle_evaluate_start(state, action, metadata, context)
+        }
+
+        fn accept(&self, _action: &EvaluateStopAction) -> bool {
+            true
+        }
+        fn schedule(
+            &self,
+            _action: &EvaluateStopAction,
+            _state: &Self::State,
+        ) -> Option<SchedulerMode> {
+            Some(SchedulerMode::Async)
+        }
+        fn handle(
+            &self,
+            state: &mut Self::State,
+            action: &EvaluateStopAction,
+            metadata: &MessageData,
+            context: &mut impl HandlerContext,
+        ) -> Option<SchedulerTransition<TAction, TTask>> {
+            self.handle_evaluate_stop(state, action, metadata, context)
+        }
+
+        fn accept(&self, _action: &EvaluateResultAction<T>) -> bool {
+            true
+        }
+        fn schedule(
+            &self,
+            _action: &EvaluateResultAction<T>,
+            _state: &Self::State,
+        ) -> Option<SchedulerMode> {
+            Some(SchedulerMode::Async)
+        }
+        fn handle(
+            &self,
+            state: &mut Self::State,
+            action: &EvaluateResultAction<T>,
+            metadata: &MessageData,
+            context: &mut impl HandlerContext,
+        ) -> Option<SchedulerTransition<TAction, TTask>> {
+            self.handle_evaluate_result(state, action, metadata, context)
+        }
+
+        fn accept(&self, _action: &EffectEmitAction<T>) -> bool {
+            true
+        }
+        fn schedule(
+            &self,
+            _action: &EffectEmitAction<T>,
+            _state: &Self::State,
+        ) -> Option<SchedulerMode> {
+            Some(SchedulerMode::Async)
+        }
+        fn handle(
+            &self,
+            state: &mut Self::State,
+            action: &EffectEmitAction<T>,
+            metadata: &MessageData,
+            context: &mut impl HandlerContext,
+        ) -> Option<SchedulerTransition<TAction, TTask>> {
+            self.handle_effect_emit(state, action, metadata, context)
+        }
     }
-}
+});
+
 impl<T, TFactory, TAllocator, TQueryLabel, TTransactionLabels>
     TelemetryMiddleware<T, TFactory, TAllocator, TQueryLabel, TTransactionLabels>
 where
@@ -247,15 +369,16 @@ where
     TQueryLabel: Fn(&GraphQlOperation) -> String,
     TTransactionLabels: Fn(&GraphQlOperation) -> (String, Vec<(String, String)>),
 {
-    fn handle_graphql_subscribe<TAction>(
+    fn handle_graphql_subscribe<TAction, TTask>(
         &self,
         state: &mut TelemetryMiddlewareState<T>,
         action: &GraphQlServerSubscribeAction<T>,
         _metadata: &MessageData,
-        context: &mut impl HandlerContext,
-    ) -> Option<StateTransition<TAction>>
+        _context: &mut impl HandlerContext,
+    ) -> Option<SchedulerTransition<TAction, TTask>>
     where
-        TAction: Action + OutboundAction<TelemetryMiddlewareTransactionStartAction>,
+        TAction: Action + From<TelemetryMiddlewareTransactionStartAction>,
+        TTask: TaskFactory<TAction, TTask>,
     {
         let GraphQlServerSubscribeAction {
             subscription_id,
@@ -277,8 +400,8 @@ where
             label: (self.get_graphql_query_label)(operation),
             effect_id: None,
         });
-        let transaction_start_action = StateOperation::Send(
-            context.pid(),
+        let transaction_start_action = SchedulerCommand::Send(
+            self.main_pid,
             TelemetryMiddlewareTransactionStartAction {
                 transactions: vec![TelemetryTransaction {
                     transaction_id,
@@ -289,17 +412,18 @@ where
             }
             .into(),
         );
-        Some(StateTransition::new(once(transaction_start_action)))
+        Some(SchedulerTransition::new(once(transaction_start_action)))
     }
-    fn handle_graphql_parse<TAction>(
+    fn handle_graphql_parse<TAction, TTask>(
         &self,
         state: &mut TelemetryMiddlewareState<T>,
         action: &GraphQlServerParseSuccessAction<T>,
         _metadata: &MessageData,
         _context: &mut impl HandlerContext,
-    ) -> Option<StateTransition<TAction>>
+    ) -> Option<SchedulerTransition<TAction, TTask>>
     where
         TAction: Action,
+        TTask: TaskFactory<TAction, TTask>,
     {
         let GraphQlServerParseSuccessAction {
             subscription_id,
@@ -349,15 +473,16 @@ where
         }
         None
     }
-    fn handle_graphql_unsubscribe<TAction>(
+    fn handle_graphql_unsubscribe<TAction, TTask>(
         &self,
         state: &mut TelemetryMiddlewareState<T>,
         action: &GraphQlServerUnsubscribeAction<T>,
         _metadata: &MessageData,
-        context: &mut impl HandlerContext,
-    ) -> Option<StateTransition<TAction>>
+        _context: &mut impl HandlerContext,
+    ) -> Option<SchedulerTransition<TAction, TTask>>
     where
-        TAction: Action + OutboundAction<TelemetryMiddlewareTransactionEndAction>,
+        TAction: Action + From<TelemetryMiddlewareTransactionEndAction>,
+        TTask: TaskFactory<TAction, TTask>,
     {
         let GraphQlServerUnsubscribeAction {
             subscription_id, ..
@@ -373,26 +498,27 @@ where
                 effect_state.parent_transactions.remove(&transaction_id);
             }
         }
-        let transaction_end_action = StateOperation::Send(
-            context.pid(),
+        let transaction_end_action = SchedulerCommand::Send(
+            self.main_pid,
             TelemetryMiddlewareTransactionEndAction {
                 transaction_ids: vec![transaction_id],
             }
             .into(),
         );
-        Some(StateTransition::new(once(transaction_end_action)))
+        Some(SchedulerTransition::new(once(transaction_end_action)))
     }
-    fn handle_effect_subscribe<TAction>(
+    fn handle_effect_subscribe<TAction, TTask>(
         &self,
         state: &mut TelemetryMiddlewareState<T>,
         action: &EffectSubscribeAction<T>,
         _metadata: &MessageData,
-        context: &mut impl HandlerContext,
-    ) -> Option<StateTransition<TAction>>
+        _context: &mut impl HandlerContext,
+    ) -> Option<SchedulerTransition<TAction, TTask>>
     where
         TAction: Action
-            + OutboundAction<TelemetryMiddlewareTransactionStartAction>
-            + OutboundAction<TelemetryMiddlewareTransactionEndAction>,
+            + From<TelemetryMiddlewareTransactionStartAction>
+            + From<TelemetryMiddlewareTransactionEndAction>,
+        TTask: TaskFactory<TAction, TTask>,
     {
         let EffectSubscribeAction {
             effect_type: _,
@@ -448,25 +574,26 @@ where
         let transaction_start_action = if subscribed_transactions.is_empty() {
             None
         } else {
-            Some(StateOperation::Send(
-                context.pid(),
+            Some(SchedulerCommand::Send(
+                self.main_pid,
                 TelemetryMiddlewareTransactionStartAction {
                     transactions: subscribed_transactions,
                 }
                 .into(),
             ))
         };
-        Some(StateTransition::new(transaction_start_action))
+        Some(SchedulerTransition::new(transaction_start_action))
     }
-    fn handle_effect_unsubscribe<TAction>(
+    fn handle_effect_unsubscribe<TAction, TTask>(
         &self,
         state: &mut TelemetryMiddlewareState<T>,
         action: &EffectUnsubscribeAction<T>,
         _metadata: &MessageData,
-        context: &mut impl HandlerContext,
-    ) -> Option<StateTransition<TAction>>
+        _context: &mut impl HandlerContext,
+    ) -> Option<SchedulerTransition<TAction, TTask>>
     where
-        TAction: Action + OutboundAction<TelemetryMiddlewareTransactionEndAction>,
+        TAction: Action + From<TelemetryMiddlewareTransactionEndAction>,
+        TTask: TaskFactory<TAction, TTask>,
     {
         let EffectUnsubscribeAction {
             effect_type: _,
@@ -490,25 +617,26 @@ where
         let transaction_end_action = if unsubscribed_transaction_ids.is_empty() {
             None
         } else {
-            Some(StateOperation::Send(
-                context.pid(),
+            Some(SchedulerCommand::Send(
+                self.main_pid,
                 TelemetryMiddlewareTransactionEndAction {
                     transaction_ids: unsubscribed_transaction_ids,
                 }
                 .into(),
             ))
         };
-        Some(StateTransition::new(transaction_end_action))
+        Some(SchedulerTransition::new(transaction_end_action))
     }
-    fn handle_evaluate_start<TAction>(
+    fn handle_evaluate_start<TAction, TTask>(
         &self,
         state: &mut TelemetryMiddlewareState<T>,
         action: &EvaluateStartAction<T>,
         _metadata: &MessageData,
         _context: &mut impl HandlerContext,
-    ) -> Option<StateTransition<TAction>>
+    ) -> Option<SchedulerTransition<TAction, TTask>>
     where
         TAction: Action,
+        TTask: TaskFactory<TAction, TTask>,
     {
         let EvaluateStartAction {
             cache_id,
@@ -532,29 +660,31 @@ where
             }
         }
     }
-    fn handle_evaluate_stop<TAction>(
+    fn handle_evaluate_stop<TAction, TTask>(
         &self,
         state: &mut TelemetryMiddlewareState<T>,
         action: &EvaluateStopAction,
         _metadata: &MessageData,
         _context: &mut impl HandlerContext,
-    ) -> Option<StateTransition<TAction>>
+    ) -> Option<SchedulerTransition<TAction, TTask>>
     where
         TAction: Action,
+        TTask: TaskFactory<TAction, TTask>,
     {
         let EvaluateStopAction { cache_id } = action;
         state.active_workers.remove(cache_id);
         None
     }
-    fn handle_evaluate_result<TAction>(
+    fn handle_evaluate_result<TAction, TTask>(
         &self,
         state: &mut TelemetryMiddlewareState<T>,
         action: &EvaluateResultAction<T>,
         _metadata: &MessageData,
         _context: &mut impl HandlerContext,
-    ) -> Option<StateTransition<TAction>>
+    ) -> Option<SchedulerTransition<TAction, TTask>>
     where
         TAction: Action,
+        TTask: TaskFactory<TAction, TTask>,
     {
         let EvaluateResultAction {
             cache_id, result, ..
@@ -618,17 +748,18 @@ where
         }
         None
     }
-    fn handle_effect_emit<TAction>(
+    fn handle_effect_emit<TAction, TTask>(
         &self,
         state: &mut TelemetryMiddlewareState<T>,
         action: &EffectEmitAction<T>,
         _metadata: &MessageData,
-        context: &mut impl HandlerContext,
-    ) -> Option<StateTransition<TAction>>
+        _context: &mut impl HandlerContext,
+    ) -> Option<SchedulerTransition<TAction, TTask>>
     where
         TAction: Action
-            + OutboundAction<TelemetryMiddlewareTransactionStartAction>
-            + OutboundAction<TelemetryMiddlewareTransactionEndAction>,
+            + From<TelemetryMiddlewareTransactionStartAction>
+            + From<TelemetryMiddlewareTransactionEndAction>,
+        TTask: TaskFactory<TAction, TTask>,
     {
         let EffectEmitAction {
             effect_types: updates,
@@ -674,8 +805,8 @@ where
         let completed_transactions_end_action = if completed_transaction_ids.is_empty() {
             None
         } else {
-            Some(StateOperation::Send(
-                context.pid(),
+            Some(SchedulerCommand::Send(
+                self.main_pid,
                 TelemetryMiddlewareTransactionEndAction {
                     transaction_ids: completed_transaction_ids,
                 }
@@ -761,8 +892,8 @@ where
         let effect_transaction_start_action = if effect_start_transactions.is_empty() {
             None
         } else {
-            Some(StateOperation::Send(
-                context.pid(),
+            Some(SchedulerCommand::Send(
+                self.main_pid,
                 TelemetryMiddlewareTransactionStartAction {
                     transactions: effect_start_transactions,
                 }
@@ -773,15 +904,15 @@ where
         let effect_transaction_end_action = if effect_end_transaction_ids.is_empty() {
             None
         } else {
-            Some(StateOperation::Send(
-                context.pid(),
+            Some(SchedulerCommand::Send(
+                self.main_pid,
                 TelemetryMiddlewareTransactionEndAction {
                     transaction_ids: effect_end_transaction_ids,
                 }
                 .into(),
             ))
         };
-        Some(StateTransition::new(
+        Some(SchedulerTransition::new(
             completed_transactions_end_action
                 .into_iter()
                 .chain(effect_transaction_start_action)

@@ -4,10 +4,14 @@
 use std::marker::PhantomData;
 
 use reflex::core::Expression;
-use reflex_dispatcher::{Action, InboundAction, MessageData, MiddlewareContext, StateOperation};
-use reflex_grpc::action::{GrpcHandlerConnectErrorAction, GrpcHandlerConnectSuccessAction};
+use reflex_dispatcher::{
+    Action, Matcher, MessageData, MiddlewareContext, SchedulerCommand, TaskFactory,
+};
+use reflex_grpc::action::{
+    GrpcHandlerConnectErrorAction, GrpcHandlerConnectSuccessAction, GrpcHandlerTransportErrorAction,
+};
 use reflex_handlers::action::graphql::{
-    GraphQlHandlerWebSocketConnectErrorAction, GraphQlHandlerWebSocketConnectSuccessAction,
+    GraphQlHandlerWebSocketConnectSuccessAction, GraphQlHandlerWebSocketConnectionErrorAction,
 };
 use reflex_runtime::{
     action::effect::{EffectEmitAction, EffectSubscribeAction, EffectUnsubscribeAction},
@@ -21,7 +25,7 @@ use crate::{
         graphql_server::GraphQlServerSubscribeAction,
         init::{
             InitGraphRootAction, InitHttpServerAction, InitOpenTelemetryAction,
-            InitPrometheusMetricsAction, InitSessionRecordingAction,
+            InitPrometheusMetricsAction,
         },
         opentelemetry::OpenTelemetryMiddlewareErrorAction,
     },
@@ -29,108 +33,132 @@ use crate::{
 
 pub trait FormattedLoggerAction<T: Expression>:
     Action
-    + InboundAction<InitGraphRootAction>
-    + InboundAction<InitHttpServerAction>
-    + InboundAction<InitOpenTelemetryAction>
-    + InboundAction<InitSessionRecordingAction>
-    + InboundAction<InitPrometheusMetricsAction>
-    + InboundAction<OpenTelemetryMiddlewareErrorAction>
-    + InboundAction<GraphQlServerSubscribeAction<T>>
-    + InboundAction<EffectSubscribeAction<T>>
-    + InboundAction<EffectUnsubscribeAction<T>>
-    + InboundAction<EffectEmitAction<T>>
-    + InboundAction<GraphQlHandlerWebSocketConnectSuccessAction>
-    + InboundAction<GraphQlHandlerWebSocketConnectErrorAction>
-    + InboundAction<GrpcHandlerConnectSuccessAction>
-    + InboundAction<GrpcHandlerConnectErrorAction>
+    + Matcher<InitGraphRootAction>
+    + Matcher<InitHttpServerAction>
+    + Matcher<InitOpenTelemetryAction>
+    + Matcher<InitPrometheusMetricsAction>
+    + Matcher<OpenTelemetryMiddlewareErrorAction>
+    + Matcher<GraphQlServerSubscribeAction<T>>
+    + Matcher<EffectSubscribeAction<T>>
+    + Matcher<EffectUnsubscribeAction<T>>
+    + Matcher<EffectEmitAction<T>>
+    + Matcher<GraphQlHandlerWebSocketConnectSuccessAction>
+    + Matcher<GraphQlHandlerWebSocketConnectionErrorAction>
+    + Matcher<GrpcHandlerConnectSuccessAction>
+    + Matcher<GrpcHandlerConnectErrorAction>
+    + Matcher<GrpcHandlerTransportErrorAction>
 {
 }
-impl<T: Expression, TAction> FormattedLoggerAction<T> for TAction where
+impl<_Self, T: Expression> FormattedLoggerAction<T> for _Self where
     Self: Action
-        + InboundAction<InitGraphRootAction>
-        + InboundAction<InitHttpServerAction>
-        + InboundAction<InitOpenTelemetryAction>
-        + InboundAction<InitSessionRecordingAction>
-        + InboundAction<InitPrometheusMetricsAction>
-        + InboundAction<OpenTelemetryMiddlewareErrorAction>
-        + InboundAction<GraphQlServerSubscribeAction<T>>
-        + InboundAction<EffectSubscribeAction<T>>
-        + InboundAction<EffectUnsubscribeAction<T>>
-        + InboundAction<EffectEmitAction<T>>
-        + InboundAction<GraphQlHandlerWebSocketConnectSuccessAction>
-        + InboundAction<GraphQlHandlerWebSocketConnectErrorAction>
-        + InboundAction<GrpcHandlerConnectSuccessAction>
-        + InboundAction<GrpcHandlerConnectErrorAction>
+        + Matcher<InitGraphRootAction>
+        + Matcher<InitHttpServerAction>
+        + Matcher<InitOpenTelemetryAction>
+        + Matcher<InitPrometheusMetricsAction>
+        + Matcher<OpenTelemetryMiddlewareErrorAction>
+        + Matcher<GraphQlServerSubscribeAction<T>>
+        + Matcher<EffectSubscribeAction<T>>
+        + Matcher<EffectUnsubscribeAction<T>>
+        + Matcher<EffectEmitAction<T>>
+        + Matcher<GraphQlHandlerWebSocketConnectSuccessAction>
+        + Matcher<GraphQlHandlerWebSocketConnectionErrorAction>
+        + Matcher<GrpcHandlerConnectSuccessAction>
+        + Matcher<GrpcHandlerConnectErrorAction>
+        + Matcher<GrpcHandlerTransportErrorAction>
 {
 }
 
-pub struct FormattedLogger<T: Expression, TOut: std::io::Write, TAction: FormattedLoggerAction<T>> {
+pub struct FormattedLogger<T: Expression, TOut, TAction, TTask>
+where
+    TOut: std::io::Write,
+    TAction: FormattedLoggerAction<T>,
+    TTask: TaskFactory<TAction, TTask>,
+{
     prefix: String,
     output: TOut,
     _expression: PhantomData<T>,
     _action: PhantomData<TAction>,
+    _task: PhantomData<TTask>,
 }
-impl<T: Expression, TOut: std::io::Write, TAction: FormattedLoggerAction<T>>
-    FormattedLogger<T, TOut, TAction>
+impl<T: Expression, TOut, TAction, TTask> FormattedLogger<T, TOut, TAction, TTask>
+where
+    TOut: std::io::Write,
+    TAction: FormattedLoggerAction<T>,
+    TTask: TaskFactory<TAction, TTask>,
 {
     pub fn new(output: TOut, prefix: impl Into<String>) -> Self {
         Self {
             prefix: prefix.into(),
             output,
-            _expression: Default::default(),
-            _action: Default::default(),
+            _expression: PhantomData,
+            _action: PhantomData,
+            _task: PhantomData,
         }
     }
 }
-impl<T: Expression, TAction: FormattedLoggerAction<T>>
-    FormattedLogger<T, std::io::Stdout, TAction>
+impl<T: Expression, TAction, TTask> FormattedLogger<T, std::io::Stdout, TAction, TTask>
+where
+    TAction: FormattedLoggerAction<T>,
+    TTask: TaskFactory<TAction, TTask>,
 {
     pub fn stdout(prefix: impl Into<String>) -> Self {
         Self::new(std::io::stdout(), prefix)
     }
 }
-impl<T: Expression, TAction: FormattedLoggerAction<T>> Clone
-    for FormattedLogger<T, std::io::Stdout, TAction>
+impl<T: Expression, TAction, TTask> Clone for FormattedLogger<T, std::io::Stdout, TAction, TTask>
+where
+    TAction: FormattedLoggerAction<T>,
+    TTask: TaskFactory<TAction, TTask>,
 {
     fn clone(&self) -> Self {
         Self {
             prefix: self.prefix.clone(),
             output: std::io::stdout(),
-            _expression: Default::default(),
-            _action: Default::default(),
+            _expression: PhantomData,
+            _action: PhantomData,
+            _task: PhantomData,
         }
     }
 }
-impl<T: Expression, TAction: FormattedLoggerAction<T>>
-    FormattedLogger<T, std::io::Stderr, TAction>
+impl<T: Expression, TAction, TTask> FormattedLogger<T, std::io::Stderr, TAction, TTask>
+where
+    TAction: FormattedLoggerAction<T>,
+    TTask: TaskFactory<TAction, TTask>,
 {
     pub fn stderr(prefix: impl Into<String>) -> Self {
         Self::new(std::io::stderr(), prefix)
     }
 }
-impl<T: Expression, TAction: FormattedLoggerAction<T>> Clone
-    for FormattedLogger<T, std::io::Stderr, TAction>
+impl<T: Expression, TAction, TTask> Clone for FormattedLogger<T, std::io::Stderr, TAction, TTask>
+where
+    TAction: FormattedLoggerAction<T>,
+    TTask: TaskFactory<TAction, TTask>,
 {
     fn clone(&self) -> Self {
         Self {
             prefix: self.prefix.clone(),
             output: std::io::stderr(),
-            _expression: Default::default(),
-            _action: Default::default(),
+            _expression: PhantomData,
+            _action: PhantomData,
+            _task: PhantomData,
         }
     }
 }
-impl<T: Expression, TOut: std::io::Write, TAction: FormattedLoggerAction<T>> ActionLogger
-    for FormattedLogger<T, TOut, TAction>
+impl<T: Expression, TOut, TAction, TTask> ActionLogger for FormattedLogger<T, TOut, TAction, TTask>
+where
+    TOut: std::io::Write,
+    TAction: FormattedLoggerAction<T>,
+    TTask: TaskFactory<TAction, TTask>,
 {
     type Action = TAction;
+    type Task = TTask;
     fn log(
         &mut self,
-        operation: &StateOperation<Self::Action>,
+        operation: &SchedulerCommand<Self::Action, Self::Task>,
         _metadata: Option<&MessageData>,
         _context: Option<&MiddlewareContext>,
     ) {
-        if let StateOperation::Send(_pid, action) = operation {
+        if let SchedulerCommand::Send(_pid, action) = operation {
             if let Some(message) = format_action_message(action) {
                 let _ = writeln!(self.output, "[{}] {}", self.prefix, message);
             }
@@ -158,11 +186,6 @@ fn format_action_message<T: Expression, TAction: FormattedLoggerAction<T>>(
                 OpenTelemetryConfig::Grpc(config) => &config.endpoint,
             },
         ))
-    } else if let Option::<&InitSessionRecordingAction>::Some(action) = action.match_type() {
-        Some(format!(
-            "Recording to session playback file {}",
-            action.output_path
-        ))
     } else if let Option::<&InitGraphRootAction>::Some(action) = action.match_type() {
         Some(format!(
             "Graph root compiled in {:?}",
@@ -188,19 +211,28 @@ fn format_action_message<T: Expression, TAction: FormattedLoggerAction<T>>(
             "Connected to GraphQL WebSocket server {}",
             action.url,
         ))
-    } else if let Option::<&GraphQlHandlerWebSocketConnectErrorAction>::Some(action) =
+    } else if let Option::<&GraphQlHandlerWebSocketConnectionErrorAction>::Some(action) =
         action.match_type()
     {
         Some(format!(
-            "Failed to connect to GraphQL WebSocket server {}: {}",
-            action.url, action.error,
+            "GraphQL WebSocket connection error {}: {}",
+            action.url, action.message,
         ))
     } else if let Option::<&GrpcHandlerConnectSuccessAction>::Some(action) = action.match_type() {
         Some(format!("Connected to gRPC server {}", action.url,))
     } else if let Option::<&GrpcHandlerConnectErrorAction>::Some(action) = action.match_type() {
         Some(format!(
             "Failed to connect to gRPC server {}: {}",
-            action.url, action.error,
+            action.url, action.message,
+        ))
+    } else if let Option::<&GrpcHandlerTransportErrorAction>::Some(action) = action.match_type() {
+        Some(format!(
+            "gRPC server transport error: {}.{} Error {}: {}: {}",
+            action.service_name,
+            action.method_name,
+            action.status.code as i32,
+            action.status.code,
+            action.status.message,
         ))
     } else if let Option::<&EffectSubscribeAction<T>>::Some(action) = action.match_type() {
         if action.effect_type.as_str() != EFFECT_TYPE_EVALUATE {

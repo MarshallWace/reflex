@@ -33,6 +33,7 @@ use reflex::{
     },
     hash::HashId,
 };
+use serde::{Deserialize, Serialize};
 
 use crate::compiler::{CompiledProgram, Instruction, Program};
 
@@ -68,7 +69,7 @@ enum ExecutionResult<T: Expression> {
     },
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, Serialize, Deserialize)]
 pub struct InterpreterOptions {
     pub debug_instructions: bool,
     pub debug_stack: bool,

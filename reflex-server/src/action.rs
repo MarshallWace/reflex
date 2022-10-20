@@ -5,7 +5,14 @@
 use reflex::core::Expression;
 use reflex_dispatcher::{Action, NamedAction, SerializableAction, SerializedAction};
 use reflex_grpc::action::*;
-use reflex_handlers::action::graphql::*;
+use reflex_handlers::action::{
+    fetch::{
+        FetchHandlerActions, FetchHandlerConnectionErrorAction, FetchHandlerFetchCompleteAction,
+    },
+    graphql::*,
+    timeout::{TimeoutHandlerActions, TimeoutHandlerTimeoutAction},
+    timestamp::{TimestampHandlerActions, TimestampHandlerUpdateAction},
+};
 use reflex_runtime::action::{
     bytecode_interpreter::*, effect::*, evaluate::*, query::*, RuntimeActions,
 };
@@ -38,8 +45,11 @@ pub enum ServerCliAction<T: Expression> {
     QueryInspectorServer(QueryInspectorServerActions),
     TelemetryMiddleware(TelemetryMiddlewareActions),
     OpenTelemetryMiddleware(OpenTelemetryMiddlewareActions),
+    FetchHandler(FetchHandlerActions),
     GraphQlHandler(GraphQlHandlerActions),
     GrpcHandler(GrpcHandlerActions),
+    TimeoutHandler(TimeoutHandlerActions),
+    TimestampHandler(TimestampHandlerActions),
     Init(InitActions),
 }
 impl<T: Expression> Action for ServerCliAction<T> {}
@@ -54,8 +64,11 @@ impl<T: Expression> NamedAction for ServerCliAction<T> {
             Self::QueryInspectorServer(action) => action.name(),
             Self::TelemetryMiddleware(action) => action.name(),
             Self::OpenTelemetryMiddleware(action) => action.name(),
+            Self::FetchHandler(action) => action.name(),
             Self::GraphQlHandler(action) => action.name(),
             Self::GrpcHandler(action) => action.name(),
+            Self::TimeoutHandler(action) => action.name(),
+            Self::TimestampHandler(action) => action.name(),
             Self::Init(action) => action.name(),
         }
     }
@@ -71,8 +84,11 @@ impl<T: Expression> SerializableAction for ServerCliAction<T> {
             Self::QueryInspectorServer(action) => action.to_json(),
             Self::TelemetryMiddleware(action) => action.to_json(),
             Self::OpenTelemetryMiddleware(action) => action.to_json(),
+            Self::FetchHandler(action) => action.to_json(),
             Self::GraphQlHandler(action) => action.to_json(),
             Self::GrpcHandler(action) => action.to_json(),
+            Self::TimeoutHandler(action) => action.to_json(),
+            Self::TimestampHandler(action) => action.to_json(),
             Self::Init(action) => action.to_json(),
         }
     }
@@ -256,6 +272,28 @@ impl<'a, T: Expression> From<&'a ServerCliAction<T>>
     }
 }
 
+impl<T: Expression> From<FetchHandlerActions> for ServerCliAction<T> {
+    fn from(value: FetchHandlerActions) -> Self {
+        Self::FetchHandler(value)
+    }
+}
+impl<T: Expression> From<ServerCliAction<T>> for Option<FetchHandlerActions> {
+    fn from(value: ServerCliAction<T>) -> Self {
+        match value {
+            ServerCliAction::FetchHandler(value) => Some(value),
+            _ => None,
+        }
+    }
+}
+impl<'a, T: Expression> From<&'a ServerCliAction<T>> for Option<&'a FetchHandlerActions> {
+    fn from(value: &'a ServerCliAction<T>) -> Self {
+        match value {
+            ServerCliAction::FetchHandler(value) => Some(value),
+            _ => None,
+        }
+    }
+}
+
 impl<T: Expression> From<GraphQlHandlerActions> for ServerCliAction<T> {
     fn from(value: GraphQlHandlerActions) -> Self {
         Self::GraphQlHandler(value)
@@ -295,6 +333,50 @@ impl<'a, T: Expression> From<&'a ServerCliAction<T>> for Option<&'a GrpcHandlerA
     fn from(value: &'a ServerCliAction<T>) -> Self {
         match value {
             ServerCliAction::GrpcHandler(value) => Some(value),
+            _ => None,
+        }
+    }
+}
+
+impl<T: Expression> From<TimeoutHandlerActions> for ServerCliAction<T> {
+    fn from(value: TimeoutHandlerActions) -> Self {
+        Self::TimeoutHandler(value)
+    }
+}
+impl<T: Expression> From<ServerCliAction<T>> for Option<TimeoutHandlerActions> {
+    fn from(value: ServerCliAction<T>) -> Self {
+        match value {
+            ServerCliAction::TimeoutHandler(value) => Some(value),
+            _ => None,
+        }
+    }
+}
+impl<'a, T: Expression> From<&'a ServerCliAction<T>> for Option<&'a TimeoutHandlerActions> {
+    fn from(value: &'a ServerCliAction<T>) -> Self {
+        match value {
+            ServerCliAction::TimeoutHandler(value) => Some(value),
+            _ => None,
+        }
+    }
+}
+
+impl<T: Expression> From<TimestampHandlerActions> for ServerCliAction<T> {
+    fn from(value: TimestampHandlerActions) -> Self {
+        Self::TimestampHandler(value)
+    }
+}
+impl<T: Expression> From<ServerCliAction<T>> for Option<TimestampHandlerActions> {
+    fn from(value: ServerCliAction<T>) -> Self {
+        match value {
+            ServerCliAction::TimestampHandler(value) => Some(value),
+            _ => None,
+        }
+    }
+}
+impl<'a, T: Expression> From<&'a ServerCliAction<T>> for Option<&'a TimestampHandlerActions> {
+    fn from(value: &'a ServerCliAction<T>) -> Self {
+        match value {
+            ServerCliAction::TimestampHandler(value) => Some(value),
             _ => None,
         }
     }
@@ -436,7 +518,7 @@ impl<'a, T: Expression> From<&'a ServerCliAction<T>> for Option<&'a EvaluateUpda
 
 impl<T: Expression> From<EvaluateStopAction> for ServerCliAction<T> {
     fn from(value: EvaluateStopAction) -> Self {
-        EvaluateActions::from(value).into()
+        EvaluateActions::<T>::from(value).into()
     }
 }
 impl<T: Expression> From<ServerCliAction<T>> for Option<EvaluateStopAction> {
@@ -750,6 +832,22 @@ impl<'a, T: Expression> From<&'a ServerCliAction<T>> for Option<&'a GraphQlServe
     }
 }
 
+impl<T: Expression> From<BytecodeInterpreterInitAction> for ServerCliAction<T> {
+    fn from(value: BytecodeInterpreterInitAction) -> Self {
+        BytecodeInterpreterActions::<T>::from(value).into()
+    }
+}
+impl<T: Expression> From<ServerCliAction<T>> for Option<BytecodeInterpreterInitAction> {
+    fn from(value: ServerCliAction<T>) -> Self {
+        Option::<BytecodeInterpreterActions<T>>::from(value).and_then(|value| value.into())
+    }
+}
+impl<'a, T: Expression> From<&'a ServerCliAction<T>> for Option<&'a BytecodeInterpreterInitAction> {
+    fn from(value: &'a ServerCliAction<T>) -> Self {
+        Option::<&'a BytecodeInterpreterActions<T>>::from(value).and_then(|value| value.into())
+    }
+}
+
 impl<T: Expression> From<BytecodeInterpreterEvaluateAction<T>> for ServerCliAction<T> {
     fn from(value: BytecodeInterpreterEvaluateAction<T>) -> Self {
         BytecodeInterpreterActions::<T>::from(value).into()
@@ -786,17 +884,19 @@ impl<'a, T: Expression> From<&'a ServerCliAction<T>>
     }
 }
 
-impl<T: Expression> From<BytecodeGcCompleteAction> for ServerCliAction<T> {
-    fn from(value: BytecodeGcCompleteAction) -> Self {
+impl<T: Expression> From<BytecodeInterpreterGcCompleteAction> for ServerCliAction<T> {
+    fn from(value: BytecodeInterpreterGcCompleteAction) -> Self {
         BytecodeInterpreterActions::<T>::from(value).into()
     }
 }
-impl<T: Expression> From<ServerCliAction<T>> for Option<BytecodeGcCompleteAction> {
+impl<T: Expression> From<ServerCliAction<T>> for Option<BytecodeInterpreterGcCompleteAction> {
     fn from(value: ServerCliAction<T>) -> Self {
         Option::<BytecodeInterpreterActions<T>>::from(value).and_then(|value| value.into())
     }
 }
-impl<'a, T: Expression> From<&'a ServerCliAction<T>> for Option<&'a BytecodeGcCompleteAction> {
+impl<'a, T: Expression> From<&'a ServerCliAction<T>>
+    for Option<&'a BytecodeInterpreterGcCompleteAction>
+{
     fn from(value: &'a ServerCliAction<T>) -> Self {
         Option::<&'a BytecodeInterpreterActions<T>>::from(value).and_then(|value| value.into())
     }
@@ -908,6 +1008,78 @@ impl<'a, T: Expression> From<&'a ServerCliAction<T>>
     }
 }
 
+impl<T: Expression> From<FetchHandlerFetchCompleteAction> for ServerCliAction<T> {
+    fn from(value: FetchHandlerFetchCompleteAction) -> Self {
+        FetchHandlerActions::from(value).into()
+    }
+}
+impl<T: Expression> From<ServerCliAction<T>> for Option<FetchHandlerFetchCompleteAction> {
+    fn from(value: ServerCliAction<T>) -> Self {
+        Option::<FetchHandlerActions>::from(value).and_then(|value| value.into())
+    }
+}
+impl<'a, T: Expression> From<&'a ServerCliAction<T>>
+    for Option<&'a FetchHandlerFetchCompleteAction>
+{
+    fn from(value: &'a ServerCliAction<T>) -> Self {
+        Option::<&'a FetchHandlerActions>::from(value).and_then(|value| value.into())
+    }
+}
+
+impl<T: Expression> From<FetchHandlerConnectionErrorAction> for ServerCliAction<T> {
+    fn from(value: FetchHandlerConnectionErrorAction) -> Self {
+        FetchHandlerActions::from(value).into()
+    }
+}
+impl<T: Expression> From<ServerCliAction<T>> for Option<FetchHandlerConnectionErrorAction> {
+    fn from(value: ServerCliAction<T>) -> Self {
+        Option::<FetchHandlerActions>::from(value).and_then(|value| value.into())
+    }
+}
+impl<'a, T: Expression> From<&'a ServerCliAction<T>>
+    for Option<&'a FetchHandlerConnectionErrorAction>
+{
+    fn from(value: &'a ServerCliAction<T>) -> Self {
+        Option::<&'a FetchHandlerActions>::from(value).and_then(|value| value.into())
+    }
+}
+
+impl<T: Expression> From<GraphQlHandlerHttpFetchCompleteAction> for ServerCliAction<T> {
+    fn from(value: GraphQlHandlerHttpFetchCompleteAction) -> Self {
+        GraphQlHandlerActions::from(value).into()
+    }
+}
+impl<T: Expression> From<ServerCliAction<T>> for Option<GraphQlHandlerHttpFetchCompleteAction> {
+    fn from(value: ServerCliAction<T>) -> Self {
+        Option::<GraphQlHandlerActions>::from(value).and_then(|value| value.into())
+    }
+}
+impl<'a, T: Expression> From<&'a ServerCliAction<T>>
+    for Option<&'a GraphQlHandlerHttpFetchCompleteAction>
+{
+    fn from(value: &'a ServerCliAction<T>) -> Self {
+        Option::<&'a GraphQlHandlerActions>::from(value).and_then(|value| value.into())
+    }
+}
+
+impl<T: Expression> From<GraphQlHandlerHttpConnectionErrorAction> for ServerCliAction<T> {
+    fn from(value: GraphQlHandlerHttpConnectionErrorAction) -> Self {
+        GraphQlHandlerActions::from(value).into()
+    }
+}
+impl<T: Expression> From<ServerCliAction<T>> for Option<GraphQlHandlerHttpConnectionErrorAction> {
+    fn from(value: ServerCliAction<T>) -> Self {
+        Option::<GraphQlHandlerActions>::from(value).and_then(|value| value.into())
+    }
+}
+impl<'a, T: Expression> From<&'a ServerCliAction<T>>
+    for Option<&'a GraphQlHandlerHttpConnectionErrorAction>
+{
+    fn from(value: &'a ServerCliAction<T>) -> Self {
+        Option::<&'a GraphQlHandlerActions>::from(value).and_then(|value| value.into())
+    }
+}
+
 impl<T: Expression> From<GraphQlHandlerWebSocketConnectSuccessAction> for ServerCliAction<T> {
     fn from(value: GraphQlHandlerWebSocketConnectSuccessAction) -> Self {
         GraphQlHandlerActions::from(value).into()
@@ -928,18 +1100,20 @@ impl<'a, T: Expression> From<&'a ServerCliAction<T>>
     }
 }
 
-impl<T: Expression> From<GraphQlHandlerWebSocketConnectErrorAction> for ServerCliAction<T> {
-    fn from(value: GraphQlHandlerWebSocketConnectErrorAction) -> Self {
+impl<T: Expression> From<GraphQlHandlerWebSocketClientMessageAction> for ServerCliAction<T> {
+    fn from(value: GraphQlHandlerWebSocketClientMessageAction) -> Self {
         GraphQlHandlerActions::from(value).into()
     }
 }
-impl<T: Expression> From<ServerCliAction<T>> for Option<GraphQlHandlerWebSocketConnectErrorAction> {
+impl<T: Expression> From<ServerCliAction<T>>
+    for Option<GraphQlHandlerWebSocketClientMessageAction>
+{
     fn from(value: ServerCliAction<T>) -> Self {
         Option::<GraphQlHandlerActions>::from(value).and_then(|value| value.into())
     }
 }
 impl<'a, T: Expression> From<&'a ServerCliAction<T>>
-    for Option<&'a GraphQlHandlerWebSocketConnectErrorAction>
+    for Option<&'a GraphQlHandlerWebSocketClientMessageAction>
 {
     fn from(value: &'a ServerCliAction<T>) -> Self {
         Option::<&'a GraphQlHandlerActions>::from(value).and_then(|value| value.into())
@@ -960,6 +1134,46 @@ impl<T: Expression> From<ServerCliAction<T>>
 }
 impl<'a, T: Expression> From<&'a ServerCliAction<T>>
     for Option<&'a GraphQlHandlerWebSocketServerMessageAction>
+{
+    fn from(value: &'a ServerCliAction<T>) -> Self {
+        Option::<&'a GraphQlHandlerActions>::from(value).and_then(|value| value.into())
+    }
+}
+
+impl<T: Expression> From<GraphQlHandlerWebSocketConnectionErrorAction> for ServerCliAction<T> {
+    fn from(value: GraphQlHandlerWebSocketConnectionErrorAction) -> Self {
+        GraphQlHandlerActions::from(value).into()
+    }
+}
+impl<T: Expression> From<ServerCliAction<T>>
+    for Option<GraphQlHandlerWebSocketConnectionErrorAction>
+{
+    fn from(value: ServerCliAction<T>) -> Self {
+        Option::<GraphQlHandlerActions>::from(value).and_then(|value| value.into())
+    }
+}
+impl<'a, T: Expression> From<&'a ServerCliAction<T>>
+    for Option<&'a GraphQlHandlerWebSocketConnectionErrorAction>
+{
+    fn from(value: &'a ServerCliAction<T>) -> Self {
+        Option::<&'a GraphQlHandlerActions>::from(value).and_then(|value| value.into())
+    }
+}
+
+impl<T: Expression> From<GraphQlHandlerWebSocketConnectionTerminateAction> for ServerCliAction<T> {
+    fn from(value: GraphQlHandlerWebSocketConnectionTerminateAction) -> Self {
+        GraphQlHandlerActions::from(value).into()
+    }
+}
+impl<T: Expression> From<ServerCliAction<T>>
+    for Option<GraphQlHandlerWebSocketConnectionTerminateAction>
+{
+    fn from(value: ServerCliAction<T>) -> Self {
+        Option::<GraphQlHandlerActions>::from(value).and_then(|value| value.into())
+    }
+}
+impl<'a, T: Expression> From<&'a ServerCliAction<T>>
+    for Option<&'a GraphQlHandlerWebSocketConnectionTerminateAction>
 {
     fn from(value: &'a ServerCliAction<T>) -> Self {
         Option::<&'a GraphQlHandlerActions>::from(value).and_then(|value| value.into())
@@ -1000,6 +1214,142 @@ impl<'a, T: Expression> From<&'a ServerCliAction<T>> for Option<&'a GrpcHandlerC
     }
 }
 
+impl<T: Expression> From<GrpcHandlerRequestStartAction> for ServerCliAction<T> {
+    fn from(value: GrpcHandlerRequestStartAction) -> Self {
+        GrpcHandlerActions::from(value).into()
+    }
+}
+impl<T: Expression> From<ServerCliAction<T>> for Option<GrpcHandlerRequestStartAction> {
+    fn from(value: ServerCliAction<T>) -> Self {
+        Option::<GrpcHandlerActions>::from(value).and_then(|value| value.into())
+    }
+}
+impl<'a, T: Expression> From<&'a ServerCliAction<T>> for Option<&'a GrpcHandlerRequestStartAction> {
+    fn from(value: &'a ServerCliAction<T>) -> Self {
+        Option::<&'a GrpcHandlerActions>::from(value).and_then(|value| value.into())
+    }
+}
+
+impl<T: Expression> From<GrpcHandlerRequestStopAction> for ServerCliAction<T> {
+    fn from(value: GrpcHandlerRequestStopAction) -> Self {
+        GrpcHandlerActions::from(value).into()
+    }
+}
+impl<T: Expression> From<ServerCliAction<T>> for Option<GrpcHandlerRequestStopAction> {
+    fn from(value: ServerCliAction<T>) -> Self {
+        Option::<GrpcHandlerActions>::from(value).and_then(|value| value.into())
+    }
+}
+impl<'a, T: Expression> From<&'a ServerCliAction<T>> for Option<&'a GrpcHandlerRequestStopAction> {
+    fn from(value: &'a ServerCliAction<T>) -> Self {
+        Option::<&'a GrpcHandlerActions>::from(value).and_then(|value| value.into())
+    }
+}
+
+impl<T: Expression> From<GrpcHandlerSuccessResponseAction> for ServerCliAction<T> {
+    fn from(value: GrpcHandlerSuccessResponseAction) -> Self {
+        GrpcHandlerActions::from(value).into()
+    }
+}
+impl<T: Expression> From<ServerCliAction<T>> for Option<GrpcHandlerSuccessResponseAction> {
+    fn from(value: ServerCliAction<T>) -> Self {
+        Option::<GrpcHandlerActions>::from(value).and_then(|value| value.into())
+    }
+}
+impl<'a, T: Expression> From<&'a ServerCliAction<T>>
+    for Option<&'a GrpcHandlerSuccessResponseAction>
+{
+    fn from(value: &'a ServerCliAction<T>) -> Self {
+        Option::<&'a GrpcHandlerActions>::from(value).and_then(|value| value.into())
+    }
+}
+
+impl<T: Expression> From<GrpcHandlerErrorResponseAction> for ServerCliAction<T> {
+    fn from(value: GrpcHandlerErrorResponseAction) -> Self {
+        GrpcHandlerActions::from(value).into()
+    }
+}
+impl<T: Expression> From<ServerCliAction<T>> for Option<GrpcHandlerErrorResponseAction> {
+    fn from(value: ServerCliAction<T>) -> Self {
+        Option::<GrpcHandlerActions>::from(value).and_then(|value| value.into())
+    }
+}
+impl<'a, T: Expression> From<&'a ServerCliAction<T>>
+    for Option<&'a GrpcHandlerErrorResponseAction>
+{
+    fn from(value: &'a ServerCliAction<T>) -> Self {
+        Option::<&'a GrpcHandlerActions>::from(value).and_then(|value| value.into())
+    }
+}
+
+impl<T: Expression> From<GrpcHandlerTransportErrorAction> for ServerCliAction<T> {
+    fn from(value: GrpcHandlerTransportErrorAction) -> Self {
+        GrpcHandlerActions::from(value).into()
+    }
+}
+impl<T: Expression> From<ServerCliAction<T>> for Option<GrpcHandlerTransportErrorAction> {
+    fn from(value: ServerCliAction<T>) -> Self {
+        Option::<GrpcHandlerActions>::from(value).and_then(|value| value.into())
+    }
+}
+impl<'a, T: Expression> From<&'a ServerCliAction<T>>
+    for Option<&'a GrpcHandlerTransportErrorAction>
+{
+    fn from(value: &'a ServerCliAction<T>) -> Self {
+        Option::<&'a GrpcHandlerActions>::from(value).and_then(|value| value.into())
+    }
+}
+
+impl<T: Expression> From<GrpcHandlerConnectionTerminateAction> for ServerCliAction<T> {
+    fn from(value: GrpcHandlerConnectionTerminateAction) -> Self {
+        GrpcHandlerActions::from(value).into()
+    }
+}
+impl<T: Expression> From<ServerCliAction<T>> for Option<GrpcHandlerConnectionTerminateAction> {
+    fn from(value: ServerCliAction<T>) -> Self {
+        Option::<GrpcHandlerActions>::from(value).and_then(|value| value.into())
+    }
+}
+impl<'a, T: Expression> From<&'a ServerCliAction<T>>
+    for Option<&'a GrpcHandlerConnectionTerminateAction>
+{
+    fn from(value: &'a ServerCliAction<T>) -> Self {
+        Option::<&'a GrpcHandlerActions>::from(value).and_then(|value| value.into())
+    }
+}
+
+impl<T: Expression> From<TimeoutHandlerTimeoutAction> for ServerCliAction<T> {
+    fn from(value: TimeoutHandlerTimeoutAction) -> Self {
+        TimeoutHandlerActions::from(value).into()
+    }
+}
+impl<T: Expression> From<ServerCliAction<T>> for Option<TimeoutHandlerTimeoutAction> {
+    fn from(value: ServerCliAction<T>) -> Self {
+        Option::<TimeoutHandlerActions>::from(value).and_then(|value| value.into())
+    }
+}
+impl<'a, T: Expression> From<&'a ServerCliAction<T>> for Option<&'a TimeoutHandlerTimeoutAction> {
+    fn from(value: &'a ServerCliAction<T>) -> Self {
+        Option::<&'a TimeoutHandlerActions>::from(value).and_then(|value| value.into())
+    }
+}
+
+impl<T: Expression> From<TimestampHandlerUpdateAction> for ServerCliAction<T> {
+    fn from(value: TimestampHandlerUpdateAction) -> Self {
+        TimestampHandlerActions::from(value).into()
+    }
+}
+impl<T: Expression> From<ServerCliAction<T>> for Option<TimestampHandlerUpdateAction> {
+    fn from(value: ServerCliAction<T>) -> Self {
+        Option::<TimestampHandlerActions>::from(value).and_then(|value| value.into())
+    }
+}
+impl<'a, T: Expression> From<&'a ServerCliAction<T>> for Option<&'a TimestampHandlerUpdateAction> {
+    fn from(value: &'a ServerCliAction<T>) -> Self {
+        Option::<&'a TimestampHandlerActions>::from(value).and_then(|value| value.into())
+    }
+}
+
 impl<T: Expression> From<InitPrometheusMetricsAction> for ServerCliAction<T> {
     fn from(value: InitPrometheusMetricsAction) -> Self {
         InitActions::from(value).into()
@@ -1027,22 +1377,6 @@ impl<T: Expression> From<ServerCliAction<T>> for Option<InitOpenTelemetryAction>
     }
 }
 impl<'a, T: Expression> From<&'a ServerCliAction<T>> for Option<&'a InitOpenTelemetryAction> {
-    fn from(value: &'a ServerCliAction<T>) -> Self {
-        Option::<&'a InitActions>::from(value).and_then(|value| value.into())
-    }
-}
-
-impl<T: Expression> From<InitSessionRecordingAction> for ServerCliAction<T> {
-    fn from(value: InitSessionRecordingAction) -> Self {
-        InitActions::from(value).into()
-    }
-}
-impl<T: Expression> From<ServerCliAction<T>> for Option<InitSessionRecordingAction> {
-    fn from(value: ServerCliAction<T>) -> Self {
-        Option::<InitActions>::from(value).and_then(|value| value.into())
-    }
-}
-impl<'a, T: Expression> From<&'a ServerCliAction<T>> for Option<&'a InitSessionRecordingAction> {
     fn from(value: &'a ServerCliAction<T>) -> Self {
         Option::<&'a InitActions>::from(value).and_then(|value| value.into())
     }

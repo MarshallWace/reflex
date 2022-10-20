@@ -6,7 +6,7 @@
 use std::{convert::Infallible, iter::once, sync::Arc};
 
 use futures::{future, stream, Future, FutureExt, Sink, SinkExt, Stream, StreamExt};
-use http::{header, HeaderMap, HeaderValue, Method, Request, Response, StatusCode};
+use http::{header, HeaderValue, Method, Request, Response, StatusCode};
 use hyper::{
     service::{service_fn, Service},
     upgrade::Upgraded,
@@ -16,17 +16,15 @@ use hyper_tungstenite::{
     tungstenite::{Error as TungsteniteError, Message},
     HyperWebsocket, WebSocketStream,
 };
-use metrics::SharedString;
 use opentelemetry::trace::{Span, Tracer};
-use reflex::core::{Applicable, Expression, InstructionPointer, Reducible, Rewritable};
+use reflex::core::{
+    Applicable, Expression, ExpressionFactory, HeapAllocator, InstructionPointer, Reducible,
+    Rewritable,
+};
 use reflex_dispatcher::{
-    scheduler::tokio::{TokioScheduler, TokioSchedulerMetricNames},
-    tokio_task_metrics_export::get_task_monitor,
-    utils::take_until_final_item::TakeUntilFinalItem,
-    Action, Actor, AsyncActionFilter, AsyncActionStream, AsyncDispatchResult, AsyncScheduler,
-    AsyncSubscriptionStream, ChainedActor, InboundAction, InstrumentedActor,
-    InstrumentedActorMetricNames, OutboundAction, PostMiddleware, PreMiddleware, Scheduler,
-    SchedulerMiddleware,
+    utils::take_until_final_item::TakeUntilFinalItem, Action, Actor, Handler,
+    InstrumentedActorMetricNames, Matcher, PostMiddleware, PreMiddleware, ProcessId, Redispatcher,
+    SchedulerMiddleware, SchedulerTransition, TaskFactory,
 };
 use reflex_graphql::{
     create_json_error_object,
@@ -35,7 +33,8 @@ use reflex_graphql::{
         deserialize_graphql_client_message, GraphQlSubscriptionClientMessage,
         GraphQlSubscriptionServerMessage,
     },
-    GraphQlOperation, GraphQlSchema,
+    validate::parse_graphql_schema_types,
+    GraphQlSchema,
 };
 use reflex_interpreter::{
     compiler::{Compile, CompiledProgram, CompilerOptions},
@@ -43,14 +42,21 @@ use reflex_interpreter::{
 };
 use reflex_json::JsonValue;
 use reflex_runtime::{
-    actor::bytecode_interpreter::{BytecodeInterpreter, BytecodeInterpreterAction},
-    worker::bytecode_worker::BytecodeWorkerMetricNames,
+    actor::bytecode_interpreter::{
+        BytecodeInterpreter, BytecodeInterpreterAction, BytecodeInterpreterMetricLabels,
+        BytecodeInterpreterMetricNames,
+    },
+    task::RuntimeTask,
     AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator,
+};
+use reflex_scheduler::tokio::{
+    get_task_monitor, TokioInbox, TokioInitContext, TokioScheduler, TokioSchedulerMetricNames,
 };
 use reflex_stdlib::Stdlib;
 use uuid::Uuid;
 
 use crate::{
+    actor::{ServerAction, ServerActor},
     server::{
         action::{
             http_server::{HttpServerRequestAction, HttpServerResponseAction},
@@ -67,91 +73,243 @@ use crate::{
         },
         actor::{
             http_graphql_server::HttpGraphQlServerQueryTransform,
-            server::{ServerAction, ServerActor, ServerMetricNames},
             websocket_graphql_server::WebSocketGraphQlServerQueryTransform,
         },
         playground::handle_playground_http_request,
+        task::websocket_graphql_server::WebSocketGraphQlServerTask,
         utils::{
             clone_http_request_wrapper, clone_http_response, clone_http_response_wrapper,
             create_http_response, create_json_http_response, get_cors_headers,
         },
-        SessionPlaybackServerAction,
+        GraphQlServerOperationMetricLabels, GraphQlServerQueryLabel,
+        HttpGraphQlServerQueryMetricLabels, SessionPlaybackServerAction,
+        WebSocketGraphQlServerConnectionMetricLabels,
     },
+    server_actors,
     utils::server::handle_http_request,
+    ServerMetricNames,
 };
 
 pub trait GraphQlWebServerAction<T: Expression>:
     Action
     + ServerAction<T>
     + BytecodeInterpreterAction<T>
-    + InboundAction<HttpServerResponseAction>
-    + InboundAction<WebSocketServerSendAction>
-    + InboundAction<WebSocketServerDisconnectAction>
-    + InboundAction<QueryInspectorServerHttpResponseAction>
-    + OutboundAction<HttpServerRequestAction>
-    + OutboundAction<HttpServerResponseAction>
-    + OutboundAction<WebSocketServerConnectAction>
-    + OutboundAction<WebSocketServerReceiveAction>
-    + OutboundAction<QueryInspectorServerHttpRequestAction>
+    + Matcher<HttpServerResponseAction>
+    + Matcher<WebSocketServerSendAction>
+    + Matcher<WebSocketServerDisconnectAction>
+    + Matcher<QueryInspectorServerHttpResponseAction>
+    + From<HttpServerRequestAction>
+    + From<HttpServerResponseAction>
+    + From<WebSocketServerConnectAction>
+    + From<WebSocketServerReceiveAction>
+    + From<QueryInspectorServerHttpRequestAction>
 {
 }
 impl<T: Expression, TAction> GraphQlWebServerAction<T> for TAction where
     Self: Action
         + ServerAction<T>
         + BytecodeInterpreterAction<T>
-        + InboundAction<HttpServerResponseAction>
-        + InboundAction<WebSocketServerSendAction>
-        + InboundAction<WebSocketServerDisconnectAction>
-        + InboundAction<QueryInspectorServerHttpResponseAction>
-        + OutboundAction<HttpServerRequestAction>
-        + OutboundAction<HttpServerResponseAction>
-        + OutboundAction<WebSocketServerConnectAction>
-        + OutboundAction<WebSocketServerReceiveAction>
-        + OutboundAction<QueryInspectorServerHttpRequestAction>
+        + Matcher<HttpServerResponseAction>
+        + Matcher<WebSocketServerSendAction>
+        + Matcher<WebSocketServerDisconnectAction>
+        + Matcher<QueryInspectorServerHttpResponseAction>
+        + From<HttpServerRequestAction>
+        + From<HttpServerResponseAction>
+        + From<WebSocketServerConnectAction>
+        + From<WebSocketServerReceiveAction>
+        + From<QueryInspectorServerHttpRequestAction>
 {
 }
 
 #[derive(Default, Clone, Copy, Debug)]
 pub struct GraphQlWebServerMetricNames {
     pub server: ServerMetricNames,
-    pub interpreter: BytecodeWorkerMetricNames,
+    pub interpreter: BytecodeInterpreterMetricNames,
     pub scheduler: TokioSchedulerMetricNames,
-    pub root_actor: InstrumentedActorMetricNames,
+    pub actor: InstrumentedActorMetricNames,
 }
 
-pub struct GraphQlWebServer<TAction: Action + Send + 'static> {
-    runtime: TokioScheduler<TAction>,
+pub trait GraphQlWebServerTask<T, TFactory, TAllocator>:
+    RuntimeTask<T, TFactory, TAllocator> + WebSocketGraphQlServerTask
+where
+    T: Expression,
+    TFactory: ExpressionFactory<T>,
+    TAllocator: HeapAllocator<T>,
+{
+}
+impl<_Self, T, TFactory, TAllocator> GraphQlWebServerTask<T, TFactory, TAllocator> for _Self
+where
+    T: Expression,
+    TFactory: ExpressionFactory<T>,
+    TAllocator: HeapAllocator<T>,
+    Self: RuntimeTask<T, TFactory, TAllocator> + WebSocketGraphQlServerTask,
+{
+}
+
+pub trait GraphQlWebServerActor<
+    T,
+    TFactory,
+    TAllocator,
+    TTransformHttp,
+    TTransformWs,
+    TGraphQlQueryLabel,
+    THttpMetricLabels,
+    TConnectionMetricLabels,
+    TOperationMetricLabels,
+    TWorkerMetricLabels,
+    TTracer,
+>:
+    From<
+        ServerActor<
+            T,
+            TFactory,
+            TAllocator,
+            TTransformHttp,
+            TTransformWs,
+            TGraphQlQueryLabel,
+            THttpMetricLabels,
+            TConnectionMetricLabels,
+            TOperationMetricLabels,
+            TTracer,
+        >,
+    > + From<BytecodeInterpreter<T, TFactory, TAllocator, TWorkerMetricLabels>>
+    + From<Redispatcher> where
+    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
+    T::String: Send,
+    T::Builtin: Send,
+    T::Signal<T>: Send,
+    T::SignalList<T>: Send,
+    T::StructPrototype<T>: Send,
+    T::ExpressionList<T>: Send,
+    T::Builtin: From<Stdlib> + From<GraphQlStdlib>,
+    TFactory: AsyncExpressionFactory<T> + Default,
+    TAllocator: AsyncHeapAllocator<T> + Default,
+    TTransformHttp: HttpGraphQlServerQueryTransform + Send + 'static,
+    TTransformWs: WebSocketGraphQlServerQueryTransform + Send + 'static,
+    TGraphQlQueryLabel: GraphQlServerQueryLabel + Send + 'static,
+    THttpMetricLabels: HttpGraphQlServerQueryMetricLabels + Send + 'static,
+    TConnectionMetricLabels: WebSocketGraphQlServerConnectionMetricLabels + Send + 'static,
+    TOperationMetricLabels: GraphQlServerOperationMetricLabels + Send + 'static,
+    TWorkerMetricLabels: BytecodeInterpreterMetricLabels + Send + 'static,
+    TTracer: Tracer + Send + 'static,
+    TTracer::Span: Span + Send + Sync + 'static,
+{
+}
+impl<
+        _Self,
+        T,
+        TFactory,
+        TAllocator,
+        TTransformHttp,
+        TTransformWs,
+        TGraphQlQueryLabel,
+        THttpMetricLabels,
+        TConnectionMetricLabels,
+        TOperationMetricLabels,
+        TWorkerMetricLabels,
+        TTracer,
+    >
+    GraphQlWebServerActor<
+        T,
+        TFactory,
+        TAllocator,
+        TTransformHttp,
+        TTransformWs,
+        TGraphQlQueryLabel,
+        THttpMetricLabels,
+        TConnectionMetricLabels,
+        TOperationMetricLabels,
+        TWorkerMetricLabels,
+        TTracer,
+    > for _Self
+where
+    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
+    T::String: Send,
+    T::Builtin: Send,
+    T::Signal<T>: Send,
+    T::SignalList<T>: Send,
+    T::StructPrototype<T>: Send,
+    T::ExpressionList<T>: Send,
+    T::Builtin: From<Stdlib> + From<GraphQlStdlib>,
+    TFactory: AsyncExpressionFactory<T> + Default,
+    TAllocator: AsyncHeapAllocator<T> + Default,
+    TTransformHttp: HttpGraphQlServerQueryTransform + Send + 'static,
+    TTransformWs: WebSocketGraphQlServerQueryTransform + Send + 'static,
+    TGraphQlQueryLabel: GraphQlServerQueryLabel + Send + 'static,
+    THttpMetricLabels: HttpGraphQlServerQueryMetricLabels + Send + 'static,
+    TConnectionMetricLabels: WebSocketGraphQlServerConnectionMetricLabels + Send + 'static,
+    TOperationMetricLabels: GraphQlServerOperationMetricLabels + Send + 'static,
+    TWorkerMetricLabels: BytecodeInterpreterMetricLabels + Send + 'static,
+    TTracer: Tracer + Send + 'static,
+    TTracer::Span: Span + Send + Sync + 'static,
+    Self: From<
+            ServerActor<
+                T,
+                TFactory,
+                TAllocator,
+                TTransformHttp,
+                TTransformWs,
+                TGraphQlQueryLabel,
+                THttpMetricLabels,
+                TConnectionMetricLabels,
+                TOperationMetricLabels,
+                TTracer,
+            >,
+        > + From<BytecodeInterpreter<T, TFactory, TAllocator, TWorkerMetricLabels>>
+        + From<Redispatcher>,
+{
+}
+
+pub struct GraphQlWebServer<TAction, TTask>
+where
+    TAction: Action,
+    TTask: TaskFactory<TAction, TTask>,
+{
+    runtime: TokioScheduler<TAction, TTask>,
+    main_pid: ProcessId,
     connection_monitor: tokio_metrics::TaskMonitor,
 }
-impl<TAction: Action + Send + 'static> GraphQlWebServer<TAction> {
-    pub fn new<T, TFactory>(
+impl<TAction, TTask> GraphQlWebServer<TAction, TTask>
+where
+    TAction: Action,
+    TTask: TaskFactory<TAction, TTask>,
+{
+    pub fn new<
+        T,
+        TFactory,
+        TAllocator,
+        TActors,
+        TTransformHttp,
+        TTransformWs,
+        TGraphQlQueryLabel,
+        THttpMetricLabels,
+        TConnectionMetricLabels,
+        TOperationMetricLabels,
+        TWorkerMetricLabels,
+        TTracer,
+    >(
         graph_root: (CompiledProgram, InstructionPointer),
         schema: Option<GraphQlSchema>,
-        actor: impl Actor<TAction, State = impl Send + 'static> + Send + 'static,
+        custom_actors: impl FnOnce(&mut TokioInitContext, ProcessId) -> TActors,
         middleware: SchedulerMiddleware<
-            impl PreMiddleware<TAction, State = impl Send + 'static> + Send + 'static,
-            impl PostMiddleware<TAction, State = impl Send + 'static> + Send + 'static,
+            impl PreMiddleware<TAction, TTask, State = impl Send + 'static> + Send + 'static,
+            impl PostMiddleware<TAction, TTask, State = impl Send + 'static> + Send + 'static,
             TAction,
+            TTask,
         >,
         compiler_options: CompilerOptions,
         interpreter_options: InterpreterOptions,
         factory: TFactory,
-        allocator: impl AsyncHeapAllocator<T>,
-        transform_http: impl HttpGraphQlServerQueryTransform + Send + 'static,
-        transform_ws: impl WebSocketGraphQlServerQueryTransform + Send + 'static,
+        allocator: TAllocator,
+        transform_http: TTransformHttp,
+        transform_ws: TTransformWs,
         metric_names: GraphQlWebServerMetricNames,
-        get_graphql_query_label: impl Fn(&GraphQlOperation) -> String + Send + 'static,
-        get_http_query_metric_labels: impl Fn(&GraphQlOperation, &HeaderMap) -> Vec<(String, String)>
-            + Send
-            + 'static,
-        get_websocket_connection_metric_labels: impl Fn(Option<&JsonValue>, &HeaderMap) -> Vec<(String, String)>
-            + Send
-            + 'static,
-        get_operation_metric_labels: impl Fn(&GraphQlOperation) -> Vec<(String, String)>
-            + Send
-            + 'static,
-        get_worker_metric_labels: impl Fn(&str) -> Vec<(SharedString, SharedString)> + Send + 'static,
-        tracer: impl Tracer<Span = impl Span + Send + Sync + 'static> + Send + 'static,
+        get_graphql_query_label: TGraphQlQueryLabel,
+        get_http_query_metric_labels: THttpMetricLabels,
+        get_websocket_connection_metric_labels: TConnectionMetricLabels,
+        get_operation_metric_labels: TOperationMetricLabels,
+        get_worker_metric_labels: TWorkerMetricLabels,
+        tracer: TTracer,
     ) -> Result<Self, String>
     where
         T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
@@ -162,55 +320,93 @@ impl<TAction: Action + Send + 'static> GraphQlWebServer<TAction> {
         T::StructPrototype<T>: Send,
         T::ExpressionList<T>: Send,
         T::Builtin: From<Stdlib> + From<GraphQlStdlib> + 'static,
-        TFactory: AsyncExpressionFactory<T>,
-        TAction: GraphQlWebServerAction<T> + Clone + Send + 'static,
+        TFactory: AsyncExpressionFactory<T> + Default,
+        TAllocator: AsyncHeapAllocator<T> + Default,
+        TActors: IntoIterator<Item = (ProcessId, TTask::Actor)>,
+        TTransformHttp: HttpGraphQlServerQueryTransform + Send + 'static,
+        TTransformWs: WebSocketGraphQlServerQueryTransform + Send + 'static,
+        TGraphQlQueryLabel: GraphQlServerQueryLabel + Send + 'static,
+        THttpMetricLabels: HttpGraphQlServerQueryMetricLabels + Send + 'static,
+        TConnectionMetricLabels: WebSocketGraphQlServerConnectionMetricLabels + Send + 'static,
+        TOperationMetricLabels: GraphQlServerOperationMetricLabels + Send + 'static,
+        TWorkerMetricLabels: BytecodeInterpreterMetricLabels + Send + 'static,
+        TTracer: Tracer + Send + 'static,
+        TTracer::Span: Span + Send + Sync + 'static,
+        TAction: Action + GraphQlWebServerAction<T> + Send + Sync + 'static,
+        TTask: RuntimeTask<T, TFactory, TAllocator> + WebSocketGraphQlServerTask + Send + 'static,
+        TTask::Actor: From<
+                ServerActor<
+                    T,
+                    TFactory,
+                    TAllocator,
+                    TTransformHttp,
+                    TTransformWs,
+                    TGraphQlQueryLabel,
+                    THttpMetricLabels,
+                    TConnectionMetricLabels,
+                    TOperationMetricLabels,
+                    TTracer,
+                >,
+            > + From<BytecodeInterpreter<T, TFactory, TAllocator, TWorkerMetricLabels>>
+            + From<Redispatcher>
+            + Send
+            + Sync
+            + 'static,
+        <TTask::Actor as Actor<TAction, TTask>>::Events<TokioInbox<TAction>>: Send + 'static,
+        <TTask::Actor as Actor<TAction, TTask>>::Dispose: Send + 'static,
+        <TTask::Actor as Handler<TAction, SchedulerTransition<TAction, TTask>>>::State:
+            Send + 'static,
     {
         let connection_monitor = get_task_monitor(
             &metric_names.scheduler.tokio_task_metric_names,
             "graphql_connection",
         );
-        let server = ServerActor::new(
-            schema,
-            factory.clone(),
-            allocator.clone(),
-            transform_http,
-            transform_ws,
-            metric_names.server,
-            get_graphql_query_label,
-            get_http_query_metric_labels,
-            get_websocket_connection_metric_labels,
-            get_operation_metric_labels,
-            tracer,
-        )?;
-        let runtime = TokioScheduler::<TAction>::new(
-            InstrumentedActor::new(
-                ChainedActor::new(
-                    server,
-                    ChainedActor::new(
-                        InstrumentedActor::new(
-                            BytecodeInterpreter::new(
-                                graph_root,
-                                compiler_options,
-                                interpreter_options,
-                                factory,
-                                allocator,
-                                metric_names.interpreter,
-                                get_worker_metric_labels,
-                            ),
-                            "BytecodeInterpreter",
-                            metric_names.server.actor,
-                        ),
-                        actor,
-                    ),
-                ),
-                "root",
-                metric_names.root_actor,
-            ),
-            middleware,
-            metric_names.scheduler,
-        );
+        let schema_types = schema.map(parse_graphql_schema_types).transpose()?;
+        let (runtime, main_pid) =
+            TokioScheduler::<TAction, TTask>::new(metric_names.scheduler, move |context| {
+                let main_pid = context.generate_pid();
+                let mut actors = {
+                    server_actors(
+                        schema_types,
+                        factory.clone(),
+                        allocator.clone(),
+                        transform_http,
+                        transform_ws,
+                        metric_names.server,
+                        get_graphql_query_label,
+                        get_http_query_metric_labels,
+                        get_websocket_connection_metric_labels,
+                        get_operation_metric_labels,
+                        tracer,
+                        main_pid,
+                    )
+                    .into_iter()
+                    .map(TTask::Actor::from)
+                }
+                .chain(
+                    once(BytecodeInterpreter::new(
+                        graph_root,
+                        compiler_options,
+                        interpreter_options,
+                        factory,
+                        allocator,
+                        metric_names.interpreter,
+                        get_worker_metric_labels,
+                        main_pid,
+                    ))
+                    .map(TTask::Actor::from),
+                )
+                .map(|actor| (context.generate_pid(), actor))
+                .collect::<Vec<_>>();
+                actors.extend(custom_actors(context, main_pid));
+                let actor_pids = actors.iter().map(|(pid, _)| *pid);
+                actors.push((main_pid, TTask::Actor::from(Redispatcher::new(actor_pids))));
+                let init_commands = SchedulerTransition::default();
+                (actors, init_commands, main_pid)
+            });
         Ok(Self {
             runtime,
+            main_pid,
             connection_monitor,
         })
     }
@@ -219,37 +415,25 @@ impl<TAction: Action + Send + 'static> GraphQlWebServer<TAction> {
         request: Request<Body>,
     ) -> impl Future<Output = Response<Body>>
     where
-        TAction: Clone
-            + InboundAction<HttpServerResponseAction>
-            + OutboundAction<HttpServerRequestAction>
-            + OutboundAction<HttpServerResponseAction>,
+        TAction: Action
+            + Matcher<HttpServerResponseAction>
+            + From<HttpServerRequestAction>
+            + From<HttpServerResponseAction>
+            + Send
+            + Sync
+            + 'static,
+        TTask: TaskFactory<TAction, TTask> + Send + 'static,
     {
-        handle_graphql_http_request(&self.runtime, request)
+        handle_graphql_http_request(&self.runtime, request, self.main_pid)
     }
-}
-impl<TAction: Action + Send + 'static> Scheduler for GraphQlWebServer<TAction> {
-    type Action = TAction;
-}
-impl<TAction> AsyncScheduler for GraphQlWebServer<TAction>
-where
-    TAction: Action + Clone + Send + 'static,
-{
-    fn dispatch<TActions: AsyncActionStream<Self::Action>>(
-        &self,
-        actions: TActions,
-    ) -> AsyncDispatchResult {
-        self.runtime.dispatch(actions)
-    }
-    fn subscribe<V: Send + 'static, TFilter: AsyncActionFilter<Self::Action, V>>(
-        &self,
-        transform: TFilter,
-    ) -> AsyncSubscriptionStream<V> {
-        self.runtime.subscribe(transform)
+    pub fn main_pid(&self) -> ProcessId {
+        self.main_pid
     }
 }
 
-pub fn graphql_service<TAction>(
-    server: Arc<GraphQlWebServer<TAction>>,
+pub fn graphql_service<TAction, TTask>(
+    server: Arc<GraphQlWebServer<TAction, TTask>>,
+    main_pid: ProcessId,
 ) -> impl Service<
     Request<Body>,
     Response = Response<Body>,
@@ -258,17 +442,18 @@ pub fn graphql_service<TAction>(
 >
 where
     TAction: Action
-        + Clone
+        + Matcher<HttpServerResponseAction>
+        + Matcher<WebSocketServerSendAction>
+        + Matcher<WebSocketServerDisconnectAction>
+        + From<HttpServerRequestAction>
+        + From<HttpServerResponseAction>
+        + From<WebSocketServerConnectAction>
+        + From<WebSocketServerSendAction>
+        + From<WebSocketServerReceiveAction>
         + Send
-        + 'static
-        + InboundAction<HttpServerResponseAction>
-        + InboundAction<WebSocketServerSendAction>
-        + InboundAction<WebSocketServerDisconnectAction>
-        + OutboundAction<HttpServerRequestAction>
-        + OutboundAction<HttpServerResponseAction>
-        + OutboundAction<WebSocketServerConnectAction>
-        + OutboundAction<WebSocketServerSendAction>
-        + OutboundAction<WebSocketServerReceiveAction>,
+        + Sync
+        + 'static,
+    TTask: TaskFactory<TAction, TTask> + Send + 'static,
 {
     let connection_monitor = server.connection_monitor.clone();
     service_fn({
@@ -278,10 +463,14 @@ where
             async move {
                 let cors_headers = get_cors_headers(&req).into_iter().collect::<Vec<_>>();
                 let mut response = match req.method() {
-                    &Method::POST => handle_graphql_http_request(&server.runtime, req).await,
+                    &Method::POST => {
+                        handle_graphql_http_request(&server.runtime, req, main_pid).await
+                    }
                     &Method::GET => {
                         if hyper_tungstenite::is_upgrade_request(&req) {
-                            match handle_graphql_websocket_request(&server.runtime, req).await {
+                            match handle_graphql_websocket_request(&server.runtime, req, main_pid)
+                                .await
+                            {
                                 Err(response) => response,
                                 Ok((response, listen_task)) => {
                                     let _ =
@@ -303,8 +492,9 @@ where
     })
 }
 
-pub fn query_inspector_service<TScheduler, TAction>(
-    scheduler: Arc<TScheduler>,
+pub fn query_inspector_service<TAction, TTask>(
+    scheduler: Arc<TokioScheduler<TAction, TTask>>,
+    main_pid: ProcessId,
 ) -> impl Service<
     Request<Body>,
     Response = Response<Body>,
@@ -312,14 +502,14 @@ pub fn query_inspector_service<TScheduler, TAction>(
     Future = impl Future<Output = Result<Response<Body>, Infallible>> + Send,
 >
 where
-    TScheduler: AsyncScheduler<Action = TAction> + Send + Sync,
     TAction: Action
-        + Clone
+        + Matcher<QueryInspectorServerHttpResponseAction>
+        + From<QueryInspectorServerHttpRequestAction>
+        + From<QueryInspectorServerHttpResponseAction>
         + Send
-        + 'static
-        + InboundAction<QueryInspectorServerHttpResponseAction>
-        + OutboundAction<QueryInspectorServerHttpRequestAction>
-        + OutboundAction<QueryInspectorServerHttpResponseAction>,
+        + Sync
+        + 'static,
+    TTask: TaskFactory<TAction, TTask> + Send + 'static,
 {
     service_fn({
         move |req: Request<Body>| {
@@ -328,7 +518,7 @@ where
                 let cors_headers = get_cors_headers(&req).into_iter().collect::<Vec<_>>();
                 let mut response = match req.method() {
                     &Method::OPTIONS => handle_cors_preflight_request(req),
-                    _ => handle_query_inspector_http_request(&scheduler, req).await,
+                    _ => handle_query_inspector_http_request(&scheduler, req, main_pid).await,
                 };
                 response.headers_mut().extend(cors_headers);
                 Ok(response)
@@ -337,8 +527,9 @@ where
     })
 }
 
-pub fn session_playback_service<T, TScheduler, TAction>(
-    scheduler: Arc<TScheduler>,
+pub fn session_playback_service<T, TAction, TTask>(
+    scheduler: Arc<TokioScheduler<TAction, TTask>>,
+    main_pid: ProcessId,
 ) -> impl Service<
     Request<Body>,
     Response = Response<Body>,
@@ -347,8 +538,8 @@ pub fn session_playback_service<T, TScheduler, TAction>(
 >
 where
     T: Expression,
-    TScheduler: AsyncScheduler<Action = TAction> + Send + Sync,
-    TAction: Action + Clone + Send + 'static + SessionPlaybackServerAction<T>,
+    TAction: Action + SessionPlaybackServerAction<T> + Send + Sync + 'static,
+    TTask: TaskFactory<TAction, TTask> + Send + 'static,
 {
     service_fn({
         move |req: Request<Body>| {
@@ -357,7 +548,7 @@ where
                 let cors_headers = get_cors_headers(&req).into_iter().collect::<Vec<_>>();
                 let mut response = match req.method() {
                     &Method::OPTIONS => handle_cors_preflight_request(req),
-                    _ => handle_session_playback_http_request(&scheduler, req).await,
+                    _ => handle_session_playback_http_request(&scheduler, req, main_pid).await,
                 };
                 response.headers_mut().extend(cors_headers);
                 Ok(response)
@@ -366,23 +557,25 @@ where
     })
 }
 
-fn handle_graphql_http_request<TScheduler, TAction>(
-    scheduler: &TScheduler,
+fn handle_graphql_http_request<TAction, TTask>(
+    scheduler: &TokioScheduler<TAction, TTask>,
     request: Request<Body>,
+    main_pid: ProcessId,
 ) -> impl Future<Output = Response<Body>>
 where
-    TScheduler: AsyncScheduler<Action = TAction>,
     TAction: Action
+        + Matcher<HttpServerResponseAction>
+        + From<HttpServerRequestAction>
+        + From<HttpServerResponseAction>
         + Send
-        + Clone
-        + 'static
-        + InboundAction<HttpServerResponseAction>
-        + OutboundAction<HttpServerRequestAction>
-        + OutboundAction<HttpServerResponseAction>,
+        + Sync
+        + 'static,
+    TTask: TaskFactory<TAction, TTask> + Send + 'static,
 {
     handle_http_request(
         request,
         scheduler,
+        main_pid,
         |request_id, request| {
             HttpServerRequestAction {
                 request_id,
@@ -410,22 +603,24 @@ where
     )
 }
 
-fn handle_graphql_websocket_request<TAction>(
-    scheduler: &TokioScheduler<TAction>,
+fn handle_graphql_websocket_request<TAction, TTask>(
+    scheduler: &TokioScheduler<TAction, TTask>,
     request: Request<Body>,
+    main_pid: ProcessId,
 ) -> impl Future<Output = Result<(Response<Body>, impl Future<Output = ()>), Response<Body>>>
 where
     TAction: Action
+        + Matcher<HttpServerResponseAction>
+        + Matcher<WebSocketServerSendAction>
+        + Matcher<WebSocketServerDisconnectAction>
+        + From<HttpServerResponseAction>
+        + From<WebSocketServerConnectAction>
+        + From<WebSocketServerSendAction>
+        + From<WebSocketServerReceiveAction>
         + Send
-        + Clone
-        + 'static
-        + InboundAction<HttpServerResponseAction>
-        + InboundAction<WebSocketServerSendAction>
-        + InboundAction<WebSocketServerDisconnectAction>
-        + OutboundAction<HttpServerResponseAction>
-        + OutboundAction<WebSocketServerConnectAction>
-        + OutboundAction<WebSocketServerSendAction>
-        + OutboundAction<WebSocketServerReceiveAction>,
+        + Sync
+        + 'static,
+    TTask: TaskFactory<TAction, TTask> + Send + 'static,
 {
     let connection_id = Uuid::new_v4();
     let request_headers = clone_http_request_wrapper(&request);
@@ -435,11 +630,11 @@ where
             response,
             connection.then({
                 let subscribe_websocket_responses =
-                    create_websocket_response_stream(scheduler, connection_id);
-                let commands = scheduler.commands();
+                    create_websocket_response_stream(scheduler, connection_id, main_pid);
+                let commands = scheduler.actions();
                 move |connection| match connection {
                     Err(err) => {
-                        let err = WebSocketServerSendAction {
+                        let action = TAction::from(WebSocketServerSendAction {
                             connection_id,
                             message: GraphQlSubscriptionServerMessage::ConnectionError(
                                 create_json_error_object(
@@ -447,10 +642,10 @@ where
                                     None,
                                 ),
                             ),
-                        };
+                        });
                         let mut commands = commands;
                         async move {
-                            let _ = commands.send(err.into());
+                            let _ = commands.send((main_pid, action));
                         }
                     }
                     .left_future(),
@@ -462,7 +657,8 @@ where
                             },
                             upgraded_socket,
                             subscribe_websocket_responses,
-                        );
+                        )
+                        .map(move |action| (main_pid, action));
                         pipe_stream(actions, commands).right_future()
                     }
                 }
@@ -472,20 +668,22 @@ where
     }
 }
 
-fn create_websocket_response_stream<TScheduler, TAction>(
-    scheduler: &TScheduler,
+fn create_websocket_response_stream<TAction, TTask>(
+    scheduler: &TokioScheduler<TAction, TTask>,
     connection_id: Uuid,
+    main_pid: ProcessId,
 ) -> impl Future<Output = impl Stream<Item = Message>>
 where
-    TScheduler: AsyncScheduler<Action = TAction>,
     TAction: Action
-        + Clone
+        + Matcher<WebSocketServerSendAction>
+        + Matcher<WebSocketServerDisconnectAction>
         + Send
-        + InboundAction<WebSocketServerSendAction>
-        + InboundAction<WebSocketServerDisconnectAction>,
+        + Sync
+        + 'static,
+    TTask: TaskFactory<TAction, TTask> + Send + 'static,
 {
     scheduler
-        .subscribe(move |action: &TAction| {
+        .subscribe(main_pid, move |action: &TAction| {
             if let Some(action) = action.match_type() {
                 let WebSocketServerSendAction {
                     connection_id: emitted_connection_id,
@@ -520,9 +718,9 @@ fn create_websocket_action_stream<TAction>(
 ) -> impl Stream<Item = TAction>
 where
     TAction: Action
-        + OutboundAction<WebSocketServerConnectAction>
-        + OutboundAction<WebSocketServerSendAction>
-        + OutboundAction<WebSocketServerReceiveAction>,
+        + From<WebSocketServerConnectAction>
+        + From<WebSocketServerSendAction>
+        + From<WebSocketServerReceiveAction>,
 {
     let connection_id = connect_action.connection_id;
     let connect_action = stream::iter(once(connect_action.into()));
@@ -567,23 +765,25 @@ where
     connect_action.chain(message_actions)
 }
 
-fn handle_query_inspector_http_request<TScheduler, TAction>(
-    scheduler: &TScheduler,
+fn handle_query_inspector_http_request<TAction, TTask>(
+    scheduler: &TokioScheduler<TAction, TTask>,
     request: Request<Body>,
+    main_pid: ProcessId,
 ) -> impl Future<Output = Response<Body>>
 where
-    TScheduler: AsyncScheduler<Action = TAction>,
     TAction: Action
+        + Matcher<QueryInspectorServerHttpResponseAction>
+        + From<QueryInspectorServerHttpRequestAction>
+        + From<QueryInspectorServerHttpResponseAction>
         + Send
-        + Clone
-        + 'static
-        + InboundAction<QueryInspectorServerHttpResponseAction>
-        + OutboundAction<QueryInspectorServerHttpRequestAction>
-        + OutboundAction<QueryInspectorServerHttpResponseAction>,
+        + Sync
+        + 'static,
+    TTask: TaskFactory<TAction, TTask> + Send + 'static,
 {
     handle_http_request(
         request,
         scheduler,
+        main_pid,
         |request_id, request| {
             QueryInspectorServerHttpRequestAction {
                 request_id,
@@ -611,23 +811,25 @@ where
     )
 }
 
-fn handle_session_playback_http_request<TScheduler, TAction>(
-    scheduler: &TScheduler,
+fn handle_session_playback_http_request<TAction, TTask>(
+    scheduler: &TokioScheduler<TAction, TTask>,
     request: Request<Body>,
+    main_pid: ProcessId,
 ) -> impl Future<Output = Response<Body>>
 where
-    TScheduler: AsyncScheduler<Action = TAction>,
     TAction: Action
+        + Matcher<SessionPlaybackServerHttpResponseAction>
+        + From<SessionPlaybackServerHttpRequestAction>
+        + From<SessionPlaybackServerHttpResponseAction>
         + Send
-        + Clone
-        + 'static
-        + InboundAction<SessionPlaybackServerHttpResponseAction>
-        + OutboundAction<SessionPlaybackServerHttpRequestAction>
-        + OutboundAction<SessionPlaybackServerHttpResponseAction>,
+        + Sync
+        + 'static,
+    TTask: TaskFactory<TAction, TTask> + Send + 'static,
 {
     handle_http_request(
         request,
         scheduler,
+        main_pid,
         |request_id, request| {
             SessionPlaybackServerHttpRequestAction {
                 request_id,

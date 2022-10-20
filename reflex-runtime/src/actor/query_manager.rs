@@ -12,9 +12,10 @@ use reflex::core::{
     ConditionType, EvaluationResult, Expression, ExpressionFactory, HeapAllocator, StateToken,
 };
 use reflex_dispatcher::{
-    Action, Actor, ActorTransition, HandlerContext, InboundAction, MessageData, OutboundAction,
-    StateOperation, StateTransition,
+    Action, ActorInitContext, HandlerContext, MessageData, NoopDisposeCallback, ProcessId,
+    SchedulerCommand, SchedulerMode, SchedulerTransition, TaskFactory, TaskInbox,
 };
+use reflex_macros::dispatcher;
 
 use crate::{
     action::{
@@ -45,27 +46,6 @@ impl Default for QueryManagerMetricNames {
     }
 }
 
-pub trait QueryManagerAction<T: Expression>:
-    Action
-    + InboundAction<QuerySubscribeAction<T>>
-    + InboundAction<QueryUnsubscribeAction<T>>
-    + InboundAction<EffectEmitAction<T>>
-    + OutboundAction<QueryEmitAction<T>>
-    + OutboundAction<EffectSubscribeAction<T>>
-    + OutboundAction<EffectUnsubscribeAction<T>>
-{
-}
-impl<T: Expression, TAction> QueryManagerAction<T> for TAction where
-    Self: Action
-        + InboundAction<QuerySubscribeAction<T>>
-        + InboundAction<QueryUnsubscribeAction<T>>
-        + InboundAction<EffectEmitAction<T>>
-        + OutboundAction<QueryEmitAction<T>>
-        + OutboundAction<EffectSubscribeAction<T>>
-        + OutboundAction<EffectUnsubscribeAction<T>>
-{
-}
-
 // TODO: Remove QueryManager in favour of interacting with EvaluateHandler directly
 pub struct QueryManager<T, TFactory, TAllocator>
 where
@@ -76,6 +56,7 @@ where
     factory: TFactory,
     allocator: TAllocator,
     metric_names: QueryManagerMetricNames,
+    main_pid: ProcessId,
     _expression: PhantomData<T>,
 }
 impl<T, TFactory, TAllocator> QueryManager<T, TFactory, TAllocator>
@@ -88,11 +69,13 @@ where
         factory: TFactory,
         allocator: TAllocator,
         metric_names: QueryManagerMetricNames,
+        main_pid: ProcessId,
     ) -> Self {
         Self {
             factory,
             allocator,
             metric_names: metric_names.init(),
+            main_pid,
             _expression: Default::default(),
         }
     }
@@ -116,55 +99,116 @@ struct QuerySubscription<T: Expression> {
     result: Option<EvaluationResult<T>>,
 }
 
-impl<T, TFactory, TAllocator, TAction> Actor<TAction> for QueryManager<T, TFactory, TAllocator>
-where
-    T: Expression,
-    TFactory: ExpressionFactory<T>,
-    TAllocator: HeapAllocator<T>,
-    TAction: QueryManagerAction<T>,
-{
-    type State = QueryManagerState<T>;
-    fn init(&self) -> Self::State {
-        Default::default()
+dispatcher!({
+    pub enum QueryManagerAction<T: Expression> {
+        Inbox(QuerySubscribeAction<T>),
+        Inbox(QueryUnsubscribeAction<T>),
+        Inbox(EffectEmitAction<T>),
+
+        Outbox(QueryEmitAction<T>),
+        Outbox(EffectSubscribeAction<T>),
+        Outbox(EffectUnsubscribeAction<T>),
     }
-    fn handle(
-        &self,
-        state: Self::State,
-        action: &TAction,
-        metadata: &MessageData,
-        context: &mut impl HandlerContext,
-    ) -> ActorTransition<Self::State, TAction> {
-        // FIXME: remove QueryManager in favour of EvaluateHandler
-        let mut state = state;
-        let actions = if let Some(action) = action.match_type() {
-            self.handle_query_subscribe(&mut state, action, metadata, context)
-        } else if let Some(action) = action.match_type() {
-            self.handle_query_unsubscribe(&mut state, action, metadata, context)
-        } else if let Some(action) = action.match_type() {
-            self.handle_effect_emit(&mut state, action, metadata, context)
-        } else {
-            None
+
+    impl<T, TFactory, TAllocator, TAction, TTask> Dispatcher<TAction, TTask>
+        for QueryManager<T, TFactory, TAllocator>
+    where
+        T: Expression,
+        TFactory: ExpressionFactory<T>,
+        TAllocator: HeapAllocator<T>,
+        TAction: Action,
+        TTask: TaskFactory<TAction, TTask>,
+    {
+        type State = QueryManagerState<T>;
+        type Events<TInbox: TaskInbox<TAction>> = TInbox;
+        type Dispose = NoopDisposeCallback;
+
+        fn init<TInbox: TaskInbox<TAction>>(
+            &self,
+            inbox: TInbox,
+            context: &impl ActorInitContext,
+        ) -> (Self::State, Self::Events<TInbox>, Self::Dispose) {
+            (Default::default(), inbox, Default::default())
         }
-        .unwrap_or_default();
-        ActorTransition::new(state, actions)
+
+        fn accept(&self, _action: &QuerySubscribeAction<T>) -> bool {
+            true
+        }
+        fn schedule(
+            &self,
+            _action: &QuerySubscribeAction<T>,
+            _state: &Self::State,
+        ) -> Option<SchedulerMode> {
+            Some(SchedulerMode::Async)
+        }
+        fn handle(
+            &self,
+            state: &mut Self::State,
+            action: &QuerySubscribeAction<T>,
+            metadata: &MessageData,
+            context: &mut impl HandlerContext,
+        ) -> Option<SchedulerTransition<TAction, TTask>> {
+            self.handle_query_subscribe(state, action, metadata, context)
+        }
+
+        fn accept(&self, _action: &QueryUnsubscribeAction<T>) -> bool {
+            true
+        }
+        fn schedule(
+            &self,
+            _action: &QueryUnsubscribeAction<T>,
+            _state: &Self::State,
+        ) -> Option<SchedulerMode> {
+            Some(SchedulerMode::Async)
+        }
+        fn handle(
+            &self,
+            state: &mut Self::State,
+            action: &QueryUnsubscribeAction<T>,
+            metadata: &MessageData,
+            context: &mut impl HandlerContext,
+        ) -> Option<SchedulerTransition<TAction, TTask>> {
+            self.handle_query_unsubscribe(state, action, metadata, context)
+        }
+
+        fn accept(&self, _action: &EffectEmitAction<T>) -> bool {
+            true
+        }
+        fn schedule(
+            &self,
+            _action: &EffectEmitAction<T>,
+            _state: &Self::State,
+        ) -> Option<SchedulerMode> {
+            Some(SchedulerMode::Async)
+        }
+        fn handle(
+            &self,
+            state: &mut Self::State,
+            action: &EffectEmitAction<T>,
+            metadata: &MessageData,
+            context: &mut impl HandlerContext,
+        ) -> Option<SchedulerTransition<TAction, TTask>> {
+            self.handle_effect_emit(state, action, metadata, context)
+        }
     }
-}
+});
+
 impl<T, TFactory, TAllocator> QueryManager<T, TFactory, TAllocator>
 where
     T: Expression,
     TFactory: ExpressionFactory<T>,
     TAllocator: HeapAllocator<T>,
 {
-    fn handle_query_subscribe<TAction>(
+    fn handle_query_subscribe<TAction, TTask>(
         &self,
         state: &mut QueryManagerState<T>,
         action: &QuerySubscribeAction<T>,
         _metadata: &MessageData,
-        context: &mut impl HandlerContext,
-    ) -> Option<StateTransition<TAction>>
+        _context: &mut impl HandlerContext,
+    ) -> Option<SchedulerTransition<TAction, TTask>>
     where
-        TAction:
-            Action + OutboundAction<EffectSubscribeAction<T>> + OutboundAction<QueryEmitAction<T>>,
+        TAction: Action + From<EffectSubscribeAction<T>> + From<QueryEmitAction<T>>,
+        TTask: TaskFactory<TAction, TTask>,
     {
         let QuerySubscribeAction { query, label } = action;
         let query_effect = create_query_evaluate_effect(
@@ -179,8 +223,8 @@ where
             Entry::Occupied(mut entry) => {
                 entry.get_mut().subscription_count += 1;
                 let emit_existing_result_action = entry.get().result.as_ref().map(|result| {
-                    StateOperation::Send(
-                        context.pid(),
+                    SchedulerCommand::Send(
+                        self.main_pid,
                         QueryEmitAction {
                             query: query.clone(),
                             result: result.clone(),
@@ -188,7 +232,7 @@ where
                         .into(),
                     )
                 });
-                Some(StateTransition::new(emit_existing_result_action))
+                Some(SchedulerTransition::new(emit_existing_result_action))
             }
             // For any queries that are not yet actively subscribed, create a new subscription
             Entry::Vacant(entry) => {
@@ -199,27 +243,28 @@ where
                     subscription_count: 1,
                 });
                 increment_gauge!(self.metric_names.active_query_count, 1.0);
-                let subscribe_action = StateOperation::Send(
-                    context.pid(),
+                let subscribe_action = SchedulerCommand::Send(
+                    self.main_pid,
                     EffectSubscribeAction {
                         effect_type: String::from(EFFECT_TYPE_EVALUATE),
                         effects: vec![query_effect],
                     }
                     .into(),
                 );
-                Some(StateTransition::new(once(subscribe_action)))
+                Some(SchedulerTransition::new(once(subscribe_action)))
             }
         }
     }
-    fn handle_query_unsubscribe<TAction>(
+    fn handle_query_unsubscribe<TAction, TTask>(
         &self,
         state: &mut QueryManagerState<T>,
         action: &QueryUnsubscribeAction<T>,
         _metadata: &MessageData,
-        context: &mut impl HandlerContext,
-    ) -> Option<StateTransition<TAction>>
+        _context: &mut impl HandlerContext,
+    ) -> Option<SchedulerTransition<TAction, TTask>>
     where
-        TAction: Action + OutboundAction<EffectUnsubscribeAction<T>>,
+        TAction: Action + From<EffectUnsubscribeAction<T>>,
+        TTask: TaskFactory<TAction, TTask>,
     {
         let QueryUnsubscribeAction { query, label } = action;
         let query_effect = create_query_evaluate_effect(
@@ -238,25 +283,26 @@ where
         }
         let subscription = entry.remove();
         decrement_gauge!(self.metric_names.active_query_count, 1.0);
-        let unsubscribe_action = StateOperation::Send(
-            context.pid(),
+        let unsubscribe_action = SchedulerCommand::Send(
+            self.main_pid,
             EffectUnsubscribeAction {
                 effect_type: String::from(EFFECT_TYPE_EVALUATE),
                 effects: vec![subscription.effect],
             }
             .into(),
         );
-        Some(StateTransition::new(once(unsubscribe_action)))
+        Some(SchedulerTransition::new(once(unsubscribe_action)))
     }
-    fn handle_effect_emit<TAction>(
+    fn handle_effect_emit<TAction, TTask>(
         &self,
         state: &mut QueryManagerState<T>,
         action: &EffectEmitAction<T>,
         _metadata: &MessageData,
-        context: &mut impl HandlerContext,
-    ) -> Option<StateTransition<TAction>>
+        _context: &mut impl HandlerContext,
+    ) -> Option<SchedulerTransition<TAction, TTask>>
     where
-        TAction: Action + OutboundAction<QueryEmitAction<T>>,
+        TAction: Action + From<QueryEmitAction<T>>,
+        TTask: TaskFactory<TAction, TTask>,
     {
         let EffectEmitAction {
             effect_types: updates,
@@ -275,10 +321,10 @@ where
         };
         let emit_actions = updated_queries
             .map(|(query, result)| {
-                StateOperation::Send(context.pid(), QueryEmitAction { query, result }.into())
+                SchedulerCommand::Send(self.main_pid, QueryEmitAction { query, result }.into())
             })
             .collect::<Vec<_>>();
-        Some(StateTransition::new(emit_actions))
+        Some(SchedulerTransition::new(emit_actions))
     }
 }
 

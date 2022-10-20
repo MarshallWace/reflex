@@ -21,8 +21,8 @@ use reflex::{
     hash::HashId,
 };
 use reflex_dispatcher::{
-    Action, Actor, ActorTransition, HandlerContext, InboundAction, MessageData, OutboundAction,
-    StateOperation, StateTransition,
+    Action, ActorInitContext, HandlerContext, MessageData, NoopDisposeCallback, ProcessId,
+    SchedulerCommand, SchedulerMode, SchedulerTransition, TaskFactory, TaskInbox,
 };
 use reflex_graphql::{
     create_graphql_error_response, create_graphql_success_response, deserialize_graphql_operation,
@@ -30,6 +30,7 @@ use reflex_graphql::{
     GraphQlOperationPayload, GraphQlQuery, GraphQlQueryTransform, GraphQlSchemaTypes,
 };
 use reflex_json::{json_object, JsonValue};
+use reflex_macros::dispatcher;
 
 use crate::{
     server::{
@@ -119,6 +120,18 @@ impl Default for HttpGraphQlServerMetricNames {
             graphql_http_total_request_count: "graphql_http_total_request_count",
             graphql_http_active_request_count: "graphql_http_active_request_count",
         }
+    }
+}
+
+pub trait HttpGraphQlServerQueryMetricLabels {
+    fn labels(&self, operation: &GraphQlOperation, headers: &HeaderMap) -> Vec<(String, String)>;
+}
+impl<T> HttpGraphQlServerQueryMetricLabels for T
+where
+    T: Fn(&GraphQlOperation, &HeaderMap) -> Vec<(String, String)>,
+{
+    fn labels(&self, operation: &GraphQlOperation, headers: &HeaderMap) -> Vec<(String, String)> {
+        (self)(operation, headers)
     }
 }
 
@@ -220,39 +233,19 @@ where
     }
 }
 
-pub trait HttpGraphQlServerAction<T: Expression>:
-    Action
-    + InboundAction<HttpServerRequestAction>
-    + InboundAction<GraphQlServerParseErrorAction<T>>
-    + InboundAction<GraphQlServerEmitAction<T>>
-    + OutboundAction<GraphQlServerSubscribeAction<T>>
-    + OutboundAction<GraphQlServerUnsubscribeAction<T>>
-    + OutboundAction<HttpServerResponseAction>
-{
-}
-impl<T: Expression, TAction> HttpGraphQlServerAction<T> for TAction where
-    Self: Action
-        + InboundAction<HttpServerRequestAction>
-        + InboundAction<GraphQlServerParseErrorAction<T>>
-        + InboundAction<GraphQlServerEmitAction<T>>
-        + OutboundAction<GraphQlServerSubscribeAction<T>>
-        + OutboundAction<GraphQlServerUnsubscribeAction<T>>
-        + OutboundAction<HttpServerResponseAction>
-{
-}
-
-pub(crate) struct HttpGraphQlServer<T, TFactory, TTransform, TQueryMetricLabels>
+pub struct HttpGraphQlServer<T, TFactory, TTransform, TQueryMetricLabels>
 where
     T: Expression,
     TFactory: ExpressionFactory<T>,
     TTransform: HttpGraphQlServerQueryTransform,
-    TQueryMetricLabels: Fn(&GraphQlOperation, &HeaderMap) -> Vec<(String, String)>,
+    TQueryMetricLabels: HttpGraphQlServerQueryMetricLabels,
 {
     schema_types: Option<GraphQlSchemaTypes<'static, String>>,
     factory: TFactory,
     transform: TTransform,
     metric_names: HttpGraphQlServerMetricNames,
     get_query_metric_labels: TQueryMetricLabels,
+    main_pid: ProcessId,
     _expression: PhantomData<T>,
 }
 impl<T, TFactory, TTransform, TQueryMetricLabels>
@@ -261,14 +254,15 @@ where
     T: Expression,
     TFactory: ExpressionFactory<T>,
     TTransform: HttpGraphQlServerQueryTransform,
-    TQueryMetricLabels: Fn(&GraphQlOperation, &HeaderMap) -> Vec<(String, String)>,
+    TQueryMetricLabels: HttpGraphQlServerQueryMetricLabels,
 {
-    pub(crate) fn new(
+    pub fn new(
         schema_types: Option<GraphQlSchemaTypes<'static, String>>,
         factory: TFactory,
         transform: TTransform,
         metric_names: HttpGraphQlServerMetricNames,
         get_query_metric_labels: TQueryMetricLabels,
+        main_pid: ProcessId,
     ) -> Self {
         Self {
             schema_types,
@@ -276,6 +270,7 @@ where
             transform,
             metric_names: metric_names.init(),
             get_query_metric_labels,
+            main_pid,
             _expression: Default::default(),
         }
     }
@@ -292,59 +287,119 @@ struct HttpGraphQlRequest {
     metric_labels: Vec<(String, String)>,
 }
 
-impl<T, TFactory, TTransform, TQueryMetricLabels, TAction> Actor<TAction>
-    for HttpGraphQlServer<T, TFactory, TTransform, TQueryMetricLabels>
-where
-    T: Expression,
-    TFactory: ExpressionFactory<T>,
-    TTransform: HttpGraphQlServerQueryTransform,
-    TQueryMetricLabels: Fn(&GraphQlOperation, &HeaderMap) -> Vec<(String, String)>,
-    TAction: HttpGraphQlServerAction<T>,
-{
-    type State = HttpGraphQlServerState;
-    fn init(&self) -> Self::State {
-        Default::default()
+dispatcher!({
+    pub enum HttpGraphQlServerAction<T: Expression> {
+        Inbox(HttpServerRequestAction),
+        Inbox(GraphQlServerParseErrorAction<T>),
+        Inbox(GraphQlServerEmitAction<T>),
+
+        Outbox(GraphQlServerSubscribeAction<T>),
+        Outbox(GraphQlServerUnsubscribeAction<T>),
+        Outbox(HttpServerResponseAction),
     }
-    fn handle(
-        &self,
-        state: Self::State,
-        action: &TAction,
-        metadata: &MessageData,
-        context: &mut impl HandlerContext,
-    ) -> ActorTransition<Self::State, TAction> {
-        let mut state = state;
-        let actions = if let Some(action) = action.match_type() {
-            self.handle_http_server_request(&mut state, action, metadata, context)
-        } else if let Some(action) = action.match_type() {
-            self.handle_graphql_parse_error(&mut state, action, metadata, context)
-        } else if let Some(action) = action.match_type() {
-            self.handle_graphql_server_emit(&mut state, action, metadata, context)
-        } else {
-            None
+
+    impl<T, TFactory, TTransform, TQueryMetricLabels, TAction, TTask> Dispatcher<TAction, TTask>
+        for HttpGraphQlServer<T, TFactory, TTransform, TQueryMetricLabels>
+    where
+        T: Expression,
+        TFactory: ExpressionFactory<T>,
+        TTransform: HttpGraphQlServerQueryTransform,
+        TQueryMetricLabels: HttpGraphQlServerQueryMetricLabels,
+        TAction: Action,
+        TTask: TaskFactory<TAction, TTask>,
+    {
+        type State = HttpGraphQlServerState;
+        type Events<TInbox: TaskInbox<TAction>> = TInbox;
+        type Dispose = NoopDisposeCallback;
+
+        fn init<TInbox: TaskInbox<TAction>>(
+            &self,
+            inbox: TInbox,
+            context: &impl ActorInitContext,
+        ) -> (Self::State, Self::Events<TInbox>, Self::Dispose) {
+            (Default::default(), inbox, Default::default())
         }
-        .unwrap_or_default();
-        ActorTransition::new(state, actions)
+
+        fn accept(&self, _action: &HttpServerRequestAction) -> bool {
+            true
+        }
+        fn schedule(
+            &self,
+            _action: &HttpServerRequestAction,
+            _state: &Self::State,
+        ) -> Option<SchedulerMode> {
+            Some(SchedulerMode::Async)
+        }
+        fn handle(
+            &self,
+            state: &mut Self::State,
+            action: &HttpServerRequestAction,
+            metadata: &MessageData,
+            context: &mut impl HandlerContext,
+        ) -> Option<SchedulerTransition<TAction, TTask>> {
+            self.handle_http_server_request(state, action, metadata, context)
+        }
+
+        fn accept(&self, _action: &GraphQlServerParseErrorAction<T>) -> bool {
+            true
+        }
+        fn schedule(
+            &self,
+            _action: &GraphQlServerParseErrorAction<T>,
+            _state: &Self::State,
+        ) -> Option<SchedulerMode> {
+            Some(SchedulerMode::Async)
+        }
+        fn handle(
+            &self,
+            state: &mut Self::State,
+            action: &GraphQlServerParseErrorAction<T>,
+            metadata: &MessageData,
+            context: &mut impl HandlerContext,
+        ) -> Option<SchedulerTransition<TAction, TTask>> {
+            self.handle_graphql_parse_error(state, action, metadata, context)
+        }
+
+        fn accept(&self, _action: &GraphQlServerEmitAction<T>) -> bool {
+            true
+        }
+        fn schedule(
+            &self,
+            _action: &GraphQlServerEmitAction<T>,
+            _state: &Self::State,
+        ) -> Option<SchedulerMode> {
+            Some(SchedulerMode::Async)
+        }
+        fn handle(
+            &self,
+            state: &mut Self::State,
+            action: &GraphQlServerEmitAction<T>,
+            metadata: &MessageData,
+            context: &mut impl HandlerContext,
+        ) -> Option<SchedulerTransition<TAction, TTask>> {
+            self.handle_graphql_server_emit(state, action, metadata, context)
+        }
     }
-}
+});
+
 impl<T, TFactory, TTransform, TQueryMetricLabels>
     HttpGraphQlServer<T, TFactory, TTransform, TQueryMetricLabels>
 where
     T: Expression,
     TFactory: ExpressionFactory<T>,
     TTransform: HttpGraphQlServerQueryTransform,
-    TQueryMetricLabels: Fn(&GraphQlOperation, &HeaderMap) -> Vec<(String, String)>,
+    TQueryMetricLabels: HttpGraphQlServerQueryMetricLabels,
 {
-    fn handle_http_server_request<TAction>(
+    fn handle_http_server_request<TAction, TTask>(
         &self,
         state: &mut HttpGraphQlServerState,
         action: &HttpServerRequestAction,
         _metadata: &MessageData,
-        context: &mut impl HandlerContext,
-    ) -> Option<StateTransition<TAction>>
+        _context: &mut impl HandlerContext,
+    ) -> Option<SchedulerTransition<TAction, TTask>>
     where
-        TAction: Action
-            + OutboundAction<HttpServerResponseAction>
-            + OutboundAction<GraphQlServerSubscribeAction<T>>,
+        TAction: Action + From<HttpServerResponseAction> + From<GraphQlServerSubscribeAction<T>>,
+        TTask: TaskFactory<TAction, TTask>,
     {
         let HttpServerRequestAction {
             request_id,
@@ -360,20 +415,24 @@ where
             Ok(operation) => self.transform.transform(operation, request),
         };
         match operation {
-            Err((status_code, message)) => Some(StateTransition::new(once(StateOperation::Send(
-                context.pid(),
-                HttpServerResponseAction {
-                    request_id,
-                    response: create_json_http_response(
-                        status_code,
-                        once(HttpGraphQlServerResponseStatus::Error.into()),
-                        &JsonValue::from(message),
-                    ),
-                }
-                .into(),
-            )))),
+            Err((status_code, message)) => {
+                Some(SchedulerTransition::new(once(SchedulerCommand::Send(
+                    self.main_pid,
+                    HttpServerResponseAction {
+                        request_id,
+                        response: create_json_http_response(
+                            status_code,
+                            once(HttpGraphQlServerResponseStatus::Error.into()),
+                            &JsonValue::from(message),
+                        ),
+                    }
+                    .into(),
+                ))))
+            }
             Ok(operation) => {
-                let metric_labels = (self.get_query_metric_labels)(&operation, request.headers());
+                let metric_labels = self
+                    .get_query_metric_labels
+                    .labels(&operation, request.headers());
                 increment_counter!(
                     self.metric_names.graphql_http_total_request_count,
                     &metric_labels,
@@ -391,8 +450,8 @@ where
                     etag: parse_request_etag(&request),
                     metric_labels,
                 });
-                Some(StateTransition::new(once(StateOperation::Send(
-                    context.pid(),
+                Some(SchedulerTransition::new(once(SchedulerCommand::Send(
+                    self.main_pid,
                     GraphQlServerSubscribeAction {
                         subscription_id: request_id,
                         operation,
@@ -403,15 +462,16 @@ where
             }
         }
     }
-    fn handle_graphql_parse_error<TAction>(
+    fn handle_graphql_parse_error<TAction, TTask>(
         &self,
         state: &mut HttpGraphQlServerState,
         action: &GraphQlServerParseErrorAction<T>,
         _metadata: &MessageData,
-        context: &mut impl HandlerContext,
-    ) -> Option<StateTransition<TAction>>
+        _context: &mut impl HandlerContext,
+    ) -> Option<SchedulerTransition<TAction, TTask>>
     where
-        TAction: Action + OutboundAction<HttpServerResponseAction>,
+        TAction: Action + From<HttpServerResponseAction>,
+        TTask: TaskFactory<TAction, TTask>,
     {
         let GraphQlServerParseErrorAction {
             subscription_id,
@@ -437,8 +497,8 @@ where
                 (String::from("operation"), operation.clone().into_json()),
             ]))),
         );
-        Some(StateTransition::new(once(StateOperation::Send(
-            context.pid(),
+        Some(SchedulerTransition::new(once(SchedulerCommand::Send(
+            self.main_pid,
             HttpServerResponseAction {
                 request_id: *subscription_id,
                 response,
@@ -446,17 +506,16 @@ where
             .into(),
         ))))
     }
-    fn handle_graphql_server_emit<TAction>(
+    fn handle_graphql_server_emit<TAction, TTask>(
         &self,
         state: &mut HttpGraphQlServerState,
         action: &GraphQlServerEmitAction<T>,
         _metadata: &MessageData,
-        context: &mut impl HandlerContext,
-    ) -> Option<StateTransition<TAction>>
+        _context: &mut impl HandlerContext,
+    ) -> Option<SchedulerTransition<TAction, TTask>>
     where
-        TAction: Action
-            + OutboundAction<GraphQlServerUnsubscribeAction<T>>
-            + OutboundAction<HttpServerResponseAction>,
+        TAction: Action + From<GraphQlServerUnsubscribeAction<T>> + From<HttpServerResponseAction>,
+        TTask: TaskFactory<TAction, TTask>,
     {
         let GraphQlServerEmitAction {
             subscription_id,
@@ -511,17 +570,17 @@ where
                 )
             }
         };
-        Some(StateTransition::new([
-            StateOperation::Send(
-                context.pid(),
+        Some(SchedulerTransition::new([
+            SchedulerCommand::Send(
+                self.main_pid,
                 GraphQlServerUnsubscribeAction {
                     subscription_id: *subscription_id,
                     _expression: Default::default(),
                 }
                 .into(),
             ),
-            StateOperation::Send(
-                context.pid(),
+            SchedulerCommand::Send(
+                self.main_pid,
                 HttpServerResponseAction {
                     request_id: *subscription_id,
                     response,

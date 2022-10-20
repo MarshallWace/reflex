@@ -9,13 +9,12 @@ use std::{
     time::{Duration, Instant},
 };
 
-use futures::FutureExt;
 use http::{HeaderMap, Request};
 use metrics::{decrement_gauge, describe_gauge, gauge, increment_gauge, Unit};
 use reflex::core::{Expression, ExpressionFactory, Uuid};
 use reflex_dispatcher::{
-    Action, Actor, ActorTransition, HandlerContext, InboundAction, MessageData, OperationStream,
-    OutboundAction, ProcessId, StateOperation, StateTransition,
+    Action, ActorInitContext, HandlerContext, MessageData, NoopDisposeCallback, ProcessId,
+    SchedulerCommand, SchedulerMode, SchedulerTransition, TaskFactory, TaskInbox,
 };
 use reflex_graphql::{
     create_graphql_error_response, create_graphql_success_response, create_json_error_object,
@@ -30,20 +29,28 @@ use reflex_graphql::{
     GraphQlSchemaTypes,
 };
 use reflex_json::{json_object, JsonMap, JsonNumber, JsonValue};
-use tokio::time::sleep;
+use reflex_macros::dispatcher;
 
-use crate::server::actor::graphql_server::GraphQlQueryStatus;
+use crate::server::{
+    actor::graphql_server::GraphQlQueryStatus,
+    task::websocket_graphql_server::{
+        WebSocketGraphQlServerTask, WebSocketGraphQlServerThrottleTimeoutTaskFactory,
+    },
+};
 use crate::{
-    server::action::{
-        graphql_server::{
-            GraphQlServerEmitAction, GraphQlServerModifyAction, GraphQlServerParseErrorAction,
-            GraphQlServerSubscribeAction, GraphQlServerUnsubscribeAction,
+    server::{
+        action::{
+            graphql_server::{
+                GraphQlServerEmitAction, GraphQlServerModifyAction, GraphQlServerParseErrorAction,
+                GraphQlServerSubscribeAction, GraphQlServerUnsubscribeAction,
+            },
+            websocket_server::{
+                WebSocketServerConnectAction, WebSocketServerDisconnectAction,
+                WebSocketServerReceiveAction, WebSocketServerSendAction,
+                WebSocketServerThrottleTimeoutAction,
+            },
         },
-        websocket_server::{
-            WebSocketServerConnectAction, WebSocketServerDisconnectAction,
-            WebSocketServerReceiveAction, WebSocketServerSendAction,
-            WebSocketServerThrottleTimeoutAction,
-        },
+        utils::clone_http_request_wrapper,
     },
     utils::transform::apply_graphql_query_transform,
 };
@@ -83,6 +90,26 @@ impl Default for WebSocketGraphQlServerMetricNames {
             graphql_websocket_query_error_duration_micros:
                 "graphql_websocket_query_error_duration_micros",
         }
+    }
+}
+
+pub trait WebSocketGraphQlServerConnectionMetricLabels {
+    fn labels(
+        &self,
+        connection_params: Option<&JsonValue>,
+        headers: &HeaderMap,
+    ) -> Vec<(String, String)>;
+}
+impl<T> WebSocketGraphQlServerConnectionMetricLabels for T
+where
+    Self: Fn(Option<&JsonValue>, &HeaderMap) -> Vec<(String, String)>,
+{
+    fn labels(
+        &self,
+        connection_params: Option<&JsonValue>,
+        headers: &HeaderMap,
+    ) -> Vec<(String, String)> {
+        (self)(connection_params, headers)
     }
 }
 
@@ -197,49 +224,19 @@ where
     }
 }
 
-pub trait WebSocketGraphQlServerAction<T: Expression>:
-    Action
-    + InboundAction<WebSocketServerConnectAction>
-    + InboundAction<WebSocketServerReceiveAction>
-    + InboundAction<WebSocketServerThrottleTimeoutAction>
-    + InboundAction<GraphQlServerParseErrorAction<T>>
-    + InboundAction<GraphQlServerEmitAction<T>>
-    + OutboundAction<GraphQlServerSubscribeAction<T>>
-    + OutboundAction<GraphQlServerModifyAction<T>>
-    + OutboundAction<GraphQlServerUnsubscribeAction<T>>
-    + OutboundAction<WebSocketServerSendAction>
-    + OutboundAction<WebSocketServerDisconnectAction>
-    + OutboundAction<WebSocketServerThrottleTimeoutAction>
-{
-}
-impl<T: Expression, TAction> WebSocketGraphQlServerAction<T> for TAction where
-    Self: Action
-        + InboundAction<WebSocketServerConnectAction>
-        + InboundAction<WebSocketServerReceiveAction>
-        + InboundAction<WebSocketServerThrottleTimeoutAction>
-        + InboundAction<GraphQlServerParseErrorAction<T>>
-        + InboundAction<GraphQlServerEmitAction<T>>
-        + OutboundAction<GraphQlServerSubscribeAction<T>>
-        + OutboundAction<GraphQlServerModifyAction<T>>
-        + OutboundAction<GraphQlServerUnsubscribeAction<T>>
-        + OutboundAction<WebSocketServerSendAction>
-        + OutboundAction<WebSocketServerDisconnectAction>
-        + OutboundAction<WebSocketServerThrottleTimeoutAction>
-{
-}
-
-pub(crate) struct WebSocketGraphQlServer<T, TFactory, TTransform, TMetricLabels>
+pub struct WebSocketGraphQlServer<T, TFactory, TTransform, TMetricLabels>
 where
     T: Expression,
     TFactory: ExpressionFactory<T>,
     TTransform: WebSocketGraphQlServerQueryTransform,
-    TMetricLabels: Fn(Option<&JsonValue>, &HeaderMap) -> Vec<(String, String)>,
+    TMetricLabels: WebSocketGraphQlServerConnectionMetricLabels,
 {
     schema_types: Option<GraphQlSchemaTypes<'static, String>>,
     factory: TFactory,
     transform: TTransform,
     metric_names: WebSocketGraphQlServerMetricNames,
     get_connection_metric_labels: TMetricLabels,
+    main_pid: ProcessId,
     _expression: PhantomData<T>,
 }
 impl<T, TFactory, TTransform, TMetricLabels>
@@ -248,7 +245,7 @@ where
     T: Expression,
     TFactory: ExpressionFactory<T>,
     TTransform: WebSocketGraphQlServerQueryTransform,
-    TMetricLabels: Fn(Option<&JsonValue>, &HeaderMap) -> Vec<(String, String)>,
+    TMetricLabels: WebSocketGraphQlServerConnectionMetricLabels,
 {
     pub(crate) fn new(
         schema_types: Option<GraphQlSchemaTypes<'static, String>>,
@@ -256,6 +253,7 @@ where
         transform: TTransform,
         metric_names: WebSocketGraphQlServerMetricNames,
         get_connection_metric_labels: TMetricLabels,
+        main_pid: ProcessId,
     ) -> Self {
         Self {
             schema_types,
@@ -263,6 +261,7 @@ where
             transform,
             metric_names: metric_names.init(),
             get_connection_metric_labels,
+            main_pid,
             _expression: Default::default(),
         }
     }
@@ -371,63 +370,164 @@ impl<T: Expression> WebSocketGraphQlConnection<T> {
     }
 }
 
-impl<T, TFactory, TTransform, TMetricLabels, TAction> Actor<TAction>
-    for WebSocketGraphQlServer<T, TFactory, TTransform, TMetricLabels>
-where
-    T: Expression,
-    TFactory: ExpressionFactory<T>,
-    TTransform: WebSocketGraphQlServerQueryTransform,
-    TMetricLabels: Fn(Option<&JsonValue>, &HeaderMap) -> Vec<(String, String)>,
-    TAction: WebSocketGraphQlServerAction<T> + Send + 'static,
-{
-    type State = WebSocketGraphQlServerState<T>;
-    fn init(&self) -> Self::State {
-        Default::default()
+dispatcher!({
+    pub enum WebSocketGraphQlServerAction<T: Expression> {
+        Inbox(WebSocketServerConnectAction),
+        Inbox(WebSocketServerReceiveAction),
+        Inbox(WebSocketServerThrottleTimeoutAction),
+        Inbox(GraphQlServerParseErrorAction<T>),
+        Inbox(GraphQlServerEmitAction<T>),
+
+        Outbox(GraphQlServerSubscribeAction<T>),
+        Outbox(GraphQlServerModifyAction<T>),
+        Outbox(GraphQlServerUnsubscribeAction<T>),
+        Outbox(WebSocketServerSendAction),
+        Outbox(WebSocketServerDisconnectAction),
+        Outbox(WebSocketServerThrottleTimeoutAction),
     }
-    fn handle(
-        &self,
-        state: Self::State,
-        action: &TAction,
-        metadata: &MessageData,
-        context: &mut impl HandlerContext,
-    ) -> ActorTransition<Self::State, TAction> {
-        let mut state = state;
-        let actions = if let Some(action) = action.match_type() {
-            self.handle_websocket_graphql_server_connect(&mut state, action, metadata, context)
-        } else if let Some(action) = action.match_type() {
-            self.handle_websocket_graphql_server_receive(&mut state, action, metadata, context)
-        } else if let Some(action) = action.match_type() {
-            self.handle_graphql_parse_error(&mut state, action, metadata, context)
-        } else if let Some(action) = action.match_type() {
-            self.handle_graphql_emit_action(&mut state, action, metadata, context)
-        } else if let Some(action) = action.match_type() {
-            self.handle_websocket_graphql_throttle_timeout_action(
-                &mut state, action, metadata, context,
-            )
-        } else {
-            None
+
+    impl<T, TFactory, TTransform, TMetricLabels, TAction, TTask> Dispatcher<TAction, TTask>
+        for WebSocketGraphQlServer<T, TFactory, TTransform, TMetricLabels>
+    where
+        T: Expression,
+        TFactory: ExpressionFactory<T>,
+        TTransform: WebSocketGraphQlServerQueryTransform,
+        TMetricLabels: WebSocketGraphQlServerConnectionMetricLabels,
+        TAction: Action,
+        TTask: TaskFactory<TAction, TTask> + WebSocketGraphQlServerTask,
+    {
+        type State = WebSocketGraphQlServerState<T>;
+        type Events<TInbox: TaskInbox<TAction>> = TInbox;
+        type Dispose = NoopDisposeCallback;
+
+        fn init<TInbox: TaskInbox<TAction>>(
+            &self,
+            inbox: TInbox,
+            context: &impl ActorInitContext,
+        ) -> (Self::State, Self::Events<TInbox>, Self::Dispose) {
+            (Default::default(), inbox, Default::default())
         }
-        .unwrap_or_default();
-        ActorTransition::new(state, actions)
+
+        fn accept(&self, _action: &WebSocketServerConnectAction) -> bool {
+            true
+        }
+        fn schedule(
+            &self,
+            _action: &WebSocketServerConnectAction,
+            _state: &Self::State,
+        ) -> Option<SchedulerMode> {
+            Some(SchedulerMode::Async)
+        }
+        fn handle(
+            &self,
+            state: &mut Self::State,
+            action: &WebSocketServerConnectAction,
+            metadata: &MessageData,
+            context: &mut impl HandlerContext,
+        ) -> Option<SchedulerTransition<TAction, TTask>> {
+            self.handle_websocket_graphql_server_connect(state, action, metadata, context)
+        }
+
+        fn accept(&self, _action: &WebSocketServerReceiveAction) -> bool {
+            true
+        }
+        fn schedule(
+            &self,
+            _action: &WebSocketServerReceiveAction,
+            _state: &Self::State,
+        ) -> Option<SchedulerMode> {
+            Some(SchedulerMode::Async)
+        }
+        fn handle(
+            &self,
+            state: &mut Self::State,
+            action: &WebSocketServerReceiveAction,
+            metadata: &MessageData,
+            context: &mut impl HandlerContext,
+        ) -> Option<SchedulerTransition<TAction, TTask>> {
+            self.handle_websocket_graphql_server_receive(state, action, metadata, context)
+        }
+
+        fn accept(&self, _action: &GraphQlServerParseErrorAction<T>) -> bool {
+            true
+        }
+        fn schedule(
+            &self,
+            _action: &GraphQlServerParseErrorAction<T>,
+            _state: &Self::State,
+        ) -> Option<SchedulerMode> {
+            Some(SchedulerMode::Async)
+        }
+        fn handle(
+            &self,
+            state: &mut Self::State,
+            action: &GraphQlServerParseErrorAction<T>,
+            metadata: &MessageData,
+            context: &mut impl HandlerContext,
+        ) -> Option<SchedulerTransition<TAction, TTask>> {
+            self.handle_graphql_parse_error(state, action, metadata, context)
+        }
+
+        fn accept(&self, _action: &GraphQlServerEmitAction<T>) -> bool {
+            true
+        }
+        fn schedule(
+            &self,
+            _action: &GraphQlServerEmitAction<T>,
+            _state: &Self::State,
+        ) -> Option<SchedulerMode> {
+            Some(SchedulerMode::Async)
+        }
+        fn handle(
+            &self,
+            state: &mut Self::State,
+            action: &GraphQlServerEmitAction<T>,
+            metadata: &MessageData,
+            context: &mut impl HandlerContext,
+        ) -> Option<SchedulerTransition<TAction, TTask>> {
+            self.handle_graphql_emit_action(state, action, metadata, context)
+        }
+
+        fn accept(&self, _action: &WebSocketServerThrottleTimeoutAction) -> bool {
+            true
+        }
+        fn schedule(
+            &self,
+            _action: &WebSocketServerThrottleTimeoutAction,
+            _state: &Self::State,
+        ) -> Option<SchedulerMode> {
+            Some(SchedulerMode::Async)
+        }
+        fn handle(
+            &self,
+            state: &mut Self::State,
+            action: &WebSocketServerThrottleTimeoutAction,
+            metadata: &MessageData,
+            context: &mut impl HandlerContext,
+        ) -> Option<SchedulerTransition<TAction, TTask>> {
+            self.handle_websocket_graphql_throttle_timeout_action(state, action, metadata, context)
+        }
     }
-}
+});
+
 impl<T, TFactory, TTransform, TMetricLabels>
     WebSocketGraphQlServer<T, TFactory, TTransform, TMetricLabels>
 where
     T: Expression,
     TFactory: ExpressionFactory<T>,
     TTransform: WebSocketGraphQlServerQueryTransform,
-    TMetricLabels: Fn(Option<&JsonValue>, &HeaderMap) -> Vec<(String, String)>,
+    TMetricLabels: WebSocketGraphQlServerConnectionMetricLabels,
 {
-    fn handle_websocket_graphql_server_connect<TAction>(
+    fn handle_websocket_graphql_server_connect<TAction, TTask>(
         &self,
         state: &mut WebSocketGraphQlServerState<T>,
         action: &WebSocketServerConnectAction,
         _metadata: &MessageData,
         _context: &mut impl HandlerContext,
-    ) -> Option<StateTransition<TAction>>
+    ) -> Option<SchedulerTransition<TAction, TTask>>
     where
         TAction: Action,
+        TTask: TaskFactory<TAction, TTask>,
     {
         let WebSocketServerConnectAction {
             connection_id,
@@ -440,26 +540,27 @@ where
         }?;
         increment_gauge!(self.metric_names.graphql_websocket_connection_count, 1.0,);
         entry.insert(WebSocketGraphQlConnection {
-            request: clone_request_wrapper(request),
+            request: clone_http_request_wrapper(request),
             initialized_state: Default::default(),
             operations: Default::default(),
         });
         None
     }
-    fn handle_websocket_graphql_server_receive<TAction>(
+    fn handle_websocket_graphql_server_receive<TAction, TTask>(
         &self,
         state: &mut WebSocketGraphQlServerState<T>,
         action: &WebSocketServerReceiveAction,
         metadata: &MessageData,
         context: &mut impl HandlerContext,
-    ) -> Option<StateTransition<TAction>>
+    ) -> Option<SchedulerTransition<TAction, TTask>>
     where
         TAction: Action
-            + OutboundAction<GraphQlServerSubscribeAction<T>>
-            + OutboundAction<GraphQlServerModifyAction<T>>
-            + OutboundAction<GraphQlServerUnsubscribeAction<T>>
-            + OutboundAction<WebSocketServerSendAction>
-            + OutboundAction<WebSocketServerDisconnectAction>,
+            + From<GraphQlServerSubscribeAction<T>>
+            + From<GraphQlServerModifyAction<T>>
+            + From<GraphQlServerUnsubscribeAction<T>>
+            + From<WebSocketServerSendAction>
+            + From<WebSocketServerDisconnectAction>,
+        TTask: TaskFactory<TAction, TTask>,
     {
         match &action.message {
             GraphQlSubscriptionClientMessage::ConnectionInit(message) => self
@@ -484,16 +585,17 @@ where
                 ),
         }
     }
-    fn handle_websocket_graphql_server_receive_connection_init<TAction>(
+    fn handle_websocket_graphql_server_receive_connection_init<TAction, TTask>(
         &self,
         state: &mut WebSocketGraphQlServerState<T>,
         message: &GraphQlSubscriptionConnectionInitMessage,
         action: &WebSocketServerReceiveAction,
         _metadata: &MessageData,
-        context: &mut impl HandlerContext,
-    ) -> Option<StateTransition<TAction>>
+        _context: &mut impl HandlerContext,
+    ) -> Option<SchedulerTransition<TAction, TTask>>
     where
-        TAction: Action + OutboundAction<WebSocketServerSendAction>,
+        TAction: Action + From<WebSocketServerSendAction>,
+        TTask: TaskFactory<TAction, TTask>,
     {
         let WebSocketServerReceiveAction {
             connection_id,
@@ -505,7 +607,7 @@ where
             .initialized_state
             .take()
             .map(|initialized_state| initialized_state.metric_labels);
-        let metric_labels = (self.get_connection_metric_labels)(
+        let metric_labels = self.get_connection_metric_labels.labels(
             connection_params.as_ref(),
             connection.request.headers(),
         );
@@ -533,28 +635,27 @@ where
                 connection_params,
                 metric_labels,
             });
-        let connection_ack_action = StateOperation::Send(
-            context.pid(),
+        let connection_ack_action = SchedulerCommand::Send(
+            self.main_pid,
             WebSocketServerSendAction {
                 connection_id: *connection_id,
                 message: GraphQlSubscriptionServerMessage::ConnectionAck,
             }
             .into(),
         );
-        Some(StateTransition::new(once(connection_ack_action)))
+        Some(SchedulerTransition::new(once(connection_ack_action)))
     }
-    fn handle_websocket_graphql_server_receive_start<TAction>(
+    fn handle_websocket_graphql_server_receive_start<TAction, TTask>(
         &self,
         state: &mut WebSocketGraphQlServerState<T>,
         message: &GraphQlSubscriptionStartMessage,
         action: &WebSocketServerReceiveAction,
         _metadata: &MessageData,
-        context: &mut impl HandlerContext,
-    ) -> Option<StateTransition<TAction>>
+        _context: &mut impl HandlerContext,
+    ) -> Option<SchedulerTransition<TAction, TTask>>
     where
-        TAction: Action
-            + OutboundAction<GraphQlServerSubscribeAction<T>>
-            + OutboundAction<WebSocketServerSendAction>,
+        TAction: Action + From<GraphQlServerSubscribeAction<T>> + From<WebSocketServerSendAction>,
+        TTask: TaskFactory<TAction, TTask>,
     {
         let WebSocketServerReceiveAction {
             connection_id,
@@ -673,8 +774,8 @@ where
                 })
         };
         match operation {
-            Err(err) => Some(StateTransition::new(once(StateOperation::Send(
-                context.pid(),
+            Err(err) => Some(SchedulerTransition::new(once(SchedulerCommand::Send(
+                self.main_pid,
                 WebSocketServerSendAction {
                     connection_id: *connection_id,
                     message: err,
@@ -684,8 +785,8 @@ where
             Ok((operation, operation_state)) => {
                 let subscription_id = operation_state.subscription_id;
                 connection.operations.push(operation_state);
-                Some(StateTransition::new(once(StateOperation::Send(
-                    context.pid(),
+                Some(SchedulerTransition::new(once(SchedulerCommand::Send(
+                    self.main_pid,
                     GraphQlServerSubscribeAction {
                         subscription_id,
                         operation,
@@ -696,18 +797,17 @@ where
             }
         }
     }
-    fn handle_websocket_graphql_server_receive_stop<TAction>(
+    fn handle_websocket_graphql_server_receive_stop<TAction, TTask>(
         &self,
         state: &mut WebSocketGraphQlServerState<T>,
         message: &GraphQlSubscriptionStopMessage,
         action: &WebSocketServerReceiveAction,
         _metadata: &MessageData,
         context: &mut impl HandlerContext,
-    ) -> Option<StateTransition<TAction>>
+    ) -> Option<SchedulerTransition<TAction, TTask>>
     where
-        TAction: Action
-            + OutboundAction<WebSocketServerSendAction>
-            + OutboundAction<GraphQlServerUnsubscribeAction<T>>,
+        TAction: Action + From<WebSocketServerSendAction> + From<GraphQlServerUnsubscribeAction<T>>,
+        TTask: TaskFactory<TAction, TTask>,
     {
         let WebSocketServerReceiveAction {
             connection_id,
@@ -715,31 +815,30 @@ where
         } = action;
         self.unsubscribe_operation(state, connection_id, message.operation_id(), context)
     }
-    fn unsubscribe_operation<TAction>(
+    fn unsubscribe_operation<TAction, TTask>(
         &self,
         state: &mut WebSocketGraphQlServerState<T>,
         connection_id: &Uuid,
         operation_id: &OperationId,
-        context: &mut impl HandlerContext,
-    ) -> Option<StateTransition<TAction>>
+        _context: &mut impl HandlerContext,
+    ) -> Option<SchedulerTransition<TAction, TTask>>
     where
-        TAction: Action
-            + OutboundAction<WebSocketServerSendAction>
-            + OutboundAction<GraphQlServerUnsubscribeAction<T>>,
+        TAction: Action + From<WebSocketServerSendAction> + From<GraphQlServerUnsubscribeAction<T>>,
+        TTask: TaskFactory<TAction, TTask>,
     {
         let connection = state.connections.get_mut(connection_id)?;
         if let Some(operation) = connection.remove_operation(operation_id) {
-            Some(StateTransition::new([
-                StateOperation::Send(
-                    context.pid(),
+            Some(SchedulerTransition::new([
+                SchedulerCommand::Send(
+                    self.main_pid,
                     GraphQlServerUnsubscribeAction {
                         subscription_id: operation.subscription_id,
                         _expression: Default::default(),
                     }
                     .into(),
                 ),
-                StateOperation::Send(
-                    context.pid(),
+                SchedulerCommand::Send(
+                    self.main_pid,
                     WebSocketServerSendAction {
                         connection_id: *connection_id,
                         message: GraphQlSubscriptionServerMessage::Complete(operation.operation_id),
@@ -748,8 +847,8 @@ where
                 ),
             ]))
         } else {
-            Some(StateTransition::new(once(StateOperation::Send(
-                context.pid(),
+            Some(SchedulerTransition::new(once(SchedulerCommand::Send(
+                self.main_pid,
                 WebSocketServerSendAction {
                     connection_id: *connection_id,
                     message: GraphQlSubscriptionServerMessage::ConnectionError(
@@ -763,18 +862,17 @@ where
             ))))
         }
     }
-    fn handle_websocket_graphql_server_receive_update<TAction>(
+    fn handle_websocket_graphql_server_receive_update<TAction, TTask>(
         &self,
         state: &mut WebSocketGraphQlServerState<T>,
         message: &GraphQlSubscriptionUpdateMessage,
         action: &WebSocketServerReceiveAction,
         _metadata: &MessageData,
-        context: &mut impl HandlerContext,
-    ) -> Option<StateTransition<TAction>>
+        _context: &mut impl HandlerContext,
+    ) -> Option<SchedulerTransition<TAction, TTask>>
     where
-        TAction: Action
-            + OutboundAction<WebSocketServerSendAction>
-            + OutboundAction<GraphQlServerModifyAction<T>>,
+        TAction: Action + From<WebSocketServerSendAction> + From<GraphQlServerModifyAction<T>>,
+        TTask: TaskFactory<TAction, TTask>,
     {
         let WebSocketServerReceiveAction {
             connection_id,
@@ -811,8 +909,8 @@ where
                 }
             },
         };
-        Some(StateTransition::new(once(StateOperation::Send(
-            context.pid(),
+        Some(SchedulerTransition::new(once(SchedulerCommand::Send(
+            self.main_pid,
             modify_action.unwrap_or_else(|err| {
                 WebSocketServerSendAction {
                     connection_id: *connection_id,
@@ -822,18 +920,19 @@ where
             }),
         ))))
     }
-    fn handle_websocket_graphql_server_receive_connection_terminate<TAction>(
+    fn handle_websocket_graphql_server_receive_connection_terminate<TAction, TTask>(
         &self,
         state: &mut WebSocketGraphQlServerState<T>,
         action: &WebSocketServerReceiveAction,
         _metadata: &MessageData,
-        context: &mut impl HandlerContext,
-    ) -> Option<StateTransition<TAction>>
+        _context: &mut impl HandlerContext,
+    ) -> Option<SchedulerTransition<TAction, TTask>>
     where
         TAction: Action
-            + OutboundAction<WebSocketServerSendAction>
-            + OutboundAction<GraphQlServerUnsubscribeAction<T>>
-            + OutboundAction<WebSocketServerDisconnectAction>,
+            + From<WebSocketServerSendAction>
+            + From<GraphQlServerUnsubscribeAction<T>>
+            + From<WebSocketServerDisconnectAction>,
+        TTask: TaskFactory<TAction, TTask>,
     {
         let WebSocketServerReceiveAction {
             connection_id,
@@ -853,13 +952,13 @@ where
             );
         }
         decrement_gauge!(self.metric_names.graphql_websocket_connection_count, 1.0);
-        Some(StateTransition::new(
+        Some(SchedulerTransition::new(
             connection
                 .operations
                 .into_iter()
                 .map(|operation| {
-                    StateOperation::Send(
-                        context.pid(),
+                    SchedulerCommand::Send(
+                        self.main_pid,
                         GraphQlServerUnsubscribeAction {
                             subscription_id: operation.subscription_id,
                             _expression: Default::default(),
@@ -867,8 +966,8 @@ where
                         .into(),
                     )
                 })
-                .chain(once(StateOperation::Send(
-                    context.pid(),
+                .chain(once(SchedulerCommand::Send(
+                    self.main_pid,
                     WebSocketServerDisconnectAction {
                         connection_id: *connection_id,
                     }
@@ -876,15 +975,16 @@ where
                 ))),
         ))
     }
-    fn handle_graphql_parse_error<TAction>(
+    fn handle_graphql_parse_error<TAction, TTask>(
         &self,
         state: &mut WebSocketGraphQlServerState<T>,
         action: &GraphQlServerParseErrorAction<T>,
         _metadata: &MessageData,
-        context: &mut impl HandlerContext,
-    ) -> Option<StateTransition<TAction>>
+        _context: &mut impl HandlerContext,
+    ) -> Option<SchedulerTransition<TAction, TTask>>
     where
-        TAction: Action + OutboundAction<WebSocketServerSendAction>,
+        TAction: Action + From<WebSocketServerSendAction>,
+        TTask: TaskFactory<TAction, TTask>,
     {
         let GraphQlServerParseErrorAction {
             subscription_id,
@@ -893,8 +993,8 @@ where
             ..
         } = action;
         let (connection_id, subscription) = state.remove_subscription(subscription_id)?;
-        Some(StateTransition::new(once(StateOperation::Send(
-            context.pid(),
+        Some(SchedulerTransition::new(once(SchedulerCommand::Send(
+            self.main_pid,
             WebSocketServerSendAction {
                 connection_id,
                 message: GraphQlSubscriptionServerMessage::Error(
@@ -920,20 +1020,19 @@ where
             .error_metric_tracker
             .record_query_state(result, &self.factory);
     }
-    fn handle_graphql_emit_action<TAction>(
+    fn handle_graphql_emit_action<TAction, TTask>(
         &self,
         state: &mut WebSocketGraphQlServerState<T>,
         action: &GraphQlServerEmitAction<T>,
         _metadata: &MessageData,
         context: &mut impl HandlerContext,
-    ) -> Option<StateTransition<TAction>>
+    ) -> Option<SchedulerTransition<TAction, TTask>>
     where
         TAction: Action
-            + Send
-            + 'static
-            + OutboundAction<WebSocketServerSendAction>
-            + OutboundAction<WebSocketServerThrottleTimeoutAction>
-            + OutboundAction<GraphQlServerUnsubscribeAction<T>>,
+            + From<WebSocketServerSendAction>
+            + From<WebSocketServerThrottleTimeoutAction>
+            + From<GraphQlServerUnsubscribeAction<T>>,
+        TTask: TaskFactory<TAction, TTask> + From<WebSocketGraphQlServerThrottleTimeoutTaskFactory>,
     {
         let GraphQlServerEmitAction {
             subscription_id,
@@ -965,8 +1064,8 @@ where
                     subscription.diff_result.as_mut(),
                     &self.factory,
                 )?;
-                Some(StateTransition::new(once(StateOperation::Send(
-                    context.pid(),
+                Some(SchedulerTransition::new(once(SchedulerCommand::Send(
+                    self.main_pid,
                     WebSocketServerSendAction {
                         connection_id,
                         message: update_message,
@@ -982,19 +1081,16 @@ where
                     });
                     None
                 } else {
-                    let (task, task_pid) = create_delayed_action(
-                        WebSocketServerThrottleTimeoutAction {
-                            subscription_id: *subscription_id,
-                        }
-                        .into(),
-                        *duration,
-                        context,
-                    );
+                    let (task_pid, task) =
+                        create_throttle_timeout_task(*subscription_id, *duration, context);
                     existing_delay.replace(ThrottleState {
                         result: result.clone(),
                         task_pid,
                     });
-                    Some(StateTransition::new(once(task)))
+                    Some(SchedulerTransition::new(once(SchedulerCommand::Task(
+                        task_pid,
+                        task.into(),
+                    ))))
                 }
             }
         };
@@ -1013,18 +1109,17 @@ where
             }
         }
     }
-    fn handle_websocket_graphql_throttle_timeout_action<TAction>(
+    fn handle_websocket_graphql_throttle_timeout_action<TAction, TTask>(
         &self,
         state: &mut WebSocketGraphQlServerState<T>,
         action: &WebSocketServerThrottleTimeoutAction,
         _metadata: &MessageData,
-        context: &mut impl HandlerContext,
-    ) -> Option<StateTransition<TAction>>
+        _context: &mut impl HandlerContext,
+    ) -> Option<SchedulerTransition<TAction, TTask>>
     where
-        TAction: Action
-            + 'static
-            + OutboundAction<WebSocketServerSendAction>
-            + OutboundAction<WebSocketServerThrottleTimeoutAction>,
+        TAction:
+            Action + From<WebSocketServerSendAction> + From<WebSocketServerThrottleTimeoutAction>,
+        TTask: TaskFactory<TAction, TTask>,
     {
         let WebSocketServerThrottleTimeoutAction { subscription_id } = action;
         let (connection_id, subscription) = state.find_subscription_mut(subscription_id)?;
@@ -1041,8 +1136,8 @@ where
             &self.factory,
         );
         let update_action = update_message.map(|message| {
-            StateOperation::Send(
-                context.pid(),
+            SchedulerCommand::Send(
+                self.main_pid,
                 WebSocketServerSendAction {
                     connection_id,
                     message,
@@ -1050,8 +1145,8 @@ where
                 .into(),
             )
         });
-        let dispose_throttle_task_action = StateOperation::Kill(task_pid);
-        Some(StateTransition::new(
+        let dispose_throttle_task_action = SchedulerCommand::Kill(task_pid);
+        Some(SchedulerTransition::new(
             once(dispose_throttle_task_action).chain(update_action),
         ))
     }
@@ -1210,41 +1305,19 @@ fn is_empty_json_object(value: &JsonValue) -> bool {
     }
 }
 
-fn create_delayed_action<TAction>(
-    action: TAction,
-    duration: Duration,
+fn create_throttle_timeout_task(
+    subscription_id: Uuid,
+    delay: Duration,
     context: &mut impl HandlerContext,
-) -> (StateOperation<TAction>, ProcessId)
-where
-    TAction: Action + Send + 'static,
-{
-    let task_id = context.generate_pid();
-    (
-        StateOperation::Task(
-            task_id,
-            OperationStream::new(Box::pin(
-                sleep(duration)
-                    .map({
-                        let current_pid = context.pid();
-                        move |_| StateOperation::Send(current_pid, action)
-                    })
-                    .into_stream(),
-            )),
-        ),
-        task_id,
-    )
-}
-
-fn clone_request_wrapper<T>(request: &Request<T>) -> Request<()> {
-    let mut result = Request::new(());
-    *result.method_mut() = request.method().clone();
-    *result.uri_mut() = request.uri().clone();
-    *result.version_mut() = request.version();
-    let headers = result.headers_mut();
-    for (key, value) in request.headers() {
-        headers.append(key.clone(), value.clone());
-    }
-    result
+) -> (ProcessId, WebSocketGraphQlServerThrottleTimeoutTaskFactory) {
+    let task_pid = context.generate_pid();
+    let current_pid = context.pid();
+    let task = WebSocketGraphQlServerThrottleTimeoutTaskFactory {
+        subscription_id,
+        delay,
+        caller_pid: current_pid,
+    };
+    (task_pid, task)
 }
 
 #[derive(Clone)]

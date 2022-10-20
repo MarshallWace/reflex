@@ -9,39 +9,28 @@ use std::{
     time::Duration,
 };
 
-use futures::{stream, FutureExt, StreamExt};
 use reflex::core::{
     ConditionType, Expression, ExpressionFactory, ExpressionListType, FloatTermType, HeapAllocator,
-    IntTermType, RefType, SignalType, StateToken,
+    IntTermType, RefType, SignalType, StateToken, Uuid,
 };
 use reflex_dispatcher::{
-    Action, Actor, ActorTransition, HandlerContext, InboundAction, MessageData, OperationStream,
-    OutboundAction, ProcessId, StateOperation, StateTransition,
+    Action, ActorInitContext, HandlerContext, MessageData, NoopDisposeCallback, ProcessId,
+    SchedulerCommand, SchedulerMode, SchedulerTransition, TaskFactory, TaskInbox,
 };
+use reflex_macros::dispatcher;
 use reflex_runtime::{
     action::effect::{
         EffectEmitAction, EffectSubscribeAction, EffectUnsubscribeAction, EffectUpdateBatch,
     },
     AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator,
 };
-use tokio::time::sleep;
+
+use crate::{
+    action::timeout::TimeoutHandlerTimeoutAction,
+    task::timeout::{TimeoutHandlerTask, TimeoutHandlerTaskFactory},
+};
 
 pub const EFFECT_TYPE_TIMEOUT: &'static str = "reflex::timeout";
-
-pub trait TimeoutHandlerAction<T: Expression>:
-    Action
-    + InboundAction<EffectSubscribeAction<T>>
-    + InboundAction<EffectUnsubscribeAction<T>>
-    + OutboundAction<EffectEmitAction<T>>
-{
-}
-impl<T: Expression, TAction> TimeoutHandlerAction<T> for TAction where
-    Self: Action
-        + InboundAction<EffectSubscribeAction<T>>
-        + InboundAction<EffectUnsubscribeAction<T>>
-        + OutboundAction<EffectEmitAction<T>>
-{
-}
 
 #[derive(Clone)]
 pub struct TimeoutHandler<T, TFactory, TAllocator>
@@ -52,6 +41,7 @@ where
 {
     factory: TFactory,
     allocator: TAllocator,
+    main_pid: ProcessId,
     _expression: PhantomData<T>,
 }
 impl<T, TFactory, TAllocator> TimeoutHandler<T, TFactory, TAllocator>
@@ -60,10 +50,11 @@ where
     TFactory: AsyncExpressionFactory<T>,
     TAllocator: AsyncHeapAllocator<T>,
 {
-    pub fn new(factory: TFactory, allocator: TAllocator) -> Self {
+    pub fn new(factory: TFactory, allocator: TAllocator, main_pid: ProcessId) -> Self {
         Self {
             factory,
             allocator,
+            main_pid,
             _expression: Default::default(),
         }
     }
@@ -71,54 +62,142 @@ where
 
 #[derive(Default)]
 pub struct TimeoutHandlerState {
-    tasks: HashMap<StateToken, ProcessId>,
+    active_operations: HashMap<StateToken, (Uuid, ProcessId)>,
+    operation_effect_mappings: HashMap<Uuid, StateToken>,
+}
+impl TimeoutHandlerState {
+    fn subscribe_timeout_task(
+        &mut self,
+        effect_id: StateToken,
+        duration: Duration,
+        context: &mut impl HandlerContext,
+    ) -> Option<(ProcessId, TimeoutHandlerTaskFactory)> {
+        let entry = match self.active_operations.entry(effect_id) {
+            Entry::Occupied(_) => None,
+            Entry::Vacant(entry) => Some(entry),
+        }?;
+        let operation_id = Uuid::new_v4();
+        let (task_pid, task) = create_timeout_task(operation_id, duration, context);
+        self.operation_effect_mappings
+            .insert(operation_id, effect_id);
+        entry.insert((operation_id, task_pid));
+        Some((task_pid, task))
+    }
+    fn unsubscribe_timeout_task(&mut self, effect_id: StateToken) -> Option<ProcessId> {
+        let (operation_id, task_pid) = self.active_operations.remove(&effect_id)?;
+        let _ = self.operation_effect_mappings.remove(&operation_id)?;
+        Some(task_pid)
+    }
 }
 
-impl<T, TFactory, TAllocator, TAction> Actor<TAction> for TimeoutHandler<T, TFactory, TAllocator>
-where
-    T: AsyncExpression,
-    TFactory: AsyncExpressionFactory<T>,
-    TAllocator: AsyncHeapAllocator<T>,
-    TAction: TimeoutHandlerAction<T> + Send + 'static,
-{
-    type State = TimeoutHandlerState;
-    fn init(&self) -> Self::State {
-        Default::default()
+dispatcher!({
+    pub enum TimeoutHandlerAction<T: Expression> {
+        Inbox(EffectSubscribeAction<T>),
+        Inbox(EffectUnsubscribeAction<T>),
+        Inbox(TimeoutHandlerTimeoutAction),
+
+        Outbox(EffectEmitAction<T>),
     }
-    fn handle(
-        &self,
-        state: Self::State,
-        action: &TAction,
-        metadata: &MessageData,
-        context: &mut impl HandlerContext,
-    ) -> ActorTransition<Self::State, TAction> {
-        let mut state = state;
-        let actions = if let Some(action) = action.match_type() {
-            self.handle_effect_subscribe(&mut state, action, metadata, context)
-        } else if let Some(action) = action.match_type() {
-            self.handle_effect_unsubscribe(&mut state, action, metadata, context)
-        } else {
-            None
+
+    impl<T, TFactory, TAllocator, TAction, TTask> Dispatcher<TAction, TTask>
+        for TimeoutHandler<T, TFactory, TAllocator>
+    where
+        T: AsyncExpression,
+        TFactory: AsyncExpressionFactory<T>,
+        TAllocator: AsyncHeapAllocator<T>,
+        TAction: Action,
+        TTask: TaskFactory<TAction, TTask> + TimeoutHandlerTask,
+    {
+        type State = TimeoutHandlerState;
+        type Events<TInbox: TaskInbox<TAction>> = TInbox;
+        type Dispose = NoopDisposeCallback;
+
+        fn init<TInbox: TaskInbox<TAction>>(
+            &self,
+            inbox: TInbox,
+            context: &impl ActorInitContext,
+        ) -> (Self::State, Self::Events<TInbox>, Self::Dispose) {
+            (Default::default(), inbox, Default::default())
         }
-        .unwrap_or_default();
-        ActorTransition::new(state, actions)
+
+        fn accept(&self, action: &EffectSubscribeAction<T>) -> bool {
+            action.effect_type.as_str() == EFFECT_TYPE_TIMEOUT
+        }
+        fn schedule(
+            &self,
+            _action: &EffectSubscribeAction<T>,
+            _state: &Self::State,
+        ) -> Option<SchedulerMode> {
+            Some(SchedulerMode::Async)
+        }
+        fn handle(
+            &self,
+            state: &mut Self::State,
+            action: &EffectSubscribeAction<T>,
+            metadata: &MessageData,
+            context: &mut impl HandlerContext,
+        ) -> Option<SchedulerTransition<TAction, TTask>> {
+            self.handle_effect_subscribe(state, action, metadata, context)
+        }
+
+        fn accept(&self, action: &EffectUnsubscribeAction<T>) -> bool {
+            action.effect_type.as_str() == EFFECT_TYPE_TIMEOUT
+        }
+        fn schedule(
+            &self,
+            _action: &EffectUnsubscribeAction<T>,
+            _state: &Self::State,
+        ) -> Option<SchedulerMode> {
+            Some(SchedulerMode::Async)
+        }
+        fn handle(
+            &self,
+            state: &mut Self::State,
+            action: &EffectUnsubscribeAction<T>,
+            metadata: &MessageData,
+            context: &mut impl HandlerContext,
+        ) -> Option<SchedulerTransition<TAction, TTask>> {
+            self.handle_effect_unsubscribe(state, action, metadata, context)
+        }
+
+        fn accept(&self, _action: &TimeoutHandlerTimeoutAction) -> bool {
+            true
+        }
+        fn schedule(
+            &self,
+            _action: &TimeoutHandlerTimeoutAction,
+            _state: &Self::State,
+        ) -> Option<SchedulerMode> {
+            Some(SchedulerMode::Async)
+        }
+        fn handle(
+            &self,
+            state: &mut Self::State,
+            action: &TimeoutHandlerTimeoutAction,
+            metadata: &MessageData,
+            context: &mut impl HandlerContext,
+        ) -> Option<SchedulerTransition<TAction, TTask>> {
+            self.handle_timeout_handler_timeout(state, action, metadata, context)
+        }
     }
-}
+});
+
 impl<T, TFactory, TAllocator> TimeoutHandler<T, TFactory, TAllocator>
 where
     T: AsyncExpression,
     TFactory: AsyncExpressionFactory<T>,
     TAllocator: AsyncHeapAllocator<T>,
 {
-    fn handle_effect_subscribe<TAction>(
+    fn handle_effect_subscribe<TAction, TTask>(
         &self,
         state: &mut TimeoutHandlerState,
         action: &EffectSubscribeAction<T>,
         _metadata: &MessageData,
         context: &mut impl HandlerContext,
-    ) -> Option<StateTransition<TAction>>
+    ) -> Option<SchedulerTransition<TAction, TTask>>
     where
-        TAction: Action + Send + 'static + OutboundAction<EffectEmitAction<T>>,
+        TAction: Action + From<EffectEmitAction<T>>,
+        TTask: TaskFactory<TAction, TTask> + From<TimeoutHandlerTaskFactory>,
     {
         let EffectSubscribeAction {
             effect_type,
@@ -127,7 +206,6 @@ where
         if effect_type.as_str() != EFFECT_TYPE_TIMEOUT {
             return None;
         }
-        let current_pid = context.pid();
         let (initial_values, tasks): (Vec<_>, Vec<_>) = effects
             .iter()
             .filter_map(|effect| {
@@ -136,23 +214,16 @@ where
                     Ok(duration) => match duration {
                         None => Some(((state_token, self.factory.create_nil_term()), None)),
                         Some(duration) => {
-                            if let Entry::Vacant(entry) = state.tasks.entry(state_token) {
-                                let (task_pid, task) = create_timeout_task(
-                                    state_token,
-                                    duration,
-                                    &self.factory,
-                                    context,
-                                );
-                                entry.insert(task_pid);
-                                Some((
-                                    (
-                                        state_token,
-                                        create_pending_expression(&self.factory, &self.allocator),
-                                    ),
-                                    Some(StateOperation::Task(task_pid, task)),
-                                ))
-                            } else {
-                                None
+                            match state.subscribe_timeout_task(effect.id(), duration, context) {
+                                None => None,
+                                Some((task_pid, task)) => {
+                                    let initial_value =
+                                        create_pending_expression(&self.factory, &self.allocator);
+                                    Some((
+                                        (state_token, initial_value),
+                                        Some(SchedulerCommand::Task(task_pid, task.into())),
+                                    ))
+                                }
                             }
                         }
                     },
@@ -169,8 +240,8 @@ where
         let initial_values_action = if initial_values.is_empty() {
             None
         } else {
-            Some(StateOperation::Send(
-                current_pid,
+            Some(SchedulerCommand::Send(
+                self.main_pid,
                 EffectEmitAction {
                     effect_types: vec![EffectUpdateBatch {
                         effect_type: EFFECT_TYPE_TIMEOUT.into(),
@@ -180,21 +251,22 @@ where
                 .into(),
             ))
         };
-        Some(StateTransition::new(
+        Some(SchedulerTransition::new(
             initial_values_action
                 .into_iter()
                 .chain(tasks.into_iter().flatten()),
         ))
     }
-    fn handle_effect_unsubscribe<TAction>(
+    fn handle_effect_unsubscribe<TAction, TTask>(
         &self,
         state: &mut TimeoutHandlerState,
         action: &EffectUnsubscribeAction<T>,
         _metadata: &MessageData,
         _context: &mut impl HandlerContext,
-    ) -> Option<StateTransition<TAction>>
+    ) -> Option<SchedulerTransition<TAction, TTask>>
     where
         TAction: Action,
+        TTask: TaskFactory<TAction, TTask>,
     {
         let EffectUnsubscribeAction {
             effect_type,
@@ -203,54 +275,62 @@ where
         if effect_type.as_str() != EFFECT_TYPE_TIMEOUT {
             return None;
         }
-        let unsubscribe_actions = effects.iter().filter_map(|effect| {
-            if let Entry::Occupied(entry) = state.tasks.entry(effect.id()) {
-                let pid = entry.remove();
-                Some(StateOperation::Kill(pid))
-            } else {
-                None
-            }
-        });
-        Some(StateTransition::new(unsubscribe_actions))
+        let active_pids = effects
+            .iter()
+            .filter_map(|effect| state.unsubscribe_timeout_task(effect.id()));
+        Some(SchedulerTransition::new(
+            active_pids.map(SchedulerCommand::Kill),
+        ))
+    }
+    fn handle_timeout_handler_timeout<TAction, TTask>(
+        &self,
+        state: &mut TimeoutHandlerState,
+        action: &TimeoutHandlerTimeoutAction,
+        _metadata: &MessageData,
+        _context: &mut impl HandlerContext,
+    ) -> Option<SchedulerTransition<TAction, TTask>>
+    where
+        TAction: Action + From<EffectEmitAction<T>>,
+        TTask: TaskFactory<TAction, TTask>,
+    {
+        let TimeoutHandlerTimeoutAction { operation_id } = action;
+        let effect_id = state.operation_effect_mappings.get(operation_id).copied()?;
+        let task_pid = state.unsubscribe_timeout_task(effect_id)?;
+        Some(SchedulerTransition::new([
+            SchedulerCommand::Kill(task_pid),
+            SchedulerCommand::Send(
+                self.main_pid,
+                EffectEmitAction {
+                    effect_types: vec![EffectUpdateBatch {
+                        effect_type: EFFECT_TYPE_TIMEOUT.into(),
+                        updates: vec![(effect_id, self.factory.create_nil_term())],
+                    }],
+                }
+                .into(),
+            ),
+        ]))
     }
 }
 
-fn create_timeout_task<T: AsyncExpression, TAction>(
-    state_token: StateToken,
-    duration: f64,
-    factory: &impl AsyncExpressionFactory<T>,
+fn create_timeout_task(
+    operation_id: Uuid,
+    duration: Duration,
     context: &mut impl HandlerContext,
-) -> (ProcessId, OperationStream<TAction>)
-where
-    TAction: Action + Send + 'static + OutboundAction<EffectEmitAction<T>>,
-{
+) -> (ProcessId, TimeoutHandlerTaskFactory) {
     let task_pid = context.generate_pid();
-    let stream = sleep(Duration::from_millis(duration as u64))
-        .into_stream()
-        .map({
-            let factory = factory.clone();
-            let main_pid = context.pid();
-            move |_| {
-                StateOperation::Send(
-                    main_pid,
-                    EffectEmitAction {
-                        effect_types: vec![EffectUpdateBatch {
-                            effect_type: EFFECT_TYPE_TIMEOUT.into(),
-                            updates: vec![(state_token, factory.create_nil_term())],
-                        }],
-                    }
-                    .into(),
-                )
-            }
-        })
-        .chain(stream::iter(once(StateOperation::Kill(task_pid))));
-    (task_pid, OperationStream::new(Box::pin(stream)))
+    let current_pid = context.pid();
+    let task = TimeoutHandlerTaskFactory {
+        operation_id,
+        duration,
+        caller_pid: current_pid,
+    };
+    (task_pid, task)
 }
 
 fn parse_timeout_effect_args<T: Expression>(
     effect: &T::Signal<T>,
     factory: &impl ExpressionFactory<T>,
-) -> Result<Option<f64>, String> {
+) -> Result<Option<Duration>, String> {
     let args = effect.args().as_deref();
     if args.len() != 2 {
         return Err(format!(
@@ -259,11 +339,11 @@ fn parse_timeout_effect_args<T: Expression>(
         ));
     }
     let mut remaining_args = args.iter().map(|item| item.as_deref());
-    let duration = parse_number_arg(remaining_args.next().unwrap(), factory);
+    let duration = parse_duration_millis_arg(remaining_args.next().unwrap(), factory);
     let _token = remaining_args.next().unwrap();
     match duration {
-        Some(duration) if duration == 0.0 => Ok(None),
-        Some(duration) => Ok(Some(duration.max(1.0))),
+        Some(duration) if duration.as_millis() == 0 => Ok(None),
+        Some(duration) => Ok(Some(duration.max(Duration::from_millis(1)))),
         _ => Err(format!(
             "Invalid timeout signal arguments: {}",
             effect
@@ -278,11 +358,28 @@ fn parse_timeout_effect_args<T: Expression>(
     }
 }
 
-fn parse_number_arg<T: Expression>(value: &T, factory: &impl ExpressionFactory<T>) -> Option<f64> {
+fn parse_duration_millis_arg<T: Expression>(
+    value: &T,
+    factory: &impl ExpressionFactory<T>,
+) -> Option<Duration> {
     match factory.match_int_term(value) {
-        Some(term) => Some(term.value() as f64),
+        Some(term) => {
+            let value = term.value();
+            if value >= 0 {
+                Some(Duration::from_millis(value as u64))
+            } else {
+                None
+            }
+        }
         _ => match factory.match_float_term(value) {
-            Some(term) => Some(term.value()),
+            Some(term) => {
+                let value = term.value();
+                if value >= 0.0 {
+                    Some(Duration::from_millis(value.trunc() as u64))
+                } else {
+                    None
+                }
+            }
             _ => None,
         },
     }

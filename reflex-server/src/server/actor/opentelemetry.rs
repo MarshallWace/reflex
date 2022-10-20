@@ -18,13 +18,15 @@ use opentelemetry::{
 };
 use opentelemetry_otlp::{SpanExporterBuilder, WithExportConfig};
 use reflex_dispatcher::{
-    Action, Actor, ActorTransition, HandlerContext, InboundAction, MessageData, StateTransition,
+    Action, ActorInitContext, HandlerContext, MessageData, NoopDisposeCallback, SchedulerMode,
+    SchedulerTransition, TaskFactory, TaskInbox,
 };
 use reflex_handlers::utils::tls::{
     create_https_client,
     hyper::{body::HttpBody, client::connect::Connect},
     tokio_native_tls::native_tls,
 };
+use reflex_macros::dispatcher;
 use tonic::{self, transport::ClientTlsConfig};
 
 use crate::{
@@ -161,32 +163,19 @@ impl<C, B> std::fmt::Debug for OpenTelemetryHyperClient<C, B> {
     }
 }
 
-pub trait OpenTelemetryMiddlewareAction:
-    Action
-    + InboundAction<TelemetryMiddlewareTransactionStartAction>
-    + InboundAction<TelemetryMiddlewareTransactionEndAction>
-{
-}
-impl<TAction> OpenTelemetryMiddlewareAction for TAction where
-    Self: Action
-        + InboundAction<TelemetryMiddlewareTransactionStartAction>
-        + InboundAction<TelemetryMiddlewareTransactionEndAction>
-{
-}
-
-pub struct OpenTelemetryMiddleware<T: Tracer> {
+pub struct OpenTelemetryActor<T: Tracer> {
     tracer: T,
 }
-impl<T: Tracer> OpenTelemetryMiddleware<T> {
+impl<T: Tracer> OpenTelemetryActor<T> {
     pub fn new(tracer: T) -> Self {
         Self { tracer }
     }
 }
 
-pub struct OpenTelemetryMiddlewareState {
+pub struct OpenTelemetryActorState {
     active_spans: HashMap<Traceparent, Context>,
 }
-impl Default for OpenTelemetryMiddlewareState {
+impl Default for OpenTelemetryActorState {
     fn default() -> Self {
         Self {
             active_spans: Default::default(),
@@ -194,49 +183,88 @@ impl Default for OpenTelemetryMiddlewareState {
     }
 }
 
-impl<TAction, T: Tracer> Actor<TAction> for OpenTelemetryMiddleware<T>
-where
-    T::Span: Send + Sync + 'static,
-    TAction: Action
-        + InboundAction<TelemetryMiddlewareTransactionStartAction>
-        + InboundAction<TelemetryMiddlewareTransactionEndAction>,
-{
-    type State = OpenTelemetryMiddlewareState;
-    fn init(&self) -> Self::State {
-        Default::default()
+dispatcher!({
+    pub enum OpenTelemetryAction {
+        Inbox(TelemetryMiddlewareTransactionStartAction),
+        Inbox(TelemetryMiddlewareTransactionEndAction),
     }
-    fn handle(
-        &self,
-        state: Self::State,
-        action: &TAction,
-        metadata: &MessageData,
-        context: &mut impl HandlerContext,
-    ) -> ActorTransition<Self::State, TAction> {
-        let mut state = state;
-        let actions = if let Some(action) = action.match_type() {
-            self.handle_transaction_start(&mut state, action, metadata, context)
-        } else if let Some(action) = action.match_type() {
-            self.handle_transaction_end(&mut state, action, metadata, context)
-        } else {
-            None
+
+    impl<TTracer, TAction, TTask> Dispatcher<TAction, TTask> for OpenTelemetryActor<TTracer>
+    where
+        TTracer: Tracer,
+        TTracer::Span: Send + Sync + 'static,
+        TAction: Action,
+        TTask: TaskFactory<TAction, TTask>,
+    {
+        type State = OpenTelemetryActorState;
+        type Events<TInbox: TaskInbox<TAction>> = TInbox;
+        type Dispose = NoopDisposeCallback;
+
+        fn init<TInbox: TaskInbox<TAction>>(
+            &self,
+            inbox: TInbox,
+            context: &impl ActorInitContext,
+        ) -> (Self::State, Self::Events<TInbox>, Self::Dispose) {
+            (Default::default(), inbox, Default::default())
         }
-        .unwrap_or_default();
-        ActorTransition::new(state, actions)
+
+        fn accept(&self, _action: &TelemetryMiddlewareTransactionStartAction) -> bool {
+            true
+        }
+        fn schedule(
+            &self,
+            _action: &TelemetryMiddlewareTransactionStartAction,
+            _state: &Self::State,
+        ) -> Option<SchedulerMode> {
+            Some(SchedulerMode::Async)
+        }
+        fn handle(
+            &self,
+            state: &mut Self::State,
+            action: &TelemetryMiddlewareTransactionStartAction,
+            metadata: &MessageData,
+            context: &mut impl HandlerContext,
+        ) -> Option<SchedulerTransition<TAction, TTask>> {
+            self.handle_telemetry_middleware_transaction_start(state, action, metadata, context)
+        }
+
+        fn accept(&self, _action: &TelemetryMiddlewareTransactionEndAction) -> bool {
+            true
+        }
+        fn schedule(
+            &self,
+            _action: &TelemetryMiddlewareTransactionEndAction,
+            _state: &Self::State,
+        ) -> Option<SchedulerMode> {
+            Some(SchedulerMode::Async)
+        }
+        fn handle(
+            &self,
+            state: &mut Self::State,
+            action: &TelemetryMiddlewareTransactionEndAction,
+            metadata: &MessageData,
+            context: &mut impl HandlerContext,
+        ) -> Option<SchedulerTransition<TAction, TTask>> {
+            self.handle_telemetry_middleware_transaction_end(state, action, metadata, context)
+        }
     }
-}
-impl<T: Tracer> OpenTelemetryMiddleware<T>
+});
+
+impl<TTracer> OpenTelemetryActor<TTracer>
 where
-    T::Span: Send + Sync + 'static,
+    TTracer: Tracer,
+    TTracer::Span: Send + Sync + 'static,
 {
-    fn handle_transaction_start<TAction>(
+    fn handle_telemetry_middleware_transaction_start<TAction, TTask>(
         &self,
-        state: &mut OpenTelemetryMiddlewareState,
+        state: &mut OpenTelemetryActorState,
         action: &TelemetryMiddlewareTransactionStartAction,
         _metadata: &MessageData,
         _context: &mut impl HandlerContext,
-    ) -> Option<StateTransition<TAction>>
+    ) -> Option<SchedulerTransition<TAction, TTask>>
     where
         TAction: Action,
+        TTask: TaskFactory<TAction, TTask>,
     {
         let TelemetryMiddlewareTransactionStartAction { transactions } = action;
         for transaction in transactions.iter() {
@@ -282,15 +310,16 @@ where
         }
         None
     }
-    fn handle_transaction_end<TAction>(
+    fn handle_telemetry_middleware_transaction_end<TAction, TTask>(
         &self,
-        state: &mut OpenTelemetryMiddlewareState,
+        state: &mut OpenTelemetryActorState,
         action: &TelemetryMiddlewareTransactionEndAction,
         _metadata: &MessageData,
         _context: &mut impl HandlerContext,
-    ) -> Option<StateTransition<TAction>>
+    ) -> Option<SchedulerTransition<TAction, TTask>>
     where
         TAction: Action,
+        TTask: TaskFactory<TAction, TTask>,
     {
         let TelemetryMiddlewareTransactionEndAction { transaction_ids } = action;
         for transaction_id in transaction_ids.iter() {

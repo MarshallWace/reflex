@@ -17,12 +17,14 @@ reflex-lang = { path = "../reflex-lang" }
 reflex-lisp = { path = "../reflex-lisp" }
 reflex-handlers = { path = "../reflex-handlers" }
 reflex-runtime = { path = "../reflex-runtime" }
+reflex-scheduler = { path = "../reflex-scheduler" }
 reflex-stdlib = { path = "../reflex-stdlib" }
 reflex-utils = { path = "../reflex-utils" }
 anyhow = "1.0"
 clap = { version = "3.0", features = ["derive"] }
 futures = "*"
 metrics = "0.18"
+pin-project = "1.0.11"
 serde_json = "1.0"
 tokio = { version = "1", features = ["full", "tracing"] }
 tokio-stream = { version = "0.1", features = ["sync"] }

@@ -12,32 +12,35 @@ use anyhow::{anyhow, Context, Result};
 use clap::Parser;
 use opentelemetry::trace::noop::NoopTracer;
 use reflex_cli::{compile_entry_point, syntax::js::default_js_loaders, Syntax};
-use reflex_dispatcher::{session_recorder::SessionRecorder, SchedulerMiddleware};
+use reflex_dispatcher::SchedulerMiddleware;
 use reflex_graphql::{parse_graphql_schema, GraphQlSchema, NoopGraphQlQueryTransform};
 use reflex_handlers::{
-    default_handlers,
-    utils::tls::{create_https_client, tokio_native_tls::native_tls::Certificate},
-    DefaultHandlersMetricNames,
+    default_handler_actors,
+    utils::tls::{create_https_client, hyper_tls, tokio_native_tls::native_tls::Certificate},
+    DefaultHandlerMetricNames,
 };
 use reflex_interpreter::compiler::CompilerOptions;
-use reflex_lang::{allocator::DefaultAllocator, SharedTermFactory};
+use reflex_lang::{allocator::DefaultAllocator, CachedSharedTerm, SharedTermFactory};
 use reflex_server::{
     action::ServerCliAction,
     builtins::ServerBuiltins,
-    cli::execute_query::{cli, ExecuteQueryCliOptions, NoopHttpMiddleware},
-    generate_session_recording_filename,
+    cli::{
+        execute_query::{
+            cli, ExecuteQueryCliOptions, GraphQlWebServerMetricLabels, NoopHttpMiddleware,
+        },
+        task::{ServerCliTaskActor, ServerCliTaskFactory},
+    },
     imports::server_imports,
     logger::{formatted::FormattedLogger, json::JsonActionLogger, EitherLogger},
     middleware::LoggerMiddleware,
-    recorder::FileRecorder,
-    server::EitherTracer,
+    server::{utils::EitherTracer, NoopWebSocketGraphQlServerQueryTransform},
     GraphQlWebServerMetricNames,
 };
 use reflex_server::{
     cli::reflex_server::OpenTelemetryConfig,
     tokio_runtime_metrics_export::TokioRuntimeMonitorMetricNames,
 };
-use reflex_utils::{reconnect::NoopReconnectTimeout, FileWriterFormat};
+use reflex_utils::reconnect::NoopReconnectTimeout;
 
 /// Execute a GraphQL query against the provided graph root
 #[derive(Parser)]
@@ -60,9 +63,6 @@ pub struct Args {
     /// Path to custom TLS certificate
     #[clap(long)]
     tls_cert: Option<PathBuf>,
-    /// Path to capture runtime event playback file
-    #[clap(long)]
-    capture_events: Option<Option<PathBuf>>,
     /// Log runtime actions
     #[clap(long)]
     log: Option<Option<LogFormat>>,
@@ -105,6 +105,29 @@ impl FromStr for LogFormat {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    type TBuiltin = ServerBuiltins;
+    type T = CachedSharedTerm<TBuiltin>;
+    type TFactory = SharedTermFactory<TBuiltin>;
+    type TAllocator = DefaultAllocator<T>;
+    type TConnect = hyper_tls::HttpsConnector<hyper::client::HttpConnector>;
+    type TReconnect = NoopReconnectTimeout;
+    type TAction = ServerCliAction<T>;
+    type TTask = ServerCliTaskFactory<
+        T,
+        TFactory,
+        TAllocator,
+        TConnect,
+        TReconnect,
+        NoopGraphQlQueryTransform,
+        NoopWebSocketGraphQlServerQueryTransform,
+        GraphQlWebServerMetricLabels,
+        GraphQlWebServerMetricLabels,
+        GraphQlWebServerMetricLabels,
+        GraphQlWebServerMetricLabels,
+        GraphQlWebServerMetricLabels,
+        EitherTracer<NoopTracer, opentelemetry::sdk::trace::Tracer>,
+    >;
+
     let args = Args::parse();
     let schema = if let Some(schema_path) = &args.schema {
         Some(load_graphql_schema(schema_path.as_path())?)
@@ -116,9 +139,9 @@ async fn main() -> Result<()> {
         .as_ref()
         .map(|path| load_tls_cert(path.as_path()))
         .transpose()?;
-    let https_client = create_https_client(tls_cert)?;
-    let factory = SharedTermFactory::<ServerBuiltins>::default();
-    let allocator = DefaultAllocator::default();
+    let https_client: hyper::Client<TConnect> = create_https_client(tls_cert)?;
+    let factory: TFactory = SharedTermFactory::<TBuiltin>::default();
+    let allocator: TAllocator = DefaultAllocator::default();
     let tracer = match OpenTelemetryConfig::parse_env(std::env::vars())? {
         None => None,
         Some(config) => Some(config.into_tracer()?),
@@ -133,20 +156,7 @@ async fn main() -> Result<()> {
             None => EitherLogger::Right(FormattedLogger::stderr("server")),
         })
     });
-    let recorder_middleware = match args.capture_events.as_ref() {
-        Some(output_path) => {
-            let recorder = match output_path {
-                Some(path) => FileRecorder::new(FileWriterFormat::MessagePack, path),
-                None => FileRecorder::new(
-                    FileWriterFormat::MessagePack,
-                    PathBuf::from(generate_session_recording_filename(None)),
-                ),
-            };
-            Some(SessionRecorder::new(recorder))
-        }
-        None => None,
-    };
-    let middleware = SchedulerMiddleware::new(logger_middleware, recorder_middleware);
+    let middleware = SchedulerMiddleware::<_, _, TAction, TTask>::pre(logger_middleware);
     let module_loader = Some(default_js_loaders(
         server_imports(&factory, &allocator),
         &factory,
@@ -162,18 +172,23 @@ async fn main() -> Result<()> {
         &factory,
         &allocator,
     )?;
-    let actor = default_handlers::<ServerCliAction<_>, _, _, _, _, _>(
-        https_client,
-        &factory,
-        &allocator,
-        NoopReconnectTimeout,
-        DefaultHandlersMetricNames::default(),
-    );
     cli(
         args.into(),
         graph_root,
         schema,
-        actor,
+        |context, main_pid| {
+            default_handler_actors::<TAction, TTask, T, TFactory, TAllocator, TConnect, TReconnect>(
+                https_client,
+                &factory,
+                &allocator,
+                NoopReconnectTimeout,
+                DefaultHandlerMetricNames::default(),
+                main_pid,
+            )
+            .into_iter()
+            .map(|actor| (context.generate_pid(), ServerCliTaskActor::from(actor)))
+            .collect::<Vec<_>>()
+        },
         middleware,
         &factory,
         &allocator,

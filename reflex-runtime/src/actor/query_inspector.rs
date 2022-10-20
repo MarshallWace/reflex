@@ -11,9 +11,11 @@ use reflex::core::{
     ExpressionFactory, ExpressionListType, RefType, SignalTermType, SignalType, StateToken,
 };
 use reflex_dispatcher::{
-    Action, Actor, ActorTransition, HandlerContext, InboundAction, MessageData, StateTransition,
+    Action, ActorInitContext, HandlerContext, MessageData, NoopDisposeCallback, SchedulerMode,
+    SchedulerTransition, TaskFactory, TaskInbox,
 };
 use reflex_json::{json, JsonValue};
+use reflex_macros::dispatcher;
 
 use crate::{
     action::{
@@ -22,27 +24,6 @@ use crate::{
     },
     QueryEvaluationMode, QueryInvalidationStrategy,
 };
-
-pub trait QueryInspectorAction<T: Expression>:
-    Action
-    + InboundAction<EvaluateStartAction<T>>
-    + InboundAction<EvaluateStopAction>
-    + InboundAction<EvaluateResultAction<T>>
-    + InboundAction<EffectSubscribeAction<T>>
-    + InboundAction<EffectEmitAction<T>>
-    + InboundAction<EffectUnsubscribeAction<T>>
-{
-}
-impl<T: Expression, TAction> QueryInspectorAction<T> for TAction where
-    Self: Action
-        + InboundAction<EvaluateStartAction<T>>
-        + InboundAction<EvaluateStopAction>
-        + InboundAction<EvaluateResultAction<T>>
-        + InboundAction<EffectSubscribeAction<T>>
-        + InboundAction<EffectEmitAction<T>>
-        + InboundAction<EffectUnsubscribeAction<T>>
-{
-}
 
 pub struct QueryInspector<T: Expression> {
     _expression: PhantomData<T>,
@@ -232,51 +213,166 @@ fn serialize_json_list<T: Expression>(items: &impl ExpressionListType<T>) -> Jso
     )
 }
 
-impl<T: Expression, TAction> Actor<TAction> for QueryInspector<T>
-where
-    TAction: QueryInspectorAction<T>,
-{
-    type State = QueryInspectorState<T>;
-    fn init(&self) -> Self::State {
-        Default::default()
+dispatcher!({
+    pub enum QueryInspectorAction<T: Expression> {
+        Inbox(EvaluateStartAction<T>),
+        Inbox(EvaluateStopAction),
+        Inbox(EvaluateResultAction<T>),
+        Inbox(EffectSubscribeAction<T>),
+        Inbox(EffectUnsubscribeAction<T>),
+        Inbox(EffectEmitAction<T>),
     }
-    fn handle(
-        &self,
-        state: Self::State,
-        action: &TAction,
-        metadata: &MessageData,
-        context: &mut impl HandlerContext,
-    ) -> ActorTransition<Self::State, TAction> {
-        let mut state = state;
-        let actions = if let Some(action) = action.match_type() {
-            self.handle_evaluate_start(&mut state, action, metadata, context)
-        } else if let Some(action) = action.match_type() {
-            self.handle_evaluate_stop(&mut state, action, metadata, context)
-        } else if let Some(action) = action.match_type() {
-            self.handle_evaluate_result(&mut state, action, metadata, context)
-        } else if let Some(action) = action.match_type() {
-            self.handle_effect_subscribe(&mut state, action, metadata, context)
-        } else if let Some(action) = action.match_type() {
-            self.handle_effect_unsubscribe(&mut state, action, metadata, context)
-        } else if let Some(action) = action.match_type() {
-            self.handle_effect_emit(&mut state, action, metadata, context)
-        } else {
-            None
+
+    impl<T: Expression, TAction, TTask> Dispatcher<TAction, TTask> for QueryInspector<T>
+    where
+        TAction: Action,
+        TTask: TaskFactory<TAction, TTask>,
+    {
+        type State = QueryInspectorState<T>;
+        type Events<TInbox: TaskInbox<TAction>> = TInbox;
+        type Dispose = NoopDisposeCallback;
+
+        fn init<TInbox: TaskInbox<TAction>>(
+            &self,
+            inbox: TInbox,
+            context: &impl ActorInitContext,
+        ) -> (Self::State, Self::Events<TInbox>, Self::Dispose) {
+            (Default::default(), inbox, Default::default())
         }
-        .unwrap_or_default();
-        ActorTransition::new(state, actions)
+
+        fn accept(&self, _action: &EvaluateStartAction<T>) -> bool {
+            true
+        }
+        fn schedule(
+            &self,
+            _action: &EvaluateStartAction<T>,
+            _state: &Self::State,
+        ) -> Option<SchedulerMode> {
+            Some(SchedulerMode::Async)
+        }
+        fn handle(
+            &self,
+            state: &mut Self::State,
+            action: &EvaluateStartAction<T>,
+            metadata: &MessageData,
+            context: &mut impl HandlerContext,
+        ) -> Option<SchedulerTransition<TAction, TTask>> {
+            self.handle_evaluate_start(state, action, metadata, context)
+        }
+
+        fn accept(&self, _action: &EvaluateStopAction) -> bool {
+            true
+        }
+        fn schedule(
+            &self,
+            _action: &EvaluateStopAction,
+            _state: &Self::State,
+        ) -> Option<SchedulerMode> {
+            Some(SchedulerMode::Async)
+        }
+        fn handle(
+            &self,
+            state: &mut Self::State,
+            action: &EvaluateStopAction,
+            metadata: &MessageData,
+            context: &mut impl HandlerContext,
+        ) -> Option<SchedulerTransition<TAction, TTask>> {
+            self.handle_evaluate_stop(state, action, metadata, context)
+        }
+
+        fn accept(&self, _action: &EvaluateResultAction<T>) -> bool {
+            true
+        }
+        fn schedule(
+            &self,
+            _action: &EvaluateResultAction<T>,
+            _state: &Self::State,
+        ) -> Option<SchedulerMode> {
+            Some(SchedulerMode::Async)
+        }
+        fn handle(
+            &self,
+            state: &mut Self::State,
+            action: &EvaluateResultAction<T>,
+            metadata: &MessageData,
+            context: &mut impl HandlerContext,
+        ) -> Option<SchedulerTransition<TAction, TTask>> {
+            self.handle_evaluate_result(state, action, metadata, context)
+        }
+
+        fn accept(&self, _action: &EffectSubscribeAction<T>) -> bool {
+            true
+        }
+        fn schedule(
+            &self,
+            _action: &EffectSubscribeAction<T>,
+            _state: &Self::State,
+        ) -> Option<SchedulerMode> {
+            Some(SchedulerMode::Async)
+        }
+        fn handle(
+            &self,
+            state: &mut Self::State,
+            action: &EffectSubscribeAction<T>,
+            metadata: &MessageData,
+            context: &mut impl HandlerContext,
+        ) -> Option<SchedulerTransition<TAction, TTask>> {
+            self.handle_effect_subscribe(state, action, metadata, context)
+        }
+
+        fn accept(&self, _action: &EffectUnsubscribeAction<T>) -> bool {
+            true
+        }
+        fn schedule(
+            &self,
+            _action: &EffectUnsubscribeAction<T>,
+            _state: &Self::State,
+        ) -> Option<SchedulerMode> {
+            Some(SchedulerMode::Async)
+        }
+        fn handle(
+            &self,
+            state: &mut Self::State,
+            action: &EffectUnsubscribeAction<T>,
+            metadata: &MessageData,
+            context: &mut impl HandlerContext,
+        ) -> Option<SchedulerTransition<TAction, TTask>> {
+            self.handle_effect_unsubscribe(state, action, metadata, context)
+        }
+
+        fn accept(&self, _action: &EffectEmitAction<T>) -> bool {
+            true
+        }
+        fn schedule(
+            &self,
+            _action: &EffectEmitAction<T>,
+            _state: &Self::State,
+        ) -> Option<SchedulerMode> {
+            Some(SchedulerMode::Async)
+        }
+        fn handle(
+            &self,
+            state: &mut Self::State,
+            action: &EffectEmitAction<T>,
+            metadata: &MessageData,
+            context: &mut impl HandlerContext,
+        ) -> Option<SchedulerTransition<TAction, TTask>> {
+            self.handle_effect_emit(state, action, metadata, context)
+        }
     }
-}
+});
+
 impl<T: Expression> QueryInspector<T> {
-    fn handle_evaluate_start<TAction>(
+    fn handle_evaluate_start<TAction, TTask>(
         &self,
         state: &mut QueryInspectorState<T>,
         action: &EvaluateStartAction<T>,
         _metadata: &MessageData,
         _context: &mut impl HandlerContext,
-    ) -> Option<StateTransition<TAction>>
+    ) -> Option<SchedulerTransition<TAction, TTask>>
     where
         TAction: Action,
+        TTask: TaskFactory<TAction, TTask>,
     {
         let EvaluateStartAction {
             cache_id,
@@ -299,15 +395,16 @@ impl<T: Expression> QueryInspector<T> {
             }
         }
     }
-    fn handle_evaluate_stop<TAction>(
+    fn handle_evaluate_stop<TAction, TTask>(
         &self,
         state: &mut QueryInspectorState<T>,
         action: &EvaluateStopAction,
         _metadata: &MessageData,
         _context: &mut impl HandlerContext,
-    ) -> Option<StateTransition<TAction>>
+    ) -> Option<SchedulerTransition<TAction, TTask>>
     where
         TAction: Action,
+        TTask: TaskFactory<TAction, TTask>,
     {
         let EvaluateStopAction { cache_id } = action;
         match state.active_workers.entry(*cache_id) {
@@ -318,15 +415,16 @@ impl<T: Expression> QueryInspector<T> {
             Entry::Vacant(_) => None,
         }
     }
-    fn handle_evaluate_result<TAction>(
+    fn handle_evaluate_result<TAction, TTask>(
         &self,
         state: &mut QueryInspectorState<T>,
         action: &EvaluateResultAction<T>,
         _metadata: &MessageData,
         _context: &mut impl HandlerContext,
-    ) -> Option<StateTransition<TAction>>
+    ) -> Option<SchedulerTransition<TAction, TTask>>
     where
         TAction: Action,
+        TTask: TaskFactory<TAction, TTask>,
     {
         let EvaluateResultAction {
             cache_id,
@@ -337,15 +435,16 @@ impl<T: Expression> QueryInspector<T> {
         worker_state.latest_result.replace(result.clone());
         None
     }
-    fn handle_effect_subscribe<TAction>(
+    fn handle_effect_subscribe<TAction, TTask>(
         &self,
         state: &mut QueryInspectorState<T>,
         action: &EffectSubscribeAction<T>,
         _metadata: &MessageData,
         _context: &mut impl HandlerContext,
-    ) -> Option<StateTransition<TAction>>
+    ) -> Option<SchedulerTransition<TAction, TTask>>
     where
         TAction: Action,
+        TTask: TaskFactory<TAction, TTask>,
     {
         let EffectSubscribeAction {
             effect_type: _,
@@ -362,15 +461,16 @@ impl<T: Expression> QueryInspector<T> {
         }));
         None
     }
-    fn handle_effect_unsubscribe<TAction>(
+    fn handle_effect_unsubscribe<TAction, TTask>(
         &self,
         state: &mut QueryInspectorState<T>,
         action: &EffectUnsubscribeAction<T>,
         _metadata: &MessageData,
         _context: &mut impl HandlerContext,
-    ) -> Option<StateTransition<TAction>>
+    ) -> Option<SchedulerTransition<TAction, TTask>>
     where
         TAction: Action,
+        TTask: TaskFactory<TAction, TTask>,
     {
         let EffectUnsubscribeAction {
             effect_type: _,
@@ -381,15 +481,16 @@ impl<T: Expression> QueryInspector<T> {
         }
         None
     }
-    fn handle_effect_emit<TAction>(
+    fn handle_effect_emit<TAction, TTask>(
         &self,
         state: &mut QueryInspectorState<T>,
         action: &EffectEmitAction<T>,
         _metadata: &MessageData,
         _context: &mut impl HandlerContext,
-    ) -> Option<StateTransition<TAction>>
+    ) -> Option<SchedulerTransition<TAction, TTask>>
     where
         TAction: Action,
+        TTask: TaskFactory<TAction, TTask>,
     {
         let EffectEmitAction {
             effect_types: updates,

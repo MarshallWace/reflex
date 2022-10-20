@@ -3,9 +3,9 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use std::marker::PhantomData;
 
-use crate::{
-    Action, MessageData, MiddlewareContext, PostMiddleware, PostMiddlewareTransition,
-    PreMiddleware, PreMiddlewareTransition, StateOperation,
+use reflex_dispatcher::{
+    Action, MessageData, MiddlewareContext, PostMiddleware, PreMiddleware, SchedulerCommand,
+    SchedulerTransition, TaskFactory,
 };
 
 pub trait OperationRecorderFactory<TRecorder: OperationRecorder> {
@@ -14,8 +14,9 @@ pub trait OperationRecorderFactory<TRecorder: OperationRecorder> {
 
 pub trait OperationRecorder {
     type Action: Action;
-    fn record(&mut self, operations: &StateOperation<Self::Action>);
-    fn record_batch(&mut self, operations: &[StateOperation<Self::Action>]) {
+    type Task: TaskFactory<Self::Action, Self::Task>;
+    fn record(&mut self, operation: &SchedulerCommand<Self::Action, Self::Task>);
+    fn record_batch(&mut self, operations: &[SchedulerCommand<Self::Action, Self::Task>]) {
         for operation in operations {
             self.record(operation)
         }
@@ -58,12 +59,13 @@ where
     }
 }
 
-impl<TRecorderFactory, TRecorder, TAction> PreMiddleware<TAction>
+impl<TRecorderFactory, TRecorder, TAction, TTask> PreMiddleware<TAction, TTask>
     for SessionRecorder<TRecorderFactory, TRecorder, TAction>
 where
     TRecorderFactory: OperationRecorderFactory<TRecorder>,
-    TRecorder: OperationRecorder<Action = TAction>,
-    TAction: Action + Clone + Send + 'static,
+    TRecorder: OperationRecorder<Action = TAction, Task = TTask>,
+    TAction: Action,
+    TTask: TaskFactory<TAction, TTask>,
 {
     type State = SessionRecorderState<TRecorder>;
     fn init(&self) -> Self::State {
@@ -71,23 +73,23 @@ where
     }
     fn handle(
         &self,
-        state: Self::State,
-        operation: StateOperation<TAction>,
+        state: &mut Self::State,
+        operation: SchedulerCommand<TAction, TTask>,
         _metadata: &MessageData,
         _context: &MiddlewareContext,
-    ) -> PreMiddlewareTransition<Self::State, TAction> {
-        let mut state = state;
+    ) -> SchedulerCommand<TAction, TTask> {
         state.recorder.record(&operation);
-        PreMiddlewareTransition::new(state, operation)
+        operation
     }
 }
 
-impl<TRecorderFactory, TRecorder, TAction> PostMiddleware<TAction>
+impl<TRecorderFactory, TRecorder, TAction, TTask> PostMiddleware<TAction, TTask>
     for SessionRecorder<TRecorderFactory, TRecorder, TAction>
 where
     TRecorderFactory: OperationRecorderFactory<TRecorder>,
-    TRecorder: OperationRecorder<Action = TAction>,
+    TRecorder: OperationRecorder<Action = TAction, Task = TTask>,
     TAction: Action,
+    TTask: TaskFactory<TAction, TTask>,
 {
     type State = SessionRecorderState<TRecorder>;
     fn init(&self) -> Self::State {
@@ -95,13 +97,12 @@ where
     }
     fn handle(
         &self,
-        state: Self::State,
-        operations: Vec<StateOperation<TAction>>,
+        state: &mut Self::State,
+        operations: Vec<SchedulerCommand<TAction, TTask>>,
         _metadata: &MessageData,
         _context: &MiddlewareContext,
-    ) -> PostMiddlewareTransition<Self::State, TAction> {
-        let mut state = state;
+    ) -> Option<SchedulerTransition<TAction, TTask>> {
         state.recorder.record_batch(&operations);
-        PostMiddlewareTransition::new(state, operations)
+        None
     }
 }

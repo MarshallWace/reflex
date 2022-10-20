@@ -1,12 +1,12 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use bytes::Bytes;
 use http::{
     request::{Builder as RequestBuilder, Parts as RequestHead},
     response::{Builder as ResponseBuilder, Parts as ResponseHead},
     HeaderMap, HeaderValue, Method, Request, Response, Uri,
 };
+use reflex_handlers::utils::serialize::SerializedBytes;
 use serde::{Deserialize, Serialize};
 
 use crate::server::utils::{clone_http_request_wrapper, clone_http_response_wrapper};
@@ -14,11 +14,11 @@ use crate::server::utils::{clone_http_request_wrapper, clone_http_response_wrapp
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SerializedRequest {
     head: SerializedRequestHead,
-    body: SerializedBody,
+    body: SerializedBytes,
 }
 impl<'a, T> From<&'a Request<T>> for SerializedRequest
 where
-    &'a T: Into<SerializedBody>,
+    &'a T: Into<SerializedBytes>,
 {
     fn from(value: &'a Request<T>) -> Self {
         let (head, _) = clone_http_request_wrapper(value).into_parts();
@@ -30,7 +30,7 @@ where
 }
 impl<T> From<SerializedRequest> for Request<T>
 where
-    T: From<SerializedBody>,
+    T: From<SerializedBytes>,
 {
     fn from(value: SerializedRequest) -> Self {
         let SerializedRequest { head, body } = value;
@@ -41,11 +41,11 @@ where
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SerializedResponse {
     head: SerializedResponseHead,
-    body: SerializedBody,
+    body: SerializedBytes,
 }
 impl<'a, T> From<&'a Response<T>> for SerializedResponse
 where
-    &'a T: Into<SerializedBody>,
+    &'a T: Into<SerializedBytes>,
 {
     fn from(value: &'a Response<T>) -> Self {
         let (head, _) = clone_http_response_wrapper(value).into_parts();
@@ -57,7 +57,7 @@ where
 }
 impl<T> From<SerializedResponse> for Response<T>
 where
-    T: From<SerializedBody>,
+    T: From<SerializedBytes>,
 {
     fn from(value: SerializedResponse) -> Self {
         let SerializedResponse { head, body } = value;
@@ -137,29 +137,5 @@ impl From<SerializedResponseHead> for ResponseHead {
         }
         let (head, _) = response.body(()).unwrap().into_parts();
         head
-    }
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct SerializedBody(Vec<u8>);
-impl<'a> From<&'a Bytes> for SerializedBody {
-    fn from(value: &'a Bytes) -> Self {
-        Self(value.to_vec())
-    }
-}
-impl From<SerializedBody> for Bytes {
-    fn from(value: SerializedBody) -> Self {
-        let SerializedBody(inner) = value;
-        Self::from(inner)
-    }
-}
-impl<'a> From<&'a ()> for SerializedBody {
-    fn from(_: &'a ()) -> Self {
-        Self(Vec::new())
-    }
-}
-impl From<SerializedBody> for () {
-    fn from(_: SerializedBody) -> Self {
-        ()
     }
 }

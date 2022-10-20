@@ -7,12 +7,10 @@ use std::{
     iter::once,
     marker::PhantomData,
     str::FromStr,
-    sync::{Arc, Mutex},
 };
 
 use bytes::Bytes;
-use futures::{stream, FutureExt, StreamExt};
-use http::{header::HeaderName, HeaderValue, StatusCode};
+use http::{header::HeaderName, HeaderValue};
 use hyper::Body;
 use metrics::{
     decrement_gauge, describe_counter, describe_gauge, increment_counter, increment_gauge, Unit,
@@ -20,12 +18,13 @@ use metrics::{
 use reflex::core::{
     ConditionType, Expression, ExpressionFactory, ExpressionListType, HeapAllocator,
     RecordTermType, RefType, SignalType, StateToken, StringTermType, StringValue,
-    StructPrototypeType,
+    StructPrototypeType, Uuid,
 };
 use reflex_dispatcher::{
-    Action, Actor, ActorTransition, HandlerContext, InboundAction, MessageData, OperationStream,
-    OutboundAction, ProcessId, StateOperation, StateTransition,
+    Action, ActorInitContext, HandlerContext, MessageData, NoopDisposeCallback, ProcessId,
+    SchedulerCommand, SchedulerMode, SchedulerTransition, TaskFactory, TaskInbox,
 };
+use reflex_macros::dispatcher;
 use reflex_runtime::{
     action::effect::{
         EffectEmitAction, EffectSubscribeAction, EffectUnsubscribeAction, EffectUpdateBatch,
@@ -33,7 +32,11 @@ use reflex_runtime::{
     AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator,
 };
 
-use crate::utils::fetch::{fetch, FetchError, FetchRequest};
+use crate::{
+    action::fetch::{FetchHandlerConnectionErrorAction, FetchHandlerFetchCompleteAction},
+    task::fetch::{create_fetch_error_message, FetchHandlerTask, FetchHandlerTaskFactory},
+    utils::fetch::FetchRequest,
+};
 
 pub const EFFECT_TYPE_FETCH: &'static str = "reflex::fetch";
 
@@ -66,36 +69,22 @@ impl Default for FetchHandlerMetricNames {
     }
 }
 
-pub trait FetchHandlerAction<T: Expression>:
-    Action
-    + InboundAction<EffectSubscribeAction<T>>
-    + InboundAction<EffectUnsubscribeAction<T>>
-    + OutboundAction<EffectEmitAction<T>>
-{
-}
-impl<T: Expression, TAction> FetchHandlerAction<T> for TAction where
-    Self: Action
-        + InboundAction<EffectSubscribeAction<T>>
-        + InboundAction<EffectUnsubscribeAction<T>>
-        + OutboundAction<EffectEmitAction<T>>
-{
-}
-
 #[derive(Clone)]
-pub struct FetchHandler<T, TConnect, TFactory, TAllocator>
+pub struct FetchHandler<T, TFactory, TAllocator, TConnect>
 where
     T: AsyncExpression,
-    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
     TFactory: AsyncExpressionFactory<T>,
     TAllocator: AsyncHeapAllocator<T>,
+    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
 {
     client: hyper::Client<TConnect, Body>,
     factory: TFactory,
     allocator: TAllocator,
     metric_names: FetchHandlerMetricNames,
+    main_pid: ProcessId,
     _expression: PhantomData<T>,
 }
-impl<T, TConnect, TFactory, TAllocator> FetchHandler<T, TConnect, TFactory, TAllocator>
+impl<T, TFactory, TAllocator, TConnect> FetchHandler<T, TFactory, TAllocator, TConnect>
 where
     T: AsyncExpression,
     TFactory: AsyncExpressionFactory<T>,
@@ -107,12 +96,14 @@ where
         factory: TFactory,
         allocator: TAllocator,
         metric_names: FetchHandlerMetricNames,
+        main_pid: ProcessId,
     ) -> Self {
         Self {
             factory,
             allocator,
             client,
             metric_names: metric_names.init(),
+            main_pid,
             _expression: Default::default(),
         }
     }
@@ -121,61 +112,206 @@ where
 #[derive(Default)]
 pub struct FetchHandlerState {
     tasks: HashMap<StateToken, RequestState>,
+    operation_effect_mappings: HashMap<Uuid, StateToken>,
+}
+impl FetchHandlerState {
+    fn subscribe_fetch_task<TConnect>(
+        &mut self,
+        effect_id: StateToken,
+        request: FetchRequest,
+        client: &hyper::Client<TConnect, Body>,
+        metric_names: &FetchHandlerMetricNames,
+        context: &mut impl HandlerContext,
+    ) -> Option<(ProcessId, FetchHandlerTaskFactory<TConnect>)>
+    where
+        TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
+    {
+        let entry = match self.tasks.entry(effect_id) {
+            Entry::Vacant(entry) => Some(entry),
+            Entry::Occupied(_) => None,
+        }?;
+        let operation_id = Uuid::new_v4();
+        // TODO: Allow configurable Fetch effect metric labels
+        let metric_labels = [
+            ("method", request.method.clone()),
+            ("url", request.url.clone()),
+        ];
+        increment_counter!(
+            metric_names.fetch_effect_total_request_count,
+            &metric_labels
+        );
+        increment_gauge!(
+            metric_names.fetch_effect_active_request_count,
+            1.0,
+            &metric_labels
+        );
+        let (task_pid, task) = create_fetch_task(operation_id, client.clone(), request, context);
+        entry.insert(RequestState {
+            operation_id,
+            task_pid,
+            metric_labels,
+        });
+        self.operation_effect_mappings
+            .insert(operation_id, effect_id);
+        Some((task_pid, task))
+    }
+    fn unsubscribe_fetch_task(
+        &mut self,
+        effect_id: StateToken,
+        metric_names: &FetchHandlerMetricNames,
+    ) -> Option<ProcessId> {
+        let RequestState {
+            operation_id,
+            task_pid,
+            metric_labels,
+        } = self.tasks.remove(&effect_id)?;
+        decrement_gauge!(
+            metric_names.fetch_effect_active_request_count,
+            1.0,
+            &metric_labels
+        );
+        let _ = self.operation_effect_mappings.remove(&operation_id)?;
+        Some(task_pid)
+    }
 }
 
 struct RequestState {
+    operation_id: Uuid,
     task_pid: ProcessId,
-    metric_labels: Arc<Mutex<Option<[(&'static str, String); 2]>>>,
+    metric_labels: [(&'static str, String); 2],
 }
 
-impl<T, TConnect, TFactory, TAllocator, TAction> Actor<TAction>
-    for FetchHandler<T, TConnect, TFactory, TAllocator>
-where
-    T: AsyncExpression,
-    TFactory: AsyncExpressionFactory<T>,
-    TAllocator: AsyncHeapAllocator<T>,
-    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
-    TAction: Action + Send + 'static + FetchHandlerAction<T>,
-{
-    type State = FetchHandlerState;
-    fn init(&self) -> Self::State {
-        Default::default()
+dispatcher!({
+    pub enum FetchHandlerAction<T: Expression> {
+        Inbox(EffectSubscribeAction<T>),
+        Inbox(EffectUnsubscribeAction<T>),
+        Inbox(FetchHandlerFetchCompleteAction),
+        Inbox(FetchHandlerConnectionErrorAction),
+
+        Outbox(EffectEmitAction<T>),
     }
-    fn handle(
-        &self,
-        state: Self::State,
-        action: &TAction,
-        metadata: &MessageData,
-        context: &mut impl HandlerContext,
-    ) -> ActorTransition<Self::State, TAction> {
-        let mut state = state;
-        let actions = if let Some(action) = action.match_type() {
-            self.handle_effect_subscribe(&mut state, action, metadata, context)
-        } else if let Some(action) = action.match_type() {
-            self.handle_effect_unsubscribe(&mut state, action, metadata, context)
-        } else {
-            None
+
+    impl<T, TFactory, TAllocator, TConnect, TAction, TTask> Dispatcher<TAction, TTask>
+        for FetchHandler<T, TFactory, TAllocator, TConnect>
+    where
+        T: AsyncExpression,
+        TFactory: AsyncExpressionFactory<T>,
+        TAllocator: AsyncHeapAllocator<T>,
+        TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
+        TAction: Action,
+        TTask: TaskFactory<TAction, TTask> + FetchHandlerTask<TConnect>,
+    {
+        type State = FetchHandlerState;
+        type Events<TInbox: TaskInbox<TAction>> = TInbox;
+        type Dispose = NoopDisposeCallback;
+
+        fn init<TInbox: TaskInbox<TAction>>(
+            &self,
+            inbox: TInbox,
+            context: &impl ActorInitContext,
+        ) -> (Self::State, Self::Events<TInbox>, Self::Dispose) {
+            (Default::default(), inbox, Default::default())
         }
-        .unwrap_or_default();
-        ActorTransition::new(state, actions)
+
+        fn accept(&self, action: &EffectSubscribeAction<T>) -> bool {
+            action.effect_type.as_str() == EFFECT_TYPE_FETCH
+        }
+        fn schedule(
+            &self,
+            _action: &EffectSubscribeAction<T>,
+            _state: &Self::State,
+        ) -> Option<SchedulerMode> {
+            Some(SchedulerMode::Async)
+        }
+        fn handle(
+            &self,
+            state: &mut Self::State,
+            action: &EffectSubscribeAction<T>,
+            metadata: &MessageData,
+            context: &mut impl HandlerContext,
+        ) -> Option<SchedulerTransition<TAction, TTask>> {
+            self.handle_effect_subscribe(state, action, metadata, context)
+        }
+
+        fn accept(&self, action: &EffectUnsubscribeAction<T>) -> bool {
+            action.effect_type.as_str() == EFFECT_TYPE_FETCH
+        }
+        fn schedule(
+            &self,
+            _action: &EffectUnsubscribeAction<T>,
+            _state: &Self::State,
+        ) -> Option<SchedulerMode> {
+            Some(SchedulerMode::Async)
+        }
+        fn handle(
+            &self,
+            state: &mut Self::State,
+            action: &EffectUnsubscribeAction<T>,
+            metadata: &MessageData,
+            context: &mut impl HandlerContext,
+        ) -> Option<SchedulerTransition<TAction, TTask>> {
+            self.handle_effect_unsubscribe(state, action, metadata, context)
+        }
+
+        fn accept(&self, _action: &FetchHandlerFetchCompleteAction) -> bool {
+            true
+        }
+        fn schedule(
+            &self,
+            _action: &FetchHandlerFetchCompleteAction,
+            _state: &Self::State,
+        ) -> Option<SchedulerMode> {
+            Some(SchedulerMode::Async)
+        }
+        fn handle(
+            &self,
+            state: &mut Self::State,
+            action: &FetchHandlerFetchCompleteAction,
+            metadata: &MessageData,
+            context: &mut impl HandlerContext,
+        ) -> Option<SchedulerTransition<TAction, TTask>> {
+            self.handle_fetch_handler_fetch_complete(state, action, metadata, context)
+        }
+
+        fn accept(&self, _action: &FetchHandlerConnectionErrorAction) -> bool {
+            true
+        }
+        fn schedule(
+            &self,
+            _action: &FetchHandlerConnectionErrorAction,
+            _state: &Self::State,
+        ) -> Option<SchedulerMode> {
+            Some(SchedulerMode::Async)
+        }
+        fn handle(
+            &self,
+            state: &mut Self::State,
+            action: &FetchHandlerConnectionErrorAction,
+            metadata: &MessageData,
+            context: &mut impl HandlerContext,
+        ) -> Option<SchedulerTransition<TAction, TTask>> {
+            self.handle_fetch_handler_connection_error(state, action, metadata, context)
+        }
     }
-}
-impl<T, TConnect, TFactory, TAllocator> FetchHandler<T, TConnect, TFactory, TAllocator>
+});
+
+impl<T, TFactory, TAllocator, TConnect> FetchHandler<T, TFactory, TAllocator, TConnect>
 where
     T: AsyncExpression,
     TFactory: AsyncExpressionFactory<T>,
     TAllocator: AsyncHeapAllocator<T>,
     TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
 {
-    fn handle_effect_subscribe<TAction>(
+    fn handle_effect_subscribe<TAction, TTask>(
         &self,
         state: &mut FetchHandlerState,
         action: &EffectSubscribeAction<T>,
         _metadata: &MessageData,
         context: &mut impl HandlerContext,
-    ) -> Option<StateTransition<TAction>>
+    ) -> Option<SchedulerTransition<TAction, TTask>>
     where
-        TAction: Action + Send + 'static + OutboundAction<EffectEmitAction<T>>,
+        TAction: Action + From<EffectEmitAction<T>>,
+        TTask: TaskFactory<TAction, TTask> + From<FetchHandlerTaskFactory<TConnect>>,
     {
         let EffectSubscribeAction {
             effect_type,
@@ -184,56 +320,27 @@ where
         if effect_type.as_str() != EFFECT_TYPE_FETCH {
             return None;
         }
-        let current_pid = context.pid();
         let (initial_values, tasks): (Vec<_>, Vec<_>) = effects
             .iter()
             .filter_map(|effect| {
                 let state_token = effect.id();
                 match parse_fetch_effect_args(effect, &self.factory) {
                     Ok(request) => {
-                        // TODO: Allow configurable Fetch effect metric labels
-                        let metric_labels = [
-                            ("method", request.method.clone()),
-                            ("url", request.url.clone()),
-                        ];
-                        increment_counter!(
-                            self.metric_names.fetch_effect_total_request_count,
-                            &metric_labels
-                        );
-                        increment_gauge!(
-                            self.metric_names.fetch_effect_active_request_count,
-                            1.0,
-                            &metric_labels
-                        );
-                        if let Entry::Vacant(entry) = state.tasks.entry(state_token) {
-                            match create_fetch_task(
-                                self.client.clone(),
-                                state_token,
-                                &request,
-                                &self.factory,
-                                &self.allocator,
-                                context,
-                                self.metric_names,
-                                metric_labels,
-                            ) {
-                                Err(err) => Some(((state_token, err), None)),
-                                Ok((request_state, task)) => {
-                                    let task_pid = request_state.task_pid;
-                                    entry.insert(request_state);
-                                    Some((
-                                        (
-                                            state_token,
-                                            create_pending_expression(
-                                                &self.factory,
-                                                &self.allocator,
-                                            ),
-                                        ),
-                                        Some(StateOperation::Task(task_pid, task)),
-                                    ))
-                                }
-                            }
-                        } else {
-                            None
+                        match state.subscribe_fetch_task(
+                            effect.id(),
+                            request,
+                            &self.client,
+                            &self.metric_names,
+                            context,
+                        ) {
+                            None => None,
+                            Some((task_pid, task)) => Some((
+                                (
+                                    state_token,
+                                    create_pending_expression(&self.factory, &self.allocator),
+                                ),
+                                Some(SchedulerCommand::Task(task_pid, task.into())),
+                            )),
                         }
                     }
                     Err(err) => Some((
@@ -249,8 +356,8 @@ where
         let initial_values_action = if initial_values.is_empty() {
             None
         } else {
-            Some(StateOperation::Send(
-                current_pid,
+            Some(SchedulerCommand::Send(
+                self.main_pid,
                 EffectEmitAction {
                     effect_types: vec![EffectUpdateBatch {
                         effect_type: EFFECT_TYPE_FETCH.into(),
@@ -260,21 +367,22 @@ where
                 .into(),
             ))
         };
-        Some(StateTransition::new(
+        Some(SchedulerTransition::new(
             initial_values_action
                 .into_iter()
                 .chain(tasks.into_iter().flatten()),
         ))
     }
-    fn handle_effect_unsubscribe<TAction>(
+    fn handle_effect_unsubscribe<TAction, TTask>(
         &self,
         state: &mut FetchHandlerState,
         action: &EffectUnsubscribeAction<T>,
         _metadata: &MessageData,
         _context: &mut impl HandlerContext,
-    ) -> Option<StateTransition<TAction>>
+    ) -> Option<SchedulerTransition<TAction, TTask>>
     where
         TAction: Action,
+        TTask: TaskFactory<TAction, TTask>,
     {
         let EffectUnsubscribeAction {
             effect_type,
@@ -283,114 +391,110 @@ where
         if effect_type.as_str() != EFFECT_TYPE_FETCH {
             return None;
         }
-        Some(StateTransition::new(effects.iter().filter_map(|effect| {
-            if let Entry::Occupied(entry) = state.tasks.entry(effect.id()) {
-                let RequestState {
-                    task_pid,
-                    metric_labels,
-                } = entry.remove();
-                if let Some(metric_labels) = metric_labels
-                    .lock()
-                    .ok()
-                    .and_then(|mut metric_labels| metric_labels.take())
-                {
-                    decrement_gauge!(
-                        self.metric_names.fetch_effect_active_request_count,
-                        1.0,
-                        &metric_labels
-                    );
-                }
-                Some(StateOperation::Kill(task_pid))
-            } else {
-                None
-            }
-        })))
+        let active_pids = effects
+            .iter()
+            .filter_map(|effect| state.unsubscribe_fetch_task(effect.id(), &self.metric_names));
+        Some(SchedulerTransition::new(
+            active_pids.map(SchedulerCommand::Kill),
+        ))
     }
-}
-
-fn create_fetch_task<T: Expression, TConnect, TAction>(
-    client: hyper::Client<TConnect, Body>,
-    state_token: StateToken,
-    request: &FetchRequest,
-    factory: &(impl ExpressionFactory<T> + Send + Clone + 'static),
-    allocator: &(impl HeapAllocator<T> + Send + Clone + 'static),
-    context: &mut impl HandlerContext,
-    metric_names: FetchHandlerMetricNames,
-    metric_labels: [(&'static str, String); 2],
-) -> Result<(RequestState, OperationStream<TAction>), T>
-where
-    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
-    TAction: Action + Send + 'static + OutboundAction<EffectEmitAction<T>>,
-{
-    let request = fetch(client, request)
-        .map_err(|err| create_fetch_error_expression(err, factory, allocator))?;
-    let task_pid = context.generate_pid();
-    let shared_metric_labels = Arc::new(Mutex::new(Some(metric_labels)));
-    let stream = request
-        .map({
-            let factory = factory.clone();
-            let allocator = allocator.clone();
-            let main_pid = context.pid();
-            let metric_labels = shared_metric_labels.clone();
-            move |result| {
-                if let Some(metric_labels) = metric_labels
-                    .lock()
-                    .ok()
-                    .and_then(|mut metric_labels| metric_labels.take())
-                {
-                    decrement_gauge!(
-                        metric_names.fetch_effect_active_request_count,
-                        1.0,
-                        &metric_labels
-                    );
-                }
-                let value = parse_fetch_result(result, &factory, &allocator);
-                StateOperation::Send(
-                    main_pid,
-                    EffectEmitAction {
-                        effect_types: vec![EffectUpdateBatch {
-                            effect_type: EFFECT_TYPE_FETCH.into(),
-                            updates: vec![(state_token, value)],
-                        }],
-                    }
-                    .into(),
-                )
-            }
-        })
-        .into_stream()
-        .chain(stream::iter(once(StateOperation::Kill(task_pid))));
-    Ok((
-        RequestState {
-            task_pid,
-            metric_labels: shared_metric_labels,
-        },
-        OperationStream::new(Box::pin(stream)),
-    ))
-}
-
-fn parse_fetch_result<T: Expression>(
-    result: Result<(StatusCode, Bytes), FetchError>,
-    factory: &impl ExpressionFactory<T>,
-    allocator: &impl HeapAllocator<T>,
-) -> T {
-    match result {
-        Ok((status, body)) => match String::from_utf8(body.into_iter().collect()) {
+    fn handle_fetch_handler_fetch_complete<TAction, TTask>(
+        &self,
+        state: &mut FetchHandlerState,
+        action: &FetchHandlerFetchCompleteAction,
+        _metadata: &MessageData,
+        _context: &mut impl HandlerContext,
+    ) -> Option<SchedulerTransition<TAction, TTask>>
+    where
+        TAction: Action + From<EffectEmitAction<T>>,
+        TTask: TaskFactory<TAction, TTask>,
+    {
+        let FetchHandlerFetchCompleteAction {
+            operation_id,
+            status_code,
+            body,
+            ..
+        } = action;
+        let effect_id = state.operation_effect_mappings.get(operation_id).cloned()?;
+        let task_pid = state.unsubscribe_fetch_task(effect_id, &self.metric_names)?;
+        let factory = &self.factory;
+        let allocator = &self.allocator;
+        let result = match String::from_utf8(body.into_iter().copied().collect()) {
             Ok(body) => factory.create_list_term(allocator.create_pair(
-                factory.create_int_term(status.as_u16().into()),
+                factory.create_int_term(status_code.as_u16().into()),
                 factory.create_string_term(allocator.create_string(body)),
             )),
-            Err(err) => create_fetch_error_expression(err, factory, allocator),
-        },
-        Err(err) => create_fetch_error_expression(err, factory, allocator),
+            Err(err) => {
+                create_error_expression(create_fetch_error_message(err), factory, allocator)
+            }
+        };
+        Some(SchedulerTransition::new([
+            SchedulerCommand::Kill(task_pid),
+            SchedulerCommand::Send(
+                self.main_pid,
+                EffectEmitAction {
+                    effect_types: vec![EffectUpdateBatch {
+                        effect_type: EFFECT_TYPE_FETCH.into(),
+                        updates: vec![(effect_id, result)],
+                    }],
+                }
+                .into(),
+            ),
+        ]))
+    }
+    fn handle_fetch_handler_connection_error<TAction, TTask>(
+        &self,
+        state: &mut FetchHandlerState,
+        action: &FetchHandlerConnectionErrorAction,
+        _metadata: &MessageData,
+        _context: &mut impl HandlerContext,
+    ) -> Option<SchedulerTransition<TAction, TTask>>
+    where
+        TAction: Action + From<EffectEmitAction<T>>,
+        TTask: TaskFactory<TAction, TTask>,
+    {
+        let FetchHandlerConnectionErrorAction {
+            operation_id,
+            message,
+            ..
+        } = action;
+        let effect_id = state.operation_effect_mappings.get(operation_id).cloned()?;
+        let task_pid = state.unsubscribe_fetch_task(effect_id, &self.metric_names)?;
+        let result = create_error_expression(message.clone(), &self.factory, &self.allocator);
+        Some(SchedulerTransition::new([
+            SchedulerCommand::Kill(task_pid),
+            SchedulerCommand::Send(
+                self.main_pid,
+                EffectEmitAction {
+                    effect_types: vec![EffectUpdateBatch {
+                        effect_type: EFFECT_TYPE_FETCH.into(),
+                        updates: vec![(effect_id, result)],
+                    }],
+                }
+                .into(),
+            ),
+        ]))
     }
 }
 
-fn create_fetch_error_expression<T: Expression>(
-    err: impl std::fmt::Display,
-    factory: &impl ExpressionFactory<T>,
-    allocator: &impl HeapAllocator<T>,
-) -> T {
-    create_error_expression(format!("Fetch error: {}", err), factory, allocator)
+fn create_fetch_task<TConnect>(
+    operation_id: Uuid,
+    client: hyper::Client<TConnect, Body>,
+    request: FetchRequest,
+    context: &mut impl HandlerContext,
+) -> (ProcessId, FetchHandlerTaskFactory<TConnect>)
+where
+    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
+{
+    let task_pid = context.generate_pid();
+    let current_pid = context.pid();
+    let task = FetchHandlerTaskFactory {
+        operation_id,
+        client,
+        request,
+        caller_pid: current_pid,
+    };
+    (task_pid, task)
 }
 
 fn parse_fetch_effect_args<T: Expression>(

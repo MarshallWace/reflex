@@ -15,7 +15,7 @@ bytes = "1.1.0"
 chrono = "0.4"
 nom = "7.1.0"
 prost = "0.10"
-prost-reflect = { version = "0.8.1", features = ["reflect-well-known-types"] }
+prost-reflect = { version = "0.8.1", features = ["reflect-well-known-types", "serde"] }
 
 [build-dependencies]
 prost-build = "0.10.4"

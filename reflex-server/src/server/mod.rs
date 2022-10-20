@@ -3,12 +3,12 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 pub mod action;
 pub mod actor;
+pub mod task;
+pub mod utils;
 
 pub(crate) mod playground;
-pub(crate) mod utils;
 
 pub use self::actor::{
     graphql_server::*, http_graphql_server::*, opentelemetry::*, query_inspector_server::*,
-    server::*, session_playback_server::*, telemetry::*, websocket_graphql_server::*,
+    session_playback_server::*, telemetry::*, websocket_graphql_server::*,
 };
-pub use self::utils::*;

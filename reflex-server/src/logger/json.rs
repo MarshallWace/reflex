@@ -5,7 +5,8 @@ use std::marker::PhantomData;
 
 use chrono::{DateTime, Duration, SecondsFormat, Utc};
 use reflex_dispatcher::{
-    Action, MessageData, MiddlewareContext, ProcessId, SerializableAction, StateOperation,
+    Action, MessageData, MiddlewareContext, ProcessId, SchedulerCommand, SerializableAction,
+    TaskFactory,
 };
 use reflex_json::{JsonMap, JsonValue};
 
@@ -13,73 +14,115 @@ use crate::{logger::ActionLogger, utils::sanitize::sanitize_json_value};
 
 pub use chrono;
 
-pub trait JsonLoggerAction: Action + SerializableAction {}
-impl<TAction: Action + SerializableAction> JsonLoggerAction for TAction {}
+pub trait JsonLoggerAction: SerializableAction {}
+impl<_Self> JsonLoggerAction for _Self where Self: SerializableAction {}
 
-pub struct JsonActionLogger<TOut: std::io::Write, TAction: JsonLoggerAction> {
+pub struct JsonActionLogger<TOut, TAction, TTask>
+where
+    TOut: std::io::Write,
+    TAction: Action + JsonLoggerAction,
+    TTask: TaskFactory<TAction, TTask>,
+{
     startup_time: StartupTime,
     output: TOut,
     _action: PhantomData<TAction>,
+    _task: PhantomData<TTask>,
 }
-impl<TOut: std::io::Write, TAction: JsonLoggerAction> JsonActionLogger<TOut, TAction> {
+impl<TOut, TAction, TTask> JsonActionLogger<TOut, TAction, TTask>
+where
+    TOut: std::io::Write,
+    TAction: Action + JsonLoggerAction,
+    TTask: TaskFactory<TAction, TTask>,
+{
     pub fn new(output: TOut) -> Self {
         Self {
             output,
             startup_time: StartupTime::default(),
-            _action: Default::default(),
+            _action: PhantomData,
+            _task: PhantomData,
         }
     }
 }
-impl<TAction: JsonLoggerAction> JsonActionLogger<std::io::Stdout, TAction> {
+impl<TAction, TTask> JsonActionLogger<std::io::Stdout, TAction, TTask>
+where
+    TAction: Action + JsonLoggerAction,
+    TTask: TaskFactory<TAction, TTask>,
+{
     pub fn stdout() -> Self {
         Default::default()
     }
 }
-impl<TAction: JsonLoggerAction> Default for JsonActionLogger<std::io::Stdout, TAction> {
+impl<TAction, TTask> Default for JsonActionLogger<std::io::Stdout, TAction, TTask>
+where
+    TAction: Action + JsonLoggerAction,
+    TTask: TaskFactory<TAction, TTask>,
+{
     fn default() -> Self {
         Self::new(std::io::stdout())
     }
 }
-impl<TAction: JsonLoggerAction> Clone for JsonActionLogger<std::io::Stdout, TAction> {
+impl<TAction, TTask> Clone for JsonActionLogger<std::io::Stdout, TAction, TTask>
+where
+    TAction: Action + JsonLoggerAction,
+    TTask: TaskFactory<TAction, TTask>,
+{
     fn clone(&self) -> Self {
         Self {
             startup_time: self.startup_time,
             output: std::io::stdout(),
-            _action: Default::default(),
+            _action: PhantomData,
+            _task: PhantomData,
         }
     }
 }
-impl<TAction: JsonLoggerAction> JsonActionLogger<std::io::Stderr, TAction> {
+impl<TAction, TTask> JsonActionLogger<std::io::Stderr, TAction, TTask>
+where
+    TAction: Action + JsonLoggerAction,
+    TTask: TaskFactory<TAction, TTask>,
+{
     pub fn stderr() -> Self {
         Default::default()
     }
 }
-impl<TAction: JsonLoggerAction> Default for JsonActionLogger<std::io::Stderr, TAction> {
+impl<TAction, TTask> Default for JsonActionLogger<std::io::Stderr, TAction, TTask>
+where
+    TAction: Action + JsonLoggerAction,
+    TTask: TaskFactory<TAction, TTask>,
+{
     fn default() -> Self {
         Self::new(std::io::stderr())
     }
 }
-impl<TAction: JsonLoggerAction> Clone for JsonActionLogger<std::io::Stderr, TAction> {
+impl<TAction, TTask> Clone for JsonActionLogger<std::io::Stderr, TAction, TTask>
+where
+    TAction: Action + JsonLoggerAction,
+    TTask: TaskFactory<TAction, TTask>,
+{
     fn clone(&self) -> Self {
         Self {
             startup_time: self.startup_time,
             output: std::io::stderr(),
-            _action: Default::default(),
+            _action: PhantomData,
+            _task: PhantomData,
         }
     }
 }
-impl<TOut: std::io::Write, TAction: JsonLoggerAction> ActionLogger
-    for JsonActionLogger<TOut, TAction>
+impl<TOut, TAction, TTask> ActionLogger for JsonActionLogger<TOut, TAction, TTask>
+where
+    TOut: std::io::Write,
+    TAction: Action + JsonLoggerAction,
+    TTask: TaskFactory<TAction, TTask>,
 {
     type Action = TAction;
+    type Task = TTask;
     fn log(
         &mut self,
-        action: &StateOperation<Self::Action>,
+        action: &SchedulerCommand<Self::Action, Self::Task>,
         metadata: Option<&MessageData>,
         context: Option<&MiddlewareContext>,
     ) {
         let serialized_message = match action {
-            StateOperation::Send(pid, action) => Some(serialize_action_operation(
+            SchedulerCommand::Send(pid, action) => Some(serialize_action_operation(
                 action,
                 *pid,
                 metadata,
@@ -94,13 +137,16 @@ impl<TOut: std::io::Write, TAction: JsonLoggerAction> ActionLogger
     }
 }
 
-fn serialize_action_operation<TAction: JsonLoggerAction>(
+fn serialize_action_operation<TAction>(
     action: &TAction,
     pid: ProcessId,
     metadata: Option<&MessageData>,
     context: Option<&MiddlewareContext>,
     startup_time: &StartupTime,
-) -> JsonValue {
+) -> JsonValue
+where
+    TAction: Action + JsonLoggerAction,
+{
     JsonValue::Object(JsonMap::from_iter([
         (String::from("pid"), JsonValue::from(usize::from(pid))),
         (

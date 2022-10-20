@@ -4,13 +4,12 @@
 use std::str::FromStr;
 
 use bytes::Bytes;
-use futures::Future;
 use http::{
     header::HeaderName, method::InvalidMethod, uri::InvalidUri, HeaderValue, Method, StatusCode,
 };
 use hyper::{Body, Request, Uri};
 
-#[derive(Eq, PartialEq, Hash, Debug)]
+#[derive(Eq, PartialEq, Clone, Hash, Debug)]
 pub struct FetchRequest {
     pub url: String,
     pub method: String,
@@ -51,13 +50,7 @@ impl std::fmt::Display for FetchError {
     }
 }
 
-pub fn fetch<T>(
-    client: hyper::Client<T, hyper::Body>,
-    request: &FetchRequest,
-) -> Result<impl Future<Output = Result<(StatusCode, Bytes), FetchError>>, FetchError>
-where
-    T: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
-{
+pub fn parse_fetch_request(request: &FetchRequest) -> Result<Request<Body>, FetchError> {
     let url = request
         .url
         .parse::<Uri>()
@@ -72,18 +65,25 @@ where
             http_request.header(key.clone(), value.clone())
         });
     let body = Body::from(request.body.clone().unwrap_or(Bytes::new()));
-    let http_request = http_request
+    http_request
         .body(body)
-        .map_err(FetchError::InvalidRequestBody)?;
-    Ok(async move {
-        let result = client
-            .request(http_request)
-            .await
-            .map_err(FetchError::NetworkError)?;
-        let status = result.status();
-        let response = hyper::body::to_bytes(result.into_body())
-            .await
-            .map_err(FetchError::InvalidResponseBody)?;
-        Ok((status, response))
-    })
+        .map_err(FetchError::InvalidRequestBody)
+}
+
+pub async fn fetch<T>(
+    client: hyper::Client<T, hyper::Body>,
+    request: http::Request<Body>,
+) -> Result<(StatusCode, Bytes), FetchError>
+where
+    T: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
+{
+    let result = client
+        .request(request)
+        .await
+        .map_err(FetchError::NetworkError)?;
+    let status = result.status();
+    let response = hyper::body::to_bytes(result.into_body())
+        .await
+        .map_err(FetchError::InvalidResponseBody)?;
+    Ok((status, response))
 }

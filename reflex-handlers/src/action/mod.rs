@@ -3,8 +3,5 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 pub mod fetch;
 pub mod graphql;
-pub mod loader;
-pub mod scan;
 pub mod timeout;
 pub mod timestamp;
-pub mod variable;

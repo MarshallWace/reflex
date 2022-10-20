@@ -18,9 +18,10 @@ use reflex::{
     hash::HashId,
 };
 use reflex_dispatcher::{
-    Action, Actor, ActorTransition, HandlerContext, InboundAction, MessageData, OutboundAction,
-    StateOperation, StateTransition,
+    Action, ActorInitContext, HandlerContext, MessageData, NoopDisposeCallback, ProcessId,
+    SchedulerCommand, SchedulerMode, SchedulerTransition, TaskFactory, TaskInbox,
 };
+use reflex_macros::dispatcher;
 use reflex_runtime::{
     action::effect::{
         EffectEmitAction, EffectSubscribeAction, EffectUnsubscribeAction, EffectUpdateBatch,
@@ -55,27 +56,6 @@ impl Default for LoaderHandlerMetricNames {
             loader_effect_entity_count: "loader_effect_entity_count",
         }
     }
-}
-
-pub trait LoaderHandlerAction<T: Expression>:
-    Action
-    + InboundAction<EffectSubscribeAction<T>>
-    + InboundAction<EffectEmitAction<T>>
-    + InboundAction<EffectUnsubscribeAction<T>>
-    + OutboundAction<EffectSubscribeAction<T>>
-    + OutboundAction<EffectUnsubscribeAction<T>>
-    + OutboundAction<EffectEmitAction<T>>
-{
-}
-impl<T: Expression, TAction> LoaderHandlerAction<T> for TAction where
-    Self: Action
-        + InboundAction<EffectSubscribeAction<T>>
-        + InboundAction<EffectEmitAction<T>>
-        + InboundAction<EffectUnsubscribeAction<T>>
-        + OutboundAction<EffectSubscribeAction<T>>
-        + OutboundAction<EffectUnsubscribeAction<T>>
-        + OutboundAction<EffectEmitAction<T>>
-{
 }
 
 #[derive(PartialEq, Eq, Clone, Copy, Hash)]
@@ -114,6 +94,7 @@ where
     factory: TFactory,
     allocator: TAllocator,
     metric_names: LoaderHandlerMetricNames,
+    main_pid: ProcessId,
     _expression: PhantomData<T>,
 }
 impl<T, TFactory, TAllocator> LoaderHandler<T, TFactory, TAllocator>
@@ -126,11 +107,13 @@ where
         factory: TFactory,
         allocator: TAllocator,
         metric_names: LoaderHandlerMetricNames,
+        main_pid: ProcessId,
     ) -> Self {
         Self {
             factory,
             allocator,
             metric_names: metric_names.init(),
+            main_pid,
             _expression: Default::default(),
         }
     }
@@ -345,56 +328,133 @@ fn create_load_batch_effect<T: Expression>(
     )
 }
 
-impl<T, TFactory, TAllocator, TAction> Actor<TAction> for LoaderHandler<T, TFactory, TAllocator>
-where
-    T: AsyncExpression + Applicable<T>,
-    TFactory: AsyncExpressionFactory<T>,
-    TAllocator: AsyncHeapAllocator<T>,
-    TAction: LoaderHandlerAction<T> + 'static,
-{
-    type State = LoaderHandlerState<T>;
-    fn init(&self) -> Self::State {
-        Default::default()
+dispatcher!({
+    pub enum LoaderHandlerAction<T: Expression> {
+        Inbox(EffectSubscribeAction<T>),
+        Inbox(EffectUnsubscribeAction<T>),
+        Inbox(EffectEmitAction<T>),
+
+        Outbox(EffectSubscribeAction<T>),
+        Outbox(EffectUnsubscribeAction<T>),
+        Outbox(EffectEmitAction<T>),
     }
-    fn handle(
-        &self,
-        state: Self::State,
-        action: &TAction,
-        metadata: &MessageData,
-        context: &mut impl HandlerContext,
-    ) -> ActorTransition<Self::State, TAction> {
-        let mut state = state;
-        let actions = if let Some(action) = action.match_type() {
-            self.handle_effect_subscribe(&mut state, action, metadata, context)
-        } else if let Some(action) = action.match_type() {
-            self.handle_effect_unsubscribe(&mut state, action, metadata, context)
-        } else if let Some(action) = action.match_type() {
-            self.handle_effect_emit(&mut state, action, metadata, context)
-        } else {
-            None
+
+    impl<T, TFactory, TAllocator, TAction, TTask> Dispatcher<TAction, TTask>
+        for LoaderHandler<T, TFactory, TAllocator>
+    where
+        T: AsyncExpression + Applicable<T>,
+        TFactory: AsyncExpressionFactory<T>,
+        TAllocator: AsyncHeapAllocator<T>,
+        TAction: Action,
+        TTask: TaskFactory<TAction, TTask>,
+    {
+        type State = LoaderHandlerState<T>;
+        type Events<TInbox: TaskInbox<TAction>> = TInbox;
+        type Dispose = NoopDisposeCallback;
+
+        fn init<TInbox: TaskInbox<TAction>>(
+            &self,
+            inbox: TInbox,
+            context: &impl ActorInitContext,
+        ) -> (Self::State, Self::Events<TInbox>, Self::Dispose) {
+            (Default::default(), inbox, Default::default())
         }
-        .unwrap_or_default();
-        ActorTransition::new(state, actions)
+
+        fn accept(&self, action: &EffectSubscribeAction<T>) -> bool {
+            action.effect_type.as_str() == EFFECT_TYPE_LOADER
+        }
+        fn schedule(
+            &self,
+            _action: &EffectSubscribeAction<T>,
+            _state: &Self::State,
+        ) -> Option<SchedulerMode> {
+            Some(SchedulerMode::Async)
+        }
+        fn handle(
+            &self,
+            state: &mut Self::State,
+            action: &EffectSubscribeAction<T>,
+            metadata: &MessageData,
+            context: &mut impl HandlerContext,
+        ) -> Option<SchedulerTransition<TAction, TTask>> {
+            self.handle_effect_subscribe(state, action, metadata, context)
+        }
+
+        fn accept(&self, action: &EffectUnsubscribeAction<T>) -> bool {
+            action.effect_type.as_str() == EFFECT_TYPE_LOADER
+        }
+        fn schedule(
+            &self,
+            _action: &EffectUnsubscribeAction<T>,
+            _state: &Self::State,
+        ) -> Option<SchedulerMode> {
+            Some(SchedulerMode::Async)
+        }
+        fn handle(
+            &self,
+            state: &mut Self::State,
+            action: &EffectUnsubscribeAction<T>,
+            metadata: &MessageData,
+            context: &mut impl HandlerContext,
+        ) -> Option<SchedulerTransition<TAction, TTask>> {
+            self.handle_effect_unsubscribe(state, action, metadata, context)
+        }
+
+        fn accept(&self, action: &EffectEmitAction<T>) -> bool {
+            action
+                .effect_types
+                .iter()
+                .any(|batch| &batch.effect_type == EFFECT_TYPE_EVALUATE)
+        }
+        fn schedule(
+            &self,
+            action: &EffectEmitAction<T>,
+            state: &Self::State,
+        ) -> Option<SchedulerMode> {
+            if state.loaders.is_empty() {
+                return None;
+            }
+            let has_relevant_updates = action
+                .effect_types
+                .iter()
+                .filter(|batch| &batch.effect_type == EFFECT_TYPE_EVALUATE)
+                .flat_map(|batch| batch.updates.iter())
+                .any(|(state_token, _update)| {
+                    state.loader_effect_mappings.contains_key(state_token)
+                });
+            if !has_relevant_updates {
+                return None;
+            }
+            Some(SchedulerMode::Async)
+        }
+        fn handle(
+            &self,
+            state: &mut Self::State,
+            action: &EffectEmitAction<T>,
+            metadata: &MessageData,
+            context: &mut impl HandlerContext,
+        ) -> Option<SchedulerTransition<TAction, TTask>> {
+            self.handle_effect_emit(state, action, metadata, context)
+        }
     }
-}
+});
+
 impl<T, TFactory, TAllocator> LoaderHandler<T, TFactory, TAllocator>
 where
     T: AsyncExpression + Applicable<T>,
     TFactory: AsyncExpressionFactory<T>,
     TAllocator: AsyncHeapAllocator<T>,
 {
-    fn handle_effect_subscribe<TAction>(
+    fn handle_effect_subscribe<TAction, TTask>(
         &self,
         state: &mut LoaderHandlerState<T>,
         action: &EffectSubscribeAction<T>,
         _metadata: &MessageData,
-        context: &mut impl HandlerContext,
-    ) -> Option<StateTransition<TAction>>
+        _context: &mut impl HandlerContext,
+    ) -> Option<SchedulerTransition<TAction, TTask>>
     where
-        TAction: Action
-            + 'static
-            + OutboundAction<EffectSubscribeAction<T>>
-            + OutboundAction<EffectEmitAction<T>>,
+        TAction: Action + From<EffectSubscribeAction<T>> + From<EffectEmitAction<T>>,
+        TTask: TaskFactory<TAction, TTask>,
     {
         let EffectSubscribeAction {
             effect_type,
@@ -403,7 +463,6 @@ where
         if effect_type.as_str() != EFFECT_TYPE_LOADER {
             return None;
         }
-        let current_pid = context.pid();
         let (initial_values, effects_by_loader) = effects.iter().fold(
             (
                 Vec::<(StateToken, T)>::with_capacity(effects.len()),
@@ -458,8 +517,8 @@ where
         let initial_values_action = if initial_values.is_empty() {
             None
         } else {
-            Some(StateOperation::Send(
-                current_pid,
+            Some(SchedulerCommand::Send(
+                self.main_pid,
                 EffectEmitAction {
                     effect_types: vec![EffectUpdateBatch {
                         effect_type: EFFECT_TYPE_LOADER.into(),
@@ -472,8 +531,8 @@ where
         let load_action = if load_effects.is_empty() {
             None
         } else {
-            Some(StateOperation::Send(
-                current_pid,
+            Some(SchedulerCommand::Send(
+                self.main_pid,
                 EffectSubscribeAction {
                     effect_type: EFFECT_TYPE_EVALUATE.into(),
                     effects: load_effects,
@@ -481,19 +540,20 @@ where
                 .into(),
             ))
         };
-        Some(StateTransition::new(
+        Some(SchedulerTransition::new(
             initial_values_action.into_iter().chain(load_action),
         ))
     }
-    fn handle_effect_unsubscribe<TAction>(
+    fn handle_effect_unsubscribe<TAction, TTask>(
         &self,
         state: &mut LoaderHandlerState<T>,
         action: &EffectUnsubscribeAction<T>,
         _metadata: &MessageData,
-        context: &mut impl HandlerContext,
-    ) -> Option<StateTransition<TAction>>
+        _context: &mut impl HandlerContext,
+    ) -> Option<SchedulerTransition<TAction, TTask>>
     where
-        TAction: Action + 'static + OutboundAction<EffectUnsubscribeAction<T>>,
+        TAction: Action + From<EffectUnsubscribeAction<T>>,
+        TTask: TaskFactory<TAction, TTask>,
     {
         let EffectUnsubscribeAction {
             effect_type,
@@ -502,7 +562,6 @@ where
         if effect_type.as_str() != EFFECT_TYPE_LOADER {
             return None;
         }
-        let current_pid = context.pid();
         let effects_by_loader = effects.iter().fold(
             HashMap::<LoaderFactoryHash, (T, String, Vec<LoaderEntitySubscription<T>>)>::default(),
             |mut results, effect| {
@@ -534,8 +593,8 @@ where
         let unsubscribe_action = if unsubscribe_effects.is_empty() {
             None
         } else {
-            Some(StateOperation::Send(
-                current_pid,
+            Some(SchedulerCommand::Send(
+                self.main_pid,
                 EffectUnsubscribeAction {
                     effect_type: EFFECT_TYPE_EVALUATE.into(),
                     effects: unsubscribe_effects,
@@ -543,34 +602,31 @@ where
                 .into(),
             ))
         };
-        Some(StateTransition::new(unsubscribe_action))
+        Some(SchedulerTransition::new(unsubscribe_action))
     }
-    fn handle_effect_emit<TAction>(
+    fn handle_effect_emit<TAction, TTask>(
         &self,
         state: &mut LoaderHandlerState<T>,
         action: &EffectEmitAction<T>,
         _metadata: &MessageData,
-        context: &mut impl HandlerContext,
-    ) -> Option<StateTransition<TAction>>
+        _context: &mut impl HandlerContext,
+    ) -> Option<SchedulerTransition<TAction, TTask>>
     where
-        TAction: Action + OutboundAction<EffectEmitAction<T>>,
+        TAction: Action + From<EffectEmitAction<T>>,
+        TTask: TaskFactory<TAction, TTask>,
     {
-        let EffectEmitAction {
-            effect_types: updates,
-        } = action;
+        let EffectEmitAction { effect_types } = action;
         if state.loaders.is_empty() {
             return None;
         }
-        let updates = updates
+        let updates = effect_types
             .iter()
             .filter(|batch| &batch.effect_type == EFFECT_TYPE_EVALUATE)
             .flat_map(|batch| batch.updates.iter())
-            .filter_map(|(updated_state_token, update)| {
-                let loader = state.loader_effect_mappings.get(updated_state_token)?;
+            .filter_map(|(state_token, update)| {
+                let loader = state.loader_effect_mappings.get(state_token)?;
                 let loader_state = state.loaders.get_mut(&LoaderFactoryHash::new(loader))?;
-                let batch_keys = loader_state
-                    .batch_effect_mappings
-                    .get(updated_state_token)?;
+                let batch_keys = loader_state.batch_effect_mappings.get(state_token)?;
                 let batch = loader_state
                     .active_batches
                     .get_mut(&LoaderBatchHash::new(batch_keys))?;
@@ -686,8 +742,8 @@ where
         let update_action = if updates.is_empty() {
             None
         } else {
-            Some(StateOperation::Send(
-                context.pid(),
+            Some(SchedulerCommand::Send(
+                self.main_pid,
                 EffectEmitAction {
                     effect_types: vec![EffectUpdateBatch {
                         effect_type: EFFECT_TYPE_LOADER.into(),
@@ -697,7 +753,7 @@ where
                 .into(),
             ))
         };
-        Some(StateTransition::new(update_action))
+        Some(SchedulerTransition::new(update_action))
     }
 }
 

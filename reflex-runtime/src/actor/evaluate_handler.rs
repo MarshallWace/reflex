@@ -23,9 +23,10 @@ use reflex::{
     hash::HashId,
 };
 use reflex_dispatcher::{
-    Action, Actor, ActorTransition, HandlerContext, InboundAction, MessageData, MessageOffset,
-    OutboundAction, StateOperation, StateTransition,
+    Action, ActorInitContext, HandlerContext, MessageData, MessageOffset, NoopDisposeCallback,
+    ProcessId, SchedulerCommand, SchedulerMode, SchedulerTransition, TaskFactory, TaskInbox,
 };
+use reflex_macros::dispatcher;
 use reflex_utils::partition_results;
 
 use crate::{
@@ -215,35 +216,6 @@ pub fn parse_evaluate_effect_result<T: Expression>(
     ))
 }
 
-pub trait EvaluateHandlerAction<T: Expression>:
-    Action
-    + InboundAction<EffectSubscribeAction<T>>
-    + InboundAction<EffectUnsubscribeAction<T>>
-    + InboundAction<EvaluateResultAction<T>>
-    + InboundAction<EffectEmitAction<T>>
-    + OutboundAction<EffectSubscribeAction<T>>
-    + OutboundAction<EffectUnsubscribeAction<T>>
-    + OutboundAction<EffectEmitAction<T>>
-    + OutboundAction<EvaluateStartAction<T>>
-    + OutboundAction<EvaluateUpdateAction<T>>
-    + OutboundAction<EvaluateStopAction>
-{
-}
-impl<T: Expression, TAction> EvaluateHandlerAction<T> for TAction where
-    Self: Action
-        + InboundAction<EffectSubscribeAction<T>>
-        + InboundAction<EffectUnsubscribeAction<T>>
-        + InboundAction<EvaluateResultAction<T>>
-        + InboundAction<EffectEmitAction<T>>
-        + OutboundAction<EffectSubscribeAction<T>>
-        + OutboundAction<EffectUnsubscribeAction<T>>
-        + OutboundAction<EffectEmitAction<T>>
-        + OutboundAction<EvaluateStartAction<T>>
-        + OutboundAction<EvaluateUpdateAction<T>>
-        + OutboundAction<EvaluateStopAction>
-{
-}
-
 pub struct EvaluateHandler<T, TFactory, TAllocator>
 where
     T: Expression,
@@ -253,6 +225,7 @@ where
     factory: TFactory,
     allocator: TAllocator,
     metric_names: EvaluateHandlerMetricNames,
+    main_pid: ProcessId,
     _expression: PhantomData<T>,
 }
 impl<T, TFactory, TAllocator> EvaluateHandler<T, TFactory, TAllocator>
@@ -265,11 +238,13 @@ where
         factory: TFactory,
         allocator: TAllocator,
         metric_names: EvaluateHandlerMetricNames,
+        main_pid: ProcessId,
     ) -> Self {
         Self {
             factory,
             allocator,
             metric_names: metric_names.init(),
+            main_pid,
             _expression: Default::default(),
         }
     }
@@ -543,56 +518,140 @@ impl<T: Expression> GlobalStateCache<T> {
     }
 }
 
-impl<T, TFactory, TAllocator, TAction> Actor<TAction> for EvaluateHandler<T, TFactory, TAllocator>
-where
-    T: Expression,
-    TFactory: ExpressionFactory<T>,
-    TAllocator: HeapAllocator<T>,
-    TAction: EvaluateHandlerAction<T>,
-{
-    type State = EvaluateHandlerState<T>;
-    fn init(&self) -> Self::State {
-        Default::default()
+dispatcher!({
+    pub enum EvaluateHandlerAction<T: Expression> {
+        Inbox(EffectSubscribeAction<T>),
+        Inbox(EffectUnsubscribeAction<T>),
+        Inbox(EvaluateResultAction<T>),
+        Inbox(EffectEmitAction<T>),
+
+        Outbox(EffectSubscribeAction<T>),
+        Outbox(EffectUnsubscribeAction<T>),
+        Outbox(EffectEmitAction<T>),
+        Outbox(EvaluateStartAction<T>),
+        Outbox(EvaluateUpdateAction<T>),
+        Outbox(EvaluateStopAction),
     }
-    fn handle(
-        &self,
-        state: Self::State,
-        action: &TAction,
-        metadata: &MessageData,
-        context: &mut impl HandlerContext,
-    ) -> ActorTransition<Self::State, TAction> {
-        let mut state = state;
-        let actions = if let Some(action) = action.match_type() {
-            self.handle_effect_subscribe(&mut state, action, metadata, context)
-        } else if let Some(action) = action.match_type() {
-            self.handle_effect_unsubscribe(&mut state, action, metadata, context)
-        } else if let Some(action) = action.match_type() {
-            self.handle_evaluate_result(&mut state, action, metadata, context)
-        } else if let Some(action) = action.match_type() {
-            self.handle_effect_emit(&mut state, action, metadata, context)
-        } else {
-            None
+
+    impl<T, TFactory, TAllocator, TAction, TTask> Dispatcher<TAction, TTask>
+        for EvaluateHandler<T, TFactory, TAllocator>
+    where
+        T: Expression,
+        TFactory: ExpressionFactory<T>,
+        TAllocator: HeapAllocator<T>,
+        TAction: Action,
+        TTask: TaskFactory<TAction, TTask>,
+    {
+        type State = EvaluateHandlerState<T>;
+        type Events<TInbox: TaskInbox<TAction>> = TInbox;
+        type Dispose = NoopDisposeCallback;
+
+        fn init<TInbox: TaskInbox<TAction>>(
+            &self,
+            inbox: TInbox,
+            context: &impl ActorInitContext,
+        ) -> (Self::State, Self::Events<TInbox>, Self::Dispose) {
+            (Default::default(), inbox, Default::default())
         }
-        .unwrap_or_default();
-        ActorTransition::new(state, actions)
+
+        fn accept(&self, _action: &EffectSubscribeAction<T>) -> bool {
+            true
+        }
+        fn schedule(
+            &self,
+            _action: &EffectSubscribeAction<T>,
+            _state: &Self::State,
+        ) -> Option<SchedulerMode> {
+            Some(SchedulerMode::Async)
+        }
+        fn handle(
+            &self,
+            state: &mut Self::State,
+            action: &EffectSubscribeAction<T>,
+            metadata: &MessageData,
+            context: &mut impl HandlerContext,
+        ) -> Option<SchedulerTransition<TAction, TTask>> {
+            self.handle_effect_subscribe(state, action, metadata, context)
+        }
+
+        fn accept(&self, _action: &EffectUnsubscribeAction<T>) -> bool {
+            true
+        }
+        fn schedule(
+            &self,
+            _action: &EffectUnsubscribeAction<T>,
+            _state: &Self::State,
+        ) -> Option<SchedulerMode> {
+            Some(SchedulerMode::Async)
+        }
+        fn handle(
+            &self,
+            state: &mut Self::State,
+            action: &EffectUnsubscribeAction<T>,
+            metadata: &MessageData,
+            context: &mut impl HandlerContext,
+        ) -> Option<SchedulerTransition<TAction, TTask>> {
+            self.handle_effect_unsubscribe(state, action, metadata, context)
+        }
+
+        fn accept(&self, _action: &EvaluateResultAction<T>) -> bool {
+            true
+        }
+        fn schedule(
+            &self,
+            _action: &EvaluateResultAction<T>,
+            _state: &Self::State,
+        ) -> Option<SchedulerMode> {
+            Some(SchedulerMode::Async)
+        }
+        fn handle(
+            &self,
+            state: &mut Self::State,
+            action: &EvaluateResultAction<T>,
+            metadata: &MessageData,
+            context: &mut impl HandlerContext,
+        ) -> Option<SchedulerTransition<TAction, TTask>> {
+            self.handle_evaluate_result(state, action, metadata, context)
+        }
+
+        fn accept(&self, _action: &EffectEmitAction<T>) -> bool {
+            true
+        }
+        fn schedule(
+            &self,
+            _action: &EffectEmitAction<T>,
+            _state: &Self::State,
+        ) -> Option<SchedulerMode> {
+            Some(SchedulerMode::Async)
+        }
+        fn handle(
+            &self,
+            state: &mut Self::State,
+            action: &EffectEmitAction<T>,
+            metadata: &MessageData,
+            context: &mut impl HandlerContext,
+        ) -> Option<SchedulerTransition<TAction, TTask>> {
+            self.handle_effect_emit(state, action, metadata, context)
+        }
     }
-}
+});
+
 impl<T, TFactory, TAllocator> EvaluateHandler<T, TFactory, TAllocator>
 where
     T: Expression,
     TFactory: ExpressionFactory<T>,
     TAllocator: HeapAllocator<T>,
 {
-    fn handle_effect_subscribe<TAction>(
+    fn handle_effect_subscribe<TAction, TTask>(
         &self,
         state: &mut EvaluateHandlerState<T>,
         action: &EffectSubscribeAction<T>,
         _metadata: &MessageData,
-        context: &mut impl HandlerContext,
-    ) -> Option<StateTransition<TAction>>
+        _context: &mut impl HandlerContext,
+    ) -> Option<SchedulerTransition<TAction, TTask>>
     where
-        TAction:
-            Action + OutboundAction<EvaluateStartAction<T>> + OutboundAction<EffectEmitAction<T>>,
+        TAction: Action + From<EvaluateStartAction<T>> + From<EffectEmitAction<T>>,
+        TTask: TaskFactory<TAction, TTask>,
     {
         let EffectSubscribeAction {
             effect_type,
@@ -615,7 +674,6 @@ where
         let queries = effects.iter().filter_map(|effect| {
             parse_evaluate_effect_query(effect, &self.factory).map(|query| (effect, query))
         });
-        let current_pid = context.pid();
         let (evaluate_start_actions, existing_results): (Vec<_>, Vec<_>) =
             partition_results(queries.filter_map(
                 |(effect, (label, query, evaluation_mode, invalidation_strategy))| {
@@ -650,8 +708,8 @@ where
                                 state_values: Default::default(),
                                 metric_labels,
                             });
-                            Some(Ok(StateOperation::Send(
-                                current_pid,
+                            Some(Ok(SchedulerCommand::Send(
+                                self.main_pid,
                                 EvaluateStartAction {
                                     cache_id: cache_key,
                                     query,
@@ -668,8 +726,8 @@ where
         let emit_cached_results_action = if existing_results.is_empty() {
             None
         } else {
-            Some(StateOperation::Send(
-                current_pid,
+            Some(SchedulerCommand::Send(
+                self.main_pid,
                 EffectEmitAction {
                     effect_types: vec![EffectUpdateBatch {
                         effect_type: EFFECT_TYPE_EVALUATE.into(),
@@ -679,23 +737,22 @@ where
                 .into(),
             ))
         };
-        Some(StateTransition::new(
+        Some(SchedulerTransition::new(
             emit_cached_results_action
                 .into_iter()
                 .chain(evaluate_start_actions),
         ))
     }
-    fn handle_effect_unsubscribe<TAction>(
+    fn handle_effect_unsubscribe<TAction, TTask>(
         &self,
         state: &mut EvaluateHandlerState<T>,
         action: &EffectUnsubscribeAction<T>,
         _metadata: &MessageData,
-        context: &mut impl HandlerContext,
-    ) -> Option<StateTransition<TAction>>
+        _context: &mut impl HandlerContext,
+    ) -> Option<SchedulerTransition<TAction, TTask>>
     where
-        TAction: Action
-            + OutboundAction<EvaluateStopAction>
-            + OutboundAction<EffectUnsubscribeAction<T>>,
+        TAction: Action + From<EvaluateStopAction> + From<EffectUnsubscribeAction<T>>,
+        TTask: TaskFactory<TAction, TTask>,
     {
         let EffectUnsubscribeAction {
             effect_type,
@@ -750,8 +807,8 @@ where
             .filter_map(|removed_effect_id| state.effects.remove(&removed_effect_id));
         let removed_queries = unsubscribed_workers.iter().map(|(cache_key, _)| *cache_key);
         let stop_actions = removed_queries.map(|cache_key| {
-            StateOperation::Send(
-                context.pid(),
+            SchedulerCommand::Send(
+                self.main_pid,
                 EvaluateStopAction {
                     cache_id: cache_key,
                 }
@@ -760,8 +817,8 @@ where
         });
         let unsubscribe_actions =
             group_effects_by_type(removed_effects).map(|(effect_type, effects)| {
-                StateOperation::Send(
-                    context.pid(),
+                SchedulerCommand::Send(
+                    self.main_pid,
                     EffectUnsubscribeAction {
                         effect_type,
                         effects,
@@ -781,21 +838,22 @@ where
             state.gc_worker_state_history(self.metric_names);
             state.update_worker_status_metrics(&self.factory, self.metric_names);
         }
-        Some(StateTransition::new(actions))
+        Some(SchedulerTransition::new(actions))
     }
-    fn handle_evaluate_result<TAction>(
+    fn handle_evaluate_result<TAction, TTask>(
         &self,
         state: &mut EvaluateHandlerState<T>,
         action: &EvaluateResultAction<T>,
         _metadata: &MessageData,
-        context: &mut impl HandlerContext,
-    ) -> Option<StateTransition<TAction>>
+        _context: &mut impl HandlerContext,
+    ) -> Option<SchedulerTransition<TAction, TTask>>
     where
         TAction: Action
-            + OutboundAction<EffectSubscribeAction<T>>
-            + OutboundAction<EffectUnsubscribeAction<T>>
-            + OutboundAction<EvaluateUpdateAction<T>>
-            + OutboundAction<EffectEmitAction<T>>,
+            + From<EffectSubscribeAction<T>>
+            + From<EffectUnsubscribeAction<T>>
+            + From<EvaluateUpdateAction<T>>
+            + From<EffectEmitAction<T>>,
+        TTask: TaskFactory<TAction, TTask>,
     {
         let EvaluateResultAction {
             cache_id: cache_key,
@@ -851,18 +909,18 @@ where
                     },
                 },
                 &mut state.state_cache,
-                context,
                 self.metric_names,
-            );
+            )
+            .map(|action| SchedulerCommand::Send(self.main_pid, TAction::from(action)));
             state.gc_worker_state_history(self.metric_names);
             reevaluate_action
         };
-        let effect_emit_action: Option<StateOperation<TAction>> =
+        let effect_emit_action: Option<SchedulerCommand<TAction, TTask>> =
             if is_unresolved_result(&result, &self.factory) {
                 None
             } else {
-                Some(StateOperation::Send(
-                    context.pid(),
+                Some(SchedulerCommand::Send(
+                    self.main_pid,
                     EffectEmitAction {
                         effect_types: vec![EffectUpdateBatch {
                             effect_type: EFFECT_TYPE_EVALUATE.into(),
@@ -890,8 +948,8 @@ where
             .collect::<Vec<_>>();
         let effect_subscribe_actions =
             group_effects_by_type(added_effects).map(|(effect_type, effects)| {
-                StateOperation::Send(
-                    context.pid(),
+                SchedulerCommand::Send(
+                    self.main_pid,
                     EffectSubscribeAction {
                         effect_type,
                         effects,
@@ -901,8 +959,8 @@ where
             });
         let effect_unsubscribe_actions =
             group_effects_by_type(removed_effects).map(|(effect_type, effects)| {
-                StateOperation::Send(
-                    context.pid(),
+                SchedulerCommand::Send(
+                    self.main_pid,
                     EffectUnsubscribeAction {
                         effect_type,
                         effects,
@@ -917,17 +975,18 @@ where
             .chain(effect_unsubscribe_actions)
             .collect::<Vec<_>>();
         state.update_worker_status_metrics(&self.factory, self.metric_names);
-        Some(StateTransition::new(actions))
+        Some(SchedulerTransition::new(actions))
     }
-    fn handle_effect_emit<TAction>(
+    fn handle_effect_emit<TAction, TTask>(
         &self,
         state: &mut EvaluateHandlerState<T>,
         action: &EffectEmitAction<T>,
         metadata: &MessageData,
-        context: &mut impl HandlerContext,
-    ) -> Option<StateTransition<TAction>>
+        _context: &mut impl HandlerContext,
+    ) -> Option<SchedulerTransition<TAction, TTask>>
     where
-        TAction: Action + OutboundAction<EvaluateUpdateAction<T>>,
+        TAction: Action + From<EvaluateUpdateAction<T>>,
+        TTask: TaskFactory<TAction, TTask>,
     {
         let EffectEmitAction {
             effect_types: updates,
@@ -988,13 +1047,13 @@ where
                     worker,
                     WorkerStateUpdateType::DependencyUpdate,
                     &mut state.state_cache,
-                    context,
                     self.metric_names,
                 )
+                .map(|action| SchedulerCommand::Send(self.main_pid, TAction::from(action)))
             })
             .collect::<Vec<_>>();
         state.gc_worker_state_history(self.metric_names);
-        Some(StateTransition::new(worker_update_actions))
+        Some(SchedulerTransition::new(worker_update_actions))
     }
 }
 
@@ -1005,16 +1064,12 @@ enum WorkerStateUpdateType {
     },
     DependencyUpdate,
 }
-fn update_worker_state<T: Expression, TAction>(
+fn update_worker_state<T: Expression>(
     worker: &mut WorkerState<T>,
     update_type: WorkerStateUpdateType,
     global_state: &mut GlobalStateCache<T>,
-    context: &impl HandlerContext,
     metric_names: EvaluateHandlerMetricNames,
-) -> Option<StateOperation<TAction>>
-where
-    TAction: Action + OutboundAction<EvaluateUpdateAction<T>>,
-{
+) -> Option<EvaluateUpdateAction<T>> {
     let dependencies = worker.dependencies().cloned()?;
     let updates = match update_type {
         WorkerStateUpdateType::FirstResult => {
@@ -1075,15 +1130,11 @@ where
             previous_result: Some(latest_result),
         },
     };
-    Some(StateOperation::Send(
-        context.pid(),
-        EvaluateUpdateAction {
-            cache_id: worker.effect.id(),
-            state_index: worker.state_index,
-            state_updates: updates,
-        }
-        .into(),
-    ))
+    Some(EvaluateUpdateAction {
+        cache_id: worker.effect.id(),
+        state_index: worker.state_index,
+        state_updates: updates,
+    })
 }
 
 fn group_effects_by_type<T: Expression<Signal<T> = V>, V: ConditionType<T>>(

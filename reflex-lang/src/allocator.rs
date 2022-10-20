@@ -9,8 +9,9 @@ use std::{
 
 use crate::{ExpressionList, Signal, SignalList, StructPrototype};
 use reflex::core::{Expression, HeapAllocator, RefType, SignalType, StringValue};
+use serde::{Deserialize, Serialize};
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Serialize, Deserialize)]
 pub struct DefaultAllocator<T: Expression> {
     _type: PhantomData<T>,
 }

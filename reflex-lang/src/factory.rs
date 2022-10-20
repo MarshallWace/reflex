@@ -14,6 +14,7 @@ use reflex::{
     },
     hash::HashId,
 };
+use serde::{Deserialize, Serialize};
 
 use crate::{ExpressionList, Signal, SignalList, StructPrototype};
 
@@ -22,7 +23,7 @@ use super::{
     term::*,
 };
 
-#[derive(Clone)]
+#[derive(Clone, Copy, Serialize, Deserialize)]
 pub struct SharedTermFactory<TBuiltin: Builtin> {
     _builtin: PhantomData<TBuiltin>,
 }

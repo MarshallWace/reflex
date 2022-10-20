@@ -14,9 +14,10 @@ use reflex::core::{
     SignalType, StateToken, StringTermType, StringValue,
 };
 use reflex_dispatcher::{
-    Action, Actor, ActorTransition, HandlerContext, InboundAction, MessageData, OutboundAction,
-    StateOperation, StateTransition,
+    Action, ActorInitContext, HandlerContext, MessageData, NoopDisposeCallback, ProcessId,
+    SchedulerCommand, SchedulerMode, SchedulerTransition, TaskFactory, TaskInbox,
 };
+use reflex_macros::dispatcher;
 use reflex_runtime::{
     action::effect::{
         EffectEmitAction, EffectSubscribeAction, EffectUnsubscribeAction, EffectUpdateBatch,
@@ -69,27 +70,6 @@ impl Default for ScanHandlerMetricNames {
 const EVENT_TYPE_SCAN_SOURCE: &'static str = "reflex::scan::source";
 const EVENT_TYPE_SCAN_STATE: &'static str = "reflex::scan::state";
 
-pub trait ScanHandlerAction<T: Expression>:
-    Action
-    + InboundAction<EffectSubscribeAction<T>>
-    + InboundAction<EffectEmitAction<T>>
-    + InboundAction<EffectUnsubscribeAction<T>>
-    + OutboundAction<EffectSubscribeAction<T>>
-    + OutboundAction<EffectUnsubscribeAction<T>>
-    + OutboundAction<EffectEmitAction<T>>
-{
-}
-impl<T: Expression, TAction> ScanHandlerAction<T> for TAction where
-    Self: Action
-        + InboundAction<EffectSubscribeAction<T>>
-        + InboundAction<EffectEmitAction<T>>
-        + InboundAction<EffectUnsubscribeAction<T>>
-        + OutboundAction<EffectSubscribeAction<T>>
-        + OutboundAction<EffectUnsubscribeAction<T>>
-        + OutboundAction<EffectEmitAction<T>>
-{
-}
-
 #[derive(Clone)]
 pub struct ScanHandler<T, TFactory, TAllocator>
 where
@@ -100,6 +80,7 @@ where
     factory: TFactory,
     allocator: TAllocator,
     metric_names: ScanHandlerMetricNames,
+    main_pid: ProcessId,
     _expression: PhantomData<T>,
 }
 impl<T, TFactory, TAllocator> ScanHandler<T, TFactory, TAllocator>
@@ -112,11 +93,13 @@ where
         factory: TFactory,
         allocator: TAllocator,
         metric_names: ScanHandlerMetricNames,
+        main_pid: ProcessId,
     ) -> Self {
         Self {
             factory,
             allocator,
             metric_names: metric_names.init(),
+            main_pid,
             _expression: Default::default(),
         }
     }
@@ -146,56 +129,116 @@ struct ScanHandlerReducerState<T: Expression> {
     result_effect: T::Signal<T>,
 }
 
-impl<T, TFactory, TAllocator, TAction> Actor<TAction> for ScanHandler<T, TFactory, TAllocator>
-where
-    T: AsyncExpression,
-    TFactory: AsyncExpressionFactory<T>,
-    TAllocator: AsyncHeapAllocator<T>,
-    TAction: ScanHandlerAction<T> + 'static,
-{
-    type State = ScanHandlerState<T>;
-    fn init(&self) -> Self::State {
-        Default::default()
+dispatcher!({
+    pub enum ScanHandlerAction<T: Expression> {
+        Inbox(EffectSubscribeAction<T>),
+        Inbox(EffectEmitAction<T>),
+        Inbox(EffectUnsubscribeAction<T>),
+
+        Outbox(EffectSubscribeAction<T>),
+        Outbox(EffectEmitAction<T>),
+        Outbox(EffectUnsubscribeAction<T>),
     }
-    fn handle(
-        &self,
-        state: Self::State,
-        action: &TAction,
-        metadata: &MessageData,
-        context: &mut impl HandlerContext,
-    ) -> ActorTransition<Self::State, TAction> {
-        let mut state = state;
-        let actions = if let Some(action) = action.match_type() {
-            self.handle_effect_subscribe(&mut state, action, metadata, context)
-        } else if let Some(action) = action.match_type() {
-            self.handle_effect_unsubscribe(&mut state, action, metadata, context)
-        } else if let Some(action) = action.match_type() {
-            self.handle_effect_emit(&mut state, action, metadata, context)
-        } else {
-            None
+
+    impl<T, TFactory, TAllocator, TAction, TTask> Dispatcher<TAction, TTask>
+        for ScanHandler<T, TFactory, TAllocator>
+    where
+        T: AsyncExpression,
+        TFactory: AsyncExpressionFactory<T>,
+        TAllocator: AsyncHeapAllocator<T>,
+        TAction: Action,
+        TTask: TaskFactory<TAction, TTask>,
+    {
+        type State = ScanHandlerState<T>;
+        type Events<TInbox: TaskInbox<TAction>> = TInbox;
+        type Dispose = NoopDisposeCallback;
+
+        fn init<TInbox: TaskInbox<TAction>>(
+            &self,
+            inbox: TInbox,
+            context: &impl ActorInitContext,
+        ) -> (Self::State, Self::Events<TInbox>, Self::Dispose) {
+            (Default::default(), inbox, Default::default())
         }
-        .unwrap_or_default();
-        ActorTransition::new(state, actions)
+
+        fn accept(&self, action: &EffectSubscribeAction<T>) -> bool {
+            action.effect_type.as_str() == EFFECT_TYPE_SCAN
+        }
+        fn schedule(
+            &self,
+            _action: &EffectSubscribeAction<T>,
+            _state: &Self::State,
+        ) -> Option<SchedulerMode> {
+            Some(SchedulerMode::Async)
+        }
+        fn handle(
+            &self,
+            state: &mut Self::State,
+            action: &EffectSubscribeAction<T>,
+            metadata: &MessageData,
+            context: &mut impl HandlerContext,
+        ) -> Option<SchedulerTransition<TAction, TTask>> {
+            self.handle_effect_subscribe(state, action, metadata, context)
+        }
+
+        fn accept(&self, action: &EffectUnsubscribeAction<T>) -> bool {
+            action.effect_type.as_str() == EFFECT_TYPE_SCAN
+        }
+        fn schedule(
+            &self,
+            _action: &EffectUnsubscribeAction<T>,
+            _state: &Self::State,
+        ) -> Option<SchedulerMode> {
+            Some(SchedulerMode::Async)
+        }
+        fn handle(
+            &self,
+            state: &mut Self::State,
+            action: &EffectUnsubscribeAction<T>,
+            metadata: &MessageData,
+            context: &mut impl HandlerContext,
+        ) -> Option<SchedulerTransition<TAction, TTask>> {
+            self.handle_effect_unsubscribe(state, action, metadata, context)
+        }
+
+        fn accept(&self, _action: &EffectEmitAction<T>) -> bool {
+            true
+        }
+        fn schedule(
+            &self,
+            _action: &EffectEmitAction<T>,
+            _state: &Self::State,
+        ) -> Option<SchedulerMode> {
+            Some(SchedulerMode::Async)
+        }
+        fn handle(
+            &self,
+            state: &mut Self::State,
+            action: &EffectEmitAction<T>,
+            metadata: &MessageData,
+            context: &mut impl HandlerContext,
+        ) -> Option<SchedulerTransition<TAction, TTask>> {
+            self.handle_effect_emit(state, action, metadata, context)
+        }
     }
-}
+});
+
 impl<T, TFactory, TAllocator> ScanHandler<T, TFactory, TAllocator>
 where
     T: AsyncExpression,
     TFactory: AsyncExpressionFactory<T>,
     TAllocator: AsyncHeapAllocator<T>,
 {
-    fn handle_effect_subscribe<TAction>(
+    fn handle_effect_subscribe<TAction, TTask>(
         &self,
         state: &mut ScanHandlerState<T>,
         action: &EffectSubscribeAction<T>,
         _metadata: &MessageData,
-        context: &mut impl HandlerContext,
-    ) -> Option<StateTransition<TAction>>
+        _context: &mut impl HandlerContext,
+    ) -> Option<SchedulerTransition<TAction, TTask>>
     where
-        TAction: Action
-            + 'static
-            + OutboundAction<EffectSubscribeAction<T>>
-            + OutboundAction<EffectEmitAction<T>>,
+        TAction: Action + From<EffectSubscribeAction<T>> + From<EffectEmitAction<T>>,
+        TTask: TaskFactory<TAction, TTask>,
     {
         let EffectSubscribeAction {
             effect_type,
@@ -204,7 +247,6 @@ where
         if effect_type.as_str() != EFFECT_TYPE_SCAN {
             return None;
         }
-        let current_pid = context.pid();
         let (initial_values, tasks): (Vec<_>, Vec<_>) = effects
             .iter()
             .filter_map(
@@ -216,7 +258,7 @@ where
                                     effect.id(),
                                     create_pending_expression(&self.factory, &self.allocator),
                                 ),
-                                Some(StateOperation::Send(current_pid, action)),
+                                Some(SchedulerCommand::Send(self.main_pid, action)),
                             ))
                         } else {
                             None
@@ -235,8 +277,8 @@ where
         let initial_values_action = if initial_values.is_empty() {
             None
         } else {
-            Some(StateOperation::Send(
-                current_pid,
+            Some(SchedulerCommand::Send(
+                self.main_pid,
                 EffectEmitAction {
                     effect_types: vec![EffectUpdateBatch {
                         effect_type: EFFECT_TYPE_SCAN.into(),
@@ -246,21 +288,22 @@ where
                 .into(),
             ))
         };
-        Some(StateTransition::new(
+        Some(SchedulerTransition::new(
             initial_values_action
                 .into_iter()
                 .chain(tasks.into_iter().flatten()),
         ))
     }
-    fn handle_effect_unsubscribe<TAction>(
+    fn handle_effect_unsubscribe<TAction, TTask>(
         &self,
         state: &mut ScanHandlerState<T>,
         action: &EffectUnsubscribeAction<T>,
         _metadata: &MessageData,
-        context: &mut impl HandlerContext,
-    ) -> Option<StateTransition<TAction>>
+        _context: &mut impl HandlerContext,
+    ) -> Option<SchedulerTransition<TAction, TTask>>
     where
-        TAction: Action + 'static + OutboundAction<EffectUnsubscribeAction<T>>,
+        TAction: Action + From<EffectUnsubscribeAction<T>>,
+        TTask: TaskFactory<TAction, TTask>,
     {
         let EffectUnsubscribeAction {
             effect_type,
@@ -269,25 +312,25 @@ where
         if effect_type.as_str() != EFFECT_TYPE_SCAN {
             return None;
         }
-        let current_pid = context.pid();
         let unsubscribe_actions = effects.iter().filter_map(|effect| {
             if let Some(operation) = self.unsubscribe_scan_effect(state, effect) {
-                Some(StateOperation::Send(current_pid, operation))
+                Some(SchedulerCommand::Send(self.main_pid, operation))
             } else {
                 None
             }
         });
-        Some(StateTransition::new(unsubscribe_actions))
+        Some(SchedulerTransition::new(unsubscribe_actions))
     }
-    fn handle_effect_emit<TAction>(
+    fn handle_effect_emit<TAction, TTask>(
         &self,
         state: &mut ScanHandlerState<T>,
         action: &EffectEmitAction<T>,
         _metadata: &MessageData,
-        context: &mut impl HandlerContext,
-    ) -> Option<StateTransition<TAction>>
+        _context: &mut impl HandlerContext,
+    ) -> Option<SchedulerTransition<TAction, TTask>>
     where
-        TAction: Action + OutboundAction<EffectEmitAction<T>>,
+        TAction: Action + From<EffectEmitAction<T>>,
+        TTask: TaskFactory<TAction, TTask>,
     {
         let EffectEmitAction {
             effect_types: updates,
@@ -358,8 +401,8 @@ where
         let update_action = if updates.is_empty() {
             None
         } else {
-            Some(StateOperation::Send(
-                context.pid(),
+            Some(SchedulerCommand::Send(
+                self.main_pid,
                 EffectEmitAction {
                     effect_types: vec![EffectUpdateBatch {
                         effect_type: EFFECT_TYPE_SCAN.into(),
@@ -369,7 +412,7 @@ where
                 .into(),
             ))
         };
-        Some(StateTransition::new(update_action))
+        Some(SchedulerTransition::new(update_action))
     }
     fn subscribe_scan_effect<TAction>(
         &self,
@@ -378,7 +421,7 @@ where
         args: ScanEffectArgs<T>,
     ) -> Option<TAction>
     where
-        TAction: Action + OutboundAction<EffectSubscribeAction<T>>,
+        TAction: Action + From<EffectSubscribeAction<T>>,
     {
         let (source_effect, result_effect) = match state.effect_state.entry(effect.id()) {
             Entry::Occupied(_) => None,
@@ -470,7 +513,7 @@ where
         effect: &T::Signal<T>,
     ) -> Option<TAction>
     where
-        TAction: Action + OutboundAction<EffectUnsubscribeAction<T>>,
+        TAction: Action + From<EffectUnsubscribeAction<T>>,
     {
         if let Entry::Occupied(entry) = state.effect_state.entry(effect.id()) {
             let reducer_state = entry.remove();

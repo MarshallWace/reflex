@@ -6,43 +6,32 @@ use std::{
     collections::{hash_map::Entry, HashMap},
     iter::once,
     marker::PhantomData,
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::{Duration, SystemTime},
 };
 
-use futures::StreamExt;
 use reflex::core::{
     ConditionType, Expression, ExpressionFactory, ExpressionListType, FloatTermType, HeapAllocator,
-    IntTermType, RefType, SignalType, StateToken,
+    IntTermType, RefType, SignalType, StateToken, Uuid,
 };
 use reflex_dispatcher::{
-    Action, Actor, ActorTransition, HandlerContext, InboundAction, MessageData, OperationStream,
-    OutboundAction, ProcessId, StateOperation, StateTransition,
+    Action, ActorInitContext, HandlerContext, MessageData, NoopDisposeCallback, ProcessId,
+    SchedulerCommand, SchedulerMode, SchedulerTransition, TaskFactory, TaskInbox,
 };
+use reflex_macros::dispatcher;
 use reflex_runtime::{
     action::effect::{
         EffectEmitAction, EffectSubscribeAction, EffectUnsubscribeAction, EffectUpdateBatch,
     },
     AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator,
 };
-use tokio::time::{interval_at, Instant};
-use tokio_stream::wrappers::IntervalStream;
+
+use crate::{
+    action::timestamp::TimestampHandlerUpdateAction,
+    task::timestamp::{TimestampHandlerTask, TimestampHandlerTaskFactory},
+    utils::timestamp::get_timestamp_millis,
+};
 
 pub const EFFECT_TYPE_TIMESTAMP: &'static str = "reflex::timestamp";
-
-pub trait TimestampHandlerAction<T: Expression>:
-    Action
-    + InboundAction<EffectSubscribeAction<T>>
-    + InboundAction<EffectUnsubscribeAction<T>>
-    + OutboundAction<EffectEmitAction<T>>
-{
-}
-impl<T: Expression, TAction> TimestampHandlerAction<T> for TAction where
-    Self: Action
-        + InboundAction<EffectSubscribeAction<T>>
-        + InboundAction<EffectUnsubscribeAction<T>>
-        + OutboundAction<EffectEmitAction<T>>
-{
-}
 
 #[derive(Clone)]
 pub struct TimestampHandler<T, TFactory, TAllocator>
@@ -53,6 +42,7 @@ where
 {
     factory: TFactory,
     allocator: TAllocator,
+    main_pid: ProcessId,
     _expression: PhantomData<T>,
 }
 impl<T, TFactory, TAllocator> TimestampHandler<T, TFactory, TAllocator>
@@ -61,10 +51,11 @@ where
     TFactory: AsyncExpressionFactory<T>,
     TAllocator: AsyncHeapAllocator<T>,
 {
-    pub fn new(factory: TFactory, allocator: TAllocator) -> Self {
+    pub fn new(factory: TFactory, allocator: TAllocator, main_pid: ProcessId) -> Self {
         Self {
             factory,
             allocator,
+            main_pid,
             _expression: Default::default(),
         }
     }
@@ -72,54 +63,142 @@ where
 
 #[derive(Default)]
 pub struct TimestampHandlerState {
-    tasks: HashMap<StateToken, ProcessId>,
+    active_operations: HashMap<StateToken, (Uuid, ProcessId)>,
+    operation_effect_mappings: HashMap<Uuid, StateToken>,
+}
+impl TimestampHandlerState {
+    fn subscribe_timestamp_task(
+        &mut self,
+        effect_id: StateToken,
+        duration: Duration,
+        context: &mut impl HandlerContext,
+    ) -> Option<(ProcessId, TimestampHandlerTaskFactory)> {
+        let entry = match self.active_operations.entry(effect_id) {
+            Entry::Occupied(_) => None,
+            Entry::Vacant(entry) => Some(entry),
+        }?;
+        let operation_id = Uuid::new_v4();
+        let (task_pid, task) = create_timestamp_task(operation_id, duration, context);
+        self.operation_effect_mappings
+            .insert(operation_id, effect_id);
+        entry.insert((operation_id, task_pid));
+        Some((task_pid, task))
+    }
+    fn unsubscribe_timestamp_task(&mut self, effect_id: StateToken) -> Option<ProcessId> {
+        let (operation_id, task_pid) = self.active_operations.remove(&effect_id)?;
+        let _ = self.operation_effect_mappings.remove(&operation_id)?;
+        Some(task_pid)
+    }
 }
 
-impl<T, TFactory, TAllocator, TAction> Actor<TAction> for TimestampHandler<T, TFactory, TAllocator>
-where
-    T: AsyncExpression,
-    TFactory: AsyncExpressionFactory<T>,
-    TAllocator: AsyncHeapAllocator<T>,
-    TAction: Action + Send + 'static + TimestampHandlerAction<T>,
-{
-    type State = TimestampHandlerState;
-    fn init(&self) -> Self::State {
-        Default::default()
+dispatcher!({
+    pub enum TimestampHandlerAction<T: Expression> {
+        Inbox(EffectSubscribeAction<T>),
+        Inbox(EffectUnsubscribeAction<T>),
+        Inbox(TimestampHandlerUpdateAction),
+
+        Outbox(EffectEmitAction<T>),
     }
-    fn handle(
-        &self,
-        state: Self::State,
-        action: &TAction,
-        metadata: &MessageData,
-        context: &mut impl HandlerContext,
-    ) -> ActorTransition<Self::State, TAction> {
-        let mut state = state;
-        let actions = if let Some(action) = action.match_type() {
-            self.handle_effect_subscribe(&mut state, action, metadata, context)
-        } else if let Some(action) = action.match_type() {
-            self.handle_effect_unsubscribe(&mut state, action, metadata, context)
-        } else {
-            None
+
+    impl<T, TFactory, TAllocator, TAction, TTask> Dispatcher<TAction, TTask>
+        for TimestampHandler<T, TFactory, TAllocator>
+    where
+        T: AsyncExpression,
+        TFactory: AsyncExpressionFactory<T>,
+        TAllocator: AsyncHeapAllocator<T>,
+        TAction: Action,
+        TTask: TaskFactory<TAction, TTask> + From<TimestampHandlerTaskFactory>,
+    {
+        type State = TimestampHandlerState;
+        type Events<TInbox: TaskInbox<TAction>> = TInbox;
+        type Dispose = NoopDisposeCallback;
+
+        fn init<TInbox: TaskInbox<TAction>>(
+            &self,
+            inbox: TInbox,
+            context: &impl ActorInitContext,
+        ) -> (Self::State, Self::Events<TInbox>, Self::Dispose) {
+            (Default::default(), inbox, Default::default())
         }
-        .unwrap_or_default();
-        ActorTransition::new(state, actions)
+
+        fn accept(&self, action: &EffectSubscribeAction<T>) -> bool {
+            action.effect_type.as_str() == EFFECT_TYPE_TIMESTAMP
+        }
+        fn schedule(
+            &self,
+            _action: &EffectSubscribeAction<T>,
+            _state: &Self::State,
+        ) -> Option<SchedulerMode> {
+            Some(SchedulerMode::Async)
+        }
+        fn handle(
+            &self,
+            state: &mut Self::State,
+            action: &EffectSubscribeAction<T>,
+            metadata: &MessageData,
+            context: &mut impl HandlerContext,
+        ) -> Option<SchedulerTransition<TAction, TTask>> {
+            self.handle_effect_subscribe(state, action, metadata, context)
+        }
+
+        fn accept(&self, action: &EffectUnsubscribeAction<T>) -> bool {
+            action.effect_type.as_str() == EFFECT_TYPE_TIMESTAMP
+        }
+        fn schedule(
+            &self,
+            _action: &EffectUnsubscribeAction<T>,
+            _state: &Self::State,
+        ) -> Option<SchedulerMode> {
+            Some(SchedulerMode::Async)
+        }
+        fn handle(
+            &self,
+            state: &mut Self::State,
+            action: &EffectUnsubscribeAction<T>,
+            metadata: &MessageData,
+            context: &mut impl HandlerContext,
+        ) -> Option<SchedulerTransition<TAction, TTask>> {
+            self.handle_effect_unsubscribe(state, action, metadata, context)
+        }
+
+        fn accept(&self, _action: &TimestampHandlerUpdateAction) -> bool {
+            true
+        }
+        fn schedule(
+            &self,
+            _action: &TimestampHandlerUpdateAction,
+            _state: &Self::State,
+        ) -> Option<SchedulerMode> {
+            Some(SchedulerMode::Async)
+        }
+        fn handle(
+            &self,
+            state: &mut Self::State,
+            action: &TimestampHandlerUpdateAction,
+            metadata: &MessageData,
+            context: &mut impl HandlerContext,
+        ) -> Option<SchedulerTransition<TAction, TTask>> {
+            self.handle_timestamp_handler_update(state, action, metadata, context)
+        }
     }
-}
+});
+
 impl<T, TFactory, TAllocator> TimestampHandler<T, TFactory, TAllocator>
 where
     T: AsyncExpression,
     TFactory: AsyncExpressionFactory<T>,
     TAllocator: AsyncHeapAllocator<T>,
 {
-    fn handle_effect_subscribe<TAction>(
+    fn handle_effect_subscribe<TAction, TTask>(
         &self,
         state: &mut TimestampHandlerState,
         action: &EffectSubscribeAction<T>,
         _metadata: &MessageData,
         context: &mut impl HandlerContext,
-    ) -> Option<StateTransition<TAction>>
+    ) -> Option<SchedulerTransition<TAction, TTask>>
     where
-        TAction: Action + Send + 'static + OutboundAction<EffectEmitAction<T>>,
+        TAction: Action + From<EffectEmitAction<T>>,
+        TTask: TaskFactory<TAction, TTask> + TimestampHandlerTask,
     {
         let EffectSubscribeAction {
             effect_type,
@@ -128,47 +207,41 @@ where
         if effect_type.as_str() != EFFECT_TYPE_TIMESTAMP {
             return None;
         }
-        let current_pid = context.pid();
-        let (initial_values, tasks): (Vec<_>, Vec<_>) = effects
-            .iter()
-            .filter_map(|effect| {
-                let state_token = effect.id();
-                match parse_timestamp_effect_args(effect, &self.factory) {
-                    Ok(duration) => {
-                        if let Entry::Vacant(entry) = state.tasks.entry(state_token) {
-                            let (task_pid, task) = create_timestamp_task(
-                                state_token,
-                                duration,
-                                &self.factory,
-                                context,
-                            );
-                            entry.insert(task_pid);
-                            Some((
-                                (
-                                    state_token,
-                                    self.factory.create_float_term(get_current_time()),
-                                ),
-                                Some(StateOperation::Task(task_pid, task)),
-                            ))
-                        } else {
-                            None
+        let (initial_values, tasks): (Vec<_>, Vec<_>) =
+            effects
+                .iter()
+                .filter_map(|effect| {
+                    let state_token = effect.id();
+                    match parse_timestamp_effect_args(effect, &self.factory) {
+                        Ok(interval) => {
+                            match state.subscribe_timestamp_task(effect.id(), interval, context) {
+                                None => None,
+                                Some((task_pid, task)) => {
+                                    let initial_value = self.factory.create_float_term(
+                                        get_timestamp_millis(SystemTime::now()) as f64,
+                                    );
+                                    Some((
+                                        (state_token, initial_value),
+                                        Some(SchedulerCommand::Task(task_pid, task.into())),
+                                    ))
+                                }
+                            }
                         }
+                        Err(err) => Some((
+                            (
+                                state_token,
+                                create_error_expression(err, &self.factory, &self.allocator),
+                            ),
+                            None,
+                        )),
                     }
-                    Err(err) => Some((
-                        (
-                            state_token,
-                            create_error_expression(err, &self.factory, &self.allocator),
-                        ),
-                        None,
-                    )),
-                }
-            })
-            .unzip();
+                })
+                .unzip();
         let initial_values_action = if initial_values.is_empty() {
             None
         } else {
-            Some(StateOperation::Send(
-                current_pid,
+            Some(SchedulerCommand::Send(
+                self.main_pid,
                 EffectEmitAction {
                     effect_types: vec![EffectUpdateBatch {
                         effect_type: EFFECT_TYPE_TIMESTAMP.into(),
@@ -178,21 +251,22 @@ where
                 .into(),
             ))
         };
-        Some(StateTransition::new(
+        Some(SchedulerTransition::new(
             initial_values_action
                 .into_iter()
                 .chain(tasks.into_iter().flatten()),
         ))
     }
-    fn handle_effect_unsubscribe<TAction>(
+    fn handle_effect_unsubscribe<TAction, TTask>(
         &self,
         state: &mut TimestampHandlerState,
         action: &EffectUnsubscribeAction<T>,
         _metadata: &MessageData,
         _context: &mut impl HandlerContext,
-    ) -> Option<StateTransition<TAction>>
+    ) -> Option<SchedulerTransition<TAction, TTask>>
     where
         TAction: Action,
+        TTask: TaskFactory<TAction, TTask>,
     {
         let EffectUnsubscribeAction {
             effect_type,
@@ -201,62 +275,64 @@ where
         if effect_type.as_str() != EFFECT_TYPE_TIMESTAMP {
             return None;
         }
-        let unsubscribe_actions = effects.iter().filter_map(|effect| {
-            if let Entry::Occupied(entry) = state.tasks.entry(effect.id()) {
-                let pid = entry.remove();
-                Some(StateOperation::Kill(pid))
-            } else {
-                None
+        let active_pids = effects
+            .iter()
+            .filter_map(|effect| state.unsubscribe_timestamp_task(effect.id()));
+        Some(SchedulerTransition::new(
+            active_pids.map(SchedulerCommand::Kill),
+        ))
+    }
+    fn handle_timestamp_handler_update<TAction, TTask>(
+        &self,
+        state: &mut TimestampHandlerState,
+        action: &TimestampHandlerUpdateAction,
+        _metadata: &MessageData,
+        _context: &mut impl HandlerContext,
+    ) -> Option<SchedulerTransition<TAction, TTask>>
+    where
+        TAction: Action + From<EffectEmitAction<T>>,
+        TTask: TaskFactory<TAction, TTask>,
+    {
+        let TimestampHandlerUpdateAction {
+            operation_id,
+            timestamp,
+        } = action;
+        let effect_id = state.operation_effect_mappings.get(operation_id).copied()?;
+        let result = self
+            .factory
+            .create_float_term(get_timestamp_millis(*timestamp) as f64);
+        Some(SchedulerTransition::new(once(SchedulerCommand::Send(
+            self.main_pid,
+            EffectEmitAction {
+                effect_types: vec![EffectUpdateBatch {
+                    effect_type: EFFECT_TYPE_TIMESTAMP.into(),
+                    updates: vec![(effect_id, result.clone())],
+                }],
             }
-        });
-        Some(StateTransition::new(unsubscribe_actions))
+            .into(),
+        ))))
     }
 }
 
-fn create_timestamp_task<T: AsyncExpression, TAction>(
-    state_token: StateToken,
-    duration: f64,
-    factory: &impl AsyncExpressionFactory<T>,
+fn create_timestamp_task(
+    operation_id: Uuid,
+    interval: Duration,
     context: &mut impl HandlerContext,
-) -> (ProcessId, OperationStream<TAction>)
-where
-    TAction: Action + Send + 'static + OutboundAction<EffectEmitAction<T>>,
-{
+) -> (ProcessId, TimestampHandlerTaskFactory) {
     let task_pid = context.generate_pid();
-    let period = Duration::from_millis(duration as u64);
-    let now = Instant::now();
-    let first_update = now.checked_add(period).unwrap_or(now);
-    let stream = IntervalStream::new(interval_at(first_update, period)).map({
-        let factory = factory.clone();
-        let main_pid = context.pid();
-        move |_| {
-            StateOperation::Send(
-                main_pid,
-                EffectEmitAction {
-                    effect_types: vec![EffectUpdateBatch {
-                        effect_type: EFFECT_TYPE_TIMESTAMP.into(),
-                        updates: vec![(state_token, factory.create_float_term(get_current_time()))],
-                    }],
-                }
-                .into(),
-            )
-        }
-    });
-    (task_pid, OperationStream::new(stream))
-}
-
-fn get_current_time() -> f64 {
-    let timestamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or(Duration::from_secs(0))
-        .as_secs_f64();
-    (timestamp * 1000.0).floor()
+    let current_pid = context.pid();
+    let task = TimestampHandlerTaskFactory {
+        operation_id,
+        interval,
+        caller_pid: current_pid,
+    };
+    (task_pid, task)
 }
 
 fn parse_timestamp_effect_args<T: Expression>(
     effect: &T::Signal<T>,
     factory: &impl ExpressionFactory<T>,
-) -> Result<f64, String> {
+) -> Result<Duration, String> {
     let args = effect.args().as_deref();
     if args.len() != 1 {
         return Err(format!(
@@ -265,9 +341,9 @@ fn parse_timestamp_effect_args<T: Expression>(
         ));
     }
     let mut remaining_args = args.iter().map(|item| item.as_deref());
-    let interval = parse_number_arg(remaining_args.next().unwrap(), factory);
+    let interval = parse_duration_millis_arg(remaining_args.next().unwrap(), factory);
     match interval {
-        Some(interval) if interval >= 1.0 => Ok(interval),
+        Some(interval) if interval.as_millis() >= 1 => Ok(interval),
         _ => Err(format!(
             "Invalid timestamp signal arguments: {}",
             effect
@@ -282,11 +358,28 @@ fn parse_timestamp_effect_args<T: Expression>(
     }
 }
 
-fn parse_number_arg<T: Expression>(value: &T, factory: &impl ExpressionFactory<T>) -> Option<f64> {
+fn parse_duration_millis_arg<T: Expression>(
+    value: &T,
+    factory: &impl ExpressionFactory<T>,
+) -> Option<Duration> {
     match factory.match_int_term(value) {
-        Some(term) => Some(term.value() as f64),
+        Some(term) => {
+            let value = term.value();
+            if value >= 0 {
+                Some(Duration::from_millis(value as u64))
+            } else {
+                None
+            }
+        }
         _ => match factory.match_float_term(value) {
-            Some(term) => Some(term.value()),
+            Some(term) => {
+                let value = term.value();
+                if value >= 0.0 {
+                    Some(Duration::from_millis(value.trunc() as u64))
+                } else {
+                    None
+                }
+            }
             _ => None,
         },
     }

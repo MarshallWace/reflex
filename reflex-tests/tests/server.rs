@@ -15,6 +15,9 @@ use http::HeaderMap;
 use hyper::server::conn::AddrStream;
 use hyper::service::make_service_fn;
 use hyper::Server;
+use reflex_handlers::actor::HandlerActor;
+use reflex_server::cli::execute_query::GraphQlWebServerMetricLabels;
+use reflex_server::cli::task::{ServerCliTaskActor, ServerCliTaskFactory};
 use reflex_server::{metrics::SharedString, opentelemetry::trace::noop::NoopTracer};
 use tokio::sync::oneshot;
 
@@ -28,10 +31,9 @@ use reflex_interpreter::compiler::CompilerOptions;
 use reflex_interpreter::InterpreterOptions;
 use reflex_json::JsonValue;
 use reflex_lang::allocator::DefaultAllocator;
-use reflex_lang::SharedTermFactory;
+use reflex_lang::{CachedSharedTerm, SharedTermFactory};
 use reflex_server::action::ServerCliAction;
 use reflex_server::builtins::ServerBuiltins;
-use reflex_server::cli::reflex_server::get_graphql_query_label;
 use reflex_server::imports::server_imports;
 use reflex_server::{graphql_service, GraphQlWebServer, GraphQlWebServerMetricNames};
 use reflex_utils::reconnect::NoopReconnectTimeout;
@@ -64,13 +66,6 @@ pub fn serve_graphql(input: &str) -> (SocketAddr, oneshot::Sender<()>) {
     let factory = SharedTermFactory::<ServerBuiltins>::default();
 
     let https_client = hyper::Client::builder().build(hyper_tls::HttpsConnector::new());
-    let actor = GraphQlHandler::new(
-        https_client,
-        factory.clone(),
-        allocator.clone(),
-        NoopReconnectTimeout {},
-        GraphQlHandlerMetricNames::default(),
-    );
     let compiler_options = CompilerOptions::default();
     let interpreter_options = InterpreterOptions::default();
     let module_loader = Some(default_js_loaders(
@@ -79,7 +74,6 @@ pub fn serve_graphql(input: &str) -> (SocketAddr, oneshot::Sender<()>) {
         &allocator,
     ));
     let graph_root = {
-        // let js_env = create_js_env(&factory, &allocator);
         compile_js_entry_point(
             &js_file,
             Some(empty()),
@@ -89,17 +83,51 @@ pub fn serve_graphql(input: &str) -> (SocketAddr, oneshot::Sender<()>) {
             &allocator,
         )
         .unwrap()
-        // let root = parse(input, &js_env, &factory, &allocator).unwrap();
-        // let program = Compiler::new(compiler_options, None)
-        //     .compile(&root, CompilerMode::Function, &factory, &allocator)
-        //     .unwrap();
-        // (program, InstructionPointer::default())
     };
 
-    let app: GraphQlWebServer<ServerCliAction<_>> = GraphQlWebServer::new(
+    type TBuiltin = ServerBuiltins;
+    type T = CachedSharedTerm<TBuiltin>;
+    type TFactory = SharedTermFactory<TBuiltin>;
+    type TAllocator = DefaultAllocator<T>;
+    type TConnect = hyper_tls::HttpsConnector<hyper::client::HttpConnector>;
+    type TReconnect = NoopReconnectTimeout;
+    type TTracer = NoopTracer;
+    type TAction = ServerCliAction<T>;
+    type TTask = ServerCliTaskFactory<
+        T,
+        TFactory,
+        TAllocator,
+        TConnect,
+        TReconnect,
+        NoopGraphQlQueryTransform,
+        NoopGraphQlQueryTransform,
+        GraphQlWebServerMetricLabels,
+        GraphQlWebServerMetricLabels,
+        GraphQlWebServerMetricLabels,
+        GraphQlWebServerMetricLabels,
+        GraphQlWebServerMetricLabels,
+        TTracer,
+    >;
+    let app = GraphQlWebServer::<TAction, TTask>::new(
         graph_root,
         None,
-        actor,
+        {
+            let factory = factory.clone();
+            let allocator = allocator.clone();
+            move |context, main_pid| {
+                [(
+                    context.generate_pid(),
+                    ServerCliTaskActor::from(HandlerActor::GraphQlHandler(GraphQlHandler::new(
+                        https_client,
+                        factory,
+                        allocator,
+                        NoopReconnectTimeout {},
+                        GraphQlHandlerMetricNames::default(),
+                        main_pid,
+                    ))),
+                )]
+            }
+        },
         middleware,
         compiler_options,
         interpreter_options,
@@ -108,20 +136,21 @@ pub fn serve_graphql(input: &str) -> (SocketAddr, oneshot::Sender<()>) {
         NoopGraphQlQueryTransform,
         NoopGraphQlQueryTransform,
         GraphQlWebServerMetricNames::default(),
-        get_graphql_query_label,
-        get_http_query_metric_labels,
-        get_websocket_connection_metric_labels,
-        get_websocket_operation_metric_labels,
-        get_worker_metric_labels,
+        GraphQlWebServerMetricLabels,
+        GraphQlWebServerMetricLabels,
+        GraphQlWebServerMetricLabels,
+        GraphQlWebServerMetricLabels,
+        GraphQlWebServerMetricLabels,
         NoopTracer::default(),
     )
     .unwrap();
     let socket_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
     let service = make_service_fn({
+        let main_pid = app.main_pid();
         let app = Arc::new(app);
         move |_socket: &AddrStream| {
             let app = Arc::clone(&app);
-            let service = graphql_service(app);
+            let service = graphql_service(app, main_pid);
             future::ready(Ok::<_, Infallible>(service))
         }
     });

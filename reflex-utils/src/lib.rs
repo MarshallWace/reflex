@@ -4,6 +4,7 @@
 mod file_writer;
 mod partition_results;
 pub mod reconnect;
+pub mod serialize;
 
 pub use self::file_writer::*;
 pub use self::partition_results::*;

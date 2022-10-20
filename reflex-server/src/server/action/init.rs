@@ -13,7 +13,6 @@ use crate::cli::reflex_server::OpenTelemetryConfig;
 pub enum InitActions {
     PrometheusMetrics(InitPrometheusMetricsAction),
     OpenTelemetry(InitOpenTelemetryAction),
-    SessionRecording(InitSessionRecordingAction),
     GraphRoot(InitGraphRootAction),
     HttpServer(InitHttpServerAction),
 }
@@ -23,7 +22,6 @@ impl NamedAction for InitActions {
         match self {
             Self::PrometheusMetrics(action) => action.name(),
             Self::OpenTelemetry(action) => action.name(),
-            Self::SessionRecording(action) => action.name(),
             Self::GraphRoot(action) => action.name(),
             Self::HttpServer(action) => action.name(),
         }
@@ -34,7 +32,6 @@ impl SerializableAction for InitActions {
         match self {
             Self::PrometheusMetrics(action) => action.to_json(),
             Self::OpenTelemetry(action) => action.to_json(),
-            Self::SessionRecording(action) => action.to_json(),
             Self::GraphRoot(action) => action.to_json(),
             Self::HttpServer(action) => action.to_json(),
         }
@@ -80,28 +77,6 @@ impl<'a> From<&'a InitActions> for Option<&'a InitOpenTelemetryAction> {
     fn from(value: &'a InitActions) -> Self {
         match value {
             InitActions::OpenTelemetry(value) => Some(value),
-            _ => None,
-        }
-    }
-}
-
-impl From<InitSessionRecordingAction> for InitActions {
-    fn from(value: InitSessionRecordingAction) -> Self {
-        Self::SessionRecording(value)
-    }
-}
-impl From<InitActions> for Option<InitSessionRecordingAction> {
-    fn from(value: InitActions) -> Self {
-        match value {
-            InitActions::SessionRecording(value) => Some(value),
-            _ => None,
-        }
-    }
-}
-impl<'a> From<&'a InitActions> for Option<&'a InitSessionRecordingAction> {
-    fn from(value: &'a InitActions) -> Self {
-        match value {
-            InitActions::SessionRecording(value) => Some(value),
             _ => None,
         }
     }
@@ -236,25 +211,6 @@ impl<'a> SerializableAction for InitOpenTelemetryAction {
                 ),
             ]),
         }
-    }
-}
-
-#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
-pub struct InitSessionRecordingAction {
-    pub output_path: String,
-}
-impl<'a> Action for InitSessionRecordingAction {}
-impl<'a> NamedAction for InitSessionRecordingAction {
-    fn name(&self) -> &'static str {
-        "InitSessionRecordingAction"
-    }
-}
-impl<'a> SerializableAction for InitSessionRecordingAction {
-    fn to_json(&self) -> SerializedAction {
-        SerializedAction::from_iter([(
-            "output_path",
-            JsonValue::String(String::from(&self.output_path)),
-        )])
     }
 }
 

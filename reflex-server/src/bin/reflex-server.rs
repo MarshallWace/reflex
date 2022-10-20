@@ -13,45 +13,44 @@ use std::{
 
 use anyhow::{anyhow, Context, Result};
 use clap::Parser;
-use http::HeaderMap;
-use metrics::SharedString;
 use metrics_exporter_prometheus::PrometheusBuilder;
 use opentelemetry::trace::noop::NoopTracer;
 use reflex::core::Expression;
 use reflex_cli::{compile_entry_point, syntax::js::default_js_loaders, Syntax};
-use reflex_dispatcher::{SchedulerMiddleware, SessionRecorder, StateOperation};
-use reflex_graphql::{
-    parse_graphql_schema, GraphQlOperation, GraphQlSchema, NoopGraphQlQueryTransform,
-};
+use reflex_dispatcher::{SchedulerCommand, SchedulerMiddleware};
+use reflex_graphql::{parse_graphql_schema, GraphQlSchema, NoopGraphQlQueryTransform};
 use reflex_handlers::{
-    default_handlers,
-    utils::tls::{create_https_client, tokio_native_tls::native_tls::Certificate},
-    DefaultHandlersMetricNames,
+    default_handler_actors,
+    utils::tls::{create_https_client, hyper_tls, tokio_native_tls::native_tls::Certificate},
+    DefaultHandlerMetricNames,
 };
 use reflex_interpreter::{compiler::CompilerOptions, InterpreterOptions};
-use reflex_json::JsonValue;
 use reflex_lang::{allocator::DefaultAllocator, CachedSharedTerm, SharedTermFactory};
 use reflex_server::{
     action::ServerCliAction,
     builtins::ServerBuiltins,
-    cli::reflex_server::{
-        cli, get_graphql_query_label, OpenTelemetryConfig, ReflexServerCliOptions,
+    cli::{
+        reflex_server::{
+            cli, GraphQlWebServerMetricLabels, OpenTelemetryConfig, ReflexServerCliOptions,
+        },
+        task::{ServerCliTaskActor, ServerCliTaskFactory},
     },
-    generate_session_recording_filename,
     imports::server_imports,
-    logger::{formatted::FormattedLogger, json::JsonActionLogger, ActionLogger, EitherLogger},
+    logger::{
+        formatted::FormattedLogger, json::JsonActionLogger, prometheus::PrometheusLogger,
+        ActionLogger, ChainLogger, EitherLogger,
+    },
     middleware::LoggerMiddleware,
-    recorder::FileRecorder,
     server::action::init::{
         InitGraphRootAction, InitHttpServerAction, InitOpenTelemetryAction,
-        InitPrometheusMetricsAction, InitSessionRecordingAction,
+        InitPrometheusMetricsAction,
     },
     GraphQlWebServerMetricNames,
 };
 use reflex_server::{
-    server::EitherTracer, tokio_runtime_metrics_export::TokioRuntimeMonitorMetricNames,
+    server::utils::EitherTracer, tokio_runtime_metrics_export::TokioRuntimeMonitorMetricNames,
 };
-use reflex_utils::{reconnect::FibonacciReconnectTimeout, FileWriterFormat};
+use reflex_utils::reconnect::FibonacciReconnectTimeout;
 
 /// Launch a GraphQL server for the provided graph root
 #[derive(Parser)]
@@ -76,9 +75,6 @@ struct Args {
     /// Log runtime actions
     #[clap(long)]
     log: Option<LogFormat>,
-    /// Path to capture runtime event playback file
-    #[clap(long)]
-    capture_events: Option<Option<PathBuf>>,
     /// Prevent static compiler optimizations
     #[clap(long)]
     unoptimized: bool,
@@ -116,6 +112,28 @@ impl FromStr for LogFormat {
 
 #[tokio::main]
 pub async fn main() -> Result<()> {
+    type TBuiltin = ServerBuiltins;
+    type T = CachedSharedTerm<TBuiltin>;
+    type TFactory = SharedTermFactory<TBuiltin>;
+    type TAllocator = DefaultAllocator<T>;
+    type TConnect = hyper_tls::HttpsConnector<hyper::client::HttpConnector>;
+    type TReconnect = FibonacciReconnectTimeout;
+    type TAction = ServerCliAction<T>;
+    type TTask = ServerCliTaskFactory<
+        T,
+        TFactory,
+        TAllocator,
+        TConnect,
+        TReconnect,
+        NoopGraphQlQueryTransform,
+        NoopGraphQlQueryTransform,
+        GraphQlWebServerMetricLabels,
+        GraphQlWebServerMetricLabels,
+        GraphQlWebServerMetricLabels,
+        GraphQlWebServerMetricLabels,
+        GraphQlWebServerMetricLabels,
+        EitherTracer<NoopTracer, opentelemetry::sdk::trace::Tracer>,
+    >;
     let args = Args::parse();
     let mut logger = match args.log {
         Some(LogFormat::Json) => EitherLogger::Left(JsonActionLogger::stderr()),
@@ -134,58 +152,22 @@ pub async fn main() -> Result<()> {
         .as_ref()
         .map(|path| load_tls_cert(path.as_path()))
         .transpose()?;
-    let https_client = create_https_client(tls_cert)?;
+    let https_client: hyper::Client<TConnect> = create_https_client(tls_cert)?;
     let schema = if let Some(schema_path) = &args.schema {
         Some(load_graphql_schema(schema_path.as_path())?)
     } else {
         None
     };
-    let logger_middleware = args.log.map(|_| LoggerMiddleware::new(logger.clone()));
-    let recorder_middleware = match args.capture_events.as_ref() {
-        Some(output_path) => {
-            let (recorder, serialized_path) = match output_path {
-                Some(path) => {
-                    let serialized_path = format!("{}", path.to_string_lossy());
-                    (
-                        FileRecorder::new(FileWriterFormat::MessagePack, path),
-                        serialized_path,
-                    )
-                }
-                None => {
-                    let output_path = generate_session_recording_filename(None);
-                    let serialized_path = output_path.clone();
-                    (
-                        FileRecorder::new(
-                            FileWriterFormat::MessagePack,
-                            PathBuf::from(output_path),
-                        ),
-                        serialized_path,
-                    )
-                }
-            };
-            log_server_action(
-                &mut logger,
-                InitSessionRecordingAction {
-                    output_path: serialized_path,
-                },
-            );
-            Some(SessionRecorder::new(recorder))
-        }
-        None => None,
+    let logger_middleware = {
+        let prometheus_logger = args
+            .metrics_port
+            .map(|_| PrometheusLogger::new(Default::default()));
+        let stdout_logger = args.log.map(|_| logger.clone());
+        LoggerMiddleware::new(ChainLogger::new(stdout_logger, prometheus_logger))
     };
-    let middleware = SchedulerMiddleware::new(logger_middleware, recorder_middleware);
-    let factory = SharedTermFactory::<ServerBuiltins>::default();
-    let allocator = DefaultAllocator::default();
-    let actor = default_handlers::<ServerCliAction<CachedSharedTerm<ServerBuiltins>>, _, _, _, _, _>(
-        https_client,
-        &factory,
-        &allocator,
-        FibonacciReconnectTimeout {
-            units: Duration::from_secs(1),
-            max_timeout: Duration::from_secs(30),
-        },
-        DefaultHandlersMetricNames::default(),
-    );
+    let middleware = SchedulerMiddleware::<_, _, TAction, TTask>::pre(logger_middleware);
+    let factory: TFactory = SharedTermFactory::<TBuiltin>::default();
+    let allocator: TAllocator = DefaultAllocator::default();
     let tracer = match OpenTelemetryConfig::parse_env(std::env::vars())? {
         None => None,
         Some(config) => {
@@ -242,11 +224,26 @@ pub async fn main() -> Result<()> {
             address: config.address,
         },
     );
-    let server = cli(
+    let server = cli::<TAction, TTask, T, TFactory, TAllocator, _, _, _, _, _, _, _, _, _>(
         config,
         graph_root,
         schema,
-        actor,
+        |context, main_pid| {
+            default_handler_actors::<TAction, TTask, T, TFactory, TAllocator, TConnect, TReconnect>(
+                https_client,
+                &factory,
+                &allocator,
+                FibonacciReconnectTimeout {
+                    units: Duration::from_secs(1),
+                    max_timeout: Duration::from_secs(30),
+                },
+                DefaultHandlerMetricNames::default(),
+                main_pid,
+            )
+            .into_iter()
+            .map(|actor| (context.generate_pid(), ServerCliTaskActor::from(actor)))
+            .collect::<Vec<_>>()
+        },
         middleware,
         &factory,
         &allocator,
@@ -256,11 +253,11 @@ pub async fn main() -> Result<()> {
         NoopGraphQlQueryTransform,
         GraphQlWebServerMetricNames::default(),
         TokioRuntimeMonitorMetricNames::default(),
-        get_graphql_query_label,
-        get_http_query_metric_labels,
-        get_websocket_connection_metric_labels,
-        get_websocket_operation_metric_labels,
-        get_worker_metric_labels,
+        GraphQlWebServerMetricLabels,
+        GraphQlWebServerMetricLabels,
+        GraphQlWebServerMetricLabels,
+        GraphQlWebServerMetricLabels,
+        GraphQlWebServerMetricLabels,
         match tracer {
             None => EitherTracer::Left(NoopTracer::default()),
             Some(tracer) => EitherTracer::Right(tracer),
@@ -270,40 +267,12 @@ pub async fn main() -> Result<()> {
     server.await.with_context(|| anyhow!("Server error"))
 }
 
-fn get_http_query_metric_labels(
-    operation: &GraphQlOperation,
-    _headers: &HeaderMap,
-) -> Vec<(String, String)> {
-    vec![(
-        String::from("operation_name"),
-        String::from(operation.operation_name().unwrap_or("<null>")),
-    )]
-}
-
-fn get_websocket_connection_metric_labels(
-    _connection_params: Option<&JsonValue>,
-    _headers: &HeaderMap,
-) -> Vec<(String, String)> {
-    Vec::new()
-}
-
-fn get_websocket_operation_metric_labels(operation: &GraphQlOperation) -> Vec<(String, String)> {
-    vec![(
-        String::from("operation_name"),
-        String::from(operation.operation_name().unwrap_or("<null>")),
-    )]
-}
-
-fn get_worker_metric_labels(query_name: &str) -> Vec<(SharedString, SharedString)> {
-    vec![("worker".into(), String::from(query_name).into())]
-}
-
 fn log_server_action<T: Expression>(
     logger: &mut impl ActionLogger<Action = ServerCliAction<T>>,
     action: impl Into<ServerCliAction<T>>,
 ) {
     logger.log(
-        &StateOperation::Send(Default::default(), action.into()),
+        &SchedulerCommand::Send(Default::default(), action.into()),
         None,
         None,
     )

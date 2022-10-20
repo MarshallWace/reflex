@@ -7,7 +7,9 @@ pub use tonic;
 
 pub mod action;
 pub mod actor;
+pub mod codec;
 pub mod loader;
+pub mod task;
 pub mod utils;
 
 pub(crate) mod proto;
@@ -16,7 +18,7 @@ pub trait GrpcConfig {
     fn configure(&self, endpoint: tonic::transport::Endpoint) -> tonic::transport::Endpoint;
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct DefaultGrpcConfig;
 impl GrpcConfig for DefaultGrpcConfig {
     fn configure(&self, endpoint: tonic::transport::Endpoint) -> tonic::transport::Endpoint {

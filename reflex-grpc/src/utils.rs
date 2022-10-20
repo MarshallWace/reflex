@@ -59,9 +59,13 @@ fn hash_object(value: &impl std::hash::Hash) -> u64 {
 #[derive(PartialEq, Eq, Clone, Hash, Debug)]
 pub(crate) struct GrpcServiceName(pub(crate) String);
 impl GrpcServiceName {
-    fn as_str(&self) -> &str {
+    pub(crate) fn as_str(&self) -> &str {
         let Self(value) = self;
         value.as_str()
+    }
+    pub(crate) fn into_string(self) -> String {
+        let Self(value) = self;
+        value
     }
 }
 impl std::fmt::Display for GrpcServiceName {
@@ -73,9 +77,13 @@ impl std::fmt::Display for GrpcServiceName {
 #[derive(PartialEq, Eq, Clone, Hash, Debug)]
 pub(crate) struct GrpcMethodName(pub(crate) String);
 impl GrpcMethodName {
-    fn as_str(&self) -> &str {
+    pub fn as_str(&self) -> &str {
         let Self(value) = self;
         value.as_str()
+    }
+    pub fn into_string(self) -> String {
+        let Self(value) = self;
+        value
     }
 }
 impl std::fmt::Display for GrpcMethodName {

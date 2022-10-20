@@ -1,7 +1,11 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
-use crate::{Actor, ActorTransition, HandlerContext, MessageData, NamedAction};
+// SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+use crate::{
+    Action, Actor, ActorInitContext, Handler, HandlerContext, MessageData, NamedAction,
+    SchedulerMode, TaskFactory, TaskInbox, Worker,
+};
 use metrics::{describe_histogram, histogram, Unit};
 
 #[derive(Clone, Copy, Debug)]
@@ -44,33 +48,59 @@ impl<T> InstrumentedActor<T> {
         }
     }
 }
-impl<T, TAction> Actor<TAction> for InstrumentedActor<T>
+
+impl<T, TAction, TTask> Actor<TAction, TTask> for InstrumentedActor<T>
 where
-    T: Actor<TAction>,
-    TAction: NamedAction,
+    T: Actor<TAction, TTask>,
+    TAction: Action + NamedAction,
+    TTask: TaskFactory<TAction, TTask>,
+{
+    type Events<TInbox: TaskInbox<TAction>> = T::Events<TInbox>;
+    type Dispose = T::Dispose;
+    fn init<TInbox: TaskInbox<TAction>>(
+        &self,
+        inbox: TInbox,
+        context: &impl ActorInitContext,
+    ) -> (Self::State, Self::Events<TInbox>, Self::Dispose) {
+        self.metric_names.init();
+        self.inner.init(inbox, context)
+    }
+}
+
+impl<T, I, O> Worker<I, O> for InstrumentedActor<T>
+where
+    T: Worker<I, O>,
+    I: NamedAction,
+{
+    fn accept(&self, message: &I) -> bool {
+        self.inner.accept(message)
+    }
+    fn schedule(&self, message: &I, state: &Self::State) -> Option<SchedulerMode> {
+        self.inner.schedule(message, state)
+    }
+}
+
+impl<T, I, O> Handler<I, O> for InstrumentedActor<T>
+where
+    T: Handler<I, O>,
+    I: NamedAction,
 {
     type State = T::State;
-
-    fn init(&self) -> Self::State {
-        self.metric_names.init();
-        self.inner.init()
-    }
-
     fn handle(
         &self,
-        state: Self::State,
-        action: &TAction,
+        state: &mut Self::State,
+        message: &I,
         metadata: &MessageData,
         context: &mut impl HandlerContext,
-    ) -> ActorTransition<Self::State, TAction> {
+    ) -> Option<O> {
         let starting_time = std::time::Instant::now();
-        let inner_return = self.inner.handle(state, action, metadata, context);
-        let labels = [("actor", self.actor_name), ("action_type", action.name())];
+        let result = self.inner.handle(state, message, metadata, context);
+        let labels = [("actor", self.actor_name), ("action_type", message.name())];
         histogram!(
             self.metric_names.action_processing_time_micros,
             starting_time.elapsed().as_micros() as f64,
             &labels
         );
-        inner_return
+        result
     }
 }

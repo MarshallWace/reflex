@@ -7,42 +7,167 @@ use std::{
     time::SystemTime,
 };
 
+use actor::ServerActor;
+use chrono::{DateTime, Utc};
+use http::StatusCode;
+use logger::ActionLogger;
+use opentelemetry::trace::Tracer;
+use reflex::core::{ExpressionFactory, HeapAllocator};
+use reflex_graphql::stdlib::Stdlib as GraphQlStdlib;
+use reflex_runtime::{actor::RuntimeMetricNames, runtime_actors, AsyncExpression};
+use reflex_stdlib::Stdlib;
+use server::{
+    GraphQlServerOperationMetricLabels, GraphQlServerQueryLabel,
+    HttpGraphQlServerQueryMetricLabels, WebSocketGraphQlServerConnectionMetricLabels,
+};
+
+use crate::server::{
+    action::opentelemetry::OpenTelemetryMiddlewareErrorAction,
+    ChainedHttpGraphQlServerQueryTransform, ChainedWebSocketGraphQlServerQueryTransform,
+    GraphQlServer, GraphQlServerMetricNames, HttpGraphQlServer, HttpGraphQlServerMetricNames,
+    HttpGraphQlServerQueryTransform, WebSocketGraphQlServer, WebSocketGraphQlServerMetricNames,
+    WebSocketGraphQlServerQueryTransform,
+};
+
 pub use ::bytes;
 pub use ::http;
 pub use ::metrics;
 pub use ::metrics_exporter_prometheus;
 pub use ::opentelemetry;
-use chrono::{DateTime, Utc};
-
-use http::StatusCode;
-use logger::ActionLogger;
-use server::action::opentelemetry::OpenTelemetryMiddlewareErrorAction;
 
 pub mod action;
+pub mod actor;
 pub mod imports;
 pub mod logger;
 pub mod middleware;
 pub mod recorder;
 pub mod server;
 pub mod stdlib;
+pub mod task;
 pub mod tokio_runtime_metrics_export;
 pub mod utils;
 
 pub(crate) mod service;
 
-use reflex_dispatcher::{Action, OutboundAction, StateOperation};
+use reflex_dispatcher::{Action, ProcessId, SchedulerCommand};
 use reflex_graphql::{
     create_json_error_object, validate::ValidateQueryGraphQlTransform, GraphQlOperation,
     GraphQlQueryTransform, GraphQlSchemaTypes,
 };
 use reflex_json::JsonValue;
-use server::{HttpGraphQlServerQueryTransform, WebSocketGraphQlServerQueryTransform};
 pub use service::*;
 
 pub mod builtins;
 pub mod cli {
     pub mod execute_query;
     pub mod reflex_server;
+    pub mod task;
+}
+
+#[derive(Default, Clone, Copy, Debug)]
+pub struct ServerMetricNames {
+    pub runtime: RuntimeMetricNames,
+    pub graphql_server: GraphQlServerMetricNames,
+    pub http_graphql_server: HttpGraphQlServerMetricNames,
+    pub websocket_graphql_server: WebSocketGraphQlServerMetricNames,
+}
+
+pub fn server_actors<
+    T,
+    TFactory,
+    TAllocator,
+    TTransformHttp,
+    TTransformWs,
+    TGraphQlQueryLabel,
+    THttpMetricLabels,
+    TConnectionMetricLabels,
+    TOperationMetricLabels,
+    TTracer,
+>(
+    schema_types: Option<GraphQlSchemaTypes<'static, String>>,
+    factory: TFactory,
+    allocator: TAllocator,
+    transform_http: TTransformHttp,
+    transform_ws: TTransformWs,
+    metric_names: ServerMetricNames,
+    get_graphql_query_label: TGraphQlQueryLabel,
+    get_http_query_metric_labels: THttpMetricLabels,
+    get_websocket_connection_metric_labels: TConnectionMetricLabels,
+    get_operation_metric_labels: TOperationMetricLabels,
+    tracer: TTracer,
+    main_pid: ProcessId,
+) -> impl IntoIterator<
+    Item = ServerActor<
+        T,
+        TFactory,
+        TAllocator,
+        TTransformHttp,
+        TTransformWs,
+        TGraphQlQueryLabel,
+        THttpMetricLabels,
+        TConnectionMetricLabels,
+        TOperationMetricLabels,
+        TTracer,
+    >,
+>
+where
+    T: AsyncExpression,
+    T::Builtin: From<Stdlib> + From<GraphQlStdlib>,
+    TFactory: ExpressionFactory<T> + Clone,
+    TAllocator: HeapAllocator<T> + Clone,
+    TTransformHttp: HttpGraphQlServerQueryTransform,
+    TTransformWs: WebSocketGraphQlServerQueryTransform,
+    TGraphQlQueryLabel: GraphQlServerQueryLabel,
+    THttpMetricLabels: HttpGraphQlServerQueryMetricLabels,
+    TConnectionMetricLabels: WebSocketGraphQlServerConnectionMetricLabels,
+    TOperationMetricLabels: GraphQlServerOperationMetricLabels,
+    TTracer: Tracer,
+    TTracer::Span: Send + Sync + 'static,
+{
+    let validate_query_transform = schema_types.clone().map(ValidateQueryGraphQlTransform::new);
+    {
+        runtime_actors(
+            factory.clone(),
+            allocator.clone(),
+            metric_names.runtime,
+            main_pid,
+        )
+        .into_iter()
+        .map(ServerActor::Runtime)
+    }
+    .chain([
+        ServerActor::GraphQlServer(GraphQlServer::new(
+            factory.clone(),
+            allocator.clone(),
+            metric_names.graphql_server,
+            get_graphql_query_label,
+            get_operation_metric_labels,
+            tracer,
+            main_pid,
+        )),
+        ServerActor::HttpGraphQlServer(HttpGraphQlServer::new(
+            schema_types.clone(),
+            factory.clone(),
+            ChainedHttpGraphQlServerQueryTransform {
+                left: validate_query_transform.clone(),
+                right: transform_http,
+            },
+            metric_names.http_graphql_server,
+            get_http_query_metric_labels,
+            main_pid,
+        )),
+        ServerActor::WebSocketGraphQlServer(WebSocketGraphQlServer::new(
+            schema_types,
+            factory.clone(),
+            ChainedWebSocketGraphQlServerQueryTransform {
+                left: validate_query_transform,
+                right: transform_ws,
+            },
+            metric_names.websocket_graphql_server,
+            get_websocket_connection_metric_labels,
+            main_pid,
+        )),
+    ])
 }
 
 #[derive(Clone)]
@@ -114,7 +239,7 @@ pub fn register_opentelemetry_error_logger<TAction>(
     logger: impl ActionLogger<Action = TAction> + Send + 'static,
 ) -> Result<(), OpenTelemetryMiddlewareErrorAction>
 where
-    TAction: Action + OutboundAction<OpenTelemetryMiddlewareErrorAction>,
+    TAction: Action + From<OpenTelemetryMiddlewareErrorAction>,
 {
     opentelemetry::global::set_error_handler({
         let logger = Arc::new(Mutex::new(logger));
@@ -124,7 +249,7 @@ where
                     error: format!("{}", error),
                 };
                 logger.log(
-                    &StateOperation::Send(Default::default(), action.into()),
+                    &SchedulerCommand::Send(Default::default(), action.into()),
                     None,
                     None,
                 )

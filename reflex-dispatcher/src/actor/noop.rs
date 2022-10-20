@@ -2,54 +2,88 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use crate::{
-    Action, Actor, ActorTransition, HandlerContext, MessageData, MiddlewareContext, PostMiddleware,
-    PostMiddlewareTransition, PreMiddleware, PreMiddlewareTransition, StateOperation,
+    Action, Actor, ActorInitContext, Handler, HandlerContext, MessageData, MiddlewareContext,
+    NoopDisposeCallback, PostMiddleware, PreMiddleware, SchedulerCommand, SchedulerMode,
+    SchedulerTransition, TaskFactory, TaskInbox, Worker,
 };
 
-#[derive(Clone, Copy)]
+#[derive(Default, Clone, Copy)]
 pub struct NoopActor;
-impl<TAction: Action> Actor<TAction> for NoopActor {
-    type State = ();
-    fn init(&self) -> Self::State {
-        ()
+
+impl<TAction, TTask> Actor<TAction, TTask> for NoopActor
+where
+    TAction: Action,
+    TTask: TaskFactory<TAction, TTask>,
+{
+    type Events<TInbox: TaskInbox<TAction>> = TInbox;
+    type Dispose = NoopDisposeCallback;
+    fn init<TInbox: TaskInbox<TAction>>(
+        &self,
+        inbox: TInbox,
+        _context: &impl ActorInitContext,
+    ) -> (Self::State, Self::Events<TInbox>, Self::Dispose) {
+        (Default::default(), inbox, Default::default())
     }
+}
+
+impl<I, O> Worker<I, O> for NoopActor {
+    fn accept(&self, _message: &I) -> bool {
+        false
+    }
+    fn schedule(&self, _message: &I, _state: &Self::State) -> Option<SchedulerMode> {
+        None
+    }
+}
+
+impl<I, O> Handler<I, O> for NoopActor {
+    type State = ();
     fn handle(
         &self,
-        state: Self::State,
-        _action: &TAction,
+        _state: &mut Self::State,
+        _message: &I,
         _metadata: &MessageData,
         _context: &mut impl HandlerContext,
-    ) -> ActorTransition<Self::State, TAction> {
-        ActorTransition::new(state, Default::default())
+    ) -> Option<O> {
+        None
     }
 }
-impl<TAction: Action> PreMiddleware<TAction> for NoopActor {
+
+impl<TAction, TTask> PreMiddleware<TAction, TTask> for NoopActor
+where
+    TAction: Action,
+    TTask: TaskFactory<TAction, TTask>,
+{
     type State = ();
     fn init(&self) -> Self::State {
         ()
     }
     fn handle(
         &self,
-        state: Self::State,
-        action: StateOperation<TAction>,
+        _state: &mut Self::State,
+        operation: SchedulerCommand<TAction, TTask>,
         _metadata: &MessageData,
         _context: &MiddlewareContext,
-    ) -> PreMiddlewareTransition<Self::State, TAction> {
-        PreMiddlewareTransition::new(state, action)
+    ) -> SchedulerCommand<TAction, TTask> {
+        operation
     }
 }
-impl<TAction: Action> PostMiddleware<TAction> for NoopActor {
+
+impl<TAction, TTask> PostMiddleware<TAction, TTask> for NoopActor
+where
+    TAction: Action,
+    TTask: TaskFactory<TAction, TTask>,
+{
     type State = ();
     fn init(&self) -> Self::State {
         ()
     }
     fn handle(
         &self,
-        state: Self::State,
-        operations: Vec<StateOperation<TAction>>,
+        _state: &mut Self::State,
+        operations: Vec<SchedulerCommand<TAction, TTask>>,
         _metadata: &MessageData,
         _context: &MiddlewareContext,
-    ) -> PostMiddlewareTransition<Self::State, TAction> {
-        PostMiddlewareTransition::new(state, operations)
+    ) -> Option<SchedulerTransition<TAction, TTask>> {
+        Some(SchedulerTransition::new(operations))
     }
 }

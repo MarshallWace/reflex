@@ -2,26 +2,27 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
-use actor::{
-    fetch::{FetchHandlerAction, FetchHandlerMetricNames},
-    graphql::{GraphQlHandlerAction, GraphQlHandlerMetricNames},
-    loader::{LoaderHandlerAction, LoaderHandlerMetricNames},
-    scan::{ScanHandlerAction, ScanHandlerMetricNames},
-    timeout::TimeoutHandlerAction,
-    timestamp::TimestampHandlerAction,
-    variable::VariableHandlerAction,
-};
+use actor::HandlerActor;
 use hyper::Body;
 use reflex::core::{Applicable, Expression};
-use reflex_dispatcher::{
-    Actor, ChainedActor, InstrumentedActor, InstrumentedActorMetricNames, NamedAction,
-};
+use reflex_dispatcher::{Action, ProcessId, TaskFactory};
 use reflex_runtime::{AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator};
 use reflex_utils::reconnect::ReconnectTimeout;
 
-use crate::actor::{
-    fetch::FetchHandler, graphql::GraphQlHandler, loader::LoaderHandler, scan::ScanHandler,
-    timeout::TimeoutHandler, timestamp::TimestampHandler, variable::VariableHandler,
+use crate::{
+    actor::{
+        fetch::{FetchHandler, FetchHandlerAction, FetchHandlerMetricNames},
+        graphql::{GraphQlHandler, GraphQlHandlerAction, GraphQlHandlerMetricNames},
+        loader::{LoaderHandler, LoaderHandlerAction, LoaderHandlerMetricNames},
+        scan::{ScanHandler, ScanHandlerAction, ScanHandlerMetricNames},
+        timeout::{TimeoutHandler, TimeoutHandlerAction},
+        timestamp::{TimestampHandler, TimestampHandlerAction},
+        variable::{VariableHandler, VariableHandlerAction},
+    },
+    task::{
+        fetch::FetchHandlerTask, graphql::GraphQlHandlerTask, timeout::TimeoutHandlerTask,
+        timestamp::TimestampHandlerTask,
+    },
 };
 
 pub use hyper;
@@ -31,11 +32,11 @@ pub mod actor;
 pub mod imports;
 pub mod loader;
 pub mod stdlib;
+pub mod task;
 pub mod utils;
 
-pub trait DefaultHandlersAction<T: Expression>:
-    NamedAction
-    + FetchHandlerAction<T>
+pub trait DefaultHandlerAction<T: Expression>:
+    FetchHandlerAction<T>
     + GraphQlHandlerAction<T>
     + LoaderHandlerAction<T>
     + ScanHandlerAction<T>
@@ -44,9 +45,8 @@ pub trait DefaultHandlersAction<T: Expression>:
     + VariableHandlerAction<T>
 {
 }
-impl<T: Expression, TAction> DefaultHandlersAction<T> for TAction where
-    Self: NamedAction
-        + FetchHandlerAction<T>
+impl<T: Expression, TAction> DefaultHandlerAction<T> for TAction where
+    Self: FetchHandlerAction<T>
         + GraphQlHandlerAction<T>
         + LoaderHandlerAction<T>
         + ScanHandlerAction<T>
@@ -57,21 +57,41 @@ impl<T: Expression, TAction> DefaultHandlersAction<T> for TAction where
 }
 
 #[derive(Default, Clone, Copy, Debug)]
-pub struct DefaultHandlersMetricNames {
+pub struct DefaultHandlerMetricNames {
     pub fetch_handler: FetchHandlerMetricNames,
     pub graphql_handler: GraphQlHandlerMetricNames,
     pub loader_handler: LoaderHandlerMetricNames,
     pub scan_handler: ScanHandlerMetricNames,
-    pub actor: InstrumentedActorMetricNames,
 }
 
-pub fn default_handlers<TAction, T, TFactory, TAllocator, TConnect, TReconnect>(
+pub trait DefaultHandlerTask<TConnect>:
+    FetchHandlerTask<TConnect>
+    + TimeoutHandlerTask
+    + TimestampHandlerTask
+    + GraphQlHandlerTask<TConnect>
+where
+    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
+{
+}
+
+impl<TSelf, TConnect> DefaultHandlerTask<TConnect> for TSelf
+where
+    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
+    Self: FetchHandlerTask<TConnect>
+        + TimeoutHandlerTask
+        + TimestampHandlerTask
+        + GraphQlHandlerTask<TConnect>,
+{
+}
+
+pub fn default_handler_actors<TAction, TTask, T, TFactory, TAllocator, TConnect, TReconnect>(
     https_client: hyper::Client<TConnect, Body>,
     factory: &TFactory,
     allocator: &TAllocator,
     reconnect_timeout: TReconnect,
-    metric_names: DefaultHandlersMetricNames,
-) -> impl Actor<TAction, State = impl Send> + Send + Clone
+    metric_names: DefaultHandlerMetricNames,
+    main_pid: ProcessId,
+) -> impl IntoIterator<Item = HandlerActor<T, TFactory, TAllocator, TConnect, TReconnect>>
 where
     T: AsyncExpression + Applicable<T>,
     T::String: Send,
@@ -83,73 +103,52 @@ where
     TFactory: AsyncExpressionFactory<T>,
     TAllocator: AsyncHeapAllocator<T>,
     TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
-    TReconnect: ReconnectTimeout + Send + Clone,
-    TAction: DefaultHandlersAction<T> + Send + 'static,
+    TReconnect: ReconnectTimeout + Send + Clone + 'static,
+    TAction: Action + DefaultHandlerAction<T> + Send + 'static,
+    TTask: TaskFactory<TAction, TTask> + DefaultHandlerTask<TConnect>,
 {
-    ChainedActor::new(
-        InstrumentedActor::new(
-            FetchHandler::new(
-                https_client.clone(),
-                factory.clone(),
-                allocator.clone(),
-                metric_names.fetch_handler,
-            ),
-            "Fetch",
-            metric_names.actor,
-        ),
-        ChainedActor::new(
-            InstrumentedActor::new(
-                GraphQlHandler::new(
-                    https_client,
-                    factory.clone(),
-                    allocator.clone(),
-                    reconnect_timeout,
-                    metric_names.graphql_handler,
-                ),
-                "GraphQl",
-                metric_names.actor,
-            ),
-            ChainedActor::new(
-                InstrumentedActor::new(
-                    LoaderHandler::new(
-                        factory.clone(),
-                        allocator.clone(),
-                        metric_names.loader_handler,
-                    ),
-                    "Loader",
-                    metric_names.actor,
-                ),
-                ChainedActor::new(
-                    InstrumentedActor::new(
-                        ScanHandler::new(
-                            factory.clone(),
-                            allocator.clone(),
-                            metric_names.scan_handler,
-                        ),
-                        "Scan",
-                        metric_names.actor,
-                    ),
-                    ChainedActor::new(
-                        InstrumentedActor::new(
-                            TimeoutHandler::new(factory.clone(), allocator.clone()),
-                            "Timeout",
-                            metric_names.actor,
-                        ),
-                        ChainedActor::new(
-                            InstrumentedActor::new(
-                                TimestampHandler::new(factory.clone(), allocator.clone()),
-                                "Timestamp",
-                                metric_names.actor,
-                            ),
-                            InstrumentedActor::new(
-                                VariableHandler::new(factory.clone(), allocator.clone()),
-                                "Variable",
-                                metric_names.actor,
-                            ),
-                        ),
-                    ),
-                ),
-            ),
-        ),
-    )
+    [
+        HandlerActor::FetchHandler(FetchHandler::new(
+            https_client.clone(),
+            factory.clone(),
+            allocator.clone(),
+            metric_names.fetch_handler,
+            main_pid,
+        )),
+        HandlerActor::GraphQlHandler(GraphQlHandler::new(
+            https_client,
+            factory.clone(),
+            allocator.clone(),
+            reconnect_timeout,
+            metric_names.graphql_handler,
+            main_pid,
+        )),
+        HandlerActor::LoaderHandler(LoaderHandler::new(
+            factory.clone(),
+            allocator.clone(),
+            metric_names.loader_handler,
+            main_pid,
+        )),
+        HandlerActor::ScanHandler(ScanHandler::new(
+            factory.clone(),
+            allocator.clone(),
+            metric_names.scan_handler,
+            main_pid,
+        )),
+        HandlerActor::TimeoutHandler(TimeoutHandler::new(
+            factory.clone(),
+            allocator.clone(),
+            main_pid,
+        )),
+        HandlerActor::TimestampHandler(TimestampHandler::new(
+            factory.clone(),
+            allocator.clone(),
+            main_pid,
+        )),
+        HandlerActor::VariableHandler(VariableHandler::new(
+            factory.clone(),
+            allocator.clone(),
+            main_pid,
+        )),
+    ]
 }

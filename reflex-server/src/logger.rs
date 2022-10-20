@@ -3,41 +3,59 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use std::marker::PhantomData;
 
-use reflex_dispatcher::{Action, MessageData, MiddlewareContext, StateOperation};
+use reflex_dispatcher::{Action, MessageData, MiddlewareContext, SchedulerCommand, TaskFactory};
 
 pub mod formatted;
 pub mod json;
+pub mod prometheus;
 
 pub trait ActionLogger {
     type Action: Action;
+    type Task: TaskFactory<Self::Action, Self::Task>;
     fn log(
         &mut self,
-        operation: &StateOperation<Self::Action>,
+        operation: &SchedulerCommand<Self::Action, Self::Task>,
         metadata: Option<&MessageData>,
         context: Option<&MiddlewareContext>,
     );
 }
 
-#[derive(Copy, Clone, Debug)]
-struct NoopLogger<TAction: Action> {
+#[derive(Copy, Clone, Default, Debug)]
+struct NoopLogger<TAction, TTask>
+where
+    TAction: Action,
+    TTask: TaskFactory<TAction, TTask>,
+{
     _action: PhantomData<TAction>,
+    _task: PhantomData<TTask>,
 }
-impl<TAction: Action> ActionLogger for NoopLogger<TAction> {
+impl<TAction, TTask> ActionLogger for NoopLogger<TAction, TTask>
+where
+    TAction: Action,
+    TTask: TaskFactory<TAction, TTask>,
+{
     type Action = TAction;
+    type Task = TTask;
     fn log(
         &mut self,
-        _operation: &StateOperation<Self::Action>,
+        _operation: &SchedulerCommand<Self::Action, Self::Task>,
         _metadata: Option<&MessageData>,
         _context: Option<&MiddlewareContext>,
     ) {
     }
 }
 
-impl<T: ActionLogger<Action = TAction>, TAction: Action> ActionLogger for Option<T> {
+impl<T, TAction, TTask> ActionLogger for Option<T>
+where
+    T: ActionLogger<Action = TAction, Task = TTask>,
+    TAction: Action,
+    TTask: TaskFactory<TAction, TTask>,
+{
     type Action = TAction;
+    type Task = TTask;
     fn log(
         &mut self,
-        operation: &StateOperation<Self::Action>,
+        operation: &SchedulerCommand<Self::Action, Self::Task>,
         metadata: Option<&MessageData>,
         context: Option<&MiddlewareContext>,
     ) {
@@ -63,13 +81,18 @@ where
         }
     }
 }
-impl<T1: ActionLogger<Action = TAction>, T2: ActionLogger<Action = TAction>, TAction: Action>
-    ActionLogger for EitherLogger<T1, T2>
+impl<T1, T2, TAction, TTask> ActionLogger for EitherLogger<T1, T2>
+where
+    T1: ActionLogger<Action = TAction, Task = TTask>,
+    T2: ActionLogger<Action = TAction, Task = TTask>,
+    TAction: Action,
+    TTask: TaskFactory<TAction, TTask>,
 {
     type Action = TAction;
+    type Task = TTask;
     fn log(
         &mut self,
-        operation: &StateOperation<Self::Action>,
+        operation: &SchedulerCommand<Self::Action, Self::Task>,
         metadata: Option<&MessageData>,
         context: Option<&MiddlewareContext>,
     ) {
@@ -84,6 +107,11 @@ pub struct ChainLogger<T1, T2> {
     left: T1,
     right: T2,
 }
+impl<T1, T2> ChainLogger<T1, T2> {
+    pub fn new(left: T1, right: T2) -> Self {
+        Self { left, right }
+    }
+}
 impl<T1, T2> Clone for ChainLogger<T1, T2>
 where
     T1: Clone,
@@ -96,13 +124,18 @@ where
         }
     }
 }
-impl<T1: ActionLogger<Action = TAction>, T2: ActionLogger<Action = TAction>, TAction: Action>
-    ActionLogger for ChainLogger<T1, T2>
+impl<T1, T2, TAction, TTask> ActionLogger for ChainLogger<T1, T2>
+where
+    T1: ActionLogger<Action = TAction, Task = TTask>,
+    T2: ActionLogger<Action = TAction, Task = TTask>,
+    TAction: Action,
+    TTask: TaskFactory<TAction, TTask>,
 {
     type Action = TAction;
+    type Task = TTask;
     fn log(
         &mut self,
-        operation: &StateOperation<Self::Action>,
+        operation: &SchedulerCommand<Self::Action, Self::Task>,
         metadata: Option<&MessageData>,
         context: Option<&MiddlewareContext>,
     ) {

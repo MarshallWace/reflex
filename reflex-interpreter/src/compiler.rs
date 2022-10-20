@@ -198,7 +198,7 @@ pub enum Instruction {
     },
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct CompilerOptions {
     pub debug: bool,
     pub hoist_free_variables: bool,
@@ -232,7 +232,7 @@ impl Default for CompilerOptions {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub enum CompilerMode {
     /// Wraps the compiled expression in a 'main function' that evaluates the expression before returning
     Function,

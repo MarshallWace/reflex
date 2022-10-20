@@ -10,22 +10,31 @@ use metrics::SharedString;
 use opentelemetry::trace::{Span, Tracer};
 use reflex::core::{Applicable, InstructionPointer, Reducible, Rewritable};
 use reflex_dispatcher::{
-    Action, Actor, PostMiddleware, PreMiddleware, SchedulerMiddleware, SerializableAction,
+    Action, Actor, Handler, PostMiddleware, PreMiddleware, ProcessId, SchedulerMiddleware,
+    SchedulerTransition, SerializableAction, TaskFactory,
 };
 use reflex_graphql::{stdlib::Stdlib as GraphQlStdlib, GraphQlOperation, GraphQlSchema};
 use reflex_interpreter::{
     compiler::{Compile, CompiledProgram, CompilerOptions},
     InterpreterOptions,
 };
-use reflex_js::stdlib::Stdlib as JsStdlib;
-use reflex_json::{json, stdlib::Stdlib as JsonStdlib, JsonValue};
-use reflex_runtime::{AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator};
+use reflex_json::{json, JsonValue};
+use reflex_runtime::{
+    actor::bytecode_interpreter::BytecodeInterpreterMetricLabels, AsyncExpression,
+    AsyncExpressionFactory, AsyncHeapAllocator,
+};
+use reflex_scheduler::tokio::{TokioInbox, TokioInitContext};
 use reflex_stdlib::Stdlib;
 
 use crate::{
-    server::{HttpGraphQlServerQueryTransform, NoopWebSocketGraphQlServerQueryTransform},
+    server::{
+        GraphQlServerOperationMetricLabels, GraphQlServerQueryLabel,
+        HttpGraphQlServerQueryMetricLabels, HttpGraphQlServerQueryTransform,
+        NoopWebSocketGraphQlServerQueryTransform, WebSocketGraphQlServerConnectionMetricLabels,
+    },
     utils::operation::format_graphql_operation_label,
-    GraphQlWebServer, GraphQlWebServerAction, GraphQlWebServerMetricNames,
+    GraphQlWebServer, GraphQlWebServerAction, GraphQlWebServerActor, GraphQlWebServerMetricNames,
+    GraphQlWebServerTask,
 };
 
 use crate::tokio_runtime_metrics_export::{
@@ -46,22 +55,26 @@ pub struct ExecuteQueryCliOptions {
 pub async fn cli<
     'de,
     TAction,
+    TTask,
     T,
     TFactory,
     TAllocator,
+    TActors,
     TTransform,
     THttpMiddleware,
     THttpPre,
     THttpPost,
+    TTracer,
 >(
     options: ExecuteQueryCliOptions,
     graph_root: (CompiledProgram, InstructionPointer),
     schema: Option<GraphQlSchema>,
-    actor: impl Actor<TAction, State = impl Send + 'static> + Send + 'static,
+    custom_actors: impl FnOnce(&mut TokioInitContext, ProcessId) -> TActors,
     middleware: SchedulerMiddleware<
-        impl PreMiddleware<TAction, State = impl Send + 'static> + Send + 'static,
-        impl PostMiddleware<TAction, State = impl Send + 'static> + Send + 'static,
+        impl PreMiddleware<TAction, TTask, State = impl Send + 'static> + Send + 'static,
+        impl PostMiddleware<TAction, TTask, State = impl Send + 'static> + Send + 'static,
         TAction,
+        TTask,
     >,
     factory: &TFactory,
     allocator: &TAllocator,
@@ -69,7 +82,7 @@ pub async fn cli<
     http_middleware: THttpMiddleware,
     metric_names: GraphQlWebServerMetricNames,
     tokio_runtime_metric_names: TokioRuntimeMonitorMetricNames,
-    tracer: impl Tracer<Span = impl Span + Send + Sync + 'static> + Send + 'static,
+    tracer: TTracer,
 ) -> Result<String>
 where
     T: AsyncExpression
@@ -85,14 +98,40 @@ where
     T::SignalList<T>: Send,
     T::StructPrototype<T>: Send,
     T::ExpressionList<T>: Send,
-    T::Builtin: From<Stdlib> + From<JsonStdlib> + From<JsStdlib> + From<GraphQlStdlib>,
-    TFactory: AsyncExpressionFactory<T>,
-    TAllocator: AsyncHeapAllocator<T>,
+    T::Builtin: From<Stdlib> + From<GraphQlStdlib>,
+    TFactory: AsyncExpressionFactory<T> + Default,
+    TAllocator: AsyncHeapAllocator<T> + Default,
+    TActors: IntoIterator<Item = (ProcessId, TTask::Actor)>,
+    TTransform: HttpGraphQlServerQueryTransform + Send + 'static,
     THttpMiddleware: HttpMiddleware<THttpPre, THttpPost>,
     THttpPre: Future<Output = Request<Body>>,
     THttpPost: Future<Output = Response<Body>>,
-    TAction: Action + SerializableAction + GraphQlWebServerAction<T> + Clone + Send + 'static,
-    TTransform: HttpGraphQlServerQueryTransform + Send + 'static,
+    TAction:
+        Action + SerializableAction + GraphQlWebServerAction<T> + Clone + Send + Sync + 'static,
+    TTask: TaskFactory<TAction, TTask>
+        + GraphQlWebServerTask<T, TFactory, TAllocator>
+        + Send
+        + 'static,
+    TTask::Actor: GraphQlWebServerActor<
+            T,
+            TFactory,
+            TAllocator,
+            TTransform,
+            NoopWebSocketGraphQlServerQueryTransform,
+            GraphQlWebServerMetricLabels,
+            GraphQlWebServerMetricLabels,
+            GraphQlWebServerMetricLabels,
+            GraphQlWebServerMetricLabels,
+            GraphQlWebServerMetricLabels,
+            TTracer,
+        > + Send
+        + Sync
+        + 'static,
+    <TTask::Actor as Actor<TAction, TTask>>::Events<TokioInbox<TAction>>: Send + 'static,
+    <TTask::Actor as Actor<TAction, TTask>>::Dispose: Send + 'static,
+    <TTask::Actor as Handler<TAction, SchedulerTransition<TAction, TTask>>>::State: Send + 'static,
+    TTracer: Tracer + Send + 'static,
+    TTracer::Span: Span + Send + Sync + 'static,
 {
     start_runtime_monitoring(
         tokio::runtime::Handle::current(),
@@ -136,10 +175,10 @@ where
             })
             .with_context(|| anyhow!("Failed to create GraphQL request payload"))
     }?;
-    let app = GraphQlWebServer::<TAction>::new(
+    let app = GraphQlWebServer::<TAction, TTask>::new(
         graph_root,
         schema,
-        actor,
+        custom_actors,
         middleware,
         compiler_options,
         interpreter_options,
@@ -148,11 +187,11 @@ where
         query_transform,
         NoopWebSocketGraphQlServerQueryTransform,
         metric_names,
-        get_graphql_query_label,
-        get_http_query_metric_labels,
-        get_websocket_connection_metric_labels,
-        get_websocket_operation_metric_labels,
-        get_worker_metric_labels,
+        GraphQlWebServerMetricLabels,
+        GraphQlWebServerMetricLabels,
+        GraphQlWebServerMetricLabels,
+        GraphQlWebServerMetricLabels,
+        GraphQlWebServerMetricLabels,
         tracer,
     )
     .map_err(|err| anyhow!(err))
@@ -177,30 +216,36 @@ where
     }
 }
 
-fn get_graphql_query_label(operation: &GraphQlOperation) -> String {
-    format_graphql_operation_label(operation)
+#[derive(Clone, Copy, Debug)]
+pub struct GraphQlWebServerMetricLabels;
+impl GraphQlServerQueryLabel for GraphQlWebServerMetricLabels {
+    fn label(&self, operation: &GraphQlOperation) -> String {
+        format_graphql_operation_label(operation)
+    }
 }
-
-fn get_http_query_metric_labels(
-    _operation: &GraphQlOperation,
-    _headers: &HeaderMap,
-) -> Vec<(String, String)> {
-    Vec::new()
+impl BytecodeInterpreterMetricLabels for GraphQlWebServerMetricLabels {
+    fn labels(&self, query_name: &str) -> Vec<(SharedString, SharedString)> {
+        vec![("worker".into(), String::from(query_name).into())]
+    }
 }
-
-fn get_websocket_connection_metric_labels(
-    _connection_params: Option<&JsonValue>,
-    _headers: &HeaderMap,
-) -> Vec<(String, String)> {
-    Vec::new()
+impl GraphQlServerOperationMetricLabels for GraphQlWebServerMetricLabels {
+    fn labels(&self, _operation: &GraphQlOperation) -> Vec<(String, String)> {
+        Vec::new()
+    }
 }
-
-fn get_websocket_operation_metric_labels(_operation: &GraphQlOperation) -> Vec<(String, String)> {
-    Vec::new()
+impl HttpGraphQlServerQueryMetricLabels for GraphQlWebServerMetricLabels {
+    fn labels(&self, _operation: &GraphQlOperation, _headers: &HeaderMap) -> Vec<(String, String)> {
+        Vec::new()
+    }
 }
-
-fn get_worker_metric_labels(query_name: &str) -> Vec<(SharedString, SharedString)> {
-    vec![("worker".into(), String::from(query_name).into())]
+impl WebSocketGraphQlServerConnectionMetricLabels for GraphQlWebServerMetricLabels {
+    fn labels(
+        &self,
+        _connection_params: Option<&JsonValue>,
+        _headers: &HeaderMap,
+    ) -> Vec<(String, String)> {
+        Vec::new()
+    }
 }
 
 pub trait HttpMiddleware<

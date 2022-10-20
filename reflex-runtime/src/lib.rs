@@ -2,13 +2,18 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
+use actor::{
+    evaluate_handler::EvaluateHandler, query_manager::QueryManager, RuntimeActor,
+    RuntimeMetricNames,
+};
 use reflex::core::{BooleanTermType, Expression, ExpressionFactory, HeapAllocator};
+use reflex_dispatcher::ProcessId;
 use serde::{Deserialize, Serialize};
 
 pub mod action;
 pub mod actor;
+pub mod task;
 pub mod utils;
-pub mod worker;
 
 pub trait AsyncExpression: Expression + Send + 'static {}
 impl<T> AsyncExpression for T where T: Expression + Send + 'static {}
@@ -86,4 +91,31 @@ impl QueryInvalidationStrategy {
                 true => Self::Exact,
             })
     }
+}
+
+pub fn runtime_actors<T, TFactory, TAllocator>(
+    factory: TFactory,
+    allocator: TAllocator,
+    metric_names: RuntimeMetricNames,
+    main_pid: ProcessId,
+) -> impl IntoIterator<Item = RuntimeActor<T, TFactory, TAllocator>>
+where
+    T: Expression,
+    TFactory: ExpressionFactory<T> + Clone,
+    TAllocator: HeapAllocator<T> + Clone,
+{
+    [
+        RuntimeActor::QueryManager(QueryManager::new(
+            factory.clone(),
+            allocator.clone(),
+            metric_names.query_manager,
+            main_pid,
+        )),
+        RuntimeActor::EvaluateHandler(EvaluateHandler::new(
+            factory,
+            allocator,
+            metric_names.evaluate_handler,
+            main_pid,
+        )),
+    ]
 }

@@ -9,8 +9,9 @@ use std::{
 use http::StatusCode;
 use reflex::core::{Expression, ExpressionFactory};
 use reflex_dispatcher::{
-    Action, Actor, ActorTransition, HandlerContext, InboundAction, MessageData, OutboundAction,
-    StateOperation, StateTransition,
+    Action, Actor, ActorInitContext, Handler, HandlerContext, Matcher, MessageData,
+    NoopDisposeCallback, ProcessId, SchedulerCommand, SchedulerMode, SchedulerTransition,
+    TaskFactory, TaskInbox, Worker,
 };
 use reflex_runtime::actor::query_inspector::{
     QueryInspector, QueryInspectorAction, QueryInspectorState,
@@ -21,34 +22,37 @@ use crate::server::{
     action::query_inspector_server::{
         QueryInspectorServerHttpRequestAction, QueryInspectorServerHttpResponseAction,
     },
-    create_content_type_header, create_html_http_response, create_http_response, is_json_request,
-    utils::{create_accepted_http_response, create_json_http_response},
+    utils::{
+        create_accepted_http_response, create_content_type_header, create_html_http_response,
+        create_http_response, create_json_http_response, is_json_request,
+    },
 };
 
 const INDEX_FILE: &'static str = include_str!("../template/debugger/index.html");
 
 pub trait QueryInspectorServerAction<T: Expression>:
     Action
+    + Matcher<QueryInspectorServerHttpRequestAction>
+    + Matcher<QueryInspectorServerHttpResponseAction>
+    + From<QueryInspectorServerHttpRequestAction>
+    + From<QueryInspectorServerHttpResponseAction>
     + QueryInspectorAction<T>
-    + InboundAction<QueryInspectorServerHttpRequestAction>
-    + InboundAction<QueryInspectorServerHttpResponseAction>
-    + OutboundAction<QueryInspectorServerHttpRequestAction>
-    + OutboundAction<QueryInspectorServerHttpResponseAction>
 {
 }
 impl<T: Expression, TAction> QueryInspectorServerAction<T> for TAction where
     Self: Action
+        + Matcher<QueryInspectorServerHttpRequestAction>
+        + Matcher<QueryInspectorServerHttpResponseAction>
+        + From<QueryInspectorServerHttpRequestAction>
+        + From<QueryInspectorServerHttpResponseAction>
         + QueryInspectorAction<T>
-        + InboundAction<QueryInspectorServerHttpRequestAction>
-        + InboundAction<QueryInspectorServerHttpResponseAction>
-        + OutboundAction<QueryInspectorServerHttpRequestAction>
-        + OutboundAction<QueryInspectorServerHttpResponseAction>
 {
 }
 
 pub struct QueryInspectorServer<T: Expression, TFactory: ExpressionFactory<T>> {
     query_inspector: QueryInspector<T>,
     factory: TFactory,
+    main_pid: ProcessId,
     _expression: PhantomData<T>,
 }
 impl<T, TFactory> QueryInspectorServer<T, TFactory>
@@ -56,87 +60,104 @@ where
     T: Expression,
     TFactory: ExpressionFactory<T> + Clone,
 {
-    pub fn new(factory: TFactory) -> Self {
+    pub fn new(factory: TFactory, main_pid: ProcessId) -> Self {
         Self {
             factory: factory.clone(),
             query_inspector: QueryInspector::default(),
+            main_pid,
             _expression: Default::default(),
         }
     }
 }
 
-pub struct QueryInspectorServerState<T: Expression>(Option<QueryInspectorState<T>>);
-impl<T: Expression> Default for QueryInspectorServerState<T> {
-    fn default() -> Self {
-        Self(Some(QueryInspectorState::default()))
-    }
-}
-impl<T: Expression> QueryInspectorServerState<T> {
-    fn as_inner(&self) -> Option<&QueryInspectorState<T>> {
-        self.0.as_ref()
-    }
-    fn take_inner(&mut self) -> Option<QueryInspectorState<T>> {
-        self.0.take()
-    }
-    fn replace_inner(&mut self, value: QueryInspectorState<T>) -> Option<QueryInspectorState<T>> {
-        self.0.replace(value)
-    }
-}
+pub type QueryInspectorServerState<T> = QueryInspectorState<T>;
 
-impl<T, TFactory, TAction> Actor<TAction> for QueryInspectorServer<T, TFactory>
+impl<T, TFactory, TAction, TTask> Actor<TAction, TTask> for QueryInspectorServer<T, TFactory>
 where
     T: Expression,
     TFactory: ExpressionFactory<T>,
     TAction: QueryInspectorServerAction<T>,
+    TTask: TaskFactory<TAction, TTask>,
+{
+    type Events<TInbox: TaskInbox<TAction>> = TInbox;
+    type Dispose = NoopDisposeCallback;
+
+    fn init<TInbox: TaskInbox<TAction>>(
+        &self,
+        inbox: TInbox,
+        _context: &impl ActorInitContext,
+    ) -> (Self::State, Self::Events<TInbox>, Self::Dispose) {
+        (Default::default(), inbox, Default::default())
+    }
+}
+
+impl<T, TFactory, TAction, TTask> Worker<TAction, SchedulerTransition<TAction, TTask>>
+    for QueryInspectorServer<T, TFactory>
+where
+    T: Expression,
+    TFactory: ExpressionFactory<T>,
+    TAction: QueryInspectorServerAction<T>,
+    TTask: TaskFactory<TAction, TTask>,
+{
+    fn accept(&self, action: &TAction) -> bool {
+        if let Some(QueryInspectorServerHttpRequestAction { .. }) = action.match_type() {
+            true
+        } else if let Some(QueryInspectorServerHttpResponseAction { .. }) = action.match_type() {
+            false
+        } else {
+            <QueryInspector<T> as Worker<TAction, SchedulerTransition<TAction, TTask>>>::accept(
+                &self.query_inspector,
+                action,
+            )
+        }
+    }
+    fn schedule(&self, _message: &TAction, _state: &Self::State) -> Option<SchedulerMode> {
+        Some(SchedulerMode::Async)
+    }
+}
+
+impl<T, TFactory, TAction, TTask> Handler<TAction, SchedulerTransition<TAction, TTask>>
+    for QueryInspectorServer<T, TFactory>
+where
+    T: Expression,
+    TFactory: ExpressionFactory<T>,
+    TAction: QueryInspectorServerAction<T>,
+    TTask: TaskFactory<TAction, TTask>,
 {
     type State = QueryInspectorServerState<T>;
-    fn init(&self) -> Self::State {
-        Default::default()
-    }
     fn handle(
         &self,
-        state: Self::State,
+        state: &mut Self::State,
         action: &TAction,
         metadata: &MessageData,
         context: &mut impl HandlerContext,
-    ) -> ActorTransition<Self::State, TAction> {
-        let mut state = state;
-        let (state, inner_transition) = {
-            if let Some(inner_state) = state.take_inner() {
-                let (inner_state, actions) = self
-                    .query_inspector
-                    .handle(inner_state, action, metadata, context)
-                    .into_parts();
-                state.replace_inner(inner_state);
-                (state, actions)
-            } else {
-                (state, Default::default())
-            }
-        };
-        let mut state = state;
-        let actions = if let Some(action) = action.match_type() {
-            self.handle_query_inspector_server_http_request(&mut state, action, metadata, context)
-        } else {
+    ) -> Option<SchedulerTransition<TAction, TTask>> {
+        if let Some(action) = action.match_type() {
+            self.handle_query_inspector_server_http_request(state, action, metadata, context)
+        } else if let Some(QueryInspectorServerHttpResponseAction { .. }) = action.match_type() {
             None
+        } else {
+            self.query_inspector
+                .handle(state, action, metadata, context)
         }
-        .unwrap_or_default();
-        ActorTransition::new(state, inner_transition.append(actions))
     }
 }
+
 impl<T, TFactory> QueryInspectorServer<T, TFactory>
 where
     T: Expression,
     TFactory: ExpressionFactory<T>,
 {
-    fn handle_query_inspector_server_http_request<TAction>(
+    fn handle_query_inspector_server_http_request<TAction, TTask>(
         &self,
         state: &mut QueryInspectorServerState<T>,
         action: &QueryInspectorServerHttpRequestAction,
         metadata: &MessageData,
         context: &mut impl HandlerContext,
-    ) -> Option<StateTransition<TAction>>
+    ) -> Option<SchedulerTransition<TAction, TTask>>
     where
-        TAction: Action + OutboundAction<QueryInspectorServerHttpResponseAction>,
+        TAction: Action + From<QueryInspectorServerHttpResponseAction>,
+        TTask: TaskFactory<TAction, TTask>,
     {
         let QueryInspectorServerHttpRequestAction {
             request_id: _,
@@ -152,30 +173,30 @@ where
             }
         }
     }
-    fn handle_query_inspector_server_root_path<TAction>(
+    fn handle_query_inspector_server_root_path<TAction, TTask>(
         &self,
         state: &mut QueryInspectorServerState<T>,
         action: &QueryInspectorServerHttpRequestAction,
         _metadata: &MessageData,
-        context: &mut impl HandlerContext,
-    ) -> Option<StateTransition<TAction>>
+        _context: &mut impl HandlerContext,
+    ) -> Option<SchedulerTransition<TAction, TTask>>
     where
-        TAction: Action + OutboundAction<QueryInspectorServerHttpResponseAction>,
+        TAction: Action + From<QueryInspectorServerHttpResponseAction>,
+        TTask: TaskFactory<TAction, TTask>,
     {
         let QueryInspectorServerHttpRequestAction {
             request_id,
             request,
         } = action;
-        let inner_state = state.as_inner()?;
-        Some(StateTransition::new(once(StateOperation::Send(
-            context.pid(),
+        Some(SchedulerTransition::new(once(SchedulerCommand::Send(
+            self.main_pid,
             QueryInspectorServerHttpResponseAction {
                 request_id: *request_id,
                 response: if is_json_request(request.headers()) {
                     create_json_http_response(
                         StatusCode::OK,
                         empty(),
-                        &inner_state.to_json(&self.factory),
+                        &state.to_json(&self.factory),
                     )
                 } else {
                     create_html_http_response(StatusCode::OK, empty(), INDEX_FILE)
@@ -184,22 +205,23 @@ where
             .into(),
         ))))
     }
-    fn handle_query_inspector_server_env_path<TAction>(
+    fn handle_query_inspector_server_env_path<TAction, TTask>(
         &self,
         _state: &mut QueryInspectorServerState<T>,
         action: &QueryInspectorServerHttpRequestAction,
         _metadata: &MessageData,
-        context: &mut impl HandlerContext,
-    ) -> Option<StateTransition<TAction>>
+        _context: &mut impl HandlerContext,
+    ) -> Option<SchedulerTransition<TAction, TTask>>
     where
-        TAction: Action + OutboundAction<QueryInspectorServerHttpResponseAction>,
+        TAction: Action + From<QueryInspectorServerHttpResponseAction>,
+        TTask: TaskFactory<TAction, TTask>,
     {
         let QueryInspectorServerHttpRequestAction {
             request_id,
             request: _,
         } = action;
-        Some(StateTransition::new(once(StateOperation::Send(
-            context.pid(),
+        Some(SchedulerTransition::new(once(SchedulerCommand::Send(
+            self.main_pid,
             QueryInspectorServerHttpResponseAction {
                 request_id: *request_id,
                 response: create_http_response(
@@ -218,22 +240,23 @@ where
             .into(),
         ))))
     }
-    fn handle_query_inspector_server_path_not_found<TAction>(
+    fn handle_query_inspector_server_path_not_found<TAction, TTask>(
         &self,
         _state: &mut QueryInspectorServerState<T>,
         action: &QueryInspectorServerHttpRequestAction,
         _metadata: &MessageData,
-        context: &mut impl HandlerContext,
-    ) -> Option<StateTransition<TAction>>
+        _context: &mut impl HandlerContext,
+    ) -> Option<SchedulerTransition<TAction, TTask>>
     where
-        TAction: Action + OutboundAction<QueryInspectorServerHttpResponseAction>,
+        TAction: Action + From<QueryInspectorServerHttpResponseAction>,
+        TTask: TaskFactory<TAction, TTask>,
     {
         let QueryInspectorServerHttpRequestAction {
             request_id,
             request,
         } = action;
-        Some(StateTransition::new(once(StateOperation::Send(
-            context.pid(),
+        Some(SchedulerTransition::new(once(SchedulerCommand::Send(
+            self.main_pid,
             QueryInspectorServerHttpResponseAction {
                 request_id: *request_id,
                 response: create_accepted_http_response(

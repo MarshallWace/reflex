@@ -4,8 +4,8 @@
 use std::marker::PhantomData;
 
 use reflex_dispatcher::{
-    Action, MessageData, MiddlewareContext, PostMiddleware, PostMiddlewareTransition,
-    PreMiddleware, PreMiddlewareTransition, StateOperation,
+    Action, MessageData, MiddlewareContext, PostMiddleware, PreMiddleware, SchedulerCommand,
+    SchedulerTransition, TaskFactory,
 };
 
 use crate::logger::ActionLogger;
@@ -60,11 +60,13 @@ pub struct LoggerMiddlewareState<TLogger: ActionLogger> {
     logger: TLogger,
 }
 
-impl<TFactory, TLogger, TAction> PreMiddleware<TAction> for LoggerMiddleware<TFactory, TLogger>
+impl<TFactory, TLogger, TAction, TTask> PreMiddleware<TAction, TTask>
+    for LoggerMiddleware<TFactory, TLogger>
 where
     TFactory: LoggerMiddlewareFactory<TLogger>,
-    TLogger: ActionLogger<Action = TAction>,
+    TLogger: ActionLogger<Action = TAction, Task = TTask>,
     TAction: Action,
+    TTask: TaskFactory<TAction, TTask>,
 {
     type State = LoggerMiddlewareState<TLogger>;
     fn init(&self) -> Self::State {
@@ -74,21 +76,22 @@ where
     }
     fn handle(
         &self,
-        state: Self::State,
-        operation: StateOperation<TAction>,
+        state: &mut Self::State,
+        operation: SchedulerCommand<TAction, TTask>,
         metadata: &MessageData,
         context: &MiddlewareContext,
-    ) -> PreMiddlewareTransition<Self::State, TAction> {
-        let mut state = state;
+    ) -> SchedulerCommand<TAction, TTask> {
         state.logger.log(&operation, Some(metadata), Some(context));
-        PreMiddlewareTransition::new(state, operation)
+        operation
     }
 }
-impl<TFactory, TLogger, TAction> PostMiddleware<TAction> for LoggerMiddleware<TFactory, TLogger>
+impl<TFactory, TLogger, TAction, TTask> PostMiddleware<TAction, TTask>
+    for LoggerMiddleware<TFactory, TLogger>
 where
     TFactory: LoggerMiddlewareFactory<TLogger>,
-    TLogger: ActionLogger<Action = TAction>,
+    TLogger: ActionLogger<Action = TAction, Task = TTask>,
     TAction: Action,
+    TTask: TaskFactory<TAction, TTask>,
 {
     type State = LoggerMiddlewareState<TLogger>;
     fn init(&self) -> Self::State {
@@ -98,15 +101,14 @@ where
     }
     fn handle(
         &self,
-        state: Self::State,
-        operations: Vec<StateOperation<TAction>>,
+        state: &mut Self::State,
+        operations: Vec<SchedulerCommand<TAction, TTask>>,
         metadata: &MessageData,
         context: &MiddlewareContext,
-    ) -> PostMiddlewareTransition<Self::State, TAction> {
-        let mut state = state;
+    ) -> Option<SchedulerTransition<TAction, TTask>> {
         for operation in operations.iter() {
             state.logger.log(operation, Some(metadata), Some(context));
         }
-        PostMiddlewareTransition::new(state, operations)
+        Some(SchedulerTransition::new(operations))
     }
 }

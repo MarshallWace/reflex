@@ -1,0 +1,59 @@
+{
+	"Dispatcher": {
+		"prefix": "dispatcher",
+		"body": [
+			"dispatcher!({",
+			"    ${1:pub }enum ${2:Action} {$14",
+			"    }",
+			"",
+			"    impl<$4TAction, TTask> Dispatcher<TAction, TTask> for ${3:Target}",
+			"    where",
+			"        TAction: Action$11,",
+			"        TTask: TaskFactory<TAction, TTask>$12,$13",
+			"    {",
+			"        type State = ${5:State};",
+			"        type Events<TInbox: TaskInbox<TAction>> = ${6:TInbox};",
+      "        type Dispose = ${7:NoopDisposeCallback};",
+			"",
+			"        fn init<TInbox: TaskInbox<TAction>>(",
+			"            &self,",
+			"            inbox: TInbox,",
+			"            _context: &impl ActorInitContext,",
+			"        ) -> (Self::State, Self::Events<TInbox>, Self::Dispose) {",
+			"            (${8:Default::default()}, ${9:inbox}, ${10:Default::default()})",
+			"        }",
+			"",
+			"        $0",
+			"    }",
+			"});"
+		],
+		"description": "Create dispatcher macro"
+	},
+	"Actor method": {
+		"prefix": "method",
+		"body": [
+			"fn accept(&self, _action: &${1:Action}) -> bool {",
+			"    ${4:true}",
+			"}",
+			"fn schedule(",
+			"    &self,",
+			"    _action: &$1,",
+			"    _state: &Self::State,",
+			") -> Option<SchedulerMode> {",
+			"    Some(${3:SchedulerMode::Async})",
+			"}",
+			"fn handle(",
+			"    &self,",
+			"    state: &mut Self::State,",
+			"    action: &$1,",
+			"    metadata: &MessageData,",
+			"    context: &mut impl HandlerContext,",
+			") -> Option<SchedulerTransition<TAction, TTask>> {",
+			"    self.handle_${2:action}(state, action, metadata, context)",
+			"}",
+			"$0"
+		],
+		"description": "Create dispatcher macro method"
+	}
+}
+

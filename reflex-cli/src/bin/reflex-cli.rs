@@ -8,34 +8,56 @@ use std::{
     iter::once,
     marker::PhantomData,
     path::{Path, PathBuf},
+    pin::Pin,
 };
 
 use anyhow::{anyhow, Context, Result};
 use clap::Parser;
-use futures::{stream, StreamExt};
+use futures::{Future, Stream, StreamExt};
 use metrics::SharedString;
+use pin_project::pin_project;
 use reflex::{
     cache::SubstitutionCache,
     core::{
-        ConditionListType, ConditionType, Expression, ExpressionFactory, ExpressionListType,
-        InstructionPointer, RefType, SignalTermType, StateCache,
+        Applicable, ConditionListType, ConditionType, Expression, ExpressionFactory,
+        ExpressionListType, HeapAllocator, InstructionPointer, Reducible, RefType, Rewritable,
+        SignalTermType, StateCache,
     },
     env::inject_env_vars,
 };
 use reflex_cli::{builtins::CliBuiltins, create_parser, repl, Syntax, SyntaxParser};
 use reflex_dispatcher::{
-    scheduler::tokio::{TokioScheduler, TokioSchedulerMetricNames},
-    Action, Actor, ActorTransition, ChainedActor, EitherActor, HandlerContext, Matcher,
-    MessageData, NamedAction, SchedulerMiddleware, SerializableAction, SerializedAction,
+    Action, Actor, ActorInitContext, Handler, HandlerContext, Matcher, MessageData, NamedAction,
+    NoopDisposeCallback, Redispatcher, SchedulerCommand, SchedulerMode, SchedulerTransition,
+    SerializableAction, SerializedAction, TaskFactory, TaskInbox, Worker,
 };
 use reflex_handlers::{
-    action::graphql::*,
-    default_handlers,
-    utils::tls::{create_https_client, tokio_native_tls::native_tls::Certificate},
-    DefaultHandlersMetricNames,
+    action::{
+        fetch::{
+            FetchHandlerActions, FetchHandlerConnectionErrorAction, FetchHandlerFetchCompleteAction,
+        },
+        graphql::*,
+        timeout::{TimeoutHandlerActions, TimeoutHandlerTimeoutAction},
+        timestamp::{TimestampHandlerActions, TimestampHandlerUpdateAction},
+    },
+    actor::{HandlerAction, HandlerActor, HandlerTask},
+    default_handler_actors, hyper,
+    task::{
+        fetch::FetchHandlerTaskFactory,
+        graphql::{
+            GraphQlHandlerHttpFetchTaskFactory, GraphQlHandlerWebSocketConnectionTaskFactory,
+        },
+        timeout::TimeoutHandlerTaskFactory,
+        timestamp::TimestampHandlerTaskFactory,
+        DefaultHandlersTaskAction, DefaultHandlersTaskActor, DefaultHandlersTaskFactory,
+    },
+    utils::tls::{create_https_client, hyper_tls, tokio_native_tls::native_tls::Certificate},
+    DefaultHandlerMetricNames,
 };
 use reflex_interpreter::{
-    compiler::{hash_compiled_program, CompiledProgram, Compiler, CompilerMode, CompilerOptions},
+    compiler::{
+        hash_compiled_program, Compile, CompiledProgram, Compiler, CompilerMode, CompilerOptions,
+    },
     execute, DefaultInterpreterCache, InterpreterOptions,
 };
 use reflex_json::{JsonMap, JsonValue};
@@ -45,17 +67,25 @@ use reflex_lang::{
 use reflex_runtime::{
     action::{bytecode_interpreter::*, effect::*, evaluate::*, query::*, RuntimeActions},
     actor::{
-        bytecode_interpreter::BytecodeInterpreter,
+        bytecode_interpreter::{
+            BytecodeInterpreter, BytecodeInterpreterAction, BytecodeInterpreterMetricLabels,
+            BytecodeInterpreterMetricNames,
+        },
         evaluate_handler::{
             create_evaluate_effect, parse_evaluate_effect_result, EFFECT_TYPE_EVALUATE,
         },
-        RuntimeActor, RuntimeMetricNames,
+        RuntimeAction, RuntimeActor, RuntimeMetricNames,
     },
-    worker::bytecode_worker::BytecodeWorkerMetricNames,
+    runtime_actors,
+    task::{
+        bytecode_worker::BytecodeWorkerTaskFactory, RuntimeTask, RuntimeTaskAction,
+        RuntimeTaskActor, RuntimeTaskFactory,
+    },
     AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator, QueryEvaluationMode,
     QueryInvalidationStrategy,
 };
-use reflex_utils::reconnect::NoopReconnectTimeout;
+use reflex_scheduler::tokio::{TokioScheduler, TokioSchedulerMetricNames};
+use reflex_utils::reconnect::{NoopReconnectTimeout, ReconnectTimeout};
 
 /// Reflex runtime evaluator
 #[derive(Parser)]
@@ -87,14 +117,25 @@ struct Args {
 
 #[tokio::main]
 pub async fn main() -> Result<()> {
+    type TBuiltin = CliBuiltins;
+    type T = CachedSharedTerm<TBuiltin>;
+    type TFactory = SharedTermFactory<TBuiltin>;
+    type TAllocator = DefaultAllocator<T>;
+    type TConnect = hyper_tls::HttpsConnector<hyper::client::HttpConnector>;
+    type TReconnect = NoopReconnectTimeout;
+    type TAction = CliActions<T>;
+    type TMetricLabels = CliMetricLabels;
+    type TOutput = std::io::Stderr;
+    type TTask =
+        CliActorFactory<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TOutput>;
     let args = Args::parse();
     let unoptimized = args.unoptimized;
     let debug_actions = args.log;
     let debug_compiler = args.debug_compiler;
     let debug_interpreter = args.debug_interpreter;
     let debug_stack = args.debug_stack;
-    let factory = SharedTermFactory::<CliBuiltins>::default();
-    let allocator = DefaultAllocator::default();
+    let factory: TFactory = SharedTermFactory::<TBuiltin>::default();
+    let allocator: TAllocator = DefaultAllocator::default();
     let input_path = args.entry_point;
     let syntax = args.syntax;
     let tls_cert = args
@@ -102,7 +143,7 @@ pub async fn main() -> Result<()> {
         .as_ref()
         .map(|path| load_tls_cert(path.as_path()))
         .transpose()?;
-    let https_client = create_https_client(tls_cert)?;
+    let https_client: hyper::Client<TConnect> = create_https_client(tls_cert)?;
     match input_path {
         None => {
             let state = StateCache::default();
@@ -177,46 +218,71 @@ pub async fn main() -> Result<()> {
             } else {
                 let (evaluate_effect, subscribe_action) =
                     create_query(expression, &factory, &allocator);
-                let handlers =
-                    default_handlers::<CliAction<CachedSharedTerm<CliBuiltins>>, _, _, _, _, _>(
-                        https_client,
-                        &factory,
-                        &allocator,
-                        NoopReconnectTimeout,
-                        DefaultHandlersMetricNames::default(),
-                    );
-                let app = ChainedActor::new(
-                    ChainedActor::new(
-                        RuntimeActor::new(
-                            factory.clone(),
-                            allocator.clone(),
-                            RuntimeMetricNames::default(),
-                        ),
-                        BytecodeInterpreter::new(
-                            (CompiledProgram::default(), InstructionPointer::default()),
-                            compiler_options,
-                            interpreter_options,
-                            factory.clone(),
-                            allocator,
-                            BytecodeWorkerMetricNames::default(),
-                            get_worker_metric_labels,
-                        ),
-                    ),
-                    handlers,
-                );
-                let app = if debug_actions {
-                    EitherActor::Left(ChainedActor::new(app, DebugActor::stderr()))
-                } else {
-                    EitherActor::Right(app)
-                };
-                let scheduler = TokioScheduler::new(
-                    app,
-                    SchedulerMiddleware::noop(),
+                let (scheduler, main_pid) = TokioScheduler::<TAction, TTask>::new(
                     TokioSchedulerMetricNames::default(),
+                    |context| {
+                        let main_pid = context.generate_pid();
+                        let mut actors = {
+                            runtime_actors(
+                                factory.clone(),
+                                allocator.clone(),
+                                RuntimeMetricNames::default(),
+                                main_pid,
+                            )
+                            .into_iter()
+                            .map(CliActor::Runtime)
+                        }
+                        .chain(once(CliActor::BytecodeInterpreter(
+                            BytecodeInterpreter::new(
+                                (CompiledProgram::default(), InstructionPointer::default()),
+                                compiler_options,
+                                interpreter_options,
+                                factory.clone(),
+                                allocator.clone(),
+                                BytecodeInterpreterMetricNames::default(),
+                                CliMetricLabels,
+                                main_pid,
+                            ),
+                        )))
+                        .chain(
+                            default_handler_actors::<
+                                TAction,
+                                TTask,
+                                T,
+                                TFactory,
+                                TAllocator,
+                                TConnect,
+                                TReconnect,
+                            >(
+                                https_client,
+                                &factory,
+                                &allocator,
+                                NoopReconnectTimeout,
+                                DefaultHandlerMetricNames::default(),
+                                main_pid,
+                            )
+                            .into_iter()
+                            .map(|actor| CliActor::Handler(actor)),
+                        )
+                        .chain(if debug_actions {
+                            Some(CliActor::Debug(DebugActor::stderr()))
+                        } else {
+                            None
+                        })
+                        .map(|actor| (context.generate_pid(), actor))
+                        .collect::<Vec<_>>();
+                        let actor_pids = actors.iter().map(|(pid, _)| *pid);
+                        actors.push((main_pid, CliActor::Main(Redispatcher::new(actor_pids))));
+                        let init_commands = SchedulerTransition::new([SchedulerCommand::Send(
+                            main_pid,
+                            TAction::from(subscribe_action),
+                        )]);
+                        (actors, init_commands, main_pid)
+                    },
                 );
-                let mut results_stream = tokio::spawn(scheduler.subscribe({
+                let mut results_stream = tokio::spawn(scheduler.subscribe(main_pid, {
                     let factory = factory.clone();
-                    move |action: &CliAction<CachedSharedTerm<CliBuiltins>>| {
+                    move |action: &CliActions<CachedSharedTerm<CliBuiltins>>| {
                         let EffectEmitAction { effect_types } = action.match_type()?;
                         let update = effect_types
                             .iter()
@@ -233,8 +299,6 @@ pub async fn main() -> Result<()> {
                 }))
                 .await
                 .unwrap();
-                let _ =
-                    tokio::spawn(scheduler.dispatch(stream::iter(once(subscribe_action.into()))));
                 while let Some(value) = results_stream.next().await {
                     let output = match factory.match_signal_term(&value) {
                         None => format!("{}", value),
@@ -276,8 +340,11 @@ fn create_query<
     (evaluate_effect, subscribe_action)
 }
 
-fn get_worker_metric_labels(query_name: &str) -> Vec<(SharedString, SharedString)> {
-    vec![("worker".into(), String::from(query_name).into())]
+struct CliMetricLabels;
+impl BytecodeInterpreterMetricLabels for CliMetricLabels {
+    fn labels(&self, query_name: &str) -> Vec<(SharedString, SharedString)> {
+        vec![("worker".into(), String::from(query_name).into())]
+    }
 }
 
 struct DebugActorLogger<T: std::io::Write> {
@@ -325,26 +392,56 @@ impl Default for DebugActorState<std::io::Stderr> {
     }
 }
 
-impl<TAction, TOutput> Actor<TAction> for DebugActor<TOutput>
+impl<TOutput, TAction, TTask> Actor<TAction, TTask> for DebugActor<TOutput>
 where
-    TAction: Action + SerializableAction,
-    TOutput: std::io::Write,
+    TOutput: std::io::Write + Send + 'static,
     DebugActorState<TOutput>: Default,
+    TAction: Action + SerializableAction,
+    TTask: TaskFactory<TAction, TTask>,
+{
+    type Events<TInbox: TaskInbox<TAction>> = TInbox;
+    type Dispose = NoopDisposeCallback;
+    fn init<TInbox: TaskInbox<TAction>>(
+        &self,
+        inbox: TInbox,
+        _context: &impl ActorInitContext,
+    ) -> (Self::State, Self::Events<TInbox>, Self::Dispose) {
+        (Default::default(), inbox, Default::default())
+    }
+}
+impl<TOutput, TAction, TTask> Worker<TAction, SchedulerTransition<TAction, TTask>>
+    for DebugActor<TOutput>
+where
+    TOutput: std::io::Write + Send + 'static,
+    DebugActorState<TOutput>: Default,
+    TAction: Action + SerializableAction,
+    TTask: TaskFactory<TAction, TTask>,
+{
+    fn accept(&self, _message: &TAction) -> bool {
+        true
+    }
+    fn schedule(&self, _message: &TAction, _state: &Self::State) -> Option<SchedulerMode> {
+        Some(SchedulerMode::Sync)
+    }
+}
+impl<TOutput, TAction, TTask> Handler<TAction, SchedulerTransition<TAction, TTask>>
+    for DebugActor<TOutput>
+where
+    TOutput: std::io::Write + Send + 'static,
+    DebugActorState<TOutput>: Default,
+    TAction: Action + SerializableAction,
+    TTask: TaskFactory<TAction, TTask>,
 {
     type State = DebugActorState<TOutput>;
-    fn init(&self) -> Self::State {
-        Default::default()
-    }
     fn handle(
         &self,
-        state: Self::State,
+        state: &mut Self::State,
         action: &TAction,
         _metadata: &MessageData,
         _context: &mut impl HandlerContext,
-    ) -> ActorTransition<Self::State, TAction> {
-        let mut state = state;
+    ) -> Option<SchedulerTransition<TAction, TTask>> {
         state.logger.log(action);
-        ActorTransition::new(state, Default::default())
+        None
     }
 }
 
@@ -371,434 +468,6 @@ fn format_signal_errors<'a, T: Expression>(
         })
 }
 
-fn read_file(path: &Path) -> Result<String> {
-    fs::read_to_string(path).with_context(|| format!("Failed to read path {}", path.display()))
-}
-
-fn clear_escape_sequence() -> &'static str {
-    "\x1b[2J\x1b[H"
-}
-
-#[derive(PartialEq, Eq, Clone, Debug)]
-enum CliAction<T: Expression> {
-    Runtime(RuntimeActions<T>),
-    BytecodeInterpreter(BytecodeInterpreterActions<T>),
-    GraphQlHandler(GraphQlHandlerActions),
-}
-impl<T: Expression> Action for CliAction<T> {}
-impl<T: Expression> NamedAction for CliAction<T> {
-    fn name(&self) -> &'static str {
-        match self {
-            Self::Runtime(action) => action.name(),
-            Self::BytecodeInterpreter(action) => action.name(),
-            Self::GraphQlHandler(action) => action.name(),
-        }
-    }
-}
-impl<T: Expression> SerializableAction for CliAction<T> {
-    fn to_json(&self) -> SerializedAction {
-        match self {
-            Self::Runtime(action) => action.to_json(),
-            Self::BytecodeInterpreter(action) => action.to_json(),
-            Self::GraphQlHandler(action) => action.to_json(),
-        }
-    }
-}
-
-impl<T: Expression> From<RuntimeActions<T>> for CliAction<T> {
-    fn from(value: RuntimeActions<T>) -> Self {
-        Self::Runtime(value)
-    }
-}
-impl<T: Expression> From<CliAction<T>> for Option<RuntimeActions<T>> {
-    fn from(value: CliAction<T>) -> Self {
-        match value {
-            CliAction::Runtime(value) => Some(value),
-            _ => None,
-        }
-    }
-}
-impl<'a, T: Expression> From<&'a CliAction<T>> for Option<&'a RuntimeActions<T>> {
-    fn from(value: &'a CliAction<T>) -> Self {
-        match value {
-            CliAction::Runtime(value) => Some(value),
-            _ => None,
-        }
-    }
-}
-
-impl<T: Expression> From<BytecodeInterpreterActions<T>> for CliAction<T> {
-    fn from(value: BytecodeInterpreterActions<T>) -> Self {
-        Self::BytecodeInterpreter(value)
-    }
-}
-impl<T: Expression> From<CliAction<T>> for Option<BytecodeInterpreterActions<T>> {
-    fn from(value: CliAction<T>) -> Self {
-        match value {
-            CliAction::BytecodeInterpreter(value) => Some(value),
-            _ => None,
-        }
-    }
-}
-impl<'a, T: Expression> From<&'a CliAction<T>> for Option<&'a BytecodeInterpreterActions<T>> {
-    fn from(value: &'a CliAction<T>) -> Self {
-        match value {
-            CliAction::BytecodeInterpreter(value) => Some(value),
-            _ => None,
-        }
-    }
-}
-
-impl<T: Expression> From<GraphQlHandlerActions> for CliAction<T> {
-    fn from(value: GraphQlHandlerActions) -> Self {
-        Self::GraphQlHandler(value)
-    }
-}
-impl<T: Expression> From<CliAction<T>> for Option<GraphQlHandlerActions> {
-    fn from(value: CliAction<T>) -> Self {
-        match value {
-            CliAction::GraphQlHandler(value) => Some(value),
-            _ => None,
-        }
-    }
-}
-impl<'a, T: Expression> From<&'a CliAction<T>> for Option<&'a GraphQlHandlerActions> {
-    fn from(value: &'a CliAction<T>) -> Self {
-        match value {
-            CliAction::GraphQlHandler(value) => Some(value),
-            _ => None,
-        }
-    }
-}
-
-impl<T: Expression> From<EffectActions<T>> for CliAction<T> {
-    fn from(value: EffectActions<T>) -> Self {
-        RuntimeActions::from(value).into()
-    }
-}
-impl<T: Expression> From<CliAction<T>> for Option<EffectActions<T>> {
-    fn from(value: CliAction<T>) -> Self {
-        Option::<RuntimeActions<T>>::from(value).and_then(|value| value.into())
-    }
-}
-impl<'a, T: Expression> From<&'a CliAction<T>> for Option<&'a EffectActions<T>> {
-    fn from(value: &'a CliAction<T>) -> Self {
-        Option::<&'a RuntimeActions<T>>::from(value).and_then(|value| value.into())
-    }
-}
-
-impl<T: Expression> From<EffectSubscribeAction<T>> for CliAction<T> {
-    fn from(value: EffectSubscribeAction<T>) -> Self {
-        EffectActions::from(value).into()
-    }
-}
-impl<T: Expression> From<CliAction<T>> for Option<EffectSubscribeAction<T>> {
-    fn from(value: CliAction<T>) -> Self {
-        Option::<EffectActions<T>>::from(value).and_then(|value| value.into())
-    }
-}
-impl<'a, T: Expression> From<&'a CliAction<T>> for Option<&'a EffectSubscribeAction<T>> {
-    fn from(value: &'a CliAction<T>) -> Self {
-        Option::<&'a EffectActions<T>>::from(value).and_then(|value| value.into())
-    }
-}
-
-impl<T: Expression> From<EffectUnsubscribeAction<T>> for CliAction<T> {
-    fn from(value: EffectUnsubscribeAction<T>) -> Self {
-        EffectActions::from(value).into()
-    }
-}
-impl<T: Expression> From<CliAction<T>> for Option<EffectUnsubscribeAction<T>> {
-    fn from(value: CliAction<T>) -> Self {
-        Option::<EffectActions<T>>::from(value).and_then(|value| value.into())
-    }
-}
-impl<'a, T: Expression> From<&'a CliAction<T>> for Option<&'a EffectUnsubscribeAction<T>> {
-    fn from(value: &'a CliAction<T>) -> Self {
-        Option::<&'a EffectActions<T>>::from(value).and_then(|value| value.into())
-    }
-}
-
-impl<T: Expression> From<EffectEmitAction<T>> for CliAction<T> {
-    fn from(value: EffectEmitAction<T>) -> Self {
-        EffectActions::from(value).into()
-    }
-}
-impl<T: Expression> From<CliAction<T>> for Option<EffectEmitAction<T>> {
-    fn from(value: CliAction<T>) -> Self {
-        Option::<EffectActions<T>>::from(value).and_then(|value| value.into())
-    }
-}
-impl<'a, T: Expression> From<&'a CliAction<T>> for Option<&'a EffectEmitAction<T>> {
-    fn from(value: &'a CliAction<T>) -> Self {
-        Option::<&'a EffectActions<T>>::from(value).and_then(|value| value.into())
-    }
-}
-
-impl<T: Expression> From<EvaluateActions<T>> for CliAction<T> {
-    fn from(value: EvaluateActions<T>) -> Self {
-        RuntimeActions::from(value).into()
-    }
-}
-impl<T: Expression> From<CliAction<T>> for Option<EvaluateActions<T>> {
-    fn from(value: CliAction<T>) -> Self {
-        Option::<RuntimeActions<T>>::from(value).and_then(|value| value.into())
-    }
-}
-impl<'a, T: Expression> From<&'a CliAction<T>> for Option<&'a EvaluateActions<T>> {
-    fn from(value: &'a CliAction<T>) -> Self {
-        Option::<&'a RuntimeActions<T>>::from(value).and_then(|value| value.into())
-    }
-}
-
-impl<T: Expression> From<EvaluateStartAction<T>> for CliAction<T> {
-    fn from(value: EvaluateStartAction<T>) -> Self {
-        EvaluateActions::from(value).into()
-    }
-}
-impl<T: Expression> From<CliAction<T>> for Option<EvaluateStartAction<T>> {
-    fn from(value: CliAction<T>) -> Self {
-        Option::<EvaluateActions<T>>::from(value).and_then(|value| value.into())
-    }
-}
-impl<'a, T: Expression> From<&'a CliAction<T>> for Option<&'a EvaluateStartAction<T>> {
-    fn from(value: &'a CliAction<T>) -> Self {
-        Option::<&'a EvaluateActions<T>>::from(value).and_then(|value| value.into())
-    }
-}
-
-impl<T: Expression> From<EvaluateUpdateAction<T>> for CliAction<T> {
-    fn from(value: EvaluateUpdateAction<T>) -> Self {
-        EvaluateActions::from(value).into()
-    }
-}
-impl<T: Expression> From<CliAction<T>> for Option<EvaluateUpdateAction<T>> {
-    fn from(value: CliAction<T>) -> Self {
-        Option::<EvaluateActions<T>>::from(value).and_then(|value| value.into())
-    }
-}
-impl<'a, T: Expression> From<&'a CliAction<T>> for Option<&'a EvaluateUpdateAction<T>> {
-    fn from(value: &'a CliAction<T>) -> Self {
-        Option::<&'a EvaluateActions<T>>::from(value).and_then(|value| value.into())
-    }
-}
-
-impl<T: Expression> From<EvaluateStopAction> for CliAction<T> {
-    fn from(value: EvaluateStopAction) -> Self {
-        EvaluateActions::from(value).into()
-    }
-}
-impl<T: Expression> From<CliAction<T>> for Option<EvaluateStopAction> {
-    fn from(value: CliAction<T>) -> Self {
-        Option::<EvaluateActions<T>>::from(value).and_then(|value| value.into())
-    }
-}
-impl<'a, T: Expression> From<&'a CliAction<T>> for Option<&'a EvaluateStopAction> {
-    fn from(value: &'a CliAction<T>) -> Self {
-        Option::<&'a EvaluateActions<T>>::from(value).and_then(|value| value.into())
-    }
-}
-
-impl<T: Expression> From<EvaluateResultAction<T>> for CliAction<T> {
-    fn from(value: EvaluateResultAction<T>) -> Self {
-        EvaluateActions::from(value).into()
-    }
-}
-impl<T: Expression> From<CliAction<T>> for Option<EvaluateResultAction<T>> {
-    fn from(value: CliAction<T>) -> Self {
-        Option::<EvaluateActions<T>>::from(value).and_then(|value| value.into())
-    }
-}
-impl<'a, T: Expression> From<&'a CliAction<T>> for Option<&'a EvaluateResultAction<T>> {
-    fn from(value: &'a CliAction<T>) -> Self {
-        Option::<&'a EvaluateActions<T>>::from(value).and_then(|value| value.into())
-    }
-}
-
-impl<T: Expression> From<QueryActions<T>> for CliAction<T> {
-    fn from(value: QueryActions<T>) -> Self {
-        RuntimeActions::from(value).into()
-    }
-}
-impl<T: Expression> From<CliAction<T>> for Option<QueryActions<T>> {
-    fn from(value: CliAction<T>) -> Self {
-        Option::<RuntimeActions<T>>::from(value).and_then(|value| value.into())
-    }
-}
-impl<'a, T: Expression> From<&'a CliAction<T>> for Option<&'a QueryActions<T>> {
-    fn from(value: &'a CliAction<T>) -> Self {
-        Option::<&'a RuntimeActions<T>>::from(value).and_then(|value| value.into())
-    }
-}
-
-impl<T: Expression> From<QuerySubscribeAction<T>> for CliAction<T> {
-    fn from(value: QuerySubscribeAction<T>) -> Self {
-        QueryActions::from(value).into()
-    }
-}
-impl<T: Expression> From<CliAction<T>> for Option<QuerySubscribeAction<T>> {
-    fn from(value: CliAction<T>) -> Self {
-        Option::<QueryActions<T>>::from(value).and_then(|value| value.into())
-    }
-}
-impl<'a, T: Expression> From<&'a CliAction<T>> for Option<&'a QuerySubscribeAction<T>> {
-    fn from(value: &'a CliAction<T>) -> Self {
-        Option::<&'a QueryActions<T>>::from(value).and_then(|value| value.into())
-    }
-}
-
-impl<T: Expression> From<QueryUnsubscribeAction<T>> for CliAction<T> {
-    fn from(value: QueryUnsubscribeAction<T>) -> Self {
-        QueryActions::from(value).into()
-    }
-}
-impl<T: Expression> From<CliAction<T>> for Option<QueryUnsubscribeAction<T>> {
-    fn from(value: CliAction<T>) -> Self {
-        Option::<QueryActions<T>>::from(value).and_then(|value| value.into())
-    }
-}
-impl<'a, T: Expression> From<&'a CliAction<T>> for Option<&'a QueryUnsubscribeAction<T>> {
-    fn from(value: &'a CliAction<T>) -> Self {
-        Option::<&'a QueryActions<T>>::from(value).and_then(|value| value.into())
-    }
-}
-
-impl<T: Expression> From<QueryEmitAction<T>> for CliAction<T> {
-    fn from(value: QueryEmitAction<T>) -> Self {
-        QueryActions::from(value).into()
-    }
-}
-impl<T: Expression> From<CliAction<T>> for Option<QueryEmitAction<T>> {
-    fn from(value: CliAction<T>) -> Self {
-        Option::<QueryActions<T>>::from(value).and_then(|value| value.into())
-    }
-}
-impl<'a, T: Expression> From<&'a CliAction<T>> for Option<&'a QueryEmitAction<T>> {
-    fn from(value: &'a CliAction<T>) -> Self {
-        Option::<&'a QueryActions<T>>::from(value).and_then(|value| value.into())
-    }
-}
-
-impl<T: Expression> From<BytecodeInterpreterEvaluateAction<T>> for CliAction<T> {
-    fn from(value: BytecodeInterpreterEvaluateAction<T>) -> Self {
-        BytecodeInterpreterActions::<T>::from(value).into()
-    }
-}
-impl<T: Expression> From<CliAction<T>> for Option<BytecodeInterpreterEvaluateAction<T>> {
-    fn from(value: CliAction<T>) -> Self {
-        Option::<BytecodeInterpreterActions<T>>::from(value).and_then(|value| value.into())
-    }
-}
-impl<'a, T: Expression> From<&'a CliAction<T>>
-    for Option<&'a BytecodeInterpreterEvaluateAction<T>>
-{
-    fn from(value: &'a CliAction<T>) -> Self {
-        Option::<&'a BytecodeInterpreterActions<T>>::from(value).and_then(|value| value.into())
-    }
-}
-
-impl<T: Expression> From<BytecodeGcCompleteAction> for CliAction<T> {
-    fn from(value: BytecodeGcCompleteAction) -> Self {
-        BytecodeInterpreterActions::<T>::from(value).into()
-    }
-}
-impl<T: Expression> From<CliAction<T>> for Option<BytecodeGcCompleteAction> {
-    fn from(value: CliAction<T>) -> Self {
-        Option::<BytecodeInterpreterActions<T>>::from(value).and_then(|value| value.into())
-    }
-}
-impl<'a, T: Expression> From<&'a CliAction<T>> for Option<&'a BytecodeGcCompleteAction> {
-    fn from(value: &'a CliAction<T>) -> Self {
-        Option::<&'a BytecodeInterpreterActions<T>>::from(value).and_then(|value| value.into())
-    }
-}
-
-impl<T: Expression> From<BytecodeInterpreterResultAction<T>> for CliAction<T> {
-    fn from(value: BytecodeInterpreterResultAction<T>) -> Self {
-        BytecodeInterpreterActions::<T>::from(value).into()
-    }
-}
-impl<T: Expression> From<CliAction<T>> for Option<BytecodeInterpreterResultAction<T>> {
-    fn from(value: CliAction<T>) -> Self {
-        Option::<BytecodeInterpreterActions<T>>::from(value).and_then(|value| value.into())
-    }
-}
-impl<'a, T: Expression> From<&'a CliAction<T>> for Option<&'a BytecodeInterpreterResultAction<T>> {
-    fn from(value: &'a CliAction<T>) -> Self {
-        Option::<&'a BytecodeInterpreterActions<T>>::from(value).and_then(|value| value.into())
-    }
-}
-
-impl<T: Expression> From<BytecodeInterpreterGcAction> for CliAction<T> {
-    fn from(value: BytecodeInterpreterGcAction) -> Self {
-        BytecodeInterpreterActions::<T>::from(value).into()
-    }
-}
-impl<T: Expression> From<CliAction<T>> for Option<BytecodeInterpreterGcAction> {
-    fn from(value: CliAction<T>) -> Self {
-        Option::<BytecodeInterpreterActions<T>>::from(value).and_then(|value| value.into())
-    }
-}
-impl<'a, T: Expression> From<&'a CliAction<T>> for Option<&'a BytecodeInterpreterGcAction> {
-    fn from(value: &'a CliAction<T>) -> Self {
-        Option::<&'a BytecodeInterpreterActions<T>>::from(value).and_then(|value| value.into())
-    }
-}
-
-impl<T: Expression> From<GraphQlHandlerWebSocketConnectSuccessAction> for CliAction<T> {
-    fn from(value: GraphQlHandlerWebSocketConnectSuccessAction) -> Self {
-        GraphQlHandlerActions::from(value).into()
-    }
-}
-impl<T: Expression> From<CliAction<T>> for Option<GraphQlHandlerWebSocketConnectSuccessAction> {
-    fn from(value: CliAction<T>) -> Self {
-        Option::<GraphQlHandlerActions>::from(value).and_then(|value| value.into())
-    }
-}
-impl<'a, T: Expression> From<&'a CliAction<T>>
-    for Option<&'a GraphQlHandlerWebSocketConnectSuccessAction>
-{
-    fn from(value: &'a CliAction<T>) -> Self {
-        Option::<&'a GraphQlHandlerActions>::from(value).and_then(|value| value.into())
-    }
-}
-
-impl<T: Expression> From<GraphQlHandlerWebSocketConnectErrorAction> for CliAction<T> {
-    fn from(value: GraphQlHandlerWebSocketConnectErrorAction) -> Self {
-        GraphQlHandlerActions::from(value).into()
-    }
-}
-impl<T: Expression> From<CliAction<T>> for Option<GraphQlHandlerWebSocketConnectErrorAction> {
-    fn from(value: CliAction<T>) -> Self {
-        Option::<GraphQlHandlerActions>::from(value).and_then(|value| value.into())
-    }
-}
-impl<'a, T: Expression> From<&'a CliAction<T>>
-    for Option<&'a GraphQlHandlerWebSocketConnectErrorAction>
-{
-    fn from(value: &'a CliAction<T>) -> Self {
-        Option::<&'a GraphQlHandlerActions>::from(value).and_then(|value| value.into())
-    }
-}
-
-impl<T: Expression> From<GraphQlHandlerWebSocketServerMessageAction> for CliAction<T> {
-    fn from(value: GraphQlHandlerWebSocketServerMessageAction) -> Self {
-        GraphQlHandlerActions::from(value).into()
-    }
-}
-impl<T: Expression> From<CliAction<T>> for Option<GraphQlHandlerWebSocketServerMessageAction> {
-    fn from(value: CliAction<T>) -> Self {
-        Option::<GraphQlHandlerActions>::from(value).and_then(|value| value.into())
-    }
-}
-impl<'a, T: Expression> From<&'a CliAction<T>>
-    for Option<&'a GraphQlHandlerWebSocketServerMessageAction>
-{
-    fn from(value: &'a CliAction<T>) -> Self {
-        Option::<&'a GraphQlHandlerActions>::from(value).and_then(|value| value.into())
-    }
-}
-
 fn load_tls_cert(path: &Path) -> Result<Certificate> {
     let source = fs::read_to_string(path)
         .with_context(|| format!("Failed to load TLS certificate: {}", path.to_string_lossy()))?;
@@ -808,4 +477,1826 @@ fn load_tls_cert(path: &Path) -> Result<Certificate> {
             path.to_string_lossy()
         )
     })
+}
+
+fn read_file(path: &Path) -> Result<String> {
+    fs::read_to_string(path).with_context(|| format!("Failed to read path {}", path.display()))
+}
+
+fn clear_escape_sequence() -> &'static str {
+    "\x1b[2J\x1b[H"
+}
+
+#[derive(PartialEq, Eq, Clone, Debug)]
+enum CliActions<T: Expression> {
+    Runtime(RuntimeActions<T>),
+    BytecodeInterpreter(BytecodeInterpreterActions<T>),
+    FetchHandler(FetchHandlerActions),
+    GraphQlHandler(GraphQlHandlerActions),
+    TimeoutHandler(TimeoutHandlerActions),
+    TimestampHandler(TimestampHandlerActions),
+}
+impl<T: Expression> Action for CliActions<T> {}
+impl<T: Expression> NamedAction for CliActions<T> {
+    fn name(&self) -> &'static str {
+        match self {
+            Self::Runtime(action) => action.name(),
+            Self::BytecodeInterpreter(action) => action.name(),
+            Self::FetchHandler(action) => action.name(),
+            Self::GraphQlHandler(action) => action.name(),
+            Self::TimeoutHandler(action) => action.name(),
+            Self::TimestampHandler(action) => action.name(),
+        }
+    }
+}
+impl<T: Expression> SerializableAction for CliActions<T> {
+    fn to_json(&self) -> SerializedAction {
+        match self {
+            Self::Runtime(action) => action.to_json(),
+            Self::BytecodeInterpreter(action) => action.to_json(),
+            Self::FetchHandler(action) => action.to_json(),
+            Self::GraphQlHandler(action) => action.to_json(),
+            Self::TimeoutHandler(action) => action.to_json(),
+            Self::TimestampHandler(action) => action.to_json(),
+        }
+    }
+}
+
+trait CliAction<T: Expression>:
+    SerializableAction
+    + RuntimeAction<T>
+    + HandlerAction<T>
+    + BytecodeInterpreterAction<T>
+    + CliTaskAction<T>
+{
+}
+impl<_Self, T: Expression> CliAction<T> for _Self where
+    Self: SerializableAction
+        + RuntimeAction<T>
+        + HandlerAction<T>
+        + BytecodeInterpreterAction<T>
+        + CliTaskAction<T>
+{
+}
+
+trait CliTask<T, TFactory, TAllocator, TConnect>:
+    RuntimeTask<T, TFactory, TAllocator> + HandlerTask<TConnect>
+where
+    T: Expression,
+    TFactory: ExpressionFactory<T>,
+    TAllocator: HeapAllocator<T>,
+    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
+{
+}
+
+impl<_Self, T, TFactory, TAllocator, TConnect> CliTask<T, TFactory, TAllocator, TConnect> for _Self
+where
+    Self: RuntimeTask<T, TFactory, TAllocator> + HandlerTask<TConnect>,
+    T: Expression,
+    TFactory: ExpressionFactory<T>,
+    TAllocator: HeapAllocator<T>,
+    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
+{
+}
+
+enum CliActor<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TOutput>
+where
+    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
+    T::String: Send,
+    T::Builtin: Send,
+    T::Signal<T>: Send,
+    T::SignalList<T>: Send,
+    T::StructPrototype<T>: Send,
+    T::ExpressionList<T>: Send,
+    TFactory: AsyncExpressionFactory<T> + Default,
+    TAllocator: AsyncHeapAllocator<T> + Default,
+    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
+    TReconnect: ReconnectTimeout + Send + Clone + 'static,
+    TMetricLabels: BytecodeInterpreterMetricLabels + Send + 'static,
+    TOutput: std::io::Write + Send + 'static,
+    DebugActorState<TOutput>: Default,
+{
+    Runtime(RuntimeActor<T, TFactory, TAllocator>),
+    Handler(HandlerActor<T, TFactory, TAllocator, TConnect, TReconnect>),
+    BytecodeInterpreter(BytecodeInterpreter<T, TFactory, TAllocator, TMetricLabels>),
+    Debug(DebugActor<TOutput>),
+    Main(Redispatcher),
+    Task(CliTaskActor<T, TFactory, TAllocator, TConnect>),
+}
+
+impl<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TOutput, TAction, TTask>
+    Actor<TAction, TTask>
+    for CliActor<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TOutput>
+where
+    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
+    T::String: Send,
+    T::Builtin: Send,
+    T::Signal<T>: Send,
+    T::SignalList<T>: Send,
+    T::StructPrototype<T>: Send,
+    T::ExpressionList<T>: Send,
+    TFactory: AsyncExpressionFactory<T> + Default,
+    TAllocator: AsyncHeapAllocator<T> + Default,
+    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
+    TReconnect: ReconnectTimeout + Send + Clone + 'static,
+    TMetricLabels: BytecodeInterpreterMetricLabels + Send + 'static,
+    TOutput: std::io::Write + Send + 'static,
+    DebugActorState<TOutput>: Default,
+    TAction: Action + CliAction<T> + Send + 'static,
+    TTask:
+        TaskFactory<TAction, TTask> + CliTask<T, TFactory, TAllocator, TConnect> + Send + 'static,
+{
+    type Events<TInbox: TaskInbox<TAction>> = CliEvents<
+        T,
+        TFactory,
+        TAllocator,
+        TConnect,
+        TReconnect,
+        TMetricLabels,
+        TOutput,
+        TInbox,
+        TAction,
+        TTask,
+    >;
+    type Dispose = CliDispose<
+        T,
+        TFactory,
+        TAllocator,
+        TConnect,
+        TReconnect,
+        TMetricLabels,
+        TOutput,
+        TAction,
+        TTask,
+    >;
+    fn init<TInbox: TaskInbox<TAction>>(
+        &self,
+        inbox: TInbox,
+        context: &impl ActorInitContext,
+    ) -> (Self::State, Self::Events<TInbox>, Self::Dispose) {
+        match self {
+            Self::Runtime(actor) => {
+                let (state, events, dispose) = {
+                    <RuntimeActor<T, TFactory, TAllocator> as Actor<TAction, TTask>>::init(
+                        actor, inbox, context,
+                    )
+                };
+                (
+                    CliActorState::Runtime(state),
+                    CliEvents::Runtime(events),
+                    CliDispose::Runtime(dispose),
+                )
+            }
+            Self::Handler(actor) => {
+                let (state, events, dispose) = {
+                    <HandlerActor<T, TFactory, TAllocator, TConnect, TReconnect> as Actor<
+                        TAction,
+                        TTask,
+                    >>::init(actor, inbox, context)
+                };
+                (
+                    CliActorState::Handler(state),
+                    CliEvents::Handler(events),
+                    CliDispose::Handler(dispose),
+                )
+            }
+            Self::BytecodeInterpreter(actor) => {
+                let (state, events, dispose) = {
+                    <BytecodeInterpreter<T, TFactory, TAllocator, TMetricLabels> as Actor<
+                        TAction,
+                        TTask,
+                    >>::init(actor, inbox, context)
+                };
+                (
+                    CliActorState::BytecodeInterpreter(state),
+                    CliEvents::BytecodeInterpreter(events),
+                    CliDispose::BytecodeInterpreter(dispose),
+                )
+            }
+            Self::Debug(actor) => {
+                let (state, events, dispose) =
+                    { <DebugActor<TOutput> as Actor<TAction, TTask>>::init(actor, inbox, context) };
+                (
+                    CliActorState::Debug(state),
+                    CliEvents::Debug(events),
+                    CliDispose::Debug(dispose),
+                )
+            }
+            Self::Main(actor) => {
+                let (state, events, dispose) =
+                    { <Redispatcher as Actor<TAction, TTask>>::init(actor, inbox, context) };
+                (
+                    CliActorState::Main(state),
+                    CliEvents::Main(events),
+                    CliDispose::Main(dispose),
+                )
+            }
+            Self::Task(actor) => {
+                let (state, events, dispose) = {
+                    <CliTaskActor<T, TFactory, TAllocator, TConnect> as Actor<TAction, TTask>>::init(
+                        actor, inbox, context,
+                    )
+                };
+                (
+                    CliActorState::Task(state),
+                    CliEvents::Task(events),
+                    CliDispose::Task(dispose),
+                )
+            }
+        }
+    }
+}
+
+impl<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TOutput, TAction, TTask>
+    Worker<TAction, SchedulerTransition<TAction, TTask>>
+    for CliActor<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TOutput>
+where
+    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
+    T::String: Send,
+    T::Builtin: Send,
+    T::Signal<T>: Send,
+    T::SignalList<T>: Send,
+    T::StructPrototype<T>: Send,
+    T::ExpressionList<T>: Send,
+    TFactory: AsyncExpressionFactory<T> + Default,
+    TAllocator: AsyncHeapAllocator<T> + Default,
+    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
+    TReconnect: ReconnectTimeout + Send + Clone + 'static,
+    TMetricLabels: BytecodeInterpreterMetricLabels + Send + 'static,
+    TOutput: std::io::Write + Send + 'static,
+    DebugActorState<TOutput>: Default,
+    TAction: Action + CliAction<T> + Send + 'static,
+    TTask:
+        TaskFactory<TAction, TTask> + CliTask<T, TFactory, TAllocator, TConnect> + Send + 'static,
+{
+    fn accept(&self, message: &TAction) -> bool {
+        match self {
+            Self::Runtime(actor) => <RuntimeActor<T, TFactory, TAllocator> as Worker<
+                TAction,
+                SchedulerTransition<TAction, TTask>,
+            >>::accept(actor, message),
+            Self::Handler(actor) => {
+                <HandlerActor<T, TFactory, TAllocator, TConnect, TReconnect> as Worker<
+                    TAction,
+                    SchedulerTransition<TAction, TTask>,
+                >>::accept(actor, message)
+            }
+            Self::BytecodeInterpreter(actor) => {
+                <BytecodeInterpreter<T, TFactory, TAllocator, TMetricLabels> as Worker<
+                    TAction,
+                    SchedulerTransition<TAction, TTask>,
+                >>::accept(actor, message)
+            }
+            Self::Debug(actor) => <DebugActor<TOutput> as Worker<
+                TAction,
+                SchedulerTransition<TAction, TTask>,
+            >>::accept(actor, message),
+            Self::Main(actor) => <Redispatcher as Worker<
+                TAction,
+                SchedulerTransition<TAction, TTask>,
+            >>::accept(actor, message),
+            Self::Task(actor) => <CliTaskActor<T, TFactory, TAllocator, TConnect> as Worker<
+                TAction,
+                SchedulerTransition<TAction, TTask>,
+            >>::accept(actor, message),
+        }
+    }
+    fn schedule(&self, message: &TAction, state: &Self::State) -> Option<SchedulerMode> {
+        match (self, state) {
+            (Self::Runtime(actor), CliActorState::Runtime(state)) => {
+                <RuntimeActor<T, TFactory, TAllocator> as Worker<
+                    TAction,
+                    SchedulerTransition<TAction, TTask>,
+                >>::schedule(actor, message, state)
+            }
+            (Self::Handler(actor), CliActorState::Handler(state)) => {
+                <HandlerActor<T, TFactory, TAllocator, TConnect, TReconnect> as Worker<
+                    TAction,
+                    SchedulerTransition<TAction, TTask>,
+                >>::schedule(actor, message, state)
+            }
+            (Self::BytecodeInterpreter(actor), CliActorState::BytecodeInterpreter(state)) => {
+                <BytecodeInterpreter<T, TFactory, TAllocator, TMetricLabels> as Worker<
+                    TAction,
+                    SchedulerTransition<TAction, TTask>,
+                >>::schedule(actor, message, state)
+            }
+            (Self::Debug(actor), CliActorState::Debug(state)) => <DebugActor<TOutput> as Worker<
+                TAction,
+                SchedulerTransition<TAction, TTask>,
+            >>::schedule(
+                actor, message, state
+            ),
+            (Self::Main(actor), CliActorState::Main(state)) => {
+                <Redispatcher as Worker<TAction, SchedulerTransition<TAction, TTask>>>::schedule(
+                    actor, message, state,
+                )
+            }
+            (Self::Task(actor), CliActorState::Task(state)) => {
+                <CliTaskActor<T, TFactory, TAllocator, TConnect> as Worker<
+                    TAction,
+                    SchedulerTransition<TAction, TTask>,
+                >>::schedule(actor, message, state)
+            }
+            _ => unreachable!(),
+        }
+    }
+}
+
+impl<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TOutput, TAction, TTask>
+    Handler<TAction, SchedulerTransition<TAction, TTask>>
+    for CliActor<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TOutput>
+where
+    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
+    T::String: Send,
+    T::Builtin: Send,
+    T::Signal<T>: Send,
+    T::SignalList<T>: Send,
+    T::StructPrototype<T>: Send,
+    T::ExpressionList<T>: Send,
+    TFactory: AsyncExpressionFactory<T> + Default,
+    TAllocator: AsyncHeapAllocator<T> + Default,
+    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
+    TReconnect: ReconnectTimeout + Send + Clone + 'static,
+    TMetricLabels: BytecodeInterpreterMetricLabels + Send + 'static,
+    TOutput: std::io::Write + Send + 'static,
+    DebugActorState<TOutput>: Default,
+    TAction: Action + CliAction<T> + Send + 'static,
+    TTask:
+        TaskFactory<TAction, TTask> + CliTask<T, TFactory, TAllocator, TConnect> + Send + 'static,
+{
+    type State = CliActorState<
+        T,
+        TFactory,
+        TAllocator,
+        TConnect,
+        TReconnect,
+        TMetricLabels,
+        TOutput,
+        TAction,
+        TTask,
+    >;
+    fn handle(
+        &self,
+        state: &mut Self::State,
+        action: &TAction,
+        metadata: &MessageData,
+        context: &mut impl HandlerContext,
+    ) -> Option<SchedulerTransition<TAction, TTask>> {
+        match (self, state) {
+            (Self::Runtime(actor), CliActorState::Runtime(state)) => {
+                <RuntimeActor<T, TFactory, TAllocator> as Handler<
+                    TAction,
+                    SchedulerTransition<TAction, TTask>,
+                >>::handle(actor, state, action, metadata, context)
+            }
+            (Self::Handler(actor), CliActorState::Handler(state)) => {
+                <HandlerActor<T, TFactory, TAllocator, TConnect, TReconnect> as Handler<
+                    TAction,
+                    SchedulerTransition<TAction, TTask>,
+                >>::handle(actor, state, action, metadata, context)
+            }
+            (Self::BytecodeInterpreter(actor), CliActorState::BytecodeInterpreter(state)) => {
+                <BytecodeInterpreter<T, TFactory, TAllocator, TMetricLabels> as Handler<
+                    TAction,
+                    SchedulerTransition<TAction, TTask>,
+                >>::handle(actor, state, action, metadata, context)
+            }
+            (Self::Debug(actor), CliActorState::Debug(state)) => <DebugActor<TOutput> as Handler<
+                TAction,
+                SchedulerTransition<TAction, TTask>,
+            >>::handle(
+                actor, state, action, metadata, context,
+            ),
+            (Self::Main(actor), CliActorState::Main(state)) => {
+                <Redispatcher as Handler<TAction, SchedulerTransition<TAction, TTask>>>::handle(
+                    actor, state, action, metadata, context,
+                )
+            }
+            (Self::Task(actor), CliActorState::Task(state)) => {
+                <CliTaskActor<T, TFactory, TAllocator, TConnect> as Handler<
+                    TAction,
+                    SchedulerTransition<TAction, TTask>,
+                >>::handle(actor, state, action, metadata, context)
+            }
+            _ => unreachable!(),
+        }
+    }
+}
+
+enum CliActorState<
+    T,
+    TFactory,
+    TAllocator,
+    TConnect,
+    TReconnect,
+    TMetricLabels,
+    TOutput,
+    TAction,
+    TTask,
+> where
+    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
+    T::String: Send,
+    T::Builtin: Send,
+    T::Signal<T>: Send,
+    T::SignalList<T>: Send,
+    T::StructPrototype<T>: Send,
+    T::ExpressionList<T>: Send,
+    TFactory: AsyncExpressionFactory<T> + Default,
+    TAllocator: AsyncHeapAllocator<T> + Default,
+    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
+    TReconnect: ReconnectTimeout + Send + Clone + 'static,
+    TMetricLabels: BytecodeInterpreterMetricLabels + Send + 'static,
+    TOutput: std::io::Write + Send + 'static,
+    DebugActorState<TOutput>: Default,
+    TAction: Action + CliAction<T> + Send + 'static,
+    TTask:
+        TaskFactory<TAction, TTask> + CliTask<T, TFactory, TAllocator, TConnect> + Send + 'static,
+{
+    Runtime(
+        <RuntimeActor<T, TFactory, TAllocator> as Handler<
+            TAction,
+            SchedulerTransition<TAction, TTask>,
+        >>::State,
+    ),
+    Handler(
+        <HandlerActor<T, TFactory, TAllocator, TConnect, TReconnect> as Handler<
+            TAction,
+            SchedulerTransition<TAction, TTask>,
+        >>::State,
+    ),
+    BytecodeInterpreter(
+        <BytecodeInterpreter<T, TFactory, TAllocator, TMetricLabels> as Handler<
+            TAction,
+            SchedulerTransition<TAction, TTask>,
+        >>::State,
+    ),
+    Debug(<DebugActor<TOutput> as Handler<TAction, SchedulerTransition<TAction, TTask>>>::State),
+    Main(<Redispatcher as Handler<TAction, SchedulerTransition<TAction, TTask>>>::State),
+    Task(
+        <CliTaskActor<T, TFactory, TAllocator, TConnect> as Handler<
+            TAction,
+            SchedulerTransition<TAction, TTask>,
+        >>::State,
+    ),
+}
+
+#[pin_project(project = CliEventsVariant)]
+enum CliEvents<
+    T,
+    TFactory,
+    TAllocator,
+    TConnect,
+    TReconnect,
+    TMetricLabels,
+    TOutput,
+    TInbox,
+    TAction,
+    TTask,
+> where
+    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
+    T::String: Send,
+    T::Builtin: Send,
+    T::Signal<T>: Send,
+    T::SignalList<T>: Send,
+    T::StructPrototype<T>: Send,
+    T::ExpressionList<T>: Send,
+    TFactory: AsyncExpressionFactory<T> + Default,
+    TAllocator: AsyncHeapAllocator<T> + Default,
+    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
+    TReconnect: ReconnectTimeout + Send + Clone + 'static,
+    TMetricLabels: BytecodeInterpreterMetricLabels + Send + 'static,
+    TOutput: std::io::Write + Send + 'static,
+    DebugActorState<TOutput>: Default,
+    TInbox: TaskInbox<TAction>,
+    TAction: Action + CliAction<T> + Send + 'static,
+    TTask:
+        TaskFactory<TAction, TTask> + CliTask<T, TFactory, TAllocator, TConnect> + Send + 'static,
+{
+    Runtime(
+        #[pin] <RuntimeActor<T, TFactory, TAllocator> as Actor<TAction, TTask>>::Events<TInbox>,
+    ),
+    Handler(
+        #[pin]
+        <HandlerActor<T, TFactory, TAllocator, TConnect, TReconnect> as Actor<
+                TAction,
+                TTask,
+            >>::Events<TInbox>,
+    ),
+    BytecodeInterpreter(
+        #[pin]
+        <BytecodeInterpreter<T, TFactory, TAllocator, TMetricLabels> as Actor<
+                TAction,
+                TTask,
+            >>::Events<TInbox>,
+    ),
+    Debug(#[pin] <DebugActor<TOutput> as Actor<TAction, TTask>>::Events<TInbox>),
+    Main(#[pin] <Redispatcher as Actor<TAction, TTask>>::Events<TInbox>),
+    Task(
+        #[pin]
+        <CliTaskActor<T, TFactory, TAllocator, TConnect> as Actor<TAction, TTask>>::Events<TInbox>,
+    ),
+}
+impl<
+        T,
+        TFactory,
+        TAllocator,
+        TConnect,
+        TReconnect,
+        TMetricLabels,
+        TOutput,
+        TInbox,
+        TAction,
+        TTask,
+    > Stream
+    for CliEvents<
+        T,
+        TFactory,
+        TAllocator,
+        TConnect,
+        TReconnect,
+        TMetricLabels,
+        TOutput,
+        TInbox,
+        TAction,
+        TTask,
+    >
+where
+    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
+    T::String: Send,
+    T::Builtin: Send,
+    T::Signal<T>: Send,
+    T::SignalList<T>: Send,
+    T::StructPrototype<T>: Send,
+    T::ExpressionList<T>: Send,
+    TFactory: AsyncExpressionFactory<T> + Default,
+    TAllocator: AsyncHeapAllocator<T> + Default,
+    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
+    TReconnect: ReconnectTimeout + Send + Clone + 'static,
+    TMetricLabels: BytecodeInterpreterMetricLabels + Send + 'static,
+    TOutput: std::io::Write + Send + 'static,
+    DebugActorState<TOutput>: Default,
+    TInbox: TaskInbox<TAction>,
+    TAction: Action + CliAction<T> + Send + 'static,
+    TTask:
+        TaskFactory<TAction, TTask> + CliTask<T, TFactory, TAllocator, TConnect> + Send + 'static,
+{
+    type Item = TInbox::Message;
+    fn poll_next(
+        self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        match self.project() {
+            CliEventsVariant::Runtime(inner) => inner.poll_next(cx),
+            CliEventsVariant::Handler(inner) => inner.poll_next(cx),
+            CliEventsVariant::BytecodeInterpreter(inner) => inner.poll_next(cx),
+            CliEventsVariant::Debug(inner) => inner.poll_next(cx),
+            CliEventsVariant::Main(inner) => inner.poll_next(cx),
+            CliEventsVariant::Task(inner) => inner.poll_next(cx),
+        }
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        match self {
+            Self::Runtime(inner) => inner.size_hint(),
+            Self::Handler(inner) => inner.size_hint(),
+            Self::BytecodeInterpreter(inner) => inner.size_hint(),
+            Self::Debug(inner) => inner.size_hint(),
+            Self::Main(inner) => inner.size_hint(),
+            Self::Task(inner) => inner.size_hint(),
+        }
+    }
+}
+
+#[pin_project(project = CliDisposeVariant)]
+enum CliDispose<
+    T,
+    TFactory,
+    TAllocator,
+    TConnect,
+    TReconnect,
+    TMetricLabels,
+    TOutput,
+    TAction,
+    TTask,
+> where
+    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
+    T::String: Send,
+    T::Builtin: Send,
+    T::Signal<T>: Send,
+    T::SignalList<T>: Send,
+    T::StructPrototype<T>: Send,
+    T::ExpressionList<T>: Send,
+    TFactory: AsyncExpressionFactory<T> + Default,
+    TAllocator: AsyncHeapAllocator<T> + Default,
+    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
+    TReconnect: ReconnectTimeout + Send + Clone + 'static,
+    TMetricLabels: BytecodeInterpreterMetricLabels + Send + 'static,
+    TOutput: std::io::Write + Send + 'static,
+    DebugActorState<TOutput>: Default,
+    TAction: Action + CliAction<T> + Send + 'static,
+    TTask:
+        TaskFactory<TAction, TTask> + CliTask<T, TFactory, TAllocator, TConnect> + Send + 'static,
+{
+    Runtime(#[pin] <RuntimeActor<T, TFactory, TAllocator> as Actor<TAction, TTask>>::Dispose),
+    Handler(
+        #[pin]
+        <HandlerActor<T, TFactory, TAllocator, TConnect, TReconnect> as Actor<
+                TAction,
+                TTask,
+            >>::Dispose,
+    ),
+    BytecodeInterpreter(
+        #[pin]
+        <BytecodeInterpreter<T, TFactory, TAllocator, TMetricLabels> as Actor<
+                TAction,
+                TTask,
+            >>::Dispose,
+    ),
+    Debug(#[pin] <DebugActor<TOutput> as Actor<TAction, TTask>>::Dispose),
+    Main(#[pin] <Redispatcher as Actor<TAction, TTask>>::Dispose),
+    Task(
+        #[pin] <CliTaskActor<T, TFactory, TAllocator, TConnect> as Actor<TAction, TTask>>::Dispose,
+    ),
+}
+impl<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TOutput, TAction, TTask> Future
+    for CliDispose<
+        T,
+        TFactory,
+        TAllocator,
+        TConnect,
+        TReconnect,
+        TMetricLabels,
+        TOutput,
+        TAction,
+        TTask,
+    >
+where
+    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
+    T::String: Send,
+    T::Builtin: Send,
+    T::Signal<T>: Send,
+    T::SignalList<T>: Send,
+    T::StructPrototype<T>: Send,
+    T::ExpressionList<T>: Send,
+    TFactory: AsyncExpressionFactory<T> + Default,
+    TAllocator: AsyncHeapAllocator<T> + Default,
+    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
+    TReconnect: ReconnectTimeout + Send + Clone + 'static,
+    TMetricLabels: BytecodeInterpreterMetricLabels + Send + 'static,
+    TOutput: std::io::Write + Send + 'static,
+    DebugActorState<TOutput>: Default,
+    TAction: Action + CliAction<T> + Send + 'static,
+    TTask:
+        TaskFactory<TAction, TTask> + CliTask<T, TFactory, TAllocator, TConnect> + Send + 'static,
+{
+    type Output = ();
+    fn poll(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Self::Output> {
+        match self.project() {
+            CliDisposeVariant::Runtime(inner) => inner.poll(cx),
+            CliDisposeVariant::Handler(inner) => inner.poll(cx),
+            CliDisposeVariant::BytecodeInterpreter(inner) => inner.poll(cx),
+            CliDisposeVariant::Debug(inner) => inner.poll(cx),
+            CliDisposeVariant::Main(inner) => inner.poll(cx),
+            CliDisposeVariant::Task(inner) => inner.poll(cx),
+        }
+    }
+}
+
+trait CliTaskAction<T: Expression>: Action + RuntimeTaskAction<T> + DefaultHandlersTaskAction {}
+impl<TSelf, T: Expression> CliTaskAction<T> for TSelf where
+    Self: Action + RuntimeTaskAction<T> + DefaultHandlersTaskAction
+{
+}
+
+enum CliTaskFactory<T, TFactory, TAllocator, TConnect>
+where
+    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
+    TFactory: AsyncExpressionFactory<T> + Default,
+    TAllocator: AsyncHeapAllocator<T> + Default,
+    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
+{
+    Runtime(RuntimeTaskFactory<T, TFactory, TAllocator>),
+    DefaultHandlers(DefaultHandlersTaskFactory<TConnect>),
+}
+impl<T, TFactory, TAllocator, TConnect, TAction, TTask> TaskFactory<TAction, TTask>
+    for CliTaskFactory<T, TFactory, TAllocator, TConnect>
+where
+    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
+    TFactory: AsyncExpressionFactory<T> + Default,
+    TAllocator: AsyncHeapAllocator<T> + Default,
+    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
+    TAction: Action + CliTaskAction<T> + Send + 'static,
+    TTask: TaskFactory<TAction, TTask>,
+{
+    type Actor = CliTaskActor<T, TFactory, TAllocator, TConnect>;
+    fn create(self) -> Self::Actor {
+        match self {
+            Self::Runtime(inner) => CliTaskActor::RuntimeTask(<RuntimeTaskFactory<
+                T,
+                TFactory,
+                TAllocator,
+            > as TaskFactory<TAction, TTask>>::create(
+                inner
+            )),
+            Self::DefaultHandlers(inner) => CliTaskActor::DefaultHandlersTask(
+                <DefaultHandlersTaskFactory<TConnect> as TaskFactory<TAction, TTask>>::create(
+                    inner,
+                ),
+            ),
+        }
+    }
+}
+
+enum CliTaskActor<T, TFactory, TAllocator, TConnect>
+where
+    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
+    TFactory: AsyncExpressionFactory<T> + Default,
+    TAllocator: AsyncHeapAllocator<T> + Default,
+    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
+{
+    RuntimeTask(RuntimeTaskActor<T, TFactory, TAllocator>),
+    DefaultHandlersTask(DefaultHandlersTaskActor<TConnect>),
+}
+
+impl<T, TFactory, TAllocator, TConnect, TAction, TTask> Actor<TAction, TTask>
+    for CliTaskActor<T, TFactory, TAllocator, TConnect>
+where
+    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
+    TFactory: AsyncExpressionFactory<T> + Default,
+    TAllocator: AsyncHeapAllocator<T> + Default,
+    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
+    TAction: Action + CliTaskAction<T> + Send + 'static,
+    TTask: TaskFactory<TAction, TTask>,
+{
+    type Events<TInbox: TaskInbox<TAction>> =
+        CliTaskEvents<T, TFactory, TAllocator, TConnect, TInbox, TAction, TTask>;
+    type Dispose = CliTaskDispose<T, TFactory, TAllocator, TConnect, TAction, TTask>;
+    fn init<TInbox: TaskInbox<TAction>>(
+        &self,
+        inbox: TInbox,
+        context: &impl ActorInitContext,
+    ) -> (Self::State, Self::Events<TInbox>, Self::Dispose) {
+        match self {
+            Self::RuntimeTask(actor) => {
+                let (state, events, dispose) = {
+                    <RuntimeTaskActor<T, TFactory, TAllocator> as Actor<TAction, TTask>>::init(
+                        actor, inbox, context,
+                    )
+                };
+                (
+                    CliTaskActorState::RuntimeTask(state),
+                    CliTaskEvents::RuntimeTask(events),
+                    CliTaskDispose::RuntimeTask(dispose),
+                )
+            }
+            Self::DefaultHandlersTask(actor) => {
+                let (state, events, dispose) = {
+                    <DefaultHandlersTaskActor<TConnect> as Actor<TAction, TTask>>::init(
+                        actor, inbox, context,
+                    )
+                };
+                (
+                    CliTaskActorState::DefaultHandlersTask(state),
+                    CliTaskEvents::DefaultHandlersTask(events),
+                    CliTaskDispose::DefaultHandlersTask(dispose),
+                )
+            }
+        }
+    }
+}
+
+impl<T, TFactory, TAllocator, TConnect, TAction, TTask>
+    Worker<TAction, SchedulerTransition<TAction, TTask>>
+    for CliTaskActor<T, TFactory, TAllocator, TConnect>
+where
+    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
+    TFactory: AsyncExpressionFactory<T> + Default,
+    TAllocator: AsyncHeapAllocator<T> + Default,
+    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
+    TAction: Action + CliTaskAction<T> + Send + 'static,
+    TTask: TaskFactory<TAction, TTask>,
+{
+    fn accept(&self, message: &TAction) -> bool {
+        match self {
+            Self::RuntimeTask(actor) => <RuntimeTaskActor<T, TFactory, TAllocator> as Worker<
+                TAction,
+                SchedulerTransition<TAction, TTask>,
+            >>::accept(actor, message),
+            Self::DefaultHandlersTask(actor) => <DefaultHandlersTaskActor<TConnect> as Worker<
+                TAction,
+                SchedulerTransition<TAction, TTask>,
+            >>::accept(actor, message),
+        }
+    }
+    fn schedule(&self, message: &TAction, state: &Self::State) -> Option<SchedulerMode> {
+        match (self, state) {
+            (Self::RuntimeTask(actor), CliTaskActorState::RuntimeTask(state)) => {
+                <RuntimeTaskActor<T, TFactory, TAllocator> as Worker<
+                    TAction,
+                    SchedulerTransition<TAction, TTask>,
+                >>::schedule(actor, message, state)
+            }
+            (Self::DefaultHandlersTask(actor), CliTaskActorState::DefaultHandlersTask(state)) => {
+                <DefaultHandlersTaskActor<TConnect> as Worker<
+                    TAction,
+                    SchedulerTransition<TAction, TTask>,
+                >>::schedule(actor, message, state)
+            }
+            _ => unreachable!(),
+        }
+    }
+}
+
+impl<T, TFactory, TAllocator, TConnect, TAction, TTask>
+    Handler<TAction, SchedulerTransition<TAction, TTask>>
+    for CliTaskActor<T, TFactory, TAllocator, TConnect>
+where
+    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
+    TFactory: AsyncExpressionFactory<T> + Default,
+    TAllocator: AsyncHeapAllocator<T> + Default,
+    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
+    TAction: Action + CliTaskAction<T> + Send + 'static,
+    TTask: TaskFactory<TAction, TTask>,
+{
+    type State = CliTaskActorState<T, TFactory, TAllocator, TConnect, TAction, TTask>;
+    fn handle(
+        &self,
+        state: &mut Self::State,
+        action: &TAction,
+        metadata: &MessageData,
+        context: &mut impl HandlerContext,
+    ) -> Option<SchedulerTransition<TAction, TTask>> {
+        match (self, state) {
+            (Self::RuntimeTask(actor), CliTaskActorState::RuntimeTask(state)) => {
+                <RuntimeTaskActor<T, TFactory, TAllocator> as Handler<
+                    TAction,
+                    SchedulerTransition<TAction, TTask>,
+                >>::handle(actor, state, action, metadata, context)
+            }
+            (Self::DefaultHandlersTask(actor), CliTaskActorState::DefaultHandlersTask(state)) => {
+                <DefaultHandlersTaskActor<TConnect> as Handler<
+                    TAction,
+                    SchedulerTransition<TAction, TTask>,
+                >>::handle(actor, state, action, metadata, context)
+            }
+            _ => unreachable!(),
+        }
+    }
+}
+
+enum CliTaskActorState<T, TFactory, TAllocator, TConnect, TAction, TTask>
+where
+    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
+    TFactory: AsyncExpressionFactory<T> + Default,
+    TAllocator: AsyncHeapAllocator<T> + Default,
+    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
+    TAction: Action + CliTaskAction<T> + Send + 'static,
+    TTask: TaskFactory<TAction, TTask>,
+{
+    RuntimeTask(
+        <RuntimeTaskActor<T, TFactory, TAllocator> as Handler<
+            TAction,
+            SchedulerTransition<TAction, TTask>,
+        >>::State,
+    ),
+    DefaultHandlersTask(
+        <DefaultHandlersTaskActor<TConnect> as Handler<
+            TAction,
+            SchedulerTransition<TAction, TTask>,
+        >>::State,
+    ),
+}
+
+#[pin_project(project = CliTaskEventsVariant)]
+enum CliTaskEvents<T, TFactory, TAllocator, TConnect, TInbox, TAction, TTask>
+where
+    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
+    TFactory: AsyncExpressionFactory<T> + Default,
+    TAllocator: AsyncHeapAllocator<T> + Default,
+    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
+    TInbox: TaskInbox<TAction>,
+    TAction: Action + CliTaskAction<T> + Send + 'static,
+    TTask: TaskFactory<TAction, TTask>,
+{
+    RuntimeTask(
+        #[pin] <RuntimeTaskActor<T, TFactory, TAllocator> as Actor<TAction, TTask>>::Events<TInbox>,
+    ),
+    DefaultHandlersTask(
+        #[pin] <DefaultHandlersTaskActor<TConnect> as Actor<TAction, TTask>>::Events<TInbox>,
+    ),
+}
+impl<T, TFactory, TAllocator, TConnect, TInbox, TAction, TTask> Stream
+    for CliTaskEvents<T, TFactory, TAllocator, TConnect, TInbox, TAction, TTask>
+where
+    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
+    TFactory: AsyncExpressionFactory<T> + Default,
+    TAllocator: AsyncHeapAllocator<T> + Default,
+    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
+    TInbox: TaskInbox<TAction>,
+    TAction: Action + CliTaskAction<T> + Send + 'static,
+    TTask: TaskFactory<TAction, TTask>,
+{
+    type Item = TInbox::Message;
+    fn poll_next(
+        self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        match self.project() {
+            CliTaskEventsVariant::RuntimeTask(inner) => inner.poll_next(cx),
+            CliTaskEventsVariant::DefaultHandlersTask(inner) => inner.poll_next(cx),
+        }
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        match self {
+            Self::RuntimeTask(inner) => inner.size_hint(),
+            Self::DefaultHandlersTask(inner) => inner.size_hint(),
+        }
+    }
+}
+
+#[pin_project(project = CliTaskDisposeVariant)]
+enum CliTaskDispose<T, TFactory, TAllocator, TConnect, TAction, TTask>
+where
+    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
+    TFactory: AsyncExpressionFactory<T> + Default,
+    TAllocator: AsyncHeapAllocator<T> + Default,
+    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
+    TAction: Action + CliTaskAction<T> + Send + 'static,
+    TTask: TaskFactory<TAction, TTask>,
+{
+    RuntimeTask(
+        #[pin] <RuntimeTaskActor<T, TFactory, TAllocator> as Actor<TAction, TTask>>::Dispose,
+    ),
+    DefaultHandlersTask(
+        #[pin] <DefaultHandlersTaskActor<TConnect> as Actor<TAction, TTask>>::Dispose,
+    ),
+}
+impl<T, TFactory, TAllocator, TConnect, TAction, TTask> Future
+    for CliTaskDispose<T, TFactory, TAllocator, TConnect, TAction, TTask>
+where
+    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
+    TFactory: AsyncExpressionFactory<T> + Default,
+    TAllocator: AsyncHeapAllocator<T> + Default,
+    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
+    TAction: Action + CliTaskAction<T> + Send + 'static,
+    TTask: TaskFactory<TAction, TTask>,
+{
+    type Output = ();
+    fn poll(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Self::Output> {
+        match self.project() {
+            CliTaskDisposeVariant::RuntimeTask(inner) => inner.poll(cx),
+            CliTaskDisposeVariant::DefaultHandlersTask(inner) => inner.poll(cx),
+        }
+    }
+}
+
+struct CliActorFactory<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TOutput>
+where
+    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
+    T::String: Send,
+    T::Builtin: Send,
+    T::Signal<T>: Send,
+    T::SignalList<T>: Send,
+    T::StructPrototype<T>: Send,
+    T::ExpressionList<T>: Send,
+    TFactory: AsyncExpressionFactory<T> + Default,
+    TAllocator: AsyncHeapAllocator<T> + Default,
+    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
+    TReconnect: ReconnectTimeout + Send + Clone + 'static,
+    TMetricLabels: BytecodeInterpreterMetricLabels + Send + 'static,
+    TOutput: std::io::Write + Send + 'static,
+{
+    inner: CliTaskFactory<T, TFactory, TAllocator, TConnect>,
+    _reconnect: PhantomData<TReconnect>,
+    _metric_labels: PhantomData<TMetricLabels>,
+    _output: PhantomData<TOutput>,
+}
+impl<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TOutput>
+    From<CliTaskFactory<T, TFactory, TAllocator, TConnect>>
+    for CliActorFactory<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TOutput>
+where
+    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
+    T::String: Send,
+    T::Builtin: Send,
+    T::Signal<T>: Send,
+    T::SignalList<T>: Send,
+    T::StructPrototype<T>: Send,
+    T::ExpressionList<T>: Send,
+    TFactory: AsyncExpressionFactory<T> + Default,
+    TAllocator: AsyncHeapAllocator<T> + Default,
+    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
+    TReconnect: ReconnectTimeout + Send + Clone + 'static,
+    TMetricLabels: BytecodeInterpreterMetricLabels + Send + 'static,
+    TOutput: std::io::Write + Send + 'static,
+    DebugActorState<TOutput>: Default,
+{
+    fn from(value: CliTaskFactory<T, TFactory, TAllocator, TConnect>) -> Self {
+        Self {
+            inner: value,
+            _reconnect: PhantomData,
+            _metric_labels: PhantomData,
+            _output: PhantomData,
+        }
+    }
+}
+impl<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TOutput, TAction>
+    TaskFactory<TAction, Self>
+    for CliActorFactory<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TOutput>
+where
+    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
+    T::String: Send,
+    T::Builtin: Send,
+    T::Signal<T>: Send,
+    T::SignalList<T>: Send,
+    T::StructPrototype<T>: Send,
+    T::ExpressionList<T>: Send,
+    TFactory: AsyncExpressionFactory<T> + Default,
+    TAllocator: AsyncHeapAllocator<T> + Default,
+    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
+    TReconnect: ReconnectTimeout + Send + Clone + 'static,
+    TMetricLabels: BytecodeInterpreterMetricLabels + Send + 'static,
+    TOutput: std::io::Write + Send + 'static,
+    DebugActorState<TOutput>: Default,
+    TAction: Action + CliAction<T> + Send + 'static,
+{
+    type Actor = CliActor<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TOutput>;
+    fn create(self) -> Self::Actor {
+        CliActor::Task(<CliTaskFactory<T, TFactory, TAllocator, TConnect> as TaskFactory<TAction, Self>>::create(self.inner))
+    }
+}
+
+impl<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TOutput>
+    From<BytecodeWorkerTaskFactory<T, TFactory, TAllocator>>
+    for CliActorFactory<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TOutput>
+where
+    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
+    T::String: Send,
+    T::Builtin: Send,
+    T::Signal<T>: Send,
+    T::SignalList<T>: Send,
+    T::StructPrototype<T>: Send,
+    T::ExpressionList<T>: Send,
+    TFactory: AsyncExpressionFactory<T> + Default,
+    TAllocator: AsyncHeapAllocator<T> + Default,
+    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
+    TReconnect: ReconnectTimeout + Send + Clone + 'static,
+    TMetricLabels: BytecodeInterpreterMetricLabels + Send + 'static,
+    TOutput: std::io::Write + Send + 'static,
+    DebugActorState<TOutput>: Default,
+{
+    fn from(value: BytecodeWorkerTaskFactory<T, TFactory, TAllocator>) -> Self {
+        Self::from(CliTaskFactory::Runtime(RuntimeTaskFactory::from(value)))
+    }
+}
+
+impl<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TOutput>
+    From<FetchHandlerTaskFactory<TConnect>>
+    for CliActorFactory<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TOutput>
+where
+    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
+    T::String: Send,
+    T::Builtin: Send,
+    T::Signal<T>: Send,
+    T::SignalList<T>: Send,
+    T::StructPrototype<T>: Send,
+    T::ExpressionList<T>: Send,
+    TFactory: AsyncExpressionFactory<T> + Default,
+    TAllocator: AsyncHeapAllocator<T> + Default,
+    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
+    TReconnect: ReconnectTimeout + Send + Clone + 'static,
+    TMetricLabels: BytecodeInterpreterMetricLabels + Send + 'static,
+    TOutput: std::io::Write + Send + 'static,
+    DebugActorState<TOutput>: Default,
+{
+    fn from(value: FetchHandlerTaskFactory<TConnect>) -> Self {
+        Self::from(CliTaskFactory::DefaultHandlers(
+            DefaultHandlersTaskFactory::from(value),
+        ))
+    }
+}
+
+impl<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TOutput>
+    From<GraphQlHandlerHttpFetchTaskFactory<TConnect>>
+    for CliActorFactory<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TOutput>
+where
+    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
+    T::String: Send,
+    T::Builtin: Send,
+    T::Signal<T>: Send,
+    T::SignalList<T>: Send,
+    T::StructPrototype<T>: Send,
+    T::ExpressionList<T>: Send,
+    TFactory: AsyncExpressionFactory<T> + Default,
+    TAllocator: AsyncHeapAllocator<T> + Default,
+    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
+    TReconnect: ReconnectTimeout + Send + Clone + 'static,
+    TMetricLabels: BytecodeInterpreterMetricLabels + Send + 'static,
+    TOutput: std::io::Write + Send + 'static,
+    DebugActorState<TOutput>: Default,
+{
+    fn from(value: GraphQlHandlerHttpFetchTaskFactory<TConnect>) -> Self {
+        Self::from(CliTaskFactory::DefaultHandlers(
+            DefaultHandlersTaskFactory::from(value),
+        ))
+    }
+}
+
+impl<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TOutput>
+    From<GraphQlHandlerWebSocketConnectionTaskFactory>
+    for CliActorFactory<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TOutput>
+where
+    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
+    T::String: Send,
+    T::Builtin: Send,
+    T::Signal<T>: Send,
+    T::SignalList<T>: Send,
+    T::StructPrototype<T>: Send,
+    T::ExpressionList<T>: Send,
+    TFactory: AsyncExpressionFactory<T> + Default,
+    TAllocator: AsyncHeapAllocator<T> + Default,
+    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
+    TReconnect: ReconnectTimeout + Send + Clone + 'static,
+    TMetricLabels: BytecodeInterpreterMetricLabels + Send + 'static,
+    TOutput: std::io::Write + Send + 'static,
+    DebugActorState<TOutput>: Default,
+{
+    fn from(value: GraphQlHandlerWebSocketConnectionTaskFactory) -> Self {
+        Self::from(CliTaskFactory::DefaultHandlers(
+            DefaultHandlersTaskFactory::from(value),
+        ))
+    }
+}
+
+impl<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TOutput>
+    From<TimeoutHandlerTaskFactory>
+    for CliActorFactory<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TOutput>
+where
+    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
+    T::String: Send,
+    T::Builtin: Send,
+    T::Signal<T>: Send,
+    T::SignalList<T>: Send,
+    T::StructPrototype<T>: Send,
+    T::ExpressionList<T>: Send,
+    TFactory: AsyncExpressionFactory<T> + Default,
+    TAllocator: AsyncHeapAllocator<T> + Default,
+    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
+    TReconnect: ReconnectTimeout + Send + Clone + 'static,
+    TMetricLabels: BytecodeInterpreterMetricLabels + Send + 'static,
+    TOutput: std::io::Write + Send + 'static,
+    DebugActorState<TOutput>: Default,
+{
+    fn from(value: TimeoutHandlerTaskFactory) -> Self {
+        Self::from(CliTaskFactory::DefaultHandlers(
+            DefaultHandlersTaskFactory::from(value),
+        ))
+    }
+}
+
+impl<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TOutput>
+    From<TimestampHandlerTaskFactory>
+    for CliActorFactory<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TOutput>
+where
+    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
+    T::String: Send,
+    T::Builtin: Send,
+    T::Signal<T>: Send,
+    T::SignalList<T>: Send,
+    T::StructPrototype<T>: Send,
+    T::ExpressionList<T>: Send,
+    TFactory: AsyncExpressionFactory<T> + Default,
+    TAllocator: AsyncHeapAllocator<T> + Default,
+    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
+    TReconnect: ReconnectTimeout + Send + Clone + 'static,
+    TMetricLabels: BytecodeInterpreterMetricLabels + Send + 'static,
+    TOutput: std::io::Write + Send + 'static,
+    DebugActorState<TOutput>: Default,
+{
+    fn from(value: TimestampHandlerTaskFactory) -> Self {
+        Self::from(CliTaskFactory::DefaultHandlers(
+            DefaultHandlersTaskFactory::from(value),
+        ))
+    }
+}
+
+impl<T: Expression> From<RuntimeActions<T>> for CliActions<T> {
+    fn from(value: RuntimeActions<T>) -> Self {
+        Self::Runtime(value)
+    }
+}
+impl<T: Expression> From<CliActions<T>> for Option<RuntimeActions<T>> {
+    fn from(value: CliActions<T>) -> Self {
+        match value {
+            CliActions::Runtime(value) => Some(value),
+            _ => None,
+        }
+    }
+}
+impl<'a, T: Expression> From<&'a CliActions<T>> for Option<&'a RuntimeActions<T>> {
+    fn from(value: &'a CliActions<T>) -> Self {
+        match value {
+            CliActions::Runtime(value) => Some(value),
+            _ => None,
+        }
+    }
+}
+
+impl<T: Expression> From<BytecodeInterpreterActions<T>> for CliActions<T> {
+    fn from(value: BytecodeInterpreterActions<T>) -> Self {
+        Self::BytecodeInterpreter(value)
+    }
+}
+impl<T: Expression> From<CliActions<T>> for Option<BytecodeInterpreterActions<T>> {
+    fn from(value: CliActions<T>) -> Self {
+        match value {
+            CliActions::BytecodeInterpreter(value) => Some(value),
+            _ => None,
+        }
+    }
+}
+impl<'a, T: Expression> From<&'a CliActions<T>> for Option<&'a BytecodeInterpreterActions<T>> {
+    fn from(value: &'a CliActions<T>) -> Self {
+        match value {
+            CliActions::BytecodeInterpreter(value) => Some(value),
+            _ => None,
+        }
+    }
+}
+
+impl<T: Expression> From<FetchHandlerActions> for CliActions<T> {
+    fn from(value: FetchHandlerActions) -> Self {
+        Self::FetchHandler(value)
+    }
+}
+impl<T: Expression> From<CliActions<T>> for Option<FetchHandlerActions> {
+    fn from(value: CliActions<T>) -> Self {
+        match value {
+            CliActions::FetchHandler(value) => Some(value),
+            _ => None,
+        }
+    }
+}
+impl<'a, T: Expression> From<&'a CliActions<T>> for Option<&'a FetchHandlerActions> {
+    fn from(value: &'a CliActions<T>) -> Self {
+        match value {
+            CliActions::FetchHandler(value) => Some(value),
+            _ => None,
+        }
+    }
+}
+
+impl<T: Expression> From<GraphQlHandlerActions> for CliActions<T> {
+    fn from(value: GraphQlHandlerActions) -> Self {
+        Self::GraphQlHandler(value)
+    }
+}
+impl<T: Expression> From<CliActions<T>> for Option<GraphQlHandlerActions> {
+    fn from(value: CliActions<T>) -> Self {
+        match value {
+            CliActions::GraphQlHandler(value) => Some(value),
+            _ => None,
+        }
+    }
+}
+impl<'a, T: Expression> From<&'a CliActions<T>> for Option<&'a GraphQlHandlerActions> {
+    fn from(value: &'a CliActions<T>) -> Self {
+        match value {
+            CliActions::GraphQlHandler(value) => Some(value),
+            _ => None,
+        }
+    }
+}
+
+impl<T: Expression> From<TimeoutHandlerActions> for CliActions<T> {
+    fn from(value: TimeoutHandlerActions) -> Self {
+        Self::TimeoutHandler(value)
+    }
+}
+impl<T: Expression> From<CliActions<T>> for Option<TimeoutHandlerActions> {
+    fn from(value: CliActions<T>) -> Self {
+        match value {
+            CliActions::TimeoutHandler(value) => Some(value),
+            _ => None,
+        }
+    }
+}
+impl<'a, T: Expression> From<&'a CliActions<T>> for Option<&'a TimeoutHandlerActions> {
+    fn from(value: &'a CliActions<T>) -> Self {
+        match value {
+            CliActions::TimeoutHandler(value) => Some(value),
+            _ => None,
+        }
+    }
+}
+
+impl<T: Expression> From<TimestampHandlerActions> for CliActions<T> {
+    fn from(value: TimestampHandlerActions) -> Self {
+        Self::TimestampHandler(value)
+    }
+}
+impl<T: Expression> From<CliActions<T>> for Option<TimestampHandlerActions> {
+    fn from(value: CliActions<T>) -> Self {
+        match value {
+            CliActions::TimestampHandler(value) => Some(value),
+            _ => None,
+        }
+    }
+}
+impl<'a, T: Expression> From<&'a CliActions<T>> for Option<&'a TimestampHandlerActions> {
+    fn from(value: &'a CliActions<T>) -> Self {
+        match value {
+            CliActions::TimestampHandler(value) => Some(value),
+            _ => None,
+        }
+    }
+}
+
+impl<T: Expression> From<EffectActions<T>> for CliActions<T> {
+    fn from(value: EffectActions<T>) -> Self {
+        RuntimeActions::from(value).into()
+    }
+}
+impl<T: Expression> From<CliActions<T>> for Option<EffectActions<T>> {
+    fn from(value: CliActions<T>) -> Self {
+        Option::<RuntimeActions<T>>::from(value).and_then(|value| value.into())
+    }
+}
+impl<'a, T: Expression> From<&'a CliActions<T>> for Option<&'a EffectActions<T>> {
+    fn from(value: &'a CliActions<T>) -> Self {
+        Option::<&'a RuntimeActions<T>>::from(value).and_then(|value| value.into())
+    }
+}
+
+impl<T: Expression> From<EffectSubscribeAction<T>> for CliActions<T> {
+    fn from(value: EffectSubscribeAction<T>) -> Self {
+        EffectActions::from(value).into()
+    }
+}
+impl<T: Expression> From<CliActions<T>> for Option<EffectSubscribeAction<T>> {
+    fn from(value: CliActions<T>) -> Self {
+        Option::<EffectActions<T>>::from(value).and_then(|value| value.into())
+    }
+}
+impl<'a, T: Expression> From<&'a CliActions<T>> for Option<&'a EffectSubscribeAction<T>> {
+    fn from(value: &'a CliActions<T>) -> Self {
+        Option::<&'a EffectActions<T>>::from(value).and_then(|value| value.into())
+    }
+}
+
+impl<T: Expression> From<EffectUnsubscribeAction<T>> for CliActions<T> {
+    fn from(value: EffectUnsubscribeAction<T>) -> Self {
+        EffectActions::from(value).into()
+    }
+}
+impl<T: Expression> From<CliActions<T>> for Option<EffectUnsubscribeAction<T>> {
+    fn from(value: CliActions<T>) -> Self {
+        Option::<EffectActions<T>>::from(value).and_then(|value| value.into())
+    }
+}
+impl<'a, T: Expression> From<&'a CliActions<T>> for Option<&'a EffectUnsubscribeAction<T>> {
+    fn from(value: &'a CliActions<T>) -> Self {
+        Option::<&'a EffectActions<T>>::from(value).and_then(|value| value.into())
+    }
+}
+
+impl<T: Expression> From<EffectEmitAction<T>> for CliActions<T> {
+    fn from(value: EffectEmitAction<T>) -> Self {
+        EffectActions::from(value).into()
+    }
+}
+impl<T: Expression> From<CliActions<T>> for Option<EffectEmitAction<T>> {
+    fn from(value: CliActions<T>) -> Self {
+        Option::<EffectActions<T>>::from(value).and_then(|value| value.into())
+    }
+}
+impl<'a, T: Expression> From<&'a CliActions<T>> for Option<&'a EffectEmitAction<T>> {
+    fn from(value: &'a CliActions<T>) -> Self {
+        Option::<&'a EffectActions<T>>::from(value).and_then(|value| value.into())
+    }
+}
+
+impl<T: Expression> From<EvaluateActions<T>> for CliActions<T> {
+    fn from(value: EvaluateActions<T>) -> Self {
+        RuntimeActions::from(value).into()
+    }
+}
+impl<T: Expression> From<CliActions<T>> for Option<EvaluateActions<T>> {
+    fn from(value: CliActions<T>) -> Self {
+        Option::<RuntimeActions<T>>::from(value).and_then(|value| value.into())
+    }
+}
+impl<'a, T: Expression> From<&'a CliActions<T>> for Option<&'a EvaluateActions<T>> {
+    fn from(value: &'a CliActions<T>) -> Self {
+        Option::<&'a RuntimeActions<T>>::from(value).and_then(|value| value.into())
+    }
+}
+
+impl<T: Expression> From<EvaluateStartAction<T>> for CliActions<T> {
+    fn from(value: EvaluateStartAction<T>) -> Self {
+        EvaluateActions::from(value).into()
+    }
+}
+impl<T: Expression> From<CliActions<T>> for Option<EvaluateStartAction<T>> {
+    fn from(value: CliActions<T>) -> Self {
+        Option::<EvaluateActions<T>>::from(value).and_then(|value| value.into())
+    }
+}
+impl<'a, T: Expression> From<&'a CliActions<T>> for Option<&'a EvaluateStartAction<T>> {
+    fn from(value: &'a CliActions<T>) -> Self {
+        Option::<&'a EvaluateActions<T>>::from(value).and_then(|value| value.into())
+    }
+}
+
+impl<T: Expression> From<EvaluateUpdateAction<T>> for CliActions<T> {
+    fn from(value: EvaluateUpdateAction<T>) -> Self {
+        EvaluateActions::from(value).into()
+    }
+}
+impl<T: Expression> From<CliActions<T>> for Option<EvaluateUpdateAction<T>> {
+    fn from(value: CliActions<T>) -> Self {
+        Option::<EvaluateActions<T>>::from(value).and_then(|value| value.into())
+    }
+}
+impl<'a, T: Expression> From<&'a CliActions<T>> for Option<&'a EvaluateUpdateAction<T>> {
+    fn from(value: &'a CliActions<T>) -> Self {
+        Option::<&'a EvaluateActions<T>>::from(value).and_then(|value| value.into())
+    }
+}
+
+impl<T: Expression> From<EvaluateStopAction> for CliActions<T> {
+    fn from(value: EvaluateStopAction) -> Self {
+        EvaluateActions::from(value).into()
+    }
+}
+impl<T: Expression> From<CliActions<T>> for Option<EvaluateStopAction> {
+    fn from(value: CliActions<T>) -> Self {
+        Option::<EvaluateActions<T>>::from(value).and_then(|value| value.into())
+    }
+}
+impl<'a, T: Expression> From<&'a CliActions<T>> for Option<&'a EvaluateStopAction> {
+    fn from(value: &'a CliActions<T>) -> Self {
+        Option::<&'a EvaluateActions<T>>::from(value).and_then(|value| value.into())
+    }
+}
+
+impl<T: Expression> From<EvaluateResultAction<T>> for CliActions<T> {
+    fn from(value: EvaluateResultAction<T>) -> Self {
+        EvaluateActions::from(value).into()
+    }
+}
+impl<T: Expression> From<CliActions<T>> for Option<EvaluateResultAction<T>> {
+    fn from(value: CliActions<T>) -> Self {
+        Option::<EvaluateActions<T>>::from(value).and_then(|value| value.into())
+    }
+}
+impl<'a, T: Expression> From<&'a CliActions<T>> for Option<&'a EvaluateResultAction<T>> {
+    fn from(value: &'a CliActions<T>) -> Self {
+        Option::<&'a EvaluateActions<T>>::from(value).and_then(|value| value.into())
+    }
+}
+
+impl<T: Expression> From<QueryActions<T>> for CliActions<T> {
+    fn from(value: QueryActions<T>) -> Self {
+        RuntimeActions::from(value).into()
+    }
+}
+impl<T: Expression> From<CliActions<T>> for Option<QueryActions<T>> {
+    fn from(value: CliActions<T>) -> Self {
+        Option::<RuntimeActions<T>>::from(value).and_then(|value| value.into())
+    }
+}
+impl<'a, T: Expression> From<&'a CliActions<T>> for Option<&'a QueryActions<T>> {
+    fn from(value: &'a CliActions<T>) -> Self {
+        Option::<&'a RuntimeActions<T>>::from(value).and_then(|value| value.into())
+    }
+}
+
+impl<T: Expression> From<QuerySubscribeAction<T>> for CliActions<T> {
+    fn from(value: QuerySubscribeAction<T>) -> Self {
+        QueryActions::from(value).into()
+    }
+}
+impl<T: Expression> From<CliActions<T>> for Option<QuerySubscribeAction<T>> {
+    fn from(value: CliActions<T>) -> Self {
+        Option::<QueryActions<T>>::from(value).and_then(|value| value.into())
+    }
+}
+impl<'a, T: Expression> From<&'a CliActions<T>> for Option<&'a QuerySubscribeAction<T>> {
+    fn from(value: &'a CliActions<T>) -> Self {
+        Option::<&'a QueryActions<T>>::from(value).and_then(|value| value.into())
+    }
+}
+
+impl<T: Expression> From<QueryUnsubscribeAction<T>> for CliActions<T> {
+    fn from(value: QueryUnsubscribeAction<T>) -> Self {
+        QueryActions::from(value).into()
+    }
+}
+impl<T: Expression> From<CliActions<T>> for Option<QueryUnsubscribeAction<T>> {
+    fn from(value: CliActions<T>) -> Self {
+        Option::<QueryActions<T>>::from(value).and_then(|value| value.into())
+    }
+}
+impl<'a, T: Expression> From<&'a CliActions<T>> for Option<&'a QueryUnsubscribeAction<T>> {
+    fn from(value: &'a CliActions<T>) -> Self {
+        Option::<&'a QueryActions<T>>::from(value).and_then(|value| value.into())
+    }
+}
+
+impl<T: Expression> From<QueryEmitAction<T>> for CliActions<T> {
+    fn from(value: QueryEmitAction<T>) -> Self {
+        QueryActions::from(value).into()
+    }
+}
+impl<T: Expression> From<CliActions<T>> for Option<QueryEmitAction<T>> {
+    fn from(value: CliActions<T>) -> Self {
+        Option::<QueryActions<T>>::from(value).and_then(|value| value.into())
+    }
+}
+impl<'a, T: Expression> From<&'a CliActions<T>> for Option<&'a QueryEmitAction<T>> {
+    fn from(value: &'a CliActions<T>) -> Self {
+        Option::<&'a QueryActions<T>>::from(value).and_then(|value| value.into())
+    }
+}
+
+impl<T: Expression> From<BytecodeInterpreterInitAction> for CliActions<T> {
+    fn from(value: BytecodeInterpreterInitAction) -> Self {
+        BytecodeInterpreterActions::<T>::from(value).into()
+    }
+}
+impl<T: Expression> From<CliActions<T>> for Option<BytecodeInterpreterInitAction> {
+    fn from(value: CliActions<T>) -> Self {
+        Option::<BytecodeInterpreterActions<T>>::from(value).and_then(|value| value.into())
+    }
+}
+impl<'a, T: Expression> From<&'a CliActions<T>> for Option<&'a BytecodeInterpreterInitAction> {
+    fn from(value: &'a CliActions<T>) -> Self {
+        Option::<&'a BytecodeInterpreterActions<T>>::from(value).and_then(|value| value.into())
+    }
+}
+
+impl<T: Expression> From<BytecodeInterpreterEvaluateAction<T>> for CliActions<T> {
+    fn from(value: BytecodeInterpreterEvaluateAction<T>) -> Self {
+        BytecodeInterpreterActions::<T>::from(value).into()
+    }
+}
+impl<T: Expression> From<CliActions<T>> for Option<BytecodeInterpreterEvaluateAction<T>> {
+    fn from(value: CliActions<T>) -> Self {
+        Option::<BytecodeInterpreterActions<T>>::from(value).and_then(|value| value.into())
+    }
+}
+impl<'a, T: Expression> From<&'a CliActions<T>>
+    for Option<&'a BytecodeInterpreterEvaluateAction<T>>
+{
+    fn from(value: &'a CliActions<T>) -> Self {
+        Option::<&'a BytecodeInterpreterActions<T>>::from(value).and_then(|value| value.into())
+    }
+}
+
+impl<T: Expression> From<BytecodeInterpreterGcCompleteAction> for CliActions<T> {
+    fn from(value: BytecodeInterpreterGcCompleteAction) -> Self {
+        BytecodeInterpreterActions::<T>::from(value).into()
+    }
+}
+impl<T: Expression> From<CliActions<T>> for Option<BytecodeInterpreterGcCompleteAction> {
+    fn from(value: CliActions<T>) -> Self {
+        Option::<BytecodeInterpreterActions<T>>::from(value).and_then(|value| value.into())
+    }
+}
+impl<'a, T: Expression> From<&'a CliActions<T>>
+    for Option<&'a BytecodeInterpreterGcCompleteAction>
+{
+    fn from(value: &'a CliActions<T>) -> Self {
+        Option::<&'a BytecodeInterpreterActions<T>>::from(value).and_then(|value| value.into())
+    }
+}
+
+impl<T: Expression> From<BytecodeInterpreterResultAction<T>> for CliActions<T> {
+    fn from(value: BytecodeInterpreterResultAction<T>) -> Self {
+        BytecodeInterpreterActions::<T>::from(value).into()
+    }
+}
+impl<T: Expression> From<CliActions<T>> for Option<BytecodeInterpreterResultAction<T>> {
+    fn from(value: CliActions<T>) -> Self {
+        Option::<BytecodeInterpreterActions<T>>::from(value).and_then(|value| value.into())
+    }
+}
+impl<'a, T: Expression> From<&'a CliActions<T>> for Option<&'a BytecodeInterpreterResultAction<T>> {
+    fn from(value: &'a CliActions<T>) -> Self {
+        Option::<&'a BytecodeInterpreterActions<T>>::from(value).and_then(|value| value.into())
+    }
+}
+
+impl<T: Expression> From<BytecodeInterpreterGcAction> for CliActions<T> {
+    fn from(value: BytecodeInterpreterGcAction) -> Self {
+        BytecodeInterpreterActions::<T>::from(value).into()
+    }
+}
+impl<T: Expression> From<CliActions<T>> for Option<BytecodeInterpreterGcAction> {
+    fn from(value: CliActions<T>) -> Self {
+        Option::<BytecodeInterpreterActions<T>>::from(value).and_then(|value| value.into())
+    }
+}
+impl<'a, T: Expression> From<&'a CliActions<T>> for Option<&'a BytecodeInterpreterGcAction> {
+    fn from(value: &'a CliActions<T>) -> Self {
+        Option::<&'a BytecodeInterpreterActions<T>>::from(value).and_then(|value| value.into())
+    }
+}
+
+impl<T: Expression> From<FetchHandlerFetchCompleteAction> for CliActions<T> {
+    fn from(value: FetchHandlerFetchCompleteAction) -> Self {
+        FetchHandlerActions::from(value).into()
+    }
+}
+impl<T: Expression> From<CliActions<T>> for Option<FetchHandlerFetchCompleteAction> {
+    fn from(value: CliActions<T>) -> Self {
+        Option::<FetchHandlerActions>::from(value).and_then(|value| value.into())
+    }
+}
+impl<'a, T: Expression> From<&'a CliActions<T>> for Option<&'a FetchHandlerFetchCompleteAction> {
+    fn from(value: &'a CliActions<T>) -> Self {
+        Option::<&'a FetchHandlerActions>::from(value).and_then(|value| value.into())
+    }
+}
+
+impl<T: Expression> From<FetchHandlerConnectionErrorAction> for CliActions<T> {
+    fn from(value: FetchHandlerConnectionErrorAction) -> Self {
+        FetchHandlerActions::from(value).into()
+    }
+}
+impl<T: Expression> From<CliActions<T>> for Option<FetchHandlerConnectionErrorAction> {
+    fn from(value: CliActions<T>) -> Self {
+        Option::<FetchHandlerActions>::from(value).and_then(|value| value.into())
+    }
+}
+impl<'a, T: Expression> From<&'a CliActions<T>> for Option<&'a FetchHandlerConnectionErrorAction> {
+    fn from(value: &'a CliActions<T>) -> Self {
+        Option::<&'a FetchHandlerActions>::from(value).and_then(|value| value.into())
+    }
+}
+
+impl<T: Expression> From<GraphQlHandlerHttpFetchCompleteAction> for CliActions<T> {
+    fn from(value: GraphQlHandlerHttpFetchCompleteAction) -> Self {
+        GraphQlHandlerActions::from(value).into()
+    }
+}
+impl<T: Expression> From<CliActions<T>> for Option<GraphQlHandlerHttpFetchCompleteAction> {
+    fn from(value: CliActions<T>) -> Self {
+        Option::<GraphQlHandlerActions>::from(value).and_then(|value| value.into())
+    }
+}
+impl<'a, T: Expression> From<&'a CliActions<T>>
+    for Option<&'a GraphQlHandlerHttpFetchCompleteAction>
+{
+    fn from(value: &'a CliActions<T>) -> Self {
+        Option::<&'a GraphQlHandlerActions>::from(value).and_then(|value| value.into())
+    }
+}
+
+impl<T: Expression> From<GraphQlHandlerHttpConnectionErrorAction> for CliActions<T> {
+    fn from(value: GraphQlHandlerHttpConnectionErrorAction) -> Self {
+        GraphQlHandlerActions::from(value).into()
+    }
+}
+impl<T: Expression> From<CliActions<T>> for Option<GraphQlHandlerHttpConnectionErrorAction> {
+    fn from(value: CliActions<T>) -> Self {
+        Option::<GraphQlHandlerActions>::from(value).and_then(|value| value.into())
+    }
+}
+impl<'a, T: Expression> From<&'a CliActions<T>>
+    for Option<&'a GraphQlHandlerHttpConnectionErrorAction>
+{
+    fn from(value: &'a CliActions<T>) -> Self {
+        Option::<&'a GraphQlHandlerActions>::from(value).and_then(|value| value.into())
+    }
+}
+
+impl<T: Expression> From<GraphQlHandlerWebSocketConnectSuccessAction> for CliActions<T> {
+    fn from(value: GraphQlHandlerWebSocketConnectSuccessAction) -> Self {
+        GraphQlHandlerActions::from(value).into()
+    }
+}
+impl<T: Expression> From<CliActions<T>> for Option<GraphQlHandlerWebSocketConnectSuccessAction> {
+    fn from(value: CliActions<T>) -> Self {
+        Option::<GraphQlHandlerActions>::from(value).and_then(|value| value.into())
+    }
+}
+impl<'a, T: Expression> From<&'a CliActions<T>>
+    for Option<&'a GraphQlHandlerWebSocketConnectSuccessAction>
+{
+    fn from(value: &'a CliActions<T>) -> Self {
+        Option::<&'a GraphQlHandlerActions>::from(value).and_then(|value| value.into())
+    }
+}
+
+impl<T: Expression> From<GraphQlHandlerWebSocketClientMessageAction> for CliActions<T> {
+    fn from(value: GraphQlHandlerWebSocketClientMessageAction) -> Self {
+        GraphQlHandlerActions::from(value).into()
+    }
+}
+impl<T: Expression> From<CliActions<T>> for Option<GraphQlHandlerWebSocketClientMessageAction> {
+    fn from(value: CliActions<T>) -> Self {
+        Option::<GraphQlHandlerActions>::from(value).and_then(|value| value.into())
+    }
+}
+impl<'a, T: Expression> From<&'a CliActions<T>>
+    for Option<&'a GraphQlHandlerWebSocketClientMessageAction>
+{
+    fn from(value: &'a CliActions<T>) -> Self {
+        Option::<&'a GraphQlHandlerActions>::from(value).and_then(|value| value.into())
+    }
+}
+
+impl<T: Expression> From<GraphQlHandlerWebSocketServerMessageAction> for CliActions<T> {
+    fn from(value: GraphQlHandlerWebSocketServerMessageAction) -> Self {
+        GraphQlHandlerActions::from(value).into()
+    }
+}
+impl<T: Expression> From<CliActions<T>> for Option<GraphQlHandlerWebSocketServerMessageAction> {
+    fn from(value: CliActions<T>) -> Self {
+        Option::<GraphQlHandlerActions>::from(value).and_then(|value| value.into())
+    }
+}
+impl<'a, T: Expression> From<&'a CliActions<T>>
+    for Option<&'a GraphQlHandlerWebSocketServerMessageAction>
+{
+    fn from(value: &'a CliActions<T>) -> Self {
+        Option::<&'a GraphQlHandlerActions>::from(value).and_then(|value| value.into())
+    }
+}
+
+impl<T: Expression> From<GraphQlHandlerWebSocketConnectionErrorAction> for CliActions<T> {
+    fn from(value: GraphQlHandlerWebSocketConnectionErrorAction) -> Self {
+        GraphQlHandlerActions::from(value).into()
+    }
+}
+impl<T: Expression> From<CliActions<T>> for Option<GraphQlHandlerWebSocketConnectionErrorAction> {
+    fn from(value: CliActions<T>) -> Self {
+        Option::<GraphQlHandlerActions>::from(value).and_then(|value| value.into())
+    }
+}
+impl<'a, T: Expression> From<&'a CliActions<T>>
+    for Option<&'a GraphQlHandlerWebSocketConnectionErrorAction>
+{
+    fn from(value: &'a CliActions<T>) -> Self {
+        Option::<&'a GraphQlHandlerActions>::from(value).and_then(|value| value.into())
+    }
+}
+
+impl<T: Expression> From<GraphQlHandlerWebSocketConnectionTerminateAction> for CliActions<T> {
+    fn from(value: GraphQlHandlerWebSocketConnectionTerminateAction) -> Self {
+        GraphQlHandlerActions::from(value).into()
+    }
+}
+impl<T: Expression> From<CliActions<T>>
+    for Option<GraphQlHandlerWebSocketConnectionTerminateAction>
+{
+    fn from(value: CliActions<T>) -> Self {
+        Option::<GraphQlHandlerActions>::from(value).and_then(|value| value.into())
+    }
+}
+impl<'a, T: Expression> From<&'a CliActions<T>>
+    for Option<&'a GraphQlHandlerWebSocketConnectionTerminateAction>
+{
+    fn from(value: &'a CliActions<T>) -> Self {
+        Option::<&'a GraphQlHandlerActions>::from(value).and_then(|value| value.into())
+    }
+}
+
+impl<T: Expression> From<TimeoutHandlerTimeoutAction> for CliActions<T> {
+    fn from(value: TimeoutHandlerTimeoutAction) -> Self {
+        TimeoutHandlerActions::from(value).into()
+    }
+}
+impl<T: Expression> From<CliActions<T>> for Option<TimeoutHandlerTimeoutAction> {
+    fn from(value: CliActions<T>) -> Self {
+        Option::<TimeoutHandlerActions>::from(value).and_then(|value| value.into())
+    }
+}
+impl<'a, T: Expression> From<&'a CliActions<T>> for Option<&'a TimeoutHandlerTimeoutAction> {
+    fn from(value: &'a CliActions<T>) -> Self {
+        Option::<&'a TimeoutHandlerActions>::from(value).and_then(|value| value.into())
+    }
+}
+
+impl<T: Expression> From<TimestampHandlerUpdateAction> for CliActions<T> {
+    fn from(value: TimestampHandlerUpdateAction) -> Self {
+        TimestampHandlerActions::from(value).into()
+    }
+}
+impl<T: Expression> From<CliActions<T>> for Option<TimestampHandlerUpdateAction> {
+    fn from(value: CliActions<T>) -> Self {
+        Option::<TimestampHandlerActions>::from(value).and_then(|value| value.into())
+    }
+}
+impl<'a, T: Expression> From<&'a CliActions<T>> for Option<&'a TimestampHandlerUpdateAction> {
+    fn from(value: &'a CliActions<T>) -> Self {
+        Option::<&'a TimestampHandlerActions>::from(value).and_then(|value| value.into())
+    }
 }

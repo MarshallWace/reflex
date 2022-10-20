@@ -58,12 +58,7 @@ impl GraphQlSubscriptionClientMessage {
             Self::Update(message) => serialize_message(
                 "update",
                 Some(message.id),
-                Some(JsonValue::Object(JsonMap::from_iter(
-                    message
-                        .payload
-                        .iter()
-                        .map(|(key, value)| (key.clone(), value.clone())),
-                ))),
+                Some(JsonValue::Object(JsonMap::from_iter(message.payload))),
             ),
             Self::ConnectionTerminate => serialize_message("connection_terminate", None, None),
         }

@@ -16,9 +16,10 @@ use reflex::{
     hash::HashId,
 };
 use reflex_dispatcher::{
-    Action, Actor, ActorTransition, HandlerContext, InboundAction, MessageData, OutboundAction,
-    StateOperation, StateTransition,
+    Action, ActorInitContext, HandlerContext, MessageData, NoopDisposeCallback, ProcessId,
+    SchedulerCommand, SchedulerMode, SchedulerTransition, TaskFactory, TaskInbox,
 };
+use reflex_macros::dispatcher;
 use reflex_runtime::{
     action::effect::{
         EffectEmitAction, EffectSubscribeAction, EffectUnsubscribeAction, EffectUpdateBatch,
@@ -30,21 +31,6 @@ use crate::stdlib::{
     EFFECT_TYPE_VARIABLE_DECREMENT, EFFECT_TYPE_VARIABLE_GET, EFFECT_TYPE_VARIABLE_INCREMENT,
     EFFECT_TYPE_VARIABLE_SET,
 };
-
-pub trait VariableHandlerAction<T: Expression>:
-    Action
-    + InboundAction<EffectSubscribeAction<T>>
-    + InboundAction<EffectUnsubscribeAction<T>>
-    + OutboundAction<EffectEmitAction<T>>
-{
-}
-impl<T: Expression, TAction> VariableHandlerAction<T> for TAction where
-    Self: Action
-        + InboundAction<EffectSubscribeAction<T>>
-        + InboundAction<EffectUnsubscribeAction<T>>
-        + OutboundAction<EffectEmitAction<T>>
-{
-}
 
 #[derive(PartialEq, Eq, Clone, Copy, Hash)]
 struct VariableKeyHash(HashId);
@@ -79,6 +65,7 @@ where
 {
     factory: TFactory,
     allocator: TAllocator,
+    main_pid: ProcessId,
     _expression: PhantomData<T>,
 }
 impl<T, TFactory, TAllocator> VariableHandler<T, TFactory, TAllocator>
@@ -87,60 +74,115 @@ where
     TFactory: AsyncExpressionFactory<T>,
     TAllocator: AsyncHeapAllocator<T>,
 {
-    pub fn new(factory: TFactory, allocator: TAllocator) -> Self {
+    pub fn new(factory: TFactory, allocator: TAllocator, main_pid: ProcessId) -> Self {
         Self {
             factory,
             allocator,
+            main_pid,
             _expression: Default::default(),
         }
     }
 }
 
-impl<T, TFactory, TAllocator, TAction> Actor<TAction> for VariableHandler<T, TFactory, TAllocator>
-where
-    T: AsyncExpression,
-    TFactory: AsyncExpressionFactory<T>,
-    TAllocator: AsyncHeapAllocator<T>,
-    TAction: VariableHandlerAction<T> + 'static,
-{
-    type State = VariableHandlerState<T>;
-    fn init(&self) -> Self::State {
-        Default::default()
+dispatcher!({
+    pub enum VariableHandlerAction<T: Expression> {
+        Inbox(EffectSubscribeAction<T>),
+        Inbox(EffectUnsubscribeAction<T>),
+
+        Outbox(EffectEmitAction<T>),
     }
-    fn handle(
-        &self,
-        state: Self::State,
-        action: &TAction,
-        metadata: &MessageData,
-        context: &mut impl HandlerContext,
-    ) -> ActorTransition<Self::State, TAction> {
-        let mut state = state;
-        let actions = if let Some(action) = action.match_type() {
-            self.handle_effect_subscribe(&mut state, action, metadata, context)
-        } else if let Some(action) = action.match_type() {
-            self.handle_effect_unsubscribe(&mut state, action, metadata, context)
-        } else {
-            None
+
+    impl<T, TFactory, TAllocator, TAction, TTask> Dispatcher<TAction, TTask>
+        for VariableHandler<T, TFactory, TAllocator>
+    where
+        T: AsyncExpression,
+        TFactory: AsyncExpressionFactory<T>,
+        TAllocator: AsyncHeapAllocator<T>,
+        TAction: Action,
+        TTask: TaskFactory<TAction, TTask>,
+    {
+        type State = VariableHandlerState<T>;
+        type Events<TInbox: TaskInbox<TAction>> = TInbox;
+        type Dispose = NoopDisposeCallback;
+
+        fn init<TInbox: TaskInbox<TAction>>(
+            &self,
+            inbox: TInbox,
+            context: &impl ActorInitContext,
+        ) -> (Self::State, Self::Events<TInbox>, Self::Dispose) {
+            (Default::default(), inbox, Default::default())
         }
-        .unwrap_or_default();
-        ActorTransition::new(state, actions)
+
+        fn accept(&self, action: &EffectSubscribeAction<T>) -> bool {
+            match action.effect_type.as_str() {
+                EFFECT_TYPE_VARIABLE_GET
+                | EFFECT_TYPE_VARIABLE_SET
+                | EFFECT_TYPE_VARIABLE_INCREMENT
+                | EFFECT_TYPE_VARIABLE_DECREMENT => true,
+                _ => false,
+            }
+        }
+        fn schedule(
+            &self,
+            _action: &EffectSubscribeAction<T>,
+            _state: &Self::State,
+        ) -> Option<SchedulerMode> {
+            Some(SchedulerMode::Async)
+        }
+        fn handle(
+            &self,
+            state: &mut Self::State,
+            action: &EffectSubscribeAction<T>,
+            metadata: &MessageData,
+            context: &mut impl HandlerContext,
+        ) -> Option<SchedulerTransition<TAction, TTask>> {
+            self.handle_effect_subscribe(state, action, metadata, context)
+        }
+
+        fn accept(&self, action: &EffectUnsubscribeAction<T>) -> bool {
+            match action.effect_type.as_str() {
+                EFFECT_TYPE_VARIABLE_GET
+                | EFFECT_TYPE_VARIABLE_SET
+                | EFFECT_TYPE_VARIABLE_INCREMENT
+                | EFFECT_TYPE_VARIABLE_DECREMENT => true,
+                _ => false,
+            }
+        }
+        fn schedule(
+            &self,
+            _action: &EffectUnsubscribeAction<T>,
+            _state: &Self::State,
+        ) -> Option<SchedulerMode> {
+            Some(SchedulerMode::Async)
+        }
+        fn handle(
+            &self,
+            state: &mut Self::State,
+            action: &EffectUnsubscribeAction<T>,
+            metadata: &MessageData,
+            context: &mut impl HandlerContext,
+        ) -> Option<SchedulerTransition<TAction, TTask>> {
+            self.handle_effect_unsubscribe(state, action, metadata, context)
+        }
     }
-}
+});
+
 impl<T, TFactory, TAllocator> VariableHandler<T, TFactory, TAllocator>
 where
     T: AsyncExpression,
     TFactory: AsyncExpressionFactory<T>,
     TAllocator: AsyncHeapAllocator<T>,
 {
-    fn handle_effect_subscribe<TAction>(
+    fn handle_effect_subscribe<TAction, TTask>(
         &self,
         state: &mut VariableHandlerState<T>,
         action: &EffectSubscribeAction<T>,
         metadata: &MessageData,
         context: &mut impl HandlerContext,
-    ) -> Option<StateTransition<TAction>>
+    ) -> Option<SchedulerTransition<TAction, TTask>>
     where
-        TAction: Action + 'static + OutboundAction<EffectEmitAction<T>>,
+        TAction: Action + From<EffectEmitAction<T>>,
+        TTask: TaskFactory<TAction, TTask>,
     {
         match action.effect_type.as_str() {
             EFFECT_TYPE_VARIABLE_GET => {
@@ -158,15 +200,16 @@ where
             _ => None,
         }
     }
-    fn handle_get_effect_subscribe<TAction>(
+    fn handle_get_effect_subscribe<TAction, TTask>(
         &self,
         state: &mut VariableHandlerState<T>,
         action: &EffectSubscribeAction<T>,
         _metadata: &MessageData,
-        context: &mut impl HandlerContext,
-    ) -> Option<StateTransition<TAction>>
+        _context: &mut impl HandlerContext,
+    ) -> Option<SchedulerTransition<TAction, TTask>>
     where
-        TAction: Action + 'static + OutboundAction<EffectEmitAction<T>>,
+        TAction: Action + From<EffectEmitAction<T>>,
+        TTask: TaskFactory<TAction, TTask>,
     {
         let EffectSubscribeAction {
             effect_type: _,
@@ -199,8 +242,8 @@ where
                 ),
             }
         });
-        Some(StateTransition::new(once(StateOperation::Send(
-            context.pid(),
+        Some(SchedulerTransition::new(once(SchedulerCommand::Send(
+            self.main_pid,
             EffectEmitAction {
                 effect_types: vec![EffectUpdateBatch {
                     effect_type: EFFECT_TYPE_VARIABLE_GET.into(),
@@ -210,21 +253,21 @@ where
             .into(),
         ))))
     }
-    fn handle_set_effect_subscribe<TAction>(
+    fn handle_set_effect_subscribe<TAction, TTask>(
         &self,
         state: &mut VariableHandlerState<T>,
         action: &EffectSubscribeAction<T>,
         _metadata: &MessageData,
-        context: &mut impl HandlerContext,
-    ) -> Option<StateTransition<TAction>>
+        _context: &mut impl HandlerContext,
+    ) -> Option<SchedulerTransition<TAction, TTask>>
     where
-        TAction: Action + 'static + OutboundAction<EffectEmitAction<T>>,
+        TAction: Action + From<EffectEmitAction<T>>,
+        TTask: TaskFactory<TAction, TTask>,
     {
         let EffectSubscribeAction {
             effect_type: _,
             effects,
         } = action;
-        let current_pid = context.pid();
         let updates = effects
             .iter()
             .flat_map(|effect| {
@@ -270,8 +313,8 @@ where
                     .chain(once((effect.id(), value)))
             })
             .collect();
-        Some(StateTransition::new(once(StateOperation::Send(
-            current_pid,
+        Some(SchedulerTransition::new(once(SchedulerCommand::Send(
+            self.main_pid,
             EffectEmitAction {
                 effect_types: vec![EffectUpdateBatch {
                     effect_type: EFFECT_TYPE_VARIABLE_SET.into(),
@@ -281,21 +324,21 @@ where
             .into(),
         ))))
     }
-    fn handle_increment_effect_subscribe<TAction>(
+    fn handle_increment_effect_subscribe<TAction, TTask>(
         &self,
         state: &mut VariableHandlerState<T>,
         action: &EffectSubscribeAction<T>,
         _metadata: &MessageData,
-        context: &mut impl HandlerContext,
-    ) -> Option<StateTransition<TAction>>
+        _context: &mut impl HandlerContext,
+    ) -> Option<SchedulerTransition<TAction, TTask>>
     where
-        TAction: Action + 'static + OutboundAction<EffectEmitAction<T>>,
+        TAction: Action + From<EffectEmitAction<T>>,
+        TTask: TaskFactory<TAction, TTask>,
     {
         let EffectSubscribeAction {
             effect_type: _,
             effects,
         } = action;
-        let current_pid = context.pid();
         let updates = effects
             .iter()
             .flat_map(move |effect| {
@@ -343,8 +386,8 @@ where
                     .chain(once((effect.id(), value)))
             })
             .collect();
-        Some(StateTransition::new(once(StateOperation::Send(
-            current_pid,
+        Some(SchedulerTransition::new(once(SchedulerCommand::Send(
+            self.main_pid,
             EffectEmitAction {
                 effect_types: vec![EffectUpdateBatch {
                     effect_type: EFFECT_TYPE_VARIABLE_INCREMENT.into(),
@@ -354,21 +397,21 @@ where
             .into(),
         ))))
     }
-    fn handle_decrement_effect_subscribe<TAction>(
+    fn handle_decrement_effect_subscribe<TAction, TTask>(
         &self,
         state: &mut VariableHandlerState<T>,
         action: &EffectSubscribeAction<T>,
         _metadata: &MessageData,
-        context: &mut impl HandlerContext,
-    ) -> Option<StateTransition<TAction>>
+        _context: &mut impl HandlerContext,
+    ) -> Option<SchedulerTransition<TAction, TTask>>
     where
-        TAction: Action + 'static + OutboundAction<EffectEmitAction<T>>,
+        TAction: Action + From<EffectEmitAction<T>>,
+        TTask: TaskFactory<TAction, TTask>,
     {
         let EffectSubscribeAction {
             effect_type: _,
             effects,
         } = action;
-        let current_pid = context.pid();
         let updates = effects
             .iter()
             .flat_map(|effect| {
@@ -416,8 +459,8 @@ where
                     .chain(once((effect.id(), value)))
             })
             .collect();
-        Some(StateTransition::new(once(StateOperation::Send(
-            current_pid,
+        Some(SchedulerTransition::new(once(SchedulerCommand::Send(
+            self.main_pid,
             EffectEmitAction {
                 effect_types: vec![EffectUpdateBatch {
                     effect_type: EFFECT_TYPE_VARIABLE_DECREMENT.into(),
@@ -427,15 +470,16 @@ where
             .into(),
         ))))
     }
-    fn handle_effect_unsubscribe<TAction>(
+    fn handle_effect_unsubscribe<TAction, TTask>(
         &self,
         state: &mut VariableHandlerState<T>,
         action: &EffectUnsubscribeAction<T>,
         metadata: &MessageData,
         context: &mut impl HandlerContext,
-    ) -> Option<StateTransition<TAction>>
+    ) -> Option<SchedulerTransition<TAction, TTask>>
     where
-        TAction: Action + 'static + OutboundAction<EffectEmitAction<T>>,
+        TAction: Action + From<EffectEmitAction<T>>,
+        TTask: TaskFactory<TAction, TTask>,
     {
         let EffectUnsubscribeAction {
             effect_type,
@@ -448,15 +492,16 @@ where
             _ => None,
         }
     }
-    fn handle_get_effect_unsubscribe<TAction>(
+    fn handle_get_effect_unsubscribe<TAction, TTask>(
         &self,
         state: &mut VariableHandlerState<T>,
         action: &EffectUnsubscribeAction<T>,
         _metadata: &MessageData,
         _context: &mut impl HandlerContext,
-    ) -> Option<StateTransition<TAction>>
+    ) -> Option<SchedulerTransition<TAction, TTask>>
     where
         TAction: Action,
+        TTask: TaskFactory<TAction, TTask>,
     {
         let EffectUnsubscribeAction {
             effect_type: _,

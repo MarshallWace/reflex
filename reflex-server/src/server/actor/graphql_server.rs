@@ -12,7 +12,6 @@ use metrics::{
     counter, decrement_gauge, describe_counter, describe_gauge, gauge, histogram,
     increment_counter, increment_gauge, Unit,
 };
-
 use opentelemetry::trace::StatusCode;
 use opentelemetry::{
     trace::{Span, SpanId, TraceContextExt, TraceId, Tracer},
@@ -25,13 +24,14 @@ use reflex::core::{
 };
 use reflex::hash::{HashId, IntMap};
 use reflex_dispatcher::{
-    Action, Actor, ActorTransition, HandlerContext, InboundAction, MessageData, OutboundAction,
-    StateOperation, StateTransition,
+    Action, ActorInitContext, HandlerContext, MessageData, NoopDisposeCallback, ProcessId,
+    SchedulerCommand, SchedulerMode, SchedulerTransition, TaskFactory, TaskInbox,
 };
 use reflex_graphql::{
     graphql_variables_are_equal, stdlib::Stdlib as GraphQlStdlib, GraphQlOperation,
 };
 use reflex_json::JsonValue;
+use reflex_macros::dispatcher;
 use reflex_runtime::action::evaluate::{
     EvaluateResultAction, EvaluateStartAction, EvaluateUpdateAction,
 };
@@ -157,14 +157,38 @@ impl GraphQlOperationPhase {
     }
 }
 
-pub(crate) struct GraphQlServer<T, TFactory, TAllocator, TQueryLabel, TMetricLabels, TTracer>
+pub trait GraphQlServerQueryLabel {
+    fn label(&self, operation: &GraphQlOperation) -> String;
+}
+impl<T> GraphQlServerQueryLabel for T
+where
+    Self: Fn(&GraphQlOperation) -> String,
+{
+    fn label(&self, operation: &GraphQlOperation) -> String {
+        (self)(operation)
+    }
+}
+
+pub trait GraphQlServerOperationMetricLabels {
+    fn labels(&self, operation: &GraphQlOperation) -> Vec<(String, String)>;
+}
+impl<T> GraphQlServerOperationMetricLabels for T
+where
+    Self: Fn(&GraphQlOperation) -> Vec<(String, String)>,
+{
+    fn labels(&self, operation: &GraphQlOperation) -> Vec<(String, String)> {
+        (self)(operation)
+    }
+}
+
+pub struct GraphQlServer<T, TFactory, TAllocator, TQueryLabel, TMetricLabels, TTracer>
 where
     T: Expression,
     T::Builtin: From<Stdlib> + From<GraphQlStdlib>,
     TFactory: ExpressionFactory<T>,
     TAllocator: HeapAllocator<T>,
-    TQueryLabel: Fn(&GraphQlOperation) -> String,
-    TMetricLabels: Fn(&GraphQlOperation) -> Vec<(String, String)>,
+    TQueryLabel: GraphQlServerQueryLabel,
+    TMetricLabels: GraphQlServerOperationMetricLabels,
     TTracer: Tracer,
     TTracer::Span: Send + Sync + 'static,
 {
@@ -174,6 +198,7 @@ where
     get_graphql_query_label: TQueryLabel,
     get_operation_metric_labels: TMetricLabels,
     tracer: TTracer,
+    main_pid: ProcessId,
     _expression: PhantomData<T>,
 }
 impl<T, TFactory, TAllocator, TQueryLabel, TMetricLabels, TTracer>
@@ -183,18 +208,19 @@ where
     T::Builtin: From<Stdlib> + From<GraphQlStdlib>,
     TFactory: ExpressionFactory<T>,
     TAllocator: HeapAllocator<T>,
-    TQueryLabel: Fn(&GraphQlOperation) -> String,
-    TMetricLabels: Fn(&GraphQlOperation) -> Vec<(String, String)>,
+    TQueryLabel: GraphQlServerQueryLabel,
+    TMetricLabels: GraphQlServerOperationMetricLabels,
     TTracer: Tracer,
     TTracer::Span: Send + Sync + 'static,
 {
-    pub(crate) fn new(
+    pub fn new(
         factory: TFactory,
         allocator: TAllocator,
         metric_names: GraphQlServerMetricNames,
         get_graphql_query_label: TQueryLabel,
         get_operation_metric_labels: TMetricLabels,
         tracer: TTracer,
+        main_pid: ProcessId,
     ) -> Self {
         Self {
             factory,
@@ -203,6 +229,7 @@ where
             get_graphql_query_label,
             get_operation_metric_labels,
             tracer,
+            main_pid,
             _expression: Default::default(),
         }
     }
@@ -381,89 +408,193 @@ impl GraphQlTraceEventType {
     }
 }
 
-pub trait GraphQlServerAction<T: Expression>:
-    Action
-    + InboundAction<GraphQlServerSubscribeAction<T>>
-    + InboundAction<GraphQlServerUnsubscribeAction<T>>
-    + InboundAction<GraphQlServerModifyAction<T>>
-    + InboundAction<GraphQlServerEmitAction<T>>
-    + InboundAction<QueryEmitAction<T>>
-    + InboundAction<EvaluateStartAction<T>>
-    + InboundAction<EvaluateResultAction<T>>
-    + InboundAction<EvaluateUpdateAction<T>>
-    + OutboundAction<GraphQlServerParseSuccessAction<T>>
-    + OutboundAction<GraphQlServerEmitAction<T>>
-    + OutboundAction<QuerySubscribeAction<T>>
-    + OutboundAction<QueryUnsubscribeAction<T>>
-    + OutboundAction<GraphQlServerParseErrorAction<T>>
-    + OutboundAction<GraphQlServerUnsubscribeAction<T>>
-{
-}
-impl<T: Expression, TAction> GraphQlServerAction<T> for TAction where
-    Self: Action
-        + InboundAction<GraphQlServerSubscribeAction<T>>
-        + InboundAction<GraphQlServerUnsubscribeAction<T>>
-        + InboundAction<GraphQlServerModifyAction<T>>
-        + InboundAction<GraphQlServerEmitAction<T>>
-        + InboundAction<QueryEmitAction<T>>
-        + InboundAction<EvaluateStartAction<T>>
-        + InboundAction<EvaluateResultAction<T>>
-        + InboundAction<EvaluateUpdateAction<T>>
-        + OutboundAction<GraphQlServerParseSuccessAction<T>>
-        + OutboundAction<GraphQlServerEmitAction<T>>
-        + OutboundAction<QuerySubscribeAction<T>>
-        + OutboundAction<QueryUnsubscribeAction<T>>
-        + OutboundAction<GraphQlServerParseErrorAction<T>>
-        + OutboundAction<GraphQlServerUnsubscribeAction<T>>
-{
-}
+dispatcher!({
+    pub enum GraphQlServerAction<T: Expression> {
+        Inbox(GraphQlServerSubscribeAction<T>),
+        Inbox(GraphQlServerUnsubscribeAction<T>),
+        Inbox(GraphQlServerModifyAction<T>),
+        Inbox(QueryEmitAction<T>),
+        Inbox(EvaluateStartAction<T>),
+        Inbox(EvaluateResultAction<T>),
+        Inbox(EvaluateUpdateAction<T>),
 
-impl<T, TFactory, TAllocator, TAction, TQueryLabel, TMetricLabels, TTracer> Actor<TAction>
-    for GraphQlServer<T, TFactory, TAllocator, TQueryLabel, TMetricLabels, TTracer>
-where
-    T: Expression,
-    T::Builtin: From<Stdlib> + From<GraphQlStdlib>,
-    TFactory: ExpressionFactory<T>,
-    TAllocator: HeapAllocator<T>,
-    TQueryLabel: Fn(&GraphQlOperation) -> String,
-    TMetricLabels: Fn(&GraphQlOperation) -> Vec<(String, String)>,
-    TTracer: Tracer,
-    TTracer::Span: Send + Sync + 'static,
-    TAction: GraphQlServerAction<T>,
-{
-    type State = GraphQlServerState<T, TTracer::Span>;
-    fn init(&self) -> Self::State {
-        Default::default()
+        Outbox(GraphQlServerParseSuccessAction<T>),
+        Outbox(GraphQlServerEmitAction<T>),
+        Outbox(QuerySubscribeAction<T>),
+        Outbox(QueryUnsubscribeAction<T>),
+        Outbox(GraphQlServerParseErrorAction<T>),
+        Outbox(GraphQlServerUnsubscribeAction<T>),
     }
-    fn handle(
-        &self,
-        state: Self::State,
-        action: &TAction,
-        metadata: &MessageData,
-        context: &mut impl HandlerContext,
-    ) -> ActorTransition<Self::State, TAction> {
-        let mut state = state;
-        let actions = if let Some(action) = action.match_type() {
-            self.handle_graphql_subscribe(&mut state, action, metadata, context)
-        } else if let Some(action) = action.match_type() {
-            self.handle_graphql_unsubscribe(&mut state, action, metadata, context)
-        } else if let Some(action) = action.match_type() {
-            self.handle_graphql_modify(&mut state, action, metadata, context)
-        } else if let Some(action) = action.match_type() {
-            self.handle_query_emit(&mut state, action, metadata, context)
-        } else if let Some(action) = action.match_type() {
-            self.handle_evaluate_start(&mut state, action, metadata, context)
-        } else if let Some(action) = action.match_type() {
-            self.handle_evaluate_result(&mut state, action, metadata, context)
-        } else if let Some(action) = action.match_type() {
-            self.handle_evaluate_update(&mut state, action, metadata, context)
-        } else {
-            None
+
+    impl<T, TFactory, TAllocator, TQueryLabel, TMetricLabels, TTracer, TAction, TTask>
+        Dispatcher<TAction, TTask>
+        for GraphQlServer<T, TFactory, TAllocator, TQueryLabel, TMetricLabels, TTracer>
+    where
+        T: Expression,
+        T::Builtin: From<Stdlib> + From<GraphQlStdlib>,
+        TFactory: ExpressionFactory<T>,
+        TAllocator: HeapAllocator<T>,
+        TQueryLabel: GraphQlServerQueryLabel,
+        TMetricLabels: GraphQlServerOperationMetricLabels,
+        TTracer: Tracer,
+        TTracer::Span: Send + Sync + 'static,
+        TAction: Action,
+        TTask: TaskFactory<TAction, TTask>,
+    {
+        type State = GraphQlServerState<T, TTracer::Span>;
+        type Events<TInbox: TaskInbox<TAction>> = TInbox;
+        type Dispose = NoopDisposeCallback;
+
+        fn init<TInbox: TaskInbox<TAction>>(
+            &self,
+            inbox: TInbox,
+            context: &impl ActorInitContext,
+        ) -> (Self::State, Self::Events<TInbox>, Self::Dispose) {
+            (Default::default(), inbox, Default::default())
         }
-        .unwrap_or_default();
-        ActorTransition::new(state, actions)
+
+        fn accept(&self, _action: &GraphQlServerSubscribeAction<T>) -> bool {
+            true
+        }
+        fn schedule(
+            &self,
+            _action: &GraphQlServerSubscribeAction<T>,
+            _state: &Self::State,
+        ) -> Option<SchedulerMode> {
+            Some(SchedulerMode::Async)
+        }
+        fn handle(
+            &self,
+            state: &mut Self::State,
+            action: &GraphQlServerSubscribeAction<T>,
+            metadata: &MessageData,
+            context: &mut impl HandlerContext,
+        ) -> Option<SchedulerTransition<TAction, TTask>> {
+            self.handle_graphql_subscribe(state, action, metadata, context)
+        }
+
+        fn accept(&self, _action: &GraphQlServerUnsubscribeAction<T>) -> bool {
+            true
+        }
+        fn schedule(
+            &self,
+            _action: &GraphQlServerUnsubscribeAction<T>,
+            _state: &Self::State,
+        ) -> Option<SchedulerMode> {
+            Some(SchedulerMode::Async)
+        }
+        fn handle(
+            &self,
+            state: &mut Self::State,
+            action: &GraphQlServerUnsubscribeAction<T>,
+            metadata: &MessageData,
+            context: &mut impl HandlerContext,
+        ) -> Option<SchedulerTransition<TAction, TTask>> {
+            self.handle_graphql_unsubscribe(state, action, metadata, context)
+        }
+
+        fn accept(&self, _action: &GraphQlServerModifyAction<T>) -> bool {
+            true
+        }
+        fn schedule(
+            &self,
+            _action: &GraphQlServerModifyAction<T>,
+            _state: &Self::State,
+        ) -> Option<SchedulerMode> {
+            Some(SchedulerMode::Async)
+        }
+        fn handle(
+            &self,
+            state: &mut Self::State,
+            action: &GraphQlServerModifyAction<T>,
+            metadata: &MessageData,
+            context: &mut impl HandlerContext,
+        ) -> Option<SchedulerTransition<TAction, TTask>> {
+            self.handle_graphql_modify(state, action, metadata, context)
+        }
+
+        fn accept(&self, _action: &QueryEmitAction<T>) -> bool {
+            true
+        }
+        fn schedule(
+            &self,
+            _action: &QueryEmitAction<T>,
+            _state: &Self::State,
+        ) -> Option<SchedulerMode> {
+            Some(SchedulerMode::Async)
+        }
+        fn handle(
+            &self,
+            state: &mut Self::State,
+            action: &QueryEmitAction<T>,
+            metadata: &MessageData,
+            context: &mut impl HandlerContext,
+        ) -> Option<SchedulerTransition<TAction, TTask>> {
+            self.handle_query_emit(state, action, metadata, context)
+        }
+
+        fn accept(&self, _action: &EvaluateStartAction<T>) -> bool {
+            true
+        }
+        fn schedule(
+            &self,
+            _action: &EvaluateStartAction<T>,
+            _state: &Self::State,
+        ) -> Option<SchedulerMode> {
+            Some(SchedulerMode::Async)
+        }
+        fn handle(
+            &self,
+            state: &mut Self::State,
+            action: &EvaluateStartAction<T>,
+            metadata: &MessageData,
+            context: &mut impl HandlerContext,
+        ) -> Option<SchedulerTransition<TAction, TTask>> {
+            self.handle_evaluate_start(state, action, metadata, context)
+        }
+
+        fn accept(&self, _action: &EvaluateResultAction<T>) -> bool {
+            true
+        }
+        fn schedule(
+            &self,
+            _action: &EvaluateResultAction<T>,
+            _state: &Self::State,
+        ) -> Option<SchedulerMode> {
+            Some(SchedulerMode::Async)
+        }
+        fn handle(
+            &self,
+            state: &mut Self::State,
+            action: &EvaluateResultAction<T>,
+            metadata: &MessageData,
+            context: &mut impl HandlerContext,
+        ) -> Option<SchedulerTransition<TAction, TTask>> {
+            self.handle_evaluate_result(state, action, metadata, context)
+        }
+
+        fn accept(&self, _action: &EvaluateUpdateAction<T>) -> bool {
+            true
+        }
+        fn schedule(
+            &self,
+            _action: &EvaluateUpdateAction<T>,
+            _state: &Self::State,
+        ) -> Option<SchedulerMode> {
+            Some(SchedulerMode::Async)
+        }
+        fn handle(
+            &self,
+            state: &mut Self::State,
+            action: &EvaluateUpdateAction<T>,
+            metadata: &MessageData,
+            context: &mut impl HandlerContext,
+        ) -> Option<SchedulerTransition<TAction, TTask>> {
+            self.handle_evaluate_update(state, action, metadata, context)
+        }
     }
-}
+});
+
 impl<T, TFactory, TAllocator, TQueryLabel, TMetricLabels, TTracer>
     GraphQlServer<T, TFactory, TAllocator, TQueryLabel, TMetricLabels, TTracer>
 where
@@ -471,25 +602,26 @@ where
     T::Builtin: From<Stdlib> + From<GraphQlStdlib>,
     TFactory: ExpressionFactory<T>,
     TAllocator: HeapAllocator<T>,
-    TQueryLabel: Fn(&GraphQlOperation) -> String,
-    TMetricLabels: Fn(&GraphQlOperation) -> Vec<(String, String)>,
+    TQueryLabel: GraphQlServerQueryLabel,
+    TMetricLabels: GraphQlServerOperationMetricLabels,
     TTracer: Tracer,
     TTracer::Span: Send + Sync + 'static,
 {
-    fn handle_graphql_subscribe<TAction>(
+    fn handle_graphql_subscribe<TAction, TTask>(
         &self,
         state: &mut GraphQlServerState<T, TTracer::Span>,
         action: &GraphQlServerSubscribeAction<T>,
         _metadata: &MessageData,
-        context: &mut impl HandlerContext,
-    ) -> Option<StateTransition<TAction>>
+        _context: &mut impl HandlerContext,
+    ) -> Option<SchedulerTransition<TAction, TTask>>
     where
         TAction: Action
-            + OutboundAction<QuerySubscribeAction<T>>
-            + OutboundAction<GraphQlServerParseSuccessAction<T>>
-            + OutboundAction<GraphQlServerParseErrorAction<T>>
-            + OutboundAction<GraphQlServerUnsubscribeAction<T>>
-            + OutboundAction<GraphQlServerEmitAction<T>>,
+            + From<QuerySubscribeAction<T>>
+            + From<GraphQlServerParseSuccessAction<T>>
+            + From<GraphQlServerParseErrorAction<T>>
+            + From<GraphQlServerUnsubscribeAction<T>>
+            + From<GraphQlServerEmitAction<T>>,
+        TTask: TaskFactory<TAction, TTask>,
     {
         let GraphQlServerSubscribeAction {
             subscription_id,
@@ -498,9 +630,9 @@ where
         } = action;
         let subscription_id = *subscription_id;
         match reflex_graphql::parse_graphql_operation(operation, &self.factory, &self.allocator) {
-            Err(err) => Some(StateTransition::new([
-                StateOperation::Send(
-                    context.pid(),
+            Err(err) => Some(SchedulerTransition::new([
+                SchedulerCommand::Send(
+                    self.main_pid,
                     GraphQlServerParseErrorAction {
                         subscription_id,
                         message: err,
@@ -509,8 +641,8 @@ where
                     }
                     .into(),
                 ),
-                StateOperation::Send(
-                    context.pid(),
+                SchedulerCommand::Send(
+                    self.main_pid,
                     GraphQlServerUnsubscribeAction {
                         subscription_id,
                         _expression: Default::default(),
@@ -547,9 +679,9 @@ where
                         .subscription_operation_mappings
                         .insert(subscription_id, query.id());
                     let GraphQlOperationState { query, result, .. } = entry.get();
-                    let transition = StateTransition::new(
-                        once(StateOperation::Send(
-                            context.pid(),
+                    let transition = SchedulerTransition::new(
+                        once(SchedulerCommand::Send(
+                            self.main_pid,
                             GraphQlServerParseSuccessAction {
                                 subscription_id,
                                 query: query.clone(),
@@ -557,8 +689,8 @@ where
                             .into(),
                         ))
                         .chain(result.as_ref().map(|result| {
-                            StateOperation::Send(
-                                context.pid(),
+                            SchedulerCommand::Send(
+                                self.main_pid,
                                 GraphQlServerEmitAction {
                                     subscription_id,
                                     result: result.result().clone(),
@@ -571,8 +703,8 @@ where
                     Some(transition)
                 }
                 Entry::Vacant(entry) => {
-                    let label = (self.get_graphql_query_label)(operation);
-                    let metric_labels = (self.get_operation_metric_labels)(operation);
+                    let label = self.get_graphql_query_label.label(operation);
+                    let metric_labels = self.get_operation_metric_labels.labels(operation);
                     let evaluate_effect = create_query_evaluate_effect(
                         label.clone(),
                         query.clone(),
@@ -620,17 +752,17 @@ where
                         result: None,
                         subscriptions: HashMap::from([(subscription_id, subscription_state)]),
                     });
-                    let transition = StateTransition::new([
-                        StateOperation::Send(
-                            context.pid(),
+                    let transition = SchedulerTransition::new([
+                        SchedulerCommand::Send(
+                            self.main_pid,
                             GraphQlServerParseSuccessAction {
                                 subscription_id,
                                 query: query.clone(),
                             }
                             .into(),
                         ),
-                        StateOperation::Send(
-                            context.pid(),
+                        SchedulerCommand::Send(
+                            self.main_pid,
                             QuerySubscribeAction { query, label }.into(),
                         ),
                     ]);
@@ -640,15 +772,16 @@ where
             },
         }
     }
-    fn handle_graphql_unsubscribe<TAction>(
+    fn handle_graphql_unsubscribe<TAction, TTask>(
         &self,
         state: &mut GraphQlServerState<T, TTracer::Span>,
         action: &GraphQlServerUnsubscribeAction<T>,
         _metadata: &MessageData,
-        context: &mut impl HandlerContext,
-    ) -> Option<StateTransition<TAction>>
+        _context: &mut impl HandlerContext,
+    ) -> Option<SchedulerTransition<TAction, TTask>>
     where
-        TAction: Action + OutboundAction<QueryUnsubscribeAction<T>>,
+        TAction: Action + From<QueryUnsubscribeAction<T>>,
+        TTask: TaskFactory<TAction, TTask>,
     {
         let GraphQlServerUnsubscribeAction {
             subscription_id,
@@ -697,8 +830,8 @@ where
             .map(|operation_state| std::mem::take(&mut operation_state.metric_labels));
         let transition = if let Some(operation_state) = removed_operation_state {
             let GraphQlOperationState { query, label, .. } = operation_state;
-            Some(StateTransition::new(Some(StateOperation::Send(
-                context.pid(),
+            Some(SchedulerTransition::new(Some(SchedulerCommand::Send(
+                self.main_pid,
                 QueryUnsubscribeAction { query, label }.into(),
             ))))
         } else {
@@ -711,20 +844,21 @@ where
         }
         transition
     }
-    fn handle_graphql_modify<TAction>(
+    fn handle_graphql_modify<TAction, TTask>(
         &self,
         state: &mut GraphQlServerState<T, TTracer::Span>,
         action: &GraphQlServerModifyAction<T>,
         _metadata: &MessageData,
-        context: &mut impl HandlerContext,
-    ) -> Option<StateTransition<TAction>>
+        _context: &mut impl HandlerContext,
+    ) -> Option<SchedulerTransition<TAction, TTask>>
     where
         TAction: Action
-            + OutboundAction<QuerySubscribeAction<T>>
-            + OutboundAction<GraphQlServerParseSuccessAction<T>>
-            + OutboundAction<GraphQlServerParseErrorAction<T>>
-            + OutboundAction<GraphQlServerUnsubscribeAction<T>>
-            + OutboundAction<GraphQlServerEmitAction<T>>,
+            + From<QuerySubscribeAction<T>>
+            + From<GraphQlServerParseSuccessAction<T>>
+            + From<GraphQlServerParseErrorAction<T>>
+            + From<GraphQlServerUnsubscribeAction<T>>
+            + From<GraphQlServerEmitAction<T>>,
+        TTask: TaskFactory<TAction, TTask>,
     {
         let GraphQlServerModifyAction {
             subscription_id,
@@ -759,9 +893,9 @@ where
             &self.factory,
             &self.allocator,
         ) {
-            Err(err) => Some(StateTransition::new([
-                StateOperation::Send(
-                    context.pid(),
+            Err(err) => Some(SchedulerTransition::new([
+                SchedulerCommand::Send(
+                    self.main_pid,
                     GraphQlServerParseErrorAction {
                         subscription_id: *subscription_id,
                         message: err,
@@ -770,8 +904,8 @@ where
                     }
                     .into(),
                 ),
-                StateOperation::Send(
-                    context.pid(),
+                SchedulerCommand::Send(
+                    self.main_pid,
                     GraphQlServerUnsubscribeAction {
                         subscription_id: *subscription_id,
                         _expression: Default::default(),
@@ -859,8 +993,8 @@ where
                                 .subscriptions
                                 .insert(subscription_id, subscription_state);
                             operation_state.result.as_ref().map(|result| {
-                                StateOperation::Send(
-                                    context.pid(),
+                                SchedulerCommand::Send(
+                                    self.main_pid,
                                     GraphQlServerEmitAction {
                                         subscription_id,
                                         result: result.result().clone(),
@@ -870,9 +1004,10 @@ where
                             })
                         }
                         Entry::Vacant(entry) => {
-                            let updated_label = (self.get_graphql_query_label)(&updated_operation);
+                            let updated_label =
+                                self.get_graphql_query_label.label(&updated_operation);
                             let metric_labels =
-                                (self.get_operation_metric_labels)(&updated_operation);
+                                self.get_operation_metric_labels.labels(&updated_operation);
                             let evaluate_effect = create_query_evaluate_effect(
                                 updated_label.clone(),
                                 updated_query.clone(),
@@ -920,8 +1055,8 @@ where
                                     subscription_state,
                                 )]),
                             });
-                            Some(StateOperation::Send(
-                                context.pid(),
+                            Some(SchedulerCommand::Send(
+                                self.main_pid,
                                 QuerySubscribeAction {
                                     query: updated_query.clone(),
                                     label: updated_label,
@@ -936,9 +1071,9 @@ where
                     } else {
                         self.update_graphql_query_status_metrics(state, []);
                     }
-                    Some(StateTransition::new(
-                        once(StateOperation::Send(
-                            context.pid(),
+                    Some(SchedulerTransition::new(
+                        once(SchedulerCommand::Send(
+                            self.main_pid,
                             GraphQlServerParseSuccessAction {
                                 subscription_id,
                                 query: updated_query,
@@ -951,15 +1086,16 @@ where
             }
         }
     }
-    fn handle_query_emit<TAction>(
+    fn handle_query_emit<TAction, TTask>(
         &self,
         state: &mut GraphQlServerState<T, TTracer::Span>,
         action: &QueryEmitAction<T>,
         _metadata: &MessageData,
-        context: &mut impl HandlerContext,
-    ) -> Option<StateTransition<TAction>>
+        _context: &mut impl HandlerContext,
+    ) -> Option<SchedulerTransition<TAction, TTask>>
     where
-        TAction: Action + OutboundAction<GraphQlServerEmitAction<T>>,
+        TAction: Action + From<GraphQlServerEmitAction<T>>,
+        TTask: TaskFactory<TAction, TTask>,
     {
         let QueryEmitAction { query, result } = action;
         let operation_state = state.operations.get_mut(&query.id())?;
@@ -1017,32 +1153,34 @@ where
             let updated_query_state = GraphQlQueryStatus::get_state(updated_value, &self.factory);
             updated_query_state != previous_query_state
         };
-        let transition = StateTransition::new(operation_state.subscriptions.keys().copied().map(
-            |subscription_id| {
-                StateOperation::Send(
-                    context.pid(),
-                    GraphQlServerEmitAction {
-                        subscription_id,
-                        result: result.result().clone(),
-                    }
-                    .into(),
-                )
-            },
-        ));
+        let transition =
+            SchedulerTransition::new(operation_state.subscriptions.keys().copied().map(
+                |subscription_id| {
+                    SchedulerCommand::Send(
+                        self.main_pid,
+                        GraphQlServerEmitAction {
+                            subscription_id,
+                            result: result.result().clone(),
+                        }
+                        .into(),
+                    )
+                },
+            ));
         if should_recalculate_metrics {
             self.update_graphql_query_status_metrics(state, []);
         }
         Some(transition)
     }
-    fn handle_evaluate_start<TAction>(
+    fn handle_evaluate_start<TAction, TTask>(
         &self,
         state: &mut GraphQlServerState<T, TTracer::Span>,
         action: &EvaluateStartAction<T>,
         _metadata: &MessageData,
         _context: &mut impl HandlerContext,
-    ) -> Option<StateTransition<TAction>>
+    ) -> Option<SchedulerTransition<TAction, TTask>>
     where
-        TAction: Action + OutboundAction<GraphQlServerEmitAction<T>>,
+        TAction: Action + From<GraphQlServerEmitAction<T>>,
+        TTask: TaskFactory<TAction, TTask>,
     {
         let EvaluateStartAction { cache_id, .. } = action;
         let query_id = state.evaluate_effect_mappings.get(cache_id)?;
@@ -1066,15 +1204,16 @@ where
         }
         None
     }
-    fn handle_evaluate_update<TAction>(
+    fn handle_evaluate_update<TAction, TTask>(
         &self,
         state: &mut GraphQlServerState<T, TTracer::Span>,
         action: &EvaluateUpdateAction<T>,
         _metadata: &MessageData,
         _context: &mut impl HandlerContext,
-    ) -> Option<StateTransition<TAction>>
+    ) -> Option<SchedulerTransition<TAction, TTask>>
     where
-        TAction: Action + OutboundAction<GraphQlServerEmitAction<T>>,
+        TAction: Action + From<GraphQlServerEmitAction<T>>,
+        TTask: TaskFactory<TAction, TTask>,
     {
         let EvaluateUpdateAction {
             cache_id,
@@ -1111,15 +1250,16 @@ where
         }
         None
     }
-    fn handle_evaluate_result<TAction>(
+    fn handle_evaluate_result<TAction, TTask>(
         &self,
         state: &mut GraphQlServerState<T, TTracer::Span>,
         action: &EvaluateResultAction<T>,
         _metadata: &MessageData,
         _context: &mut impl HandlerContext,
-    ) -> Option<StateTransition<TAction>>
+    ) -> Option<SchedulerTransition<TAction, TTask>>
     where
-        TAction: Action + OutboundAction<GraphQlServerEmitAction<T>>,
+        TAction: Action + From<GraphQlServerEmitAction<T>>,
+        TTask: TaskFactory<TAction, TTask>,
     {
         let EvaluateResultAction {
             cache_id, result, ..
@@ -1405,15 +1545,20 @@ mod tests {
 
     use opentelemetry::trace::noop::{NoopSpan, NoopTracer};
     use reflex::core::{uuid, DependencyList};
-    use reflex_dispatcher::{MessageOffset, ProcessId};
-    use reflex_graphql::{parse_graphql_operation, parse_graphql_query, GraphQlVariables};
+    use reflex_dispatcher::{Handler, MessageOffset, ProcessId, SchedulerTransition};
+    use reflex_graphql::{
+        parse_graphql_operation, parse_graphql_query, GraphQlVariables, NoopGraphQlQueryTransform,
+    };
+    use reflex_handlers::utils::tls::hyper_tls;
     use reflex_json::{JsonMap, JsonValue};
     use reflex_lang::allocator::DefaultAllocator;
     use reflex_lang::{CachedSharedTerm, ExpressionList, SharedTermFactory};
+    use reflex_utils::reconnect::NoopReconnectTimeout;
 
     use crate::action::ServerCliAction;
     use crate::builtins::ServerBuiltins;
-    use crate::cli::reflex_server::get_graphql_query_label;
+    use crate::cli::reflex_server::GraphQlWebServerMetricLabels;
+    use crate::cli::task::ServerCliTaskFactory;
 
     use super::*;
 
@@ -1465,6 +1610,28 @@ mod tests {
 
     #[test]
     fn subscription_results_in_pending_state() {
+        type T = CachedSharedTerm<ServerBuiltins>;
+        type TFactory = SharedTermFactory<ServerBuiltins>;
+        type TAllocator = DefaultAllocator<T>;
+        type TConnect = hyper_tls::HttpsConnector<hyper::client::HttpConnector>;
+        type TReconnect = NoopReconnectTimeout;
+        type TTracer = NoopTracer;
+        type TAction = ServerCliAction<T>;
+        type TTask = ServerCliTaskFactory<
+            T,
+            TFactory,
+            TAllocator,
+            TConnect,
+            TReconnect,
+            NoopGraphQlQueryTransform,
+            NoopGraphQlQueryTransform,
+            GraphQlWebServerMetricLabels,
+            GraphQlWebServerMetricLabels,
+            GraphQlWebServerMetricLabels,
+            GraphQlWebServerMetricLabels,
+            GraphQlWebServerMetricLabels,
+            TTracer,
+        >;
         let (_factory, _allocator, server) = harness(generate_metric_labels_for_operation);
         let subscribed_operation_id = uuid!("b60cd922-45f2-47b2-8929-e6b43befbe3c");
         let subscribed_operation = graphql_operation_with_uuid(subscribed_operation_id);
@@ -1474,19 +1641,18 @@ mod tests {
             let subscription_id = operation_id;
             graphql_subscribe_action(subscription_id, operation)
         };
-        let empty_state = GraphQlServerState::default();
+        let mut state = GraphQlServerState::default();
 
-        let (updated_state, _) = server
-            .handle(
-                empty_state,
-                &subscribe_action,
-                &message_data(),
-                &mut DummyContext,
-            )
-            .into_parts();
+        let _ = Handler::<TAction, SchedulerTransition<TAction, TTask>>::handle(
+            &server,
+            &mut state,
+            &subscribe_action,
+            &message_data(),
+            &mut DummyContext,
+        );
 
-        assert_eq!(updated_state.operations.len(), 1);
-        let updated_operation_state = updated_state.operations.values().next().unwrap();
+        assert_eq!(state.operations.len(), 1);
+        let updated_operation_state = state.operations.values().next().unwrap();
         assert_eq!(updated_operation_state.result, None);
         let active_subscription_ids = updated_operation_state
             .subscriptions
@@ -1501,6 +1667,28 @@ mod tests {
 
     #[test]
     fn new_subscription_metrics_are_recorded_alongside_existing_subscription_metrics() {
+        type T = CachedSharedTerm<ServerBuiltins>;
+        type TFactory = SharedTermFactory<ServerBuiltins>;
+        type TAllocator = DefaultAllocator<T>;
+        type TConnect = hyper_tls::HttpsConnector<hyper::client::HttpConnector>;
+        type TReconnect = NoopReconnectTimeout;
+        type TTracer = NoopTracer;
+        type TAction = ServerCliAction<T>;
+        type TTask = ServerCliTaskFactory<
+            T,
+            TFactory,
+            TAllocator,
+            TConnect,
+            TReconnect,
+            NoopGraphQlQueryTransform,
+            NoopGraphQlQueryTransform,
+            GraphQlWebServerMetricLabels,
+            GraphQlWebServerMetricLabels,
+            GraphQlWebServerMetricLabels,
+            GraphQlWebServerMetricLabels,
+            GraphQlWebServerMetricLabels,
+            TTracer,
+        >;
         reflex_test_utils::run_metrics_test(|handle| {
             let (factory, allocator, server) = harness(generate_metric_labels_for_operation);
 
@@ -1513,13 +1701,13 @@ mod tests {
             let error_operation = graphql_operation_with_uuid(error_operation_id);
             let pending_operation = graphql_operation_with_uuid(pending_operation_id);
 
-            let initial_state = graphql_server_state([
+            let mut state = graphql_server_state([
                 {
                     let operation_id = success_operation_id;
                     let operation = success_operation.clone();
                     let result = Some(dummy_success_result(&factory));
                     let query = parse_graphql_operation(&operation, &factory, &allocator).unwrap();
-                    let query_label = get_graphql_query_label(&operation);
+                    let query_label = GraphQlWebServerMetricLabels.label(&operation);
                     let evaluate_effect = create_query_evaluate_effect(
                         query_label.clone(),
                         query.clone(),
@@ -1554,7 +1742,7 @@ mod tests {
                     let operation = error_operation.clone();
                     let result = Some(dummy_error_result(&factory, &allocator));
                     let query = parse_graphql_operation(&operation, &factory, &allocator).unwrap();
-                    let query_label = get_graphql_query_label(&operation);
+                    let query_label = GraphQlWebServerMetricLabels.label(&operation);
                     let evaluate_effect = create_query_evaluate_effect(
                         query_label.clone(),
                         query.clone(),
@@ -1589,7 +1777,7 @@ mod tests {
                     let operation = pending_operation.clone();
                     let result = Some(dummy_pending_result(&factory, &allocator));
                     let query = parse_graphql_operation(&operation, &factory, &allocator).unwrap();
-                    let query_label = get_graphql_query_label(&operation);
+                    let query_label = GraphQlWebServerMetricLabels.label(&operation);
                     let evaluate_effect = create_query_evaluate_effect(
                         query_label.clone(),
                         query.clone(),
@@ -1621,14 +1809,10 @@ mod tests {
                 },
             ]);
             // Keep a copy of the query ids from the the initial operation state (used for detecting newly-added queries)
-            let existing_query_ids = initial_state
-                .operations
-                .keys()
-                .cloned()
-                .collect::<HashSet<_>>();
+            let existing_query_ids = state.operations.keys().cloned().collect::<HashSet<_>>();
 
             // Flush the initial metrics
-            server.update_graphql_query_status_metrics(&initial_state, []);
+            server.update_graphql_query_status_metrics(&state, []);
             let initial_metrics = get_metrics(&handle);
 
             // Assert the correctness of the initial metrics
@@ -1693,18 +1877,17 @@ mod tests {
                 let subscription_id = operation_id;
                 graphql_subscribe_action(subscription_id, operation)
             };
-            let (updated_state, _) = server
-                .handle(
-                    initial_state,
-                    &subscribe_action,
-                    &message_data(),
-                    &mut DummyContext,
-                )
-                .into_parts();
+            let _ = Handler::<TAction, SchedulerTransition<TAction, TTask>>::handle(
+                &server,
+                &mut state,
+                &subscribe_action,
+                &message_data(),
+                &mut DummyContext,
+            );
 
             // Ensure that the newly-subscribed operation state was added correctly
-            assert_eq!(updated_state.operations.len(), 4);
-            let added_operations = updated_state
+            assert_eq!(state.operations.len(), 4);
+            let added_operations = state
                 .operations
                 .iter()
                 .filter(|(query_id, _)| !existing_query_ids.contains(query_id))
@@ -1798,8 +1981,30 @@ mod tests {
 
     #[test]
     fn unsubscription_removes_subscription_from_state() {
-        // ensure subscription exists
+        type T = CachedSharedTerm<ServerBuiltins>;
+        type TFactory = SharedTermFactory<ServerBuiltins>;
+        type TAllocator = DefaultAllocator<T>;
+        type TConnect = hyper_tls::HttpsConnector<hyper::client::HttpConnector>;
+        type TReconnect = NoopReconnectTimeout;
+        type TTracer = NoopTracer;
+        type TAction = ServerCliAction<T>;
+        type TTask = ServerCliTaskFactory<
+            T,
+            TFactory,
+            TAllocator,
+            TConnect,
+            TReconnect,
+            NoopGraphQlQueryTransform,
+            NoopGraphQlQueryTransform,
+            GraphQlWebServerMetricLabels,
+            GraphQlWebServerMetricLabels,
+            GraphQlWebServerMetricLabels,
+            GraphQlWebServerMetricLabels,
+            GraphQlWebServerMetricLabels,
+            TTracer,
+        >;
         let (_factory, _allocator, server) = harness(generate_metric_labels_for_operation);
+        // ensure subscription exists
         let subscribed_operation_id = uuid!("03422820-ac5a-4271-a834-3c5163e25aba");
         let subscribed_operation = graphql_operation_with_uuid(subscribed_operation_id);
         let subscribe_action = {
@@ -1808,33 +2013,53 @@ mod tests {
             let subscription_id = operation_id;
             graphql_subscribe_action(subscription_id, operation)
         };
-        let empty_state = GraphQlServerState::default();
-        let (updated_state, _) = server
-            .handle(
-                empty_state,
-                &subscribe_action,
-                &message_data(),
-                &mut DummyContext,
-            )
-            .into_parts();
+        let mut state = GraphQlServerState::default();
+        let _ = Handler::<TAction, SchedulerTransition<TAction, TTask>>::handle(
+            &server,
+            &mut state,
+            &subscribe_action,
+            &message_data(),
+            &mut DummyContext,
+        );
 
         let unsubscribe_action = graphql_unsubscribe_action(subscribed_operation_id);
-        let (final_state, _) = server
-            .handle(
-                updated_state,
-                &unsubscribe_action,
-                &message_data(),
-                &mut DummyContext,
-            )
-            .into_parts();
-        assert_eq!(final_state.operations.len(), 0);
+        let _ = Handler::<TAction, SchedulerTransition<TAction, TTask>>::handle(
+            &server,
+            &mut state,
+            &unsubscribe_action,
+            &message_data(),
+            &mut DummyContext,
+        );
+        assert_eq!(state.operations.len(), 0);
     }
 
     #[test]
     fn unsubscription_updates_metrics_for_subscriptions() {
+        type T = CachedSharedTerm<ServerBuiltins>;
+        type TFactory = SharedTermFactory<ServerBuiltins>;
+        type TAllocator = DefaultAllocator<T>;
+        type TConnect = hyper_tls::HttpsConnector<hyper::client::HttpConnector>;
+        type TReconnect = NoopReconnectTimeout;
+        type TTracer = NoopTracer;
+        type TAction = ServerCliAction<T>;
+        type TTask = ServerCliTaskFactory<
+            T,
+            TFactory,
+            TAllocator,
+            TConnect,
+            TReconnect,
+            NoopGraphQlQueryTransform,
+            NoopGraphQlQueryTransform,
+            GraphQlWebServerMetricLabels,
+            GraphQlWebServerMetricLabels,
+            GraphQlWebServerMetricLabels,
+            GraphQlWebServerMetricLabels,
+            GraphQlWebServerMetricLabels,
+            TTracer,
+        >;
         reflex_test_utils::run_metrics_test(|handle| {
-            // ensure subscription exists
             let (_factory, _allocator, server) = harness(generate_metric_labels_for_operation);
+            // ensure subscription exists
             let subscribed_operation_id = uuid!("f137fc55-cea8-46ec-a807-67d0402a25aa");
             let subscribed_operation = graphql_operation_with_uuid(subscribed_operation_id);
             let subscribe_action = {
@@ -1843,15 +2068,15 @@ mod tests {
                 let subscription_id = operation_id;
                 graphql_subscribe_action(subscription_id, operation)
             };
-            let empty_state = GraphQlServerState::default();
-            let (updated_state, _) = server
-                .handle(
-                    empty_state,
-                    &subscribe_action,
-                    &message_data(),
-                    &mut DummyContext,
-                )
-                .into_parts();
+            let mut state = GraphQlServerState::default();
+            let _ = Handler::<TAction, SchedulerTransition<TAction, TTask>>::handle(
+                &server,
+                &mut state,
+                &subscribe_action,
+                &message_data(),
+                &mut DummyContext,
+            );
+
             let label = retrieve_metric_labels_for_operation(&subscribed_operation);
             let metrics = get_metrics(&handle);
             assert_eq!(metrics[&success_metric_name(&label)], 0.0);
@@ -1859,15 +2084,14 @@ mod tests {
             assert_eq!(metrics[&pending_metric_name(&label)], 1.0);
 
             let unsubscribe_action = graphql_unsubscribe_action(subscribed_operation_id);
-            let (final_state, _) = server
-                .handle(
-                    updated_state,
-                    &unsubscribe_action,
-                    &message_data(),
-                    &mut DummyContext,
-                )
-                .into_parts();
-            assert_eq!(final_state.operations.len(), 0);
+            let _ = Handler::<TAction, SchedulerTransition<TAction, TTask>>::handle(
+                &server,
+                &mut state,
+                &unsubscribe_action,
+                &message_data(),
+                &mut DummyContext,
+            );
+            assert_eq!(state.operations.len(), 0);
             let label = retrieve_metric_labels_for_operation(&subscribed_operation);
             let metrics = get_metrics(&handle);
             assert_eq!(metrics[&success_metric_name(&label)], 0.0);
@@ -1878,17 +2102,39 @@ mod tests {
 
     #[test]
     fn graphql_query_modification_merges_subscriptions_with_shared_queries() {
+        type T = CachedSharedTerm<ServerBuiltins>;
+        type TFactory = SharedTermFactory<ServerBuiltins>;
+        type TAllocator = DefaultAllocator<T>;
+        type TConnect = hyper_tls::HttpsConnector<hyper::client::HttpConnector>;
+        type TReconnect = NoopReconnectTimeout;
+        type TTracer = NoopTracer;
+        type TAction = ServerCliAction<T>;
+        type TTask = ServerCliTaskFactory<
+            T,
+            TFactory,
+            TAllocator,
+            TConnect,
+            TReconnect,
+            NoopGraphQlQueryTransform,
+            NoopGraphQlQueryTransform,
+            GraphQlWebServerMetricLabels,
+            GraphQlWebServerMetricLabels,
+            GraphQlWebServerMetricLabels,
+            GraphQlWebServerMetricLabels,
+            GraphQlWebServerMetricLabels,
+            TTracer,
+        >;
         reflex_test_utils::run_metrics_test(|handle| {
             let (factory, allocator, server) = harness(generate_metric_labels_for_operation);
 
             let success_operation_id = uuid!("39002291-ca3b-4043-b403-5e0e50e91c0a");
             let success_operation = graphql_operation_with_uuid(success_operation_id);
-            let initial_state = graphql_server_state([{
+            let mut state = graphql_server_state([{
                 let operation_id = success_operation_id;
                 let operation = success_operation.clone();
                 let result = Some(dummy_success_result(&factory));
                 let query = parse_graphql_operation(&operation, &factory, &allocator).unwrap();
-                let query_label = get_graphql_query_label(&operation);
+                let query_label = GraphQlWebServerMetricLabels.label(&operation);
                 let evaluate_effect = create_query_evaluate_effect(
                     query_label.clone(),
                     query.clone(),
@@ -1919,14 +2165,10 @@ mod tests {
                 }
             }]);
             // Keep a copy of the query ids from the the initial operation state (used for detecting newly-added queries)
-            let existing_query_ids = initial_state
-                .operations
-                .keys()
-                .cloned()
-                .collect::<HashSet<_>>();
+            let existing_query_ids = state.operations.keys().cloned().collect::<HashSet<_>>();
 
             // Flush the initial metrics
-            server.update_graphql_query_status_metrics(&initial_state, []);
+            server.update_graphql_query_status_metrics(&state, []);
             let initial_metrics = get_metrics(&handle);
 
             // Assert the correctness of the initial metrics
@@ -1957,18 +2199,17 @@ mod tests {
                 let subscription_id = operation_id;
                 graphql_subscribe_action(subscription_id, operation)
             };
-            let (updated_state, _) = server
-                .handle(
-                    initial_state,
-                    &subscribe_action,
-                    &message_data(),
-                    &mut DummyContext,
-                )
-                .into_parts();
+            let _ = Handler::<TAction, SchedulerTransition<TAction, TTask>>::handle(
+                &server,
+                &mut state,
+                &subscribe_action,
+                &message_data(),
+                &mut DummyContext,
+            );
 
             // Ensure that the newly-subscribed operation state was added correctly
-            assert_eq!(updated_state.operations.len(), 2);
-            let added_operations = updated_state
+            assert_eq!(state.operations.len(), 2);
+            let added_operations = state
                 .operations
                 .iter()
                 .filter(|(query_id, _)| !existing_query_ids.contains(query_id))
@@ -2026,11 +2267,7 @@ mod tests {
             );
 
             // Keep a copy of the query ids from the the current operation state (used for detecting newly-added queries)
-            let existing_query_ids = updated_state
-                .operations
-                .keys()
-                .cloned()
-                .collect::<HashSet<_>>();
+            let existing_query_ids = state.operations.keys().cloned().collect::<HashSet<_>>();
 
             // Modify the newly-added query variables so that it becomes identical to the original query
             let modify_action = graphql_modify_action(
@@ -2040,18 +2277,17 @@ mod tests {
                     success_operation_id.to_string().into(),
                 )]),
             );
-            let (updated_state, _) = server
-                .handle(
-                    updated_state,
-                    &modify_action,
-                    &message_data(),
-                    &mut DummyContext,
-                )
-                .into_parts();
+            let _ = Handler::<TAction, SchedulerTransition<TAction, TTask>>::handle(
+                &server,
+                &mut state,
+                &modify_action,
+                &message_data(),
+                &mut DummyContext,
+            );
 
             // Ensure that the subscriptions were consolidated into a single operation state
-            assert_eq!(updated_state.operations.len(), 1);
-            let retained_operations = updated_state
+            assert_eq!(state.operations.len(), 1);
+            let retained_operations = state
                 .operations
                 .iter()
                 .filter(|(query_id, _)| existing_query_ids.contains(query_id))
@@ -2124,8 +2360,8 @@ mod tests {
         format!("graphql_active_query_success_count{{{}}}", label)
     }
 
-    fn harness(
-        get_operation_metric_labels: impl Fn(&GraphQlOperation) -> Vec<(String, String)>,
+    fn harness<TMetricLabels>(
+        get_operation_metric_labels: TMetricLabels,
     ) -> (
         SharedTermFactory<ServerBuiltins>,
         DefaultAllocator<CachedSharedTerm<ServerBuiltins>>,
@@ -2133,11 +2369,14 @@ mod tests {
             CachedSharedTerm<ServerBuiltins>,
             SharedTermFactory<ServerBuiltins>,
             DefaultAllocator<CachedSharedTerm<ServerBuiltins>>,
-            impl Fn(&GraphQlOperation) -> String,
-            impl Fn(&GraphQlOperation) -> Vec<(String, String)>,
+            GraphQlWebServerMetricLabels,
+            TMetricLabels,
             NoopTracer,
         >,
-    ) {
+    )
+    where
+        TMetricLabels: GraphQlServerOperationMetricLabels,
+    {
         let factory = SharedTermFactory::<ServerBuiltins>::default();
         let allocator = DefaultAllocator::default();
         let metric_names = GraphQlServerMetricNames::default();
@@ -2145,9 +2384,10 @@ mod tests {
             factory.clone(),
             allocator.clone(),
             metric_names,
-            get_graphql_query_label,
+            GraphQlWebServerMetricLabels,
             get_operation_metric_labels,
             NoopTracer::default(),
+            ProcessId::default(),
         );
         (factory, allocator, server)
     }
@@ -2175,7 +2415,7 @@ mod tests {
         GraphQlServerSubscribeAction {
             subscription_id,
             operation,
-            _expression: PhantomData::default(),
+            _expression: PhantomData::<CachedSharedTerm<ServerBuiltins>>::default(),
         }
         .into()
     }
@@ -2185,7 +2425,7 @@ mod tests {
     ) -> ServerCliAction<CachedSharedTerm<ServerBuiltins>> {
         GraphQlServerUnsubscribeAction {
             subscription_id,
-            _expression: PhantomData::default(),
+            _expression: PhantomData::<CachedSharedTerm<ServerBuiltins>>::default(),
         }
         .into()
     }
@@ -2197,7 +2437,7 @@ mod tests {
         GraphQlServerModifyAction {
             subscription_id,
             variables,
-            _expression: PhantomData::default(),
+            _expression: PhantomData::<CachedSharedTerm<ServerBuiltins>>::default(),
         }
         .into()
     }
@@ -2322,10 +2562,6 @@ mod tests {
     impl HandlerContext for DummyContext {
         fn pid(&self) -> ProcessId {
             ProcessId::from(0)
-        }
-
-        fn caller_pid(&self) -> Option<ProcessId> {
-            Some(ProcessId::from(0))
         }
 
         fn generate_pid(&mut self) -> ProcessId {

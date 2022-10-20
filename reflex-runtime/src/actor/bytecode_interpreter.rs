@@ -3,7 +3,6 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 // SPDX-FileContributor: Jordan Hall <j.hall@mwam.com> https://github.com/j-hall-mwam
-use metrics::SharedString;
 use std::{
     collections::{hash_map::Entry, HashMap, VecDeque},
     iter::once,
@@ -11,6 +10,7 @@ use std::{
     sync::Arc,
 };
 
+use metrics::{describe_gauge, describe_histogram, SharedString, Unit};
 use reflex::{
     core::{
         Applicable, ConditionListType, ConditionType, EvaluationResult, Expression,
@@ -20,29 +20,31 @@ use reflex::{
     hash::{HashId, IntMap, IntSet},
 };
 use reflex_dispatcher::{
-    Action, Actor, ActorTransition, HandlerContext, InboundAction, MessageData, MessageOffset,
-    OutboundAction, ProcessId, StateOperation, StateTransition,
+    Action, ActorInitContext, HandlerContext, MessageData, MessageOffset, NoopDisposeCallback,
+    ProcessId, SchedulerCommand, SchedulerMode, SchedulerTransition, TaskFactory, TaskInbox,
 };
 use reflex_interpreter::{
     compiler::{Compile, CompiledProgram, CompilerOptions},
     InterpreterOptions,
 };
+use reflex_macros::dispatcher;
 
 use crate::{
     action::{
         bytecode_interpreter::{
-            BytecodeGcCompleteAction, BytecodeInterpreterEvaluateAction,
-            BytecodeInterpreterGcAction, BytecodeInterpreterResultAction, BytecodeWorkerStatistics,
+            BytecodeInterpreterEvaluateAction, BytecodeInterpreterGcAction,
+            BytecodeInterpreterGcCompleteAction, BytecodeInterpreterInitAction,
+            BytecodeInterpreterResultAction, BytecodeWorkerStatistics,
         },
         evaluate::{
             EvaluateResultAction, EvaluateStartAction, EvaluateStopAction, EvaluateUpdateAction,
         },
     },
+    task::bytecode_worker::{
+        BytecodeWorkerMetricNames, BytecodeWorkerTask, BytecodeWorkerTaskFactory,
+    },
     utils::quantiles::{
         generate_quantile_metric_labels, publish_quantile_bucketed_metric, QuantileBucket,
-    },
-    worker::bytecode_worker::{
-        BytecodeWorkerAction, BytecodeWorkerFactory, BytecodeWorkerMetricNames,
     },
     AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator, QueryInvalidationStrategy,
 };
@@ -50,31 +52,73 @@ use crate::{
 // TODO: Allow tweaking bytecode interpreter GC trigger
 const MAX_UPDATES_WITHOUT_GC: usize = 3;
 
-pub trait BytecodeInterpreterAction<T: Expression>:
-    Action
-    + BytecodeWorkerAction<T>
-    + InboundAction<EvaluateStartAction<T>>
-    + InboundAction<EvaluateUpdateAction<T>>
-    + InboundAction<EvaluateStopAction>
-    + InboundAction<BytecodeInterpreterResultAction<T>>
-    + InboundAction<BytecodeGcCompleteAction>
-    + OutboundAction<EvaluateResultAction<T>>
-    + OutboundAction<BytecodeInterpreterEvaluateAction<T>>
-    + OutboundAction<BytecodeInterpreterGcAction>
-{
+#[derive(Clone, Copy, Debug)]
+pub struct BytecodeInterpreterMetricNames {
+    pub query_worker_compile_duration: &'static str,
+    pub query_worker_evaluate_duration: &'static str,
+    pub query_worker_gc_duration: &'static str,
+    pub query_worker_state_dependency_count: &'static str,
+    pub query_worker_evaluation_cache_entry_count: &'static str,
+    pub query_worker_evaluation_cache_deep_size: &'static str,
 }
-impl<T: Expression, TAction> BytecodeInterpreterAction<T> for TAction where
-    Self: Action
-        + BytecodeWorkerAction<T>
-        + InboundAction<EvaluateStartAction<T>>
-        + InboundAction<EvaluateUpdateAction<T>>
-        + InboundAction<EvaluateStopAction>
-        + InboundAction<BytecodeInterpreterResultAction<T>>
-        + InboundAction<BytecodeGcCompleteAction>
-        + OutboundAction<EvaluateResultAction<T>>
-        + OutboundAction<BytecodeInterpreterEvaluateAction<T>>
-        + OutboundAction<BytecodeInterpreterGcAction>
+impl BytecodeInterpreterMetricNames {
+    pub fn init(self) -> Self {
+        describe_histogram!(
+            self.query_worker_compile_duration,
+            Unit::Seconds,
+            "Worker query compilation duration (seconds)"
+        );
+        describe_histogram!(
+            self.query_worker_evaluate_duration,
+            Unit::Seconds,
+            "Worker query evaluation duration (seconds)"
+        );
+        describe_histogram!(
+            self.query_worker_gc_duration,
+            Unit::Seconds,
+            "Worker garbage collection duration (seconds)"
+        );
+        describe_gauge!(
+            self.query_worker_state_dependency_count,
+            Unit::Count,
+            "The number of state dependencies for the most recent worker result"
+        );
+        describe_gauge!(
+            self.query_worker_evaluation_cache_entry_count,
+            Unit::Count,
+            "The number of entries in the query worker evaluation cache"
+        );
+        describe_gauge!(
+            self.query_worker_evaluation_cache_deep_size,
+            Unit::Count,
+            "A full count of the number of graph nodes in all entries in the query worker evaluation cache"
+        );
+        self
+    }
+}
+impl Default for BytecodeInterpreterMetricNames {
+    fn default() -> Self {
+        Self {
+            query_worker_compile_duration: "query_worker_compile_duration",
+            query_worker_evaluate_duration: "query_worker_evaluate_duration",
+            query_worker_gc_duration: "query_worker_gc_duration",
+            query_worker_state_dependency_count: "query_worker_state_dependency_count",
+            query_worker_evaluation_cache_deep_size: "query_worker_evaluation_cache_deep_size",
+            query_worker_evaluation_cache_entry_count: "query_worker_evaluation_cache_entry_count",
+        }
+    }
+}
+
+pub trait BytecodeInterpreterMetricLabels {
+    fn labels(&self, query_name: &str) -> Vec<(SharedString, SharedString)>;
+}
+impl<T> BytecodeInterpreterMetricLabels for T
+where
+    T: Fn(&str) -> Vec<(SharedString, SharedString)>,
 {
+    fn labels(&self, query_name: &str) -> Vec<(SharedString, SharedString)> {
+        (self)(query_name)
+    }
 }
 
 pub struct BytecodeInterpreter<T, TFactory, TAllocator, TMetricLabels>
@@ -82,15 +126,16 @@ where
     T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
     TFactory: AsyncExpressionFactory<T>,
     TAllocator: AsyncHeapAllocator<T>,
-    TMetricLabels: Fn(&str) -> Vec<(SharedString, SharedString)>,
+    TMetricLabels: BytecodeInterpreterMetricLabels,
 {
     graph_root: Arc<(CompiledProgram, InstructionPointer)>,
     compiler_options: CompilerOptions,
     interpreter_options: InterpreterOptions,
     factory: TFactory,
-    allocator: TAllocator,
-    metric_names: BytecodeWorkerMetricNames,
+    _allocator: TAllocator,
+    metric_names: BytecodeInterpreterMetricNames,
     get_worker_metric_labels: TMetricLabels,
+    main_pid: ProcessId,
     _expression: PhantomData<T>,
 }
 impl<T, TFactory, TAllocator, TMetricLabels>
@@ -99,7 +144,7 @@ where
     T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
     TFactory: AsyncExpressionFactory<T>,
     TAllocator: AsyncHeapAllocator<T>,
-    TMetricLabels: Fn(&str) -> Vec<(SharedString, SharedString)>,
+    TMetricLabels: BytecodeInterpreterMetricLabels,
 {
     pub fn new(
         graph_root: (CompiledProgram, InstructionPointer),
@@ -107,17 +152,19 @@ where
         interpreter_options: InterpreterOptions,
         factory: TFactory,
         allocator: TAllocator,
-        metric_names: BytecodeWorkerMetricNames,
+        metric_names: BytecodeInterpreterMetricNames,
         get_worker_metric_labels: TMetricLabels,
+        main_pid: ProcessId,
     ) -> Self {
         Self {
             graph_root: Arc::new(graph_root),
             compiler_options,
             interpreter_options,
             factory,
-            allocator,
+            _allocator: allocator,
             metric_names: metric_names.init(),
             get_worker_metric_labels,
+            main_pid,
             _expression: Default::default(),
         }
     }
@@ -254,86 +301,185 @@ impl<T: Expression> Default for ExactWorkerUpdateQueue<T> {
     }
 }
 
-impl<T, TFactory, TAllocator, TAction, TMetricLabels> Actor<TAction>
-    for BytecodeInterpreter<T, TFactory, TAllocator, TMetricLabels>
-where
-    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
-    TFactory: AsyncExpressionFactory<T>,
-    TAllocator: AsyncHeapAllocator<T>,
-    TMetricLabels: Fn(&str) -> Vec<(SharedString, SharedString)>,
-    TAction: BytecodeInterpreterAction<T> + Send + 'static,
-{
-    type State = BytecodeInterpreterState<T>;
-    fn init(&self) -> Self::State {
-        Default::default()
+dispatcher!({
+    pub enum BytecodeInterpreterAction<T: Expression> {
+        Inbox(EvaluateStartAction<T>),
+        Inbox(EvaluateUpdateAction<T>),
+        Inbox(EvaluateStopAction),
+        Inbox(BytecodeInterpreterResultAction<T>),
+        Inbox(BytecodeInterpreterGcCompleteAction),
+
+        Outbox(EvaluateResultAction<T>),
+        Outbox(BytecodeInterpreterInitAction),
+        Outbox(BytecodeInterpreterEvaluateAction<T>),
+        Outbox(BytecodeInterpreterGcAction),
     }
-    fn handle(
-        &self,
-        state: Self::State,
-        action: &TAction,
-        metadata: &MessageData,
-        context: &mut impl HandlerContext,
-    ) -> ActorTransition<Self::State, TAction> {
-        let mut state = state;
-        let actions = if let Some(action) = action.match_type() {
-            self.handle_evaluate_start(&mut state, action, metadata, context)
-        } else if let Some(action) = action.match_type() {
-            self.handle_evaluate_update(&mut state, action, metadata, context)
-        } else if let Some(action) = action.match_type() {
-            self.handle_evaluate_stop(&mut state, action, metadata, context)
-        } else if let Some(action) = action.match_type() {
-            self.handle_bytecode_interpreter_result(&mut state, action, metadata, context)
-        } else if let Some(action) = action.match_type() {
-            self.handle_gc_complete_action(&mut state, action, metadata, context)
-        } else {
-            None
+
+    impl<T, TFactory, TAllocator, TMetricLabels, TAction, TTask> Dispatcher<TAction, TTask>
+        for BytecodeInterpreter<T, TFactory, TAllocator, TMetricLabels>
+    where
+        T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
+        TFactory: AsyncExpressionFactory<T> + Default,
+        TAllocator: AsyncHeapAllocator<T> + Default,
+        TMetricLabels: BytecodeInterpreterMetricLabels,
+        TAction: Action,
+        TTask: TaskFactory<TAction, TTask> + BytecodeWorkerTask<T, TFactory, TAllocator>,
+    {
+        type State = BytecodeInterpreterState<T>;
+        type Events<TInbox: TaskInbox<TAction>> = TInbox;
+        type Dispose = NoopDisposeCallback;
+
+        fn init<TInbox: TaskInbox<TAction>>(
+            &self,
+            inbox: TInbox,
+            context: &impl ActorInitContext,
+        ) -> (Self::State, Self::Events<TInbox>, Self::Dispose) {
+            (Default::default(), inbox, Default::default())
         }
-        .unwrap_or_default();
-        ActorTransition::new(state, actions)
+
+        fn accept(&self, _action: &EvaluateStartAction<T>) -> bool {
+            true
+        }
+        fn schedule(
+            &self,
+            _action: &EvaluateStartAction<T>,
+            _state: &Self::State,
+        ) -> Option<SchedulerMode> {
+            Some(SchedulerMode::Async)
+        }
+        fn handle(
+            &self,
+            state: &mut Self::State,
+            action: &EvaluateStartAction<T>,
+            metadata: &MessageData,
+            context: &mut impl HandlerContext,
+        ) -> Option<SchedulerTransition<TAction, TTask>> {
+            self.handle_evaluate_start(state, action, metadata, context)
+        }
+
+        fn accept(&self, _action: &EvaluateUpdateAction<T>) -> bool {
+            true
+        }
+        fn schedule(
+            &self,
+            _action: &EvaluateUpdateAction<T>,
+            _state: &Self::State,
+        ) -> Option<SchedulerMode> {
+            Some(SchedulerMode::Async)
+        }
+        fn handle(
+            &self,
+            state: &mut Self::State,
+            action: &EvaluateUpdateAction<T>,
+            metadata: &MessageData,
+            context: &mut impl HandlerContext,
+        ) -> Option<SchedulerTransition<TAction, TTask>> {
+            self.handle_evaluate_update(state, action, metadata, context)
+        }
+
+        fn accept(&self, _action: &EvaluateStopAction) -> bool {
+            true
+        }
+        fn schedule(
+            &self,
+            _action: &EvaluateStopAction,
+            _state: &Self::State,
+        ) -> Option<SchedulerMode> {
+            Some(SchedulerMode::Async)
+        }
+        fn handle(
+            &self,
+            state: &mut Self::State,
+            action: &EvaluateStopAction,
+            metadata: &MessageData,
+            context: &mut impl HandlerContext,
+        ) -> Option<SchedulerTransition<TAction, TTask>> {
+            self.handle_evaluate_stop(state, action, metadata, context)
+        }
+
+        fn accept(&self, _action: &BytecodeInterpreterResultAction<T>) -> bool {
+            true
+        }
+        fn schedule(
+            &self,
+            _action: &BytecodeInterpreterResultAction<T>,
+            _state: &Self::State,
+        ) -> Option<SchedulerMode> {
+            Some(SchedulerMode::Async)
+        }
+        fn handle(
+            &self,
+            state: &mut Self::State,
+            action: &BytecodeInterpreterResultAction<T>,
+            metadata: &MessageData,
+            context: &mut impl HandlerContext,
+        ) -> Option<SchedulerTransition<TAction, TTask>> {
+            self.handle_bytecode_interpreter_result(state, action, metadata, context)
+        }
+
+        fn accept(&self, _action: &BytecodeInterpreterGcCompleteAction) -> bool {
+            true
+        }
+        fn schedule(
+            &self,
+            _action: &BytecodeInterpreterGcCompleteAction,
+            _state: &Self::State,
+        ) -> Option<SchedulerMode> {
+            Some(SchedulerMode::Async)
+        }
+        fn handle(
+            &self,
+            state: &mut Self::State,
+            action: &BytecodeInterpreterGcCompleteAction,
+            metadata: &MessageData,
+            context: &mut impl HandlerContext,
+        ) -> Option<SchedulerTransition<TAction, TTask>> {
+            self.handle_gc_complete_action(state, action, metadata, context)
+        }
     }
-}
+});
+
 impl<T, TFactory, TAllocator, TMetricLabels>
     BytecodeInterpreter<T, TFactory, TAllocator, TMetricLabels>
 where
     T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
     TFactory: AsyncExpressionFactory<T>,
     TAllocator: AsyncHeapAllocator<T>,
-    TMetricLabels: Fn(&str) -> Vec<(SharedString, SharedString)>,
+    TMetricLabels: BytecodeInterpreterMetricLabels,
 {
-    fn handle_gc_complete_action<TAction>(
+    fn handle_gc_complete_action<TAction, TTask>(
         &self,
         state: &mut BytecodeInterpreterState<T>,
-        action: &BytecodeGcCompleteAction,
+        action: &BytecodeInterpreterGcCompleteAction,
         _metadata: &MessageData,
         _context: &mut impl HandlerContext,
-    ) -> Option<StateTransition<TAction>>
+    ) -> Option<SchedulerTransition<TAction, TTask>>
     where
-        TAction: Action
-            + Send
-            + 'static
-            + OutboundAction<BytecodeInterpreterEvaluateAction<T>>
-            + BytecodeWorkerAction<T>,
+        TAction: Action,
+        TTask: TaskFactory<TAction, TTask>,
     {
-        let BytecodeGcCompleteAction {
+        let BytecodeInterpreterGcCompleteAction {
             cache_id,
             statistics,
         } = action;
         self.update_worker_cache_metrics(state, *cache_id, *statistics);
         None
     }
-    fn handle_evaluate_start<TAction>(
+    fn handle_evaluate_start<TAction, TTask>(
         &self,
         state: &mut BytecodeInterpreterState<T>,
         action: &EvaluateStartAction<T>,
         _metadata: &MessageData,
         context: &mut impl HandlerContext,
-    ) -> Option<StateTransition<TAction>>
+    ) -> Option<SchedulerTransition<TAction, TTask>>
     where
+        TFactory: Default,
+        TAllocator: Default,
         TAction: Action
-            + Send
-            + 'static
-            + OutboundAction<BytecodeInterpreterEvaluateAction<T>>
-            + BytecodeWorkerAction<T>,
+            + From<BytecodeInterpreterInitAction>
+            + From<BytecodeInterpreterEvaluateAction<T>>,
+        TTask:
+            TaskFactory<TAction, TTask> + From<BytecodeWorkerTaskFactory<T, TFactory, TAllocator>>,
     {
         let EvaluateStartAction {
             cache_id,
@@ -345,9 +491,10 @@ where
         let actions = match state.workers.entry(*cache_id) {
             Entry::Occupied(_) => None,
             Entry::Vacant(entry) => {
-                let worker_pid = context.generate_pid();
+                let task_pid = context.generate_pid();
+                let current_pid = context.pid();
                 entry.insert(BytecodeInterpreterWorkerState {
-                    pid: worker_pid,
+                    pid: task_pid,
                     label: label.clone(),
                     state_index: None,
                     status: BytecodeInterpreterWorkerStatus::Working(
@@ -357,23 +504,46 @@ where
                     updates_since_gc: 0,
                     metrics: Default::default(),
                 });
-                Some(StateTransition::new([
-                    StateOperation::spawn(
-                        worker_pid,
-                        BytecodeWorkerFactory {
+                Some(SchedulerTransition::new([
+                    SchedulerCommand::Task(
+                        task_pid,
+                        BytecodeWorkerTaskFactory {
                             cache_id: *cache_id,
                             query: query.clone(),
                             evaluation_mode: *evaluation_mode,
                             compiler_options: self.compiler_options,
                             interpreter_options: self.interpreter_options,
                             graph_root: self.graph_root.clone(),
-                            factory: self.factory.clone(),
-                            allocator: self.allocator.clone(),
-                            metric_names: self.metric_names,
-                        },
+                            metric_names: BytecodeWorkerMetricNames {
+                                query_worker_compile_duration: self
+                                    .metric_names
+                                    .query_worker_compile_duration
+                                    .into(),
+                                query_worker_evaluate_duration: self
+                                    .metric_names
+                                    .query_worker_evaluate_duration
+                                    .into(),
+                                query_worker_gc_duration: self
+                                    .metric_names
+                                    .query_worker_gc_duration
+                                    .into(),
+                            },
+                            caller_pid: current_pid,
+                            _expression: PhantomData,
+                            _factory: PhantomData,
+                            _allocator: PhantomData,
+                        }
+                        .into(),
                     ),
-                    StateOperation::Send(
-                        worker_pid,
+                    SchedulerCommand::Send(
+                        task_pid,
+                        BytecodeInterpreterInitAction {
+                            cache_id: *cache_id,
+                        }
+                        .into(),
+                    ),
+                    SchedulerCommand::Send(
+                        task_pid,
                         BytecodeInterpreterEvaluateAction {
                             cache_id: *cache_id,
                             state_index: None,
@@ -389,7 +559,7 @@ where
                 entry.get_mut().active_workers.insert(*cache_id);
             }
             Entry::Vacant(entry) => {
-                let worker_labels = (self.get_worker_metric_labels)(label.as_str());
+                let worker_labels = self.get_worker_metric_labels.labels(label.as_str());
                 entry.insert(WorkerMetricsState {
                     active_workers: IntSet::from_iter(once(*cache_id)),
                     quantile_metric_labels: generate_quantile_metric_labels(
@@ -401,15 +571,18 @@ where
         }
         Some(actions)
     }
-    fn handle_evaluate_update<TAction>(
+    fn handle_evaluate_update<TAction, TTask>(
         &self,
         state: &mut BytecodeInterpreterState<T>,
         action: &EvaluateUpdateAction<T>,
         _metadata: &MessageData,
         _context: &mut impl HandlerContext,
-    ) -> Option<StateTransition<TAction>>
+    ) -> Option<SchedulerTransition<TAction, TTask>>
     where
-        TAction: Action + Send + 'static + OutboundAction<BytecodeInterpreterEvaluateAction<T>>,
+        TAction: Action
+            + From<BytecodeInterpreterInitAction>
+            + From<BytecodeInterpreterEvaluateAction<T>>,
+        TTask: TaskFactory<TAction, TTask>,
     {
         let EvaluateUpdateAction {
             cache_id,
@@ -433,20 +606,21 @@ where
         worker_state.status = BytecodeInterpreterWorkerStatus::Working(
             BytecodeWorkerUpdateQueue::new(worker_state.invalidation_strategy),
         );
-        Some(StateTransition::new(once(StateOperation::Send(
+        Some(SchedulerTransition::new(once(SchedulerCommand::Send(
             worker_pid,
             evaluate_action.into(),
         ))))
     }
-    fn handle_evaluate_stop<TAction>(
+    fn handle_evaluate_stop<TAction, TTask>(
         &self,
         state: &mut BytecodeInterpreterState<T>,
         action: &EvaluateStopAction,
         _metadata: &MessageData,
         _context: &mut impl HandlerContext,
-    ) -> Option<StateTransition<TAction>>
+    ) -> Option<SchedulerTransition<TAction, TTask>>
     where
         TAction: Action,
+        TTask: TaskFactory<TAction, TTask>,
     {
         let EvaluateStopAction { cache_id } = action;
         // Reset the metrics for this worker
@@ -462,22 +636,23 @@ where
                 entry.remove();
             }
         }
-        Some(StateTransition::new(once(StateOperation::Kill(worker_pid))))
+        Some(SchedulerTransition::new(once(SchedulerCommand::Kill(
+            worker_pid,
+        ))))
     }
-    fn handle_bytecode_interpreter_result<TAction>(
+    fn handle_bytecode_interpreter_result<TAction, TTask>(
         &self,
         state: &mut BytecodeInterpreterState<T>,
         action: &BytecodeInterpreterResultAction<T>,
         _metadata: &MessageData,
-        context: &mut impl HandlerContext,
-    ) -> Option<StateTransition<TAction>>
+        _context: &mut impl HandlerContext,
+    ) -> Option<SchedulerTransition<TAction, TTask>>
     where
         TAction: Action
-            + Send
-            + 'static
-            + OutboundAction<EvaluateResultAction<T>>
-            + OutboundAction<BytecodeInterpreterEvaluateAction<T>>
-            + OutboundAction<BytecodeInterpreterGcAction>,
+            + From<EvaluateResultAction<T>>
+            + From<BytecodeInterpreterEvaluateAction<T>>
+            + From<BytecodeInterpreterGcAction>,
+        TTask: TaskFactory<TAction, TTask>,
     {
         let BytecodeInterpreterResultAction {
             cache_id,
@@ -524,9 +699,9 @@ where
                 None
             }
         };
-        Some(StateTransition::new(
-            once(StateOperation::Send(
-                context.pid(),
+        Some(SchedulerTransition::new(
+            once(SchedulerCommand::Send(
+                self.main_pid,
                 EvaluateResultAction {
                     cache_id: *cache_id,
                     state_index: *state_index,
@@ -536,12 +711,12 @@ where
             ))
             .chain(gc_action.map(|action| {
                 let worker_pid = worker_state.pid;
-                StateOperation::Send(worker_pid, action.into())
+                SchedulerCommand::Send(worker_pid, action.into())
             }))
             .chain(queued_evaluation.map(|(action, remaining_queue)| {
                 let worker_pid = worker_state.pid;
                 worker_state.status = BytecodeInterpreterWorkerStatus::Working(remaining_queue);
-                StateOperation::Send(worker_pid, action.into())
+                SchedulerCommand::Send(worker_pid, action.into())
             })),
         ))
     }
