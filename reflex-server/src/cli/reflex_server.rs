@@ -410,7 +410,11 @@ where
     TAllocator: AsyncHeapAllocator<T>,
     TAction: GraphQlWebServerAction<T> + Clone + Send + 'static,
 {
-    start_runtime_monitoring(tokio_runtime_metric_names);
+    start_runtime_monitoring(
+        tokio::runtime::Handle::current(),
+        tokio_runtime_metric_names,
+        "main",
+    );
     let app = GraphQlWebServer::new(
         graph_root,
         schema,

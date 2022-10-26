@@ -94,7 +94,11 @@ where
     TAction: Action + SerializableAction + GraphQlWebServerAction<T> + Clone + Send + 'static,
     TTransform: HttpGraphQlServerQueryTransform + Send + 'static,
 {
-    start_runtime_monitoring(tokio_runtime_metric_names);
+    start_runtime_monitoring(
+        tokio::runtime::Handle::current(),
+        tokio_runtime_metric_names,
+        "main",
+    );
     let compiler_options = if options.debug_compiler {
         CompilerOptions::debug()
     } else {
