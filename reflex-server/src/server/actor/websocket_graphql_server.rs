@@ -1,16 +1,17 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use std::{
     collections::{hash_map::Entry, HashMap},
     iter::{empty, once},
     marker::PhantomData,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use futures::FutureExt;
 use http::{HeaderMap, Request};
-use metrics::{decrement_gauge, describe_gauge, increment_gauge, Unit};
+use metrics::{decrement_gauge, describe_gauge, gauge, increment_gauge, Unit};
 use reflex::core::{Expression, ExpressionFactory, Uuid};
 use reflex_dispatcher::{
     Action, Actor, ActorTransition, HandlerContext, InboundAction, MessageData, OperationStream,
@@ -31,6 +32,7 @@ use reflex_graphql::{
 use reflex_json::{json_object, JsonMap, JsonNumber, JsonValue};
 use tokio::time::sleep;
 
+use crate::server::actor::graphql_server::GraphQlQueryStatus;
 use crate::{
     server::action::{
         graphql_server::{
@@ -50,6 +52,7 @@ use crate::{
 pub struct WebSocketGraphQlServerMetricNames {
     pub graphql_websocket_connection_count: &'static str,
     pub graphql_websocket_initialized_connection_count: &'static str,
+    pub graphql_websocket_query_error_duration_micros: &'static str,
 }
 impl WebSocketGraphQlServerMetricNames {
     fn init(self) -> Self {
@@ -63,6 +66,11 @@ impl WebSocketGraphQlServerMetricNames {
             Unit::Count,
             "Active initialized client GraphQL Web Socket connection count"
         );
+        describe_gauge!(
+            self.graphql_websocket_query_error_duration_micros,
+            Unit::Microseconds,
+            "Time that a given query has spent in an error state"
+        );
         self
     }
 }
@@ -72,6 +80,8 @@ impl Default for WebSocketGraphQlServerMetricNames {
             graphql_websocket_connection_count: "graphql_websocket_connection_count",
             graphql_websocket_initialized_connection_count:
                 "graphql_websocket_initialized_connection_count",
+            graphql_websocket_query_error_duration_micros:
+                "graphql_websocket_query_error_duration_micros",
         }
     }
 }
@@ -290,6 +300,7 @@ struct WebSocketGraphQlOperation<T: Expression> {
     diff_result: Option<Option<(T, JsonValue)>>,
     /// Throttle duration and active throttle state if this is a throttled stream
     throttle: Option<(Duration, Option<ThrottleState<T>>)>,
+    error_metric_tracker: QueryErrorStateTracker,
 }
 struct ThrottleState<T: Expression> {
     result: T,
@@ -505,6 +516,10 @@ where
                 1.0,
                 &previous_metric_labels
             );
+            connection
+                .operations
+                .iter_mut()
+                .for_each(|operation| operation.error_metric_tracker.record_in_non_error_state());
         }
         increment_gauge!(
             self.metric_names
@@ -625,6 +640,24 @@ where
                                 .schema_types
                                 .as_ref()
                                 .map(|_| operation.query().clone());
+                            let mut operation_metric_labels = connection
+                                .initialized_state
+                                .as_ref()
+                                .map(|connection| connection.metric_labels.clone())
+                                .unwrap_or_else(Vec::new);
+                            if let Some(operation_name) = operation.operation_name() {
+                                operation_metric_labels.push((
+                                    "operation_name".to_string(),
+                                    operation_name.to_string(),
+                                ));
+                            }
+                            let error_metric_tracker = QueryErrorStateTracker {
+                                metric_labels: operation_metric_labels,
+                                metric_name: self
+                                    .metric_names
+                                    .graphql_websocket_query_error_duration_micros,
+                                error_state_start_time: None,
+                            };
                             WebSocketGraphQlOperation {
                                 operation_id: operation_id.clone(),
                                 subscription_id,
@@ -632,6 +665,7 @@ where
                                 query: validation_query,
                                 diff_result: if diff_result { Some(None) } else { None },
                                 throttle: throttle_duration.map(|duration| (duration, None)),
+                                error_metric_tracker,
                             }
                         };
                         Ok((operation, operation_state))
@@ -877,6 +911,15 @@ where
             .into(),
         ))))
     }
+    fn record_error_duration_metrics(
+        &self,
+        result: &T,
+        subscription: &mut WebSocketGraphQlOperation<T>,
+    ) {
+        subscription
+            .error_metric_tracker
+            .record_query_state(result, &self.factory);
+    }
     fn handle_graphql_emit_action<TAction>(
         &self,
         state: &mut WebSocketGraphQlServerState<T>,
@@ -897,6 +940,8 @@ where
             result,
         } = action;
         let (connection_id, subscription) = state.find_subscription_mut(subscription_id)?;
+        self.record_error_duration_metrics(result, subscription);
+
         let is_unchanged = subscription
             .diff_result
             .as_ref()
@@ -1200,4 +1245,39 @@ fn clone_request_wrapper<T>(request: &Request<T>) -> Request<()> {
         headers.append(key.clone(), value.clone());
     }
     result
+}
+
+#[derive(Clone)]
+struct QueryErrorStateTracker {
+    metric_labels: Vec<(String, String)>,
+    metric_name: &'static str,
+    error_state_start_time: Option<Instant>,
+}
+impl QueryErrorStateTracker {
+    pub fn record_query_state<T: Expression>(
+        &mut self,
+        result: &T,
+        factory: &impl ExpressionFactory<T>,
+    ) {
+        match GraphQlQueryStatus::get_state(Some(result), factory) {
+            GraphQlQueryStatus::Error => self.record_query_error_state(),
+            _ => self.record_in_non_error_state(),
+        }
+    }
+    pub fn record_in_non_error_state(&mut self) {
+        // If this was previously in error then remove it, and update the gauge as appropriate, otherwise nothing to do
+        if self.error_state_start_time.is_some() {
+            gauge!(self.metric_name, 0.0, &self.metric_labels);
+            self.error_state_start_time = None;
+        }
+    }
+    fn record_query_error_state(&mut self) {
+        let error_start_time = self.error_state_start_time.unwrap_or_else(Instant::now);
+        gauge!(
+            self.metric_name,
+            error_start_time.elapsed().as_micros() as f64,
+            &self.metric_labels
+        );
+        self.error_state_start_time = Some(error_start_time);
+    }
 }

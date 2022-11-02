@@ -1374,7 +1374,7 @@ fn is_pending_result_payload<T: Expression>(
 }
 
 #[derive(Eq, PartialEq, Clone, Copy, Debug)]
-enum GraphQlQueryStatus {
+pub(super) enum GraphQlQueryStatus {
     Blocked,
     Pending,
     Success,
@@ -1382,7 +1382,10 @@ enum GraphQlQueryStatus {
 }
 
 impl GraphQlQueryStatus {
-    fn get_state<T: Expression>(value: Option<&T>, factory: &impl ExpressionFactory<T>) -> Self {
+    pub(super) fn get_state<T: Expression>(
+        value: Option<&T>,
+        factory: &impl ExpressionFactory<T>,
+    ) -> Self {
         match value {
             None => Self::Pending,
             Some(value) if is_error_result_payload(value, factory) => Self::Error,
