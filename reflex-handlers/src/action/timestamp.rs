@@ -4,7 +4,7 @@
 use std::time::SystemTime;
 
 use reflex::core::Uuid;
-use reflex_dispatcher::{Action, NamedAction, SerializableAction, SerializedAction};
+use reflex_dispatcher::{Action, Named, SerializableAction, SerializedAction};
 use reflex_json::JsonValue;
 use serde::{Deserialize, Serialize};
 
@@ -15,7 +15,7 @@ pub enum TimestampHandlerActions {
     Update(TimestampHandlerUpdateAction),
 }
 impl Action for TimestampHandlerActions {}
-impl NamedAction for TimestampHandlerActions {
+impl Named for TimestampHandlerActions {
     fn name(&self) -> &'static str {
         match self {
             Self::Update(action) => action.name(),
@@ -56,7 +56,7 @@ pub struct TimestampHandlerUpdateAction {
     pub timestamp: SystemTime,
 }
 impl Action for TimestampHandlerUpdateAction {}
-impl NamedAction for TimestampHandlerUpdateAction {
+impl Named for TimestampHandlerUpdateAction {
     fn name(&self) -> &'static str {
         "TimestampHandlerUpdateAction"
     }

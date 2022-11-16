@@ -3,7 +3,7 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use bytes::Bytes;
 use http::{Request, Response};
-use reflex_dispatcher::{Action, NamedAction, SerializableAction, SerializedAction};
+use reflex_dispatcher::{Action, Named, SerializableAction, SerializedAction};
 use reflex_json::{JsonMap, JsonValue};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -19,7 +19,7 @@ pub enum SessionPlaybackServerActions {
     HttpResponse(SessionPlaybackServerHttpResponseAction),
 }
 impl Action for SessionPlaybackServerActions {}
-impl NamedAction for SessionPlaybackServerActions {
+impl Named for SessionPlaybackServerActions {
     fn name(&self) -> &'static str {
         match self {
             Self::HttpRequest(action) => action.name(),
@@ -98,7 +98,7 @@ impl Clone for SessionPlaybackServerHttpRequestAction {
     }
 }
 impl Action for SessionPlaybackServerHttpRequestAction {}
-impl NamedAction for SessionPlaybackServerHttpRequestAction {
+impl Named for SessionPlaybackServerHttpRequestAction {
     fn name(&self) -> &'static str {
         "SessionPlaybackServerHttpRequestAction"
     }
@@ -176,7 +176,7 @@ impl Clone for SessionPlaybackServerHttpResponseAction {
     }
 }
 impl Action for SessionPlaybackServerHttpResponseAction {}
-impl NamedAction for SessionPlaybackServerHttpResponseAction {
+impl Named for SessionPlaybackServerHttpResponseAction {
     fn name(&self) -> &'static str {
         "SessionPlaybackServerHttpResponseAction"
     }

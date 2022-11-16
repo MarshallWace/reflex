@@ -3,7 +3,7 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use reflex::core::Expression;
-use reflex_dispatcher::{Action, NamedAction, SerializableAction, SerializedAction};
+use reflex_dispatcher::{Action, Named, SerializableAction, SerializedAction};
 use reflex_grpc::action::*;
 use reflex_handlers::action::{
     fetch::{
@@ -53,7 +53,7 @@ pub enum ServerCliAction<T: Expression> {
     Init(InitActions),
 }
 impl<T: Expression> Action for ServerCliAction<T> {}
-impl<T: Expression> NamedAction for ServerCliAction<T> {
+impl<T: Expression> Named for ServerCliAction<T> {
     fn name(&self) -> &'static str {
         match self {
             Self::Runtime(action) => action.name(),

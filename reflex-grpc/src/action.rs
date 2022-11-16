@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 
 use hyper::{header::HeaderName, http::HeaderValue, HeaderMap};
-use reflex_dispatcher::{Action, NamedAction, SerializableAction, SerializedAction};
+use reflex_dispatcher::{Action, Named, SerializableAction, SerializedAction};
 use reflex_json::json;
 use reflex_protobuf::Bytes;
 use reflex_utils::serialize::bytes as serialize_bytes;
@@ -121,7 +121,7 @@ pub enum GrpcHandlerActions {
     ConnectionTerminate(GrpcHandlerConnectionTerminateAction),
 }
 impl Action for GrpcHandlerActions {}
-impl NamedAction for GrpcHandlerActions {
+impl Named for GrpcHandlerActions {
     fn name(&self) -> &'static str {
         match self {
             Self::ConnectSuccess(action) => action.name(),
@@ -356,7 +356,7 @@ pub struct GrpcHandlerConnectSuccessAction {
     pub url: String,
 }
 impl Action for GrpcHandlerConnectSuccessAction {}
-impl NamedAction for GrpcHandlerConnectSuccessAction {
+impl Named for GrpcHandlerConnectSuccessAction {
     fn name(&self) -> &'static str {
         "GrpcMiddlewareConnectSuccessAction"
     }
@@ -380,7 +380,7 @@ pub struct GrpcHandlerConnectErrorAction {
     pub message: String,
 }
 impl Action for GrpcHandlerConnectErrorAction {}
-impl NamedAction for GrpcHandlerConnectErrorAction {
+impl Named for GrpcHandlerConnectErrorAction {
     fn name(&self) -> &'static str {
         "GrpcMiddlewareConnectErrorAction"
     }
@@ -413,7 +413,7 @@ pub struct GrpcHandlerRequestStartAction {
     pub message: Bytes,
 }
 impl Action for GrpcHandlerRequestStartAction {}
-impl NamedAction for GrpcHandlerRequestStartAction {
+impl Named for GrpcHandlerRequestStartAction {
     fn name(&self) -> &'static str {
         "GrpcMiddlewareRequestStartAction"
     }
@@ -457,7 +457,7 @@ pub struct GrpcHandlerRequestStopAction {
     pub metadata: GrpcMetadata,
 }
 impl Action for GrpcHandlerRequestStopAction {}
-impl NamedAction for GrpcHandlerRequestStopAction {
+impl Named for GrpcHandlerRequestStopAction {
     fn name(&self) -> &'static str {
         "GrpcMiddlewareRequestStopAction"
     }
@@ -495,7 +495,7 @@ pub struct GrpcHandlerSuccessResponseAction {
     pub data: Bytes,
 }
 impl Action for GrpcHandlerSuccessResponseAction {}
-impl NamedAction for GrpcHandlerSuccessResponseAction {
+impl Named for GrpcHandlerSuccessResponseAction {
     fn name(&self) -> &'static str {
         "GrpcMiddlewareSuccessResponseAction"
     }
@@ -529,7 +529,7 @@ pub struct GrpcHandlerErrorResponseAction {
     pub status: GrpcStatus,
 }
 impl Action for GrpcHandlerErrorResponseAction {}
-impl NamedAction for GrpcHandlerErrorResponseAction {
+impl Named for GrpcHandlerErrorResponseAction {
     fn name(&self) -> &'static str {
         "GrpcMiddlewareErrorResponseAction"
     }
@@ -573,7 +573,7 @@ pub struct GrpcHandlerTransportErrorAction {
     pub status: GrpcStatus,
 }
 impl Action for GrpcHandlerTransportErrorAction {}
-impl NamedAction for GrpcHandlerTransportErrorAction {
+impl Named for GrpcHandlerTransportErrorAction {
     fn name(&self) -> &'static str {
         "GrpcMiddlewareTransportErrorAction"
     }
@@ -610,7 +610,7 @@ pub struct GrpcHandlerAbortRequestAction {
     pub operation_id: Uuid,
 }
 impl Action for GrpcHandlerAbortRequestAction {}
-impl NamedAction for GrpcHandlerAbortRequestAction {
+impl Named for GrpcHandlerAbortRequestAction {
     fn name(&self) -> &'static str {
         "GrpcMiddlewareAbortRequestAction"
     }
@@ -636,7 +636,7 @@ pub struct GrpcHandlerConnectionTerminateAction {
     pub url: String,
 }
 impl Action for GrpcHandlerConnectionTerminateAction {}
-impl NamedAction for GrpcHandlerConnectionTerminateAction {
+impl Named for GrpcHandlerConnectionTerminateAction {
     fn name(&self) -> &'static str {
         "GrpcMiddlewareConnectionTerminateAction"
     }

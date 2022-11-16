@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use reflex::core::Expression;
-use reflex_dispatcher::{Action, NamedAction, SerializableAction, SerializedAction};
+use reflex_dispatcher::{Action, Named, SerializableAction, SerializedAction};
 use serde::Deserialize;
 use serde::Serialize;
 
@@ -26,7 +26,7 @@ pub enum RuntimeActions<T: Expression> {
     Query(QueryActions<T>),
 }
 impl<T: Expression> Action for RuntimeActions<T> {}
-impl<T: Expression> NamedAction for RuntimeActions<T> {
+impl<T: Expression> Named for RuntimeActions<T> {
     fn name(&self) -> &'static str {
         match self {
             Self::Effect(action) => action.name(),

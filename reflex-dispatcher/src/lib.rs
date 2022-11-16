@@ -30,11 +30,11 @@ where
 
 pub trait Action {}
 
-pub trait NamedAction: Action {
+pub trait Named {
     fn name(&self) -> &'static str;
 }
 
-pub trait SerializableAction: NamedAction {
+pub trait SerializableAction: Named {
     fn to_json(&self) -> SerializedAction;
 }
 

@@ -3,7 +3,7 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use http::Request;
 use reflex::core::Uuid;
-use reflex_dispatcher::{Action, NamedAction, SerializableAction, SerializedAction};
+use reflex_dispatcher::{Action, Named, SerializableAction, SerializedAction};
 use reflex_graphql::subscriptions::{
     GraphQlSubscriptionClientMessage, GraphQlSubscriptionServerMessage,
 };
@@ -21,7 +21,7 @@ pub enum WebSocketServerActions {
     ThrottleTimeout(WebSocketServerThrottleTimeoutAction),
 }
 impl Action for WebSocketServerActions {}
-impl NamedAction for WebSocketServerActions {
+impl Named for WebSocketServerActions {
     fn name(&self) -> &'static str {
         match self {
             Self::Connect(action) => action.name(),
@@ -166,7 +166,7 @@ impl Clone for WebSocketServerConnectAction {
     }
 }
 impl Action for WebSocketServerConnectAction {}
-impl NamedAction for WebSocketServerConnectAction {
+impl Named for WebSocketServerConnectAction {
     fn name(&self) -> &'static str {
         "WebSocketServerConnectAction"
     }
@@ -231,7 +231,7 @@ pub struct WebSocketServerReceiveAction {
     pub message: GraphQlSubscriptionClientMessage,
 }
 impl Action for WebSocketServerReceiveAction {}
-impl NamedAction for WebSocketServerReceiveAction {
+impl Named for WebSocketServerReceiveAction {
     fn name(&self) -> &'static str {
         "WebSocketServerReceiveAction"
     }
@@ -253,7 +253,7 @@ pub struct WebSocketServerSendAction {
     pub connection_id: Uuid,
     pub message: GraphQlSubscriptionServerMessage,
 }
-impl NamedAction for WebSocketServerSendAction {
+impl Named for WebSocketServerSendAction {
     fn name(&self) -> &'static str {
         "WebSocketServerSendAction"
     }
@@ -299,7 +299,7 @@ pub struct WebSocketServerDisconnectAction {
     pub connection_id: Uuid,
 }
 impl Action for WebSocketServerDisconnectAction {}
-impl NamedAction for WebSocketServerDisconnectAction {
+impl Named for WebSocketServerDisconnectAction {
     fn name(&self) -> &'static str {
         "WebSocketServerDisconnectAction"
     }
@@ -318,7 +318,7 @@ pub struct WebSocketServerThrottleTimeoutAction {
     pub subscription_id: Uuid,
 }
 impl Action for WebSocketServerThrottleTimeoutAction {}
-impl NamedAction for WebSocketServerThrottleTimeoutAction {
+impl Named for WebSocketServerThrottleTimeoutAction {
     fn name(&self) -> &'static str {
         "WebSocketServerThrottleTimeoutAction"
     }

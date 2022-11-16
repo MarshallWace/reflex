@@ -27,7 +27,7 @@ use reflex::{
 };
 use reflex_cli::{builtins::CliBuiltins, create_parser, repl, Syntax, SyntaxParser};
 use reflex_dispatcher::{
-    Action, Actor, ActorInitContext, Handler, HandlerContext, Matcher, MessageData, NamedAction,
+    Action, Actor, ActorInitContext, Handler, HandlerContext, Matcher, MessageData, Named,
     NoopDisposeCallback, Redispatcher, SchedulerCommand, SchedulerMode, SchedulerTransition,
     SerializableAction, SerializedAction, TaskFactory, TaskInbox, Worker,
 };
@@ -497,7 +497,7 @@ enum CliActions<T: Expression> {
     TimestampHandler(TimestampHandlerActions),
 }
 impl<T: Expression> Action for CliActions<T> {}
-impl<T: Expression> NamedAction for CliActions<T> {
+impl<T: Expression> Named for CliActions<T> {
     fn name(&self) -> &'static str {
         match self {
             Self::Runtime(action) => action.name(),

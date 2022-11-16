@@ -4,7 +4,7 @@
 use std::marker::PhantomData;
 
 use reflex::core::{Expression, Uuid};
-use reflex_dispatcher::{Action, NamedAction, SerializableAction, SerializedAction};
+use reflex_dispatcher::{Action, Named, SerializableAction, SerializedAction};
 use reflex_graphql::{GraphQlOperation, GraphQlVariables};
 use reflex_json::JsonValue;
 use serde::{Deserialize, Serialize};
@@ -19,7 +19,7 @@ pub enum GraphQlServerActions<T: Expression> {
     Emit(GraphQlServerEmitAction<T>),
 }
 impl<T: Expression> Action for GraphQlServerActions<T> {}
-impl<T: Expression> NamedAction for GraphQlServerActions<T> {
+impl<T: Expression> Named for GraphQlServerActions<T> {
     fn name(&self) -> &'static str {
         match self {
             Self::Subscribe(action) => action.name(),
@@ -195,7 +195,7 @@ pub struct GraphQlServerSubscribeAction<T: Expression> {
     pub _expression: PhantomData<T>,
 }
 impl<T: Expression> Action for GraphQlServerSubscribeAction<T> {}
-impl<T: Expression> NamedAction for GraphQlServerSubscribeAction<T> {
+impl<T: Expression> Named for GraphQlServerSubscribeAction<T> {
     fn name(&self) -> &'static str {
         "GraphQlServerSubscribeAction"
     }
@@ -236,7 +236,7 @@ pub struct GraphQlServerUnsubscribeAction<T: Expression> {
     pub _expression: PhantomData<T>,
 }
 impl<T: Expression> Action for GraphQlServerUnsubscribeAction<T> {}
-impl<T: Expression> NamedAction for GraphQlServerUnsubscribeAction<T> {
+impl<T: Expression> Named for GraphQlServerUnsubscribeAction<T> {
     fn name(&self) -> &'static str {
         "GraphQlServerUnsubscribeAction"
     }
@@ -257,7 +257,7 @@ pub struct GraphQlServerModifyAction<T: Expression> {
     pub _expression: PhantomData<T>,
 }
 impl<T: Expression> Action for GraphQlServerModifyAction<T> {}
-impl<T: Expression> NamedAction for GraphQlServerModifyAction<T> {
+impl<T: Expression> Named for GraphQlServerModifyAction<T> {
     fn name(&self) -> &'static str {
         "GraphQlServerModifyAction"
     }
@@ -280,7 +280,7 @@ pub struct GraphQlServerParseSuccessAction<T: Expression> {
     pub query: T,
 }
 impl<T: Expression> Action for GraphQlServerParseSuccessAction<T> {}
-impl<T: Expression> NamedAction for GraphQlServerParseSuccessAction<T> {
+impl<T: Expression> Named for GraphQlServerParseSuccessAction<T> {
     fn name(&self) -> &'static str {
         "GraphQlServerParseSuccessAction"
     }
@@ -305,7 +305,7 @@ pub struct GraphQlServerParseErrorAction<T: Expression> {
     pub _expression: PhantomData<T>,
 }
 impl<T: Expression> Action for GraphQlServerParseErrorAction<T> {}
-impl<T: Expression> NamedAction for GraphQlServerParseErrorAction<T> {
+impl<T: Expression> Named for GraphQlServerParseErrorAction<T> {
     fn name(&self) -> &'static str {
         "GraphQlServerParseErrorAction"
     }
@@ -347,7 +347,7 @@ pub struct GraphQlServerEmitAction<T: Expression> {
     pub result: T,
 }
 impl<T: Expression> Action for GraphQlServerEmitAction<T> {}
-impl<T: Expression> NamedAction for GraphQlServerEmitAction<T> {
+impl<T: Expression> Named for GraphQlServerEmitAction<T> {
     fn name(&self) -> &'static str {
         "GraphQlServerEmitAction"
     }

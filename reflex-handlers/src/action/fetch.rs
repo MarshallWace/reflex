@@ -4,7 +4,7 @@
 use bytes::Bytes;
 use http::StatusCode;
 use reflex::core::Uuid;
-use reflex_dispatcher::{Action, NamedAction, SerializableAction, SerializedAction};
+use reflex_dispatcher::{Action, Named, SerializableAction, SerializedAction};
 use reflex_json::JsonValue;
 use serde::{Deserialize, Serialize};
 
@@ -16,7 +16,7 @@ pub enum FetchHandlerActions {
     ConnectionError(FetchHandlerConnectionErrorAction),
 }
 impl Action for FetchHandlerActions {}
-impl NamedAction for FetchHandlerActions {
+impl Named for FetchHandlerActions {
     fn name(&self) -> &'static str {
         match self {
             Self::FetchComplete(action) => action.name(),
@@ -85,7 +85,7 @@ pub struct FetchHandlerFetchCompleteAction {
     pub body: Bytes,
 }
 impl Action for FetchHandlerFetchCompleteAction {}
-impl NamedAction for FetchHandlerFetchCompleteAction {
+impl Named for FetchHandlerFetchCompleteAction {
     fn name(&self) -> &'static str {
         "FetchHandlerFetchCompleteAction"
     }
@@ -166,7 +166,7 @@ pub struct FetchHandlerConnectionErrorAction {
     pub message: String,
 }
 impl Action for FetchHandlerConnectionErrorAction {}
-impl NamedAction for FetchHandlerConnectionErrorAction {
+impl Named for FetchHandlerConnectionErrorAction {
     fn name(&self) -> &'static str {
         "FetchHandlerConnectionErrorAction"
     }

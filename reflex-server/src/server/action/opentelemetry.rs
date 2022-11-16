@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use reflex_dispatcher::{Action, NamedAction, SerializableAction, SerializedAction};
+use reflex_dispatcher::{Action, Named, SerializableAction, SerializedAction};
 use reflex_json::JsonValue;
 use serde::{Deserialize, Serialize};
 
@@ -10,7 +10,7 @@ pub enum OpenTelemetryMiddlewareActions {
     Error(OpenTelemetryMiddlewareErrorAction),
 }
 impl Action for OpenTelemetryMiddlewareActions {}
-impl NamedAction for OpenTelemetryMiddlewareActions {
+impl Named for OpenTelemetryMiddlewareActions {
     fn name(&self) -> &'static str {
         match self {
             Self::Error(action) => action.name(),
@@ -52,7 +52,7 @@ pub struct OpenTelemetryMiddlewareErrorAction {
     pub error: String,
 }
 impl Action for OpenTelemetryMiddlewareErrorAction {}
-impl NamedAction for OpenTelemetryMiddlewareErrorAction {
+impl Named for OpenTelemetryMiddlewareErrorAction {
     fn name(&self) -> &'static str {
         "OpenTelemetryMiddlewareErrorAction"
     }

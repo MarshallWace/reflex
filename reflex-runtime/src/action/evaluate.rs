@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use reflex::core::{EvaluationResult, Expression, StateToken};
-use reflex_dispatcher::{Action, MessageOffset, NamedAction, SerializableAction, SerializedAction};
+use reflex_dispatcher::{Action, MessageOffset, Named, SerializableAction, SerializedAction};
 use reflex_json::JsonValue;
 use serde::{Deserialize, Serialize};
 
@@ -16,7 +16,7 @@ pub enum EvaluateActions<T: Expression> {
     Result(EvaluateResultAction<T>),
 }
 impl<T: Expression> Action for EvaluateActions<T> {}
-impl<T: Expression> NamedAction for EvaluateActions<T> {
+impl<T: Expression> Named for EvaluateActions<T> {
     fn name(&self) -> &'static str {
         match self {
             Self::Start(action) => action.name(),
@@ -134,7 +134,7 @@ pub struct EvaluateStartAction<T: Expression> {
     pub invalidation_strategy: QueryInvalidationStrategy,
 }
 impl<T: Expression> Action for EvaluateStartAction<T> {}
-impl<T: Expression> NamedAction for EvaluateStartAction<T> {
+impl<T: Expression> Named for EvaluateStartAction<T> {
     fn name(&self) -> &'static str {
         "EvaluateStartAction"
     }
@@ -170,7 +170,7 @@ pub struct EvaluateUpdateAction<T: Expression> {
     pub state_updates: Vec<(StateToken, T)>,
 }
 impl<T: Expression> Action for EvaluateUpdateAction<T> {}
-impl<T: Expression> NamedAction for EvaluateUpdateAction<T> {
+impl<T: Expression> Named for EvaluateUpdateAction<T> {
     fn name(&self) -> &'static str {
         "EvaluateUpdateAction"
     }
@@ -199,7 +199,7 @@ pub struct EvaluateStopAction {
     pub cache_id: StateToken,
 }
 impl Action for EvaluateStopAction {}
-impl NamedAction for EvaluateStopAction {
+impl Named for EvaluateStopAction {
     fn name(&self) -> &'static str {
         "EvaluateStopAction"
     }
@@ -217,7 +217,7 @@ pub struct EvaluateResultAction<T: Expression> {
     pub result: EvaluationResult<T>,
 }
 impl<T: Expression> Action for EvaluateResultAction<T> {}
-impl<T: Expression> NamedAction for EvaluateResultAction<T> {
+impl<T: Expression> Named for EvaluateResultAction<T> {
     fn name(&self) -> &'static str {
         "EvaluateResultAction"
     }

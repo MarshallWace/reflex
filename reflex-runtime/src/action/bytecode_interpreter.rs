@@ -3,7 +3,7 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use reflex::core::{EvaluationResult, Expression, StateToken};
-use reflex_dispatcher::{Action, MessageOffset, NamedAction, SerializableAction, SerializedAction};
+use reflex_dispatcher::{Action, MessageOffset, Named, SerializableAction, SerializedAction};
 use reflex_json::{JsonMap, JsonValue};
 use serde::{Deserialize, Serialize};
 
@@ -20,7 +20,7 @@ pub enum BytecodeInterpreterActions<T: Expression> {
     GcComplete(BytecodeInterpreterGcCompleteAction),
 }
 impl<T: Expression> Action for BytecodeInterpreterActions<T> {}
-impl<T: Expression> NamedAction for BytecodeInterpreterActions<T> {
+impl<T: Expression> Named for BytecodeInterpreterActions<T> {
     fn name(&self) -> &'static str {
         match self {
             Self::Init(action) => action.name(),
@@ -174,7 +174,7 @@ pub struct BytecodeInterpreterInitAction {
     pub cache_id: StateToken,
 }
 impl Action for BytecodeInterpreterInitAction {}
-impl NamedAction for BytecodeInterpreterInitAction {
+impl Named for BytecodeInterpreterInitAction {
     fn name(&self) -> &'static str {
         "BytecodeInterpreterInitAction"
     }
@@ -192,7 +192,7 @@ pub struct BytecodeInterpreterEvaluateAction<T: Expression> {
     pub state_updates: Vec<(StateToken, T)>,
 }
 impl<T: Expression> Action for BytecodeInterpreterEvaluateAction<T> {}
-impl<T: Expression> NamedAction for BytecodeInterpreterEvaluateAction<T> {
+impl<T: Expression> Named for BytecodeInterpreterEvaluateAction<T> {
     fn name(&self) -> &'static str {
         "BytecodeInterpreterEvaluateAction"
     }
@@ -224,7 +224,7 @@ pub struct BytecodeInterpreterResultAction<T: Expression> {
     pub statistics: BytecodeWorkerStatistics,
 }
 impl<T: Expression> Action for BytecodeInterpreterResultAction<T> {}
-impl<T: Expression> NamedAction for BytecodeInterpreterResultAction<T> {
+impl<T: Expression> Named for BytecodeInterpreterResultAction<T> {
     fn name(&self) -> &'static str {
         "BytecodeInterpreterResultAction"
     }
@@ -268,7 +268,7 @@ pub struct BytecodeInterpreterGcAction {
     pub state_index: Option<MessageOffset>,
 }
 impl Action for BytecodeInterpreterGcAction {}
-impl NamedAction for BytecodeInterpreterGcAction {
+impl Named for BytecodeInterpreterGcAction {
     fn name(&self) -> &'static str {
         "BytecodeInterpreterGcAction"
     }
@@ -294,7 +294,7 @@ pub struct BytecodeInterpreterGcCompleteAction {
     pub statistics: BytecodeWorkerStatistics,
 }
 impl Action for BytecodeInterpreterGcCompleteAction {}
-impl NamedAction for BytecodeInterpreterGcCompleteAction {
+impl Named for BytecodeInterpreterGcCompleteAction {
     fn name(&self) -> &'static str {
         "BytecodeInterpreterGcCompleteAction "
     }

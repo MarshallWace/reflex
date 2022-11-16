@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use reflex_dispatcher::{Action, NamedAction, SerializableAction, SerializedAction};
+use reflex_dispatcher::{Action, Named, SerializableAction, SerializedAction};
 use reflex_json::{JsonMap, JsonValue};
 use serde::{Deserialize, Serialize};
 
@@ -21,7 +21,7 @@ pub enum TelemetryMiddlewareActions {
     TransactionEnd(TelemetryMiddlewareTransactionEndAction),
 }
 impl Action for TelemetryMiddlewareActions {}
-impl NamedAction for TelemetryMiddlewareActions {
+impl Named for TelemetryMiddlewareActions {
     fn name(&self) -> &'static str {
         match self {
             Self::TransactionStart(action) => action.name(),
@@ -91,7 +91,7 @@ pub struct TelemetryMiddlewareTransactionStartAction {
     pub transactions: Vec<TelemetryTransaction>,
 }
 impl Action for TelemetryMiddlewareTransactionStartAction {}
-impl NamedAction for TelemetryMiddlewareTransactionStartAction {
+impl Named for TelemetryMiddlewareTransactionStartAction {
     fn name(&self) -> &'static str {
         "TelemetryMiddlewareTransactionStartAction"
     }
@@ -141,7 +141,7 @@ pub struct TelemetryMiddlewareTransactionEndAction {
     pub transaction_ids: Vec<Traceparent>,
 }
 impl Action for TelemetryMiddlewareTransactionEndAction {}
-impl NamedAction for TelemetryMiddlewareTransactionEndAction {
+impl Named for TelemetryMiddlewareTransactionEndAction {
     fn name(&self) -> &'static str {
         "TelemetryMiddlewareTransactionEndAction"
     }

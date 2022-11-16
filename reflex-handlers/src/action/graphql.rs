@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use http::StatusCode;
-use reflex_dispatcher::{Action, NamedAction, SerializableAction, SerializedAction};
+use reflex_dispatcher::{Action, Named, SerializableAction, SerializedAction};
 use reflex_graphql::subscriptions::{
     GraphQlSubscriptionClientMessage, GraphQlSubscriptionServerMessage,
 };
@@ -26,7 +26,7 @@ pub enum GraphQlHandlerActions {
     WebSocketConnectionError(GraphQlHandlerWebSocketConnectionErrorAction),
 }
 impl Action for GraphQlHandlerActions {}
-impl NamedAction for GraphQlHandlerActions {
+impl Named for GraphQlHandlerActions {
     fn name(&self) -> &'static str {
         match self {
             Self::HttpFetchComplete(action) => action.name(),
@@ -225,7 +225,7 @@ pub struct GraphQlHandlerHttpFetchCompleteAction {
     pub body: Bytes,
 }
 impl Action for GraphQlHandlerHttpFetchCompleteAction {}
-impl NamedAction for GraphQlHandlerHttpFetchCompleteAction {
+impl Named for GraphQlHandlerHttpFetchCompleteAction {
     fn name(&self) -> &'static str {
         "GraphQlHandlerHttpFetchCompleteAction"
     }
@@ -310,7 +310,7 @@ pub struct GraphQlHandlerHttpConnectionErrorAction {
     pub message: String,
 }
 impl Action for GraphQlHandlerHttpConnectionErrorAction {}
-impl NamedAction for GraphQlHandlerHttpConnectionErrorAction {
+impl Named for GraphQlHandlerHttpConnectionErrorAction {
     fn name(&self) -> &'static str {
         "GraphQlHandlerHttpConnectionErrorAction"
     }
@@ -334,7 +334,7 @@ pub struct GraphQlHandlerWebSocketConnectSuccessAction {
     pub url: String,
 }
 impl Action for GraphQlHandlerWebSocketConnectSuccessAction {}
-impl NamedAction for GraphQlHandlerWebSocketConnectSuccessAction {
+impl Named for GraphQlHandlerWebSocketConnectSuccessAction {
     fn name(&self) -> &'static str {
         "GraphQlHandlerWebSocketConnectSuccessAction"
     }
@@ -357,7 +357,7 @@ pub struct GraphQlHandlerWebSocketClientMessageAction {
     pub message: GraphQlSubscriptionClientMessage,
 }
 impl Action for GraphQlHandlerWebSocketClientMessageAction {}
-impl NamedAction for GraphQlHandlerWebSocketClientMessageAction {
+impl Named for GraphQlHandlerWebSocketClientMessageAction {
     fn name(&self) -> &'static str {
         "GraphQlHandlerWebSocketClientMessageAction"
     }
@@ -380,7 +380,7 @@ pub struct GraphQlHandlerWebSocketServerMessageAction {
     pub message: Arc<GraphQlSubscriptionServerMessage>,
 }
 impl Action for GraphQlHandlerWebSocketServerMessageAction {}
-impl NamedAction for GraphQlHandlerWebSocketServerMessageAction {
+impl Named for GraphQlHandlerWebSocketServerMessageAction {
     fn name(&self) -> &'static str {
         "GraphQlHandlerWebSocketServerMessageAction"
     }
@@ -426,7 +426,7 @@ pub struct GraphQlHandlerWebSocketConnectionTerminateAction {
     pub url: String,
 }
 impl Action for GraphQlHandlerWebSocketConnectionTerminateAction {}
-impl NamedAction for GraphQlHandlerWebSocketConnectionTerminateAction {
+impl Named for GraphQlHandlerWebSocketConnectionTerminateAction {
     fn name(&self) -> &'static str {
         "GraphQlHandlerWebSocketConnectionTerminateAction"
     }
@@ -451,7 +451,7 @@ pub struct GraphQlHandlerWebSocketConnectionErrorAction {
     pub retryable: bool,
 }
 impl Action for GraphQlHandlerWebSocketConnectionErrorAction {}
-impl NamedAction for GraphQlHandlerWebSocketConnectionErrorAction {
+impl Named for GraphQlHandlerWebSocketConnectionErrorAction {
     fn name(&self) -> &'static str {
         "GraphQlHandlerWebSocketConnectionErrorAction"
     }

@@ -3,7 +3,7 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use bytes::Bytes;
 use http::{Request, Response};
-use reflex_dispatcher::{Action, NamedAction, SerializableAction, SerializedAction};
+use reflex_dispatcher::{Action, Named, SerializableAction, SerializedAction};
 use reflex_json::{JsonMap, JsonValue};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -19,7 +19,7 @@ pub enum QueryInspectorServerActions {
     HttpResponse(QueryInspectorServerHttpResponseAction),
 }
 impl Action for QueryInspectorServerActions {}
-impl NamedAction for QueryInspectorServerActions {
+impl Named for QueryInspectorServerActions {
     fn name(&self) -> &'static str {
         match self {
             Self::HttpRequest(action) => action.name(),
@@ -98,7 +98,7 @@ impl Clone for QueryInspectorServerHttpRequestAction {
     }
 }
 impl Action for QueryInspectorServerHttpRequestAction {}
-impl NamedAction for QueryInspectorServerHttpRequestAction {
+impl Named for QueryInspectorServerHttpRequestAction {
     fn name(&self) -> &'static str {
         "QueryInspectorServerHttpRequestAction"
     }
@@ -176,7 +176,7 @@ impl Clone for QueryInspectorServerHttpResponseAction {
     }
 }
 impl Action for QueryInspectorServerHttpResponseAction {}
-impl NamedAction for QueryInspectorServerHttpResponseAction {
+impl Named for QueryInspectorServerHttpResponseAction {
     fn name(&self) -> &'static str {
         "QueryInspectorServerHttpResponseAction"
     }

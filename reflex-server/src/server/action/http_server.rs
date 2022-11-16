@@ -4,7 +4,7 @@
 use bytes::Bytes;
 use http::{Request, Response};
 use reflex::core::Uuid;
-use reflex_dispatcher::{Action, NamedAction, SerializableAction, SerializedAction};
+use reflex_dispatcher::{Action, Named, SerializableAction, SerializedAction};
 use reflex_json::{JsonMap, JsonValue};
 use serde::{Deserialize, Serialize};
 
@@ -19,7 +19,7 @@ pub enum HttpServerActions {
     Response(HttpServerResponseAction),
 }
 impl Action for HttpServerActions {}
-impl NamedAction for HttpServerActions {
+impl Named for HttpServerActions {
     fn name(&self) -> &'static str {
         match self {
             Self::Request(action) => action.name(),
@@ -94,7 +94,7 @@ impl Clone for HttpServerRequestAction {
     }
 }
 impl Action for HttpServerRequestAction {}
-impl NamedAction for HttpServerRequestAction {
+impl Named for HttpServerRequestAction {
     fn name(&self) -> &'static str {
         "HttpServerRequestAction"
     }
@@ -200,7 +200,7 @@ impl Clone for HttpServerResponseAction {
     }
 }
 impl Action for HttpServerResponseAction {}
-impl NamedAction for HttpServerResponseAction {
+impl Named for HttpServerResponseAction {
     fn name(&self) -> &'static str {
         "HttpServerResponseAction"
     }

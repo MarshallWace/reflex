@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use reflex::core::Uuid;
-use reflex_dispatcher::{Action, NamedAction, SerializableAction, SerializedAction};
+use reflex_dispatcher::{Action, Named, SerializableAction, SerializedAction};
 use reflex_json::JsonValue;
 use serde::{Deserialize, Serialize};
 
@@ -11,7 +11,7 @@ pub enum TimeoutHandlerActions {
     Timeout(TimeoutHandlerTimeoutAction),
 }
 impl Action for TimeoutHandlerActions {}
-impl NamedAction for TimeoutHandlerActions {
+impl Named for TimeoutHandlerActions {
     fn name(&self) -> &'static str {
         match self {
             Self::Timeout(action) => action.name(),
@@ -51,7 +51,7 @@ pub struct TimeoutHandlerTimeoutAction {
     pub operation_id: Uuid,
 }
 impl Action for TimeoutHandlerTimeoutAction {}
-impl NamedAction for TimeoutHandlerTimeoutAction {
+impl Named for TimeoutHandlerTimeoutAction {
     fn name(&self) -> &'static str {
         "TimeoutHandlerTimeoutAction"
     }

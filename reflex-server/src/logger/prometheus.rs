@@ -5,7 +5,7 @@ use std::marker::PhantomData;
 
 use metrics::{describe_counter, increment_counter, Unit};
 use reflex_dispatcher::{
-    Action, MessageData, MiddlewareContext, NamedAction, SchedulerCommand, TaskFactory,
+    Action, MessageData, MiddlewareContext, Named, SchedulerCommand, TaskFactory,
 };
 
 use crate::logger::ActionLogger;
@@ -28,8 +28,8 @@ impl Default for PrometheusLoggerMetricNames {
     }
 }
 
-pub trait PrometheusLoggerAction: NamedAction {}
-impl<_Self> PrometheusLoggerAction for _Self where Self: NamedAction {}
+pub trait PrometheusLoggerAction: Named {}
+impl<_Self> PrometheusLoggerAction for _Self where Self: Named {}
 
 #[derive(Clone)]
 pub struct PrometheusLogger<TAction: Action, TTask: TaskFactory<TAction, TTask>> {

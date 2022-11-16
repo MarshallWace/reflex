@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use reflex::core::{EvaluationResult, Expression};
-use reflex_dispatcher::{Action, NamedAction, SerializableAction, SerializedAction};
+use reflex_dispatcher::{Action, Named, SerializableAction, SerializedAction};
 use reflex_json::JsonValue;
 use serde::{Deserialize, Serialize};
 
@@ -13,7 +13,7 @@ pub enum QueryActions<T: Expression> {
     Emit(QueryEmitAction<T>),
 }
 impl<T: Expression> Action for QueryActions<T> {}
-impl<T: Expression> NamedAction for QueryActions<T> {
+impl<T: Expression> Named for QueryActions<T> {
     fn name(&self) -> &'static str {
         match self {
             Self::Subscribe(action) => action.name(),
@@ -104,7 +104,7 @@ pub struct QuerySubscribeAction<T: Expression> {
     pub label: String,
 }
 impl<T: Expression> Action for QuerySubscribeAction<T> {}
-impl<T: Expression> NamedAction for QuerySubscribeAction<T> {
+impl<T: Expression> Named for QuerySubscribeAction<T> {
     fn name(&self) -> &'static str {
         "QuerySubscribeAction"
     }
@@ -124,7 +124,7 @@ pub struct QueryUnsubscribeAction<T: Expression> {
     pub label: String,
 }
 impl<T: Expression> Action for QueryUnsubscribeAction<T> {}
-impl<T: Expression> NamedAction for QueryUnsubscribeAction<T> {
+impl<T: Expression> Named for QueryUnsubscribeAction<T> {
     fn name(&self) -> &'static str {
         "QueryUnsubscribeAction"
     }
@@ -144,7 +144,7 @@ pub struct QueryEmitAction<T: Expression> {
     pub result: EvaluationResult<T>,
 }
 impl<T: Expression> Action for QueryEmitAction<T> {}
-impl<T: Expression> NamedAction for QueryEmitAction<T> {
+impl<T: Expression> Named for QueryEmitAction<T> {
     fn name(&self) -> &'static str {
         "QueryEmitAction"
     }

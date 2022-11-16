@@ -3,8 +3,8 @@
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use crate::{
-    Action, Actor, ActorInitContext, Handler, HandlerContext, MessageData, NamedAction,
-    SchedulerMode, TaskFactory, TaskInbox, Worker,
+    Action, Actor, ActorInitContext, Handler, HandlerContext, MessageData, Named, SchedulerMode,
+    TaskFactory, TaskInbox, Worker,
 };
 use metrics::{describe_histogram, histogram, Unit};
 
@@ -52,7 +52,7 @@ impl<T> InstrumentedActor<T> {
 impl<T, TAction, TTask> Actor<TAction, TTask> for InstrumentedActor<T>
 where
     T: Actor<TAction, TTask>,
-    TAction: Action + NamedAction,
+    TAction: Action + Named,
     TTask: TaskFactory<TAction, TTask>,
 {
     type Events<TInbox: TaskInbox<TAction>> = T::Events<TInbox>;
@@ -70,7 +70,7 @@ where
 impl<T, I, O> Worker<I, O> for InstrumentedActor<T>
 where
     T: Worker<I, O>,
-    I: NamedAction,
+    I: Named,
 {
     fn accept(&self, message: &I) -> bool {
         self.inner.accept(message)
@@ -83,7 +83,7 @@ where
 impl<T, I, O> Handler<I, O> for InstrumentedActor<T>
 where
     T: Handler<I, O>,
-    I: NamedAction,
+    I: Named,
 {
     type State = T::State;
     fn handle(

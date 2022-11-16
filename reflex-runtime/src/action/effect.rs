@@ -4,7 +4,7 @@
 use std::borrow::Cow;
 
 use reflex::core::{ConditionType, Expression, ExpressionListType, RefType, StateToken};
-use reflex_dispatcher::{Action, NamedAction, SerializableAction, SerializedAction};
+use reflex_dispatcher::{Action, Named, SerializableAction, SerializedAction};
 use reflex_json::{JsonMap, JsonValue};
 use serde::{Deserialize, Serialize};
 
@@ -19,7 +19,7 @@ pub enum EffectActions<T: Expression> {
     Emit(EffectEmitAction<T>),
 }
 impl<T: Expression> Action for EffectActions<T> {}
-impl<T: Expression> NamedAction for EffectActions<T> {
+impl<T: Expression> Named for EffectActions<T> {
     fn name(&self) -> &'static str {
         match self {
             Self::Subscribe(action) => action.name(),
@@ -114,7 +114,7 @@ pub struct EffectSubscribeAction<T: Expression> {
     pub effects: Vec<T::Signal<T>>,
 }
 impl<T: Expression> Action for EffectSubscribeAction<T> {}
-impl<T: Expression> NamedAction for EffectSubscribeAction<T> {
+impl<T: Expression> Named for EffectSubscribeAction<T> {
     fn name(&self) -> &'static str {
         "EffectSubscribeAction"
     }
@@ -162,7 +162,7 @@ pub struct EffectUnsubscribeAction<T: Expression> {
     pub effects: Vec<T::Signal<T>>,
 }
 impl<T: Expression> Action for EffectUnsubscribeAction<T> {}
-impl<T: Expression> NamedAction for EffectUnsubscribeAction<T> {
+impl<T: Expression> Named for EffectUnsubscribeAction<T> {
     fn name(&self) -> &'static str {
         "EffectUnsubscribeAction"
     }
@@ -205,7 +205,7 @@ pub struct EffectEmitAction<T: Expression> {
     pub effect_types: Vec<EffectUpdateBatch<T>>,
 }
 impl<T: Expression> Action for EffectEmitAction<T> {}
-impl<T: Expression> NamedAction for EffectEmitAction<T> {
+impl<T: Expression> Named for EffectEmitAction<T> {
     fn name(&self) -> &'static str {
         "EffectEmitAction"
     }

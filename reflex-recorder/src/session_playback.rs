@@ -8,9 +8,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value as JsonValue};
 
 use reflex_dispatcher::{
-    Action, ActorInitContext, HandlerContext, MessageData, NamedAction, NoopDisposeCallback,
-    ProcessId, SchedulerCommand, SchedulerMode, SchedulerTransition, SerializableAction,
-    SerializedAction, TaskFactory, TaskInbox,
+    Action, ActorInitContext, HandlerContext, MessageData, Named, NoopDisposeCallback, ProcessId,
+    SchedulerCommand, SchedulerMode, SchedulerTransition, SerializableAction, SerializedAction,
+    TaskFactory, TaskInbox,
 };
 
 #[derive(PartialEq, Eq, Clone, Copy, Debug, Serialize, Deserialize)]
@@ -18,7 +18,7 @@ pub struct SessionPlaybackBeginAction {
     pub num_frames: usize,
 }
 impl Action for SessionPlaybackBeginAction {}
-impl NamedAction for SessionPlaybackBeginAction {
+impl Named for SessionPlaybackBeginAction {
     fn name(&self) -> &'static str {
         "SessionPlaybackBeginAction"
     }
@@ -32,7 +32,7 @@ impl SerializableAction for SessionPlaybackBeginAction {
 #[derive(PartialEq, Eq, Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct SessionPlaybackEndAction;
 impl Action for SessionPlaybackEndAction {}
-impl NamedAction for SessionPlaybackEndAction {
+impl Named for SessionPlaybackEndAction {
     fn name(&self) -> &'static str {
         "SessionPlaybackEndAction"
     }

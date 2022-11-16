@@ -3,7 +3,7 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use std::{net::SocketAddr, time::Duration};
 
-use reflex_dispatcher::{Action, NamedAction, SerializableAction, SerializedAction};
+use reflex_dispatcher::{Action, Named, SerializableAction, SerializedAction};
 use reflex_json::{JsonMap, JsonValue};
 use serde::{Deserialize, Serialize};
 
@@ -17,7 +17,7 @@ pub enum InitActions {
     HttpServer(InitHttpServerAction),
 }
 impl Action for InitActions {}
-impl NamedAction for InitActions {
+impl Named for InitActions {
     fn name(&self) -> &'static str {
         match self {
             Self::PrometheusMetrics(action) => action.name(),
@@ -131,7 +131,7 @@ pub struct InitPrometheusMetricsAction {
     pub address: SocketAddr,
 }
 impl Action for InitPrometheusMetricsAction {}
-impl NamedAction for InitPrometheusMetricsAction {
+impl Named for InitPrometheusMetricsAction {
     fn name(&self) -> &'static str {
         "InitPrometheusMetricsAction"
     }
@@ -150,7 +150,7 @@ pub struct InitOpenTelemetryAction {
     pub config: OpenTelemetryConfig,
 }
 impl<'a> Action for InitOpenTelemetryAction {}
-impl<'a> NamedAction for InitOpenTelemetryAction {
+impl<'a> Named for InitOpenTelemetryAction {
     fn name(&self) -> &'static str {
         "InitOpenTelemetryAction"
     }
@@ -220,7 +220,7 @@ pub struct InitGraphRootAction {
     pub instruction_count: usize,
 }
 impl Action for InitGraphRootAction {}
-impl NamedAction for InitGraphRootAction {
+impl Named for InitGraphRootAction {
     fn name(&self) -> &'static str {
         "InitGraphRootAction"
     }
@@ -242,7 +242,7 @@ pub struct InitHttpServerAction {
     pub address: SocketAddr,
 }
 impl Action for InitHttpServerAction {}
-impl NamedAction for InitHttpServerAction {
+impl Named for InitHttpServerAction {
     fn name(&self) -> &'static str {
         "InitHttpServerAction"
     }
