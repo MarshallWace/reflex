@@ -31,7 +31,7 @@ use reflex_graphql::{
     graphql_variables_are_equal, stdlib::Stdlib as GraphQlStdlib, GraphQlOperation,
 };
 use reflex_json::JsonValue;
-use reflex_macros::dispatcher;
+use reflex_macros::{dispatcher, Named};
 use reflex_runtime::action::evaluate::{
     EvaluateResultAction, EvaluateStartAction, EvaluateUpdateAction,
 };
@@ -181,6 +181,7 @@ where
     }
 }
 
+#[derive(Named, Clone)]
 pub struct GraphQlServer<T, TFactory, TAllocator, TQueryLabel, TMetricLabels, TTracer>
 where
     T: Expression,

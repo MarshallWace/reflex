@@ -25,7 +25,6 @@ pub enum RuntimeActions<T: Expression> {
     Evaluate(EvaluateActions<T>),
     Query(QueryActions<T>),
 }
-impl<T: Expression> Action for RuntimeActions<T> {}
 impl<T: Expression> Named for RuntimeActions<T> {
     fn name(&self) -> &'static str {
         match self {
@@ -35,6 +34,7 @@ impl<T: Expression> Named for RuntimeActions<T> {
         }
     }
 }
+impl<T: Expression> Action for RuntimeActions<T> {}
 impl<T: Expression> SerializableAction for RuntimeActions<T> {
     fn to_json(&self) -> SerializedAction {
         match self {

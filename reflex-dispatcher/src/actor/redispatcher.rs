@@ -2,14 +2,19 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use crate::{
-    Action, Actor, ActorInitContext, Handler, HandlerContext, MessageData, NoopDisposeCallback,
-    ProcessId, SchedulerCommand, SchedulerMode, SchedulerTransition, TaskFactory, TaskInbox,
-    Worker,
+    Action, Actor, ActorInitContext, Handler, HandlerContext, MessageData, Named,
+    NoopDisposeCallback, ProcessId, SchedulerCommand, SchedulerMode, SchedulerTransition,
+    TaskFactory, TaskInbox, Worker,
 };
 
 #[derive(Clone)]
 pub struct Redispatcher {
     target_pids: Vec<ProcessId>,
+}
+impl Named for Redispatcher {
+    fn name(&self) -> &'static str {
+        "Redispatcher"
+    }
 }
 impl Redispatcher {
     pub fn new(target_pids: impl IntoIterator<Item = ProcessId>) -> Self {

@@ -4,6 +4,7 @@
 use reflex::core::{EvaluationResult, Expression};
 use reflex_dispatcher::{Action, Named, SerializableAction, SerializedAction};
 use reflex_json::JsonValue;
+use reflex_macros::Named;
 use serde::{Deserialize, Serialize};
 
 #[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
@@ -12,7 +13,6 @@ pub enum QueryActions<T: Expression> {
     Unsubscribe(QueryUnsubscribeAction<T>),
     Emit(QueryEmitAction<T>),
 }
-impl<T: Expression> Action for QueryActions<T> {}
 impl<T: Expression> Named for QueryActions<T> {
     fn name(&self) -> &'static str {
         match self {
@@ -22,6 +22,7 @@ impl<T: Expression> Named for QueryActions<T> {
         }
     }
 }
+impl<T: Expression> Action for QueryActions<T> {}
 impl<T: Expression> SerializableAction for QueryActions<T> {
     fn to_json(&self) -> SerializedAction {
         match self {
@@ -98,17 +99,12 @@ impl<'a, T: Expression> From<&'a QueryActions<T>> for Option<&'a QueryEmitAction
     }
 }
 
-#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
+#[derive(Named, PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct QuerySubscribeAction<T: Expression> {
     pub query: T,
     pub label: String,
 }
 impl<T: Expression> Action for QuerySubscribeAction<T> {}
-impl<T: Expression> Named for QuerySubscribeAction<T> {
-    fn name(&self) -> &'static str {
-        "QuerySubscribeAction"
-    }
-}
 impl<T: Expression> SerializableAction for QuerySubscribeAction<T> {
     fn to_json(&self) -> SerializedAction {
         SerializedAction::from_iter([
@@ -118,17 +114,12 @@ impl<T: Expression> SerializableAction for QuerySubscribeAction<T> {
     }
 }
 
-#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
+#[derive(Named, PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct QueryUnsubscribeAction<T: Expression> {
     pub query: T,
     pub label: String,
 }
 impl<T: Expression> Action for QueryUnsubscribeAction<T> {}
-impl<T: Expression> Named for QueryUnsubscribeAction<T> {
-    fn name(&self) -> &'static str {
-        "QueryUnsubscribeAction"
-    }
-}
 impl<T: Expression> SerializableAction for QueryUnsubscribeAction<T> {
     fn to_json(&self) -> SerializedAction {
         SerializedAction::from_iter([
@@ -138,17 +129,12 @@ impl<T: Expression> SerializableAction for QueryUnsubscribeAction<T> {
     }
 }
 
-#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
+#[derive(Named, PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct QueryEmitAction<T: Expression> {
     pub query: T,
     pub result: EvaluationResult<T>,
 }
 impl<T: Expression> Action for QueryEmitAction<T> {}
-impl<T: Expression> Named for QueryEmitAction<T> {
-    fn name(&self) -> &'static str {
-        "QueryEmitAction"
-    }
-}
 impl<T: Expression> SerializableAction for QueryEmitAction<T> {
     fn to_json(&self) -> SerializedAction {
         SerializedAction::from_iter([

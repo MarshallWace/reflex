@@ -17,7 +17,7 @@ use reflex_dispatcher::{
     TaskFactory, TaskInbox,
 };
 use reflex_json::JsonValue;
-use reflex_macros::dispatcher;
+use reflex_macros::{dispatcher, Named};
 use reflex_protobuf::Bytes;
 use tokio::task::JoinHandle;
 use tokio_stream::wrappers::ReceiverStream;
@@ -95,13 +95,14 @@ impl<_Self> GrpcHandlerConnectionTaskEventsAction for _Self where
 }
 
 // TODO: Implement Serialize/Deserialize traits for GrpcHandlerConnectionTaskFactory
-#[derive(Clone)]
+#[derive(Named, Clone)]
 pub struct GrpcHandlerConnectionTaskFactory {
     pub connection_id: Uuid,
     pub endpoint: tonic::transport::Endpoint,
     pub delay: Option<Duration>,
     pub caller_pid: ProcessId,
 }
+
 impl<TAction, TTask> TaskFactory<TAction, TTask> for GrpcHandlerConnectionTaskFactory
 where
     TAction: Action + GrpcHandlerConnectionTaskAction + Send + 'static,
@@ -370,6 +371,7 @@ where
     )
 }
 
+#[derive(Named, Clone)]
 pub struct GrpcHandlerConnectionTaskActor {
     connection_id: Uuid,
     endpoint: tonic::transport::Endpoint,

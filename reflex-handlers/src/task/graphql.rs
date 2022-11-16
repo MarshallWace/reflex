@@ -22,7 +22,7 @@ use pin_project::pin_project;
 use reflex::core::Uuid;
 use reflex_dispatcher::{
     Action, Actor, ActorInitContext, BoxedActionStream, Handler, HandlerContext, Matcher,
-    MessageData, NoopDisposeCallback, ProcessId, SchedulerCommand, SchedulerMode,
+    MessageData, Named, NoopDisposeCallback, ProcessId, SchedulerCommand, SchedulerMode,
     SchedulerTransition, TaskFactory, TaskInbox, Worker,
 };
 use reflex_graphql::subscriptions::{
@@ -30,7 +30,7 @@ use reflex_graphql::subscriptions::{
     GraphQlSubscriptionServerMessage,
 };
 use reflex_json::JsonValue;
-use reflex_macros::dispatcher;
+use reflex_macros::{dispatcher, Named};
 use serde::{Deserialize, Serialize};
 use tokio::net::TcpStream;
 use tokio_tungstenite::{
@@ -105,6 +105,18 @@ where
     HttpFetch(GraphQlHandlerHttpFetchTaskFactory<TConnect>),
     WebSocketConnection(GraphQlHandlerWebSocketConnectionTaskFactory),
 }
+impl<TConnect> Named for GraphQlHandlerTaskFactory<TConnect>
+where
+    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
+{
+    fn name(&self) -> &'static str {
+        match self {
+            Self::HttpFetch(inner) => inner.name(),
+            Self::WebSocketConnection(inner) => inner.name(),
+        }
+    }
+}
+
 impl<TConnect, TAction, TTask> TaskFactory<TAction, TTask> for GraphQlHandlerTaskFactory<TConnect>
 where
     TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
@@ -124,12 +136,24 @@ where
     }
 }
 
+#[derive(Clone)]
 pub enum GraphQlHandlerTaskActor<TConnect>
 where
     TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
 {
     HttpFetch(GraphQlHandlerHttpFetchTaskActor<TConnect>),
     WebSocketConnection(GraphQlHandlerWebSocketConnectionTaskActor),
+}
+impl<TConnect> Named for GraphQlHandlerTaskActor<TConnect>
+where
+    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
+{
+    fn name(&self) -> &'static str {
+        match self {
+            Self::HttpFetch(inner) => inner.name(),
+            Self::WebSocketConnection(inner) => inner.name(),
+        }
+    }
 }
 impl<TConnect, TAction, TTask> Actor<TAction, TTask> for GraphQlHandlerTaskActor<TConnect>
 where
@@ -347,7 +371,7 @@ where
 }
 
 // TODO: Implement Serialize/Deserialize traits for GraphQlHandlerHttpFetchTaskFactory
-#[derive(Clone)]
+#[derive(Named, Clone)]
 pub struct GraphQlHandlerHttpFetchTaskFactory<TConnect>
 where
     TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
@@ -381,6 +405,7 @@ where
     }
 }
 
+#[derive(Named, Clone)]
 pub struct GraphQlHandlerHttpFetchTaskActor<TConnect>
 where
     TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
@@ -560,7 +585,7 @@ impl<_Self> GraphQlHandlerWebSocketConnectionTaskEventsAction for _Self where
 {
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Named, Clone, Serialize, Deserialize)]
 pub struct GraphQlHandlerWebSocketConnectionTaskFactory {
     pub connection_id: Uuid,
     pub url: GraphQlConnectionUrl,
@@ -589,6 +614,7 @@ where
     }
 }
 
+#[derive(Named, Clone)]
 pub struct GraphQlHandlerWebSocketConnectionTaskActor {
     connection_id: Uuid,
     url: GraphQlConnectionUrl,

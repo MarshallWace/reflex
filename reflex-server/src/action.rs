@@ -52,7 +52,6 @@ pub enum ServerCliAction<T: Expression> {
     TimestampHandler(TimestampHandlerActions),
     Init(InitActions),
 }
-impl<T: Expression> Action for ServerCliAction<T> {}
 impl<T: Expression> Named for ServerCliAction<T> {
     fn name(&self) -> &'static str {
         match self {
@@ -73,6 +72,7 @@ impl<T: Expression> Named for ServerCliAction<T> {
         }
     }
 }
+impl<T: Expression> Action for ServerCliAction<T> {}
 impl<T: Expression> SerializableAction for ServerCliAction<T> {
     fn to_json(&self) -> SerializedAction {
         match self {

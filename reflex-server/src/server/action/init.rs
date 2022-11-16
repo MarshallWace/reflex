@@ -5,6 +5,7 @@ use std::{net::SocketAddr, time::Duration};
 
 use reflex_dispatcher::{Action, Named, SerializableAction, SerializedAction};
 use reflex_json::{JsonMap, JsonValue};
+use reflex_macros::Named;
 use serde::{Deserialize, Serialize};
 
 use crate::cli::reflex_server::OpenTelemetryConfig;
@@ -16,7 +17,6 @@ pub enum InitActions {
     GraphRoot(InitGraphRootAction),
     HttpServer(InitHttpServerAction),
 }
-impl Action for InitActions {}
 impl Named for InitActions {
     fn name(&self) -> &'static str {
         match self {
@@ -27,6 +27,7 @@ impl Named for InitActions {
         }
     }
 }
+impl Action for InitActions {}
 impl SerializableAction for InitActions {
     fn to_json(&self) -> SerializedAction {
         match self {
@@ -126,16 +127,11 @@ impl<'a> From<&'a InitActions> for Option<&'a InitHttpServerAction> {
     }
 }
 
-#[derive(PartialEq, Eq, Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Named, PartialEq, Eq, Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct InitPrometheusMetricsAction {
     pub address: SocketAddr,
 }
 impl Action for InitPrometheusMetricsAction {}
-impl Named for InitPrometheusMetricsAction {
-    fn name(&self) -> &'static str {
-        "InitPrometheusMetricsAction"
-    }
-}
 impl SerializableAction for InitPrometheusMetricsAction {
     fn to_json(&self) -> SerializedAction {
         SerializedAction::from_iter([
@@ -145,16 +141,11 @@ impl SerializableAction for InitPrometheusMetricsAction {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Named, Clone, Debug, Serialize, Deserialize)]
 pub struct InitOpenTelemetryAction {
     pub config: OpenTelemetryConfig,
 }
 impl<'a> Action for InitOpenTelemetryAction {}
-impl<'a> Named for InitOpenTelemetryAction {
-    fn name(&self) -> &'static str {
-        "InitOpenTelemetryAction"
-    }
-}
 impl<'a> SerializableAction for InitOpenTelemetryAction {
     fn to_json(&self) -> SerializedAction {
         match &self.config {
@@ -214,17 +205,12 @@ impl<'a> SerializableAction for InitOpenTelemetryAction {
     }
 }
 
-#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
+#[derive(Named, PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct InitGraphRootAction {
     pub compiler_duration: Duration,
     pub instruction_count: usize,
 }
 impl Action for InitGraphRootAction {}
-impl Named for InitGraphRootAction {
-    fn name(&self) -> &'static str {
-        "InitGraphRootAction"
-    }
-}
 impl SerializableAction for InitGraphRootAction {
     fn to_json(&self) -> SerializedAction {
         SerializedAction::from_iter([
@@ -237,16 +223,11 @@ impl SerializableAction for InitGraphRootAction {
     }
 }
 
-#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
+#[derive(Named, PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct InitHttpServerAction {
     pub address: SocketAddr,
 }
 impl Action for InitHttpServerAction {}
-impl Named for InitHttpServerAction {
-    fn name(&self) -> &'static str {
-        "InitHttpServerAction"
-    }
-}
 impl SerializableAction for InitHttpServerAction {
     fn to_json(&self) -> SerializedAction {
         SerializedAction::from_iter([

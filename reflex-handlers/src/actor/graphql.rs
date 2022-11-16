@@ -34,7 +34,7 @@ use reflex_graphql::{
     GraphQlOperationPayload,
 };
 use reflex_json::{JsonMap, JsonValue};
-use reflex_macros::dispatcher;
+use reflex_macros::{dispatcher, Named};
 use reflex_runtime::{
     action::effect::{
         EffectEmitAction, EffectSubscribeAction, EffectUnsubscribeAction, EffectUpdateBatch,
@@ -124,7 +124,7 @@ impl std::fmt::Display for GraphQlOperationId {
     }
 }
 
-#[derive(Clone)]
+#[derive(Named, Clone)]
 pub struct GraphQlHandler<T, TFactory, TAllocator, TConnect, TReconnect>
 where
     T: AsyncExpression,

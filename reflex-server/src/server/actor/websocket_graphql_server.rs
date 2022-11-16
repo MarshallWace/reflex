@@ -29,7 +29,7 @@ use reflex_graphql::{
     GraphQlSchemaTypes,
 };
 use reflex_json::{json_object, JsonMap, JsonNumber, JsonValue};
-use reflex_macros::dispatcher;
+use reflex_macros::{dispatcher, Named};
 
 use crate::server::{
     actor::graphql_server::GraphQlQueryStatus,
@@ -224,6 +224,7 @@ where
     }
 }
 
+#[derive(Named, Clone)]
 pub struct WebSocketGraphQlServer<T, TFactory, TTransform, TMetricLabels>
 where
     T: Expression,
@@ -607,10 +608,9 @@ where
             .initialized_state
             .take()
             .map(|initialized_state| initialized_state.metric_labels);
-        let metric_labels = self.get_connection_metric_labels.labels(
-            connection_params.as_ref(),
-            connection.request.headers(),
-        );
+        let metric_labels = self
+            .get_connection_metric_labels
+            .labels(connection_params.as_ref(), connection.request.headers());
         if let Some(previous_metric_labels) = previous_metric_labels {
             decrement_gauge!(
                 self.metric_names

@@ -5,6 +5,7 @@
 use reflex::core::{EvaluationResult, Expression, StateToken};
 use reflex_dispatcher::{Action, MessageOffset, Named, SerializableAction, SerializedAction};
 use reflex_json::{JsonMap, JsonValue};
+use reflex_macros::Named;
 use serde::{Deserialize, Serialize};
 
 #[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
@@ -19,7 +20,6 @@ pub enum BytecodeInterpreterActions<T: Expression> {
     Gc(BytecodeInterpreterGcAction),
     GcComplete(BytecodeInterpreterGcCompleteAction),
 }
-impl<T: Expression> Action for BytecodeInterpreterActions<T> {}
 impl<T: Expression> Named for BytecodeInterpreterActions<T> {
     fn name(&self) -> &'static str {
         match self {
@@ -31,6 +31,7 @@ impl<T: Expression> Named for BytecodeInterpreterActions<T> {
         }
     }
 }
+impl<T: Expression> Action for BytecodeInterpreterActions<T> {}
 impl<T: Expression> SerializableAction for BytecodeInterpreterActions<T> {
     fn to_json(&self) -> SerializedAction {
         match self {
@@ -169,16 +170,11 @@ impl<'a, T: Expression> From<&'a BytecodeInterpreterActions<T>>
     }
 }
 
-#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
+#[derive(Named, PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct BytecodeInterpreterInitAction {
     pub cache_id: StateToken,
 }
 impl Action for BytecodeInterpreterInitAction {}
-impl Named for BytecodeInterpreterInitAction {
-    fn name(&self) -> &'static str {
-        "BytecodeInterpreterInitAction"
-    }
-}
 impl SerializableAction for BytecodeInterpreterInitAction {
     fn to_json(&self) -> SerializedAction {
         SerializedAction::from_iter([("cache_id", JsonValue::from(self.cache_id))])
@@ -262,17 +258,12 @@ impl<T: Expression> SerializableAction for BytecodeInterpreterResultAction<T> {
     }
 }
 
-#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
+#[derive(Named, PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct BytecodeInterpreterGcAction {
     pub cache_id: StateToken,
     pub state_index: Option<MessageOffset>,
 }
 impl Action for BytecodeInterpreterGcAction {}
-impl Named for BytecodeInterpreterGcAction {
-    fn name(&self) -> &'static str {
-        "BytecodeInterpreterGcAction"
-    }
-}
 impl SerializableAction for BytecodeInterpreterGcAction {
     fn to_json(&self) -> SerializedAction {
         SerializedAction::from_iter([
@@ -288,17 +279,12 @@ impl SerializableAction for BytecodeInterpreterGcAction {
     }
 }
 
-#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
+#[derive(Named, PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct BytecodeInterpreterGcCompleteAction {
     pub cache_id: StateToken,
     pub statistics: BytecodeWorkerStatistics,
 }
 impl Action for BytecodeInterpreterGcCompleteAction {}
-impl Named for BytecodeInterpreterGcCompleteAction {
-    fn name(&self) -> &'static str {
-        "BytecodeInterpreterGcCompleteAction "
-    }
-}
 impl SerializableAction for BytecodeInterpreterGcCompleteAction {
     fn to_json(&self) -> SerializedAction {
         SerializedAction::from_iter([

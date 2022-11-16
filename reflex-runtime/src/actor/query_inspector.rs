@@ -15,7 +15,7 @@ use reflex_dispatcher::{
     SchedulerTransition, TaskFactory, TaskInbox,
 };
 use reflex_json::{json, JsonValue};
-use reflex_macros::dispatcher;
+use reflex_macros::{dispatcher, Named};
 
 use crate::{
     action::{
@@ -25,6 +25,7 @@ use crate::{
     QueryEvaluationMode, QueryInvalidationStrategy,
 };
 
+#[derive(Named, Clone)]
 pub struct QueryInspector<T: Expression> {
     _expression: PhantomData<T>,
 }

@@ -2001,6 +2001,7 @@ dependencies = [
  "reflex-json",
  "reflex-lang",
  "reflex-lisp",
+ "reflex-macros",
  "reflex-runtime",
  "reflex-scheduler",
  "reflex-stdlib",

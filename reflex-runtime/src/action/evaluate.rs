@@ -4,6 +4,7 @@
 use reflex::core::{EvaluationResult, Expression, StateToken};
 use reflex_dispatcher::{Action, MessageOffset, Named, SerializableAction, SerializedAction};
 use reflex_json::JsonValue;
+use reflex_macros::Named;
 use serde::{Deserialize, Serialize};
 
 use crate::{QueryEvaluationMode, QueryInvalidationStrategy};
@@ -125,7 +126,7 @@ impl<'a, T: Expression> From<&'a EvaluateActions<T>> for Option<&'a EvaluateResu
     }
 }
 
-#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
+#[derive(Named, PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct EvaluateStartAction<T: Expression> {
     pub cache_id: StateToken,
     pub label: String,
@@ -134,11 +135,6 @@ pub struct EvaluateStartAction<T: Expression> {
     pub invalidation_strategy: QueryInvalidationStrategy,
 }
 impl<T: Expression> Action for EvaluateStartAction<T> {}
-impl<T: Expression> Named for EvaluateStartAction<T> {
-    fn name(&self) -> &'static str {
-        "EvaluateStartAction"
-    }
-}
 impl<T: Expression> SerializableAction for EvaluateStartAction<T> {
     fn to_json(&self) -> SerializedAction {
         SerializedAction::from_iter([
@@ -163,18 +159,13 @@ impl<T: Expression> SerializableAction for EvaluateStartAction<T> {
     }
 }
 
-#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
+#[derive(Named, PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct EvaluateUpdateAction<T: Expression> {
     pub cache_id: StateToken,
     pub state_index: Option<MessageOffset>,
     pub state_updates: Vec<(StateToken, T)>,
 }
 impl<T: Expression> Action for EvaluateUpdateAction<T> {}
-impl<T: Expression> Named for EvaluateUpdateAction<T> {
-    fn name(&self) -> &'static str {
-        "EvaluateUpdateAction"
-    }
-}
 impl<T: Expression> SerializableAction for EvaluateUpdateAction<T> {
     fn to_json(&self) -> SerializedAction {
         SerializedAction::from_iter([
@@ -194,15 +185,9 @@ impl<T: Expression> SerializableAction for EvaluateUpdateAction<T> {
     }
 }
 
-#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
+#[derive(Named, PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct EvaluateStopAction {
     pub cache_id: StateToken,
-}
-impl Action for EvaluateStopAction {}
-impl Named for EvaluateStopAction {
-    fn name(&self) -> &'static str {
-        "EvaluateStopAction"
-    }
 }
 impl SerializableAction for EvaluateStopAction {
     fn to_json(&self) -> SerializedAction {
@@ -210,18 +195,13 @@ impl SerializableAction for EvaluateStopAction {
     }
 }
 
-#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
+#[derive(Named, PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct EvaluateResultAction<T: Expression> {
     pub cache_id: StateToken,
     pub state_index: Option<MessageOffset>,
     pub result: EvaluationResult<T>,
 }
 impl<T: Expression> Action for EvaluateResultAction<T> {}
-impl<T: Expression> Named for EvaluateResultAction<T> {
-    fn name(&self) -> &'static str {
-        "EvaluateResultAction"
-    }
-}
 impl<T: Expression> SerializableAction for EvaluateResultAction<T> {
     fn to_json(&self) -> SerializedAction {
         SerializedAction::from_iter([

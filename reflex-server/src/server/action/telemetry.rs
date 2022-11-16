@@ -3,6 +3,7 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use reflex_dispatcher::{Action, Named, SerializableAction, SerializedAction};
 use reflex_json::{JsonMap, JsonValue};
+use reflex_macros::Named;
 use serde::{Deserialize, Serialize};
 
 use crate::utils::traceparent::Traceparent;
@@ -20,7 +21,6 @@ pub enum TelemetryMiddlewareActions {
     TransactionStart(TelemetryMiddlewareTransactionStartAction),
     TransactionEnd(TelemetryMiddlewareTransactionEndAction),
 }
-impl Action for TelemetryMiddlewareActions {}
 impl Named for TelemetryMiddlewareActions {
     fn name(&self) -> &'static str {
         match self {
@@ -29,6 +29,7 @@ impl Named for TelemetryMiddlewareActions {
         }
     }
 }
+impl Action for TelemetryMiddlewareActions {}
 impl SerializableAction for TelemetryMiddlewareActions {
     fn to_json(&self) -> SerializedAction {
         match self {
@@ -86,16 +87,11 @@ impl<'a> From<&'a TelemetryMiddlewareActions>
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Named, Clone, Debug, Serialize, Deserialize)]
 pub struct TelemetryMiddlewareTransactionStartAction {
     pub transactions: Vec<TelemetryTransaction>,
 }
 impl Action for TelemetryMiddlewareTransactionStartAction {}
-impl Named for TelemetryMiddlewareTransactionStartAction {
-    fn name(&self) -> &'static str {
-        "TelemetryMiddlewareTransactionStartAction"
-    }
-}
 impl SerializableAction for TelemetryMiddlewareTransactionStartAction {
     fn to_json(&self) -> SerializedAction {
         SerializedAction::from_iter([(
@@ -136,16 +132,11 @@ impl SerializableAction for TelemetryMiddlewareTransactionStartAction {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Named, Clone, Debug, Serialize, Deserialize)]
 pub struct TelemetryMiddlewareTransactionEndAction {
     pub transaction_ids: Vec<Traceparent>,
 }
 impl Action for TelemetryMiddlewareTransactionEndAction {}
-impl Named for TelemetryMiddlewareTransactionEndAction {
-    fn name(&self) -> &'static str {
-        "TelemetryMiddlewareTransactionEndAction"
-    }
-}
 impl SerializableAction for TelemetryMiddlewareTransactionEndAction {
     fn to_json(&self) -> SerializedAction {
         SerializedAction::from_iter([(

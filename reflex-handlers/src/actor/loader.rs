@@ -21,7 +21,7 @@ use reflex_dispatcher::{
     Action, ActorInitContext, HandlerContext, MessageData, NoopDisposeCallback, ProcessId,
     SchedulerCommand, SchedulerMode, SchedulerTransition, TaskFactory, TaskInbox,
 };
-use reflex_macros::dispatcher;
+use reflex_macros::{dispatcher, Named};
 use reflex_runtime::{
     action::effect::{
         EffectEmitAction, EffectSubscribeAction, EffectUnsubscribeAction, EffectUpdateBatch,
@@ -84,7 +84,7 @@ impl LoaderBatchHash {
     }
 }
 
-#[derive(Clone)]
+#[derive(Named, Clone)]
 pub struct LoaderHandler<T, TFactory, TAllocator>
 where
     T: AsyncExpression,

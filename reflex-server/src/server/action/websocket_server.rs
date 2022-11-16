@@ -8,6 +8,7 @@ use reflex_graphql::subscriptions::{
     GraphQlSubscriptionClientMessage, GraphQlSubscriptionServerMessage,
 };
 use reflex_json::{JsonMap, JsonValue};
+use reflex_macros::Named;
 use serde::{Deserialize, Serialize};
 
 use crate::{server::utils::clone_http_request_wrapper, utils::serialize::SerializedRequest};
@@ -20,7 +21,6 @@ pub enum WebSocketServerActions {
     Disconnect(WebSocketServerDisconnectAction),
     ThrottleTimeout(WebSocketServerThrottleTimeoutAction),
 }
-impl Action for WebSocketServerActions {}
 impl Named for WebSocketServerActions {
     fn name(&self) -> &'static str {
         match self {
@@ -32,6 +32,7 @@ impl Named for WebSocketServerActions {
         }
     }
 }
+impl Action for WebSocketServerActions {}
 impl SerializableAction for WebSocketServerActions {
     fn to_json(&self) -> SerializedAction {
         match self {
@@ -152,7 +153,7 @@ impl<'a> From<&'a WebSocketServerActions> for Option<&'a WebSocketServerThrottle
     }
 }
 
-#[derive(Debug)]
+#[derive(Named, Debug)]
 pub struct WebSocketServerConnectAction {
     pub connection_id: Uuid,
     pub request: Request<()>,
@@ -166,11 +167,6 @@ impl Clone for WebSocketServerConnectAction {
     }
 }
 impl Action for WebSocketServerConnectAction {}
-impl Named for WebSocketServerConnectAction {
-    fn name(&self) -> &'static str {
-        "WebSocketServerConnectAction"
-    }
-}
 impl SerializableAction for WebSocketServerConnectAction {
     fn to_json(&self) -> SerializedAction {
         SerializedAction::from_iter([(
@@ -225,17 +221,12 @@ impl From<SerializedWebSocketServerConnectAction> for WebSocketServerConnectActi
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Named, Clone, Debug, Serialize, Deserialize)]
 pub struct WebSocketServerReceiveAction {
     pub connection_id: Uuid,
     pub message: GraphQlSubscriptionClientMessage,
 }
 impl Action for WebSocketServerReceiveAction {}
-impl Named for WebSocketServerReceiveAction {
-    fn name(&self) -> &'static str {
-        "WebSocketServerReceiveAction"
-    }
-}
 impl SerializableAction for WebSocketServerReceiveAction {
     fn to_json(&self) -> SerializedAction {
         SerializedAction::from_iter([
@@ -248,15 +239,10 @@ impl SerializableAction for WebSocketServerReceiveAction {
     }
 }
 
-#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
+#[derive(Named, PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct WebSocketServerSendAction {
     pub connection_id: Uuid,
     pub message: GraphQlSubscriptionServerMessage,
-}
-impl Named for WebSocketServerSendAction {
-    fn name(&self) -> &'static str {
-        "WebSocketServerSendAction"
-    }
 }
 impl Action for WebSocketServerSendAction {}
 impl SerializableAction for WebSocketServerSendAction {
@@ -294,16 +280,11 @@ impl SerializableAction for WebSocketServerSendAction {
     }
 }
 
-#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
+#[derive(Named, PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct WebSocketServerDisconnectAction {
     pub connection_id: Uuid,
 }
 impl Action for WebSocketServerDisconnectAction {}
-impl Named for WebSocketServerDisconnectAction {
-    fn name(&self) -> &'static str {
-        "WebSocketServerDisconnectAction"
-    }
-}
 impl SerializableAction for WebSocketServerDisconnectAction {
     fn to_json(&self) -> SerializedAction {
         SerializedAction::from_iter([(
@@ -313,16 +294,11 @@ impl SerializableAction for WebSocketServerDisconnectAction {
     }
 }
 
-#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
+#[derive(Named, PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct WebSocketServerThrottleTimeoutAction {
     pub subscription_id: Uuid,
 }
 impl Action for WebSocketServerThrottleTimeoutAction {}
-impl Named for WebSocketServerThrottleTimeoutAction {
-    fn name(&self) -> &'static str {
-        "WebSocketServerThrottleTimeoutAction"
-    }
-}
 impl SerializableAction for WebSocketServerThrottleTimeoutAction {
     fn to_json(&self) -> SerializedAction {
         SerializedAction::from_iter([(

@@ -6,7 +6,7 @@ use opentelemetry::trace::{Span, Tracer};
 use pin_project::pin_project;
 use reflex::core::{Expression, ExpressionFactory, HeapAllocator};
 use reflex_dispatcher::{
-    Action, Actor, ActorInitContext, Handler, HandlerContext, MessageData, SchedulerMode,
+    Action, Actor, ActorInitContext, Handler, HandlerContext, MessageData, Named, SchedulerMode,
     SchedulerTransition, TaskFactory, TaskInbox, Worker,
 };
 use reflex_graphql::{stdlib::Stdlib as GraphQlStdlib, validate::ValidateQueryGraphQlTransform};
@@ -46,6 +46,7 @@ impl<T: Expression, TAction> ServerAction<T> for TAction where
 {
 }
 
+#[derive(Clone)]
 pub enum ServerActor<
     T,
     TFactory,
@@ -97,6 +98,53 @@ pub enum ServerActor<
             TConnectionMetricLabels,
         >,
     ),
+}
+impl<
+        T,
+        TFactory,
+        TAllocator,
+        TTransformHttp,
+        TTransformWs,
+        TGraphQlQueryLabel,
+        THttpMetricLabels,
+        TConnectionMetricLabels,
+        TOperationMetricLabels,
+        TTracer,
+    > Named
+    for ServerActor<
+        T,
+        TFactory,
+        TAllocator,
+        TTransformHttp,
+        TTransformWs,
+        TGraphQlQueryLabel,
+        THttpMetricLabels,
+        TConnectionMetricLabels,
+        TOperationMetricLabels,
+        TTracer,
+    >
+where
+    T: AsyncExpression,
+    T::Builtin: From<Stdlib> + From<GraphQlStdlib>,
+    TFactory: ExpressionFactory<T> + Clone,
+    TAllocator: HeapAllocator<T> + Clone,
+    TTransformHttp: HttpGraphQlServerQueryTransform,
+    TTransformWs: WebSocketGraphQlServerQueryTransform,
+    TGraphQlQueryLabel: GraphQlServerQueryLabel,
+    THttpMetricLabels: HttpGraphQlServerQueryMetricLabels,
+    TConnectionMetricLabels: WebSocketGraphQlServerConnectionMetricLabels,
+    TOperationMetricLabels: GraphQlServerOperationMetricLabels,
+    TTracer: Tracer,
+    TTracer::Span: Send + Sync + 'static,
+{
+    fn name(&self) -> &'static str {
+        match self {
+            Self::Runtime(inner) => inner.name(),
+            Self::GraphQlServer(inner) => inner.name(),
+            Self::HttpGraphQlServer(inner) => inner.name(),
+            Self::WebSocketGraphQlServer(inner) => inner.name(),
+        }
+    }
 }
 
 pub enum ServerActorState<T, TSpan>

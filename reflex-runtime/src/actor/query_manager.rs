@@ -15,7 +15,7 @@ use reflex_dispatcher::{
     Action, ActorInitContext, HandlerContext, MessageData, NoopDisposeCallback, ProcessId,
     SchedulerCommand, SchedulerMode, SchedulerTransition, TaskFactory, TaskInbox,
 };
-use reflex_macros::dispatcher;
+use reflex_macros::{dispatcher, Named};
 
 use crate::{
     action::{
@@ -47,6 +47,7 @@ impl Default for QueryManagerMetricNames {
 }
 
 // TODO: Remove QueryManager in favour of interacting with EvaluateHandler directly
+#[derive(Named, Clone)]
 pub struct QueryManager<T, TFactory, TAllocator>
 where
     T: Expression,

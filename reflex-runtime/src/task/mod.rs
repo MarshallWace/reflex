@@ -9,7 +9,7 @@ use reflex::core::{
     Applicable, Expression, ExpressionFactory, HeapAllocator, Reducible, Rewritable,
 };
 use reflex_dispatcher::{
-    Action, Actor, ActorInitContext, Handler, HandlerContext, MessageData, SchedulerMode,
+    Action, Actor, ActorInitContext, Handler, HandlerContext, MessageData, Named, SchedulerMode,
     SchedulerTransition, TaskFactory, TaskInbox, Worker,
 };
 use reflex_interpreter::compiler::Compile;
@@ -53,6 +53,19 @@ where
 {
     BytecodeWorker(BytecodeWorkerTaskFactory<T, TFactory, TAllocator>),
 }
+impl<T, TFactory, TAllocator> Named for RuntimeTaskFactory<T, TFactory, TAllocator>
+where
+    T: Expression,
+    TFactory: ExpressionFactory<T>,
+    TAllocator: HeapAllocator<T>,
+{
+    fn name(&self) -> &'static str {
+        match self {
+            Self::BytecodeWorker(inner) => inner.name(),
+        }
+    }
+}
+
 impl<T, TFactory, TAllocator, TAction, TTask> TaskFactory<TAction, TTask>
     for RuntimeTaskFactory<T, TFactory, TAllocator>
 where
@@ -75,6 +88,7 @@ where
     }
 }
 
+#[derive(Clone)]
 pub enum RuntimeTaskActor<T, TFactory, TAllocator>
 where
     T: Expression,
@@ -82,6 +96,18 @@ where
     TAllocator: HeapAllocator<T>,
 {
     BytecodeWorker(BytecodeWorker<T, TFactory, TAllocator>),
+}
+impl<T, TFactory, TAllocator> Named for RuntimeTaskActor<T, TFactory, TAllocator>
+where
+    T: Expression,
+    TFactory: ExpressionFactory<T>,
+    TAllocator: HeapAllocator<T>,
+{
+    fn name(&self) -> &'static str {
+        match self {
+            Self::BytecodeWorker(inner) => inner.name(),
+        }
+    }
 }
 
 impl<T, TFactory, TAllocator, TAction, TTask> Actor<TAction, TTask>

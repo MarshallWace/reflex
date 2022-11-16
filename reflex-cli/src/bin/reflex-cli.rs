@@ -64,6 +64,7 @@ use reflex_json::{JsonMap, JsonValue};
 use reflex_lang::{
     allocator::DefaultAllocator, term::SignalTerm, CachedSharedTerm, SharedTermFactory,
 };
+use reflex_macros::Named;
 use reflex_runtime::{
     action::{bytecode_interpreter::*, effect::*, evaluate::*, query::*, RuntimeActions},
     actor::{
@@ -370,6 +371,7 @@ impl DebugActorLogger<std::io::Stderr> {
     }
 }
 
+#[derive(Named, Clone)]
 struct DebugActor<TOutput: std::io::Write> {
     _logger: PhantomData<DebugActorLogger<TOutput>>,
 }
@@ -496,7 +498,6 @@ enum CliActions<T: Expression> {
     TimeoutHandler(TimeoutHandlerActions),
     TimestampHandler(TimestampHandlerActions),
 }
-impl<T: Expression> Action for CliActions<T> {}
 impl<T: Expression> Named for CliActions<T> {
     fn name(&self) -> &'static str {
         match self {
@@ -509,6 +510,7 @@ impl<T: Expression> Named for CliActions<T> {
         }
     }
 }
+impl<T: Expression> Action for CliActions<T> {}
 impl<T: Expression> SerializableAction for CliActions<T> {
     fn to_json(&self) -> SerializedAction {
         match self {
@@ -559,6 +561,7 @@ where
 {
 }
 
+#[derive(Clone)]
 enum CliActor<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TOutput>
 where
     T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
@@ -582,6 +585,35 @@ where
     Debug(DebugActor<TOutput>),
     Main(Redispatcher),
     Task(CliTaskActor<T, TFactory, TAllocator, TConnect>),
+}
+impl<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TOutput> Named
+    for CliActor<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TOutput>
+where
+    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
+    T::String: Send,
+    T::Builtin: Send,
+    T::Signal<T>: Send,
+    T::SignalList<T>: Send,
+    T::StructPrototype<T>: Send,
+    T::ExpressionList<T>: Send,
+    TFactory: AsyncExpressionFactory<T> + Default,
+    TAllocator: AsyncHeapAllocator<T> + Default,
+    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
+    TReconnect: ReconnectTimeout + Send + Clone + 'static,
+    TMetricLabels: BytecodeInterpreterMetricLabels + Send + 'static,
+    TOutput: std::io::Write + Send + 'static,
+    DebugActorState<TOutput>: Default,
+{
+    fn name(&self) -> &'static str {
+        match self {
+            Self::Runtime(inner) => inner.name(),
+            Self::Handler(inner) => inner.name(),
+            Self::BytecodeInterpreter(inner) => inner.name(),
+            Self::Debug(inner) => inner.name(),
+            Self::Main(inner) => inner.name(),
+            Self::Task(inner) => inner.name(),
+        }
+    }
 }
 
 impl<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TOutput, TAction, TTask>
@@ -1171,6 +1203,7 @@ impl<TSelf, T: Expression> CliTaskAction<T> for TSelf where
 {
 }
 
+#[derive(Named, Clone)]
 enum CliTaskFactory<T, TFactory, TAllocator, TConnect>
 where
     T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
@@ -1181,6 +1214,7 @@ where
     Runtime(RuntimeTaskFactory<T, TFactory, TAllocator>),
     DefaultHandlers(DefaultHandlersTaskFactory<TConnect>),
 }
+
 impl<T, TFactory, TAllocator, TConnect, TAction, TTask> TaskFactory<TAction, TTask>
     for CliTaskFactory<T, TFactory, TAllocator, TConnect>
 where
@@ -1210,6 +1244,7 @@ where
     }
 }
 
+#[derive(Clone)]
 enum CliTaskActor<T, TFactory, TAllocator, TConnect>
 where
     T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
@@ -1219,6 +1254,20 @@ where
 {
     RuntimeTask(RuntimeTaskActor<T, TFactory, TAllocator>),
     DefaultHandlersTask(DefaultHandlersTaskActor<TConnect>),
+}
+impl<T, TFactory, TAllocator, TConnect> Named for CliTaskActor<T, TFactory, TAllocator, TConnect>
+where
+    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
+    TFactory: AsyncExpressionFactory<T> + Default,
+    TAllocator: AsyncHeapAllocator<T> + Default,
+    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
+{
+    fn name(&self) -> &'static str {
+        match self {
+            Self::RuntimeTask(inner) => inner.name(),
+            Self::DefaultHandlersTask(inner) => inner.name(),
+        }
+    }
 }
 
 impl<T, TFactory, TAllocator, TConnect, TAction, TTask> Actor<TAction, TTask>
@@ -1456,6 +1505,7 @@ where
     }
 }
 
+#[derive(Named, Clone)]
 struct CliActorFactory<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TOutput>
 where
     T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
@@ -1505,6 +1555,7 @@ where
         }
     }
 }
+
 impl<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TOutput, TAction>
     TaskFactory<TAction, Self>
     for CliActorFactory<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TOutput>

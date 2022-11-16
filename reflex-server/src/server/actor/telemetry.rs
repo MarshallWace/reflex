@@ -21,7 +21,7 @@ use reflex_dispatcher::{
 };
 use reflex_graphql::GraphQlOperation;
 use reflex_json::JsonValue;
-use reflex_macros::dispatcher;
+use reflex_macros::{dispatcher, Named};
 use reflex_runtime::{
     action::{
         effect::{EffectEmitAction, EffectSubscribeAction, EffectUnsubscribeAction},
@@ -50,6 +50,7 @@ use crate::{
     },
 };
 
+#[derive(Named, Clone)]
 pub struct TelemetryMiddleware<T, TFactory, TAllocator, TQueryLabel, TTransactionLabels>
 where
     T: Expression,

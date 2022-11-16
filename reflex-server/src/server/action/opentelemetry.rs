@@ -3,13 +3,13 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use reflex_dispatcher::{Action, Named, SerializableAction, SerializedAction};
 use reflex_json::JsonValue;
+use reflex_macros::Named;
 use serde::{Deserialize, Serialize};
 
 #[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub enum OpenTelemetryMiddlewareActions {
     Error(OpenTelemetryMiddlewareErrorAction),
 }
-impl Action for OpenTelemetryMiddlewareActions {}
 impl Named for OpenTelemetryMiddlewareActions {
     fn name(&self) -> &'static str {
         match self {
@@ -17,6 +17,7 @@ impl Named for OpenTelemetryMiddlewareActions {
         }
     }
 }
+impl Action for OpenTelemetryMiddlewareActions {}
 impl SerializableAction for OpenTelemetryMiddlewareActions {
     fn to_json(&self) -> SerializedAction {
         match self {
@@ -47,16 +48,11 @@ impl<'a> From<&'a OpenTelemetryMiddlewareActions>
     }
 }
 
-#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
+#[derive(Named, PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct OpenTelemetryMiddlewareErrorAction {
     pub error: String,
 }
 impl Action for OpenTelemetryMiddlewareErrorAction {}
-impl Named for OpenTelemetryMiddlewareErrorAction {
-    fn name(&self) -> &'static str {
-        "OpenTelemetryMiddlewareErrorAction"
-    }
-}
 impl SerializableAction for OpenTelemetryMiddlewareErrorAction {
     fn to_json(&self) -> SerializedAction {
         SerializedAction::from_iter([("error", JsonValue::String(self.error.clone()))])

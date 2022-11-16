@@ -27,7 +27,7 @@ use reflex_interpreter::{
     compiler::{Compile, CompiledProgram, CompilerOptions},
     InterpreterOptions,
 };
-use reflex_macros::dispatcher;
+use reflex_macros::{dispatcher, Named};
 
 use crate::{
     action::{
@@ -121,6 +121,7 @@ where
     }
 }
 
+#[derive(Named, Clone)]
 pub struct BytecodeInterpreter<T, TFactory, TAllocator, TMetricLabels>
 where
     T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,

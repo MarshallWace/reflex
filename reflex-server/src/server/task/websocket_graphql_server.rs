@@ -7,10 +7,10 @@ use futures::{Future, FutureExt, Stream};
 use pin_project::pin_project;
 use reflex_dispatcher::{
     Action, Actor, ActorInitContext, BoxedActionStream, Handler, HandlerContext, MessageData,
-    NoopDisposeCallback, ProcessId, SchedulerCommand, SchedulerMode, SchedulerTransition,
+    Named, NoopDisposeCallback, ProcessId, SchedulerCommand, SchedulerMode, SchedulerTransition,
     TaskFactory, TaskInbox, Worker,
 };
-use reflex_macros::dispatcher;
+use reflex_macros::{dispatcher, Named};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -38,6 +38,13 @@ impl<TSelf> WebSocketGraphQlServerTask for TSelf where
 pub enum WebSocketGraphQlServerTaskFactory {
     ThrottleTimeout(WebSocketGraphQlServerThrottleTimeoutTaskFactory),
 }
+impl Named for WebSocketGraphQlServerTaskFactory {
+    fn name(&self) -> &'static str {
+        match self {
+            Self::ThrottleTimeout(inner) => inner.name(),
+        }
+    }
+}
 impl<TAction, TTask> TaskFactory<TAction, TTask> for WebSocketGraphQlServerTaskFactory
 where
     TAction: Action + WebSocketGraphQlServerTaskAction + Send + 'static,
@@ -62,6 +69,14 @@ where
 pub enum WebSocketGraphQlServerTaskActor {
     ThrottleTimeout(WebSocketGraphQlServerThrottleTimeoutTaskActor),
 }
+impl Named for WebSocketGraphQlServerTaskActor {
+    fn name(&self) -> &'static str {
+        match self {
+            Self::ThrottleTimeout(inner) => inner.name(),
+        }
+    }
+}
+
 impl<TAction, TTask> Actor<TAction, TTask> for WebSocketGraphQlServerTaskActor
 where
     TAction: Action + WebSocketGraphQlServerTaskAction + Send + 'static,
@@ -90,6 +105,7 @@ where
         }
     }
 }
+
 impl<TAction, TTask> Worker<TAction, SchedulerTransition<TAction, TTask>>
     for WebSocketGraphQlServerTaskActor
 where
@@ -118,6 +134,7 @@ where
         }
     }
 }
+
 impl<TAction, TTask> Handler<TAction, SchedulerTransition<TAction, TTask>>
     for WebSocketGraphQlServerTaskActor
 where
@@ -230,7 +247,7 @@ impl<_Self> WebSocketGraphQlServerThrottleTimeoutTaskEventsAction for _Self wher
 {
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Named, Clone, Serialize, Deserialize)]
 pub struct WebSocketGraphQlServerThrottleTimeoutTaskFactory {
     pub subscription_id: Uuid,
     pub delay: Duration,
@@ -257,7 +274,7 @@ where
     }
 }
 
-#[derive(Clone)]
+#[derive(Named, Clone)]
 pub struct WebSocketGraphQlServerThrottleTimeoutTaskActor {
     subscription_id: Uuid,
     delay: Duration,

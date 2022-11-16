@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use hyper::{header::HeaderName, http::HeaderValue, HeaderMap};
 use reflex_dispatcher::{Action, Named, SerializableAction, SerializedAction};
 use reflex_json::json;
+use reflex_macros::Named;
 use reflex_protobuf::Bytes;
 use reflex_utils::serialize::bytes as serialize_bytes;
 use serde::{Deserialize, Serialize};
@@ -120,7 +121,6 @@ pub enum GrpcHandlerActions {
     AbortRequest(GrpcHandlerAbortRequestAction),
     ConnectionTerminate(GrpcHandlerConnectionTerminateAction),
 }
-impl Action for GrpcHandlerActions {}
 impl Named for GrpcHandlerActions {
     fn name(&self) -> &'static str {
         match self {
@@ -136,6 +136,7 @@ impl Named for GrpcHandlerActions {
         }
     }
 }
+impl Action for GrpcHandlerActions {}
 impl SerializableAction for GrpcHandlerActions {
     fn to_json(&self) -> SerializedAction {
         match self {
@@ -350,17 +351,12 @@ impl<'a> From<&'a GrpcHandlerActions> for Option<&'a GrpcHandlerConnectionTermin
     }
 }
 
-#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
+#[derive(Named, PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct GrpcHandlerConnectSuccessAction {
     pub connection_id: Uuid,
     pub url: String,
 }
 impl Action for GrpcHandlerConnectSuccessAction {}
-impl Named for GrpcHandlerConnectSuccessAction {
-    fn name(&self) -> &'static str {
-        "GrpcMiddlewareConnectSuccessAction"
-    }
-}
 impl SerializableAction for GrpcHandlerConnectSuccessAction {
     fn to_json(&self) -> SerializedAction {
         SerializedAction::from_iter([
@@ -373,18 +369,13 @@ impl SerializableAction for GrpcHandlerConnectSuccessAction {
     }
 }
 
-#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
+#[derive(Named, PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct GrpcHandlerConnectErrorAction {
     pub connection_id: Uuid,
     pub url: String,
     pub message: String,
 }
 impl Action for GrpcHandlerConnectErrorAction {}
-impl Named for GrpcHandlerConnectErrorAction {
-    fn name(&self) -> &'static str {
-        "GrpcMiddlewareConnectErrorAction"
-    }
-}
 impl SerializableAction for GrpcHandlerConnectErrorAction {
     fn to_json(&self) -> SerializedAction {
         SerializedAction::from_iter([
@@ -398,7 +389,7 @@ impl SerializableAction for GrpcHandlerConnectErrorAction {
     }
 }
 
-#[derive(PartialEq, Clone, Debug, Serialize, Deserialize)]
+#[derive(Named, PartialEq, Clone, Debug, Serialize, Deserialize)]
 pub struct GrpcHandlerRequestStartAction {
     pub connection_id: Uuid,
     pub url: String,
@@ -413,11 +404,6 @@ pub struct GrpcHandlerRequestStartAction {
     pub message: Bytes,
 }
 impl Action for GrpcHandlerRequestStartAction {}
-impl Named for GrpcHandlerRequestStartAction {
-    fn name(&self) -> &'static str {
-        "GrpcMiddlewareRequestStartAction"
-    }
-}
 impl SerializableAction for GrpcHandlerRequestStartAction {
     fn to_json(&self) -> SerializedAction {
         SerializedAction::from_iter([
@@ -445,7 +431,7 @@ impl SerializableAction for GrpcHandlerRequestStartAction {
     }
 }
 
-#[derive(PartialEq, Clone, Debug, Serialize, Deserialize)]
+#[derive(Named, PartialEq, Clone, Debug, Serialize, Deserialize)]
 pub struct GrpcHandlerRequestStopAction {
     pub connection_id: Uuid,
     pub url: String,
@@ -457,11 +443,6 @@ pub struct GrpcHandlerRequestStopAction {
     pub metadata: GrpcMetadata,
 }
 impl Action for GrpcHandlerRequestStopAction {}
-impl Named for GrpcHandlerRequestStopAction {
-    fn name(&self) -> &'static str {
-        "GrpcMiddlewareRequestStopAction"
-    }
-}
 impl SerializableAction for GrpcHandlerRequestStopAction {
     fn to_json(&self) -> SerializedAction {
         SerializedAction::from_iter([
@@ -487,7 +468,7 @@ impl SerializableAction for GrpcHandlerRequestStopAction {
     }
 }
 
-#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
+#[derive(Named, PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct GrpcHandlerSuccessResponseAction {
     pub connection_id: Uuid,
     pub operation_id: Uuid,
@@ -495,11 +476,6 @@ pub struct GrpcHandlerSuccessResponseAction {
     pub data: Bytes,
 }
 impl Action for GrpcHandlerSuccessResponseAction {}
-impl Named for GrpcHandlerSuccessResponseAction {
-    fn name(&self) -> &'static str {
-        "GrpcMiddlewareSuccessResponseAction"
-    }
-}
 impl SerializableAction for GrpcHandlerSuccessResponseAction {
     fn to_json(&self) -> SerializedAction {
         SerializedAction::from_iter([
@@ -516,7 +492,7 @@ impl SerializableAction for GrpcHandlerSuccessResponseAction {
     }
 }
 
-#[derive(PartialEq, Clone, Debug, Serialize, Deserialize)]
+#[derive(Named, PartialEq, Clone, Debug, Serialize, Deserialize)]
 pub struct GrpcHandlerErrorResponseAction {
     pub connection_id: Uuid,
     pub url: String,
@@ -529,11 +505,6 @@ pub struct GrpcHandlerErrorResponseAction {
     pub status: GrpcStatus,
 }
 impl Action for GrpcHandlerErrorResponseAction {}
-impl Named for GrpcHandlerErrorResponseAction {
-    fn name(&self) -> &'static str {
-        "GrpcMiddlewareErrorResponseAction"
-    }
-}
 impl SerializableAction for GrpcHandlerErrorResponseAction {
     fn to_json(&self) -> SerializedAction {
         SerializedAction::from_iter([
@@ -560,7 +531,7 @@ impl SerializableAction for GrpcHandlerErrorResponseAction {
     }
 }
 
-#[derive(PartialEq, Clone, Debug, Serialize, Deserialize)]
+#[derive(Named, PartialEq, Clone, Debug, Serialize, Deserialize)]
 pub struct GrpcHandlerTransportErrorAction {
     pub connection_id: Uuid,
     pub url: String,
@@ -573,11 +544,6 @@ pub struct GrpcHandlerTransportErrorAction {
     pub status: GrpcStatus,
 }
 impl Action for GrpcHandlerTransportErrorAction {}
-impl Named for GrpcHandlerTransportErrorAction {
-    fn name(&self) -> &'static str {
-        "GrpcMiddlewareTransportErrorAction"
-    }
-}
 impl SerializableAction for GrpcHandlerTransportErrorAction {
     fn to_json(&self) -> SerializedAction {
         SerializedAction::from_iter([
@@ -604,17 +570,12 @@ impl SerializableAction for GrpcHandlerTransportErrorAction {
     }
 }
 
-#[derive(PartialEq, Clone, Debug, Serialize, Deserialize)]
+#[derive(Named, PartialEq, Clone, Debug, Serialize, Deserialize)]
 pub struct GrpcHandlerAbortRequestAction {
     pub connection_id: Uuid,
     pub operation_id: Uuid,
 }
 impl Action for GrpcHandlerAbortRequestAction {}
-impl Named for GrpcHandlerAbortRequestAction {
-    fn name(&self) -> &'static str {
-        "GrpcMiddlewareAbortRequestAction"
-    }
-}
 impl SerializableAction for GrpcHandlerAbortRequestAction {
     fn to_json(&self) -> SerializedAction {
         SerializedAction::from_iter([
@@ -630,17 +591,12 @@ impl SerializableAction for GrpcHandlerAbortRequestAction {
     }
 }
 
-#[derive(PartialEq, Clone, Debug, Serialize, Deserialize)]
+#[derive(Named, PartialEq, Clone, Debug, Serialize, Deserialize)]
 pub struct GrpcHandlerConnectionTerminateAction {
     pub connection_id: Uuid,
     pub url: String,
 }
 impl Action for GrpcHandlerConnectionTerminateAction {}
-impl Named for GrpcHandlerConnectionTerminateAction {
-    fn name(&self) -> &'static str {
-        "GrpcMiddlewareConnectionTerminateAction"
-    }
-}
 impl SerializableAction for GrpcHandlerConnectionTerminateAction {
     fn to_json(&self) -> SerializedAction {
         SerializedAction::from_iter([

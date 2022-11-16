@@ -3,46 +3,37 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use std::iter::once;
 
-use reflex_macros::dispatcher;
+use reflex_macros::{dispatcher, Named};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value as JsonValue};
 
 use reflex_dispatcher::{
-    Action, ActorInitContext, HandlerContext, MessageData, Named, NoopDisposeCallback, ProcessId,
+    Action, ActorInitContext, HandlerContext, MessageData, NoopDisposeCallback, ProcessId,
     SchedulerCommand, SchedulerMode, SchedulerTransition, SerializableAction, SerializedAction,
     TaskFactory, TaskInbox,
 };
 
-#[derive(PartialEq, Eq, Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Named, PartialEq, Eq, Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct SessionPlaybackBeginAction {
     pub num_frames: usize,
 }
 impl Action for SessionPlaybackBeginAction {}
-impl Named for SessionPlaybackBeginAction {
-    fn name(&self) -> &'static str {
-        "SessionPlaybackBeginAction"
-    }
-}
 impl SerializableAction for SessionPlaybackBeginAction {
     fn to_json(&self) -> SerializedAction {
         SerializedAction::from_iter([("num_frames", JsonValue::Number(self.num_frames.into()))])
     }
 }
 
-#[derive(PartialEq, Eq, Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Named, PartialEq, Eq, Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct SessionPlaybackEndAction;
 impl Action for SessionPlaybackEndAction {}
-impl Named for SessionPlaybackEndAction {
-    fn name(&self) -> &'static str {
-        "SessionPlaybackEndAction"
-    }
-}
 impl SerializableAction for SessionPlaybackEndAction {
     fn to_json(&self) -> SerializedAction {
         SerializedAction::from_iter([])
     }
 }
 
+#[derive(Named, Clone)]
 pub struct SessionPlayback<TRecordedAction, TRecordedTask>
 where
     TRecordedAction: Action,

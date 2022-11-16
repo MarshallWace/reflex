@@ -6,6 +6,7 @@ use std::time::SystemTime;
 use reflex::core::Uuid;
 use reflex_dispatcher::{Action, Named, SerializableAction, SerializedAction};
 use reflex_json::JsonValue;
+use reflex_macros::Named;
 use serde::{Deserialize, Serialize};
 
 use crate::utils::timestamp::get_timestamp_millis;
@@ -14,7 +15,6 @@ use crate::utils::timestamp::get_timestamp_millis;
 pub enum TimestampHandlerActions {
     Update(TimestampHandlerUpdateAction),
 }
-impl Action for TimestampHandlerActions {}
 impl Named for TimestampHandlerActions {
     fn name(&self) -> &'static str {
         match self {
@@ -22,6 +22,7 @@ impl Named for TimestampHandlerActions {
         }
     }
 }
+impl Action for TimestampHandlerActions {}
 impl SerializableAction for TimestampHandlerActions {
     fn to_json(&self) -> SerializedAction {
         match self {
@@ -50,17 +51,12 @@ impl<'a> From<&'a TimestampHandlerActions> for Option<&'a TimestampHandlerUpdate
     }
 }
 
-#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
+#[derive(Named, PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct TimestampHandlerUpdateAction {
     pub operation_id: Uuid,
     pub timestamp: SystemTime,
 }
 impl Action for TimestampHandlerUpdateAction {}
-impl Named for TimestampHandlerUpdateAction {
-    fn name(&self) -> &'static str {
-        "TimestampHandlerUpdateAction"
-    }
-}
 impl SerializableAction for TimestampHandlerUpdateAction {
     fn to_json(&self) -> SerializedAction {
         SerializedAction::from_iter([

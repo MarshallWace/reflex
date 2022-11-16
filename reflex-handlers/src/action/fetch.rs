@@ -6,6 +6,7 @@ use http::StatusCode;
 use reflex::core::Uuid;
 use reflex_dispatcher::{Action, Named, SerializableAction, SerializedAction};
 use reflex_json::JsonValue;
+use reflex_macros::Named;
 use serde::{Deserialize, Serialize};
 
 use crate::utils::serialize::SerializedBytes;
@@ -77,7 +78,7 @@ impl<'a> From<&'a FetchHandlerActions> for Option<&'a FetchHandlerConnectionErro
     }
 }
 
-#[derive(PartialEq, Eq, Clone, Debug)]
+#[derive(Named, PartialEq, Eq, Clone, Debug)]
 pub struct FetchHandlerFetchCompleteAction {
     pub operation_id: Uuid,
     pub url: String,
@@ -85,11 +86,6 @@ pub struct FetchHandlerFetchCompleteAction {
     pub body: Bytes,
 }
 impl Action for FetchHandlerFetchCompleteAction {}
-impl Named for FetchHandlerFetchCompleteAction {
-    fn name(&self) -> &'static str {
-        "FetchHandlerFetchCompleteAction"
-    }
-}
 impl SerializableAction for FetchHandlerFetchCompleteAction {
     fn to_json(&self) -> SerializedAction {
         SerializedAction::from_iter([
@@ -159,18 +155,13 @@ impl From<SerializedFetchHandlerFetchCompleteAction> for FetchHandlerFetchComple
     }
 }
 
-#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
+#[derive(Named, PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct FetchHandlerConnectionErrorAction {
     pub operation_id: Uuid,
     pub url: String,
     pub message: String,
 }
 impl Action for FetchHandlerConnectionErrorAction {}
-impl Named for FetchHandlerConnectionErrorAction {
-    fn name(&self) -> &'static str {
-        "FetchHandlerConnectionErrorAction"
-    }
-}
 impl SerializableAction for FetchHandlerConnectionErrorAction {
     fn to_json(&self) -> SerializedAction {
         SerializedAction::from_iter([

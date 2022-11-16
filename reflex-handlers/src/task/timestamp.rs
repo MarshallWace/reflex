@@ -12,7 +12,7 @@ use reflex_dispatcher::{
     Action, ActorInitContext, BoxedActionStream, HandlerContext, MessageData, NoopDisposeCallback,
     ProcessId, SchedulerCommand, SchedulerMode, SchedulerTransition, TaskFactory, TaskInbox,
 };
-use reflex_macros::dispatcher;
+use reflex_macros::{dispatcher, Named};
 use serde::{Deserialize, Serialize};
 use tokio::time::interval_at;
 use tokio_stream::wrappers::IntervalStream;
@@ -22,7 +22,7 @@ use crate::action::timestamp::TimestampHandlerUpdateAction;
 pub trait TimestampHandlerTask: From<TimestampHandlerTaskFactory> {}
 impl<TSelf> TimestampHandlerTask for TSelf where Self: From<TimestampHandlerTaskFactory> {}
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Named, Clone, Serialize, Deserialize)]
 pub struct TimestampHandlerTaskFactory {
     pub operation_id: Uuid,
     pub interval: Duration,
@@ -48,6 +48,7 @@ where
     }
 }
 
+#[derive(Named, Clone)]
 pub struct TimestampHandlerTaskActor {
     operation_id: Uuid,
     interval: Duration,

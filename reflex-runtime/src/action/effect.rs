@@ -6,6 +6,7 @@ use std::borrow::Cow;
 use reflex::core::{ConditionType, Expression, ExpressionListType, RefType, StateToken};
 use reflex_dispatcher::{Action, Named, SerializableAction, SerializedAction};
 use reflex_json::{JsonMap, JsonValue};
+use reflex_macros::Named;
 use serde::{Deserialize, Serialize};
 
 #[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
@@ -18,7 +19,6 @@ pub enum EffectActions<T: Expression> {
     Unsubscribe(EffectUnsubscribeAction<T>),
     Emit(EffectEmitAction<T>),
 }
-impl<T: Expression> Action for EffectActions<T> {}
 impl<T: Expression> Named for EffectActions<T> {
     fn name(&self) -> &'static str {
         match self {
@@ -28,6 +28,7 @@ impl<T: Expression> Named for EffectActions<T> {
         }
     }
 }
+impl<T: Expression> Action for EffectActions<T> {}
 impl<T: Expression> SerializableAction for EffectActions<T> {
     fn to_json(&self) -> SerializedAction {
         match self {
@@ -104,7 +105,7 @@ impl<'a, T: Expression> From<&'a EffectActions<T>> for Option<&'a EffectEmitActi
     }
 }
 
-#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
+#[derive(Named, PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct EffectSubscribeAction<T: Expression> {
     pub effect_type: String,
     #[serde(bound(
@@ -114,11 +115,6 @@ pub struct EffectSubscribeAction<T: Expression> {
     pub effects: Vec<T::Signal<T>>,
 }
 impl<T: Expression> Action for EffectSubscribeAction<T> {}
-impl<T: Expression> Named for EffectSubscribeAction<T> {
-    fn name(&self) -> &'static str {
-        "EffectSubscribeAction"
-    }
-}
 impl<T: Expression> SerializableAction for EffectSubscribeAction<T> {
     fn to_json(&self) -> SerializedAction {
         SerializedAction::from_iter([
@@ -152,7 +148,7 @@ impl<T: Expression> SerializableAction for EffectSubscribeAction<T> {
     }
 }
 
-#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
+#[derive(Named, PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct EffectUnsubscribeAction<T: Expression> {
     pub effect_type: String,
     #[serde(bound(
@@ -162,11 +158,6 @@ pub struct EffectUnsubscribeAction<T: Expression> {
     pub effects: Vec<T::Signal<T>>,
 }
 impl<T: Expression> Action for EffectUnsubscribeAction<T> {}
-impl<T: Expression> Named for EffectUnsubscribeAction<T> {
-    fn name(&self) -> &'static str {
-        "EffectUnsubscribeAction"
-    }
-}
 impl<T: Expression> SerializableAction for EffectUnsubscribeAction<T> {
     fn to_json(&self) -> SerializedAction {
         SerializedAction::from_iter([
@@ -200,16 +191,11 @@ impl<T: Expression> SerializableAction for EffectUnsubscribeAction<T> {
     }
 }
 
-#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
+#[derive(Named, PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct EffectEmitAction<T: Expression> {
     pub effect_types: Vec<EffectUpdateBatch<T>>,
 }
 impl<T: Expression> Action for EffectEmitAction<T> {}
-impl<T: Expression> Named for EffectEmitAction<T> {
-    fn name(&self) -> &'static str {
-        "EffectEmitAction"
-    }
-}
 impl<T: Expression> SerializableAction for EffectEmitAction<T> {
     fn to_json(&self) -> SerializedAction {
         SerializedAction::from_iter([(

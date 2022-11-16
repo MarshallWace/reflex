@@ -35,6 +35,14 @@ pub struct InstrumentedActor<T> {
     actor_name: &'static str,
     metric_names: InstrumentedActorMetricNames,
 }
+impl<T> Named for InstrumentedActor<T>
+where
+    T: Named,
+{
+    fn name(&self) -> &'static str {
+        self.inner.name()
+    }
+}
 impl<T> InstrumentedActor<T> {
     pub fn new(
         inner: T,

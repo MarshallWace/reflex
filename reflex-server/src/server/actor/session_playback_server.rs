@@ -18,6 +18,7 @@ use reflex_dispatcher::{
     SerializableAction, TaskFactory, TaskInbox, Worker,
 };
 use reflex_json::{json, JsonValue};
+use reflex_macros::Named;
 use reflex_recorder::session_playback::{
     SessionPlayback, SessionPlaybackAction, SessionPlaybackBeginAction, SessionPlaybackEndAction,
     SessionPlaybackState,
@@ -80,6 +81,7 @@ impl<T: Expression, TAction> SessionPlaybackServerAction<T> for TAction where
 {
 }
 
+#[derive(Named, Clone)]
 pub struct SessionPlaybackServer<T, TFactory, TRecordedAction, TRecordedTask>
 where
     T: Expression,

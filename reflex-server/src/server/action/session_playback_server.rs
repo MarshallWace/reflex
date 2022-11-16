@@ -5,6 +5,7 @@ use bytes::Bytes;
 use http::{Request, Response};
 use reflex_dispatcher::{Action, Named, SerializableAction, SerializedAction};
 use reflex_json::{JsonMap, JsonValue};
+use reflex_macros::Named;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -18,7 +19,6 @@ pub enum SessionPlaybackServerActions {
     HttpRequest(SessionPlaybackServerHttpRequestAction),
     HttpResponse(SessionPlaybackServerHttpResponseAction),
 }
-impl Action for SessionPlaybackServerActions {}
 impl Named for SessionPlaybackServerActions {
     fn name(&self) -> &'static str {
         match self {
@@ -27,6 +27,7 @@ impl Named for SessionPlaybackServerActions {
         }
     }
 }
+impl Action for SessionPlaybackServerActions {}
 impl SerializableAction for SessionPlaybackServerActions {
     fn to_json(&self) -> SerializedAction {
         match self {
@@ -84,7 +85,7 @@ impl<'a> From<&'a SessionPlaybackServerActions>
     }
 }
 
-#[derive(Debug)]
+#[derive(Named, Debug)]
 pub struct SessionPlaybackServerHttpRequestAction {
     pub request_id: Uuid,
     pub request: Request<Bytes>,
@@ -98,11 +99,6 @@ impl Clone for SessionPlaybackServerHttpRequestAction {
     }
 }
 impl Action for SessionPlaybackServerHttpRequestAction {}
-impl Named for SessionPlaybackServerHttpRequestAction {
-    fn name(&self) -> &'static str {
-        "SessionPlaybackServerHttpRequestAction"
-    }
-}
 impl SerializableAction for SessionPlaybackServerHttpRequestAction {
     fn to_json(&self) -> SerializedAction {
         SerializedAction::from_iter([(
@@ -161,7 +157,7 @@ impl From<SerializedSessionPlaybackServerHttpRequestAction>
     }
 }
 
-#[derive(Debug)]
+#[derive(Named, Debug)]
 pub struct SessionPlaybackServerHttpResponseAction {
     pub request_id: Uuid,
     pub response: Response<Bytes>,
@@ -176,11 +172,6 @@ impl Clone for SessionPlaybackServerHttpResponseAction {
     }
 }
 impl Action for SessionPlaybackServerHttpResponseAction {}
-impl Named for SessionPlaybackServerHttpResponseAction {
-    fn name(&self) -> &'static str {
-        "SessionPlaybackServerHttpResponseAction"
-    }
-}
 impl SerializableAction for SessionPlaybackServerHttpResponseAction {
     fn to_json(&self) -> SerializedAction {
         SerializedAction::from_iter([

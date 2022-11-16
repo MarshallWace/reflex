@@ -10,6 +10,7 @@ use reflex_graphql::subscriptions::{
     GraphQlSubscriptionClientMessage, GraphQlSubscriptionServerMessage,
 };
 use reflex_json::{JsonMap, JsonValue};
+use reflex_macros::Named;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -25,7 +26,6 @@ pub enum GraphQlHandlerActions {
     WebSocketConnectionTerminate(GraphQlHandlerWebSocketConnectionTerminateAction),
     WebSocketConnectionError(GraphQlHandlerWebSocketConnectionErrorAction),
 }
-impl Action for GraphQlHandlerActions {}
 impl Named for GraphQlHandlerActions {
     fn name(&self) -> &'static str {
         match self {
@@ -39,6 +39,7 @@ impl Named for GraphQlHandlerActions {
         }
     }
 }
+impl Action for GraphQlHandlerActions {}
 impl SerializableAction for GraphQlHandlerActions {
     fn to_json(&self) -> SerializedAction {
         match self {
@@ -217,7 +218,7 @@ impl<'a> From<&'a GraphQlHandlerActions>
     }
 }
 
-#[derive(PartialEq, Eq, Clone, Debug)]
+#[derive(Named, PartialEq, Eq, Clone, Debug)]
 pub struct GraphQlHandlerHttpFetchCompleteAction {
     pub operation_id: Uuid,
     pub url: String,
@@ -225,11 +226,6 @@ pub struct GraphQlHandlerHttpFetchCompleteAction {
     pub body: Bytes,
 }
 impl Action for GraphQlHandlerHttpFetchCompleteAction {}
-impl Named for GraphQlHandlerHttpFetchCompleteAction {
-    fn name(&self) -> &'static str {
-        "GraphQlHandlerHttpFetchCompleteAction"
-    }
-}
 impl SerializableAction for GraphQlHandlerHttpFetchCompleteAction {
     fn to_json(&self) -> SerializedAction {
         SerializedAction::from_iter([
@@ -303,18 +299,13 @@ impl From<SerializedGraphQlHandlerHttpFetchCompleteAction>
     }
 }
 
-#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
+#[derive(Named, PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct GraphQlHandlerHttpConnectionErrorAction {
     pub operation_id: Uuid,
     pub url: String,
     pub message: String,
 }
 impl Action for GraphQlHandlerHttpConnectionErrorAction {}
-impl Named for GraphQlHandlerHttpConnectionErrorAction {
-    fn name(&self) -> &'static str {
-        "GraphQlHandlerHttpConnectionErrorAction"
-    }
-}
 impl SerializableAction for GraphQlHandlerHttpConnectionErrorAction {
     fn to_json(&self) -> SerializedAction {
         SerializedAction::from_iter([
@@ -328,17 +319,12 @@ impl SerializableAction for GraphQlHandlerHttpConnectionErrorAction {
     }
 }
 
-#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
+#[derive(Named, PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct GraphQlHandlerWebSocketConnectSuccessAction {
     pub connection_id: Uuid,
     pub url: String,
 }
 impl Action for GraphQlHandlerWebSocketConnectSuccessAction {}
-impl Named for GraphQlHandlerWebSocketConnectSuccessAction {
-    fn name(&self) -> &'static str {
-        "GraphQlHandlerWebSocketConnectSuccessAction"
-    }
-}
 impl SerializableAction for GraphQlHandlerWebSocketConnectSuccessAction {
     fn to_json(&self) -> SerializedAction {
         SerializedAction::from_iter([
@@ -351,17 +337,12 @@ impl SerializableAction for GraphQlHandlerWebSocketConnectSuccessAction {
     }
 }
 
-#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
+#[derive(Named, PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct GraphQlHandlerWebSocketClientMessageAction {
     pub connection_id: Uuid,
     pub message: GraphQlSubscriptionClientMessage,
 }
 impl Action for GraphQlHandlerWebSocketClientMessageAction {}
-impl Named for GraphQlHandlerWebSocketClientMessageAction {
-    fn name(&self) -> &'static str {
-        "GraphQlHandlerWebSocketClientMessageAction"
-    }
-}
 impl SerializableAction for GraphQlHandlerWebSocketClientMessageAction {
     fn to_json(&self) -> SerializedAction {
         SerializedAction::from_iter([
@@ -374,17 +355,12 @@ impl SerializableAction for GraphQlHandlerWebSocketClientMessageAction {
     }
 }
 
-#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
+#[derive(Named, PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct GraphQlHandlerWebSocketServerMessageAction {
     pub connection_id: Uuid,
     pub message: Arc<GraphQlSubscriptionServerMessage>,
 }
 impl Action for GraphQlHandlerWebSocketServerMessageAction {}
-impl Named for GraphQlHandlerWebSocketServerMessageAction {
-    fn name(&self) -> &'static str {
-        "GraphQlHandlerWebSocketServerMessageAction"
-    }
-}
 impl SerializableAction for GraphQlHandlerWebSocketServerMessageAction {
     fn to_json(&self) -> SerializedAction {
         SerializedAction::from_iter([
@@ -420,17 +396,12 @@ impl SerializableAction for GraphQlHandlerWebSocketServerMessageAction {
     }
 }
 
-#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
+#[derive(Named, PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct GraphQlHandlerWebSocketConnectionTerminateAction {
     pub connection_id: Uuid,
     pub url: String,
 }
 impl Action for GraphQlHandlerWebSocketConnectionTerminateAction {}
-impl Named for GraphQlHandlerWebSocketConnectionTerminateAction {
-    fn name(&self) -> &'static str {
-        "GraphQlHandlerWebSocketConnectionTerminateAction"
-    }
-}
 impl SerializableAction for GraphQlHandlerWebSocketConnectionTerminateAction {
     fn to_json(&self) -> SerializedAction {
         SerializedAction::from_iter([
@@ -443,7 +414,7 @@ impl SerializableAction for GraphQlHandlerWebSocketConnectionTerminateAction {
     }
 }
 
-#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
+#[derive(Named, PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct GraphQlHandlerWebSocketConnectionErrorAction {
     pub connection_id: Uuid,
     pub url: String,
@@ -451,11 +422,6 @@ pub struct GraphQlHandlerWebSocketConnectionErrorAction {
     pub retryable: bool,
 }
 impl Action for GraphQlHandlerWebSocketConnectionErrorAction {}
-impl Named for GraphQlHandlerWebSocketConnectionErrorAction {
-    fn name(&self) -> &'static str {
-        "GraphQlHandlerWebSocketConnectionErrorAction"
-    }
-}
 impl SerializableAction for GraphQlHandlerWebSocketConnectionErrorAction {
     fn to_json(&self) -> SerializedAction {
         SerializedAction::from_iter([

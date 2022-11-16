@@ -26,7 +26,7 @@ use reflex_handlers::utils::tls::{
     hyper::{body::HttpBody, client::connect::Connect},
     tokio_native_tls::native_tls,
 };
-use reflex_macros::dispatcher;
+use reflex_macros::{dispatcher, Named};
 use tonic::{self, transport::ClientTlsConfig};
 
 use crate::{
@@ -163,6 +163,7 @@ impl<C, B> std::fmt::Debug for OpenTelemetryHyperClient<C, B> {
     }
 }
 
+#[derive(Named, Clone)]
 pub struct OpenTelemetryActor<T: Tracer> {
     tracer: T,
 }

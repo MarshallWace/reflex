@@ -6,6 +6,7 @@ use http::{Request, Response};
 use reflex::core::Uuid;
 use reflex_dispatcher::{Action, Named, SerializableAction, SerializedAction};
 use reflex_json::{JsonMap, JsonValue};
+use reflex_macros::Named;
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -18,7 +19,6 @@ pub enum HttpServerActions {
     Request(HttpServerRequestAction),
     Response(HttpServerResponseAction),
 }
-impl Action for HttpServerActions {}
 impl Named for HttpServerActions {
     fn name(&self) -> &'static str {
         match self {
@@ -27,6 +27,7 @@ impl Named for HttpServerActions {
         }
     }
 }
+impl Action for HttpServerActions {}
 impl SerializableAction for HttpServerActions {
     fn to_json(&self) -> SerializedAction {
         match self {
@@ -80,7 +81,7 @@ impl<'a> From<&'a HttpServerActions> for Option<&'a HttpServerResponseAction> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Named, Debug)]
 pub struct HttpServerRequestAction {
     pub request_id: Uuid,
     pub request: Request<Bytes>,
@@ -94,11 +95,6 @@ impl Clone for HttpServerRequestAction {
     }
 }
 impl Action for HttpServerRequestAction {}
-impl Named for HttpServerRequestAction {
-    fn name(&self) -> &'static str {
-        "HttpServerRequestAction"
-    }
-}
 impl SerializableAction for HttpServerRequestAction {
     fn to_json(&self) -> SerializedAction {
         SerializedAction::from_iter([
@@ -185,7 +181,7 @@ impl From<SerializedHttpServerRequestAction> for HttpServerRequestAction {
     }
 }
 
-#[derive(Debug)]
+#[derive(Named, Debug)]
 pub struct HttpServerResponseAction {
     pub request_id: Uuid,
     pub response: Response<Bytes>,
@@ -200,11 +196,6 @@ impl Clone for HttpServerResponseAction {
     }
 }
 impl Action for HttpServerResponseAction {}
-impl Named for HttpServerResponseAction {
-    fn name(&self) -> &'static str {
-        "HttpServerResponseAction"
-    }
-}
 impl SerializableAction for HttpServerResponseAction {
     fn to_json(&self) -> SerializedAction {
         SerializedAction::from_iter([

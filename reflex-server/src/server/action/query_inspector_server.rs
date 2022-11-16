@@ -5,6 +5,7 @@ use bytes::Bytes;
 use http::{Request, Response};
 use reflex_dispatcher::{Action, Named, SerializableAction, SerializedAction};
 use reflex_json::{JsonMap, JsonValue};
+use reflex_macros::Named;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -18,7 +19,6 @@ pub enum QueryInspectorServerActions {
     HttpRequest(QueryInspectorServerHttpRequestAction),
     HttpResponse(QueryInspectorServerHttpResponseAction),
 }
-impl Action for QueryInspectorServerActions {}
 impl Named for QueryInspectorServerActions {
     fn name(&self) -> &'static str {
         match self {
@@ -27,6 +27,7 @@ impl Named for QueryInspectorServerActions {
         }
     }
 }
+impl Action for QueryInspectorServerActions {}
 impl SerializableAction for QueryInspectorServerActions {
     fn to_json(&self) -> SerializedAction {
         match self {
@@ -84,7 +85,7 @@ impl<'a> From<&'a QueryInspectorServerActions>
     }
 }
 
-#[derive(Debug)]
+#[derive(Named, Debug)]
 pub struct QueryInspectorServerHttpRequestAction {
     pub request_id: Uuid,
     pub request: Request<Bytes>,
@@ -98,11 +99,6 @@ impl Clone for QueryInspectorServerHttpRequestAction {
     }
 }
 impl Action for QueryInspectorServerHttpRequestAction {}
-impl Named for QueryInspectorServerHttpRequestAction {
-    fn name(&self) -> &'static str {
-        "QueryInspectorServerHttpRequestAction"
-    }
-}
 impl SerializableAction for QueryInspectorServerHttpRequestAction {
     fn to_json(&self) -> SerializedAction {
         SerializedAction::from_iter([(
@@ -161,7 +157,7 @@ impl From<SerializedQueryInspectorServerHttpRequestAction>
     }
 }
 
-#[derive(Debug)]
+#[derive(Named, Debug)]
 pub struct QueryInspectorServerHttpResponseAction {
     pub request_id: Uuid,
     pub response: Response<Bytes>,
@@ -176,11 +172,6 @@ impl Clone for QueryInspectorServerHttpResponseAction {
     }
 }
 impl Action for QueryInspectorServerHttpResponseAction {}
-impl Named for QueryInspectorServerHttpResponseAction {
-    fn name(&self) -> &'static str {
-        "QueryInspectorServerHttpResponseAction"
-    }
-}
 impl SerializableAction for QueryInspectorServerHttpResponseAction {
     fn to_json(&self) -> SerializedAction {
         SerializedAction::from_iter([

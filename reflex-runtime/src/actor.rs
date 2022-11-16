@@ -5,10 +5,9 @@ use futures::{Future, Stream};
 use pin_project::pin_project;
 use reflex::core::{Expression, ExpressionFactory, HeapAllocator};
 use reflex_dispatcher::{
-    Action, Actor, ActorInitContext, HandlerContext, MessageData, SchedulerTransition, TaskFactory,
-    TaskInbox,
+    Action, Actor, ActorInitContext, Handler, HandlerContext, MessageData, Named, SchedulerMode,
+    SchedulerTransition, TaskFactory, TaskInbox, Worker,
 };
-use reflex_dispatcher::{Handler, SchedulerMode, Worker};
 
 pub mod bytecode_interpreter;
 pub mod evaluate_handler;
@@ -30,9 +29,28 @@ impl<T: Expression, TAction> RuntimeAction<T> for TAction where
 {
 }
 
-pub enum RuntimeActor<T: Expression, TFactory: ExpressionFactory<T>, TAllocator: HeapAllocator<T>> {
+#[derive(Clone)]
+pub enum RuntimeActor<T, TFactory, TAllocator>
+where
+    T: Expression,
+    TFactory: ExpressionFactory<T>,
+    TAllocator: HeapAllocator<T>,
+{
     QueryManager(QueryManager<T, TFactory, TAllocator>),
     EvaluateHandler(EvaluateHandler<T, TFactory, TAllocator>),
+}
+impl<T, TFactory, TAllocator> Named for RuntimeActor<T, TFactory, TAllocator>
+where
+    T: Expression,
+    TFactory: ExpressionFactory<T>,
+    TAllocator: HeapAllocator<T>,
+{
+    fn name(&self) -> &'static str {
+        match self {
+            RuntimeActor::QueryManager(inner) => inner.name(),
+            RuntimeActor::EvaluateHandler(inner) => inner.name(),
+        }
+    }
 }
 
 impl<T, TFactory, TAllocator, TAction, TTask> Actor<TAction, TTask>

@@ -8,7 +8,7 @@ use opentelemetry::trace::Tracer;
 use pin_project::pin_project;
 use reflex::core::{Applicable, Expression, Reducible, Rewritable};
 use reflex_dispatcher::{
-    Action, Actor, ActorInitContext, Handler, HandlerContext, MessageData, Redispatcher,
+    Action, Actor, ActorInitContext, Handler, HandlerContext, MessageData, Named, Redispatcher,
     SchedulerTransition, TaskFactory, TaskInbox, Worker,
 };
 use reflex_graphql::stdlib::Stdlib as GraphQlStdlib;
@@ -156,6 +156,66 @@ impl<
         TWorkerMetricLabels,
         TOperationMetricLabels,
         TTracer,
+    > Named
+    for ServerCliTaskFactory<
+        T,
+        TFactory,
+        TAllocator,
+        TConnect,
+        TReconnect,
+        TTransformHttp,
+        TTransformWs,
+        TGraphQlQueryLabel,
+        THttpMetricLabels,
+        TConnectionMetricLabels,
+        TWorkerMetricLabels,
+        TOperationMetricLabels,
+        TTracer,
+    >
+where
+    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
+    T::String: Send,
+    T::Builtin: From<Stdlib> + From<GraphQlStdlib> + Send,
+    T::Signal<T>: Send,
+    T::SignalList<T>: Send,
+    T::StructPrototype<T>: Send,
+    T::ExpressionList<T>: Send,
+    TFactory: AsyncExpressionFactory<T> + Default,
+    TAllocator: AsyncHeapAllocator<T> + Default,
+    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
+    TReconnect: ReconnectTimeout + Send + Clone + 'static,
+    TTransformHttp: HttpGraphQlServerQueryTransform,
+    TTransformWs: WebSocketGraphQlServerQueryTransform,
+    TGraphQlQueryLabel: GraphQlServerQueryLabel,
+    THttpMetricLabels: HttpGraphQlServerQueryMetricLabels,
+    TConnectionMetricLabels: WebSocketGraphQlServerConnectionMetricLabels,
+    TOperationMetricLabels: GraphQlServerOperationMetricLabels,
+    TWorkerMetricLabels: BytecodeInterpreterMetricLabels,
+    TTracer: Tracer,
+    TTracer::Span: Send + Sync + 'static,
+{
+    fn name(&self) -> &'static str {
+        match self {
+            Self::ServerTask(inner) => inner.name(),
+            Self::_Unreachable(inner, ..) => match *inner {},
+        }
+    }
+}
+
+impl<
+        T,
+        TFactory,
+        TAllocator,
+        TConnect,
+        TReconnect,
+        TTransformHttp,
+        TTransformWs,
+        TGraphQlQueryLabel,
+        THttpMetricLabels,
+        TConnectionMetricLabels,
+        TWorkerMetricLabels,
+        TOperationMetricLabels,
+        TTracer,
         TAction,
     > TaskFactory<TAction, Self>
     for ServerCliTaskFactory<
@@ -226,6 +286,7 @@ where
     }
 }
 
+#[derive(Clone)]
 pub enum ServerCliTaskActor<
     T,
     TFactory,
@@ -280,6 +341,68 @@ pub enum ServerCliTaskActor<
     ServerTask(ServerTaskActor<T, TFactory, TAllocator, TConnect>),
     Handler(HandlerActor<T, TFactory, TAllocator, TConnect, TReconnect>),
     Main(Redispatcher),
+}
+impl<
+        T,
+        TFactory,
+        TAllocator,
+        TConnect,
+        TReconnect,
+        TTransformHttp,
+        TTransformWs,
+        TGraphQlQueryLabel,
+        THttpMetricLabels,
+        TConnectionMetricLabels,
+        TWorkerMetricLabels,
+        TOperationMetricLabels,
+        TTracer,
+    > Named
+    for ServerCliTaskActor<
+        T,
+        TFactory,
+        TAllocator,
+        TConnect,
+        TReconnect,
+        TTransformHttp,
+        TTransformWs,
+        TGraphQlQueryLabel,
+        THttpMetricLabels,
+        TConnectionMetricLabels,
+        TWorkerMetricLabels,
+        TOperationMetricLabels,
+        TTracer,
+    >
+where
+    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
+    T::String: Send,
+    T::Builtin: From<Stdlib> + From<GraphQlStdlib> + Send,
+    T::Signal<T>: Send,
+    T::SignalList<T>: Send,
+    T::StructPrototype<T>: Send,
+    T::ExpressionList<T>: Send,
+    TFactory: AsyncExpressionFactory<T> + Default,
+    TAllocator: AsyncHeapAllocator<T> + Default,
+    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
+    TReconnect: ReconnectTimeout + Send + Clone + 'static,
+    TTransformHttp: HttpGraphQlServerQueryTransform,
+    TTransformWs: WebSocketGraphQlServerQueryTransform,
+    TGraphQlQueryLabel: GraphQlServerQueryLabel,
+    THttpMetricLabels: HttpGraphQlServerQueryMetricLabels,
+    TConnectionMetricLabels: WebSocketGraphQlServerConnectionMetricLabels,
+    TOperationMetricLabels: GraphQlServerOperationMetricLabels,
+    TWorkerMetricLabels: BytecodeInterpreterMetricLabels,
+    TTracer: Tracer,
+    TTracer::Span: Send + Sync + 'static,
+{
+    fn name(&self) -> &'static str {
+        match self {
+            Self::Server(inner) => inner.name(),
+            Self::BytecodeInterpreter(inner) => inner.name(),
+            Self::ServerTask(inner) => inner.name(),
+            Self::Handler(inner) => inner.name(),
+            Self::Main(inner) => inner.name(),
+        }
+    }
 }
 impl<
         T,

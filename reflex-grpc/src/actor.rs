@@ -23,7 +23,7 @@ use reflex_dispatcher::{
     SchedulerCommand, SchedulerMode, SchedulerTransition, TaskFactory, TaskInbox,
 };
 use reflex_json::JsonValue;
-use reflex_macros::dispatcher;
+use reflex_macros::{dispatcher, Named};
 use reflex_protobuf::{reflection::DynamicMessage, Bytes, ProtoTranscoder};
 use reflex_runtime::{
     action::effect::{
@@ -167,7 +167,7 @@ impl std::fmt::Display for GrpcOperationId {
     }
 }
 
-#[derive(Clone)]
+#[derive(Named, Clone)]
 pub struct GrpcHandler<T, TFactory, TAllocator, TTranscoder, TConfig, TReconnect>
 where
     T: AsyncExpression + Rewritable<T> + Reducible<T>,

@@ -9,7 +9,7 @@ use reflex_dispatcher::{
     Action, ActorInitContext, BoxedActionStream, HandlerContext, MessageData, NoopDisposeCallback,
     ProcessId, SchedulerCommand, SchedulerMode, SchedulerTransition, TaskFactory, TaskInbox,
 };
-use reflex_macros::dispatcher;
+use reflex_macros::{dispatcher, Named};
 use serde::{Deserialize, Serialize};
 
 use crate::action::timeout::TimeoutHandlerTimeoutAction;
@@ -17,7 +17,7 @@ use crate::action::timeout::TimeoutHandlerTimeoutAction;
 pub trait TimeoutHandlerTask: From<TimeoutHandlerTaskFactory> {}
 impl<TSelf> TimeoutHandlerTask for TSelf where Self: From<TimeoutHandlerTaskFactory> {}
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Named, Clone, Serialize, Deserialize)]
 pub struct TimeoutHandlerTaskFactory {
     pub operation_id: Uuid,
     pub duration: Duration,
@@ -43,6 +43,7 @@ where
     }
 }
 
+#[derive(Named, Clone)]
 pub struct TimeoutHandlerTaskActor {
     operation_id: Uuid,
     duration: Duration,

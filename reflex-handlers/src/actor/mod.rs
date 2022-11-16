@@ -5,7 +5,7 @@ use futures::{Future, Stream};
 use pin_project::pin_project;
 use reflex::core::{Applicable, Expression};
 use reflex_dispatcher::{
-    Action, Actor, ActorInitContext, Handler, HandlerContext, MessageData, SchedulerMode,
+    Action, Actor, ActorInitContext, Handler, HandlerContext, MessageData, Named, SchedulerMode,
     SchedulerTransition, TaskFactory, TaskInbox, Worker,
 };
 use reflex_runtime::{AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator};
@@ -74,6 +74,7 @@ where
 {
 }
 
+#[derive(Clone)]
 pub enum HandlerActor<T, TFactory, TAllocator, TConnect, TReconnect>
 where
     T: AsyncExpression + Applicable<T>,
@@ -95,6 +96,33 @@ where
     TimeoutHandler(TimeoutHandler<T, TFactory, TAllocator>),
     TimestampHandler(TimestampHandler<T, TFactory, TAllocator>),
     VariableHandler(VariableHandler<T, TFactory, TAllocator>),
+}
+impl<T, TFactory, TAllocator, TConnect, TReconnect> Named
+    for HandlerActor<T, TFactory, TAllocator, TConnect, TReconnect>
+where
+    T: AsyncExpression + Applicable<T>,
+    T::String: Send,
+    T::Builtin: Send,
+    T::Signal<T>: Send,
+    T::SignalList<T>: Send,
+    T::StructPrototype<T>: Send,
+    T::ExpressionList<T>: Send,
+    TFactory: AsyncExpressionFactory<T>,
+    TAllocator: AsyncHeapAllocator<T>,
+    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
+    TReconnect: ReconnectTimeout + Send + Clone + 'static,
+{
+    fn name(&self) -> &'static str {
+        match self {
+            Self::FetchHandler(inner) => inner.name(),
+            Self::GraphQlHandler(inner) => inner.name(),
+            Self::LoaderHandler(inner) => inner.name(),
+            Self::ScanHandler(inner) => inner.name(),
+            Self::TimeoutHandler(inner) => inner.name(),
+            Self::TimestampHandler(inner) => inner.name(),
+            Self::VariableHandler(inner) => inner.name(),
+        }
+    }
 }
 
 impl<T, TFactory, TAllocator, TConnect, TReconnect, TAction, TTask> Actor<TAction, TTask>

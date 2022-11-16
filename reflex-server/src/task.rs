@@ -7,8 +7,8 @@ use futures::{Future, Stream};
 use pin_project::pin_project;
 use reflex::core::{Applicable, Expression, Reducible, Rewritable};
 use reflex_dispatcher::{
-    Action, Actor, ActorInitContext, Handler, HandlerContext, MessageData, SchedulerTransition,
-    TaskFactory, TaskInbox, Worker,
+    Action, Actor, ActorInitContext, Handler, HandlerContext, MessageData, Named,
+    SchedulerTransition, TaskFactory, TaskInbox, Worker,
 };
 use reflex_handlers::task::{
     fetch::FetchHandlerTaskFactory,
@@ -75,6 +75,23 @@ where
     DefaultHandlers(DefaultHandlersTaskFactory<TConnect>),
     WebSocketGraphQlServer(WebSocketGraphQlServerTaskFactory),
 }
+impl<T, TFactory, TAllocator, TConnect> Named
+    for ServerTaskFactory<T, TFactory, TAllocator, TConnect>
+where
+    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
+    TFactory: AsyncExpressionFactory<T> + Default,
+    TAllocator: AsyncHeapAllocator<T> + Default,
+    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
+{
+    fn name(&self) -> &'static str {
+        match self {
+            Self::Runtime(inner) => inner.name(),
+            Self::DefaultHandlers(inner) => inner.name(),
+            Self::WebSocketGraphQlServer(inner) => inner.name(),
+        }
+    }
+}
+
 impl<T, TFactory, TAllocator, TConnect, TAction, TTask> TaskFactory<TAction, TTask>
     for ServerTaskFactory<T, TFactory, TAllocator, TConnect>
 where
@@ -107,6 +124,7 @@ where
     }
 }
 
+#[derive(Clone)]
 pub enum ServerTaskActor<T, TFactory, TAllocator, TConnect>
 where
     T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
@@ -118,6 +136,22 @@ where
     DefaultHandlers(DefaultHandlersTaskActor<TConnect>),
     WebSocketGraphQlServer(WebSocketGraphQlServerTaskActor),
 }
+impl<T, TFactory, TAllocator, TConnect> Named for ServerTaskActor<T, TFactory, TAllocator, TConnect>
+where
+    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
+    TFactory: AsyncExpressionFactory<T> + Default,
+    TAllocator: AsyncHeapAllocator<T> + Default,
+    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
+{
+    fn name(&self) -> &'static str {
+        match self {
+            Self::Runtime(inner) => inner.name(),
+            Self::DefaultHandlers(inner) => inner.name(),
+            Self::WebSocketGraphQlServer(inner) => inner.name(),
+        }
+    }
+}
+
 impl<T, TFactory, TAllocator, TConnect, TAction, TTask> Actor<TAction, TTask>
     for ServerTaskActor<T, TFactory, TAllocator, TConnect>
 where

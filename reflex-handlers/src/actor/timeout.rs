@@ -17,7 +17,7 @@ use reflex_dispatcher::{
     Action, ActorInitContext, HandlerContext, MessageData, NoopDisposeCallback, ProcessId,
     SchedulerCommand, SchedulerMode, SchedulerTransition, TaskFactory, TaskInbox,
 };
-use reflex_macros::dispatcher;
+use reflex_macros::{dispatcher, Named};
 use reflex_runtime::{
     action::effect::{
         EffectEmitAction, EffectSubscribeAction, EffectUnsubscribeAction, EffectUpdateBatch,
@@ -32,7 +32,7 @@ use crate::{
 
 pub const EFFECT_TYPE_TIMEOUT: &'static str = "reflex::timeout";
 
-#[derive(Clone)]
+#[derive(Named, Clone)]
 pub struct TimeoutHandler<T, TFactory, TAllocator>
 where
     T: AsyncExpression,

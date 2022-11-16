@@ -4,13 +4,13 @@
 use reflex::core::Uuid;
 use reflex_dispatcher::{Action, Named, SerializableAction, SerializedAction};
 use reflex_json::JsonValue;
+use reflex_macros::Named;
 use serde::{Deserialize, Serialize};
 
 #[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub enum TimeoutHandlerActions {
     Timeout(TimeoutHandlerTimeoutAction),
 }
-impl Action for TimeoutHandlerActions {}
 impl Named for TimeoutHandlerActions {
     fn name(&self) -> &'static str {
         match self {
@@ -18,6 +18,7 @@ impl Named for TimeoutHandlerActions {
         }
     }
 }
+impl Action for TimeoutHandlerActions {}
 impl SerializableAction for TimeoutHandlerActions {
     fn to_json(&self) -> SerializedAction {
         match self {
@@ -46,16 +47,11 @@ impl<'a> From<&'a TimeoutHandlerActions> for Option<&'a TimeoutHandlerTimeoutAct
     }
 }
 
-#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
+#[derive(Named, PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct TimeoutHandlerTimeoutAction {
     pub operation_id: Uuid,
 }
 impl Action for TimeoutHandlerTimeoutAction {}
-impl Named for TimeoutHandlerTimeoutAction {
-    fn name(&self) -> &'static str {
-        "TimeoutHandlerTimeoutAction"
-    }
-}
 impl SerializableAction for TimeoutHandlerTimeoutAction {
     fn to_json(&self) -> SerializedAction {
         SerializedAction::from_iter([(

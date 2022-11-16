@@ -20,7 +20,7 @@ use reflex_interpreter::{
     },
     execute, DefaultInterpreterCache, InterpreterOptions, MutableInterpreterCache,
 };
-use reflex_macros::dispatcher;
+use reflex_macros::{dispatcher, Named};
 use serde::{Deserialize, Serialize};
 use std::{borrow::Cow, hash::Hash, iter::once, marker::PhantomData, sync::Arc, time::Instant};
 
@@ -60,7 +60,7 @@ where
 {
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Named, Clone, Serialize, Deserialize)]
 pub struct BytecodeWorkerTaskFactory<
     T: Expression,
     TFactory: ExpressionFactory<T>,
@@ -119,6 +119,7 @@ where
     }
 }
 
+#[derive(Named, Clone)]
 pub struct BytecodeWorker<T, TFactory, TAllocator>
 where
     T: Expression,

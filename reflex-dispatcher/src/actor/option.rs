@@ -6,10 +6,21 @@ use pin_project::pin_project;
 
 use crate::{
     Action, Actor, ActorInitContext, Handler, HandlerContext, MessageData, MiddlewareContext,
-    PostMiddleware, PreMiddleware, SchedulerCommand, SchedulerMode, SchedulerTransition,
+    Named, PostMiddleware, PreMiddleware, SchedulerCommand, SchedulerMode, SchedulerTransition,
     TaskFactory, TaskInbox, Worker,
 };
 
+impl<T> Named for Option<T>
+where
+    T: Named,
+{
+    fn name(&self) -> &'static str {
+        match self {
+            Some(inner) => inner.name(),
+            None => "None",
+        }
+    }
+}
 impl<T, TAction, TTask> Actor<TAction, TTask> for Option<T>
 where
     T: Actor<TAction, TTask>,

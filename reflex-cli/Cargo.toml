@@ -16,6 +16,7 @@ reflex-json = { path = "../reflex-json" }
 reflex-lang = { path = "../reflex-lang" }
 reflex-lisp = { path = "../reflex-lisp" }
 reflex-handlers = { path = "../reflex-handlers" }
+reflex-macros = { path = "../reflex-macros" }
 reflex-runtime = { path = "../reflex-runtime" }
 reflex-scheduler = { path = "../reflex-scheduler" }
 reflex-stdlib = { path = "../reflex-stdlib" }

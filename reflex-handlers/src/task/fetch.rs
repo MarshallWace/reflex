@@ -8,7 +8,7 @@ use reflex_dispatcher::{
     Action, ActorInitContext, BoxedActionStream, HandlerContext, MessageData, NoopDisposeCallback,
     ProcessId, SchedulerCommand, SchedulerMode, SchedulerTransition, TaskFactory, TaskInbox,
 };
-use reflex_macros::dispatcher;
+use reflex_macros::{dispatcher, Named};
 
 use crate::{
     action::fetch::{FetchHandlerConnectionErrorAction, FetchHandlerFetchCompleteAction},
@@ -28,7 +28,7 @@ where
 }
 
 // TODO: Implement Serialize/Deserialize traits for FetchHandlerTaskFactory
-#[derive(Clone)]
+#[derive(Named, Clone)]
 pub struct FetchHandlerTaskFactory<TConnect>
 where
     TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
@@ -38,6 +38,7 @@ where
     pub request: FetchRequest,
     pub caller_pid: ProcessId,
 }
+
 impl<TConnect, TAction, TTask> TaskFactory<TAction, TTask> for FetchHandlerTaskFactory<TConnect>
 where
     TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
@@ -61,6 +62,7 @@ where
     }
 }
 
+#[derive(Named, Clone)]
 pub struct FetchHandlerTaskActor<TConnect>
 where
     TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,

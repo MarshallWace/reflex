@@ -30,7 +30,7 @@ use reflex_graphql::{
     GraphQlOperationPayload, GraphQlQuery, GraphQlQueryTransform, GraphQlSchemaTypes,
 };
 use reflex_json::{json_object, JsonValue};
-use reflex_macros::dispatcher;
+use reflex_macros::{dispatcher, Named};
 
 use crate::{
     server::{
@@ -233,6 +233,7 @@ where
     }
 }
 
+#[derive(Named, Clone)]
 pub struct HttpGraphQlServer<T, TFactory, TTransform, TQueryMetricLabels>
 where
     T: Expression,

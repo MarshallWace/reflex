@@ -3,12 +3,17 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use crate::{
     Action, Actor, ActorInitContext, Handler, HandlerContext, MessageData, MiddlewareContext,
-    NoopDisposeCallback, PostMiddleware, PreMiddleware, SchedulerCommand, SchedulerMode,
+    Named, NoopDisposeCallback, PostMiddleware, PreMiddleware, SchedulerCommand, SchedulerMode,
     SchedulerTransition, TaskFactory, TaskInbox, Worker,
 };
 
 #[derive(Default, Clone, Copy)]
 pub struct NoopActor;
+impl Named for NoopActor {
+    fn name(&self) -> &'static str {
+        "Noop"
+    }
+}
 
 impl<TAction, TTask> Actor<TAction, TTask> for NoopActor
 where

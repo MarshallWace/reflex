@@ -6,7 +6,7 @@ use std::pin::Pin;
 use futures::{Future, Stream};
 use pin_project::pin_project;
 use reflex_dispatcher::{
-    Action, Actor, ActorInitContext, Handler, HandlerContext, MessageData, SchedulerMode,
+    Action, Actor, ActorInitContext, Handler, HandlerContext, MessageData, Named, SchedulerMode,
     SchedulerTransition, TaskFactory, TaskInbox, Worker,
 };
 
@@ -84,6 +84,20 @@ where
     Timeout(TimeoutHandlerTaskFactory),
     Timestamp(TimestampHandlerTaskFactory),
 }
+impl<TConnect> Named for DefaultHandlersTaskFactory<TConnect>
+where
+    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
+{
+    fn name(&self) -> &'static str {
+        match self {
+            Self::Fetch(inner) => inner.name(),
+            Self::GraphQl(inner) => inner.name(),
+            Self::Timeout(inner) => inner.name(),
+            Self::Timestamp(inner) => inner.name(),
+        }
+    }
+}
+
 impl<TConnect, TAction, TTask> TaskFactory<TAction, TTask> for DefaultHandlersTaskFactory<TConnect>
 where
     TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
@@ -120,6 +134,7 @@ where
     }
 }
 
+#[derive(Clone)]
 pub enum DefaultHandlersTaskActor<TConnect>
 where
     TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
@@ -128,6 +143,19 @@ where
     GraphQl(GraphQlHandlerTaskActor<TConnect>),
     Timeout(TimeoutHandlerTaskActor),
     Timestamp(TimestampHandlerTaskActor),
+}
+impl<TConnect> Named for DefaultHandlersTaskActor<TConnect>
+where
+    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
+{
+    fn name(&self) -> &'static str {
+        match self {
+            Self::Fetch(inner) => inner.name(),
+            Self::GraphQl(inner) => inner.name(),
+            Self::Timeout(inner) => inner.name(),
+            Self::Timestamp(inner) => inner.name(),
+        }
+    }
 }
 
 impl<TConnect, TAction, TTask> Actor<TAction, TTask> for DefaultHandlersTaskActor<TConnect>

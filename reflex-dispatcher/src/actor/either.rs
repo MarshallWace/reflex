@@ -5,7 +5,7 @@ use futures::{Future, Stream};
 use pin_project::pin_project;
 
 use crate::{
-    Action, Actor, Handler, HandlerContext, MessageData, MiddlewareContext, PostMiddleware,
+    Action, Actor, Handler, HandlerContext, MessageData, MiddlewareContext, Named, PostMiddleware,
     PreMiddleware, SchedulerCommand, SchedulerMode, SchedulerTransition, TaskFactory, TaskInbox,
     Worker,
 };
@@ -13,6 +13,18 @@ use crate::{
 pub enum EitherActor<T1, T2> {
     Left(T1),
     Right(T2),
+}
+impl<T1, T2> Named for EitherActor<T1, T2>
+where
+    T1: Named,
+    T2: Named,
+{
+    fn name(&self) -> &'static str {
+        match self {
+            EitherActor::Left(inner) => inner.name(),
+            EitherActor::Right(inner) => inner.name(),
+        }
+    }
 }
 impl<T1, T2> Clone for EitherActor<T1, T2>
 where

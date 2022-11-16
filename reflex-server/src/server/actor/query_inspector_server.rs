@@ -13,6 +13,7 @@ use reflex_dispatcher::{
     NoopDisposeCallback, ProcessId, SchedulerCommand, SchedulerMode, SchedulerTransition,
     TaskFactory, TaskInbox, Worker,
 };
+use reflex_macros::Named;
 use reflex_runtime::actor::query_inspector::{
     QueryInspector, QueryInspectorAction, QueryInspectorState,
 };
@@ -49,6 +50,7 @@ impl<T: Expression, TAction> QueryInspectorServerAction<T> for TAction where
 {
 }
 
+#[derive(Named, Clone)]
 pub struct QueryInspectorServer<T: Expression, TFactory: ExpressionFactory<T>> {
     query_inspector: QueryInspector<T>,
     factory: TFactory,

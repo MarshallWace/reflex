@@ -26,7 +26,7 @@ use reflex_dispatcher::{
     Action, ActorInitContext, HandlerContext, MessageData, MessageOffset, NoopDisposeCallback,
     ProcessId, SchedulerCommand, SchedulerMode, SchedulerTransition, TaskFactory, TaskInbox,
 };
-use reflex_macros::dispatcher;
+use reflex_macros::{dispatcher, Named};
 use reflex_utils::partition_results;
 
 use crate::{
@@ -216,6 +216,7 @@ pub fn parse_evaluate_effect_result<T: Expression>(
     ))
 }
 
+#[derive(Named, Clone)]
 pub struct EvaluateHandler<T, TFactory, TAllocator>
 where
     T: Expression,
