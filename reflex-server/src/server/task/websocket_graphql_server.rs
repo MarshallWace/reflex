@@ -20,7 +20,7 @@ pub trait WebSocketGraphQlServerTaskAction:
     Action + WebSocketGraphQlServerThrottleTimeoutTaskAction
 {
 }
-impl<TSelf> WebSocketGraphQlServerTaskAction for TSelf where
+impl<_Self> WebSocketGraphQlServerTaskAction for _Self where
     Self: Action + WebSocketGraphQlServerThrottleTimeoutTaskAction
 {
 }
@@ -29,7 +29,7 @@ pub trait WebSocketGraphQlServerTask:
     From<WebSocketGraphQlServerThrottleTimeoutTaskFactory>
 {
 }
-impl<TSelf> WebSocketGraphQlServerTask for TSelf where
+impl<_Self> WebSocketGraphQlServerTask for _Self where
     Self: From<WebSocketGraphQlServerThrottleTimeoutTaskFactory>
 {
 }

@@ -20,7 +20,7 @@ use tokio_stream::wrappers::IntervalStream;
 use crate::action::timestamp::TimestampHandlerUpdateAction;
 
 pub trait TimestampHandlerTask: From<TimestampHandlerTaskFactory> {}
-impl<TSelf> TimestampHandlerTask for TSelf where Self: From<TimestampHandlerTaskFactory> {}
+impl<_Self> TimestampHandlerTask for _Self where Self: From<TimestampHandlerTaskFactory> {}
 
 #[derive(Named, Clone, Serialize, Deserialize)]
 pub struct TimestampHandlerTaskFactory {

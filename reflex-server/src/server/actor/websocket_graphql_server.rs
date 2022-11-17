@@ -100,7 +100,7 @@ pub trait WebSocketGraphQlServerConnectionMetricLabels {
         headers: &HeaderMap,
     ) -> Vec<(String, String)>;
 }
-impl<T> WebSocketGraphQlServerConnectionMetricLabels for T
+impl<_Self> WebSocketGraphQlServerConnectionMetricLabels for _Self
 where
     Self: Fn(Option<&JsonValue>, &HeaderMap) -> Vec<(String, String)>,
 {
@@ -121,9 +121,9 @@ pub trait WebSocketGraphQlServerQueryTransform {
         connection_params: Option<&JsonValue>,
     ) -> Result<GraphQlOperation, JsonValue>;
 }
-impl<T> WebSocketGraphQlServerQueryTransform for T
+impl<_Self> WebSocketGraphQlServerQueryTransform for _Self
 where
-    T: GraphQlQueryTransform,
+    Self: GraphQlQueryTransform,
 {
     fn transform(
         &self,

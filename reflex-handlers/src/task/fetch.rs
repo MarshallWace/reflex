@@ -20,7 +20,7 @@ where
     TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
 {
 }
-impl<TSelf, TConnect> FetchHandlerTask<TConnect> for TSelf
+impl<_Self, TConnect> FetchHandlerTask<TConnect> for _Self
 where
     TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
     Self: From<FetchHandlerTaskFactory<TConnect>>,

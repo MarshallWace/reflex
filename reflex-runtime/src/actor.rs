@@ -24,7 +24,7 @@ pub struct RuntimeMetricNames {
 }
 
 pub trait RuntimeAction<T: Expression>: QueryManagerAction<T> + EvaluateHandlerAction<T> {}
-impl<T: Expression, TAction> RuntimeAction<T> for TAction where
+impl<_Self, T: Expression> RuntimeAction<T> for _Self where
     Self: QueryManagerAction<T> + EvaluateHandlerAction<T>
 {
 }

@@ -34,7 +34,7 @@ where
     TAllocator: HeapAllocator<T>,
 {
 }
-impl<TSelf, T, TFactory, TAllocator> RuntimeTask<T, TFactory, TAllocator> for TSelf
+impl<_Self, T, TFactory, TAllocator> RuntimeTask<T, TFactory, TAllocator> for _Self
 where
     T: Expression,
     TFactory: ExpressionFactory<T>,

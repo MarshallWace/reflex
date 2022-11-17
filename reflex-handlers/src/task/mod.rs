@@ -45,7 +45,7 @@ pub trait DefaultHandlersTaskAction:
     + TimestampHandlerTaskAction
 {
 }
-impl<TAction> DefaultHandlersTaskAction for TAction where
+impl<_Self> DefaultHandlersTaskAction for _Self where
     Self: Action
         + FetchHandlerTaskAction
         + GraphQlHandlerTaskAction
@@ -63,7 +63,7 @@ where
     TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
 {
 }
-impl<TSelf, TConnect> DefaultHandlersTask<TConnect> for TSelf
+impl<_Self, TConnect> DefaultHandlersTask<TConnect> for _Self
 where
     TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
     Self: FetchHandlerTask<TConnect>

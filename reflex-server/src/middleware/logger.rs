@@ -17,7 +17,7 @@ impl<T> LoggerMiddlewareFactory<T> for T
 where
     T: ActionLogger + Clone,
 {
-    fn create(&self) -> T {
+    fn create(&self) -> Self {
         self.clone()
     }
 }

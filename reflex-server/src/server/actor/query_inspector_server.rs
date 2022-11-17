@@ -32,17 +32,15 @@ use crate::server::{
 const INDEX_FILE: &'static str = include_str!("../template/debugger/index.html");
 
 pub trait QueryInspectorServerAction<T: Expression>:
-    Action
-    + Matcher<QueryInspectorServerHttpRequestAction>
+    Matcher<QueryInspectorServerHttpRequestAction>
     + Matcher<QueryInspectorServerHttpResponseAction>
     + From<QueryInspectorServerHttpRequestAction>
     + From<QueryInspectorServerHttpResponseAction>
     + QueryInspectorAction<T>
 {
 }
-impl<T: Expression, TAction> QueryInspectorServerAction<T> for TAction where
-    Self: Action
-        + Matcher<QueryInspectorServerHttpRequestAction>
+impl<_Self, T: Expression> QueryInspectorServerAction<T> for _Self where
+    Self: Matcher<QueryInspectorServerHttpRequestAction>
         + Matcher<QueryInspectorServerHttpResponseAction>
         + From<QueryInspectorServerHttpRequestAction>
         + From<QueryInspectorServerHttpResponseAction>
@@ -78,7 +76,7 @@ impl<T, TFactory, TAction, TTask> Actor<TAction, TTask> for QueryInspectorServer
 where
     T: Expression,
     TFactory: ExpressionFactory<T>,
-    TAction: QueryInspectorServerAction<T>,
+    TAction: Action + QueryInspectorServerAction<T>,
     TTask: TaskFactory<TAction, TTask>,
 {
     type Events<TInbox: TaskInbox<TAction>> = TInbox;
@@ -98,7 +96,7 @@ impl<T, TFactory, TAction, TTask> Worker<TAction, SchedulerTransition<TAction, T
 where
     T: Expression,
     TFactory: ExpressionFactory<T>,
-    TAction: QueryInspectorServerAction<T>,
+    TAction: Action + QueryInspectorServerAction<T>,
     TTask: TaskFactory<TAction, TTask>,
 {
     fn accept(&self, action: &TAction) -> bool {
@@ -123,7 +121,7 @@ impl<T, TFactory, TAction, TTask> Handler<TAction, SchedulerTransition<TAction, 
 where
     T: Expression,
     TFactory: ExpressionFactory<T>,
-    TAction: QueryInspectorServerAction<T>,
+    TAction: Action + QueryInspectorServerAction<T>,
     TTask: TaskFactory<TAction, TTask>,
 {
     type State = QueryInspectorServerState<T>;

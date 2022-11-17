@@ -126,9 +126,9 @@ impl Default for HttpGraphQlServerMetricNames {
 pub trait HttpGraphQlServerQueryMetricLabels {
     fn labels(&self, operation: &GraphQlOperation, headers: &HeaderMap) -> Vec<(String, String)>;
 }
-impl<T> HttpGraphQlServerQueryMetricLabels for T
+impl<_Self> HttpGraphQlServerQueryMetricLabels for _Self
 where
-    T: Fn(&GraphQlOperation, &HeaderMap) -> Vec<(String, String)>,
+    Self: Fn(&GraphQlOperation, &HeaderMap) -> Vec<(String, String)>,
 {
     fn labels(&self, operation: &GraphQlOperation, headers: &HeaderMap) -> Vec<(String, String)> {
         (self)(operation, headers)
@@ -142,9 +142,9 @@ pub trait HttpGraphQlServerQueryTransform {
         request: &Request<Bytes>,
     ) -> Result<GraphQlOperation, (StatusCode, String)>;
 }
-impl<T> HttpGraphQlServerQueryTransform for T
+impl<_Self> HttpGraphQlServerQueryTransform for _Self
 where
-    T: GraphQlQueryTransform,
+    Self: GraphQlQueryTransform,
 {
     fn transform(
         &self,

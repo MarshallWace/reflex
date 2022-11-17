@@ -7,9 +7,9 @@ pub trait ReconnectTimeout {
     fn duration(&self, attempt_index: usize) -> Option<Duration>;
 }
 
-impl<T> ReconnectTimeout for T
+impl<_Self> ReconnectTimeout for _Self
 where
-    T: Fn(usize) -> Option<Duration>,
+    Self: Fn(usize) -> Option<Duration>,
 {
     fn duration(&self, attempt_index: usize) -> Option<Duration> {
         self(attempt_index)

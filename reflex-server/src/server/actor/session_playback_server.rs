@@ -67,7 +67,7 @@ pub trait SessionPlaybackServerAction<T: Expression>:
     + From<SessionPlaybackServerHttpResponseAction>
 {
 }
-impl<T: Expression, TAction> SessionPlaybackServerAction<T> for TAction where
+impl<_Self, T: Expression> SessionPlaybackServerAction<T> for _Self where
     Self: SerializableAction
         + SessionPlaybackAction
         + QueryInspectorServerAction<T>
@@ -140,7 +140,7 @@ where
     TFactory: ExpressionFactory<T>,
     TRecordedAction: Action + SerializableAction + Matcher<EvaluateResultAction<T>>,
     TRecordedTask: TaskFactory<TRecordedAction, TRecordedTask>,
-    TAction: SessionPlaybackServerAction<T>,
+    TAction: Action + SessionPlaybackServerAction<T>,
     TTask: TaskFactory<TAction, TTask>,
     for<'a> &'a SchedulerCommand<TRecordedAction, TRecordedTask>:
         Into<SchedulerCommand<TAction, TTask>>,
@@ -165,7 +165,7 @@ where
     TFactory: ExpressionFactory<T>,
     TRecordedAction: Action + SerializableAction + Matcher<EvaluateResultAction<T>>,
     TRecordedTask: TaskFactory<TRecordedAction, TRecordedTask>,
-    TAction: SessionPlaybackServerAction<T>,
+    TAction: Action + SessionPlaybackServerAction<T>,
     TTask: TaskFactory<TAction, TTask>,
     for<'a> &'a SchedulerCommand<TRecordedAction, TRecordedTask>:
         Into<SchedulerCommand<TAction, TTask>>,
@@ -186,7 +186,7 @@ where
     TFactory: ExpressionFactory<T>,
     TRecordedAction: Action + SerializableAction + Matcher<EvaluateResultAction<T>>,
     TRecordedTask: TaskFactory<TRecordedAction, TRecordedTask>,
-    TAction: SessionPlaybackServerAction<T>,
+    TAction: Action + SessionPlaybackServerAction<T>,
     TTask: TaskFactory<TAction, TTask>,
     for<'a> &'a SchedulerCommand<TRecordedAction, TRecordedTask>:
         Into<SchedulerCommand<TAction, TTask>>,

@@ -45,7 +45,7 @@ pub trait DefaultHandlerAction<T: Expression>:
     + VariableHandlerAction<T>
 {
 }
-impl<T: Expression, TAction> DefaultHandlerAction<T> for TAction where
+impl<_Self, T: Expression> DefaultHandlerAction<T> for _Self where
     Self: FetchHandlerAction<T>
         + GraphQlHandlerAction<T>
         + LoaderHandlerAction<T>

@@ -88,7 +88,7 @@ where
     TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
 {
 }
-impl<TSelf, TConnect> GraphQlHandlerTask<TConnect> for TSelf
+impl<_Self, TConnect> GraphQlHandlerTask<TConnect> for _Self
 where
     TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
     Self: From<GraphQlHandlerHttpFetchTaskFactory<TConnect>>

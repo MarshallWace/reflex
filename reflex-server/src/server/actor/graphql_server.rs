@@ -160,7 +160,7 @@ impl GraphQlOperationPhase {
 pub trait GraphQlServerQueryLabel {
     fn label(&self, operation: &GraphQlOperation) -> String;
 }
-impl<T> GraphQlServerQueryLabel for T
+impl<_Self> GraphQlServerQueryLabel for _Self
 where
     Self: Fn(&GraphQlOperation) -> String,
 {
@@ -172,7 +172,7 @@ where
 pub trait GraphQlServerOperationMetricLabels {
     fn labels(&self, operation: &GraphQlOperation) -> Vec<(String, String)>;
 }
-impl<T> GraphQlServerOperationMetricLabels for T
+impl<_Self> GraphQlServerOperationMetricLabels for _Self
 where
     Self: Fn(&GraphQlOperation) -> Vec<(String, String)>,
 {

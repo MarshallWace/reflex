@@ -110,8 +110,8 @@ where
     TTranscoder: ProtoTranscoder + Send + 'static,
 {
 }
-impl<TSelf, T, TFactory, TAllocator, TTranscoder>
-    GrpcHandlerTask<T, TFactory, TAllocator, TTranscoder> for TSelf
+impl<_Self, T, TFactory, TAllocator, TTranscoder>
+    GrpcHandlerTask<T, TFactory, TAllocator, TTranscoder> for _Self
 where
     T: AsyncExpression,
     TFactory: AsyncExpressionFactory<T>,

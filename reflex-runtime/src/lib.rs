@@ -16,21 +16,21 @@ pub mod task;
 pub mod utils;
 
 pub trait AsyncExpression: Expression + Send + 'static {}
-impl<T> AsyncExpression for T where T: Expression + Send + 'static {}
+impl<_Self> AsyncExpression for _Self where Self: Expression + Send + 'static {}
 pub trait AsyncExpressionFactory<T: AsyncExpression>:
     ExpressionFactory<T> + Send + Clone + 'static
 {
 }
-impl<T, E: AsyncExpression> AsyncExpressionFactory<E> for T where
-    T: ExpressionFactory<E> + Send + Clone + 'static
+impl<_Self, E: AsyncExpression> AsyncExpressionFactory<E> for _Self where
+    Self: ExpressionFactory<E> + Send + Clone + 'static
 {
 }
 pub trait AsyncHeapAllocator<T: AsyncExpression>:
     HeapAllocator<T> + Send + Clone + 'static
 {
 }
-impl<T, E: AsyncExpression> AsyncHeapAllocator<E> for T where
-    T: HeapAllocator<E> + Send + Clone + 'static
+impl<_Self, E: AsyncExpression> AsyncHeapAllocator<E> for _Self where
+    Self: HeapAllocator<E> + Send + Clone + 'static
 {
 }
 

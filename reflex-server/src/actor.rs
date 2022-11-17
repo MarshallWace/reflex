@@ -37,7 +37,7 @@ pub trait ServerAction<T: Expression>:
     + WebSocketGraphQlServerTaskAction
 {
 }
-impl<T: Expression, TAction> ServerAction<T> for TAction where
+impl<_Self, T: Expression> ServerAction<T> for _Self where
     Self: RuntimeAction<T>
         + HttpGraphQlServerAction<T>
         + WebSocketGraphQlServerAction<T>

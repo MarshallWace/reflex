@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use crate::action::timeout::TimeoutHandlerTimeoutAction;
 
 pub trait TimeoutHandlerTask: From<TimeoutHandlerTaskFactory> {}
-impl<TSelf> TimeoutHandlerTask for TSelf where Self: From<TimeoutHandlerTaskFactory> {}
+impl<_Self> TimeoutHandlerTask for _Self where Self: From<TimeoutHandlerTaskFactory> {}
 
 #[derive(Named, Clone, Serialize, Deserialize)]
 pub struct TimeoutHandlerTaskFactory {

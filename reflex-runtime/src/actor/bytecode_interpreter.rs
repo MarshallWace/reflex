@@ -112,9 +112,9 @@ impl Default for BytecodeInterpreterMetricNames {
 pub trait BytecodeInterpreterMetricLabels {
     fn labels(&self, query_name: &str) -> Vec<(SharedString, SharedString)>;
 }
-impl<T> BytecodeInterpreterMetricLabels for T
+impl<_Self> BytecodeInterpreterMetricLabels for _Self
 where
-    T: Fn(&str) -> Vec<(SharedString, SharedString)>,
+    Self: Fn(&str) -> Vec<(SharedString, SharedString)>,
 {
     fn labels(&self, query_name: &str) -> Vec<(SharedString, SharedString)> {
         (self)(query_name)

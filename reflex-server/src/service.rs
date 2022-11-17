@@ -105,7 +105,7 @@ pub trait GraphQlWebServerAction<T: Expression>:
     + From<QueryInspectorServerHttpRequestAction>
 {
 }
-impl<T: Expression, TAction> GraphQlWebServerAction<T> for TAction where
+impl<_Self, T: Expression> GraphQlWebServerAction<T> for _Self where
     Self: Action
         + ServerAction<T>
         + BytecodeInterpreterAction<T>
