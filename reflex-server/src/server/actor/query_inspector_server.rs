@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use std::{
     iter::{empty, once},
     marker::PhantomData,
@@ -13,7 +14,7 @@ use reflex_dispatcher::{
     NoopDisposeCallback, ProcessId, SchedulerCommand, SchedulerMode, SchedulerTransition,
     TaskFactory, TaskInbox, Worker,
 };
-use reflex_macros::Named;
+use reflex_macros::{blanket_trait, Named};
 use reflex_runtime::actor::query_inspector::{
     QueryInspector, QueryInspectorAction, QueryInspectorState,
 };
@@ -31,22 +32,16 @@ use crate::server::{
 
 const INDEX_FILE: &'static str = include_str!("../template/debugger/index.html");
 
-pub trait QueryInspectorServerAction<T: Expression>:
-    Matcher<QueryInspectorServerHttpRequestAction>
-    + Matcher<QueryInspectorServerHttpResponseAction>
-    + From<QueryInspectorServerHttpRequestAction>
-    + From<QueryInspectorServerHttpResponseAction>
-    + QueryInspectorAction<T>
-{
-}
-impl<_Self, T: Expression> QueryInspectorServerAction<T> for _Self where
-    Self: Matcher<QueryInspectorServerHttpRequestAction>
+blanket_trait!(
+    pub trait QueryInspectorServerAction<T: Expression>:
+        Matcher<QueryInspectorServerHttpRequestAction>
         + Matcher<QueryInspectorServerHttpResponseAction>
         + From<QueryInspectorServerHttpRequestAction>
         + From<QueryInspectorServerHttpResponseAction>
         + QueryInspectorAction<T>
-{
-}
+    {
+    }
+);
 
 #[derive(Named, Clone)]
 pub struct QueryInspectorServer<T: Expression, TFactory: ExpressionFactory<T>> {

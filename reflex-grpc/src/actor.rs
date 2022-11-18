@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet},
     iter::once,
@@ -23,7 +24,7 @@ use reflex_dispatcher::{
     SchedulerCommand, SchedulerMode, SchedulerTransition, TaskFactory, TaskInbox,
 };
 use reflex_json::JsonValue;
-use reflex_macros::{dispatcher, Named};
+use reflex_macros::{blanket_trait, dispatcher, Named};
 use reflex_protobuf::{reflection::DynamicMessage, Bytes, ProtoTranscoder};
 use reflex_runtime::{
     action::effect::{
@@ -92,34 +93,24 @@ impl Default for GrpcHandlerMetricNames {
     }
 }
 
-pub trait GrpcHandlerAction<T: Expression>:
-    GrpcHandlerActorAction<T> + GrpcHandlerConnectionTaskAction
-{
-}
-impl<_Self, T: Expression> GrpcHandlerAction<T> for _Self where
-    Self: GrpcHandlerActorAction<T> + GrpcHandlerConnectionTaskAction
-{
-}
+blanket_trait!(
+    pub trait GrpcHandlerAction<T: Expression>:
+        GrpcHandlerActorAction<T> + GrpcHandlerConnectionTaskAction
+    {
+    }
+);
 
-pub trait GrpcHandlerTask<T, TFactory, TAllocator, TTranscoder>:
-    From<GrpcHandlerConnectionTaskFactory>
-where
-    T: AsyncExpression,
-    TFactory: AsyncExpressionFactory<T>,
-    TAllocator: AsyncHeapAllocator<T>,
-    TTranscoder: ProtoTranscoder + Send + 'static,
-{
-}
-impl<_Self, T, TFactory, TAllocator, TTranscoder>
-    GrpcHandlerTask<T, TFactory, TAllocator, TTranscoder> for _Self
-where
-    T: AsyncExpression,
-    TFactory: AsyncExpressionFactory<T>,
-    TAllocator: AsyncHeapAllocator<T>,
-    TTranscoder: ProtoTranscoder + Send + 'static,
-    Self: From<GrpcHandlerConnectionTaskFactory>,
-{
-}
+blanket_trait!(
+    pub trait GrpcHandlerTask<T, TFactory, TAllocator, TTranscoder>:
+        From<GrpcHandlerConnectionTaskFactory>
+    where
+        T: AsyncExpression,
+        TFactory: AsyncExpressionFactory<T>,
+        TAllocator: AsyncHeapAllocator<T>,
+        TTranscoder: ProtoTranscoder + Send + 'static,
+    {
+    }
+);
 
 #[derive(PartialEq, Eq, Clone, Hash, Debug)]
 struct GrpcServiceUrl(String);

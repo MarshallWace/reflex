@@ -26,6 +26,7 @@ use crate::{
 };
 
 pub use hyper;
+use reflex_macros::blanket_trait;
 
 pub mod action;
 pub mod actor;
@@ -35,26 +36,18 @@ pub mod stdlib;
 pub mod task;
 pub mod utils;
 
-pub trait DefaultHandlerAction<T: Expression>:
-    FetchHandlerAction<T>
-    + GraphQlHandlerAction<T>
-    + LoaderHandlerAction<T>
-    + ScanHandlerAction<T>
-    + TimeoutHandlerAction<T>
-    + TimestampHandlerAction<T>
-    + VariableHandlerAction<T>
-{
-}
-impl<_Self, T: Expression> DefaultHandlerAction<T> for _Self where
-    Self: FetchHandlerAction<T>
+blanket_trait!(
+    pub trait DefaultHandlerAction<T: Expression>:
+        FetchHandlerAction<T>
         + GraphQlHandlerAction<T>
         + LoaderHandlerAction<T>
         + ScanHandlerAction<T>
         + TimeoutHandlerAction<T>
         + TimestampHandlerAction<T>
         + VariableHandlerAction<T>
-{
-}
+    {
+    }
+);
 
 #[derive(Default, Clone, Copy, Debug)]
 pub struct DefaultHandlerMetricNames {

@@ -524,34 +524,28 @@ impl<T: Expression> SerializableAction for CliActions<T> {
     }
 }
 
-blanket_trait!(trait CliAction<T: Expression>:
-    SerializableAction
-    + RuntimeAction<T>
-    + HandlerAction<T>
-    + BytecodeInterpreterAction<T>
-    + CliTaskAction<T>
-{
-});
+blanket_trait!(
+    trait CliAction<T: Expression>:
+        SerializableAction
+        + RuntimeAction<T>
+        + HandlerAction<T>
+        + BytecodeInterpreterAction<T>
+        + CliTaskAction<T>
+    {
+    }
+);
 
-trait CliTask<T, TFactory, TAllocator, TConnect>:
-    RuntimeTask<T, TFactory, TAllocator> + HandlerTask<TConnect>
-where
-    T: Expression,
-    TFactory: ExpressionFactory<T>,
-    TAllocator: HeapAllocator<T>,
-    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
-{
-}
-
-impl<_Self, T, TFactory, TAllocator, TConnect> CliTask<T, TFactory, TAllocator, TConnect> for _Self
-where
-    Self: RuntimeTask<T, TFactory, TAllocator> + HandlerTask<TConnect>,
-    T: Expression,
-    TFactory: ExpressionFactory<T>,
-    TAllocator: HeapAllocator<T>,
-    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
-{
-}
+blanket_trait!(
+    trait CliTask<T, TFactory, TAllocator, TConnect>:
+        RuntimeTask<T, TFactory, TAllocator> + HandlerTask<TConnect>
+    where
+        T: Expression,
+        TFactory: ExpressionFactory<T>,
+        TAllocator: HeapAllocator<T>,
+        TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
+    {
+    }
+);
 
 #[derive(Clone)]
 enum CliActor<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TOutput>

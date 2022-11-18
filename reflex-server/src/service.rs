@@ -41,6 +41,7 @@ use reflex_interpreter::{
     InterpreterOptions,
 };
 use reflex_json::JsonValue;
+use reflex_macros::blanket_trait;
 use reflex_runtime::{
     actor::bytecode_interpreter::{
         BytecodeInterpreter, BytecodeInterpreterAction, BytecodeInterpreterMetricLabels,
@@ -90,23 +91,9 @@ use crate::{
     ServerMetricNames,
 };
 
-pub trait GraphQlWebServerAction<T: Expression>:
-    Action
-    + ServerAction<T>
-    + BytecodeInterpreterAction<T>
-    + Matcher<HttpServerResponseAction>
-    + Matcher<WebSocketServerSendAction>
-    + Matcher<WebSocketServerDisconnectAction>
-    + Matcher<QueryInspectorServerHttpResponseAction>
-    + From<HttpServerRequestAction>
-    + From<HttpServerResponseAction>
-    + From<WebSocketServerConnectAction>
-    + From<WebSocketServerReceiveAction>
-    + From<QueryInspectorServerHttpRequestAction>
-{
-}
-impl<_Self, T: Expression> GraphQlWebServerAction<T> for _Self where
-    Self: Action
+blanket_trait!(
+    pub trait GraphQlWebServerAction<T: Expression>:
+        Action
         + ServerAction<T>
         + BytecodeInterpreterAction<T>
         + Matcher<HttpServerResponseAction>
@@ -118,8 +105,9 @@ impl<_Self, T: Expression> GraphQlWebServerAction<T> for _Self where
         + From<WebSocketServerConnectAction>
         + From<WebSocketServerReceiveAction>
         + From<QueryInspectorServerHttpRequestAction>
-{
-}
+    {
+    }
+);
 
 #[derive(Default, Clone, Copy, Debug)]
 pub struct GraphQlWebServerMetricNames {
@@ -129,22 +117,16 @@ pub struct GraphQlWebServerMetricNames {
     pub actor: InstrumentedActorMetricNames,
 }
 
-pub trait GraphQlWebServerTask<T, TFactory, TAllocator>:
-    RuntimeTask<T, TFactory, TAllocator> + WebSocketGraphQlServerTask
-where
-    T: Expression,
-    TFactory: ExpressionFactory<T>,
-    TAllocator: HeapAllocator<T>,
-{
-}
-impl<_Self, T, TFactory, TAllocator> GraphQlWebServerTask<T, TFactory, TAllocator> for _Self
-where
-    T: Expression,
-    TFactory: ExpressionFactory<T>,
-    TAllocator: HeapAllocator<T>,
-    Self: RuntimeTask<T, TFactory, TAllocator> + WebSocketGraphQlServerTask,
-{
-}
+blanket_trait!(
+    pub trait GraphQlWebServerTask<T, TFactory, TAllocator>:
+        RuntimeTask<T, TFactory, TAllocator> + WebSocketGraphQlServerTask
+    where
+        T: Expression,
+        TFactory: ExpressionFactory<T>,
+        TAllocator: HeapAllocator<T>,
+    {
+    }
+);
 
 pub trait GraphQlWebServerActor<
     T,

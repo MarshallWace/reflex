@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use futures::{Future, Stream};
 use opentelemetry::trace::{Span, Tracer};
 use pin_project::pin_project;
@@ -10,6 +11,7 @@ use reflex_dispatcher::{
     SchedulerTransition, TaskFactory, TaskInbox, Worker,
 };
 use reflex_graphql::{stdlib::Stdlib as GraphQlStdlib, validate::ValidateQueryGraphQlTransform};
+use reflex_macros::blanket_trait;
 use reflex_runtime::{
     actor::{RuntimeAction, RuntimeActor, RuntimeActorState},
     AsyncExpression,
@@ -29,22 +31,16 @@ use crate::server::{
     WebSocketGraphQlServerState,
 };
 
-pub trait ServerAction<T: Expression>:
-    RuntimeAction<T>
-    + HttpGraphQlServerAction<T>
-    + WebSocketGraphQlServerAction<T>
-    + GraphQlServerAction<T>
-    + WebSocketGraphQlServerTaskAction
-{
-}
-impl<_Self, T: Expression> ServerAction<T> for _Self where
-    Self: RuntimeAction<T>
+blanket_trait!(
+    pub trait ServerAction<T: Expression>:
+        RuntimeAction<T>
         + HttpGraphQlServerAction<T>
         + WebSocketGraphQlServerAction<T>
         + GraphQlServerAction<T>
         + WebSocketGraphQlServerTaskAction
-{
-}
+    {
+    }
+);
 
 #[derive(Clone)]
 pub enum ServerActor<

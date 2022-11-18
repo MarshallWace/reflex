@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use futures::{future, FutureExt, Stream};
 use hyper::Body;
 use reflex::core::Uuid;
@@ -8,24 +9,20 @@ use reflex_dispatcher::{
     Action, ActorInitContext, BoxedActionStream, HandlerContext, MessageData, NoopDisposeCallback,
     ProcessId, SchedulerCommand, SchedulerMode, SchedulerTransition, TaskFactory, TaskInbox,
 };
-use reflex_macros::{dispatcher, Named};
+use reflex_macros::{blanket_trait, dispatcher, Named};
 
 use crate::{
     action::fetch::{FetchHandlerConnectionErrorAction, FetchHandlerFetchCompleteAction},
     utils::fetch::{fetch, parse_fetch_request, FetchRequest},
 };
 
-pub trait FetchHandlerTask<TConnect>: From<FetchHandlerTaskFactory<TConnect>>
-where
-    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
-{
-}
-impl<_Self, TConnect> FetchHandlerTask<TConnect> for _Self
-where
-    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
-    Self: From<FetchHandlerTaskFactory<TConnect>>,
-{
-}
+blanket_trait!(
+    pub trait FetchHandlerTask<TConnect>: From<FetchHandlerTaskFactory<TConnect>>
+    where
+        TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
+    {
+    }
+);
 
 // TODO: Implement Serialize/Deserialize traits for FetchHandlerTaskFactory
 #[derive(Named, Clone)]

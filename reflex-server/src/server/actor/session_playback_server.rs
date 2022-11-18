@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use std::{
     iter::{empty, once},
     marker::PhantomData,
@@ -18,7 +19,7 @@ use reflex_dispatcher::{
     SerializableAction, TaskFactory, TaskInbox, Worker,
 };
 use reflex_json::{json, JsonValue};
-use reflex_macros::Named;
+use reflex_macros::{blanket_trait, Named};
 use reflex_recorder::session_playback::{
     SessionPlayback, SessionPlaybackAction, SessionPlaybackBeginAction, SessionPlaybackEndAction,
     SessionPlaybackState,
@@ -54,21 +55,9 @@ impl std::fmt::Display for SessionPlaybackCommand {
     }
 }
 
-pub trait SessionPlaybackServerAction<T: Expression>:
-    SerializableAction
-    + SessionPlaybackAction
-    + QueryInspectorServerAction<T>
-    + Matcher<SessionPlaybackBeginAction>
-    + Matcher<SessionPlaybackEndAction>
-    + Matcher<SessionPlaybackServerHttpRequestAction>
-    + Matcher<SessionPlaybackServerHttpResponseAction>
-    + From<SessionPlaybackBeginAction>
-    + From<SessionPlaybackServerHttpRequestAction>
-    + From<SessionPlaybackServerHttpResponseAction>
-{
-}
-impl<_Self, T: Expression> SessionPlaybackServerAction<T> for _Self where
-    Self: SerializableAction
+blanket_trait!(
+    pub trait SessionPlaybackServerAction<T: Expression>:
+        SerializableAction
         + SessionPlaybackAction
         + QueryInspectorServerAction<T>
         + Matcher<SessionPlaybackBeginAction>
@@ -78,8 +67,9 @@ impl<_Self, T: Expression> SessionPlaybackServerAction<T> for _Self where
         + From<SessionPlaybackBeginAction>
         + From<SessionPlaybackServerHttpRequestAction>
         + From<SessionPlaybackServerHttpResponseAction>
-{
-}
+    {
+    }
+);
 
 #[derive(Named, Clone)]
 pub struct SessionPlaybackServer<T, TFactory, TRecordedAction, TRecordedTask>

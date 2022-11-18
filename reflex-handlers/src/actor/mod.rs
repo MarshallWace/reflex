@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use futures::{Future, Stream};
 use pin_project::pin_project;
 use reflex::core::{Applicable, Expression};
@@ -8,6 +9,7 @@ use reflex_dispatcher::{
     Action, Actor, ActorInitContext, Handler, HandlerContext, MessageData, Named, SchedulerMode,
     SchedulerTransition, TaskFactory, TaskInbox, Worker,
 };
+use reflex_macros::blanket_trait;
 use reflex_runtime::{AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator};
 use reflex_utils::reconnect::ReconnectTimeout;
 
@@ -34,45 +36,30 @@ pub mod timeout;
 pub mod timestamp;
 pub mod variable;
 
-pub trait HandlerAction<T: Expression>:
-    FetchHandlerAction<T>
-    + GraphQlHandlerAction<T>
-    + LoaderHandlerAction<T>
-    + ScanHandlerAction<T>
-    + TimeoutHandlerAction<T>
-    + TimestampHandlerAction<T>
-    + VariableHandlerAction<T>
-{
-}
-impl<_Self, T: Expression> HandlerAction<T> for _Self where
-    Self: FetchHandlerAction<T>
+blanket_trait!(
+    pub trait HandlerAction<T: Expression>:
+        FetchHandlerAction<T>
         + GraphQlHandlerAction<T>
         + LoaderHandlerAction<T>
         + ScanHandlerAction<T>
         + TimeoutHandlerAction<T>
         + TimestampHandlerAction<T>
         + VariableHandlerAction<T>
-{
-}
+    {
+    }
+);
 
-pub trait HandlerTask<TConnect>:
-    FetchHandlerTask<TConnect>
-    + GraphQlHandlerTask<TConnect>
-    + TimeoutHandlerTask
-    + TimestampHandlerTask
-where
-    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
-{
-}
-impl<_Self, TConnect> HandlerTask<TConnect> for _Self
-where
-    Self: FetchHandlerTask<TConnect>
+blanket_trait!(
+    pub trait HandlerTask<TConnect>:
+        FetchHandlerTask<TConnect>
         + GraphQlHandlerTask<TConnect>
         + TimeoutHandlerTask
-        + TimestampHandlerTask,
-    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
-{
-}
+        + TimestampHandlerTask
+    where
+        TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
+    {
+    }
+);
 
 #[derive(Clone)]
 pub enum HandlerActor<T, TFactory, TAllocator, TConnect, TReconnect>

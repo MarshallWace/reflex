@@ -1,12 +1,12 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
-use proc_macro::{ TokenStream};
+use crate::named::create_generic_arguments_for_params;
+use proc_macro::TokenStream;
 use quote::quote_spanned;
 use syn::punctuated::Punctuated;
-use syn::{ItemImpl, ItemTrait, TypeImplTrait};
-use syn::token::{Comma, Impl};
-use crate::named::create_generic_arguments_for_params;
+use syn::token::Comma;
+use syn::{ItemImpl, ItemTrait};
 
 pub fn execute(input: TokenStream) -> TokenStream {
     let mut input = input;

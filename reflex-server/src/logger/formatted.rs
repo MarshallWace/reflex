@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use std::marker::PhantomData;
 
 use reflex::core::Expression;
@@ -13,6 +14,7 @@ use reflex_grpc::action::{
 use reflex_handlers::action::graphql::{
     GraphQlHandlerWebSocketConnectSuccessAction, GraphQlHandlerWebSocketConnectionErrorAction,
 };
+use reflex_macros::blanket_trait;
 use reflex_runtime::{
     action::effect::{EffectEmitAction, EffectSubscribeAction, EffectUnsubscribeAction},
     actor::evaluate_handler::EFFECT_TYPE_EVALUATE,
@@ -31,26 +33,9 @@ use crate::{
     },
 };
 
-pub trait FormattedLoggerAction<T: Expression>:
-    Action
-    + Matcher<InitGraphRootAction>
-    + Matcher<InitHttpServerAction>
-    + Matcher<InitOpenTelemetryAction>
-    + Matcher<InitPrometheusMetricsAction>
-    + Matcher<OpenTelemetryMiddlewareErrorAction>
-    + Matcher<GraphQlServerSubscribeAction<T>>
-    + Matcher<EffectSubscribeAction<T>>
-    + Matcher<EffectUnsubscribeAction<T>>
-    + Matcher<EffectEmitAction<T>>
-    + Matcher<GraphQlHandlerWebSocketConnectSuccessAction>
-    + Matcher<GraphQlHandlerWebSocketConnectionErrorAction>
-    + Matcher<GrpcHandlerConnectSuccessAction>
-    + Matcher<GrpcHandlerConnectErrorAction>
-    + Matcher<GrpcHandlerTransportErrorAction>
-{
-}
-impl<_Self, T: Expression> FormattedLoggerAction<T> for _Self where
-    Self: Action
+blanket_trait!(
+    pub trait FormattedLoggerAction<T: Expression>:
+        Action
         + Matcher<InitGraphRootAction>
         + Matcher<InitHttpServerAction>
         + Matcher<InitOpenTelemetryAction>
@@ -65,8 +50,9 @@ impl<_Self, T: Expression> FormattedLoggerAction<T> for _Self where
         + Matcher<GrpcHandlerConnectSuccessAction>
         + Matcher<GrpcHandlerConnectErrorAction>
         + Matcher<GrpcHandlerTransportErrorAction>
-{
-}
+    {
+    }
+);
 
 pub struct FormattedLogger<T: Expression, TOut, TAction, TTask>
 where

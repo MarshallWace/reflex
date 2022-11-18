@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use std::{marker::PhantomData, pin::Pin};
 
 use futures::{Future, Stream};
@@ -25,6 +26,7 @@ use reflex_handlers::{
     },
 };
 use reflex_interpreter::compiler::Compile;
+use reflex_macros::blanket_trait;
 use reflex_runtime::{
     actor::bytecode_interpreter::{
         BytecodeInterpreter, BytecodeInterpreterAction, BytecodeInterpreterMetricLabels,
@@ -49,47 +51,31 @@ use crate::{
     GraphQlWebServerTask,
 };
 
-pub trait ServerCliTaskAction<T: Expression>:
-    ServerAction<T> + BytecodeInterpreterAction<T> + ServerTaskAction<T> + HandlerAction<T>
-{
-}
-impl<_Self, T: Expression> ServerCliTaskAction<T> for _Self where
-    Self: ServerAction<T> + BytecodeInterpreterAction<T> + ServerTaskAction<T> + HandlerAction<T>
-{
-}
+blanket_trait!(
+    pub trait ServerCliTaskAction<T: Expression>:
+        ServerAction<T> + BytecodeInterpreterAction<T> + ServerTaskAction<T> + HandlerAction<T>
+    {
+    }
+);
 
-pub trait ServerCliTask<T, TFactory, TAllocator, TConnect>:
-    ServerTask<T, TFactory, TAllocator, TConnect> + GraphQlWebServerTask<T, TFactory, TAllocator>
-where
-    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
-    T::String: Send,
-    T::Builtin: From<Stdlib> + From<GraphQlStdlib> + Send,
-    T::Signal<T>: Send,
-    T::SignalList<T>: Send,
-    T::StructPrototype<T>: Send,
-    T::ExpressionList<T>: Send,
-    TFactory: AsyncExpressionFactory<T> + Default,
-    TAllocator: AsyncHeapAllocator<T> + Default,
-    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
-{
-}
-impl<_Self, T, TFactory, TAllocator, TConnect> ServerCliTask<T, TFactory, TAllocator, TConnect>
-    for _Self
-where
-    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
-    T::String: Send,
-    T::Builtin: From<Stdlib> + From<GraphQlStdlib> + Send,
-    T::Signal<T>: Send,
-    T::SignalList<T>: Send,
-    T::StructPrototype<T>: Send,
-    T::ExpressionList<T>: Send,
-    TFactory: AsyncExpressionFactory<T> + Default,
-    TAllocator: AsyncHeapAllocator<T> + Default,
-    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
-    Self: ServerTask<T, TFactory, TAllocator, TConnect>
-        + GraphQlWebServerTask<T, TFactory, TAllocator>,
-{
-}
+blanket_trait!(
+    pub trait ServerCliTask<T, TFactory, TAllocator, TConnect>:
+        ServerTask<T, TFactory, TAllocator, TConnect>
+        + GraphQlWebServerTask<T, TFactory, TAllocator>
+    where
+        T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
+        T::String: Send,
+        T::Builtin: From<Stdlib> + From<GraphQlStdlib> + Send,
+        T::Signal<T>: Send,
+        T::SignalList<T>: Send,
+        T::StructPrototype<T>: Send,
+        T::ExpressionList<T>: Send,
+        TFactory: AsyncExpressionFactory<T> + Default,
+        TAllocator: AsyncHeapAllocator<T> + Default,
+        TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
+    {
+    }
+);
 
 #[derive(Clone)]
 pub enum ServerCliTaskFactory<

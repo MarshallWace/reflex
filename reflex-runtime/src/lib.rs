@@ -8,6 +8,7 @@ use actor::{
 };
 use reflex::core::{BooleanTermType, Expression, ExpressionFactory, HeapAllocator};
 use reflex_dispatcher::ProcessId;
+use reflex_macros::blanket_trait;
 use serde::{Deserialize, Serialize};
 
 pub mod action;
@@ -15,24 +16,21 @@ pub mod actor;
 pub mod task;
 pub mod utils;
 
-pub trait AsyncExpression: Expression + Send + 'static {}
-impl<_Self> AsyncExpression for _Self where Self: Expression + Send + 'static {}
-pub trait AsyncExpressionFactory<T: AsyncExpression>:
-    ExpressionFactory<T> + Send + Clone + 'static
-{
-}
-impl<_Self, E: AsyncExpression> AsyncExpressionFactory<E> for _Self where
-    Self: ExpressionFactory<E> + Send + Clone + 'static
-{
-}
-pub trait AsyncHeapAllocator<T: AsyncExpression>:
-    HeapAllocator<T> + Send + Clone + 'static
-{
-}
-impl<_Self, E: AsyncExpression> AsyncHeapAllocator<E> for _Self where
-    Self: HeapAllocator<E> + Send + Clone + 'static
-{
-}
+blanket_trait!(
+    pub trait AsyncExpression: Expression + Send + 'static {}
+);
+blanket_trait!(
+    pub trait AsyncExpressionFactory<T: AsyncExpression>:
+        ExpressionFactory<T> + Send + Clone + 'static
+    {
+    }
+);
+blanket_trait!(
+    pub trait AsyncHeapAllocator<T: AsyncExpression>:
+        HeapAllocator<T> + Send + Clone + 'static
+    {
+    }
+);
 
 #[derive(PartialEq, Eq, Clone, Copy, Debug, Serialize, Deserialize)]
 pub enum QueryEvaluationMode {
