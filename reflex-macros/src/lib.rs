@@ -1,8 +1,10 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use proc_macro::TokenStream;
 
+mod blanket_trait;
 mod dispatcher;
 mod matcher;
 mod named;
@@ -20,4 +22,9 @@ pub fn named_matcher(input: TokenStream) -> TokenStream {
 #[proc_macro]
 pub fn dispatcher(input: TokenStream) -> TokenStream {
     dispatcher::execute(input)
+}
+
+#[proc_macro]
+pub fn blanket_trait(input: TokenStream) -> TokenStream {
+    blanket_trait::execute(input)
 }

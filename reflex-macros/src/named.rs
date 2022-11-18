@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use proc_macro::TokenStream;
 use quote::quote;
 use syn::{
@@ -29,7 +30,7 @@ pub fn execute(input: TokenStream) -> TokenStream {
         .unwrap_or_else(|err| err.to_compile_error().into())
 }
 
-fn create_generic_arguments_for_params<'a>(
+pub(crate) fn create_generic_arguments_for_params<'a>(
     params: impl IntoIterator<
         Item = &'a GenericParam,
         IntoIter = impl Iterator<Item = &'a GenericParam> + 'a,

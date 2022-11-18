@@ -64,7 +64,7 @@ use reflex_json::{JsonMap, JsonValue};
 use reflex_lang::{
     allocator::DefaultAllocator, term::SignalTerm, CachedSharedTerm, SharedTermFactory,
 };
-use reflex_macros::Named;
+use reflex_macros::{blanket_trait, Named};
 use reflex_runtime::{
     action::{bytecode_interpreter::*, effect::*, evaluate::*, query::*, RuntimeActions},
     actor::{
@@ -524,22 +524,14 @@ impl<T: Expression> SerializableAction for CliActions<T> {
     }
 }
 
-trait CliAction<T: Expression>:
+blanket_trait!(trait CliAction<T: Expression>:
     SerializableAction
     + RuntimeAction<T>
     + HandlerAction<T>
     + BytecodeInterpreterAction<T>
     + CliTaskAction<T>
 {
-}
-impl<_Self, T: Expression> CliAction<T> for _Self where
-    Self: SerializableAction
-        + RuntimeAction<T>
-        + HandlerAction<T>
-        + BytecodeInterpreterAction<T>
-        + CliTaskAction<T>
-{
-}
+});
 
 trait CliTask<T, TFactory, TAllocator, TConnect>:
     RuntimeTask<T, TFactory, TAllocator> + HandlerTask<TConnect>
