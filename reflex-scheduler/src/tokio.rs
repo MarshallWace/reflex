@@ -43,6 +43,10 @@ pub trait TokioSchedulerInstrumentation {
         &self,
         task: T,
     ) -> Self::InstrumentedTask<T>;
+    fn instrument_task_thread<T: Future + Send + 'static>(
+        &self,
+        task: T,
+    ) -> Self::InstrumentedTask<T>;
     fn instrument_dispose_task<T: Future + Send + 'static>(
         &self,
         task: T,
@@ -121,6 +125,13 @@ where
             AsyncMessage::Pending { .. } => None,
             AsyncMessage::Owned { offset, .. } => Some(*offset),
             AsyncMessage::Shared { offset, .. } => Some(*offset),
+        }
+    }
+    pub fn parent_offset(&self) -> Option<MessageOffset> {
+        match self {
+            AsyncMessage::Pending { .. } => None,
+            AsyncMessage::Owned { caller, .. } => caller.map(|(parent_offset, _)| parent_offset),
+            AsyncMessage::Shared { caller, .. } => caller.map(|(parent_offset, _)| parent_offset),
         }
     }
     pub fn redispatched_from(&self) -> Option<MessageOffset> {
@@ -211,7 +222,18 @@ where
     }
 }
 
-struct TokioProcess<TAction, TTask>
+enum TokioProcess<TAction, TTask>
+where
+    TAction: Action,
+    TTask: TaskFactory<TAction, TTask>,
+{
+    // Synchronous actor
+    Actor(TokioActorInstance<TAction, TTask>),
+    // Asynchronous event stream (used as input to an actor process)
+    Task(TokioTask<TAction, TTask>),
+}
+
+struct TokioActorInstance<TAction, TTask>
 where
     TAction: Action,
     TTask: TaskFactory<TAction, TTask>,
@@ -219,10 +241,9 @@ where
     inbox: mpsc::Sender<AsyncMessage<TAction>>,
     actor: Arc<TTask::Actor>,
     handle: JoinHandle<()>,
-    dispose: Option<<TTask::Actor as Actor<TAction, TTask>>::Dispose>,
     subscribers: HashMap<TokioSubscriberId, TokioSubscriber<TAction>>,
 }
-impl<TAction, TTask> Drop for TokioProcess<TAction, TTask>
+impl<TAction, TTask> Drop for TokioActorInstance<TAction, TTask>
 where
     TAction: Action,
     TTask: TaskFactory<TAction, TTask>,
@@ -231,7 +252,26 @@ where
         self.handle.abort();
     }
 }
-impl<TAction, TTask> TokioProcess<TAction, TTask>
+
+struct TokioTask<TAction, TTask>
+where
+    TAction: Action,
+    TTask: TaskFactory<TAction, TTask>,
+{
+    inbox: mpsc::Sender<AsyncMessage<TAction>>,
+    handle: JoinHandle<()>,
+    dispose: Option<<TTask::Actor as Actor<TAction, TTask>>::Dispose>,
+}
+impl<TAction, TTask> Drop for TokioTask<TAction, TTask>
+where
+    TAction: Action,
+    TTask: TaskFactory<TAction, TTask>,
+{
+    fn drop(&mut self) {
+        self.handle.abort();
+    }
+}
+impl<TAction, TTask> TokioTask<TAction, TTask>
 where
     TAction: Action,
     TTask: TaskFactory<TAction, TTask>,
@@ -519,20 +559,24 @@ where
         let next_pid = Arc::new(AtomicUsize::new(next_pid.into()));
         let init_processes: HashMap<ProcessId, TokioProcess<TAction, TTask>> = init_processes
             .into_iter()
-            .map(|(pid, actor)| {
-                (
-                    pid,
-                    spawn_worker_process(
-                        actor,
-                        pid,
-                        &next_pid,
-                        &next_offset,
-                        &commands_tx,
-                        &blocking_tasks_tx,
-                        timer.clone(),
-                        instrumentation.clone(),
-                    ),
-                )
+            .flat_map(|(pid, actor)| {
+                let worker_pid = pid;
+                let actor_pid = ProcessId::from(increment_atomic_counter(&next_pid));
+                let (task, actor) = spawn_worker_process(
+                    actor,
+                    worker_pid,
+                    actor_pid,
+                    &next_pid,
+                    &next_offset,
+                    &commands_tx,
+                    &blocking_tasks_tx,
+                    timer.clone(),
+                    instrumentation.clone(),
+                );
+                [
+                    (worker_pid, TokioProcess::Task(task)),
+                    (actor_pid, TokioProcess::Actor(actor)),
+                ]
             })
             .collect();
         let enqueue_time = Instant::now();
@@ -590,10 +634,13 @@ where
                         caller: _,
                     } => {
                         if let Entry::Vacant(entry) = processes.entry(pid) {
+                            let worker_pid = pid;
+                            let actor_pid = ProcessId::from(increment_atomic_counter(&next_pid));
                             let actor = factory.create();
-                            let process = spawn_worker_process(
+                            let (task, actor) = spawn_worker_process(
                                 actor,
-                                pid,
+                                worker_pid,
+                                actor_pid,
                                 &next_pid,
                                 &next_offset,
                                 &async_commands,
@@ -601,32 +648,43 @@ where
                                 timer.clone(),
                                 instrumentation.clone(),
                             );
-                            entry.insert(process);
+                            entry.insert(TokioProcess::Task(task));
+                            processes.insert(actor_pid, TokioProcess::Actor(actor));
                         }
                     }
                     TokioCommand::Send { pid, message } => {
-                        let (send_task, subscriptions) = if let Some(worker) = processes.get(&pid) {
-                            let is_accepted_message = worker.actor.accept(&message);
-                            let subscriptions = if worker.subscribers.is_empty() {
-                                None
-                            } else {
-                                let subscriptions = worker
-                                    .subscribers
-                                    .values()
-                                    .filter_map(|subscriber| subscriber.emit(&message))
-                                    .collect::<Vec<_>>();
-                                if subscriptions.is_empty() {
-                                    None
-                                } else {
-                                    Some(subscriptions)
+                        let (send_task, subscriptions) = if let Some(process) = processes.get(&pid)
+                        {
+                            match process {
+                                TokioProcess::Task(instance) => {
+                                    let send_task = instance.inbox.send(message);
+                                    let subscriptions = None;
+                                    (Some(send_task), subscriptions)
                                 }
-                            };
-                            let send_task = if is_accepted_message {
-                                Some(worker.inbox.send(message))
-                            } else {
-                                None
-                            };
-                            (send_task, subscriptions)
+                                TokioProcess::Actor(instance) => {
+                                    let is_accepted_message = instance.actor.accept(&message);
+                                    let subscriptions = if instance.subscribers.is_empty() {
+                                        None
+                                    } else {
+                                        let subscriptions = instance
+                                            .subscribers
+                                            .values()
+                                            .filter_map(|subscriber| subscriber.emit(&message))
+                                            .collect::<Vec<_>>();
+                                        if subscriptions.is_empty() {
+                                            None
+                                        } else {
+                                            Some(subscriptions)
+                                        }
+                                    };
+                                    let send_task = if is_accepted_message {
+                                        Some(instance.inbox.send(message))
+                                    } else {
+                                        None
+                                    };
+                                    (send_task, subscriptions)
+                                }
+                            }
                         } else {
                             (None, None)
                         };
@@ -641,10 +699,10 @@ where
                         }
                     }
                     TokioCommand::Kill { pid, caller: _ } => {
-                        if let Some(mut worker) = processes.remove(&pid) {
+                        if let Some(TokioProcess::Task(mut task)) = processes.remove(&pid) {
                             tokio::spawn(
                                 instrumentation
-                                    .instrument_dispose_task(async move { worker.abort().await }),
+                                    .instrument_dispose_task(async move { task.abort().await }),
                             );
                         }
                     }
@@ -653,13 +711,19 @@ where
                         pid,
                         subscriber,
                     } => {
-                        if let Some(entry) = processes.get_mut(&pid).and_then(|worker| match worker
-                            .subscribers
-                            .entry(subscription_id)
+                        if let Some(entry) = processes
+                            .get_mut(&pid)
+                            .and_then(|process| match process {
+                                TokioProcess::Actor(instance) => Some(instance),
+                                TokioProcess::Task(_) => None,
+                            })
+                            .and_then(|instance| {
+                                match instance.subscribers.entry(subscription_id) {
+                                    Entry::Occupied(_) => None,
+                                    Entry::Vacant(entry) => Some(entry),
+                                }
+                            })
                         {
-                            Entry::Occupied(_) => None,
-                            Entry::Vacant(entry) => Some(entry),
-                        }) {
                             entry.insert(subscriber);
                         }
                     }
@@ -667,8 +731,8 @@ where
                         subscription_id,
                         pid,
                     } => {
-                        if let Some(worker) = processes.get_mut(&pid) {
-                            worker.subscribers.remove(&subscription_id);
+                        if let Some(TokioProcess::Actor(instance)) = processes.get_mut(&pid) {
+                            instance.subscribers.remove(&subscription_id);
                         }
                     }
                 };
@@ -684,7 +748,8 @@ where
 
 fn spawn_worker_process<TAction, TTask>(
     actor: <TTask as TaskFactory<TAction, TTask>>::Actor,
-    pid: ProcessId,
+    task_pid: ProcessId,
+    actor_pid: ProcessId,
     next_pid: &Arc<AtomicUsize>,
     next_offset: &Arc<AtomicUsize>,
     results: &mpsc::Sender<(TokioCommand<TAction, TTask>, Instant)>,
@@ -693,7 +758,10 @@ fn spawn_worker_process<TAction, TTask>(
         + Send
         + 'static,
     instrumentation: impl TokioSchedulerInstrumentation + Clone + Send + 'static,
-) -> TokioProcess<TAction, TTask>
+) -> (
+    TokioTask<TAction, TTask>,
+    TokioActorInstance<TAction, TTask>,
+)
 where
     TAction: Action + Send + Sync + 'static,
     TTask: TaskFactory<TAction, TTask> + Send + 'static,
@@ -702,29 +770,46 @@ where
     <TTask::Actor as Actor<TAction, TTask>>::Dispose: Send + 'static,
     <TTask::Actor as Handler<TAction, SchedulerTransition<TAction, TTask>>>::State: Send + 'static,
 {
-    let (inbox_tx, inbox_rx) = mpsc::channel(1024);
-    let inbox = TokioInbox(ReceiverStream::new(inbox_rx));
-    let actor = Arc::new(actor);
-    let context = get_handler_context(pid, &next_pid);
-    let (task, dispose) = create_worker_task(
-        actor.clone(),
-        inbox,
+    let (task_inbox_tx, task_inbox) = create_inbox();
+    let (actor_inbox_tx, actor_inbox) = create_inbox();
+    let (state, task, dispose) = create_worker_task(
+        &actor,
+        task_inbox,
+        actor_pid,
         next_offset.clone(),
-        pid,
-        context,
+        results.clone(),
+    );
+    let actor = Arc::new(actor);
+    let actor_task = create_worker_actor_task(
+        actor.clone(),
+        state,
+        actor_inbox,
+        get_handler_context(task_pid, &next_pid),
+        next_offset.clone(),
         results.clone(),
         blocking_tasks.clone(),
         timer,
         instrumentation.clone(),
     );
-    TokioProcess {
-        inbox: inbox_tx,
+    let task_process = TokioTask {
+        inbox: task_inbox_tx,
+        // TODO: Panic main scheduler thread when worker task panics
+        handle: tokio::spawn(instrumentation.instrument_task_thread(task)),
+        dispose: Some(dispose),
+    };
+    let actor_process = TokioActorInstance {
+        inbox: actor_inbox_tx,
         actor,
         // TODO: Panic main scheduler thread when worker task panics
-        handle: tokio::spawn(instrumentation.instrument_worker_thread(task)),
-        dispose: Some(dispose),
+        handle: tokio::spawn(instrumentation.instrument_worker_thread(actor_task)),
         subscribers: Default::default(),
-    }
+    };
+    (task_process, actor_process)
+}
+
+fn create_inbox<TAction: Action>() -> (mpsc::Sender<AsyncMessage<TAction>>, TokioInbox<TAction>) {
+    let (inbox_tx, inbox_rx) = mpsc::channel(1024);
+    (inbox_tx, TokioInbox(ReceiverStream::new(inbox_rx)))
 }
 
 struct BlockingTaskRequest<TAction: Action, TTask: TaskFactory<TAction, TTask>> {
@@ -732,7 +817,7 @@ struct BlockingTaskRequest<TAction: Action, TTask: TaskFactory<TAction, TTask>> 
     state: <TTask::Actor as Handler<TAction, SchedulerTransition<TAction, TTask>>>::State,
     message: AsyncMessage<TAction>,
     metadata: MessageData,
-    context: TokioContext,
+    context: TokioHandlerContext,
     response: oneshot::Sender<(
         AsyncMessage<TAction>,
         <TTask::Actor as Handler<TAction, SchedulerTransition<TAction, TTask>>>::State,
@@ -741,18 +826,13 @@ struct BlockingTaskRequest<TAction: Action, TTask: TaskFactory<TAction, TTask>> 
 }
 
 fn create_worker_task<TAction, TTask>(
-    actor: Arc<TTask::Actor>,
+    actor: &TTask::Actor,
     inbox: TokioInbox<TAction>,
+    actor_pid: ProcessId,
     next_offset: Arc<AtomicUsize>,
-    pid: ProcessId,
-    context: TokioContext,
     results: mpsc::Sender<(TokioCommand<TAction, TTask>, Instant)>,
-    blocking_tasks: mpsc::Sender<BlockingTaskRequest<TAction, TTask>>,
-    timer: impl TokioSchedulerHandlerTimer<Action = TAction, Task = TTask, Span = impl Send + 'static>
-        + Send
-        + 'static,
-    instrumentation: impl TokioSchedulerInstrumentation + Send + 'static,
 ) -> (
+    <TTask::Actor as Handler<TAction, SchedulerTransition<TAction, TTask>>>::State,
     impl Future<Output = ()> + Send + 'static,
     <TTask::Actor as Actor<TAction, TTask>>::Dispose,
 )
@@ -762,121 +842,204 @@ where
     TTask::Actor: Send + Sync + 'static,
     <TTask::Actor as Handler<TAction, SchedulerTransition<TAction, TTask>>>::State: Send + 'static,
 {
+    let context = TokioWorkerInitContext { pid: actor_pid };
     let (state, inbox, dispose) = actor.init(inbox, &context);
     let task = {
-        let mut actor_state = Some(state);
         let mut inbox = inbox;
         async move {
             while let Some(message) = inbox.next().await {
-                let parent_offset = match message.caller() {
-                    // If this message was created by the worker's async event stream, it has no parent offset
-                    None => None,
-                    // Otherwise use the parent offset assigned to the message when it was enqueued (this will only
-                    // exist if the message was produced as a handler result, as opposed to e.g. an init command)
-                    Some(caller) => caller.map(|(parent_offset, _pid)| parent_offset),
+                let offset = MessageOffset::from(increment_atomic_counter(&next_offset));
+                let (command, enqueue_time) = match message {
+                    AsyncMessage::Pending { message } => {
+                        let enqueue_time = Instant::now();
+                        (
+                            TokioCommand::Send {
+                                pid: actor_pid,
+                                message: {
+                                    AsyncMessage::Owned {
+                                        message,
+                                        offset,
+                                        redispatched_from: None,
+                                        caller: None,
+                                        enqueue_time,
+                                    }
+                                },
+                            },
+                            enqueue_time,
+                        )
+                    }
+                    AsyncMessage::Owned {
+                        message,
+                        offset: inbox_offset,
+                        redispatched_from: _,
+                        caller,
+                        enqueue_time,
+                    } => (
+                        TokioCommand::Send {
+                            pid: actor_pid,
+                            message: AsyncMessage::Owned {
+                                message,
+                                offset,
+                                redispatched_from: Some(inbox_offset),
+                                caller,
+                                enqueue_time,
+                            },
+                        },
+                        enqueue_time,
+                    ),
+                    AsyncMessage::Shared {
+                        message,
+                        offset: inbox_offset,
+                        redispatched_from: _,
+                        caller,
+                        enqueue_time,
+                    } => (
+                        TokioCommand::Send {
+                            pid: actor_pid,
+                            message: AsyncMessage::Shared {
+                                message,
+                                offset,
+                                redispatched_from: Some(inbox_offset),
+                                caller,
+                                enqueue_time,
+                            },
+                        },
+                        enqueue_time,
+                    ),
                 };
-                let offset = message.offset().unwrap_or_else(|| {
-                    MessageOffset::from(increment_atomic_counter(&next_offset))
-                    // FIXME: log inbox actions created by worker event stream
-                });
-                if let Some(mut state) = actor_state.take() {
+                let _ = results.send((command, enqueue_time)).await;
+            }
+        }
+    };
+    (state, task, dispose)
+}
+
+fn create_worker_actor_task<TAction, TTask>(
+    actor: Arc<TTask::Actor>,
+    state: <TTask::Actor as Handler<TAction, SchedulerTransition<TAction, TTask>>>::State,
+    inbox: TokioInbox<TAction>,
+    context: TokioHandlerContext,
+    next_offset: Arc<AtomicUsize>,
+    results: mpsc::Sender<(TokioCommand<TAction, TTask>, Instant)>,
+    blocking_tasks: mpsc::Sender<BlockingTaskRequest<TAction, TTask>>,
+    timer: impl TokioSchedulerHandlerTimer<Action = TAction, Task = TTask, Span = impl Send + 'static>
+        + Send
+        + 'static,
+    instrumentation: impl TokioSchedulerInstrumentation + Send + 'static,
+) -> impl Future<Output = ()> + Send + 'static
+where
+    TAction: Action + Send + Sync + 'static,
+    TTask: TaskFactory<TAction, TTask> + Send + 'static,
+    TTask::Actor: Send + Sync + 'static,
+    <TTask::Actor as Handler<TAction, SchedulerTransition<TAction, TTask>>>::State: Send + 'static,
+{
+    let task = {
+        let mut actor_state = Some(state);
+        let mut inbox = inbox;
+        let pid = context.pid();
+        async move {
+            while let Some(message) = inbox.next().await {
+                if let Some(offset) = message.offset() {
+                    let parent_offset = message.parent_offset();
                     if let Some(enqueue_time) = message.enqueue_time() {
-                        // If this message was enqueued internally based on a prior handler result (as opposed to a
-                        // message produced by this worker's async events stream), record the time spent in the queue
                         instrumentation
                             .record_queue_item_waiting_duration(pid, enqueue_time.elapsed());
-                    } else {
-                        // Otherwise if this message was newly-produced by the actor's event stream, nothing to record
                     }
-                    let scheduler_mode = actor.schedule(&message, &state);
-                    let handler_start_time = Instant::now();
-                    let (message, state, actions) = match scheduler_mode {
-                        None => (message, state, None),
-                        Some(SchedulerMode::Sync) => {
-                            let metadata = get_message_metadata(offset, parent_offset);
-                            let mut context = context.clone();
-                            let span = timer.start_span(&actor, &message, pid, &metadata);
-                            let actions =
-                                actor.handle(&mut state, &message, &metadata, &mut context);
-                            timer.end_span(span, &actor, &message, pid, &metadata);
-                            (message, state, actions)
-                        }
-                        Some(SchedulerMode::Async) => {
-                            // TODO: Move async handler into separate threadpool
-                            let metadata = get_message_metadata(offset, parent_offset);
-                            let span = timer.start_span(&actor, &message, pid, &metadata);
-                            match tokio::spawn({
-                                let actor = actor.clone();
+                    if let Some(mut state) = actor_state.take() {
+                        let scheduler_mode = actor.schedule(&message, &state);
+                        let handler_start_time = Instant::now();
+                        let (message, state, actions) = match scheduler_mode {
+                            None => (message, state, None),
+                            Some(SchedulerMode::Sync) => {
+                                let metadata = get_message_metadata(offset, parent_offset);
                                 let mut context = context.clone();
-                                async move {
-                                    let actions =
-                                        actor.handle(&mut state, &message, &metadata, &mut context);
-                                    (message, state, actions)
-                                }
-                            })
-                            .await
-                            {
-                                Err(err) => {
-                                    if err.is_panic() {
-                                        std::panic::resume_unwind(err.into_panic())
-                                    } else {
-                                        break;
-                                    }
-                                }
-                                Ok((message, state, actions)) => {
-                                    timer.end_span(span, &actor, &message, pid, &metadata);
-                                    (message, state, actions)
-                                }
+                                let span = timer.start_span(&actor, &message, pid, &metadata);
+                                let actions =
+                                    actor.handle(&mut state, &message, &metadata, &mut context);
+                                timer.end_span(span, &actor, &message, pid, &metadata);
+                                (message, state, actions)
                             }
-                        }
-                        Some(SchedulerMode::Blocking) => {
-                            let (response_tx, response_rx) = oneshot::channel();
-                            let actor = actor.clone();
-                            let metadata = get_message_metadata(offset, parent_offset);
-                            let context = context.clone();
-                            match blocking_tasks
-                                .send(BlockingTaskRequest {
-                                    actor,
-                                    state,
-                                    message,
-                                    metadata,
-                                    context,
-                                    response: response_tx,
+                            Some(SchedulerMode::Async) => {
+                                // TODO: Move async handler into separate threadpool
+                                let metadata = get_message_metadata(offset, parent_offset);
+                                let span = timer.start_span(&actor, &message, pid, &metadata);
+                                match tokio::spawn({
+                                    let actor = actor.clone();
+                                    let mut context = context.clone();
+                                    async move {
+                                        let actions = actor.handle(
+                                            &mut state,
+                                            &message,
+                                            &metadata,
+                                            &mut context,
+                                        );
+                                        (message, state, actions)
+                                    }
                                 })
                                 .await
-                            {
-                                Err(_err) => {
-                                    break;
+                                {
+                                    Err(err) => {
+                                        if err.is_panic() {
+                                            std::panic::resume_unwind(err.into_panic())
+                                        } else {
+                                            break;
+                                        }
+                                    }
+                                    Ok((message, state, actions)) => {
+                                        timer.end_span(span, &actor, &message, pid, &metadata);
+                                        (message, state, actions)
+                                    }
                                 }
-                                Ok(_) => match response_rx.await {
-                                    Err(_err) => break,
-                                    Ok((message, state, actions)) => (message, state, actions),
-                                },
                             }
-                        }
-                    };
-                    actor_state.replace(state);
-                    instrumentation
-                        .record_queue_item_working_duration(pid, handler_start_time.elapsed());
-                    if let Some(commands) = actions {
-                        let enqueue_time = Instant::now();
-                        let commands = collect_worker_results(
-                            commands,
-                            message,
-                            offset,
-                            pid,
-                            enqueue_time,
-                            &next_offset,
-                        );
-                        for command in commands {
-                            let _ = results.send((command, enqueue_time)).await;
+                            Some(SchedulerMode::Blocking) => {
+                                let (response_tx, response_rx) = oneshot::channel();
+                                let actor = actor.clone();
+                                let metadata = get_message_metadata(offset, parent_offset);
+                                let context = context.clone();
+                                match blocking_tasks
+                                    .send(BlockingTaskRequest {
+                                        actor,
+                                        state,
+                                        message,
+                                        metadata,
+                                        context,
+                                        response: response_tx,
+                                    })
+                                    .await
+                                {
+                                    Err(_err) => {
+                                        break;
+                                    }
+                                    Ok(_) => match response_rx.await {
+                                        Err(_err) => break,
+                                        Ok((message, state, actions)) => (message, state, actions),
+                                    },
+                                }
+                            }
+                        };
+                        actor_state.replace(state);
+                        instrumentation
+                            .record_queue_item_working_duration(pid, handler_start_time.elapsed());
+                        if let Some(commands) = actions {
+                            let enqueue_time = Instant::now();
+                            let commands = collect_worker_results(
+                                commands,
+                                message,
+                                offset,
+                                pid,
+                                enqueue_time,
+                                &next_offset,
+                            );
+                            for command in commands {
+                                let _ = results.send((command, enqueue_time)).await;
+                            }
                         }
                     }
                 }
             }
         }
     };
-    (task, dispose)
+    task
 }
 
 fn collect_worker_results<TAction: Action, TTask: TaskFactory<TAction, TTask>>(
@@ -1080,21 +1243,26 @@ fn collect_worker_results<TAction: Action, TTask: TaskFactory<TAction, TTask>>(
 }
 
 #[derive(Debug, Clone)]
-struct TokioContext {
+struct TokioHandlerContext {
     pid: ProcessId,
     next_pid: Arc<AtomicUsize>,
 }
-impl ActorInitContext for TokioContext {
-    fn pid(&self) -> ProcessId {
-        self.pid
-    }
-}
-impl HandlerContext for TokioContext {
+impl HandlerContext for TokioHandlerContext {
     fn pid(&self) -> ProcessId {
         self.pid
     }
     fn generate_pid(&mut self) -> ProcessId {
         increment_atomic_counter(&self.next_pid).into()
+    }
+}
+
+#[derive(Debug, Clone)]
+struct TokioWorkerInitContext {
+    pid: ProcessId,
+}
+impl ActorInitContext for TokioWorkerInitContext {
+    fn pid(&self) -> ProcessId {
+        self.pid
     }
 }
 
@@ -1109,8 +1277,8 @@ fn get_message_metadata(
     }
 }
 
-fn get_handler_context(pid: ProcessId, next_pid: &Arc<AtomicUsize>) -> TokioContext {
-    TokioContext {
+fn get_handler_context(pid: ProcessId, next_pid: &Arc<AtomicUsize>) -> TokioHandlerContext {
+    TokioHandlerContext {
         pid,
         next_pid: Arc::clone(&next_pid),
     }
@@ -1187,6 +1355,12 @@ impl TokioSchedulerInstrumentation for NoopTokioSchedulerInstrumentation {
         task
     }
     fn instrument_worker_thread<T: Future + Send + 'static>(
+        &self,
+        task: T,
+    ) -> Self::InstrumentedTask<T> {
+        task
+    }
+    fn instrument_task_thread<T: Future + Send + 'static>(
         &self,
         task: T,
     ) -> Self::InstrumentedTask<T> {
