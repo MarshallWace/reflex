@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
-use crate::named::create_generic_arguments_for_params;
+use crate::utils::create_generic_arguments_for_params;
 use proc_macro::TokenStream;
 use quote::quote_spanned;
 use syn::punctuated::Punctuated;

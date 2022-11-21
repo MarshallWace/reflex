@@ -8,6 +8,8 @@ mod blanket_trait;
 mod dispatcher;
 mod matcher;
 mod named;
+mod task_factory_enum;
+mod utils;
 
 #[proc_macro_derive(Matcher, attributes(matcher))]
 pub fn derive_matcher(input: TokenStream) -> TokenStream {
@@ -27,4 +29,9 @@ pub fn dispatcher(input: TokenStream) -> TokenStream {
 #[proc_macro]
 pub fn blanket_trait(input: TokenStream) -> TokenStream {
     blanket_trait::execute(input)
+}
+
+#[proc_macro]
+pub fn task_factory_enum(input: TokenStream) -> TokenStream {
+    task_factory_enum::execute(input)
 }

@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use std::pin::Pin;
 
 use futures::{Future, Stream};
@@ -13,6 +14,7 @@ use reflex_dispatcher::{
     SchedulerTransition, TaskFactory, TaskInbox, Worker,
 };
 use reflex_interpreter::compiler::Compile;
+use reflex_macros::blanket_trait;
 
 pub mod bytecode_worker;
 
@@ -23,25 +25,19 @@ use crate::{
     AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator,
 };
 
-pub trait RuntimeTaskAction<T: Expression>: BytecodeWorkerAction<T> {}
-impl<_Self, T: Expression> RuntimeTaskAction<T> for _Self where Self: BytecodeWorkerAction<T> {}
-
-pub trait RuntimeTask<T, TFactory, TAllocator>:
-    BytecodeWorkerTask<T, TFactory, TAllocator>
-where
-    T: Expression,
-    TFactory: ExpressionFactory<T>,
-    TAllocator: HeapAllocator<T>,
-{
-}
-impl<_Self, T, TFactory, TAllocator> RuntimeTask<T, TFactory, TAllocator> for _Self
-where
-    T: Expression,
-    TFactory: ExpressionFactory<T>,
-    TAllocator: HeapAllocator<T>,
-    Self: BytecodeWorkerTask<T, TFactory, TAllocator>,
-{
-}
+blanket_trait!(
+    pub trait RuntimeTaskAction<T: Expression>: BytecodeWorkerAction<T> {}
+);
+blanket_trait!(
+    pub trait RuntimeTask<T, TFactory, TAllocator>:
+        BytecodeWorkerTask<T, TFactory, TAllocator>
+    where
+        T: Expression,
+        TFactory: ExpressionFactory<T>,
+        TAllocator: HeapAllocator<T>,
+    {
+    }
+);
 
 // TODO: Implement Serialize/Deserialize traits for RuntimeTaskFactory
 #[derive(Clone)]

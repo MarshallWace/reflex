@@ -1,8 +1,11 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
+use crate::utils;
+use crate::utils::parse_item_enum;
 use proc_macro::TokenStream;
-use quote::{ToTokens, __private::Span, quote_spanned};
+use quote::{__private::Span, quote_spanned, ToTokens};
 use syn::{
     punctuated::Punctuated, spanned::Spanned, token, AngleBracketedGenericArguments, AttrStyle,
     Attribute, Block, Error, Expr, ExprPath, Field, Fields, FieldsNamed, FnArg, GenericArgument,
@@ -94,7 +97,7 @@ fn parse_dispatcher_macro_options(body: Block) -> Result<DispatcherMacroOptions>
     let mut block_stmts = stmts.into_iter();
     let actions_enum = parse_item_enum(&mut block_stmts, span)?;
     let (action_types, action_trait) = parse_action_trait(actions_enum)?;
-    let mut impl_template = parse_item_impl(&mut block_stmts, span)?;
+    let mut impl_template = utils::parse_item_impl(&mut block_stmts, span)?;
     let actor_type_path = parse_actor_type_path(&impl_template)?;
     let actor_type_name = parse_actor_type_name(&actor_type_path)?;
     let handler_type_name = get_handler_type_name(&actor_type_name);
@@ -1053,34 +1056,6 @@ fn mutate_generic_args(
     mutate(&mut generic_args);
     *type_args = PathArguments::AngleBracketed(generic_args);
     Ok(())
-}
-
-fn parse_item_enum(stmts: &mut impl Iterator<Item = Stmt>, span: Span) -> Result<ItemEnum> {
-    match stmts.next() {
-        Some(stmt) => match stmt {
-            Stmt::Item(item) => match item {
-                Item::Enum(item) => Ok(item),
-                item => Err(item.span()),
-            },
-            stmt => Err(stmt.span()),
-        },
-        None => Err(span),
-    }
-    .map_err(|span| Error::new(span, "Expected enum definition"))
-}
-
-fn parse_item_impl(stmts: &mut impl Iterator<Item = Stmt>, span: Span) -> Result<ItemImpl> {
-    match stmts.next() {
-        Some(stmt) => match stmt {
-            Stmt::Item(item) => match item {
-                Item::Impl(item) => Ok(item),
-                item => Err(item.span()),
-            },
-            stmt => Err(stmt.span()),
-        },
-        None => Err(span),
-    }
-    .map_err(|span| Error::new(span, "Expected impl block"))
 }
 
 fn parse_impl_item_type(
