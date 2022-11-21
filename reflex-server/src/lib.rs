@@ -39,8 +39,7 @@ pub mod action;
 pub mod actor;
 pub mod imports;
 pub mod logger;
-pub mod middleware;
-pub mod recorder;
+pub mod scheduler_metrics;
 pub mod server;
 pub mod stdlib;
 pub mod task;
@@ -49,7 +48,7 @@ pub mod utils;
 
 pub(crate) mod service;
 
-use reflex_dispatcher::{Action, ProcessId, SchedulerCommand};
+use reflex_dispatcher::{Action, ProcessId};
 use reflex_graphql::{
     create_json_error_object, validate::ValidateQueryGraphQlTransform, GraphQlOperation,
     GraphQlQueryTransform, GraphQlSchemaTypes,
@@ -245,14 +244,10 @@ where
         let logger = Arc::new(Mutex::new(logger));
         move |error| {
             if let Ok(mut logger) = logger.lock() {
-                let action = OpenTelemetryMiddlewareErrorAction {
+                let action = TAction::from(OpenTelemetryMiddlewareErrorAction {
                     error: format!("{}", error),
-                };
-                logger.log(
-                    &SchedulerCommand::Send(Default::default(), action.into()),
-                    None,
-                    None,
-                )
+                });
+                logger.log(&action)
             }
         }
     })

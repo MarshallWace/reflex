@@ -7,6 +7,7 @@ use std::{
     fs,
     iter::once,
     marker::PhantomData,
+    ops::Deref,
     path::{Path, PathBuf},
     pin::Pin,
 };
@@ -28,8 +29,8 @@ use reflex::{
 use reflex_cli::{builtins::CliBuiltins, create_parser, repl, Syntax, SyntaxParser};
 use reflex_dispatcher::{
     Action, Actor, ActorInitContext, Handler, HandlerContext, Matcher, MessageData, Named,
-    NoopDisposeCallback, Redispatcher, SchedulerCommand, SchedulerMode, SchedulerTransition,
-    SerializableAction, SerializedAction, TaskFactory, TaskInbox, Worker,
+    Redispatcher, SchedulerCommand, SchedulerMode, SchedulerTransition, SerializableAction,
+    SerializedAction, TaskFactory, TaskInbox, Worker,
 };
 use reflex_handlers::{
     action::{
@@ -85,7 +86,10 @@ use reflex_runtime::{
     AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator, QueryEvaluationMode,
     QueryInvalidationStrategy,
 };
-use reflex_scheduler::tokio::{TokioScheduler, TokioSchedulerMetricNames};
+use reflex_scheduler::tokio::{
+    NoopTokioSchedulerHandlerTimer, NoopTokioSchedulerInstrumentation, TokioCommand,
+    TokioScheduler, TokioSchedulerLogger,
+};
 use reflex_utils::reconnect::{NoopReconnectTimeout, ReconnectTimeout};
 
 /// Reflex runtime evaluator
@@ -126,9 +130,7 @@ pub async fn main() -> Result<()> {
     type TReconnect = NoopReconnectTimeout;
     type TAction = CliActions<T>;
     type TMetricLabels = CliMetricLabels;
-    type TOutput = std::io::Stderr;
-    type TTask =
-        CliActorFactory<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TOutput>;
+    type TTask = CliActorFactory<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels>;
     let args = Args::parse();
     let unoptimized = args.unoptimized;
     let debug_actions = args.log;
@@ -219,8 +221,14 @@ pub async fn main() -> Result<()> {
             } else {
                 let (evaluate_effect, subscribe_action) =
                     create_query(expression, &factory, &allocator);
+                let logger = if debug_actions {
+                    Some(CliActionLogger::stderr())
+                } else {
+                    None
+                };
+                let timer = NoopTokioSchedulerHandlerTimer::default();
+                let instrumentation = NoopTokioSchedulerInstrumentation::default();
                 let (scheduler, main_pid) = TokioScheduler::<TAction, TTask>::new(
-                    TokioSchedulerMetricNames::default(),
                     |context| {
                         let main_pid = context.generate_pid();
                         let mut actors = {
@@ -265,11 +273,6 @@ pub async fn main() -> Result<()> {
                             .into_iter()
                             .map(|actor| CliActor::Handler(actor)),
                         )
-                        .chain(if debug_actions {
-                            Some(CliActor::Debug(DebugActor::stderr()))
-                        } else {
-                            None
-                        })
                         .map(|actor| (context.generate_pid(), actor))
                         .collect::<Vec<_>>();
                         let actor_pids = actors.iter().map(|(pid, _)| *pid);
@@ -280,6 +283,9 @@ pub async fn main() -> Result<()> {
                         )]);
                         (actors, init_commands, main_pid)
                     },
+                    logger,
+                    timer,
+                    instrumentation,
                 );
                 let mut results_stream = tokio::spawn(scheduler.subscribe(main_pid, {
                     let factory = factory.clone();
@@ -348,12 +354,20 @@ impl BytecodeInterpreterMetricLabels for CliMetricLabels {
     }
 }
 
-struct DebugActorLogger<T: std::io::Write> {
-    output: T,
+struct CliActionLogger<TOut: std::io::Write, TAction: Action, TTask: TaskFactory<TAction, TTask>> {
+    output: TOut,
+    _action: PhantomData<TAction>,
+    _task: PhantomData<TTask>,
 }
-impl<T: std::io::Write> DebugActorLogger<T> {
-    pub fn new(output: T) -> Self {
-        Self { output }
+impl<TOut: std::io::Write, TAction: Action, TTask: TaskFactory<TAction, TTask>>
+    CliActionLogger<TOut, TAction, TTask>
+{
+    pub fn new(output: TOut) -> Self {
+        Self {
+            output,
+            _action: PhantomData,
+            _task: PhantomData,
+        }
     }
     fn log(&mut self, action: &impl SerializableAction) {
         let serialized_args = JsonValue::Object(JsonMap::from_iter(action.to_json()));
@@ -365,85 +379,28 @@ impl<T: std::io::Write> DebugActorLogger<T> {
         );
     }
 }
-impl DebugActorLogger<std::io::Stderr> {
+impl<TAction: Action, TTask: TaskFactory<TAction, TTask>>
+    CliActionLogger<std::io::Stderr, TAction, TTask>
+{
     pub fn stderr() -> Self {
         Self::new(std::io::stderr())
     }
 }
-
-#[derive(Named, Clone)]
-struct DebugActor<TOutput: std::io::Write> {
-    _logger: PhantomData<DebugActorLogger<TOutput>>,
-}
-impl DebugActor<std::io::Stderr> {
-    fn stderr() -> Self {
-        Self {
-            _logger: Default::default(),
+impl<TOut: std::io::Write, TAction: Action, TTask: TaskFactory<TAction, TTask>> TokioSchedulerLogger
+    for CliActionLogger<TOut, TAction, TTask>
+where
+    TAction: SerializableAction,
+{
+    type Action = TAction;
+    type Task = TTask;
+    fn log(&mut self, command: &TokioCommand<TAction, TTask>) {
+        match command {
+            TokioCommand::Send { message, .. } => {
+                let action = message.deref();
+                self.log(action);
+            }
+            _ => {}
         }
-    }
-}
-
-struct DebugActorState<TOutput: std::io::Write> {
-    logger: DebugActorLogger<TOutput>,
-}
-impl Default for DebugActorState<std::io::Stderr> {
-    fn default() -> Self {
-        Self {
-            logger: DebugActorLogger::stderr(),
-        }
-    }
-}
-
-impl<TOutput, TAction, TTask> Actor<TAction, TTask> for DebugActor<TOutput>
-where
-    TOutput: std::io::Write + Send + 'static,
-    DebugActorState<TOutput>: Default,
-    TAction: Action + SerializableAction,
-    TTask: TaskFactory<TAction, TTask>,
-{
-    type Events<TInbox: TaskInbox<TAction>> = TInbox;
-    type Dispose = NoopDisposeCallback;
-    fn init<TInbox: TaskInbox<TAction>>(
-        &self,
-        inbox: TInbox,
-        _context: &impl ActorInitContext,
-    ) -> (Self::State, Self::Events<TInbox>, Self::Dispose) {
-        (Default::default(), inbox, Default::default())
-    }
-}
-impl<TOutput, TAction, TTask> Worker<TAction, SchedulerTransition<TAction, TTask>>
-    for DebugActor<TOutput>
-where
-    TOutput: std::io::Write + Send + 'static,
-    DebugActorState<TOutput>: Default,
-    TAction: Action + SerializableAction,
-    TTask: TaskFactory<TAction, TTask>,
-{
-    fn accept(&self, _message: &TAction) -> bool {
-        true
-    }
-    fn schedule(&self, _message: &TAction, _state: &Self::State) -> Option<SchedulerMode> {
-        Some(SchedulerMode::Sync)
-    }
-}
-impl<TOutput, TAction, TTask> Handler<TAction, SchedulerTransition<TAction, TTask>>
-    for DebugActor<TOutput>
-where
-    TOutput: std::io::Write + Send + 'static,
-    DebugActorState<TOutput>: Default,
-    TAction: Action + SerializableAction,
-    TTask: TaskFactory<TAction, TTask>,
-{
-    type State = DebugActorState<TOutput>;
-    fn handle(
-        &self,
-        state: &mut Self::State,
-        action: &TAction,
-        _metadata: &MessageData,
-        _context: &mut impl HandlerContext,
-    ) -> Option<SchedulerTransition<TAction, TTask>> {
-        state.logger.log(action);
-        None
     }
 }
 
@@ -548,7 +505,7 @@ blanket_trait!(
 );
 
 #[derive(Clone)]
-enum CliActor<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TOutput>
+enum CliActor<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels>
 where
     T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
     T::String: Send,
@@ -562,18 +519,15 @@ where
     TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
     TReconnect: ReconnectTimeout + Send + Clone + 'static,
     TMetricLabels: BytecodeInterpreterMetricLabels + Send + 'static,
-    TOutput: std::io::Write + Send + 'static,
-    DebugActorState<TOutput>: Default,
 {
     Runtime(RuntimeActor<T, TFactory, TAllocator>),
     Handler(HandlerActor<T, TFactory, TAllocator, TConnect, TReconnect>),
     BytecodeInterpreter(BytecodeInterpreter<T, TFactory, TAllocator, TMetricLabels>),
-    Debug(DebugActor<TOutput>),
     Main(Redispatcher),
     Task(CliTaskActor<T, TFactory, TAllocator, TConnect>),
 }
-impl<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TOutput> Named
-    for CliActor<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TOutput>
+impl<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels> Named
+    for CliActor<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels>
 where
     T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
     T::String: Send,
@@ -587,24 +541,20 @@ where
     TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
     TReconnect: ReconnectTimeout + Send + Clone + 'static,
     TMetricLabels: BytecodeInterpreterMetricLabels + Send + 'static,
-    TOutput: std::io::Write + Send + 'static,
-    DebugActorState<TOutput>: Default,
 {
     fn name(&self) -> &'static str {
         match self {
             Self::Runtime(inner) => inner.name(),
             Self::Handler(inner) => inner.name(),
             Self::BytecodeInterpreter(inner) => inner.name(),
-            Self::Debug(inner) => inner.name(),
             Self::Main(inner) => inner.name(),
             Self::Task(inner) => inner.name(),
         }
     }
 }
 
-impl<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TOutput, TAction, TTask>
-    Actor<TAction, TTask>
-    for CliActor<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TOutput>
+impl<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TAction, TTask>
+    Actor<TAction, TTask> for CliActor<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels>
 where
     T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
     T::String: Send,
@@ -618,8 +568,6 @@ where
     TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
     TReconnect: ReconnectTimeout + Send + Clone + 'static,
     TMetricLabels: BytecodeInterpreterMetricLabels + Send + 'static,
-    TOutput: std::io::Write + Send + 'static,
-    DebugActorState<TOutput>: Default,
     TAction: Action + CliAction<T> + Send + 'static,
     TTask:
         TaskFactory<TAction, TTask> + CliTask<T, TFactory, TAllocator, TConnect> + Send + 'static,
@@ -631,22 +579,12 @@ where
         TConnect,
         TReconnect,
         TMetricLabels,
-        TOutput,
         TInbox,
         TAction,
         TTask,
     >;
-    type Dispose = CliDispose<
-        T,
-        TFactory,
-        TAllocator,
-        TConnect,
-        TReconnect,
-        TMetricLabels,
-        TOutput,
-        TAction,
-        TTask,
-    >;
+    type Dispose =
+        CliDispose<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TAction, TTask>;
     fn init<TInbox: TaskInbox<TAction>>(
         &self,
         inbox: TInbox,
@@ -691,15 +629,6 @@ where
                     CliDispose::BytecodeInterpreter(dispose),
                 )
             }
-            Self::Debug(actor) => {
-                let (state, events, dispose) =
-                    { <DebugActor<TOutput> as Actor<TAction, TTask>>::init(actor, inbox, context) };
-                (
-                    CliActorState::Debug(state),
-                    CliEvents::Debug(events),
-                    CliDispose::Debug(dispose),
-                )
-            }
             Self::Main(actor) => {
                 let (state, events, dispose) =
                     { <Redispatcher as Actor<TAction, TTask>>::init(actor, inbox, context) };
@@ -725,9 +654,9 @@ where
     }
 }
 
-impl<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TOutput, TAction, TTask>
+impl<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TAction, TTask>
     Worker<TAction, SchedulerTransition<TAction, TTask>>
-    for CliActor<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TOutput>
+    for CliActor<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels>
 where
     T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
     T::String: Send,
@@ -741,8 +670,6 @@ where
     TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
     TReconnect: ReconnectTimeout + Send + Clone + 'static,
     TMetricLabels: BytecodeInterpreterMetricLabels + Send + 'static,
-    TOutput: std::io::Write + Send + 'static,
-    DebugActorState<TOutput>: Default,
     TAction: Action + CliAction<T> + Send + 'static,
     TTask:
         TaskFactory<TAction, TTask> + CliTask<T, TFactory, TAllocator, TConnect> + Send + 'static,
@@ -765,10 +692,6 @@ where
                     SchedulerTransition<TAction, TTask>,
                 >>::accept(actor, message)
             }
-            Self::Debug(actor) => <DebugActor<TOutput> as Worker<
-                TAction,
-                SchedulerTransition<TAction, TTask>,
-            >>::accept(actor, message),
             Self::Main(actor) => <Redispatcher as Worker<
                 TAction,
                 SchedulerTransition<TAction, TTask>,
@@ -799,12 +722,6 @@ where
                     SchedulerTransition<TAction, TTask>,
                 >>::schedule(actor, message, state)
             }
-            (Self::Debug(actor), CliActorState::Debug(state)) => <DebugActor<TOutput> as Worker<
-                TAction,
-                SchedulerTransition<TAction, TTask>,
-            >>::schedule(
-                actor, message, state
-            ),
             (Self::Main(actor), CliActorState::Main(state)) => {
                 <Redispatcher as Worker<TAction, SchedulerTransition<TAction, TTask>>>::schedule(
                     actor, message, state,
@@ -821,9 +738,9 @@ where
     }
 }
 
-impl<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TOutput, TAction, TTask>
+impl<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TAction, TTask>
     Handler<TAction, SchedulerTransition<TAction, TTask>>
-    for CliActor<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TOutput>
+    for CliActor<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels>
 where
     T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
     T::String: Send,
@@ -837,23 +754,12 @@ where
     TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
     TReconnect: ReconnectTimeout + Send + Clone + 'static,
     TMetricLabels: BytecodeInterpreterMetricLabels + Send + 'static,
-    TOutput: std::io::Write + Send + 'static,
-    DebugActorState<TOutput>: Default,
     TAction: Action + CliAction<T> + Send + 'static,
     TTask:
         TaskFactory<TAction, TTask> + CliTask<T, TFactory, TAllocator, TConnect> + Send + 'static,
 {
-    type State = CliActorState<
-        T,
-        TFactory,
-        TAllocator,
-        TConnect,
-        TReconnect,
-        TMetricLabels,
-        TOutput,
-        TAction,
-        TTask,
-    >;
+    type State =
+        CliActorState<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TAction, TTask>;
     fn handle(
         &self,
         state: &mut Self::State,
@@ -880,12 +786,6 @@ where
                     SchedulerTransition<TAction, TTask>,
                 >>::handle(actor, state, action, metadata, context)
             }
-            (Self::Debug(actor), CliActorState::Debug(state)) => <DebugActor<TOutput> as Handler<
-                TAction,
-                SchedulerTransition<TAction, TTask>,
-            >>::handle(
-                actor, state, action, metadata, context,
-            ),
             (Self::Main(actor), CliActorState::Main(state)) => {
                 <Redispatcher as Handler<TAction, SchedulerTransition<TAction, TTask>>>::handle(
                     actor, state, action, metadata, context,
@@ -902,17 +802,8 @@ where
     }
 }
 
-enum CliActorState<
-    T,
-    TFactory,
-    TAllocator,
-    TConnect,
-    TReconnect,
-    TMetricLabels,
-    TOutput,
-    TAction,
-    TTask,
-> where
+enum CliActorState<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TAction, TTask>
+where
     T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
     T::String: Send,
     T::Builtin: Send,
@@ -925,8 +816,6 @@ enum CliActorState<
     TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
     TReconnect: ReconnectTimeout + Send + Clone + 'static,
     TMetricLabels: BytecodeInterpreterMetricLabels + Send + 'static,
-    TOutput: std::io::Write + Send + 'static,
-    DebugActorState<TOutput>: Default,
     TAction: Action + CliAction<T> + Send + 'static,
     TTask:
         TaskFactory<TAction, TTask> + CliTask<T, TFactory, TAllocator, TConnect> + Send + 'static,
@@ -949,7 +838,6 @@ enum CliActorState<
             SchedulerTransition<TAction, TTask>,
         >>::State,
     ),
-    Debug(<DebugActor<TOutput> as Handler<TAction, SchedulerTransition<TAction, TTask>>>::State),
     Main(<Redispatcher as Handler<TAction, SchedulerTransition<TAction, TTask>>>::State),
     Task(
         <CliTaskActor<T, TFactory, TAllocator, TConnect> as Handler<
@@ -960,18 +848,8 @@ enum CliActorState<
 }
 
 #[pin_project(project = CliEventsVariant)]
-enum CliEvents<
-    T,
-    TFactory,
-    TAllocator,
-    TConnect,
-    TReconnect,
-    TMetricLabels,
-    TOutput,
-    TInbox,
-    TAction,
-    TTask,
-> where
+enum CliEvents<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TInbox, TAction, TTask>
+where
     T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
     T::String: Send,
     T::Builtin: Send,
@@ -984,8 +862,6 @@ enum CliEvents<
     TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
     TReconnect: ReconnectTimeout + Send + Clone + 'static,
     TMetricLabels: BytecodeInterpreterMetricLabels + Send + 'static,
-    TOutput: std::io::Write + Send + 'static,
-    DebugActorState<TOutput>: Default,
     TInbox: TaskInbox<TAction>,
     TAction: Action + CliAction<T> + Send + 'static,
     TTask:
@@ -1008,25 +884,13 @@ enum CliEvents<
                 TTask,
             >>::Events<TInbox>,
     ),
-    Debug(#[pin] <DebugActor<TOutput> as Actor<TAction, TTask>>::Events<TInbox>),
     Main(#[pin] <Redispatcher as Actor<TAction, TTask>>::Events<TInbox>),
     Task(
         #[pin]
         <CliTaskActor<T, TFactory, TAllocator, TConnect> as Actor<TAction, TTask>>::Events<TInbox>,
     ),
 }
-impl<
-        T,
-        TFactory,
-        TAllocator,
-        TConnect,
-        TReconnect,
-        TMetricLabels,
-        TOutput,
-        TInbox,
-        TAction,
-        TTask,
-    > Stream
+impl<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TInbox, TAction, TTask> Stream
     for CliEvents<
         T,
         TFactory,
@@ -1034,7 +898,6 @@ impl<
         TConnect,
         TReconnect,
         TMetricLabels,
-        TOutput,
         TInbox,
         TAction,
         TTask,
@@ -1052,8 +915,6 @@ where
     TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
     TReconnect: ReconnectTimeout + Send + Clone + 'static,
     TMetricLabels: BytecodeInterpreterMetricLabels + Send + 'static,
-    TOutput: std::io::Write + Send + 'static,
-    DebugActorState<TOutput>: Default,
     TInbox: TaskInbox<TAction>,
     TAction: Action + CliAction<T> + Send + 'static,
     TTask:
@@ -1068,7 +929,6 @@ where
             CliEventsVariant::Runtime(inner) => inner.poll_next(cx),
             CliEventsVariant::Handler(inner) => inner.poll_next(cx),
             CliEventsVariant::BytecodeInterpreter(inner) => inner.poll_next(cx),
-            CliEventsVariant::Debug(inner) => inner.poll_next(cx),
             CliEventsVariant::Main(inner) => inner.poll_next(cx),
             CliEventsVariant::Task(inner) => inner.poll_next(cx),
         }
@@ -1078,7 +938,6 @@ where
             Self::Runtime(inner) => inner.size_hint(),
             Self::Handler(inner) => inner.size_hint(),
             Self::BytecodeInterpreter(inner) => inner.size_hint(),
-            Self::Debug(inner) => inner.size_hint(),
             Self::Main(inner) => inner.size_hint(),
             Self::Task(inner) => inner.size_hint(),
         }
@@ -1086,17 +945,8 @@ where
 }
 
 #[pin_project(project = CliDisposeVariant)]
-enum CliDispose<
-    T,
-    TFactory,
-    TAllocator,
-    TConnect,
-    TReconnect,
-    TMetricLabels,
-    TOutput,
-    TAction,
-    TTask,
-> where
+enum CliDispose<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TAction, TTask>
+where
     T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
     T::String: Send,
     T::Builtin: Send,
@@ -1109,8 +959,6 @@ enum CliDispose<
     TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
     TReconnect: ReconnectTimeout + Send + Clone + 'static,
     TMetricLabels: BytecodeInterpreterMetricLabels + Send + 'static,
-    TOutput: std::io::Write + Send + 'static,
-    DebugActorState<TOutput>: Default,
     TAction: Action + CliAction<T> + Send + 'static,
     TTask:
         TaskFactory<TAction, TTask> + CliTask<T, TFactory, TAllocator, TConnect> + Send + 'static,
@@ -1130,24 +978,13 @@ enum CliDispose<
                 TTask,
             >>::Dispose,
     ),
-    Debug(#[pin] <DebugActor<TOutput> as Actor<TAction, TTask>>::Dispose),
     Main(#[pin] <Redispatcher as Actor<TAction, TTask>>::Dispose),
     Task(
         #[pin] <CliTaskActor<T, TFactory, TAllocator, TConnect> as Actor<TAction, TTask>>::Dispose,
     ),
 }
-impl<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TOutput, TAction, TTask> Future
-    for CliDispose<
-        T,
-        TFactory,
-        TAllocator,
-        TConnect,
-        TReconnect,
-        TMetricLabels,
-        TOutput,
-        TAction,
-        TTask,
-    >
+impl<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TAction, TTask> Future
+    for CliDispose<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TAction, TTask>
 where
     T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
     T::String: Send,
@@ -1161,8 +998,6 @@ where
     TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
     TReconnect: ReconnectTimeout + Send + Clone + 'static,
     TMetricLabels: BytecodeInterpreterMetricLabels + Send + 'static,
-    TOutput: std::io::Write + Send + 'static,
-    DebugActorState<TOutput>: Default,
     TAction: Action + CliAction<T> + Send + 'static,
     TTask:
         TaskFactory<TAction, TTask> + CliTask<T, TFactory, TAllocator, TConnect> + Send + 'static,
@@ -1176,7 +1011,6 @@ where
             CliDisposeVariant::Runtime(inner) => inner.poll(cx),
             CliDisposeVariant::Handler(inner) => inner.poll(cx),
             CliDisposeVariant::BytecodeInterpreter(inner) => inner.poll(cx),
-            CliDisposeVariant::Debug(inner) => inner.poll(cx),
             CliDisposeVariant::Main(inner) => inner.poll(cx),
             CliDisposeVariant::Task(inner) => inner.poll(cx),
         }
@@ -1492,7 +1326,7 @@ where
 }
 
 #[derive(Named, Clone)]
-struct CliActorFactory<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TOutput>
+struct CliActorFactory<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels>
 where
     T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
     T::String: Send,
@@ -1506,16 +1340,14 @@ where
     TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
     TReconnect: ReconnectTimeout + Send + Clone + 'static,
     TMetricLabels: BytecodeInterpreterMetricLabels + Send + 'static,
-    TOutput: std::io::Write + Send + 'static,
 {
     inner: CliTaskFactory<T, TFactory, TAllocator, TConnect>,
     _reconnect: PhantomData<TReconnect>,
     _metric_labels: PhantomData<TMetricLabels>,
-    _output: PhantomData<TOutput>,
 }
-impl<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TOutput>
+impl<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels>
     From<CliTaskFactory<T, TFactory, TAllocator, TConnect>>
-    for CliActorFactory<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TOutput>
+    for CliActorFactory<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels>
 where
     T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
     T::String: Send,
@@ -1529,22 +1361,19 @@ where
     TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
     TReconnect: ReconnectTimeout + Send + Clone + 'static,
     TMetricLabels: BytecodeInterpreterMetricLabels + Send + 'static,
-    TOutput: std::io::Write + Send + 'static,
-    DebugActorState<TOutput>: Default,
 {
     fn from(value: CliTaskFactory<T, TFactory, TAllocator, TConnect>) -> Self {
         Self {
             inner: value,
             _reconnect: PhantomData,
             _metric_labels: PhantomData,
-            _output: PhantomData,
         }
     }
 }
 
-impl<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TOutput, TAction>
+impl<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TAction>
     TaskFactory<TAction, Self>
-    for CliActorFactory<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TOutput>
+    for CliActorFactory<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels>
 where
     T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
     T::String: Send,
@@ -1558,19 +1387,17 @@ where
     TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
     TReconnect: ReconnectTimeout + Send + Clone + 'static,
     TMetricLabels: BytecodeInterpreterMetricLabels + Send + 'static,
-    TOutput: std::io::Write + Send + 'static,
-    DebugActorState<TOutput>: Default,
     TAction: Action + CliAction<T> + Send + 'static,
 {
-    type Actor = CliActor<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TOutput>;
+    type Actor = CliActor<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels>;
     fn create(self) -> Self::Actor {
         CliActor::Task(<CliTaskFactory<T, TFactory, TAllocator, TConnect> as TaskFactory<TAction, Self>>::create(self.inner))
     }
 }
 
-impl<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TOutput>
+impl<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels>
     From<BytecodeWorkerTaskFactory<T, TFactory, TAllocator>>
-    for CliActorFactory<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TOutput>
+    for CliActorFactory<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels>
 where
     T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
     T::String: Send,
@@ -1584,17 +1411,15 @@ where
     TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
     TReconnect: ReconnectTimeout + Send + Clone + 'static,
     TMetricLabels: BytecodeInterpreterMetricLabels + Send + 'static,
-    TOutput: std::io::Write + Send + 'static,
-    DebugActorState<TOutput>: Default,
 {
     fn from(value: BytecodeWorkerTaskFactory<T, TFactory, TAllocator>) -> Self {
         Self::from(CliTaskFactory::Runtime(RuntimeTaskFactory::from(value)))
     }
 }
 
-impl<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TOutput>
+impl<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels>
     From<FetchHandlerTaskFactory<TConnect>>
-    for CliActorFactory<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TOutput>
+    for CliActorFactory<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels>
 where
     T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
     T::String: Send,
@@ -1608,8 +1433,6 @@ where
     TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
     TReconnect: ReconnectTimeout + Send + Clone + 'static,
     TMetricLabels: BytecodeInterpreterMetricLabels + Send + 'static,
-    TOutput: std::io::Write + Send + 'static,
-    DebugActorState<TOutput>: Default,
 {
     fn from(value: FetchHandlerTaskFactory<TConnect>) -> Self {
         Self::from(CliTaskFactory::DefaultHandlers(
@@ -1618,9 +1441,9 @@ where
     }
 }
 
-impl<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TOutput>
+impl<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels>
     From<GraphQlHandlerHttpFetchTaskFactory<TConnect>>
-    for CliActorFactory<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TOutput>
+    for CliActorFactory<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels>
 where
     T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
     T::String: Send,
@@ -1634,8 +1457,6 @@ where
     TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
     TReconnect: ReconnectTimeout + Send + Clone + 'static,
     TMetricLabels: BytecodeInterpreterMetricLabels + Send + 'static,
-    TOutput: std::io::Write + Send + 'static,
-    DebugActorState<TOutput>: Default,
 {
     fn from(value: GraphQlHandlerHttpFetchTaskFactory<TConnect>) -> Self {
         Self::from(CliTaskFactory::DefaultHandlers(
@@ -1644,9 +1465,9 @@ where
     }
 }
 
-impl<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TOutput>
+impl<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels>
     From<GraphQlHandlerWebSocketConnectionTaskFactory>
-    for CliActorFactory<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TOutput>
+    for CliActorFactory<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels>
 where
     T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
     T::String: Send,
@@ -1660,8 +1481,6 @@ where
     TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
     TReconnect: ReconnectTimeout + Send + Clone + 'static,
     TMetricLabels: BytecodeInterpreterMetricLabels + Send + 'static,
-    TOutput: std::io::Write + Send + 'static,
-    DebugActorState<TOutput>: Default,
 {
     fn from(value: GraphQlHandlerWebSocketConnectionTaskFactory) -> Self {
         Self::from(CliTaskFactory::DefaultHandlers(
@@ -1670,9 +1489,8 @@ where
     }
 }
 
-impl<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TOutput>
-    From<TimeoutHandlerTaskFactory>
-    for CliActorFactory<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TOutput>
+impl<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels> From<TimeoutHandlerTaskFactory>
+    for CliActorFactory<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels>
 where
     T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
     T::String: Send,
@@ -1686,8 +1504,6 @@ where
     TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
     TReconnect: ReconnectTimeout + Send + Clone + 'static,
     TMetricLabels: BytecodeInterpreterMetricLabels + Send + 'static,
-    TOutput: std::io::Write + Send + 'static,
-    DebugActorState<TOutput>: Default,
 {
     fn from(value: TimeoutHandlerTaskFactory) -> Self {
         Self::from(CliTaskFactory::DefaultHandlers(
@@ -1696,9 +1512,8 @@ where
     }
 }
 
-impl<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TOutput>
-    From<TimestampHandlerTaskFactory>
-    for CliActorFactory<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TOutput>
+impl<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels> From<TimestampHandlerTaskFactory>
+    for CliActorFactory<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels>
 where
     T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
     T::String: Send,
@@ -1712,8 +1527,6 @@ where
     TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
     TReconnect: ReconnectTimeout + Send + Clone + 'static,
     TMetricLabels: BytecodeInterpreterMetricLabels + Send + 'static,
-    TOutput: std::io::Write + Send + 'static,
-    DebugActorState<TOutput>: Default,
 {
     fn from(value: TimestampHandlerTaskFactory) -> Self {
         Self::from(CliTaskFactory::DefaultHandlers(

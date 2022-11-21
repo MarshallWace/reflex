@@ -10,8 +10,7 @@ use metrics::SharedString;
 use opentelemetry::trace::{Span, Tracer};
 use reflex::core::{Applicable, InstructionPointer, Reducible, Rewritable};
 use reflex_dispatcher::{
-    Action, Actor, Handler, PostMiddleware, PreMiddleware, ProcessId, SchedulerMiddleware,
-    SchedulerTransition, SerializableAction, TaskFactory,
+    Action, Actor, Handler, ProcessId, SchedulerTransition, SerializableAction, TaskFactory,
 };
 use reflex_graphql::{stdlib::Stdlib as GraphQlStdlib, GraphQlOperation, GraphQlSchema};
 use reflex_interpreter::{
@@ -23,7 +22,9 @@ use reflex_runtime::{
     actor::bytecode_interpreter::BytecodeInterpreterMetricLabels, AsyncExpression,
     AsyncExpressionFactory, AsyncHeapAllocator,
 };
-use reflex_scheduler::tokio::{TokioInbox, TokioInitContext};
+use reflex_scheduler::tokio::{
+    TokioInbox, TokioInitContext, TokioSchedulerHandlerTimer, TokioSchedulerLogger,
+};
 use reflex_stdlib::Stdlib;
 
 use crate::{
@@ -33,8 +34,8 @@ use crate::{
         NoopWebSocketGraphQlServerQueryTransform, WebSocketGraphQlServerConnectionMetricLabels,
     },
     utils::operation::format_graphql_operation_label,
-    GraphQlWebServer, GraphQlWebServerAction, GraphQlWebServerActor, GraphQlWebServerMetricNames,
-    GraphQlWebServerTask,
+    GraphQlWebServer, GraphQlWebServerAction, GraphQlWebServerActor,
+    GraphQlWebServerInstrumentation, GraphQlWebServerMetricNames, GraphQlWebServerTask,
 };
 
 use crate::tokio_runtime_metrics_export::{
@@ -65,17 +66,14 @@ pub async fn cli<
     THttpPre,
     THttpPost,
     TTracer,
+    TLogger,
+    TTimer,
+    TInstrumentation,
 >(
     options: ExecuteQueryCliOptions,
     graph_root: (CompiledProgram, InstructionPointer),
     schema: Option<GraphQlSchema>,
     custom_actors: impl FnOnce(&mut TokioInitContext, ProcessId) -> TActors,
-    middleware: SchedulerMiddleware<
-        impl PreMiddleware<TAction, TTask, State = impl Send + 'static> + Send + 'static,
-        impl PostMiddleware<TAction, TTask, State = impl Send + 'static> + Send + 'static,
-        TAction,
-        TTask,
-    >,
     factory: &TFactory,
     allocator: &TAllocator,
     query_transform: TTransform,
@@ -83,6 +81,9 @@ pub async fn cli<
     metric_names: GraphQlWebServerMetricNames,
     tokio_runtime_metric_names: TokioRuntimeMonitorMetricNames,
     tracer: TTracer,
+    logger: TLogger,
+    timer: TTimer,
+    instrumentation: TInstrumentation,
 ) -> Result<String>
 where
     T: AsyncExpression
@@ -106,6 +107,12 @@ where
     THttpMiddleware: HttpMiddleware<THttpPre, THttpPost>,
     THttpPre: Future<Output = Request<Body>>,
     THttpPost: Future<Output = Response<Body>>,
+    TTracer: Tracer + Send + 'static,
+    TTracer::Span: Span + Send + Sync + 'static,
+    TLogger: TokioSchedulerLogger<Action = TAction, Task = TTask> + Send + 'static,
+    TTimer: TokioSchedulerHandlerTimer<Action = TAction, Task = TTask> + Clone + Send + 'static,
+    TTimer::Span: Send + 'static,
+    TInstrumentation: GraphQlWebServerInstrumentation + Clone + Send + 'static,
     TAction:
         Action + SerializableAction + GraphQlWebServerAction<T> + Clone + Send + Sync + 'static,
     TTask: TaskFactory<TAction, TTask>
@@ -130,8 +137,6 @@ where
     <TTask::Actor as Actor<TAction, TTask>>::Events<TokioInbox<TAction>>: Send + 'static,
     <TTask::Actor as Actor<TAction, TTask>>::Dispose: Send + 'static,
     <TTask::Actor as Handler<TAction, SchedulerTransition<TAction, TTask>>>::State: Send + 'static,
-    TTracer: Tracer + Send + 'static,
-    TTracer::Span: Span + Send + Sync + 'static,
 {
     start_runtime_monitoring(
         tokio::runtime::Handle::current(),
@@ -175,11 +180,10 @@ where
             })
             .with_context(|| anyhow!("Failed to create GraphQL request payload"))
     }?;
-    let app = GraphQlWebServer::<TAction, TTask>::new(
+    let app = GraphQlWebServer::<TInstrumentation, TAction, TTask>::new(
         graph_root,
         schema,
         custom_actors,
-        middleware,
         compiler_options,
         interpreter_options,
         factory.clone(),
@@ -193,6 +197,9 @@ where
         GraphQlWebServerMetricLabels,
         GraphQlWebServerMetricLabels,
         tracer,
+        logger,
+        timer,
+        instrumentation,
     )
     .map_err(|err| anyhow!(err))
     .context("Failed to initialize server")?;

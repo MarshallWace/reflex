@@ -15,9 +15,8 @@ use anyhow::{anyhow, Context, Result};
 use clap::Parser;
 use metrics_exporter_prometheus::PrometheusBuilder;
 use opentelemetry::trace::noop::NoopTracer;
-use reflex::core::Expression;
 use reflex_cli::{compile_entry_point, syntax::js::default_js_loaders, Syntax};
-use reflex_dispatcher::{SchedulerCommand, SchedulerMiddleware};
+use reflex_dispatcher::Action;
 use reflex_graphql::{parse_graphql_schema, GraphQlSchema, NoopGraphQlQueryTransform};
 use reflex_handlers::{
     default_handler_actors,
@@ -40,7 +39,9 @@ use reflex_server::{
         formatted::FormattedLogger, json::JsonActionLogger, prometheus::PrometheusLogger,
         ActionLogger, ChainLogger, EitherLogger,
     },
-    middleware::LoggerMiddleware,
+    scheduler_metrics::{
+        ServerMetricsHandlerTimer, ServerMetricsInstrumentation, ServerSchedulerMetricNames,
+    },
     server::action::init::{
         InitGraphRootAction, InitHttpServerAction, InitOpenTelemetryAction,
         InitPrometheusMetricsAction,
@@ -134,6 +135,7 @@ pub async fn main() -> Result<()> {
         GraphQlWebServerMetricLabels,
         EitherTracer<NoopTracer, opentelemetry::sdk::trace::Tracer>,
     >;
+
     let args = Args::parse();
     let mut logger = match args.log {
         Some(LogFormat::Json) => EitherLogger::Left(JsonActionLogger::stderr()),
@@ -141,7 +143,10 @@ pub async fn main() -> Result<()> {
     };
     if let Some(port) = args.metrics_port {
         let address = SocketAddr::from(([0, 0, 0, 0], port));
-        log_server_action(&mut logger, InitPrometheusMetricsAction { address });
+        log_server_action(
+            &mut logger,
+            &TAction::from(InitPrometheusMetricsAction { address }),
+        );
         PrometheusBuilder::new()
             .with_http_listener(address)
             .install()
@@ -158,14 +163,13 @@ pub async fn main() -> Result<()> {
     } else {
         None
     };
-    let logger_middleware = {
+    let mut logger = {
         let prometheus_logger = args
             .metrics_port
             .map(|_| PrometheusLogger::new(Default::default()));
         let stdout_logger = args.log.map(|_| logger.clone());
-        LoggerMiddleware::new(ChainLogger::new(stdout_logger, prometheus_logger))
+        ChainLogger::new(stdout_logger, prometheus_logger)
     };
-    let middleware = SchedulerMiddleware::<_, _, TAction, TTask>::pre(logger_middleware);
     let factory: TFactory = SharedTermFactory::<TBuiltin>::default();
     let allocator: TAllocator = DefaultAllocator::default();
     let tracer = match OpenTelemetryConfig::parse_env(std::env::vars())? {
@@ -173,9 +177,9 @@ pub async fn main() -> Result<()> {
         Some(config) => {
             log_server_action(
                 &mut logger,
-                InitOpenTelemetryAction {
+                &TAction::from(InitOpenTelemetryAction {
                     config: config.clone(),
-                },
+                }),
             );
             Some(config.into_tracer()?)
         }
@@ -210,72 +214,80 @@ pub async fn main() -> Result<()> {
         let (program, _entry_point) = &graph_root;
         log_server_action(
             &mut logger,
-            InitGraphRootAction {
+            &TAction::from(InitGraphRootAction {
                 compiler_duration: compiler_elapsed_time,
                 instruction_count: program.instructions.len(),
-            },
+            }),
         );
         graph_root
     };
+    let metric_names = ServerSchedulerMetricNames::default();
     let config: ReflexServerCliOptions = args.into();
     log_server_action(
         &mut logger,
-        InitHttpServerAction {
+        &TAction::from(InitHttpServerAction {
             address: config.address,
-        },
+        }),
     );
-    let server = cli::<TAction, TTask, T, TFactory, TAllocator, _, _, _, _, _, _, _, _, _>(
-        config,
-        graph_root,
-        schema,
-        |context, main_pid| {
-            default_handler_actors::<TAction, TTask, T, TFactory, TAllocator, TConnect, TReconnect>(
-                https_client,
-                &factory,
-                &allocator,
-                FibonacciReconnectTimeout {
-                    units: Duration::from_secs(1),
-                    max_timeout: Duration::from_secs(30),
-                },
-                DefaultHandlerMetricNames::default(),
-                main_pid,
-            )
-            .into_iter()
-            .map(|actor| (context.generate_pid(), ServerCliTaskActor::from(actor)))
-            .collect::<Vec<_>>()
-        },
-        middleware,
-        &factory,
-        &allocator,
-        compiler_options,
-        interpreter_options,
-        NoopGraphQlQueryTransform,
-        NoopGraphQlQueryTransform,
-        GraphQlWebServerMetricNames::default(),
-        TokioRuntimeMonitorMetricNames::default(),
-        GraphQlWebServerMetricLabels,
-        GraphQlWebServerMetricLabels,
-        GraphQlWebServerMetricLabels,
-        GraphQlWebServerMetricLabels,
-        GraphQlWebServerMetricLabels,
-        match tracer {
-            None => EitherTracer::Left(NoopTracer::default()),
-            Some(tracer) => EitherTracer::Right(tracer),
-        },
-    )
-    .with_context(|| anyhow!("Server startup failed"))?;
+    let server =
+        cli::<TAction, TTask, T, TFactory, TAllocator, _, _, _, _, _, _, _, _, _, _, _, _>(
+            config,
+            graph_root,
+            schema,
+            |context, main_pid| {
+                default_handler_actors::<
+                    TAction,
+                    TTask,
+                    T,
+                    TFactory,
+                    TAllocator,
+                    TConnect,
+                    TReconnect,
+                >(
+                    https_client,
+                    &factory,
+                    &allocator,
+                    FibonacciReconnectTimeout {
+                        units: Duration::from_secs(1),
+                        max_timeout: Duration::from_secs(30),
+                    },
+                    DefaultHandlerMetricNames::default(),
+                    main_pid,
+                )
+                .into_iter()
+                .map(|actor| (context.generate_pid(), ServerCliTaskActor::from(actor)))
+                .collect::<Vec<_>>()
+            },
+            &factory,
+            &allocator,
+            compiler_options,
+            interpreter_options,
+            NoopGraphQlQueryTransform,
+            NoopGraphQlQueryTransform,
+            GraphQlWebServerMetricNames::default(),
+            TokioRuntimeMonitorMetricNames::default(),
+            GraphQlWebServerMetricLabels,
+            GraphQlWebServerMetricLabels,
+            GraphQlWebServerMetricLabels,
+            GraphQlWebServerMetricLabels,
+            GraphQlWebServerMetricLabels,
+            match tracer {
+                None => EitherTracer::Left(NoopTracer::default()),
+                Some(tracer) => EitherTracer::Right(tracer),
+            },
+            logger,
+            ServerMetricsHandlerTimer::new(metric_names),
+            ServerMetricsInstrumentation::new(metric_names),
+        )
+        .with_context(|| anyhow!("Server startup failed"))?;
     server.await.with_context(|| anyhow!("Server error"))
 }
 
-fn log_server_action<T: Expression>(
-    logger: &mut impl ActionLogger<Action = ServerCliAction<T>>,
-    action: impl Into<ServerCliAction<T>>,
+fn log_server_action<TAction: Action>(
+    logger: &mut impl ActionLogger<Action = TAction>,
+    action: &TAction,
 ) {
-    logger.log(
-        &SchedulerCommand::Send(Default::default(), action.into()),
-        None,
-        None,
-    )
+    logger.log(action)
 }
 
 fn load_graphql_schema(path: &Path) -> Result<GraphQlSchema> {

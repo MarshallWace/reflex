@@ -1,108 +1,53 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use std::marker::PhantomData;
+use std::{marker::PhantomData, ops::Deref};
 
-use reflex_dispatcher::{
-    Action, MessageData, MiddlewareContext, PostMiddleware, PreMiddleware, SchedulerCommand,
-    SchedulerTransition, TaskFactory,
-};
+use reflex_dispatcher::{Action, TaskFactory};
+use reflex_scheduler::tokio::{TokioCommand, TokioSchedulerLogger};
 
-pub trait OperationRecorderFactory<TRecorder: OperationRecorder> {
-    fn create(&self) -> TRecorder;
-}
-
-pub trait OperationRecorder {
+pub trait ActionRecorder {
     type Action: Action;
-    type Task: TaskFactory<Self::Action, Self::Task>;
-    fn record(&mut self, operation: &SchedulerCommand<Self::Action, Self::Task>);
-    fn record_batch(&mut self, operations: &[SchedulerCommand<Self::Action, Self::Task>]) {
-        for operation in operations {
-            self.record(operation)
-        }
-    }
+    fn record(&mut self, action: &Self::Action);
 }
 
-pub struct SessionRecorder<
-    TRecorderFactory: OperationRecorderFactory<TRecorder>,
-    TRecorder: OperationRecorder<Action = TAction>,
-    TAction: Action,
-> {
-    recorder_factory: TRecorderFactory,
-    _recorder: PhantomData<TRecorder>,
-    _action: PhantomData<TAction>,
-}
-impl<TRecorderFactory, TRecorder, TAction> SessionRecorder<TRecorderFactory, TRecorder, TAction>
+pub struct SessionRecorder<TRecorder, TAction, TTask>
 where
-    TRecorderFactory: OperationRecorderFactory<TRecorder>,
-    TRecorder: OperationRecorder<Action = TAction>,
+    TRecorder: ActionRecorder,
     TAction: Action,
+    TTask: TaskFactory<TAction, TTask>,
 {
-    pub fn new(recorder: TRecorderFactory) -> Self {
-        Self {
-            recorder_factory: recorder,
-            _recorder: Default::default(),
-            _action: Default::default(),
-        }
-    }
-}
-
-pub struct SessionRecorderState<TRecorder: OperationRecorder> {
     recorder: TRecorder,
+    _action: PhantomData<TAction>,
+    _task: PhantomData<TTask>,
 }
-impl<TRecorder> SessionRecorderState<TRecorder>
+impl<TRecorder, TAction, TTask> SessionRecorder<TRecorder, TAction, TTask>
 where
-    TRecorder: OperationRecorder,
+    TRecorder: ActionRecorder,
+    TAction: Action,
+    TTask: TaskFactory<TAction, TTask>,
 {
     pub fn new(recorder: TRecorder) -> Self {
-        Self { recorder }
+        Self {
+            recorder,
+            _action: PhantomData,
+            _task: PhantomData,
+        }
     }
 }
 
-impl<TRecorderFactory, TRecorder, TAction, TTask> PreMiddleware<TAction, TTask>
-    for SessionRecorder<TRecorderFactory, TRecorder, TAction>
+impl<TRecorder, TAction, TTask> TokioSchedulerLogger for SessionRecorder<TRecorder, TAction, TTask>
 where
-    TRecorderFactory: OperationRecorderFactory<TRecorder>,
-    TRecorder: OperationRecorder<Action = TAction, Task = TTask>,
-    TAction: Action,
+    TRecorder: ActionRecorder<Action = TAction>,
+    TAction: Action + Clone + 'static,
     TTask: TaskFactory<TAction, TTask>,
 {
-    type State = SessionRecorderState<TRecorder>;
-    fn init(&self) -> Self::State {
-        SessionRecorderState::new(self.recorder_factory.create())
-    }
-    fn handle(
-        &self,
-        state: &mut Self::State,
-        operation: SchedulerCommand<TAction, TTask>,
-        _metadata: &MessageData,
-        _context: &MiddlewareContext,
-    ) -> SchedulerCommand<TAction, TTask> {
-        state.recorder.record(&operation);
-        operation
-    }
-}
-
-impl<TRecorderFactory, TRecorder, TAction, TTask> PostMiddleware<TAction, TTask>
-    for SessionRecorder<TRecorderFactory, TRecorder, TAction>
-where
-    TRecorderFactory: OperationRecorderFactory<TRecorder>,
-    TRecorder: OperationRecorder<Action = TAction, Task = TTask>,
-    TAction: Action,
-    TTask: TaskFactory<TAction, TTask>,
-{
-    type State = SessionRecorderState<TRecorder>;
-    fn init(&self) -> Self::State {
-        SessionRecorderState::new(self.recorder_factory.create())
-    }
-    fn handle(
-        &self,
-        state: &mut Self::State,
-        operations: Vec<SchedulerCommand<TAction, TTask>>,
-        _metadata: &MessageData,
-        _context: &MiddlewareContext,
-    ) -> Option<SchedulerTransition<TAction, TTask>> {
-        state.recorder.record_batch(&operations);
-        None
+    type Action = TAction;
+    type Task = TTask;
+    fn log(&mut self, command: &TokioCommand<Self::Action, Self::Task>) {
+        match command {
+            TokioCommand::Send { pid: _, message } => self.recorder.record(message.deref()),
+            _ => {}
+        }
     }
 }

@@ -2,12 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
-use std::marker::PhantomData;
+use std::{marker::PhantomData, ops::Deref};
 
 use reflex::core::Expression;
-use reflex_dispatcher::{
-    Action, Matcher, MessageData, MiddlewareContext, SchedulerCommand, TaskFactory,
-};
+use reflex_dispatcher::{Action, Matcher, TaskFactory};
 use reflex_grpc::action::{
     GrpcHandlerConnectErrorAction, GrpcHandlerConnectSuccessAction, GrpcHandlerTransportErrorAction,
 };
@@ -19,6 +17,7 @@ use reflex_runtime::{
     action::effect::{EffectEmitAction, EffectSubscribeAction, EffectUnsubscribeAction},
     actor::evaluate_handler::EFFECT_TYPE_EVALUATE,
 };
+use reflex_scheduler::tokio::{TokioCommand, TokioSchedulerLogger};
 
 use crate::{
     cli::reflex_server::OpenTelemetryConfig,
@@ -81,6 +80,11 @@ where
             _task: PhantomData,
         }
     }
+    fn log(&mut self, action: &TAction) {
+        if let Some(message) = format_action_message(action) {
+            let _ = writeln!(self.output, "[{}] {}", self.prefix, message);
+        }
+    }
 }
 impl<T: Expression, TAction, TTask> FormattedLogger<T, std::io::Stdout, TAction, TTask>
 where
@@ -137,17 +141,26 @@ where
     TTask: TaskFactory<TAction, TTask>,
 {
     type Action = TAction;
+    fn log(&mut self, action: &Self::Action) {
+        FormattedLogger::log(self, action);
+    }
+}
+impl<T: Expression, TOut, TAction, TTask> TokioSchedulerLogger
+    for FormattedLogger<T, TOut, TAction, TTask>
+where
+    TOut: std::io::Write,
+    TAction: Action + FormattedLoggerAction<T>,
+    TTask: TaskFactory<TAction, TTask>,
+{
+    type Action = TAction;
     type Task = TTask;
-    fn log(
-        &mut self,
-        operation: &SchedulerCommand<Self::Action, Self::Task>,
-        _metadata: Option<&MessageData>,
-        _context: Option<&MiddlewareContext>,
-    ) {
-        if let SchedulerCommand::Send(_pid, action) = operation {
-            if let Some(message) = format_action_message(action) {
-                let _ = writeln!(self.output, "[{}] {}", self.prefix, message);
+    fn log(&mut self, command: &TokioCommand<Self::Action, Self::Task>) {
+        match command {
+            TokioCommand::Send { pid: _, message } => {
+                let action = message.deref();
+                FormattedLogger::log(self, action);
             }
+            _ => {}
         }
     }
 }

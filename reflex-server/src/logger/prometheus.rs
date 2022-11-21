@@ -4,9 +4,8 @@
 use std::marker::PhantomData;
 
 use metrics::{describe_counter, increment_counter, Unit};
-use reflex_dispatcher::{
-    Action, MessageData, MiddlewareContext, Named, SchedulerCommand, TaskFactory,
-};
+use reflex_dispatcher::{Action, Named, TaskFactory};
+use reflex_scheduler::tokio::{TokioCommand, TokioSchedulerLogger};
 
 use crate::logger::ActionLogger;
 
@@ -37,13 +36,19 @@ pub struct PrometheusLogger<TAction: Action, TTask: TaskFactory<TAction, TTask>>
     _action: PhantomData<TAction>,
     _task: PhantomData<TTask>,
 }
-impl<TAction: Action, TTask: TaskFactory<TAction, TTask>> PrometheusLogger<TAction, TTask> {
+impl<TAction: Action + PrometheusLoggerAction, TTask: TaskFactory<TAction, TTask>>
+    PrometheusLogger<TAction, TTask>
+{
     pub fn new(metric_names: PrometheusLoggerMetricNames) -> Self {
         Self {
             metric_names: metric_names.init(),
             _action: PhantomData,
             _task: PhantomData,
         }
+    }
+    fn log(&self, action: &TAction) {
+        let metric_labels = [("type", action.name())];
+        increment_counter!(self.metric_names.total_action_count, &metric_labels);
     }
 }
 impl<TAction, TTask> ActionLogger for PrometheusLogger<TAction, TTask>
@@ -52,16 +57,21 @@ where
     TTask: TaskFactory<TAction, TTask>,
 {
     type Action = TAction;
+    fn log(&mut self, action: &Self::Action) {
+        PrometheusLogger::log(self, action);
+    }
+}
+impl<TAction, TTask> TokioSchedulerLogger for PrometheusLogger<TAction, TTask>
+where
+    TAction: Action + PrometheusLoggerAction,
+    TTask: TaskFactory<TAction, TTask>,
+{
+    type Action = TAction;
     type Task = TTask;
-    fn log(
-        &mut self,
-        operation: &SchedulerCommand<Self::Action, Self::Task>,
-        _metadata: Option<&MessageData>,
-        _context: Option<&MiddlewareContext>,
-    ) {
-        if let SchedulerCommand::Send(_pid, action) = operation {
-            let metric_labels = [("type", action.name())];
-            increment_counter!(self.metric_names.total_action_count, &metric_labels);
+    fn log(&mut self, command: &TokioCommand<TAction, TTask>) {
+        // FIXME: Prevent double-counting redispatched messages in Prometheus logger
+        if let TokioCommand::Send { message, .. } = command {
+            PrometheusLogger::log(self, message);
         }
     }
 }

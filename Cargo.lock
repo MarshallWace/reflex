@@ -2016,14 +2016,9 @@ name = "reflex-dispatcher"
 version = "0.1.0"
 dependencies = [
  "futures",
- "metrics",
  "pin-project",
  "serde",
  "serde_json",
- "tokio",
- "tokio-metrics",
- "tokio-stream",
- "tokio-util 0.7.3",
 ]
 
 [[package]]
@@ -2192,6 +2187,8 @@ version = "0.1.0"
 dependencies = [
  "reflex-dispatcher",
  "reflex-macros",
+ "reflex-scheduler",
+ "reflex-utils",
  "serde",
  "serde_json",
 ]
@@ -2318,6 +2315,7 @@ dependencies = [
  "reflex-lang",
  "reflex-lisp",
  "reflex-runtime",
+ "reflex-scheduler",
  "reflex-server",
  "reflex-stdlib",
  "reflex-utils",

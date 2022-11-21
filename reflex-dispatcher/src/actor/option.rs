@@ -5,8 +5,7 @@ use futures::{Future, Stream};
 use pin_project::pin_project;
 
 use crate::{
-    Action, Actor, ActorInitContext, Handler, HandlerContext, MessageData, MiddlewareContext,
-    Named, PostMiddleware, PreMiddleware, SchedulerCommand, SchedulerMode, SchedulerTransition,
+    Action, Actor, ActorInitContext, Handler, HandlerContext, MessageData, Named, SchedulerMode,
     TaskFactory, TaskInbox, Worker,
 };
 
@@ -148,54 +147,6 @@ where
     ) -> Option<O> {
         match (self, state) {
             (Some(inner), Some(state)) => inner.handle(state, action, metadata, context),
-            (_, _) => None,
-        }
-    }
-}
-
-impl<T, TAction, TTask> PreMiddleware<TAction, TTask> for Option<T>
-where
-    T: PreMiddleware<TAction, TTask>,
-    TAction: Action,
-    TTask: TaskFactory<TAction, TTask>,
-{
-    type State = Option<T::State>;
-    fn init(&self) -> Self::State {
-        self.as_ref().map(|inner| inner.init())
-    }
-    fn handle(
-        &self,
-        state: &mut Self::State,
-        operation: SchedulerCommand<TAction, TTask>,
-        metadata: &MessageData,
-        context: &MiddlewareContext,
-    ) -> SchedulerCommand<TAction, TTask> {
-        match (self, state) {
-            (Some(inner), Some(state)) => inner.handle(state, operation, metadata, context),
-            (_, _) => operation,
-        }
-    }
-}
-
-impl<T, TAction, TTask> PostMiddleware<TAction, TTask> for Option<T>
-where
-    T: PostMiddleware<TAction, TTask>,
-    TAction: Action,
-    TTask: TaskFactory<TAction, TTask>,
-{
-    type State = Option<T::State>;
-    fn init(&self) -> Self::State {
-        self.as_ref().map(|inner| inner.init())
-    }
-    fn handle(
-        &self,
-        state: &mut Self::State,
-        operations: Vec<SchedulerCommand<TAction, TTask>>,
-        metadata: &MessageData,
-        context: &MiddlewareContext,
-    ) -> Option<SchedulerTransition<TAction, TTask>> {
-        match (self, state) {
-            (Some(inner), Some(state)) => inner.handle(state, operations, metadata, context),
             (_, _) => None,
         }
     }

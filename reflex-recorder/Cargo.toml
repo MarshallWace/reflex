@@ -10,5 +10,7 @@ edition = "2021"
 [dependencies]
 reflex-dispatcher = { path = "../reflex-dispatcher" }
 reflex-macros = { path = "../reflex-macros" }
+reflex-scheduler = { path = "../reflex-scheduler" }
+reflex-utils = { path = "../reflex-utils" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

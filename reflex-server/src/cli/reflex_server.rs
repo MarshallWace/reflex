@@ -23,10 +23,7 @@ use opentelemetry::{
     trace::{Span, Tracer},
     KeyValue,
 };
-use reflex_dispatcher::{
-    Action, Actor, Handler, PostMiddleware, PreMiddleware, ProcessId, SchedulerMiddleware,
-    SchedulerTransition, TaskFactory,
-};
+use reflex_dispatcher::{Action, Actor, Handler, ProcessId, SchedulerTransition, TaskFactory};
 
 use anyhow::{anyhow, Context, Result};
 use futures::{future, Future};
@@ -51,7 +48,9 @@ use reflex_runtime::{
     actor::bytecode_interpreter::BytecodeInterpreterMetricLabels, task::RuntimeTask,
     AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator,
 };
-use reflex_scheduler::tokio::{TokioInbox, TokioInitContext};
+use reflex_scheduler::tokio::{
+    TokioInbox, TokioInitContext, TokioSchedulerHandlerTimer, TokioSchedulerLogger,
+};
 use reflex_stdlib::Stdlib;
 use serde::{Deserialize, Serialize};
 
@@ -73,8 +72,8 @@ use crate::{
         task::websocket_graphql_server::WebSocketGraphQlServerTask,
     },
     utils::operation::format_graphql_operation_label,
-    GraphQlWebServer, GraphQlWebServerAction, GraphQlWebServerActor, GraphQlWebServerMetricNames,
-    GraphQlWebServerTask,
+    GraphQlWebServer, GraphQlWebServerAction, GraphQlWebServerActor,
+    GraphQlWebServerInstrumentation, GraphQlWebServerMetricNames, GraphQlWebServerTask,
 };
 
 use crate::tokio_runtime_metrics_export::{
@@ -391,17 +390,14 @@ pub fn cli<
     TOperationMetricLabels,
     TWorkerMetricLabels,
     TTracer,
+    TLogger,
+    TTimer,
+    TInstrumentation,
 >(
     args: ReflexServerCliOptions,
     graph_root: (CompiledProgram, InstructionPointer),
     schema: Option<GraphQlSchema>,
     custom_actors: impl FnOnce(&mut TokioInitContext, ProcessId) -> TActors,
-    middleware: SchedulerMiddleware<
-        impl PreMiddleware<TAction, TTask, State = impl Send + 'static> + Send + 'static,
-        impl PostMiddleware<TAction, TTask, State = impl Send + 'static> + Send + 'static,
-        TAction,
-        TTask,
-    >,
     factory: &TFactory,
     allocator: &TAllocator,
     compiler_options: CompilerOptions,
@@ -416,6 +412,9 @@ pub fn cli<
     get_operation_metric_labels: TOperationMetricLabels,
     get_worker_metric_labels: TWorkerMetricLabels,
     tracer: TTracer,
+    logger: TLogger,
+    timer: TTimer,
+    instrumentation: TInstrumentation,
 ) -> Result<impl Future<Output = Result<(), hyper::Error>>>
 where
     T: AsyncExpression
@@ -443,6 +442,10 @@ where
     TWorkerMetricLabels: BytecodeInterpreterMetricLabels + Send + 'static,
     TTracer: Tracer + Send + 'static,
     TTracer::Span: Span + Send + Sync + 'static,
+    TLogger: TokioSchedulerLogger<Action = TAction, Task = TTask> + Send + 'static,
+    TTimer: TokioSchedulerHandlerTimer<Action = TAction, Task = TTask> + Clone + Send + 'static,
+    TTimer::Span: Send + 'static,
+    TInstrumentation: GraphQlWebServerInstrumentation + Clone + Send + Sync + 'static,
     TAction: Action + GraphQlWebServerAction<T> + Clone + Send + Sync + 'static,
     TTask: TaskFactory<TAction, TTask>
         + GraphQlWebServerTask<T, TFactory, TAllocator>
@@ -478,7 +481,6 @@ where
         graph_root,
         schema,
         custom_actors,
-        middleware,
         compiler_options,
         interpreter_options,
         factory.clone(),
@@ -492,6 +494,9 @@ where
         get_operation_metric_labels,
         get_worker_metric_labels,
         tracer,
+        logger,
+        timer,
+        instrumentation,
     )
     .map_err(|err| anyhow!(err))
     .context("Failed to initialize server")?;

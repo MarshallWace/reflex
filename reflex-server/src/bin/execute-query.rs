@@ -12,7 +12,6 @@ use anyhow::{anyhow, Context, Result};
 use clap::Parser;
 use opentelemetry::trace::noop::NoopTracer;
 use reflex_cli::{compile_entry_point, syntax::js::default_js_loaders, Syntax};
-use reflex_dispatcher::SchedulerMiddleware;
 use reflex_graphql::{parse_graphql_schema, GraphQlSchema, NoopGraphQlQueryTransform};
 use reflex_handlers::{
     default_handler_actors,
@@ -21,6 +20,7 @@ use reflex_handlers::{
 };
 use reflex_interpreter::compiler::CompilerOptions;
 use reflex_lang::{allocator::DefaultAllocator, CachedSharedTerm, SharedTermFactory};
+use reflex_scheduler::tokio::NoopTokioSchedulerHandlerTimer;
 use reflex_server::{
     action::ServerCliAction,
     builtins::ServerBuiltins,
@@ -32,7 +32,7 @@ use reflex_server::{
     },
     imports::server_imports,
     logger::{formatted::FormattedLogger, json::JsonActionLogger, EitherLogger},
-    middleware::LoggerMiddleware,
+    scheduler_metrics::ServerMetricsInstrumentation,
     server::{utils::EitherTracer, NoopWebSocketGraphQlServerQueryTransform},
     GraphQlWebServerMetricNames,
 };
@@ -150,13 +150,10 @@ async fn main() -> Result<()> {
         debug: args.debug_compiler,
         ..Default::default()
     };
-    let logger_middleware = args.log.map(|format| {
-        LoggerMiddleware::new(match format {
-            Some(LogFormat::Json) => EitherLogger::Left(JsonActionLogger::stderr()),
-            None => EitherLogger::Right(FormattedLogger::stderr("server")),
-        })
+    let logger = args.log.map(|format| match format {
+        Some(LogFormat::Json) => EitherLogger::Left(JsonActionLogger::stderr()),
+        None => EitherLogger::Right(FormattedLogger::stderr("server")),
     });
-    let middleware = SchedulerMiddleware::<_, _, TAction, TTask>::pre(logger_middleware);
     let module_loader = Some(default_js_loaders(
         server_imports(&factory, &allocator),
         &factory,
@@ -172,7 +169,7 @@ async fn main() -> Result<()> {
         &factory,
         &allocator,
     )?;
-    cli(
+    cli::<TAction, TTask, T, TFactory, TAllocator, _, _, _, _, _, _, _, _, _>(
         args.into(),
         graph_root,
         schema,
@@ -189,7 +186,6 @@ async fn main() -> Result<()> {
             .map(|actor| (context.generate_pid(), ServerCliTaskActor::from(actor)))
             .collect::<Vec<_>>()
         },
-        middleware,
         &factory,
         &allocator,
         NoopGraphQlQueryTransform,
@@ -200,6 +196,9 @@ async fn main() -> Result<()> {
             None => EitherTracer::Left(NoopTracer::default()),
             Some(tracer) => EitherTracer::Right(tracer),
         },
+        logger,
+        NoopTokioSchedulerHandlerTimer::default(),
+        ServerMetricsInstrumentation::new(Default::default()),
     )
     .await
     .map(|response| println!("{}", response))

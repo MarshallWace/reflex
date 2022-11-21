@@ -1,14 +1,12 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use std::marker::PhantomData;
+use std::{marker::PhantomData, ops::Deref, time::Instant};
 
 use chrono::{DateTime, Duration, SecondsFormat, Utc};
-use reflex_dispatcher::{
-    Action, MessageData, MiddlewareContext, ProcessId, SchedulerCommand, SerializableAction,
-    TaskFactory,
-};
+use reflex_dispatcher::{Action, MessageOffset, ProcessId, SerializableAction, TaskFactory};
 use reflex_json::{JsonMap, JsonValue};
+use reflex_scheduler::tokio::{TokioCommand, TokioSchedulerLogger};
 
 use crate::{logger::ActionLogger, utils::sanitize::sanitize_json_value};
 
@@ -41,6 +39,25 @@ where
             _action: PhantomData,
             _task: PhantomData,
         }
+    }
+    fn log(
+        &mut self,
+        action: &TAction,
+        pid: Option<ProcessId>,
+        offset: Option<MessageOffset>,
+        timestamp: Option<std::time::Instant>,
+        caller_pid: Option<ProcessId>,
+        caller_offset: Option<MessageOffset>,
+    ) {
+        let serialized_message = serialize_action_operation(
+            action,
+            pid,
+            offset,
+            timestamp.map(|timestamp| (self.startup_time, timestamp)),
+            caller_pid,
+            caller_offset,
+        );
+        let _ = writeln!(self.output, "{}", serialized_message.to_string());
     }
 }
 impl<TAction, TTask> JsonActionLogger<std::io::Stdout, TAction, TTask>
@@ -114,51 +131,72 @@ where
     TTask: TaskFactory<TAction, TTask>,
 {
     type Action = TAction;
+    fn log(&mut self, action: &Self::Action) {
+        JsonActionLogger::log(self, action, None, None, None, None, None)
+    }
+}
+impl<TOut, TAction, TTask> TokioSchedulerLogger for JsonActionLogger<TOut, TAction, TTask>
+where
+    TOut: std::io::Write,
+    TAction: Action + JsonLoggerAction,
+    TTask: TaskFactory<TAction, TTask>,
+{
+    type Action = TAction;
     type Task = TTask;
-    fn log(
-        &mut self,
-        action: &SchedulerCommand<Self::Action, Self::Task>,
-        metadata: Option<&MessageData>,
-        context: Option<&MiddlewareContext>,
-    ) {
-        let serialized_message = match action {
-            SchedulerCommand::Send(pid, action) => Some(serialize_action_operation(
-                action,
-                *pid,
-                metadata,
-                context,
-                &self.startup_time,
-            )),
-            _ => None,
-        };
-        if let Some(serialized_message) = serialized_message {
-            let _ = writeln!(self.output, "{}", serialized_message.to_string());
+    fn log(&mut self, command: &TokioCommand<Self::Action, Self::Task>) {
+        match command {
+            TokioCommand::Send { pid, message } => {
+                let caller = message.caller().and_then(|caller| caller);
+                let caller_pid = caller.map(|(_, caller_pid)| caller_pid);
+                let caller_offset = caller.map(|(caller_offset, _)| caller_offset);
+                let action = message.deref();
+                let offset = message.offset();
+                let timestamp = message.enqueue_time();
+                JsonActionLogger::log(
+                    self,
+                    &action,
+                    Some(*pid),
+                    offset,
+                    timestamp,
+                    caller_pid,
+                    caller_offset,
+                );
+            }
+            _ => {}
         }
     }
 }
 
 fn serialize_action_operation<TAction>(
     action: &TAction,
-    pid: ProcessId,
-    metadata: Option<&MessageData>,
-    context: Option<&MiddlewareContext>,
-    startup_time: &StartupTime,
+    pid: Option<ProcessId>,
+    offset: Option<MessageOffset>,
+    timestamp: Option<(StartupTime, Instant)>,
+    caller_pid: Option<ProcessId>,
+    caller_offset: Option<MessageOffset>,
 ) -> JsonValue
 where
     TAction: Action + JsonLoggerAction,
 {
     JsonValue::Object(JsonMap::from_iter([
-        (String::from("pid"), JsonValue::from(usize::from(pid))),
+        (
+            String::from("pid"),
+            match pid {
+                Some(pid) => JsonValue::from(usize::from(pid)),
+                None => JsonValue::Null,
+            },
+        ),
         (
             String::from("offset"),
-            match metadata {
-                Some(metadata) => JsonValue::from(usize::from(metadata.offset)),
+            match offset {
+                Some(offset) => JsonValue::from(usize::from(offset)),
                 None => JsonValue::Null,
             },
         ),
         (
             String::from("timestamp"),
-            match metadata.and_then(|metadata| startup_time.timestamp(metadata.timestamp)) {
+            match timestamp.and_then(|(startup_time, timestamp)| startup_time.timestamp(timestamp))
+            {
                 Some(timestamp) => {
                     JsonValue::from(timestamp.to_rfc3339_opts(SecondsFormat::Millis, true))
                 }
@@ -167,14 +205,14 @@ where
         ),
         (
             String::from("caller_pid"),
-            match context.and_then(|context| context.caller_pid) {
+            match caller_pid {
                 Some(pid) => JsonValue::from(usize::from(pid)),
                 None => JsonValue::Null,
             },
         ),
         (
             String::from("parent_offset"),
-            match metadata.and_then(|metadata| metadata.parent) {
+            match caller_offset {
                 Some(offset) => JsonValue::from(usize::from(offset)),
                 None => JsonValue::Null,
             },

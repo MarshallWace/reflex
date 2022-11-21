@@ -5,9 +5,8 @@ use futures::{Future, Stream};
 use pin_project::pin_project;
 
 use crate::{
-    Action, Actor, Handler, HandlerContext, MessageData, MiddlewareContext, Named, PostMiddleware,
-    PreMiddleware, SchedulerCommand, SchedulerMode, SchedulerTransition, TaskFactory, TaskInbox,
-    Worker,
+    Action, Actor, Handler, HandlerContext, MessageData, Named, SchedulerMode, TaskFactory,
+    TaskInbox, Worker,
 };
 
 pub enum EitherActor<T1, T2> {
@@ -186,72 +185,6 @@ where
             }
             (Self::Right(actor), Self::State::Right(state)) => {
                 actor.handle(state, message, metadata, context)
-            }
-            (_, _) => None,
-        }
-    }
-}
-
-impl<T1, T2, TAction, TTask> PreMiddleware<TAction, TTask> for EitherActor<T1, T2>
-where
-    T1: PreMiddleware<TAction, TTask>,
-    T2: PreMiddleware<TAction, TTask>,
-    TAction: Action,
-    TTask: TaskFactory<TAction, TTask>,
-{
-    type State = EitherActorState<T1::State, T2::State>;
-    fn init(&self) -> Self::State {
-        match self {
-            Self::Left(actor) => Self::State::Left(actor.init()),
-            Self::Right(actor) => Self::State::Right(actor.init()),
-        }
-    }
-    fn handle(
-        &self,
-        state: &mut Self::State,
-        operation: SchedulerCommand<TAction, TTask>,
-        metadata: &MessageData,
-        context: &MiddlewareContext,
-    ) -> SchedulerCommand<TAction, TTask> {
-        match (self, state) {
-            (Self::Left(actor), Self::State::Left(state)) => {
-                actor.handle(state, operation, metadata, context)
-            }
-            (Self::Right(actor), Self::State::Right(state)) => {
-                actor.handle(state, operation, metadata, context)
-            }
-            (_, _) => operation,
-        }
-    }
-}
-
-impl<T1, T2, TAction, TTask> PostMiddleware<TAction, TTask> for EitherActor<T1, T2>
-where
-    T1: PostMiddleware<TAction, TTask>,
-    T2: PostMiddleware<TAction, TTask>,
-    TAction: Action,
-    TTask: TaskFactory<TAction, TTask>,
-{
-    type State = EitherActorState<T1::State, T2::State>;
-    fn init(&self) -> Self::State {
-        match self {
-            Self::Left(actor) => Self::State::Left(actor.init()),
-            Self::Right(actor) => Self::State::Right(actor.init()),
-        }
-    }
-    fn handle(
-        &self,
-        state: &mut Self::State,
-        operations: Vec<SchedulerCommand<TAction, TTask>>,
-        metadata: &MessageData,
-        context: &MiddlewareContext,
-    ) -> Option<SchedulerTransition<TAction, TTask>> {
-        match (self, state) {
-            (Self::Left(actor), Self::State::Left(state)) => {
-                actor.handle(state, operations, metadata, context)
-            }
-            (Self::Right(actor), Self::State::Right(state)) => {
-                actor.handle(state, operations, metadata, context)
             }
             (_, _) => None,
         }

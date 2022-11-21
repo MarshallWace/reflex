@@ -22,9 +22,8 @@ use reflex::core::{
     Rewritable,
 };
 use reflex_dispatcher::{
-    utils::take_until_final_item::TakeUntilFinalItem, Action, Actor, Handler,
-    InstrumentedActorMetricNames, Matcher, PostMiddleware, PreMiddleware, ProcessId, Redispatcher,
-    SchedulerMiddleware, SchedulerTransition, TaskFactory,
+    utils::take_until_final_item::TakeUntilFinalItem, Action, Actor, Handler, Matcher, ProcessId,
+    Redispatcher, SchedulerTransition, TaskFactory,
 };
 use reflex_graphql::{
     create_json_error_object,
@@ -51,7 +50,8 @@ use reflex_runtime::{
     AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator,
 };
 use reflex_scheduler::tokio::{
-    get_task_monitor, TokioInbox, TokioInitContext, TokioScheduler, TokioSchedulerMetricNames,
+    TokioInbox, TokioInitContext, TokioScheduler, TokioSchedulerHandlerTimer,
+    TokioSchedulerInstrumentation, TokioSchedulerLogger,
 };
 use reflex_stdlib::Stdlib;
 use uuid::Uuid;
@@ -113,8 +113,6 @@ blanket_trait!(
 pub struct GraphQlWebServerMetricNames {
     pub server: ServerMetricNames,
     pub interpreter: BytecodeInterpreterMetricNames,
-    pub scheduler: TokioSchedulerMetricNames,
-    pub actor: InstrumentedActorMetricNames,
 }
 
 blanket_trait!(
@@ -242,17 +240,26 @@ where
 {
 }
 
-pub struct GraphQlWebServer<TAction, TTask>
+pub trait GraphQlWebServerInstrumentation: TokioSchedulerInstrumentation {
+    fn instrument_websocket_connection<T: Future + Send + 'static>(
+        &self,
+        task: T,
+    ) -> Self::InstrumentedTask<T>;
+}
+
+pub struct GraphQlWebServer<TInstrumentation, TAction, TTask>
 where
+    TInstrumentation: GraphQlWebServerInstrumentation,
     TAction: Action,
     TTask: TaskFactory<TAction, TTask>,
 {
     runtime: TokioScheduler<TAction, TTask>,
     main_pid: ProcessId,
-    connection_monitor: tokio_metrics::TaskMonitor,
+    instrumentation: TInstrumentation,
 }
-impl<TAction, TTask> GraphQlWebServer<TAction, TTask>
+impl<TInstrumentation, TAction, TTask> GraphQlWebServer<TInstrumentation, TAction, TTask>
 where
+    TInstrumentation: GraphQlWebServerInstrumentation + Clone + Send + 'static,
     TAction: Action,
     TTask: TaskFactory<TAction, TTask>,
 {
@@ -269,16 +276,12 @@ where
         TOperationMetricLabels,
         TWorkerMetricLabels,
         TTracer,
+        TLogger,
+        TTimer,
     >(
         graph_root: (CompiledProgram, InstructionPointer),
         schema: Option<GraphQlSchema>,
         custom_actors: impl FnOnce(&mut TokioInitContext, ProcessId) -> TActors,
-        middleware: SchedulerMiddleware<
-            impl PreMiddleware<TAction, TTask, State = impl Send + 'static> + Send + 'static,
-            impl PostMiddleware<TAction, TTask, State = impl Send + 'static> + Send + 'static,
-            TAction,
-            TTask,
-        >,
         compiler_options: CompilerOptions,
         interpreter_options: InterpreterOptions,
         factory: TFactory,
@@ -292,6 +295,9 @@ where
         get_operation_metric_labels: TOperationMetricLabels,
         get_worker_metric_labels: TWorkerMetricLabels,
         tracer: TTracer,
+        logger: TLogger,
+        timer: TTimer,
+        instrumentation: TInstrumentation,
     ) -> Result<Self, String>
     where
         T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
@@ -314,6 +320,10 @@ where
         TWorkerMetricLabels: BytecodeInterpreterMetricLabels + Send + 'static,
         TTracer: Tracer + Send + 'static,
         TTracer::Span: Span + Send + Sync + 'static,
+        TLogger: TokioSchedulerLogger<Action = TAction, Task = TTask> + Send + 'static,
+        TTimer: TokioSchedulerHandlerTimer<Action = TAction, Task = TTask> + Clone + Send + 'static,
+        TTimer::Span: Send + 'static,
+        TInstrumentation: GraphQlWebServerInstrumentation + Clone + Send + 'static,
         TAction: Action + GraphQlWebServerAction<T> + Send + Sync + 'static,
         TTask: RuntimeTask<T, TFactory, TAllocator> + WebSocketGraphQlServerTask + Send + 'static,
         TTask::Actor: From<
@@ -339,13 +349,9 @@ where
         <TTask::Actor as Handler<TAction, SchedulerTransition<TAction, TTask>>>::State:
             Send + 'static,
     {
-        let connection_monitor = get_task_monitor(
-            &metric_names.scheduler.tokio_task_metric_names,
-            "graphql_connection",
-        );
         let schema_types = schema.map(parse_graphql_schema_types).transpose()?;
-        let (runtime, main_pid) =
-            TokioScheduler::<TAction, TTask>::new(metric_names.scheduler, move |context| {
+        let (runtime, main_pid) = TokioScheduler::<TAction, TTask>::new(
+            move |context| {
                 let main_pid = context.generate_pid();
                 let mut actors = {
                     server_actors(
@@ -385,11 +391,15 @@ where
                 actors.push((main_pid, TTask::Actor::from(Redispatcher::new(actor_pids))));
                 let init_commands = SchedulerTransition::default();
                 (actors, init_commands, main_pid)
-            });
+            },
+            logger,
+            timer,
+            instrumentation.clone(),
+        );
         Ok(Self {
+            instrumentation,
             runtime,
             main_pid,
-            connection_monitor,
         })
     }
     pub fn handle_graphql_http_request(
@@ -413,8 +423,8 @@ where
     }
 }
 
-pub fn graphql_service<TAction, TTask>(
-    server: Arc<GraphQlWebServer<TAction, TTask>>,
+pub fn graphql_service<TInstrumentation, TAction, TTask>(
+    server: Arc<GraphQlWebServer<TInstrumentation, TAction, TTask>>,
     main_pid: ProcessId,
 ) -> impl Service<
     Request<Body>,
@@ -423,6 +433,7 @@ pub fn graphql_service<TAction, TTask>(
     Future = impl Future<Output = Result<Response<Body>, Infallible>> + Send,
 >
 where
+    TInstrumentation: GraphQlWebServerInstrumentation + Clone + Send + Sync + 'static,
     TAction: Action
         + Matcher<HttpServerResponseAction>
         + Matcher<WebSocketServerSendAction>
@@ -437,11 +448,11 @@ where
         + 'static,
     TTask: TaskFactory<TAction, TTask> + Send + 'static,
 {
-    let connection_monitor = server.connection_monitor.clone();
+    let instrumentation = server.instrumentation.clone();
     service_fn({
         move |req: Request<Body>| {
             let server = server.clone();
-            let connection_monitor = connection_monitor.clone();
+            let instrumentation = instrumentation.clone();
             async move {
                 let cors_headers = get_cors_headers(&req).into_iter().collect::<Vec<_>>();
                 let mut response = match req.method() {
@@ -455,8 +466,10 @@ where
                             {
                                 Err(response) => response,
                                 Ok((response, listen_task)) => {
-                                    let _ =
-                                        tokio::spawn(connection_monitor.instrument(listen_task));
+                                    let _ = tokio::spawn(
+                                        instrumentation
+                                            .instrument_websocket_connection(listen_task),
+                                    );
                                     response
                                 }
                             }
